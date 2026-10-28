@@ -1,0 +1,153 @@
+//! The durable job dispatcher: claims due jobs under the load limits and runs
+//! them (chat answers, task starts, memory jobs). A chat job plans a run, drives
+//! the runtime and commits the outcome; every write is fenced by the lease epoch.
+
+use crate::{Shared, runtimes};
+use aurelius_application::run::{ChatRunPlan, RunOutcome};
+use aurelius_application::CHAT_RUN_KIND;
+use aurelius_protocol::StreamDelta;
+use aurelius_runtime::{Activity, ApprovalBridge, RunRequest, RuntimeEvent, SessionUse, ToolProfile};
+use aurelius_storage::queries;
+use std::sync::Arc;
+use std::time::Duration;
+
+mod chat;
+mod session;
+mod tooling;
+
+pub(crate) use tooling::{permission_mode, started_in};
+
+const POLL: Duration = Duration::from_millis(200);
+const LEASE_MS: i64 = 45_000;
+const RENEW_EVERY: Duration = Duration::from_secs(10);
+
+const EXPIRY_SWEEP: Duration = Duration::from_secs(5);
+/// How often runs held back by the machine's load are told why.
+const NOTE_HELD_EVERY: Duration = Duration::from_secs(2);
+
+pub async fn run(shared: Arc<Shared>) {
+    let owner = format!("daemon-{}", std::process::id());
+    let mut last_sweep = tokio::time::Instant::now();
+    let mut gate = crate::load::Gate::default();
+    let mut last_note: Option<tokio::time::Instant> = None;
+    loop {
+        if last_sweep.elapsed() >= EXPIRY_SWEEP {
+            last_sweep = tokio::time::Instant::now();
+            let s = shared.clone();
+            if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.expire_approvals()).await {
+                shared.publish(notices);
+            }
+        }
+        // After a restore nothing starts until the user resumes.
+        if shared.paused.load(std::sync::atomic::Ordering::Relaxed) {
+            tokio::time::sleep(POLL).await;
+            continue;
+        }
+        // New runs only start while the machine has room; running ones go on.
+        let running = shared.store().read(queries::running_runs).unwrap_or(0);
+        // The limits as the user set them just now.
+        let limits = shared.admission.limits();
+        let load = if shared.admission.checks_active && limits.measured { shared.load.current() } else { None };
+        let (verdict, next) = crate::load::admit(load, &limits, running, gate);
+        gate = next;
+        let held = match verdict {
+            Ok(()) => 0,
+            Err(_) => shared.store().read(|c| queries::held_runs(c, aurelius_storage::now_ms())).unwrap_or(0),
+        };
+        crate::load::observe(&shared, verdict, running, held);
+        let limit = match verdict {
+            Ok(()) => limits.max_runs,
+            Err(hold) => {
+                if last_note.is_none_or(|t| t.elapsed() >= NOTE_HELD_EVERY) {
+                    last_note = Some(tokio::time::Instant::now());
+                    let s = shared.clone();
+                    if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.note_held_runs(hold.code())).await {
+                        if !notices.is_empty() {
+                            tracing::info!(reason = hold.code(), running, ?load, held = notices.len(), "new runs wait for the machine");
+                        }
+                        shared.publish(notices);
+                    }
+                }
+                0
+            }
+        };
+        let store = shared.store().clone();
+        let owner2 = owner.clone();
+        let claimed = tokio::task::spawn_blocking(move || {
+            store.write(move |tx| queries::claim_due_job(tx, &owner2, aurelius_storage::now_ms(), LEASE_MS, limit))
+        })
+        .await;
+        match claimed {
+            Ok(Ok(Some(job))) if job.kind == CHAT_RUN_KIND => {
+                tokio::spawn(chat::run_chat(shared.clone(), job));
+            }
+            Ok(Ok(Some(job))) if job.kind == aurelius_application::task::tasks::TASK_JOB_KIND => {
+                tokio::spawn(crate::tasks::run_task(shared.clone(), job));
+            }
+            Ok(Ok(Some(job))) if job.kind == aurelius_application::memory::EXTRACT_JOB_KIND => {
+                tokio::spawn(crate::memory::run_extraction(shared.clone(), job));
+            }
+            Ok(Ok(Some(job))) if job.kind == aurelius_application::memory::SUMMARY_JOB_KIND => {
+                tokio::spawn(crate::memory::run_summary(shared.clone(), job));
+            }
+            Ok(Ok(Some(job))) if job.kind == aurelius_application::memory::CONSOLIDATE_JOB_KIND => {
+                tokio::spawn(crate::memory::run_consolidation(shared.clone(), job));
+            }
+            Ok(Ok(Some(job))) => tracing::warn!(kind = %job.kind, "no handler for job kind"),
+            Ok(Ok(None)) => {
+                // New load limits let waiting runs try at once.
+                tokio::select! {
+                    _ = tokio::time::sleep(POLL) => {}
+                    _ = shared.admission.wake.notified() => {}
+                }
+            }
+            Ok(Err(err)) => {
+                tracing::error!(error = %err, "claim failed; pausing dispatch");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            Err(_) => return,
+        }
+    }
+}
+
+
+async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    tokio::task::spawn_blocking(f).await.ok()
+}
+
+fn classify(err: &aurelius_runtime::RuntimeError) -> aurelius_domain::scheduler::Failure {
+    use aurelius_runtime::RuntimeError as E;
+    use aurelius_domain::scheduler::Failure as F;
+    match err {
+        E::Unavailable(m) => F::Transient(m.clone()),
+        E::Auth(m) => F::Auth(m.clone()),
+        // Always a time: a limit without a known reset is tried again after a default delay.
+        E::Quota { reset_at_ms } => F::Quota { reset_at_ms: Some(aurelius_domain::scheduler::quota_wake_ms(*reset_at_ms, aurelius_storage::now_ms())) },
+        E::Permanent(m) => F::Permanent(m.clone()),
+    }
+}
+
+/// A chat job that could not be planned: retry with backoff, then fail the run
+/// (and its message). A job without a valid run id is given up at once.
+async fn release_unplanned(shared: &Arc<Shared>, job: &queries::JobRow, code: &str) {
+    let epoch = job.lease_epoch;
+    let Ok(run_id) = aurelius_domain::RunId::parse(&job.id) else {
+        let (store, id, code) = (shared.store().clone(), job.id.clone(), code.to_string());
+        let _ = blocking(move || store.write(move |tx| queries::kill_job(tx, &id, epoch, &code))).await;
+        return;
+    };
+    let store = shared.store().clone();
+    let id = job.id.clone();
+    let (attempt, max) = blocking(move || store.write(move |tx| queries::job_attempts(tx, &id))).await.and_then(Result::ok).unwrap_or((1, 3));
+    let failure = aurelius_domain::scheduler::Failure::Transient(code.to_string());
+    let disposition = aurelius_domain::scheduler::dispose(&failure, attempt, max, aurelius_storage::now_ms(), shared.backoff_base_ms, &job.id);
+    let s = shared.clone();
+    match blocking(move || s.service.defer_run(run_id, epoch, disposition)).await {
+        Some(Ok(notices)) => shared.publish(notices),
+        other => {
+            tracing::error!(job = %job.id, ?other, "could not release unplanned chat job; failing it");
+            let (store, id, code) = (shared.store().clone(), job.id.clone(), code.to_string());
+            let _ = blocking(move || store.write(move |tx| queries::kill_job(tx, &id, epoch, &code))).await;
+        }
+    }
+}

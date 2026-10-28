@@ -1,0 +1,13 @@
+{
+  "kind": "load.changed",
+  "cpu_pct": 41.0,
+  "mem_free_mb": 1434,
+  "mem_total_mb": 16384,
+  "running": 1,
+  "held": 2,
+  "gate": "held",
+  "hold": { "kind": "memory", "mem_free_mb": 1434 },
+  "limits": { "max_runs": 3, "cpu_high": 75, "cpu_low": 65, "mem_min_mb": 2048, "enabled": true },
+  "checks_active": false,
+  "sampled_at_ms": 1791300002000
+}

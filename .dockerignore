@@ -1,0 +1,7 @@
+target/
+.git/
+clients/mobile/
+artifacts/
+*.swp
+.DS_Store
+.env

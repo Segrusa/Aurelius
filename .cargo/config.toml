@@ -1,0 +1,6 @@
+[alias]
+xtask = "run --package xtask --"
+
+# gpui-kit's own Windows config uses a larger main-thread stack for deep UI trees.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:8000000"]

@@ -1,0 +1,589 @@
+//! Optional remote gateway.
+//!
+//! ```text
+//! phone ── HTTPS/WSS over the tailnet ──► Tailscale Serve ──► 127.0.0.1:<port> (this gateway)
+//!                                                              └─► daemon session (same dispatch as IPC)
+//! ```
+//!
+//! * Off by default; binds only on loopback. Tailscale Serve terminates TLS
+//!   and decides which tailnet devices can reach it; pairing decides what a
+//!   device may do.
+//! * A device pairs with a one-time code shown on the desktop and confirmed
+//!   there, gets a long-lived device secret (stored on the phone in the
+//!   Keychain, only its SHA-256 here) and trades it for 12-hour session tokens.
+//! * The WebSocket carries the JSON of protocol 2.0 (`Request` in, `ServerMessage` out), one message per frame.
+//!   Text streaming is converted to appends (`StreamAppend`).
+//! * Outside apps (app keys `amk_…`, feature `app_keys`) open the same
+//!   WebSocket with their key, or speak MCP over Streamable HTTP at `/v1/mcp`
+//!   (`mcp`): the tools of `aurelius-mcp`, on a daemon session of that app.
+
+mod auth;
+mod http;
+mod mcp;
+pub mod push;
+pub mod tailscale;
+mod ws;
+
+use aurelius_domain::{ClientId, EventNotice, HostId, PrincipalId};
+use aurelius_protocol::remote::{Capability, PairingCode, PushConfig, PushStatus, RemoteStatus};
+use aurelius_protocol::{ErrorCode, ProtocolError, Request, ServerMessage};
+use aurelius_storage::Store;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
+
+/// Session lifetime; the phone renews with its device secret.
+pub const SESSION_MS: i64 = 12 * 3_600_000;
+/// Largest upload (photo, document) from a phone.
+pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
+
+/// Opens daemon sessions for paired devices (implemented by the daemon).
+pub trait Dispatch: Send + Sync + 'static {
+    /// Serve `requests` for `device` until the channel closes; write to `out`.
+    fn open(&self, device: Device, requests: mpsc::Receiver<Request>, out: mpsc::Sender<ServerMessage>);
+
+    /// The same for an outside app that presented its (working) app key: the
+    /// session has that app's scopes only, and checks the key on every request.
+    fn open_app(&self, key: aurelius_storage::app_keys::AppKeyRow, requests: mpsc::Receiver<Request>, out: mpsc::Sender<ServerMessage>);
+}
+
+/// Calls from apps with an API key (implemented by the daemon). `verifier`
+/// is the hash of the key the app presented; the secret never gets here.
+pub trait FunctionHost: Send + Sync + 'static {
+    fn call(
+        &self,
+        verifier: &str,
+        slug: &str,
+        params: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<aurelius_domain::agent_function::CallAccepted, aurelius_domain::agent_function::CallError>;
+
+    fn state(&self, verifier: &str, call_id: &str) -> Result<aurelius_domain::agent_function::CallState, aurelius_domain::agent_function::CallError>;
+}
+
+#[derive(Debug, Clone)]
+pub struct Device {
+    pub client_id: ClientId,
+    pub name: String,
+    pub capabilities: Vec<Capability>,
+    /// Uploads from this device; `attach_file` may only point inside it.
+    pub inbox: PathBuf,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct Config {
+    enabled: bool,
+    #[serde(default)]
+    push: PushIds,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PushIds {
+    pub key_id: Option<String>,
+    pub team_id: Option<String>,
+    pub bundle_id: Option<String>,
+}
+
+const APNS_KEY_REF: &str = "remote/apns-key";
+
+struct Server {
+    port: u16,
+    stop: oneshot::Sender<()>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+/// Open WebSockets of one device, and its kill switch (revoke/disable).
+struct Live {
+    connections: usize,
+    kill: watch::Sender<bool>,
+}
+
+pub(crate) struct Inner {
+    store: Arc<Store>,
+    host_id: HostId,
+    principal_id: PrincipalId,
+    root: PathBuf,
+    version: String,
+    environment: String,
+    dispatch: OnceLock<Arc<dyn Dispatch>>,
+    functions: OnceLock<Arc<dyn FunctionHost>>,
+    config: Mutex<Config>,
+    server: tokio::sync::Mutex<Option<Server>>,
+    pairings: Mutex<auth::Pairings>,
+    live: Mutex<HashMap<ClientId, Live>>,
+    /// The kill switch of each app key's open WebSockets (revoke).
+    apps: Mutex<HashMap<aurelius_domain::AppKeyId, watch::Sender<bool>>>,
+    push: push::Pusher,
+}
+
+/// Remote access for one daemon. Cheap to clone.
+#[derive(Clone)]
+pub struct Hub {
+    inner: Arc<Inner>,
+}
+
+fn validation(message: impl Into<String>) -> ProtocolError {
+    ProtocolError::new(ErrorCode::Validation, message)
+}
+
+fn internal(message: impl ToString) -> ProtocolError {
+    ProtocolError::new(ErrorCode::Internal, message.to_string())
+}
+
+impl Hub {
+    pub fn new(store: Arc<Store>, host_id: HostId, principal_id: PrincipalId, root: PathBuf, version: &str) -> Self {
+        let config = std::fs::read(root.join("data").join("remote.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        Self {
+            inner: Arc::new(Inner {
+                store,
+                host_id,
+                principal_id,
+                root,
+                version: version.into(),
+                environment: aurelius_host::Environment::current().as_str().into(),
+                dispatch: OnceLock::new(),
+                functions: OnceLock::new(),
+                config: Mutex::new(config),
+                server: tokio::sync::Mutex::new(None),
+                pairings: Mutex::new(auth::Pairings::default()),
+                live: Mutex::new(HashMap::new()),
+                apps: Mutex::new(HashMap::new()),
+                push: push::Pusher::new(),
+            }),
+        }
+    }
+
+    pub fn set_dispatch(&self, dispatch: Arc<dyn Dispatch>) {
+        let _ = self.inner.dispatch.set(dispatch);
+    }
+
+    pub fn set_functions(&self, host: Arc<dyn FunctionHost>) {
+        let _ = self.inner.functions.set(host);
+    }
+
+    /// Loopback port: `AURELIUS_REMOTE_PORT` (0 = any, tests), else 47613 (dev 47614).
+    pub fn configured_port() -> u16 {
+        if let Some(port) = std::env::var("AURELIUS_REMOTE_PORT").ok().and_then(|v| v.parse().ok()) {
+            return port;
+        }
+        match aurelius_host::Environment::current() {
+            aurelius_host::Environment::Dev => 47614,
+            _ => 47613,
+        }
+    }
+
+    /// Tailnet HTTPS port Tailscale Serve listens on (dev and production differ).
+    pub fn https_port() -> u16 {
+        match aurelius_host::Environment::current() {
+            aurelius_host::Environment::Dev => 8444,
+            _ => 8443,
+        }
+    }
+
+    fn save_config(&self) -> Result<(), ProtocolError> {
+        let config = self.inner.config.lock().unwrap().clone();
+        let path = self.inner.root.join("data").join("remote.json");
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&config).map_err(internal)?).map_err(internal)?;
+        std::fs::rename(&tmp, &path).map_err(internal)
+    }
+
+    pub fn enabled(&self) -> bool {
+        self.inner.config.lock().unwrap().enabled
+    }
+
+    /// At daemon start: bring the gateway back up when remote access was on.
+    pub async fn start_if_enabled(&self) {
+        if self.enabled() {
+            if let Err(err) = self.start_server().await {
+                tracing::warn!(error = %err, "remote gateway did not start");
+            }
+        }
+    }
+
+    /// The bound loopback address, while running (tests use port 0).
+    pub async fn local_addr(&self) -> Option<SocketAddr> {
+        self.inner.server.lock().await.as_ref().map(|s| SocketAddr::from(([127, 0, 0, 1], s.port)))
+    }
+
+    async fn start_server(&self) -> Result<u16, ProtocolError> {
+        let mut server = self.inner.server.lock().await;
+        if let Some(running) = server.as_ref() {
+            return Ok(running.port);
+        }
+        // Loopback only (R06): Tailscale Serve is the single way in from the tailnet.
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", Self::configured_port()))
+            .await
+            .map_err(|e| validation(format!("The remote port is in use: {e}")))?;
+        let port = listener.local_addr().map_err(internal)?.port();
+        let (stop, stopped) = oneshot::channel::<()>();
+        let app = http::router(self.clone());
+        let task = tokio::spawn(async move {
+            let served = axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+                .with_graceful_shutdown(async move {
+                    let _ = stopped.await;
+                })
+                .await;
+            if let Err(err) = served {
+                tracing::warn!(error = %err, "remote gateway stopped");
+            }
+        });
+        tracing::info!(port, "remote gateway listening on loopback");
+        *server = Some(Server { port, stop, task });
+        Ok(port)
+    }
+
+    async fn stop_server(&self) {
+        // Close every open WebSocket first; graceful shutdown waits for them.
+        for live in self.inner.live.lock().unwrap().values() {
+            let _ = live.kill.send(true);
+        }
+        for kill in self.inner.apps.lock().unwrap().values() {
+            let _ = kill.send(true);
+        }
+        if let Some(server) = self.inner.server.lock().await.take() {
+            let _ = server.stop.send(());
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(3), server.task).await;
+        }
+    }
+
+    /// Daemon stopping: close connections; the setting and Serve route stay.
+    pub async fn shutdown(&self) {
+        self.stop_server().await;
+    }
+
+    pub async fn enable(&self) -> Result<RemoteStatus, ProtocolError> {
+        let port = self.start_server().await?;
+        self.inner.config.lock().unwrap().enabled = true;
+        self.save_config()?;
+        let https = Self::https_port();
+        let serve = tokio::task::spawn_blocking(move || tailscale::serve_on(https, port)).await.map_err(internal)?;
+        let mut status = self.status().await;
+        if let Err(err) = serve {
+            status.error = Some(err);
+        }
+        Ok(status)
+    }
+
+    pub async fn disable(&self) -> Result<RemoteStatus, ProtocolError> {
+        self.inner.config.lock().unwrap().enabled = false;
+        self.save_config()?;
+        self.stop_server().await;
+        let store = self.inner.store.clone();
+        tokio::task::spawn_blocking(move || store.write(|tx| aurelius_storage::remote::revoke_all_sessions(tx)))
+            .await
+            .map_err(internal)?
+            .map_err(internal)?;
+        let https = Self::https_port();
+        let serve = tokio::task::spawn_blocking(move || tailscale::serve_off(https)).await.map_err(internal)?;
+        let mut status = self.status().await;
+        if let Err(err) = serve {
+            status.error = Some(err);
+        }
+        Ok(status)
+    }
+
+    pub async fn status(&self) -> RemoteStatus {
+        let port = self.inner.server.lock().await.as_ref().map(|s| s.port).unwrap_or_else(Self::configured_port);
+        let https = Self::https_port();
+        let tailscale = tokio::task::spawn_blocking(move || tailscale::status(https, port)).await.unwrap_or_default();
+        let store = self.inner.store.clone();
+        let mut clients = tokio::task::spawn_blocking(move || store.read(aurelius_storage::remote::list_clients))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        {
+            let live = self.inner.live.lock().unwrap();
+            for client in &mut clients {
+                client.connected = live.get(&client.id).is_some_and(|l| l.connections > 0);
+            }
+        }
+        let url = tailscale.dns_name.as_ref().map(|dns| format!("https://{dns}:{https}"));
+        RemoteStatus {
+            enabled: self.enabled(),
+            port,
+            url,
+            tailscale,
+            clients,
+            pending: self.inner.pairings.lock().unwrap().pending(),
+            push: self.push_status(),
+            error: None,
+        }
+    }
+
+    /// Where a phone should connect: the tailnet URL, or in dev without
+    /// Tailscale the Android emulator's view of this PC's loopback.
+    async fn phone_url(&self) -> Result<String, ProtocolError> {
+        let status = self.status().await;
+        if let Some(url) = status.url.filter(|_| status.tailscale.online) {
+            return Ok(url);
+        }
+        if self.inner.environment == "dev" {
+            return Ok(format!("http://10.0.2.2:{}", status.port));
+        }
+        Err(validation(
+            status.tailscale.error.unwrap_or_else(|| "Tailscale is not connected on this PC.".into()),
+        ))
+    }
+
+    pub async fn pairing_start(&self) -> Result<PairingCode, ProtocolError> {
+        if !self.enabled() {
+            return Err(validation("Turn on remote access first."));
+        }
+        let url = self.phone_url().await?;
+        let host_name = aurelius_host::host_name();
+        let (code, expires_at_ms) = self.inner.pairings.lock().unwrap().new_code();
+        let payload = aurelius_protocol::remote::PairingPayload {
+            v: 1,
+            url,
+            code: code.clone(),
+            host_id: self.inner.host_id,
+            host_name,
+            env: self.inner.environment.clone(),
+        };
+        // Another computer reaches this one over the tailnet; in dev without
+        // Tailscale, a second window on this PC uses loopback.
+        let computer = aurelius_protocol::remote::PairingPayload {
+            url: if payload.url.starts_with("http://10.0.2.2:") {
+                let port = self.local_addr().await.map(|a| a.port()).unwrap_or_else(Self::configured_port);
+                format!("http://127.0.0.1:{port}")
+            } else {
+                payload.url.clone()
+            },
+            ..payload.clone()
+        };
+        Ok(PairingCode {
+            code,
+            qr: serde_json::to_string(&payload).map_err(internal)?,
+            expires_at_ms,
+            pairing_text: computer.to_text(),
+        })
+    }
+
+    /// `owner`: the user confirmed full access for a computer that asked for
+    /// it. A computer asking for it is refused without that confirmation; a
+    /// phone never gets it.
+    pub async fn pairing_decide(&self, pairing_id: &str, approve: bool, owner: bool) -> Result<RemoteStatus, ProtocolError> {
+        let request = self
+            .inner
+            .pairings
+            .lock()
+            .unwrap()
+            .pending_request(pairing_id)
+            .ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "This pairing request expired. Start again."))?;
+        if approve && request.owner && !owner {
+            return Err(validation(format!(
+                "{} asks for full access. Allow it as owner, or refuse.",
+                request.device_name
+            )));
+        }
+        if approve {
+            let capabilities: Vec<Capability> =
+                if request.owner && owner { Capability::OWNER.to_vec() } else { Capability::DEVICE_DEFAULT.to_vec() };
+            let client_id = ClientId::new();
+            let secret = auth::random_token();
+            let verifier = auth::verifier(&secret);
+            let store = self.inner.store.clone();
+            let principal = self.inner.principal_id;
+            let (name, platform) = (request.device_name.clone(), request.platform.clone());
+            tokio::task::spawn_blocking(move || {
+                store.write(move |tx| {
+                    aurelius_storage::remote::create_client(tx, client_id, principal, &name, &platform, &verifier, &capabilities)
+                })
+            })
+            .await
+            .map_err(internal)?
+            .map_err(internal)?;
+            tracing::info!(%client_id, device = %request.device_name, owner = request.owner && owner, "remote device paired");
+            self.inner.pairings.lock().unwrap().approve(pairing_id, client_id, secret);
+        } else {
+            self.inner.pairings.lock().unwrap().reject(pairing_id);
+        }
+        Ok(self.status().await)
+    }
+
+    pub async fn revoke(&self, client_id: ClientId) -> Result<RemoteStatus, ProtocolError> {
+        let store = self.inner.store.clone();
+        tokio::task::spawn_blocking(move || store.write(move |tx| aurelius_storage::remote::revoke_client(tx, client_id)))
+            .await
+            .map_err(internal)?
+            .map_err(internal)?;
+        if let Some(live) = self.inner.live.lock().unwrap().get(&client_id) {
+            let _ = live.kill.send(true);
+        }
+        tracing::info!(%client_id, "remote device revoked");
+        Ok(self.status().await)
+    }
+
+    /// An app key was revoked: close its open WebSockets now. (Each request of
+    /// any of its sessions is refused by the daemon already.)
+    pub fn revoke_app(&self, key: aurelius_domain::AppKeyId) {
+        if let Some(kill) = self.inner.apps.lock().unwrap().get(&key) {
+            let _ = kill.send(true);
+        }
+    }
+
+    /// The working app key behind a secret an app presented (`amk_…`); none
+    /// for an unknown or revoked key. Only its hash is looked up.
+    async fn app_key(&self, secret: &str) -> Result<Option<aurelius_storage::app_keys::AppKeyRow>, ()> {
+        if !secret.starts_with(aurelius_domain::app_key::KEY_PREFIX) {
+            return Ok(None);
+        }
+        let store = self.inner.store.clone();
+        let verifier = auth::verifier(secret);
+        match tokio::task::spawn_blocking(move || store.read(|c| aurelius_storage::app_keys::by_verifier(c, &verifier))).await {
+            Ok(Ok(key)) => Ok(key.filter(|k| !k.revoked())),
+            _ => Err(()),
+        }
+    }
+
+    /// An app's WebSocket: its kill switch.
+    fn connect_app(&self, key: aurelius_domain::AppKeyId) -> watch::Receiver<bool> {
+        let mut apps = self.inner.apps.lock().unwrap();
+        let kill = apps.entry(key).or_insert_with(|| watch::channel(false).0);
+        if *kill.borrow() {
+            // Remote access was turned off and on again; the key itself passed auth.
+            *kill = watch::channel(false).0;
+        }
+        kill.subscribe()
+    }
+
+    fn push_status(&self) -> PushStatus {
+        let ids = self.inner.config.lock().unwrap().push.clone();
+        let has_key = aurelius_host::secrets::get(APNS_KEY_REF).ok().flatten().is_some();
+        PushStatus {
+            apns: has_key && ids.key_id.is_some() && ids.team_id.is_some() && ids.bundle_id.is_some(),
+            key_id: ids.key_id,
+            team_id: ids.team_id,
+            bundle_id: ids.bundle_id,
+            last_error: self.inner.push.last_error(),
+        }
+    }
+
+    pub async fn push_configure(&self, config: PushConfig) -> Result<RemoteStatus, ProtocolError> {
+        let trimmed = |s: &str| Some(s.trim().to_owned()).filter(|s| !s.is_empty());
+        if let Some(key) = config.key_p8.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+            push::parse_p8(key).map_err(validation)?;
+            aurelius_host::secrets::set(APNS_KEY_REF, key).map_err(|e| validation(format!("Could not store the key: {e}")))?;
+        }
+        {
+            let mut current = self.inner.config.lock().unwrap();
+            current.push = PushIds {
+                key_id: trimmed(&config.key_id),
+                team_id: trimmed(&config.team_id),
+                bundle_id: trimmed(&config.bundle_id),
+            };
+        }
+        self.save_config()?;
+        Ok(self.status().await)
+    }
+
+    pub async fn push_test(&self, client_id: ClientId) -> Result<(), ProtocolError> {
+        let store = self.inner.store.clone();
+        let target = tokio::task::spawn_blocking(move || store.read(aurelius_storage::remote::push_targets))
+            .await
+            .map_err(internal)?
+            .map_err(internal)?
+            .into_iter()
+            .find(|t| t.client_id == client_id)
+            .ok_or_else(|| validation("This device did not turn on notifications."))?;
+        let alert = push::Alert {
+            title: "Aurelius".into(),
+            body: "Notifications from this PC work.".into(),
+            data: serde_json::json!({ "target_type": "test" }),
+            category: None,
+        };
+        self.deliver(&target, &alert).await.map_err(validation)
+    }
+
+    async fn deliver(&self, target: &aurelius_storage::remote::PushTarget, alert: &push::Alert) -> Result<(), String> {
+        let ids = self.inner.config.lock().unwrap().push.clone();
+        let key = aurelius_host::secrets::get(APNS_KEY_REF).ok().flatten();
+        let outcome = self.inner.push.send(&ids, key.as_deref(), target, alert).await;
+        if let Err(push::PushError::Unregistered) = &outcome {
+            let store = self.inner.store.clone();
+            let id = target.client_id;
+            let _ = tokio::task::spawn_blocking(move || store.write(move |tx| aurelius_storage::remote::delete_push(tx, id))).await;
+        }
+        outcome.map_err(|e| e.to_string())
+    }
+
+    /// Push notifications for events that ask for the user (the same events
+    /// that create Inbox notifications), to devices without an open WebSocket.
+    pub fn start_push(&self, mut events: broadcast::Receiver<EventNotice>) {
+        let hub = self.clone();
+        tokio::spawn(async move {
+            loop {
+                let notice = match events.recv().await {
+                    Ok(notice) => notice,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                if !hub.enabled() {
+                    continue;
+                }
+                let store = hub.inner.store.clone();
+                let seq = notice.seq;
+                let found = tokio::task::spawn_blocking(move || {
+                    store.read(|c| {
+                        let Some(found) = aurelius_storage::timeline::notification_at_seq(c, seq)? else { return Ok(None) };
+                        Ok(Some((found, aurelius_storage::remote::push_targets(c)?)))
+                    })
+                })
+                .await;
+                let Ok(Ok(Some((found, targets)))) = found else { continue };
+                let alert = push::Alert::for_notification(&found, notice.project_id);
+                for target in targets {
+                    let connected = hub.inner.live.lock().unwrap().get(&target.client_id).is_some_and(|l| l.connections > 0);
+                    if connected {
+                        continue;
+                    }
+                    if let Err(err) = hub.deliver(&target, &alert).await {
+                        tracing::warn!(client_id = %target.client_id, error = %err, "push failed");
+                    }
+                }
+            }
+        });
+    }
+
+    /// Register an open WebSocket; the guard unregisters it.
+    fn connect(&self, client_id: ClientId) -> (watch::Receiver<bool>, LiveGuard) {
+        let mut live = self.inner.live.lock().unwrap();
+        let entry = live.entry(client_id).or_insert_with(|| Live { connections: 0, kill: watch::channel(false).0 });
+        if *entry.kill.borrow() {
+            // A previous revoke/disable; a fresh connection passed auth again.
+            entry.kill = watch::channel(false).0;
+        }
+        entry.connections += 1;
+        (entry.kill.subscribe(), LiveGuard { hub: self.clone(), client_id })
+    }
+
+    fn inbox(&self, client_id: ClientId) -> PathBuf {
+        self.inner.root.join("remote-inbox").join(client_id.to_string())
+    }
+}
+
+struct LiveGuard {
+    hub: Hub,
+    client_id: ClientId,
+}
+
+impl Drop for LiveGuard {
+    fn drop(&mut self) {
+        if let Some(live) = self.hub.inner.live.lock().unwrap().get_mut(&self.client_id) {
+            live.connections = live.connections.saturating_sub(1);
+        }
+        let store = self.hub.inner.store.clone();
+        let id = self.client_id;
+        // Best effort; never block a runtime thread on the writer.
+        std::thread::spawn(move || {
+            let _ = store.write(move |tx| aurelius_storage::remote::touch(tx, id));
+        });
+    }
+}

@@ -1,0 +1,40 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "ideas",
+    "value": {
+      "project_id": "01900000-0000-7000-8000-000000000001",
+      "ideas": [
+        {
+          "id": "01900000-0000-7000-8000-00000000001e",
+          "project_id": "01900000-0000-7000-8000-000000000001",
+          "title": "Dark mode",
+          "note": "For the evenings",
+          "status": "open",
+          "kind": "bug",
+          "author": "Iris",
+          "manager_id": "01900000-0000-7000-8000-000000000005",
+          "task_id": null,
+          "task_status": null,
+          "created_at_ms": 1,
+          "updated_at_ms": 1
+        },
+        {
+          "id": "01900000-0000-7000-8000-00000000001f",
+          "project_id": "01900000-0000-7000-8000-000000000001",
+          "title": "CSV export",
+          "note": null,
+          "status": "done",
+          "kind": "feature",
+          "author": "You",
+          "manager_id": null,
+          "task_id": "01900000-0000-7000-8000-000000000004",
+          "task_status": "running",
+          "created_at_ms": 2,
+          "updated_at_ms": 3
+        }
+      ]
+    }
+  }
+}

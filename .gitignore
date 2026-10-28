@@ -1,0 +1,14 @@
+/target
+*.swp
+.DS_Store
+
+# Task reports written into the repo by older Aurelius builds (now kept in the app)
+/artifacts/
+
+.worktrees/
+.claude/settings.local.json
+.claude/worktrees/
+.aurelius/
+.env
+scherm*_*.png
+clients/mobile/ios/Flutter/Local.xcconfig

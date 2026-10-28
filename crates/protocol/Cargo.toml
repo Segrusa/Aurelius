@@ -1,0 +1,18 @@
+[package]
+name = "aurelius-protocol"
+description = "Protocol 2.0: methods, writes, typed events and views, with a JSON Schema for the Dart generator. No sockets, no UI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+aurelius-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+base64.workspace = true
+schemars.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

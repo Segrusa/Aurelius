@@ -1,0 +1,34 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "memory",
+    "value": {
+      "items": [
+        {
+          "id": "01900000-0000-7000-8000-000000000028",
+          "scope": "project",
+          "manager_id": null,
+          "manager_name": null,
+          "kind": "project_knowledge",
+          "status": "proposed",
+          "content": "Launch is in May",
+          "pinned": false,
+          "importance": 0.5,
+          "confidence": 0.8,
+          "created_at_ms": 1,
+          "supersedes_id": null,
+          "conflicts_with_id": null,
+          "decided_by": null,
+          "sources": [
+            {
+              "event_id": "e",
+              "label": "Chat",
+              "at_ms": 1
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

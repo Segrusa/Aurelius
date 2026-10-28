@@ -1,0 +1,29 @@
+[package]
+name = "aurelius-agent-bridge"
+description = "The MCP server Claude Code starts for a run: approvals, memory, delegation, colleague proposals and the screen tools. Talks to the daemon on the internal bridge channel."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "aurelius-bridge"
+path = "src/main.rs"
+
+[dependencies]
+aurelius-client.workspace = true
+aurelius-host.workspace = true
+tokio = { workspace = true, features = ["io-std", "fs"] }
+anyhow.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+
+# Screenshots for the agent's screen tools; desktops only.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+xcap = "0.9.8"
+image.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

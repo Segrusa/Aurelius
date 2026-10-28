@@ -1,0 +1,21 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "subagents",
+    "value": [
+      {
+        "kind": "subagent",
+        "name": "Compare hero layouts",
+        "detail": "Explore",
+        "task_id": null,
+        "run_id": "01900000-0000-7000-8000-000000000016",
+        "conversation_id": "01900000-0000-7000-8000-00000000000d",
+        "since_ms": 6,
+        "prompt": "Compare the two hero layouts.",
+        "doing": "Read · hero.html",
+        "steps": 3
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "kind": "stream_append",
+  "run_id": "01900000-0000-7000-8000-000000000003",
+  "conversation_id": "01900000-0000-7000-8000-000000000002",
+  "message_id": "01900000-0000-7000-8000-00000000000b",
+  "offset": 5,
+  "text": " there",
+  "progress": {
+    "started_at_ms": 1700000000000,
+    "output_tokens": 3900
+  }
+}

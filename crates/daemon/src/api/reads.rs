@@ -1,0 +1,555 @@
+//! Every read method (`<area>.list` / `<area>.get`) as a `ResponseBody`.
+//! Session methods (hello, subscribe, terminal open and detach) are answered by the session itself.
+
+use super::{app_task, git, internal, sql, storage_task};
+use crate::{Shared, VERSION};
+use aurelius_domain::{ConversationId, DepartmentId, EmployeeId, ProjectId};
+use aurelius_protocol::{
+    ApprovalsSnapshot, ProvidersSnapshot, ErrorCode, HealthResult, JobSummary, JobsSnapshot, EmployeesSnapshot, MemorySnapshot,
+    Method, MessagesSnapshot, NotificationsSnapshot, ProjectConversationsSnapshot, ProjectsSnapshot, ProtocolError, ResponseBody, TasksSnapshot,
+    TimelinePage,
+};
+use aurelius_storage::queries;
+use base64::Engine;
+use std::sync::Arc;
+
+pub(super) async fn handle(shared: &Arc<Shared>, method: Method) -> Result<ResponseBody, ProtocolError> {
+    match method {
+        Method::SessionHello(_) | Method::EventSubscribe { .. } | Method::TerminalOpen { .. } | Method::TerminalDetach { .. } => {
+            Err(internal("a session method reached the reads"))
+        }
+        Method::ServerGetHealth => health(shared).await,
+        Method::ProjectList => projects(shared).await,
+        Method::JobList => jobs(shared).await,
+        Method::ConversationGet { conversation_id } => messages(shared, conversation_id).await,
+        Method::EmployeeList { department_id } => employees(shared, department_id).await,
+        Method::EmployeeChat { employee_id } => {
+            let store = shared.store().clone();
+            let chat = storage_task(move || store.read(|c| aurelius_storage::employees::main_chat(c, employee_id))).await?;
+            match chat {
+                Some(conversation_id) => messages(shared, conversation_id).await,
+                None => Err(ProtocolError::new(ErrorCode::NotFound, format!("employee {employee_id} does not exist"))),
+            }
+        }
+        Method::DepartmentList { archived } => {
+            let store = shared.store().clone();
+            storage_task(move || {
+                store.read(|c| {
+                    Ok(aurelius_protocol::DepartmentsSnapshot { as_of_seq: queries::last_seq(c)?, departments: aurelius_storage::departments::list(c, archived)? })
+                })
+            })
+            .await
+            .map(ResponseBody::Departments)
+        }
+        Method::CompanyGet => company(shared).await,
+        Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
+        Method::ApprovalList => approvals(shared).await,
+        Method::ProviderList => connections(shared).await,
+        Method::TaskList { project_id, employee_id, department_id, state } => tasks(shared, project_id, employee_id, department_id, state).await,
+        Method::TimelineList(query) => timeline(shared, query).await,
+        Method::NotificationList => notifications(shared).await,
+        Method::ShareList { project_id } => {
+            let store = shared.store().clone();
+            storage_task(move || {
+                store.read(|c| {
+                    let read = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+                    aurelius_storage::shares::for_project(c, project_id, &read)
+                })
+            })
+            .await
+            .map(ResponseBody::Shares)
+        }
+        Method::UpdateGet { check } => Ok(ResponseBody::Update(crate::updates::status(shared, check).await)),
+        Method::BackupList => Ok(ResponseBody::Backups(aurelius_host::backups::snapshot(&shared.root))),
+        Method::SubscriptionGet { refresh } => Ok(ResponseBody::Subscription(crate::runtimes::subscription_usage(shared, refresh).await)),
+        Method::UsageGet => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(|c| aurelius_storage::usage::snapshot(c, aurelius_host::utc_offset_minutes_at))).await.map(ResponseBody::Usage)
+        }
+        Method::UsageGetHours { day_start_ms } => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(|c| aurelius_storage::usage::hours(c, day_start_ms, aurelius_host::utc_offset_minutes_at))).await.map(ResponseBody::UsageHours)
+        }
+        Method::UsageGetTotals { conversation_id, task_id } => {
+            let store = shared.store().clone();
+            let totals = storage_task(move || {
+                store.read(|c| match (task_id, conversation_id) {
+                    (Some(task), _) => aurelius_storage::usage::task_totals(c, task).map(Some),
+                    (None, Some(conversation)) => aurelius_storage::usage::conversation_totals(c, conversation).map(Some),
+                    (None, None) => Ok(None),
+                })
+            })
+            .await?;
+            totals.map(ResponseBody::UsageTotals).ok_or_else(|| ProtocolError::new(ErrorCode::InvalidRequest, "Give a conversation or a task."))
+        }
+        Method::RunGetTrace { run_id } => {
+            let s = shared.clone();
+            app_task(move || s.service.run_trace(run_id))
+                .await?
+                .map(ResponseBody::RunTrace)
+                .ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "No trace was kept for this answer: trace mode was off, or it is no longer among the latest runs."))
+        }
+        Method::TraceGetSetting => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(aurelius_storage::traces::setting)).await.map(ResponseBody::TraceSetting)
+        }
+        Method::VariantsGetSetting => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(aurelius_storage::variants::setting)).await.map(ResponseBody::VariantsSetting)
+        }
+        Method::TaskVariants { task_id } => {
+            let s = shared.clone();
+            app_task(move || s.service.task_variants(task_id)).await.map(ResponseBody::TaskVariants)
+        }
+        Method::PowerGet => Ok(ResponseBody::Power(shared.power.state())),
+        Method::LoadGet => Ok(ResponseBody::Load(crate::load::snapshot(shared))),
+        Method::BrowserGet => Ok(ResponseBody::Browser(aurelius_host::chrome::setting())),
+        Method::ArtifactGetSetting => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(aurelius_storage::artifacts::enabled)).await.map(|enabled| ResponseBody::ArtifactSetting(aurelius_protocol::ArtifactSetting { enabled }))
+        }
+        Method::AutoAllowGetSetting => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(aurelius_storage::auto_allow::enabled)).await.map(|enabled| ResponseBody::AutoAllowSetting(aurelius_protocol::AutoAllowSetting::new(enabled)))
+        }
+        Method::ManagementModeGetSetting => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(aurelius_storage::management_mode::enabled)).await.map(|enabled| ResponseBody::ManagementModeSetting(aurelius_protocol::ManagementModeSetting { enabled }))
+        }
+        Method::ArtifactList { conversation_id, task_id, project_id } => {
+            let s = shared.clone();
+            let filter = aurelius_storage::artifacts::Filter { conversation_id, task_id, project_id };
+            app_task(move || s.service.artifacts(filter)).await.map(|artifacts| ResponseBody::Artifacts(aurelius_domain::views::ArtifactsSnapshot { artifacts }))
+        }
+        Method::ArtifactGetContent { url, version } => {
+            let s = shared.clone();
+            app_task(move || s.service.artifact_content(url, version)).await.map(ResponseBody::ArtifactContent)
+        }
+        Method::McpList => crate::mcp_servers::list(shared).await.map(ResponseBody::McpServers),
+        Method::McpLoginGet { login_id } => crate::mcp_oauth::get(&login_id).map(ResponseBody::McpLogin),
+        Method::McpAlwaysAllowList => crate::mcp_servers::always_allow_list(shared).await.map(ResponseBody::McpAlwaysAllow),
+        Method::PluginList => aurelius_host::plugins::list(shared).await.map(ResponseBody::Plugins),
+        Method::PluginListAvailable => aurelius_host::plugins::available().await.map(ResponseBody::PluginCatalog),
+        Method::PluginGetForEmployee { employee_id } => aurelius_host::plugins::employee_get(shared, employee_id).await.map(ResponseBody::EmployeePlugins),
+        Method::PluginGetForProject { project_id } => aurelius_host::plugins::project_get(shared, project_id).await.map(ResponseBody::ProjectPlugins),
+        Method::MemoryList { project_id, employee_id, department_id } => {
+            let store = shared.store().clone();
+            storage_task(move || {
+                store.read(|c| {
+                    let read = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+                    let wanted = aurelius_storage::memory::Wanted { project: project_id, employee: employee_id, department: department_id };
+                    Ok(MemorySnapshot { items: aurelius_storage::memory::list(c, wanted, &read)? })
+                })
+            })
+            .await
+            .map(ResponseBody::Memory)
+        }
+        Method::MemoryGetContext { project_id, employee_id, department_id } => {
+            if project_id.is_none() && employee_id.is_none() && department_id.is_none() {
+                return Err(ProtocolError::new(ErrorCode::Validation, "Give a project, an employee or a department."));
+            }
+            let store = shared.store().clone();
+            storage_task(move || {
+                store.read(|c| {
+                    let read = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+                    aurelius_application::memory::memory_context::memory_context(c, project_id, employee_id, department_id, &read)
+                })
+            })
+            .await
+            .map(ResponseBody::MemoryContext)
+        }
+        Method::ScreenshotGet { id } => {
+            let path = shared.root.join(aurelius_protocol::SCREENSHOT_DIR).join(format!("{id}.jpg"));
+            // The id is a UUID, never a path.
+            let bytes = if aurelius_protocol::valid_screenshot_id(&id) { tokio::fs::read(&path).await.ok() } else { None };
+            match bytes {
+                Some(bytes) => Ok(ResponseBody::Screenshot { id, jpeg_base64: base64::engine::general_purpose::STANDARD.encode(bytes) }),
+                None => Err(ProtocolError::new(ErrorCode::NotFound, "This screenshot is no longer kept.")),
+            }
+        }
+        Method::IdeaList { project_id } => {
+            let s = shared.clone();
+            app_task(move || s.service.ideas(project_id)).await.map(ResponseBody::Ideas)
+        }
+        Method::IdeaListAll {} => {
+            let s = shared.clone();
+            app_task(move || s.service.all_ideas()).await.map(ResponseBody::AllIdeas)
+        }
+        Method::NoteList { project_id, query } => {
+            let s = shared.clone();
+            app_task(move || s.service.notes(project_id, query)).await.map(ResponseBody::Notes)
+        }
+        Method::NoteGet { note_id } => {
+            let s = shared.clone();
+            app_task(move || s.service.note(note_id)).await.map(ResponseBody::Note)
+        }
+        Method::EmployeeInstructionVersions { employee_id } => {
+            let s = shared.clone();
+            app_task(move || s.service.employee_instruction_versions(employee_id)).await.map(ResponseBody::EmployeeInstructionVersions)
+        }
+        Method::ProposalList { department_id } => {
+            let s = shared.clone();
+            app_task(move || s.service.proposals(department_id)).await.map(ResponseBody::Proposals)
+        }
+        Method::RecurringTaskList { project_id } => {
+            let s = shared.clone();
+            app_task(move || s.service.task_schedules(project_id)).await.map(ResponseBody::TaskSchedules)
+        }
+        Method::AgentFunctionList { project_id } => {
+            let s = shared.clone();
+            app_task(move || s.service.agent_functions(project_id)).await.map(ResponseBody::AgentFunctions)
+        }
+        Method::FunctionCallList { function_id, limit } => {
+            let s = shared.clone();
+            app_task(move || s.service.function_calls(function_id, limit)).await.map(ResponseBody::FunctionCalls)
+        }
+        Method::AppKeyList => {
+            let s = shared.clone();
+            app_task(move || s.service.app_keys()).await.map(ResponseBody::AppKeys)
+        }
+        Method::ApiKeyList => {
+            let s = shared.clone();
+            app_task(move || s.service.api_keys()).await.map(ResponseBody::ApiKeys)
+        }
+        Method::FileGet { id } => {
+            let store = shared.store().clone();
+            let found = storage_task(move || {
+                store.read(|c| {
+                    let Some((name, media_type, key)) = aurelius_storage::conversations::message_file(c, &id)? else { return Ok(None) };
+                    Ok(store.blobs().read(&key).ok().map(|bytes| (id, name, media_type, bytes)))
+                })
+            })
+            .await?;
+            match found {
+                Some((id, name, media_type, bytes)) => {
+                    Ok(ResponseBody::File { id, name, media_type, data_base64: base64::engine::general_purpose::STANDARD.encode(bytes) })
+                }
+                None => Err(ProtocolError::new(ErrorCode::NotFound, "This file is no longer kept.")),
+            }
+        }
+        Method::UploadGet { id, offset, max_side } => crate::uploads::get(shared, id, offset, max_side).await.map(ResponseBody::Upload),
+        Method::RunGetContext { run_id } => {
+            let store = shared.store().clone();
+            let found = storage_task(move || {
+                store.read(|c| {
+                    Ok(sql::context_key(c, run_id)
+                        .and_then(|k| store.blobs().read(&k).ok())
+                        .and_then(|b| serde_json::from_slice::<aurelius_protocol::ContextView>(&b).ok()))
+                })
+            })
+            .await?;
+            found.map(ResponseBody::Context).ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "No context overview was kept for this answer."))
+        }
+        Method::GitGetStatus { conversation_id } => git::status(shared, conversation_id).await.map(ResponseBody::GitStatus),
+        Method::GitGetDiff { conversation_id } => git::diff(shared, conversation_id).await.map(ResponseBody::GitDiff),
+        Method::MarkdownList { scope } => crate::markdown::list(shared, scope).await.map(ResponseBody::MarkdownFiles),
+        Method::MarkdownGet { scope, path } => crate::markdown::read(shared, scope, path).await.map(ResponseBody::MarkdownFile),
+        Method::SubagentList { conversation_id } => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(|c| aurelius_storage::employees::running_subagents(c, conversation_id))).await.map(ResponseBody::Subagents)
+        }
+        Method::ActivityGet { message_id, call_id } => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(|c| aurelius_storage::conversations::activity_call(c, message_id, &call_id)))
+                .await?
+                .map(ResponseBody::Activity)
+                .ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "This tool call is no longer kept."))
+        }
+        Method::RemoteGetStatus => Ok(ResponseBody::Remote(crate::remote::status(shared).await)),
+        Method::FsListDir { path } => crate::browse::list(shared, path).await.map(ResponseBody::DirListing),
+        Method::ProviderDetectRuntime => Ok(ResponseBody::RuntimeDetected {
+            claude_code: tokio::task::spawn_blocking(aurelius_runtime::claude_code::locate).await.ok().flatten().map(|p| p.display().to_string()),
+        }),
+        Method::TerminalInput { terminal_id, data_base64 } => shared.terminals.input(&terminal_id, &data_base64).await.map(|()| ResponseBody::TerminalDone),
+        Method::TerminalList { conversation_id } => aurelius_host::terminal::list(shared, conversation_id).await.map(ResponseBody::Terminals),
+        Method::TerminalResize { terminal_id, cols, rows } => shared.terminals.resize(&terminal_id, cols, rows).map(|()| ResponseBody::TerminalDone),
+        // The attachment stays until the exit has reached this session too.
+        Method::TerminalClose { terminal_id } => shared.terminals.close(&terminal_id).map(|()| ResponseBody::TerminalDone),
+    }
+}
+
+async fn health(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let (last_seq, active_jobs) = storage_task(move || store.read(|c| Ok((queries::last_seq(c)?, queries::running_runs(c)?)))).await?;
+    Ok(ResponseBody::Health(HealthResult {
+        host_id: shared.host_id,
+        daemon_version: VERSION.into(),
+        pid: std::process::id(),
+        started_at_ms: shared.started_at_ms,
+        last_seq,
+        active_jobs,
+    }))
+}
+
+/// Snapshot read in one read transaction so `as_of_seq` matches the rows.
+async fn projects(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    storage_task(move || {
+        store.read(|conn| {
+            conn.execute_batch("BEGIN DEFERRED")?;
+            let result = (|| {
+                let as_of_seq = queries::last_seq(conn)?;
+                let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+                let projects = queries::list_projects(conn, &read_blob)?;
+                Ok(ProjectsSnapshot { as_of_seq, projects })
+            })();
+            conn.execute_batch("COMMIT")?;
+            result
+        })
+    })
+    .await
+    .map(ResponseBody::Projects)
+}
+
+async fn jobs(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let (as_of_seq, rows, names) = storage_task(move || {
+        store.read(|c| {
+            let rows = queries::list_jobs(c, 50)?;
+            let names = sql::job_names(c, &rows);
+            Ok((queries::last_seq(c)?, rows, names))
+        })
+    })
+    .await?;
+    let now = aurelius_storage::now_ms();
+    let jobs = rows
+        .into_iter()
+        .map(|row| JobSummary {
+            not_before_ms: (row.state == aurelius_domain::job::JobState::Ready && row.not_before_ms > now && row.not_before_ms < i64::MAX / 4)
+                .then_some(row.not_before_ms),
+            reason: (row.state == aurelius_domain::job::JobState::Ready).then(|| row.last_error_code.clone()).flatten(),
+            progress_permille: match row.state {
+                aurelius_domain::job::JobState::Done => 1000,
+                _ => 0,
+            },
+            label: names.get(&row.id).cloned().unwrap_or_else(|| row.payload["label"].as_str().unwrap_or("").to_owned()),
+            conversation_id: row.payload["conversation_id"].as_str().and_then(|s| ConversationId::parse(s).ok()),
+            task_id: row.payload["task_id"].as_str().and_then(|s| aurelius_domain::TaskId::parse(s).ok()),
+            live: (row.state == aurelius_domain::job::JobState::Leased)
+                .then(|| shared.live.job(&row.id))
+                .flatten()
+                .map(|(started_at_ms, output_tokens)| aurelius_protocol::RunProgress { started_at_ms, output_tokens, compacting: shared.live.is_compacting(&row.id) }),
+            id: row.id,
+            kind: row.kind,
+            state: row.state,
+            created_at_ms: row.not_before_ms,
+        })
+        .collect();
+    Ok(ResponseBody::Jobs(JobsSnapshot { as_of_seq, jobs }))
+}
+
+/// Messages plus the live text of runs still streaming, so a reconnecting
+/// client sees everything produced so far. Tool use comes shortened
+/// (`activity.get` has a call whole), so hundreds of calls stay small.
+async fn messages(shared: &Arc<Shared>, conversation_id: ConversationId) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let (as_of_seq, mut messages) = storage_task(move || {
+        store.read(|c| {
+            let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+            let as_of_seq = queries::last_seq(c)?;
+            let mut messages = aurelius_storage::conversations::list_messages(c, conversation_id, &read_blob)?;
+            for message in messages.iter_mut() {
+                message.activity = std::mem::take(&mut message.activity).into_iter().map(aurelius_domain::activity::preview).collect();
+            }
+            Ok((as_of_seq, messages))
+        })
+    })
+    .await?;
+    if let Ok(live) = shared.live_text.lock() {
+        for message in messages.iter_mut() {
+            if message.status == aurelius_domain::conversation::MessageStatus::Partial {
+                if let Some(text) = message.run_id.and_then(|r| live.get(&r)) {
+                    message.text = text.clone();
+                }
+            }
+        }
+    }
+    let store = shared.store().clone();
+    let (attachments, agent_mode, browser_allowed, screen_allowed, shares, run, (employee_id, project_id), read_only) = storage_task(move || {
+        store.read(|c| {
+            let read = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+            Ok((
+                aurelius_storage::files::list_attachments(c, conversation_id)?,
+                aurelius_storage::conversations::agent_mode(c, conversation_id)?,
+                aurelius_storage::conversations::browser_allowed(c, conversation_id)?,
+                aurelius_storage::conversations::screen_allowed(c, conversation_id)?,
+                aurelius_storage::shares::for_conversation(c, conversation_id, &read)?,
+                aurelius_storage::conversations::conversation_run(c, conversation_id)?,
+                aurelius_storage::conversations::owner_of(c, conversation_id)?,
+                aurelius_storage::conversations::is_older_employee_chat(c, conversation_id)?,
+            ))
+        })
+    })
+    .await?;
+    Ok(ResponseBody::Messages(MessagesSnapshot {
+        as_of_seq,
+        conversation_id,
+        messages,
+        attachments,
+        agent_mode,
+        browser_allowed,
+        screen_allowed,
+        shares,
+        run,
+        employee_id,
+        project_id,
+        read_only,
+    }))
+}
+
+/// The employees (not archived) with their heartbeats.
+fn employee_list(
+    c: &aurelius_storage::Conn,
+    department_id: Option<DepartmentId>,
+    read_blob: &dyn Fn(&str) -> Option<String>,
+) -> Result<Vec<aurelius_domain::views::EmployeeSummary>, aurelius_storage::StorageError> {
+    let mut employees = aurelius_storage::employees::list_employees(c, department_id, read_blob)?;
+    let day_start = aurelius_domain::scheduler::heartbeat::local_day_start(aurelius_storage::now_ms(), aurelius_host::utc_offset_minutes_at);
+    for m in employees.iter_mut() {
+        m.heartbeat = aurelius_storage::heartbeats::view(c, m.id, day_start)?;
+    }
+    Ok(employees)
+}
+
+async fn employees(shared: &Arc<Shared>, department_id: Option<DepartmentId>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    storage_task(move || {
+        store.read(|c| {
+            let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+            let employees = employee_list(c, department_id, &read_blob)?;
+            Ok(EmployeesSnapshot { as_of_seq: queries::last_seq(c)?, employees })
+        })
+    })
+    .await
+    .map(ResponseBody::Employees)
+}
+
+/// The company in one read transaction, so `as_of_seq` matches the rows.
+async fn company(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    storage_task(move || {
+        store.read(|c| {
+            c.execute_batch("BEGIN DEFERRED")?;
+            let result = (|| {
+                let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+                let employees = employee_list(c, None, &read_blob)?;
+                let roots = employees
+                    .iter()
+                    .filter(|e| e.status == aurelius_domain::employee::LifecycleStatus::Active && e.reports_to.is_none_or(|b| !employees.iter().any(|o| o.id == b)))
+                    .map(|e| e.id)
+                    .collect();
+                Ok(aurelius_protocol::CompanySnapshot {
+                    as_of_seq: queries::last_seq(c)?,
+                    departments: aurelius_storage::departments::list(c, false)?,
+                    follow_org_chart: aurelius_storage::employees::follow_org_chart(c)?,
+                    conversion: aurelius_storage::departments::conversion_report(c)?,
+                    employees,
+                    roots,
+                })
+            })();
+            c.execute_batch("COMMIT")?;
+            result
+        })
+    })
+    .await
+    .map(ResponseBody::Company)
+}
+
+async fn project_conversations(shared: &Arc<Shared>, project_id: ProjectId) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    storage_task(move || {
+        store.read(|c| {
+            Ok(ProjectConversationsSnapshot {
+                as_of_seq: queries::last_seq(c)?,
+                project_id,
+                conversations: aurelius_storage::conversations::project_conversations(c, project_id)?,
+            })
+        })
+    })
+    .await
+    .map(ResponseBody::ProjectConversations)
+}
+
+async fn approvals(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    storage_task(move || {
+        store.read(|c| {
+            let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+            Ok(ApprovalsSnapshot { as_of_seq: queries::last_seq(c)?, approvals: aurelius_storage::approvals::list_approvals(c, &read_blob)? })
+        })
+    })
+    .await
+    .map(ResponseBody::Approvals)
+}
+
+async fn connections(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    storage_task(move || {
+        store.read(|c| {
+            let has_secret = |r: &str| matches!(aurelius_host::secrets::get(r), Ok(Some(_)));
+            Ok(ProvidersSnapshot {
+                as_of_seq: queries::last_seq(c)?,
+                connections: aurelius_storage::connections::list(c, &has_secret)?,
+                defaults: aurelius_storage::connections::list_defaults(c)?,
+            })
+        })
+    })
+    .await
+    .map(ResponseBody::Connections)
+}
+
+async fn timeline(shared: &Arc<Shared>, query: aurelius_protocol::TimelineQuery) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let limit = query.limit.clamp(1, 200);
+    storage_task(move || {
+        store.read(|c| {
+            let (cards, next_before_seq) =
+                aurelius_storage::timeline::cards(c, query.project_id, query.correlation_id.as_deref(), query.before_seq, limit, query.activity)?;
+            Ok(TimelinePage { cards, next_before_seq })
+        })
+    })
+    .await
+    .map(ResponseBody::Timeline)
+}
+
+async fn notifications(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    storage_task(move || {
+        store.read(|c| {
+            Ok(NotificationsSnapshot {
+                notifications: aurelius_storage::timeline::list_notifications(c, 100)?,
+                unread: aurelius_storage::timeline::unread_count(c)?,
+            })
+        })
+    })
+    .await
+    .map(ResponseBody::Notifications)
+}
+
+async fn tasks(
+    shared: &Arc<Shared>,
+    project_id: Option<ProjectId>,
+    employee_id: Option<EmployeeId>,
+    department_id: Option<DepartmentId>,
+    state: Option<aurelius_protocol::method::TaskListState>,
+) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    storage_task(move || {
+        store.read(|c| {
+            let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+            let members: Option<Vec<EmployeeId>> = match department_id {
+                Some(d) => Some(aurelius_storage::employees::org_entries(c)?.into_iter().filter(|(_, _, dep)| *dep == Some(d)).map(|(e, _, _)| e).collect()),
+                None => None,
+            };
+            let tasks = aurelius_storage::tasks::list_tasks(c, project_id, &read_blob)?
+                .into_iter()
+                .filter(|t| employee_id.is_none() || t.employee_id == employee_id)
+                .filter(|t| members.as_ref().is_none_or(|m| t.employee_id.is_some_and(|e| m.contains(&e))))
+                .filter(|t| state.is_none_or(|s| s.matches(t.status, t.waiting_reason.as_deref())))
+                .collect();
+            Ok(TasksSnapshot { as_of_seq: queries::last_seq(c)?, tasks })
+        })
+    })
+    .await
+    .map(ResponseBody::Tasks)
+}

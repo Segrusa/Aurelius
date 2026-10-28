@@ -1,0 +1,23 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "timeline",
+    "value": {
+      "cards": [
+        {
+          "seq": 9,
+          "at_ms": 1,
+          "kind": "decision",
+          "label": "Plan",
+          "title": "Plan approved",
+          "detail": "",
+          "actor": "You",
+          "correlation_id": "01900000-0000-7000-8000-000000000004",
+          "task_id": "01900000-0000-7000-8000-000000000004"
+        }
+      ],
+      "next_before_seq": 9
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "approvals",
+    "value": {
+      "as_of_seq": 70,
+      "approvals": [
+        {
+          "id": "01900000-0000-7000-8000-00000000001e",
+          "status": "pending",
+          "tool": "fake.publish",
+          "effect": "external_write",
+          "arguments": {
+            "text": "Hallo"
+          },
+          "resources": [
+            "example.com"
+          ],
+          "account": "default",
+          "reasons": [
+            "External write asks"
+          ],
+          "action_digest": "abcdef0123456789",
+          "requested_at_ms": 1,
+          "expires_at_ms": 1800001,
+          "run_id": "01900000-0000-7000-8000-000000000003",
+          "conversation_id": "01900000-0000-7000-8000-000000000002",
+          "requester": "Chat",
+          "task_id": null
+        },
+        {
+          "id": "01900000-0000-7000-8000-00000000001f",
+          "status": "pending",
+          "tool": "claude.AskUserQuestion",
+          "effect": "read",
+          "arguments": {
+            "questions": [
+              {
+                "header": "Tone",
+                "multiSelect": false,
+                "options": [
+                  {
+                    "description": "Like a bank",
+                    "label": "Formal"
+                  },
+                  {
+                    "description": "Like a game",
+                    "label": "Playful"
+                  }
+                ],
+                "question": "Which tone?"
+              }
+            ]
+          },
+          "resources": [],
+          "account": "local",
+          "reasons": [
+            "Claude asks you; it waits for your answer."
+          ],
+          "action_digest": "0123456789abcdef",
+          "requested_at_ms": 2,
+          "expires_at_ms": 1800002,
+          "run_id": "01900000-0000-7000-8000-000000000003",
+          "conversation_id": null,
+          "requester": "Iris · Copy",
+          "task_id": "01900000-0000-7000-8000-000000000004"
+        }
+      ]
+    }
+  }
+}

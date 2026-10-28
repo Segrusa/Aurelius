@@ -1,0 +1,19 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "load",
+    "value": {
+      "cpu_pct": 82.4,
+      "mem_free_mb": 9216,
+      "mem_total_mb": 32768,
+      "running": 2,
+      "held": 1,
+      "gate": "held",
+      "hold": { "kind": "cpu", "cpu_pct": 82.4 },
+      "limits": { "max_runs": 3, "cpu_high": 75, "cpu_low": 65, "mem_min_mb": 2048, "enabled": true },
+      "checks_active": true,
+      "sampled_at_ms": 1791300000000
+    }
+  }
+}

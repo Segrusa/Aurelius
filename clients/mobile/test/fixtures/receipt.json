@@ -1,0 +1,18 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "receipt",
+    "value": {
+      "command_id": "01900000-0000-7000-8000-000000000032",
+      "committed_seq": 91,
+      "replayed": false,
+      "result": {
+        "type": "chat_message_sent",
+        "conversation_id": "01900000-0000-7000-8000-000000000002",
+        "message_id": "01900000-0000-7000-8000-00000000000a",
+        "run_id": "01900000-0000-7000-8000-000000000003"
+      }
+    }
+  }
+}

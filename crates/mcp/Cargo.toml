@@ -1,0 +1,23 @@
+[package]
+name = "aurelius-mcp"
+description = "MCP server for outside apps and agents: the tools call protocol methods through aurelius-client, as the app of one app key."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "aurelius-mcp"
+path = "src/main.rs"
+
+[dependencies]
+aurelius-domain.workspace = true
+aurelius-protocol.workspace = true
+aurelius-client.workspace = true
+aurelius-host.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
+# Streamable HTTP (`http`): the gateway's `/v1/mcp` and `aurelius-mcp --http`.
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true

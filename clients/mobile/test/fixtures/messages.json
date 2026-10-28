@@ -1,0 +1,95 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "messages",
+    "value": {
+      "as_of_seq": 50,
+      "conversation_id": "01900000-0000-7000-8000-000000000002",
+      "messages": [
+        {
+          "id": "01900000-0000-7000-8000-00000000000a",
+          "ordinal": 1,
+          "role": "user",
+          "status": "complete",
+          "text": "Hello",
+          "created_at_ms": 1700000000000,
+          "run_id": null,
+          "reply_to": null,
+          "produced_by": null,
+          "author": null,
+          "sources": [],
+          "activity": [],
+          "update": null,
+          "approval_id": null,
+          "files": [],
+          "uploads": [
+            {
+              "name": "report.pdf",
+              "path": ".aurelius/uploads/report.pdf",
+              "byte_length": 1258291
+            }
+          ]
+        },
+        {
+          "id": "01900000-0000-7000-8000-00000000000b",
+          "ordinal": 2,
+          "role": "assistant",
+          "status": "partial",
+          "text": "Hi 👋",
+          "created_at_ms": 1700000001000,
+          "run_id": "01900000-0000-7000-8000-000000000003",
+          "reply_to": null,
+          "produced_by": "Claude Code · opus",
+          "author": "Marcus",
+          "sources": [
+            {
+              "n": 1,
+              "url": "https://example.com",
+              "title": "Example",
+              "error": null
+            }
+          ],
+          "activity": [
+            {
+              "call_id": "toolu_1",
+              "tool": "Bash",
+              "input": {
+                "command": "cargo test",
+                "description": "Run the tests"
+              },
+              "output": "test result: ok",
+              "ok": true,
+              "offset": 3
+            }
+          ],
+          "update": null,
+          "approval_id": null,
+          "files": [
+            {
+              "id": "6d6a2f7e-0000-4000-8000-000000000001",
+              "name": "scherm1.png",
+              "media_type": "image/png",
+              "size": 1484481
+            }
+          ],
+          "uploads": []
+        }
+      ],
+      "attachments": [
+        {
+          "id": "01900000-0000-7000-8000-00000000000c",
+          "name": "note.txt",
+          "kind": "text",
+          "byte_length": 20,
+          "truncated": false
+        }
+      ],
+      "agent_mode": "accept_edits",
+      "browser_allowed": false,
+      "screen_allowed": false,
+      "shares": [],
+      "run": {}
+    }
+  }
+}

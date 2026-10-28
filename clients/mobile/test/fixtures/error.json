@@ -1,0 +1,8 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "error": {
+    "code": "forbidden",
+    "message": "This is only available in Aurelius on the PC."
+  }
+}

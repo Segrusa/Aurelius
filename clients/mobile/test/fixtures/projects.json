@@ -1,0 +1,22 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "projects",
+    "value": {
+      "as_of_seq": 42,
+      "projects": [
+        {
+          "id": "01900000-0000-7000-8000-000000000001",
+          "name": "Atlas",
+          "description": "Launch",
+          "status": "active",
+          "version": 3,
+          "created_at_ms": 1700000000000,
+          "manager_count": 1,
+          "folder": "C:\\Projects\\Atlas"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+* text=auto eol=lf
+# Migration checksums must not change with platform line endings.
+migrations/*.sql text eol=lf
+*.png binary
+*.ttf binary
+*.ico binary
+# Vendored minified bundle: no text diffs.
+clients/mobile/assets/mermaid/mermaid.min.js -diff

@@ -1,0 +1,35 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "project_conversations",
+    "value": {
+      "as_of_seq": 44,
+      "project_id": "01900000-0000-7000-8000-000000000001",
+      "conversations": [
+        {
+          "id": "01900000-0000-7000-8000-000000000002",
+          "title": "What is open?",
+          "created_at_ms": 1,
+          "updated_at_ms": 9,
+          "message_count": 4,
+          "manager_id": null,
+          "manager_name": null,
+          "read_only": false,
+          "working": true
+        },
+        {
+          "id": "01900000-0000-7000-8000-000000000006",
+          "title": "Iris",
+          "created_at_ms": 1,
+          "updated_at_ms": 3,
+          "message_count": 4,
+          "manager_id": "01900000-0000-7000-8000-000000000005",
+          "manager_name": "Iris",
+          "read_only": true,
+          "working": false
+        }
+      ]
+    }
+  }
+}

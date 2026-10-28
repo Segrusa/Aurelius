@@ -1,0 +1,91 @@
+# Builds, signs and publishes a desktop release for every desktop-v* tag.
+# The server and the desktop app are released separately (own version, tag,
+# changelog and zip); they work together as long as their protocol matches.
+# Tests run locally in scripts/release.ps1 before a tag is pushed (Windows
+# Actions minutes count double, so they are not repeated here).
+# The app's updater only installs packages whose signature verifies against the
+# public key compiled into the app; the private key exists only as the
+# AURELIUS_SIGNING_KEY secret.
+name: release-desktop
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. desktop-v0.6.1"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Toolchain (from rust-toolchain.toml)
+        shell: pwsh
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: windows-
+
+      - name: Version matches the tag
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("desktop-v$version" -ne $env:TAG) { throw "workspace Cargo.toml version $version does not match tag $env:TAG" }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build
+        shell: pwsh
+        run: cargo build --release --locked -p aurelius-desktop -p aurelius-host
+
+      - name: Package and sign
+        shell: pwsh
+        env:
+          AURELIUS_SIGNING_KEY: ${{ secrets.AURELIUS_SIGNING_KEY }}
+        run: |
+          $zip = "aurelius-desktop-$env:VERSION-windows-x64.zip"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          ./scripts/licenses.ps1 -Out target/release/THIRD-PARTY-LICENSES.md
+          Compress-Archive -Path target/release/aurelius.exe, target/release/THIRD-PARTY-LICENSES.md -DestinationPath "dist/$zip" -Force
+          ./target/release/aurelius-release.exe sign "dist/$zip"
+          ./target/release/aurelius-release.exe verify "dist/$zip"
+          (Get-FileHash "dist/$zip" -Algorithm SHA256).Hash.ToLower() + "  $zip" | Out-File -Encoding ascii "dist/$zip.sha256"
+
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Notes: the "## v<version>" section of docs/changelog/desktop.md.
+          $log = Get-Content docs/changelog/desktop.md -Raw
+          $section = [regex]::Match($log, "(?ms)^## v$([regex]::Escape($env:VERSION))\s*\r?\n(.*?)(?=^## v|\z)")
+          if (-not $section.Success) { throw "docs/changelog/desktop.md has no '## v$env:VERSION' section" }
+          $section.Groups[1].Value.Trim() | Out-File -Encoding utf8 notes.md
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG dist/* --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $env:TAG dist/* --title "Aurelius app $env:VERSION" --notes-file notes.md --repo $env:GITHUB_REPOSITORY
+          }

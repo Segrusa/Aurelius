@@ -1,0 +1,142 @@
+# Builds, signs and publishes a server release for every server-v* tag.
+# The server and the desktop app are released separately (own version, tag,
+# changelog and zip); they work together as long as their protocol matches.
+# Tests run locally in scripts/release.ps1 before a tag is pushed (Windows
+# Actions minutes count double, so they are not repeated here).
+# The app's updater only installs packages whose signature verifies against the
+# public key compiled into the app; the private key exists only as the
+# AURELIUS_SIGNING_KEY secret.
+# The zip also carries aurelius-mcp.exe (for outside apps; the updater does not
+# replace it), and the docker job publishes its Linux image to
+# ghcr.io/<owner>/aurelius-mcp:<version> and :latest, only after the Windows
+# release succeeded.
+name: release-server
+
+on:
+  push:
+    tags: ["server-v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. server-v0.6.1"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-server-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Toolchain (from rust-toolchain.toml)
+        shell: pwsh
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: windows-
+
+      - name: Version matches the tag
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path crates/daemon/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          if ("server-v$version" -ne $env:TAG) { throw "crates/daemon/Cargo.toml version $version does not match tag $env:TAG" }
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build
+        shell: pwsh
+        run: cargo build --release --locked -p aurelius-daemon -p aurelius-client -p aurelius-agent-bridge -p aurelius-host -p aurelius-mcp
+
+      - name: Package and sign
+        shell: pwsh
+        env:
+          AURELIUS_SIGNING_KEY: ${{ secrets.AURELIUS_SIGNING_KEY }}
+        run: |
+          $zip = "aurelius-server-$env:VERSION-windows-x64.zip"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          ./scripts/licenses.ps1 -Out target/release/THIRD-PARTY-LICENSES.md
+          Compress-Archive -Path target/release/aurelius-daemon.exe, target/release/aurelius-ctl.exe, target/release/aurelius-bridge.exe, target/release/aurelius-mcp.exe, target/release/THIRD-PARTY-LICENSES.md -DestinationPath "dist/$zip" -Force
+          ./target/release/aurelius-release.exe sign "dist/$zip"
+          ./target/release/aurelius-release.exe verify "dist/$zip"
+          (Get-FileHash "dist/$zip" -Algorithm SHA256).Hash.ToLower() + "  $zip" | Out-File -Encoding ascii "dist/$zip.sha256"
+
+      - name: Publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Notes: the "## v<version>" section of docs/changelog/server.md.
+          $log = Get-Content docs/changelog/server.md -Raw
+          $section = [regex]::Match($log, "(?ms)^## v$([regex]::Escape($env:VERSION))\s*\r?\n(.*?)(?=^## v|\z)")
+          if (-not $section.Success) { throw "docs/changelog/server.md has no '## v$env:VERSION' section" }
+          $section.Groups[1].Value.Trim() | Out-File -Encoding utf8 notes.md
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG dist/* --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $env:TAG dist/* --title "Aurelius server $env:VERSION" --notes-file notes.md --repo $env:GITHUB_REPOSITORY
+          }
+
+  # The aurelius-mcp Docker image (Dockerfile, linux/amd64), tagged with the
+  # server version and latest. Runs only after the release job, so a tag whose
+  # version check or build fails publishes no image.
+  docker:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/aurelius-mcp
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.VERSION }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.title=aurelius-mcp
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=aurelius-mcp
+          cache-to: type=gha,mode=max,scope=aurelius-mcp

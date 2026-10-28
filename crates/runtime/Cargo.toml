@@ -1,0 +1,25 @@
+[package]
+name = "aurelius-runtime"
+description = "Runtime contract and adapters: Claude Code (claude_code), app-owned HTTP APIs (http_api) and a fake for tests."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# The scripted fake runtime; only tests and demos use it.
+testing = []
+
+[dependencies]
+aurelius-domain.workspace = true
+tokio = { workspace = true, features = ["process", "fs"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+base64.workspace = true
+async-trait = "0.1"
+reqwest = { version = "0.13", features = ["json"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects"] }

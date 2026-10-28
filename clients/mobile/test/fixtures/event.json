@@ -1,0 +1,9 @@
+{
+  "kind": "event",
+  "seq": 92,
+  "event_type": "message.assistant_committed",
+  "aggregate_type": "conversation",
+  "aggregate_id": "01900000-0000-7000-8000-000000000002",
+  "project_id": null,
+  "occurred_at_ms": 3
+}

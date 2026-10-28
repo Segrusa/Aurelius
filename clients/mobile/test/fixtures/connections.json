@@ -1,0 +1,99 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "connections",
+    "value": {
+      "as_of_seq": 95,
+      "connections": [
+        {
+          "id": "01900000-0000-7000-8000-00000000003c",
+          "provider": "claude_code",
+          "display_name": "Claude Code",
+          "auth_kind": "subscription",
+          "billing": "subscription",
+          "status": "ready",
+          "has_secret": false,
+          "runtime_path": null,
+          "default_model": "sonnet",
+          "models": [
+            "opus",
+            "sonnet",
+            "claude-haiku-4-5"
+          ],
+          "detail": null,
+          "last_verified_ms": 1
+        }
+      ],
+      "defaults": [
+        {
+          "scope": {
+            "kind": "global"
+          },
+          "purpose": "chat",
+          "settings": {
+            "connection": {
+              "mode": "value",
+              "value": "01900000-0000-7000-8000-00000000003c"
+            },
+            "model": {
+              "mode": "value",
+              "value": "opus"
+            },
+            "persona": {
+              "mode": "inherit"
+            },
+            "effort": {
+              "mode": "value",
+              "value": "high"
+            }
+          }
+        },
+        {
+          "scope": {
+            "kind": "global"
+          },
+          "purpose": "manager",
+          "settings": {
+            "connection": {
+              "mode": "value",
+              "value": "01900000-0000-7000-8000-00000000003c"
+            },
+            "model": {
+              "mode": "inherit"
+            },
+            "persona": {
+              "mode": "inherit"
+            },
+            "effort": {
+              "mode": "inherit"
+            }
+          }
+        },
+        {
+          "scope": {
+            "kind": "project",
+            "id": "01900000-0000-7000-8000-000000000001"
+          },
+          "purpose": "chat",
+          "settings": {
+            "connection": {
+              "mode": "inherit"
+            },
+            "model": {
+              "mode": "value",
+              "value": "haiku"
+            },
+            "persona": {
+              "mode": "inherit"
+            },
+            "effort": {
+              "mode": "inherit"
+            }
+          }
+        }
+      ],
+      "grants": []
+    }
+  }
+}

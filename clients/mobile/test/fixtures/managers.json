@@ -1,0 +1,85 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "managers",
+    "value": {
+      "as_of_seq": 80,
+      "managers": [
+        {
+          "id": "01900000-0000-7000-8000-000000000005",
+          "project_id": "01900000-0000-7000-8000-000000000001",
+          "name": "Iris",
+          "role": "Marketing",
+          "instructions": null,
+          "status": "active",
+          "version": 1,
+          "conversation_id": "01900000-0000-7000-8000-000000000006",
+          "working": true,
+          "agent_mode": "plan",
+          "browser_allowed": true,
+          "screen_allowed": true,
+          "folder": null,
+          "heartbeat": {
+            "every_minutes": 60,
+            "quiet_start_min": 0,
+            "quiet_end_min": 0,
+            "daily_token_budget": 50000,
+            "tokens_today": 1200,
+            "next_due_ms": 5,
+            "waiting": null
+          },
+          "sequential_tasks": false,
+          "conversations": [
+            {
+              "id": "01900000-0000-7000-8000-000000000006",
+              "title": "Iris",
+              "created_at_ms": 1,
+              "updated_at_ms": 3,
+              "message_count": 4
+            },
+            {
+              "id": "01900000-0000-7000-8000-00000000000d",
+              "title": "",
+              "created_at_ms": 2,
+              "updated_at_ms": 2,
+              "message_count": 0
+            }
+          ],
+          "agents": [
+            {
+              "kind": "planning",
+              "name": "Planning",
+              "detail": "Landing page",
+              "task_id": "01900000-0000-7000-8000-000000000004",
+              "run_id": "01900000-0000-7000-8000-000000000016",
+              "conversation_id": "01900000-0000-7000-8000-00000000000d",
+              "since_ms": 5
+            },
+            {
+              "kind": "subagent",
+              "name": "Compare hero layouts",
+              "detail": "Landing page",
+              "task_id": "01900000-0000-7000-8000-000000000004",
+              "run_id": "01900000-0000-7000-8000-000000000016",
+              "conversation_id": "01900000-0000-7000-8000-00000000000d",
+              "since_ms": 6,
+              "prompt": "Compare the two hero layouts.\nSay which reads faster.",
+              "doing": "Read · hero.html",
+              "steps": 3
+            },
+            {
+              "kind": "delegated",
+              "name": "Bram",
+              "detail": "Pricing table · running",
+              "task_id": "01900000-0000-7000-8000-000000000015",
+              "run_id": null,
+              "conversation_id": "01900000-0000-7000-8000-00000000000d",
+              "since_ms": 4
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

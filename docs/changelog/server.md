@@ -1,0 +1,276 @@
+# Server changelog
+
+The background server (`aurelius-daemon` and `aurelius-ctl`), released as
+`server-v<version>`. `scripts/release.ps1 -Product server` takes a release's
+notes from its section here; they become the GitHub release text and appear
+under "What's new" for the server in Settings → Server & PC.
+
+The server and the desktop app are released separately. They work together
+as long as their protocol major matches. Releases up to v0.6.0 were combined:
+see [CHANGELOG.md](../../CHANGELOG.md).
+
+## Unreleased: v0.9.0 (protocol 3.0)
+
+- **Finished tasks with a follow-up run** (additive to protocol 3.0, no feature flag): `TaskView.live_run` (`"running"` | `"queued"`, left out when none and for tasks that are not finished) is set on a succeeded, failed or cancelled task while a run in its conversation goes or waits to start, after someone wrote to it. The status does not change (the task is not reopened), so clients show it as working/queued instead of done. New event `task.run_changed` (aggregate: the task, no status change) when such a run is queued, starts or ends, so clients read the task again. Older servers leave the field out.
+- **Management chooses its own task mode** (feature `management_chooses_mode`, additive to protocol 3.0): the CEO and their direct reports get a bridge tool `set_mode {mode: auto|plan, reason}` in a task the user gave no mode. Such a task starts in Plan; the choice shows in the thread as a task update of kind `mode_chosen` ("<name> chose Auto: <reason>") and in the audit log as the event `task.mode_chosen` (payload `employee_id`, `mode`, `reason`, `conversation_id`, `run_id`). `set_mode` is refused outside management, outside the task's own conversation, for modes other than Plan/Auto, while a plan waits for approval, and with the setting off. A delegation or hand-over to management no longer passes a mode on. Server setting: read `management_mode.get_setting`, write `management_mode.set_enabled {enabled}` (Approve right), both `ManagementModeSetting {enabled}`, on by default.
+- **Management channel and webhooks for app keys** (features `management_channel` and `webhooks`, additive to protocol 3.0): an app key has an `audience` (`all`, the default and what every existing key is, or `management`). The server confines a `management` key to the CEO and the CEO's direct reports: `employee.list` and `task.list` show only them, tasks and messages for anyone else are refused, and the project assistant is out of reach. New MCP tools `ask_management`, `list_open_questions` and `answer_question`. A key can have a `webhook_url` (`http`/`https`) and gets a `whsec_…` secret once at `app_key.create`; Aurelius posts `manager.replied`, `question.for_you`, `task.finished` and `task.waiting` signed with HMAC-SHA256 (`X-Aurelius-Signature`), from a persistent outbox with retries and backoff and a stable delivery id. Migration 16. Contract: [aurelius-mcp.md](../aurelius-mcp.md).
+- **The plain chat is gone**: every conversation belongs to a project, a task or an employee. Removed `conversation.list`, `conversation.set_web_research` (web research), `MessagesSnapshot.web_research`, the Chat run defaults (`Purpose` `chat`) and the ctl `chat`/`conversations` commands. `chat.send` and `attachment.add` need a conversation (project conversations); `task.discuss` gives the task's result to its lead employee's chat and returns `{ conversation_id, employee_id }`. Migration 15 deletes existing plain chats (after the pre-update backup) and rebuilds `conversations` without `chat` and `web_research`. Client list: [no-plain-chat.md](../v0.9.0/no-plain-chat.md).
+- **Manual folder grants are gone**: removed `folder.grant` and `folder.revoke` (commands `grant_folder`, `revoke_grant`) and `ConnectionsSnapshot.grants`. They were never used. The work folders of projects and employees are untouched: they stay stored in `file_grants` and work as before, and the check for sensitive roots (drive roots, home, credential folders) still applies to them. Newer clients no longer call these methods; older clients show an empty Folders page.
+- **`aurelius-mcp` ships with the release**: `aurelius-mcp.exe` is in the server zip (not replaced by updates), and the Docker image is published as `ghcr.io/opteon-sdc/aurelius-mcp:<version>` and `:latest`.
+
+## Unreleased
+
+Fixes for apps that hung while opening a big task. Protocol 2.0, additive only (feature `activity_preview`); contract in [activity-preview-clients.md](../activity-preview-clients.md).
+
+- **No more silent hang on a big reply**: over local IPC a reply over the 4 MiB frame limit is now answered with a `frame_too_large` error for its request and logged, instead of stopping the connection's writer without a word. Too large pushes are logged and dropped.
+- **Short tool output** (feature `activity_preview`): `conversation.get` and live updates send each tool call shortened (output 2 KB, input strings 1 KB, with `truncated` and `output_bytes`); `activity.get` returns one call whole. A client that sends `accepts: ["activity_changes"]` in its hello gets only new or changed calls in live updates. The 575-call task that hung went from 5.0 MB to 1.2 MB.
+- **Faster reads**: four read connections instead of one shared, and small blobs are kept in memory, so `memory.list` with thousands of items no longer opens a file per item on every reload (2,162 items: 0.27 s with warm files, 12.8 s cold, 66 ms from the cache).
+- **Automatic session compaction** (feature `session_compaction`): a resumed conversation or task whose Claude Code session is above the settings key `session_compact_threshold` (default 120,000 tokens, 0 = off) is sent `/compact` before its next turn, with a full rebuild as fallback, and shows a "Context compacted" line in its timeline. Migration 13.
+
+## v0.8.0
+
+App keys for external apps and agents, and attachments on ideas. Protocol 2.0, additive only: works with the 0.7.x apps; the new parts need the 0.8.0 apps, which find them in `HelloResult.features` (`app_keys`, `idea_attachments`).
+
+- **App keys and `aurelius-mcp`** (feature `app_keys`): external apps reach Aurelius through the separate `aurelius-mcp` binary (stdio, or `--http` at :7464/mcp, also as a Docker image). Each app has its own key with scopes read/draft/run/approve, hourly and concurrent limits and instant revoke; only owners manage keys. Without approve a task never runs in Auto, and tasks show which app created them.
+- **Idea attachments** (feature `idea_attachments`): ideas carry files and images like tasks do (same ids, fetch and 25 MB cap). Starting an idea copies its files into the task, and `idea.delete` removes the idea with its files. Migration 7.
+
+## v0.7.4
+
+Project-wide plugins, editable project descriptions and a fix for stopping a run that waits for the quota. Protocol 2.0, additive only: works with the 0.7.x apps; the new parts need the 0.7.4 apps, which find them in `HelloResult.features` (`project_plugins_managers`, `project_description`).
+
+- **Project descriptions** (feature `project_description`): `project.set_description` (`SetProjectDescription { project_id, description }`, with `expected_version` like a rename) sets or clears a project's description: trimmed, an empty text clears it, at most 2000 characters. The project's version goes up. No migration.
+- **Stopping a parked run**: stopping a run or cancelling a task that waits for the quota reset now cancels its waiting job at once and marks the message interrupted, instead of leaving the run pending until the reset.
+- **Project plugins for every manager** (feature `project_plugins_managers`): a project's plugin list is project-wide; every manager run in the project (tasks and conversations, every mode) loads the project's plugins plus the manager's own extras, without doubles. `ManagerPlugins` gets `inherited` (the project's ids, additive). The project assistant keeps loading the project's list.
+
+## v0.7.3
+
+Project notes, plugins per project, artifact snapshots, several terminals per conversation, Playwright as a browser backend and clearer waits. Protocol 2.0, additive only: works with the 0.7.x apps; the new parts need the 0.7.3 apps, which find them in `HelloResult.features` (`upload_fetch`, `notes`, `project_plugins`, `terminal.multi`).
+
+- **Project notes** (feature `notes`): `note.list` (pinned first, search), `note.get`, `note.create`, `note.update` (with `base_revision`, a version conflict when it changed elsewhere), `note.set_pinned`, `note.delete`; events `note.created/updated/deleted`. Migration 4.
+- **Plugins per project** (feature `project_plugins`): `plugin.get_for_project` / `plugin.set_for_project` and `PluginInfo::projects`; the project assistant loads its project's plugins, and a slash command (a plugin's or Claude Code's own) goes in as the prompt itself. Migration 5.
+- **Artifact snapshots**: the published file of every artifact version is kept (`artifact.get_content`, migration 3), so the apps can show it inside Aurelius; artifacts of deleted conversations leave `artifact.list`.
+- **Uploaded files** (feature `upload_fetch`): uploads get an id (`MessageFileView::id`) and `upload.get` fetches them whole or as a thumbnail.
+- **Several terminals per conversation** (feature `terminal.multi`): `terminal.open` with `terminal_id` / `additional`, `terminal.detach` (the shell runs on) and `terminal.list`; at most 4 per conversation and 8 per server.
+- **Playwright MCP** as a second browser backend next to Claude in Chrome. Claude in Chrome keeps one tab group per manager across runs.
+- **Usage limit**: a task waiting for the limit shows its reset time (`TaskView.waiting_until_ms`, `JobSummary.not_before_ms` / `reason`), the run resumes its own Claude Code session afterwards, and kept sessions whose run will not resume are swept.
+- **Queued tasks say why they wait**: `waiting_reason` `in_line` or `scheduled` with `starts_at_ms`, so apps count them as waiting, not active.
+- **Unknown methods** are answered with `unknown_method` for their own request id; the connection stays open.
+- **v0.6 import**: databases of released v0.6 servers (schema 27, no idea kind) are imported too, not only dev builds at 28.
+- **Times** take the UTC offset at the instant being formatted, not the current one (daylight saving).
+- **One file limit of 25 MB**: attaching a file (AttachFile, was 10 MB), images sent with a message and files a manager mentions in a message (both 15 MB) now take the same 25 MB as phone and desktop uploads (`UPLOAD_MAX_BYTES`). A file that is too large to attach is refused as `<name>: the file is too large (<size>; at most 25 MB).`
+- **English error texts**: the last Dutch messages are now English: unsupported, scanned or unreadable attachments and the web fetch errors (invalid URL, https only, blocked address, too many redirects, response too large, content type, network error), and the note for an attachment left out when the context budget is full.
+
+## v0.7.2
+
+Deleting a conversation no longer fails while something still runs in it. Protocol unchanged: works with the 0.7.x apps.
+
+- **Delete stops what still runs.** `conversation.delete` refused a conversation with an unfinished run, including runs stuck in `cancelling` that never finished, so some old task conversations could never be deleted. Delete now stops those runs in the same commit (as Send now does), interrupts their processes and then deletes the conversation.
+- **Unknown methods get a clean error** (protocol 2.0, additive). A request whose method the server does not know is answered with the new error code `unknown_method` for its own `request_id`, and the connection stays open, on local IPC and on the remote gateway. Before, the daemon answered with `request_id` 0 and dropped the connection, and the gateway answered with `request_id` 0 so the call timed out. A known method with bad params is still `invalid_request` for its own id; a frame that is not JSON gets `invalid_request` with id 0 and no longer drops the connection. Only an oversized frame still does. Newer clients can detect an older server by `unknown_method`.
+- **Project notes** (protocol 2.0, additive): Markdown notes per project, like Apple Notes. `note.list` (`project_id`, optional `query`; pinned first, then last edited) and `note.get` (Read); `note.create`, `note.update` (`base_revision`; a stale one is refused with `version_conflict`), `note.set_pinned` and `note.delete` (TaskControl). Events `note.created`, `note.updated`, `note.deleted` on the note with its project. Body up to 1 MB. Schema migration 4 adds the `notes` table. `HelloResult.features` (new, default empty) lists `notes`, so clients can tell an older server apart. See docs/notes.md.
+- **Usage-limit reset time for clients** (protocol 2.0, additive). `TaskView.waiting_until_ms`: while a task waits for the usage limit (`waiting`/`quota`), when its run goes again. `JobSummary.not_before_ms` and `reason`: a ready job that waits, until when and why (`quota`, `auth`, `transient`, ...), so plain chats can show it too. Older servers leave them out.
+- **Fix**: a usage limit with an unknown or already-past reset time parked the run indefinitely and left its task `running`; it now waits `QUOTA_RETRY_MS` (20 min, repeating) and the task goes to `waiting`/`quota`.
+- **Playwright as the browser** (protocol 2.0, additive). Besides Claude in Chrome, runs can now drive a browser through Playwright MCP (`@playwright/mcp` 0.0.83, installed with npm under the data folder on the first run; needs Node.js). The server keeps a Chrome or Edge window of its own (profile `playwright/browser-profile` in the data folder, started with a DevTools port) and every run with the browser allowed attaches to it over CDP as the MCP server `aurelius-browser`. Logins made in that window stay between runs; parallel runs share the window and each opens its own tab. Unlike Claude in Chrome its tools follow the mode like other MCP tools (Auto lets them through, Always allow works). `BrowserSetting.backend` (`claude_in_chrome` | `playwright`, absent from older servers) and `browser.set_backend { backend }` (Approve). If Node or the browser is missing the run goes on without a browser and says why; it never falls back to Claude in Chrome.
+
+## v0.7.1
+
+Log in to remote MCP servers from the app, Always allow for MCP tools and Claude Code artifacts. Protocol 2.0, additive only: works with desktop and mobile 0.7.0; the new parts need the 0.7.1 apps.
+
+- **Always allow for MCP tools** (protocol 2.0, additive). Answering an approval of an MCP tool (`mcp__<server>__<tool>`, user servers and Claude in Chrome, never `mcp__aurelius__*`) with `always_allow` approves it, puts the tool on a server-wide list and approves the other pending asks for that tool. From then on the tool goes through in Ask, Accept edits and Auto, for every manager; Plan mode still blocks. `DecideApproval.always_allow`, `ApprovalView.always_allow_eligible`, `mcp_always_allow.list` (Read) and `mcp_always_allow.remove` (Approve) answering `McpAlwaysAllow { tools }`, event `approval.allowed_always`.
+- **Install fix**: the production install also installs `aurelius-bridge.exe` next to the daemon.
+
+**MCP OAuth login** (protocol 2.0, additive). Remote (http/sse) MCP servers that ask for an OAuth login can be logged in to from Aurelius instead of `claude /mcp`. `claude mcp login` needs a terminal, so the server runs the MCP authorization flow itself (protected-resource metadata from the 401 `WWW-Authenticate` or `/.well-known/oauth-protected-resource`, authorization-server metadata, dynamic client registration, PKCE S256, `resource` parameter) and writes the tokens into Claude Code's own credential entry (`~/.claude/.credentials.json` → `mcpOAuth["<name>|<hash>"]`, or under `CLAUDE_CONFIG_DIR`), then clears the server from Claude Code's needs-auth cache. Claude Code refreshes the tokens itself, so every later run of an enabled server gets its tools. Tokens, the PKCE verifier and client secrets never reach a client. Not on macOS yet (Claude Code keeps logins in the Keychain there; the server answers with an error).
+- `mcp.list`: each server has `auth`: `none` (stdio or a fixed `Authorization` header) | `authorized` | `needs_login` | `unknown` (never connected; a login can be tried). Read from Claude Code's files, no network. Older servers leave it out (`unknown`).
+- `mcp.login_start` `{ name }` (Approve right, so a phone can log in) answers `McpLogin` `{ login_id, name, state: pending, authorization_url, redirect_uri, expires_at_ms, error }`. Open `authorization_url`; the browser returns to `redirect_uri` = `http://localhost:<port>/callback`, a listener of the server that finishes the login when the browser runs on the server's computer. A login waits 10 minutes; a newer login of the same server replaces it (`expired`).
+- `mcp.login_complete` `{ login_id, redirect_url }` (Approve): for a browser elsewhere (the phone), which ends on a page that does not load; send that address (full URL, `?code=…&state=…` or the query). A foreign state or missing code is refused and the login keeps waiting; an `error=` from the server or a failed token request ends it as `failed` with the error. Answers `McpLogin` (`succeeded`).
+- `mcp.login_get` `{ login_id }` (Read) answers `McpLogin` (`pending` | `succeeded` | `failed` | `expired`), kept 30 minutes after it ends.
+- `mcp.logout` `{ name }` (Approve) removes the tokens (keeps the client registration) and answers like `mcp.list`; runs then report the server as needing a login.
+- Events: `mcp.login_finished` (aggregate = login id; metadata `server`, `state`) and `mcp.auth_changed` (aggregate = server name; metadata `server`, `auth`). Reload `mcp.list` / `mcp.login_get` on them.
+- Clients: `Client::mcp_login_start`, `mcp_login_complete`, `mcp_login_get`, `mcp_logout`; Dart `mcpLoginStart(name:)`, `mcpLoginComplete(loginId:, redirectUrl:)`, `mcpLoginGet(loginId:)`, `mcpLogout(name:)`. A server without these methods answers an unknown-method error: hide the login there.
+- **Claude Code artifacts** (off by default): with the server-wide setting on (`artifact.set_enabled`, Approve right), manager runs get Claude Code's artifact tools and can publish pages to the user's claude.ai account. A publish asks in Ask and Accept edits, goes through in Auto and is blocked in Plan. Every publish is kept by URL (`artifact.list`, event `artifact.published`), and later runs of the conversation or task are told to republish to it. Schema migration 2 adds the `artifacts` table. See docs/claude-artifacts.md.
+
+## v0.7.0
+
+A clean break: protocol 2.0, a new database schema and a new crate layout. Server, desktop and mobile app are released together; older apps get a clear "update needed". See docs/adr/ADR-007-v0.7-break.md and docs/v0.7.0/protocol-2.0.md.
+
+- **Protocol 2.0**: every method is `<area>.<verb>`; one write pipeline (idempotency key, receipt, audit event, required right) for every write; typed events; the handshake checks the major only; the agent bridge has its own internal channel.
+- **New schema** (`migrations/0001_schema.sql`). There is no in-place migration from v0.6. When the daemon starts on a v0.6 data folder (an update from 0.6.x), it moves the old database and blobs to `v0.6-backup/` and imports projects, managers, memories, ideas and recurring tasks into a fresh database by itself (the same code as `aurelius-import --from <old> --to <new>`). Providers and connections are added again by hand; conversations, tasks and history stay only in the backup.
+- **Quota auto-resume**: when a Claude usage or session limit stops a run, the run is parked (waiting, reason quota) and resumes the same session by itself at the reset time, or after a default delay if none is known. The task goes to Waiting without escalating, and other runs of the provider wait too.
+- **Skills from GitHub**: a repo or `/tree/<ref>/<path>` link with standalone `SKILL.md` folders (no marketplace, like `anthropics/skills`) can be added through the plugins flow; they are wrapped in a local `aurelius-skills` marketplace. Additive protocol fields: plugin kind and source.
+- **Org chart**: managers get a title and `reports_to` (`manager.set_reports_to`, no cycles; archiving moves reports up). The project setting "Follow the org chart" (off by default) limits `delegate_task` to the own subtree and `hand_over_task` to the boss or peers, and escalates a failed or stopped task to the boss first. Managers can propose a colleague (`propose_colleague`); the user always decides (`manager_proposal.list`/`decide`), also in Auto; at most two open proposals per manager.
+- **Removed**: the v0.1 tool broker, the worker/plan/review pipeline, per-task repeat (recurring tasks stay), plain manager conversations, task workspaces and merge, fake jobs in production, the Call button/voice, the combined release.
+- The server zip now also contains `aurelius-bridge.exe` (the MCP server Claude Code starts for a run; it replaces `aurelius-ctl mcp-permissions`).
+
+## v0.6.13
+
+Add and remove MCP servers (protocol 1.23, additive).
+
+**mcp/add and mcp/remove** (Owner right, like the terminal, because a stdio server runs any command). The server runs `claude mcp add --scope user …` and `claude mcp remove --scope user <name>` itself (no window); Claude Code stays the source of truth and `~/.claude.json` is never edited by Aurelius. Both answer like `mcp/list`.
+- `mcp/add` `{ name, transport: stdio|http|sse, command, args, env, url, headers, enable }`: stdio uses `command` (+`args`, `env`), http/sse use `url` (+`headers`). The name is letters, digits, `-`, `_` (max 64), not reserved and not already a server. With `enable` the name joins the `mcp_servers` list. When Claude Code refuses, its text comes back as the error.
+- `mcp/remove` `{ name }`: removes the server and drops it from the enabled list.
+- Env and header values are never returned or logged: clients keep the summary only, `Debug` of the request hides them and error text has them replaced by `***`.
+- Clients: `Client::mcp_add`, `Client::mcp_remove`; gate on `MCP_ADD_MINOR` (23).
+
+## v0.6.12
+
+Claude Code plugins for managers (protocol 1.22, additive).
+
+**Manager plugins.** Managers can use Claude Code plugins and skills (for example ponytail). Claude Code's own plugin install is the source of truth: the server drives `claude plugin marketplace add / install / update / uninstall / list`. Each manager has its own list of enabled plugins (settings key `plugins/<manager_id>`, none by default); it applies from the manager's next run. Runs of an enabled manager load each plugin with `--plugin-dir` and may use the `Skill` tool; `--restricted` and `--strict-mcp-config` stay, so a plugin's own MCP servers are not loaded. Plugin hooks run on the server's computer outside the approval bridge, so enabling a plugin counts as consent. Runs without plugins are unchanged.
+- Methods: `plugins/list`, `plugins/available`, `plugins/manager/get` (read right); `plugins/preview`, `plugins/install`, `plugins/update`, `plugins/remove`, `plugins/manager/set` (Approve right).
+- Clients gate on `PLUGINS_MINOR` (22). See docs/plugins.md.
+
+## v0.6.11
+
+MCP servers from Claude Code and callable agent functions (protocol 1.20 and 1.21, both additive).
+
+**Existing MCP servers** (protocol 1.20, additive). The server reads the user-scope MCP servers the user already has in Claude Code (`~/.claude.json` `mcpServers`). One server-wide list, not tied to any manager or project, says which are enabled (settings key `mcp_servers`; default none, so runs are unchanged). Every run (chat, project conversation, manager conversation, task) gets the enabled servers: their full config is read from that file at each run start and merged into the run's `--mcp-config` next to `aurelius` (still `--strict-mcp-config`). Enabled names that are no longer found are skipped without error and reported in `missing`. Env values, headers, tokens and command arguments never reach clients. In Auto the tools `mcp__<server>__*` of enabled servers go ahead like the browser; Ask and Accept edits (and Plan) ask in the inbox as for any tool. `aurelius` and `claude-in-chrome` cannot be enabled.
+- `mcp/list` `{}` (read right) answers `McpServers`: `{ servers: [{ name, scope: user, transport: stdio|http|sse, summary, enabled }], missing: [names enabled but no longer found] }`. `summary` is the command (no arguments) or the URL without credentials/query.
+- `mcp/set` `{ enabled: [name] }` (Approve right) replaces the list and answers like `mcp/list`; it applies from the next run that starts, not mid-answer. Unknown names are kept (shown as `missing`); `aurelius`/`claude-in-chrome`/empty names are refused (`invalid_request`).
+- Clients: `Client::mcp_list`, `Client::set_mcp`. Older clients ignore it.
+
+**Agent functions** (protocol 1.21, additive, Tailscale gateway). The user's own apps call fixed, per-project task templates over HTTP through the remote gateway, authenticated with a hashed access credential that is shown once. A call creates a normal task and answers 202 with a call id; limits per day/week (rolling 24 h / 7 d) answer 429; a global kill switch refuses all calls. Owner-only admin methods `agent_functions/*`, `api_keys/*`, `query/agent_functions`, `query/function_calls`, `query/api_keys` (direct protocol methods, so new credentials never appear in command receipts). Migration 0027. See docs/agent-functions.md. Clients gate on `AGENT_FUNCTIONS_MINOR` (21).
+
+Protocol numbers: 1.20 existing MCP servers, 1.21 agent functions.
+
+## v0.6.10
+
+Bug fix: every message to a manager or a project conversation failed with "Claude Code unexpectedly loaded tools (1) or MCP servers (0); the run was stopped". The new `message_task` tool of v0.6.9 was missing from the tools a run may load, so the safety check stopped each run. It is allowed now; nothing else changes (protocol 1.18).
+
+## v0.6.9
+
+Convert a repeating task, Markdown files, clear all results, project conversations and messaging a delegated task (protocol 1.15 to 1.18, all additive).
+
+**Convert a repeating task** (protocol 1.15). Command `convert_task_repeat` (`task_id`; result `task_schedule_created` with `schedule_id`) turns a task's old per-task repeat into a recurring task with the same template and clears the repeat, so it can be edited like any recurring task. It refuses ended tasks (their follow-up already exists and repeats), tasks without a repeat, drafts and archived projects or managers. The time of day comes from the task's scheduled time, else now. Same rights as creating a task.
+
+**Markdown files for the in-app viewer** (protocol 1.16, additive; the Read right is enough).
+
+- `query/markdown_files` lists the `.md`/`.markdown` files of a project's, conversation's or task's work folder (`.gitignore` respected, `target`, `node_modules` and `.git` skipped, at most 500, plus the conversation's uploads).
+- `query/markdown_file` reads one as UTF-8 text (relative path, or an absolute path inside the work folder; at most 2 MB). `..` and symlinks leaving the folder are refused.
+
+**Project conversations instead of manager conversations** (protocol 1.18, additive).
+
+- **Project conversations.** A conversation now belongs to a project. An assistant of the project answers: it works in the project folder, sees the project's managers, tasks, ideas and memories, can give work to a manager with `delegate_task` (the manager's result comes back in the conversation as a `finding`, and the assistant answers it), and can use `add_idea`, `recall` and `remember` (everything goes to the project's memory). It cannot hand a task over. Mode, model and effort are the standard ones of the settings (the manager defaults, then the project's, then global). Everything a conversation supports works in it: waiting messages and Send now, images and files (copied into the project folder), mode and model, approvals and questions, the Git chip and diff and the terminal of the project folder.
+- **New protocol.** Query `query/project_conversations` (`project_id`) answers `ProjectConversations` (`as_of_seq`, `project_id`, `conversations`: id, title, created_at_ms, updated_at_ms, message_count, `manager_id`, `manager_name`, `read_only`, `working`). Commands `start_project_conversation` (`project_id`, optional `agent_mode`, `browser_allowed`, `screen_allowed`; result `project_conversation_started`) and `send_project_message` (`project_id`, `text`, optional `conversation_id`, `images`, `files`, `interrupt`, and the same start settings for a new conversation; result `project_message_sent` with `project_id`, `conversation_id`, `message_id`, `run_id`). Existing commands (`stop_run`, `retry_reply`, `delete_queued_message`, `send_queued_now`, `set_agent_mode`, `set_conversation_run`, `delete_conversation`, approvals, git and terminal queries) work on a project conversation's id; messages come from `query/messages`. Starting in Auto mode, the browser or the screen needs the Approve right, as for chats.
+- **Managers have tasks only.** `start_manager_conversation` and `send_manager_message` to a manager's own plain conversations are refused (validation error: "This conversation is read-only: managers no longer have conversations of their own. …"). Task conversations are not affected. Existing manager conversations are not deleted: those with messages are listed in `query/project_conversations` with `read_only: true` and the manager's name, and `send_project_message` to them is refused the same way. They stay in a manager's `conversations` list too (with its task conversations); the project list is where clients show them.
+- **Tools.** `list_conversations` and `read_conversation` now show the project's conversations (a manager also sees its own earlier conversations, never a colleague's). Their descriptions and the managers' system text no longer speak of the manager's own conversations. Tasks given by the project assistant show "Project assistant" as `delegated_by`.
+- Test and ad-hoc data folders keep the old behaviour so older suites run; `AURELIUS_LEGACY_MANAGER_CHAT=0|1` forces either.
+
+**Clear all results** (protocol 1.17). `notifications/dismiss_all` removes every notification (the inbox results) in one call and answers `NotificationsRead` with `count`; approvals are untouched. Older servers do not know it; clients dismiss the loaded results one by one instead.
+
+**Managers can message a task they delegated.** New manager tool `message_task` (`task`, `message`, `interrupt`, default true) posts a message from the delegating manager into the conversation of an open task it delegated, interrupts the other manager's run by default (like "Send now") and queues a run; a stopped task resumes. Other tasks are refused. The task update has kind `message`, authored by the delegating manager. No new protocol method.
+
+**Browser for Claude in Chrome** (protocol 1.19). `browser/get` answers `Browser` (`choice`: `automatic`|`chrome`|`edge`, `env_override`); `browser/set` (`choice`, Approve right) stores it in the server settings and applies from the next run. `AURELIUS_BROWSER` still overrides. Older servers do not know it; clients show 'too old'.
+
+Protocol numbers: 1.15 convert repeat, 1.16 Markdown files, 1.17 clear all results, 1.18 project conversations, 1.19 browser setting.
+
+## v0.6.8
+
+Files with a task, and recurring tasks (protocol 1.14, additive).
+
+- **Files with a new task.** `create_task` takes `files`: host paths or this device's upload inbox, at most 8 of 25 MB, copied into the work folder's git-ignored `.aurelius/uploads/` like message uploads (a task without a manager uses the project's folder). The task view lists them as `attachments` and the manager and workers are given their absolute paths. The goal keeps its newlines (only the ends are trimmed).
+- **Model and effort per task.** `run` of `create_task` (`mode`, `model`, `effort`; empty is the manager's default) was already applied to the task's runs and is now covered by a test; the run's `model_origin` reads `task <title>`.
+- **Recurring tasks.** Commands `create_task_schedule`, `update_task_schedule`, `delete_task_schedule`, `set_task_schedule_paused` (pause and resume) and `run_task_schedule_now`; query `query/task_schedules`; event `task_schedule.changed` (`metadata.change`: created, updated, deleted, paused, resumed, fired, skipped). Recurrence: every N hours, daily at a time, or weekly on chosen weekdays at a time, in the server's local time zone. The daemon checks every 30 s (`AURELIUS_SCHEDULE_TICK_MS`) and at start; a due schedule makes a normal task for its manager, skips the occurrence while its previous task is still open, and after downtime makes one task, not one per missed occurrence. Same rights as creating a task (Auto mode needs Approve).
+
+## v0.6.7
+
+Shut down the server's PC (protocol 1.12) and see what is in a manager's memory context (protocol 1.13).
+
+- **Shut down the PC from a client.** `power/shutdown` (owner only, so the desktop and an owner-paired phone) with `when: now` starts a 60 s countdown, with `when: when_idle` waits until no run is running or queued and no task is running or queued, then counts down (and waits again if new work starts). `power/cancel` clears it, a new request replaces it, `power/get` returns the `PowerState` (`pending` with `when`, `requested_at_ms`, `deadline_ms`, empty while `when_idle` still waits). Clients that said hello with 1.12 get `power.changed` on every change. The power-off is `shutdown /s /t 0` (Windows), `systemctl poweroff` (Linux) or `osascript` (macOS); `AURELIUS_POWER_COMMAND` replaces it and `AURELIUS_POWER_GRACE_SECS` the 60 s. A pending shutdown is not kept over a restart.
+- **Memory context** (protocol 1.13). `query/memory_context` (`project_id`, optional `manager_id`) returns the memories as the context builder would place them without a specific question: always in context (within the memory budget, with tokens each), only when relevant, and those that do not fit the budget, plus the token size of the manager's fixed system text (0 without a manager). Shares are not listed. Older servers answer with a protocol error; clients show that the server is too old.
+
+## v0.6.6
+
+Models for delegated tasks and subagents (protocol 1.11).
+
+- **Delegated tasks on their own model.** A task a manager gives a colleague (`delegate_task`, also from a conversation) or hands over now looks at the `worker` defaults first: those of the receiving manager (`set_run_defaults` with scope `manager`), then the project's, then the global ones, and only then at the manager defaults as before. Per field, so a worker effort alone leaves the model as it was. The global worker connection does not count (every install has one); a worker connection at manager or project scope does. The run's `model_origin` reads e.g. `delegated work · manager Iris`. Tasks the user creates or assigns keep the manager defaults. Without worker settings nothing changes: once per install the global worker model and effort, until now a copy of the model chosen for all purposes and never read, go back to Inherit, and choosing a connection for all purposes no longer copies its model into the worker row.
+- **Subagent model per manager** (protocol 1.11). New purpose `subagent`: `set_run_defaults` with scope `manager`, `project` or `global` chooses the model Claude Code gives the subagents of that manager's runs (`CLAUDE_CODE_SUBAGENT_MODEL`). Unset stays `sonnet`; Disabled leaves it to Claude Code; `AURELIUS_SUBAGENT_MODEL` still wins over both. Effort for subagents is stored but not applied: Claude Code only takes an effort per agent definition, and its built-in subagents follow the run's own effort. Clients that said hello with less than 1.11 do not get `subagent` defaults in `query/connections`.
+- **Phone: delegated task and subagent models.** A paired phone with the Chat right may set model and effort for `worker` and `subagent`, globally and per manager, as for a manager's own model; the connection and persona must stay as they are.
+
+## v0.6.5
+
+Delete or send now a waiting message, load limits from the app, and new folders from the folder browser (protocol 1.10).
+
+- **Waiting messages: delete or send now** (protocol 1.9). A user message sent while an answer runs waits behind it; `MessageView.queued` is true until its answer starts (left out when false). `delete_queued_message` (`conversation_id`, `message_id`) cancels its queued run and removes the message (`message.deleted`); in a task's conversation a running task with nothing else running for it then waits for the user, as after a stop. `send_queued_now` stops the answers running or queued ahead of it, as "Send now" does, and lets its run go first (`message.sent_now`); messages queued after it keep their place. Both work in chats, manager and task conversations, need the Chat right on a phone, and are refused once the answer started ("the answer to this message has already started; stop it instead") or when the message does not wait ("this message is not waiting for an answer").
+- **Load limits from the app** (protocol 1.10). `load/get` (right to read, phones too) returns a `LoadSnapshot`: CPU and memory, runs going and runs waiting for the machine, the gate (`open`/`held`) with why (`cpu`, `memory`, `max_runs`, `disabled_all`), the limits and whether CPU and memory are measured here (`checks_active`, only for the standard data folder). `load/set_limits` (right to approve) changes `max_runs` (0 holds every new run), `cpu_high`, `cpu_low` (below `cpu_high`, at most 100), `mem_min_mb` and `enabled`; absent ones stay as they are. The change applies at once, waiting runs try again right away, and it is kept in the new `settings` table, where it wins over the `AURELIUS_*` variables, per limit. Clients that said hello with 1.10 get a `load.changed` push with the snapshot when the gate, the reason or the number of waiting runs changes, and every 2 s while runs wait. `aurelius-ctl load [watch]` and `aurelius-ctl load set key=value…`.
+- **New folders from the folder browser** (protocol 1.10). `fs/create_dir` (`parent`, `name`; owner only, like `fs/list_dir`) creates a folder in an existing folder and answers with its listing, so a browser opens straight into it. The name is trimmed and checked: not empty, not `.` or `..`, no `/ \ : * ? " < > |` or control characters, no trailing dot and no Windows device names.
+
+## v0.6.4
+
+Less Claude usage, tasks one at a time per manager, and ideas started as a task in a chosen mode (protocol 1.8).
+
+- **A manager's own model and effort.** `set_run_defaults` with scope `manager` and purpose `manager` sets a manager's model and effort; its conversations and the tasks it does, also tasks delegated or handed over to it, use them before the project's and global defaults (the run's `model_origin` names the manager). A paired phone may set this for a manager with the same right as the global manager model. No protocol change.
+- **Subagents on Sonnet.** Every Claude Code run gives its subagents (the Task tool) `sonnet` via `CLAUDE_CODE_SUBAGENT_MODEL`. `AURELIUS_SUBAGENT_MODEL` chooses another model; empty leaves it to Claude Code.
+- **Fewer subagents in tasks.** A manager working on a task is told to do the work with its own tools and use subagents only for broad searches across many files.
+- **Tasks one at a time** (protocol 1.8). A manager's worker policy has `sequential_tasks` (off by default), set with `update_manager` (`sequential_tasks`, left as it is when absent) and shown in `ManagerSummary.sequential_tasks`. When on, the manager works on one task at a time: its other tasks (new, delegated, handed over, repeating) stay queued (`task.queued` with reason `sequential`) and start in the order they were created. The turn passes on when the running task ends or waits (for the user or for colleagues) or goes to review. Turning it off starts the queued tasks; turning it on leaves tasks that already run alone. Conversations with the manager are not affected.
+- **Delegated results answered together.** When a manager gave several tasks from one conversation, it answers once, when the last of them ended (or was cancelled), instead of once per result. A result that comes in while the conversation is answering is picked up when that answer ends.
+- **Start an idea in a chosen mode** (protocol 1.8). `start_idea` takes an optional `run` (as `create_task`), so the idea's task conversation starts in that mode. Starting a task or idea in Auto needs the right to approve, as switching a conversation to Auto does.
+- **A phone can set a manager's model even with a global persona or connection.** Setting a manager's model and effort from a phone now compares the connection and persona with the manager's own setting instead of the global one.
+
+## v0.6.3
+
+Restart the server from a client, send files to managers, and runs wait while the machine is busy (protocol 1.7).
+
+- **Restart the server from a client** (protocol 1.7). The new method `server/restart` answers first and then stops the service, which starts itself again, as after an update. Any paired device that may approve can ask for it; `aurelius-ctl restart` does it from the command line. Answers that were running stop and show as interrupted, as with an update.
+- **New answers wait while the machine is busy.** The server measures the computer's CPU and free memory (averaged over about 10 seconds) and starts a new answer or task only below 75 % CPU (again below 65 %) with more than 2 GB free, and at most 3 at a time; with nothing running, one always starts, and running answers are never stopped. Waiting answers stay queued and their run records why (`run.waiting`, reason `load:cpu`, `load:memory` or `load:max_runs`). `AURELIUS_MAX_RUNS`, `AURELIUS_CPU_HIGH`, `AURELIUS_CPU_LOW`, `AURELIUS_MIN_FREE_MB` and `AURELIUS_LOAD_ADMISSION=on|off` change this. Claude Code's builds use half the cores (`CARGO_BUILD_JOBS`).
+- **Delegated work keeps the mode it was given in.** When a manager gives work to a colleague (delegate_task, from a task or a plain conversation, or hand_over_task), the colleague's task conversation starts in the giver's current mode if that is Auto or Accept edits, also further down a chain. Plan and Ask are not passed on; the conversation then starts as usual. The user can still change the mode afterwards.
+- **Files with a message to a manager** (protocol 1.7). `send_manager_message` takes `files`: up to 8 files of any type, 25 MB each, as paths on the server or (from the phone) files in its own upload inbox. The server copies them into `.aurelius/uploads/` of the conversation's work folder (the project folder, else the manager's folder), which Git ignores, and tells the manager where they are. The message shows them as `uploads` (name, path, size). Without a work folder the message is refused with "no work folder".
+- **Usage per hour** (protocol 1.7). The new query `query/usage_hours` returns the 24 hours of a server-local day with runs, tokens and cost per hour, with the same rights as `query/usage`.
+- **A task's own change** (protocol 1.7). The new query `query/task_diff` returns the change of a task with a workspace of its own: its branch against the commit it started from (plus what is not committed yet while its worktree exists), or, for a separate folder without Git, its files as new files. Same shape and 512 KB limit as `query/git_diff`; nothing when the task has no workspace.
+- **Who wrote an idea.** Ideas carry the id of the manager who noted them (`manager_id`, optional, so older apps keep working); an idea of a manager that has since been removed shows "A removed manager" instead of "You".
+- **A task whose answer cannot start no longer stays running.** When the run of a task cannot be started after its retries, the task now waits for the user (reason `not_started`); sending a message in the task conversation lets it finish.
+- **Standalone chats get no Git status, diff or terminal.** Only manager and task conversations work in a project folder; a plain chat gets no Git status or diff and is refused a terminal.
+
+## v0.6.2
+
+Managers keep answering, however much they remember.
+
+- **Long instructions no longer stop a manager.** The system text (role, colleagues, tasks and memory) now goes to Claude Code as a temporary file instead of on the command line. On Windows a long text made every run fail with "The filename or extension is too long" (os error 206), and the manager stopped answering without saying why.
+- **An answer that cannot start says why.** When a run cannot be started after its retries, the answer in the conversation now gives the reason instead of staying empty.
+- **A fixed budget for memory.** At most about 4 000 tokens of memory go into a manager's instructions. Pinned memories always go in; other decisions go in most relevant first, and a long memory is cut there. Everything stays reachable with `recall`.
+- **Memory consolidation.** Once a project's or a manager's memory holds 30 or more memories that may be merged (or about 3 000 tokens), a background job merges them into short points, at most once a day. Memories you wrote, accepted or pinned are left alone. A point may only name memories that exist; what it replaces is superseded and stays in History. A cut that looks too drastic becomes proposals for you instead. The new command `consolidate_memory` (protocol 1.6) starts it at once.
+
+Every conversation knows its own subagents (protocol 1.6).
+
+- **`query/subagents`.** Returns the subagents running in the answers of one conversation: a plain chat, a manager conversation or a task conversation. Older apps keep working; the manager overview is unchanged.
+
+A manager can give work to a colleague, also outside a task.
+
+- **Delegate from a conversation.** In a normal conversation with the user, a
+  manager can decide to let a colleague do something (`delegate_task`). The
+  colleague gets it as a task of their own, shown as "Delegated by …". The
+  result comes back in the conversation that asked, and the manager answers
+  on it. Before this the tool was offered there but always refused. A manager
+  whose worker policy forbids delegating still does the work itself.
+- **No lost results.** A colleague who finishes while the delegating manager
+  is still answering no longer gets skipped. The manager goes on once more
+  with the result before it writes the report.
+- **Hand-over no longer stalls.** A task handed over while the old manager's
+  answer was still running now starts with the new manager once that answer
+  ends.
+
+## v0.6.1
+
+A new chat starts with the settings chosen before its first message.
+
+- **Settings before the first message.** A new chat can be sent with its mode,
+  browser and screen already set (next to web research), so the first answer
+  runs with them. The phone uses this for its switches above the composer.
+  Starting in Auto or with the browser or screen on needs the Approve right,
+  as turning them on later does. Older apps send exactly what they did before.
+
+## v0.6.0
+
+The first separate server release, built from the same code as the combined
+v0.6.0.
+
+- **Own releases.** The server has its own version and updates on its own in
+  Settings → App & updates. A server update restarts only the server; open apps
+  reconnect by themselves. A server-only install never receives the app.
+- **Built-in terminal.** A manager conversation can open a shell in its work
+  folder on this computer (owner rights only).
+- **Subagents.** The server reports which subagents run and what they are
+  doing; subagents run in the foreground, so answers no longer stall.
+- **Diff and branch.** New queries for the branch, changed lines and full diff
+  of a conversation's work folder.
+- Managers see their project's tasks and their own earlier conversations; mode
+  switches and Send now reach a running answer; stopping an answer ends the
+  programs it started and withdraws its open approvals.

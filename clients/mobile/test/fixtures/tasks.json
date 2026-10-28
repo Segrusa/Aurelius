@@ -1,0 +1,73 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "tasks",
+    "value": {
+      "as_of_seq": 60,
+      "tasks": [
+        {
+          "id": "01900000-0000-7000-8000-000000000004",
+          "project_id": "01900000-0000-7000-8000-000000000001",
+          "manager_id": "01900000-0000-7000-8000-000000000005",
+          "manager_name": "Iris",
+          "title": "Landing page",
+          "goal": "Ship it",
+          "criteria": [
+            "Fast"
+          ],
+          "status": "waiting",
+          "waiting_reason": "plan_approval",
+          "created_at_ms": 1,
+          "updated_at_ms": 2,
+          "workers": [
+            {
+              "id": "01900000-0000-7000-8000-000000000014",
+              "name": "Copy",
+              "brief": "Write the copy",
+              "status": "queued",
+              "result": null,
+              "revisions": 0,
+              "feedback": null
+            }
+          ],
+          "review": {
+            "decision": "revise",
+            "feedback": "Shorter",
+            "criteria": [
+              {
+                "criterion": "Fast",
+                "met": false,
+                "evidence": "3 s"
+              }
+            ],
+            "revise_workers": []
+          },
+          "result": null,
+          "depends_on": [],
+          "pending_approvals": 1,
+          "parent_task_id": "01900000-0000-7000-8000-000000000015",
+          "delegated_by": "Bram",
+          "children": [],
+          "handoffs": [
+            {
+              "from": "Bram",
+              "to": "Iris",
+              "reason": "Copy is Iris' area",
+              "from_id": null,
+              "to_id": "01900000-0000-7000-8000-000000000005"
+            }
+          ],
+          "conversation_id": "01900000-0000-7000-8000-000000000017",
+          "repeat_every_minutes": 1440,
+          "scheduled_for_ms": null,
+          "run": {
+            "mode": "auto",
+            "model": "claude-sonnet-5-5",
+            "effort": "high"
+          }
+        }
+      ]
+    }
+  }
+}

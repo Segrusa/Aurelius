@@ -1,0 +1,126 @@
+//! Checksummed, versioned migrations.
+
+use crate::{BlobStore, StorageError, now_ms};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+
+/// Work in Rust after a migration's SQL, in the same transaction (with the blob
+/// store when the database belongs to a data folder).
+pub type Then = fn(&Transaction<'_>, Option<&BlobStore>) -> Result<(), StorageError>;
+
+pub struct Migration {
+    pub version: i64,
+    pub sql: &'static str,
+    /// Rebuilds tables: runs with foreign keys off (the SQLite way to change a
+    /// table), and `PRAGMA foreign_key_check` must be clean before it commits.
+    pub rebuild: bool,
+    pub then: Option<Then>,
+}
+
+const fn plain(version: i64, sql: &'static str) -> Migration {
+    Migration { version, sql, rebuild: false, then: None }
+}
+
+/// v0.7 starts with one schema. A v0.6 database (versions up to 28) is "too new"
+/// for it; its data comes over with the one-time `aurelius-import` tool.
+/// 14 is v0.9's company (protocol 3.0): managers become employees; 15 deletes
+/// the plain chats (every conversation has a project, task or employee); 16 adds
+/// the audience, webhook and outbox of app keys.
+pub const MIGRATIONS: &[Migration] = &[
+    plain(1, include_str!("../../../migrations/0001_schema.sql")),
+    plain(2, include_str!("../../../migrations/0002_artifacts.sql")),
+    plain(3, include_str!("../../../migrations/0003_artifact_versions.sql")),
+    plain(4, include_str!("../../../migrations/0004_notes.sql")),
+    plain(5, include_str!("../../../migrations/0005_project_plugins.sql")),
+    plain(6, include_str!("../../../migrations/0006_app_keys.sql")),
+    plain(7, include_str!("../../../migrations/0007_idea_attachments.sql")),
+    plain(8, include_str!("../../../migrations/0008_conversation_sessions.sql")),
+    plain(9, include_str!("../../../migrations/0009_run_traces.sql")),
+    plain(10, include_str!("../../../migrations/0010_session_system_text.sql")),
+    plain(11, include_str!("../../../migrations/0011_instruction_proposals.sql")),
+    plain(12, include_str!("../../../migrations/0012_task_variants.sql")),
+    plain(13, include_str!("../../../migrations/0013_session_context_tokens.sql")),
+    Migration { version: 14, sql: include_str!("../../../migrations/0014_company.sql"), rebuild: true, then: Some(crate::company_convert::convert) },
+    Migration { version: 15, sql: include_str!("../../../migrations/0015_no_plain_chats.sql"), rebuild: true, then: None },
+    plain(16, include_str!("../../../migrations/0016_management_channel.sql")),
+];
+
+/// The last schema of protocol 2 (managers per project). The v0.6 import writes
+/// into it; migration 14 converts it like any 2.x database.
+pub const LAST_PROTOCOL_2_VERSION: i64 = 13;
+
+/// Highest schema version this build knows.
+pub fn supported_version() -> i64 {
+    MIGRATIONS.last().map(|m| m.version).unwrap_or(0)
+}
+
+pub fn checksum(sql: &str) -> String {
+    hex::encode(Sha256::digest(sql.as_bytes()))
+}
+
+pub fn run(conn: &mut Connection, blobs: Option<&BlobStore>) -> Result<(), StorageError> {
+    run_until(conn, blobs, supported_version())
+}
+
+/// Apply the migrations up to `until`, each in its own transaction.
+pub fn run_until(conn: &mut Connection, blobs: Option<&BlobStore>, until: i64) -> Result<(), StorageError> {
+    let has_table: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations')",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let supported = supported_version();
+    let mut applied: HashMap<i64, String> = HashMap::new();
+    if has_table {
+        let found: Option<i64> = conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |row| row.get(0))?;
+        if let Some(found) = found.filter(|v| *v > supported) {
+            return Err(StorageError::DatabaseTooNew { found, supported });
+        }
+        let mut stmt = conn.prepare("SELECT version, checksum FROM schema_migrations")?;
+        applied = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+    }
+
+    for migration in MIGRATIONS.iter().filter(|m| m.version <= until) {
+        let sum = checksum(migration.sql);
+        match applied.get(&migration.version) {
+            Some(existing) if *existing == sum => continue,
+            Some(_) => return Err(StorageError::MigrationChecksum { version: migration.version }),
+            None => {}
+        }
+        tracing::info!(version = migration.version, "applying migration");
+        // foreign_keys cannot change inside a transaction: switch it around it.
+        if migration.rebuild {
+            conn.pragma_update(None, "foreign_keys", "OFF")?;
+        }
+        let result = apply(conn, migration, &sum, blobs);
+        if migration.rebuild {
+            conn.pragma_update(None, "foreign_keys", "ON")?;
+        }
+        result?;
+    }
+    Ok(())
+}
+
+fn apply(conn: &mut Connection, migration: &Migration, sum: &str, blobs: Option<&BlobStore>) -> Result<(), StorageError> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Exclusive)?;
+    tx.execute_batch(migration.sql)?;
+    if let Some(then) = migration.then {
+        then(&tx, blobs)?;
+    }
+    if migration.rebuild {
+        let broken: Option<String> = tx
+            .query_row("SELECT \"table\" || ' -> ' || parent FROM pragma_foreign_key_check LIMIT 1", [], |r| r.get(0))
+            .optional()?;
+        if let Some(broken) = broken {
+            return Err(StorageError::Rejected(format!("migration {} left a broken reference ({broken})", migration.version)));
+        }
+    }
+    tx.execute(
+        "INSERT INTO schema_migrations(version, checksum, applied_at_ms) VALUES (?1, ?2, ?3)",
+        rusqlite::params![migration.version, sum, now_ms()],
+    )?;
+    tx.commit()?;
+    Ok(())
+}

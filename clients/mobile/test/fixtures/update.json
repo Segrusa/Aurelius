@@ -1,0 +1,18 @@
+{
+  "kind": "response",
+  "request_id": 7,
+  "ok": {
+    "type": "update",
+    "value": {
+      "current": "0.3.0",
+      "enabled": true,
+      "reason": null,
+      "latest": "0.3.1",
+      "available": true,
+      "notes": "Update the server from the phone.",
+      "staged": null,
+      "checked_at_ms": 1790000000000,
+      "error": null
+    }
+  }
+}

@@ -1,0 +1,145 @@
+--- a/src/text/inline.rs
++++ b/src/text/inline.rs
+@@ -24,7 +24,7 @@
+     text::range_highlight::RevealAt,
+     text::selection::word_range_at,
+     text::state::LineSpan,
+-    text::text_view::{LinkClickHandlerFn, handle_link_click},
++    text::text_view::{LinkClickHandlerFn, handle_link_click, report_link_hover},
+     text_selection::text_rows_extent,
+ };
+ 
+@@ -257,11 +257,16 @@
+ 
+ thread_local! {
+     static RETAINED_LAYOUTS: RefCell<HashMap<usize, RetainedLayout>> = RefCell::new(HashMap::new());
++    /// Table size at which the next sweep runs (see [`RETAINED_SWEEP_MIN`]).
++    static RETAINED_SWEEP_AT: std::cell::Cell<usize> = const { std::cell::Cell::new(RETAINED_SWEEP_MIN) };
+ }
+ 
+ /// Dead entries (states that were dropped without a final paint, e.g. a
+-/// replaced document) are swept once the table grows past this many.
+-const RETAINED_SWEEP_AT: usize = 4096;
++/// replaced document) are swept once the table doubles since the last sweep,
++/// and at this size at the latest. A streamed reply replaces its document on
++/// every update, so a fixed limit of 4096 kept that many dead layouts (~20 MB
++/// after one long reply) alive for good.
++const RETAINED_SWEEP_MIN: usize = 256;
+ 
+ fn state_key(state: &Arc<Mutex<InlineState>>) -> usize {
+     Arc::as_ptr(state) as usize
+@@ -290,9 +295,13 @@
+ fn retain_layout(state: &Arc<Mutex<InlineState>>, retained: RetainedLayout) {
+     RETAINED_LAYOUTS.with(|layouts| {
+         let mut layouts = layouts.borrow_mut();
+-        if layouts.len() >= RETAINED_SWEEP_AT {
+-            layouts.retain(|_, retained| retained.state.strong_count() > 0);
+-        }
++        RETAINED_SWEEP_AT.with(|sweep_at| {
++            if layouts.len() >= sweep_at.get() {
++                layouts.retain(|_, retained| retained.state.strong_count() > 0);
++                // Amortized O(1) per insert, and never more dead entries than live ones (plus the minimum).
++                sweep_at.set((layouts.len() * 2).max(RETAINED_SWEEP_MIN));
++            }
++        });
+         layouts.insert(state_key(state), retained);
+     });
+ }
+@@ -1108,13 +1117,21 @@
+                 let links = self.links.clone();
+                 let mut hovered_link = hovered_link;
+                 move |event: &MouseMoveEvent, phase, window, cx| {
+-                    if !phase.bubble() || !hitbox.is_hovered(window) {
++                    if !phase.bubble() {
+                         return;
+                     }
+ 
+-                    let updated =
+-                        Self::link_range_for_position(&text_layout, &links, event.position);
++                    // Leaving the text also leaves its link (for on_link_hover).
++                    let updated = hitbox
++                        .is_hovered(window)
++                        .then(|| Self::link_range_for_position(&text_layout, &links, event.position))
++                        .flatten();
+                     if hovered_link != updated {
++                        let url = |range: &Option<Range<usize>>| {
++                            let range = range.as_ref()?;
++                            links.iter().find(|(r, _)| r == range).map(|(_, l)| l.url.clone())
++                        };
++                        report_link_hover(url(&hovered_link), url(&updated), window, cx);
+                         hovered_link = updated;
+                         cx.notify(current_view);
+                     }
+@@ -2433,4 +2450,23 @@
+         });
+         assert_eq!(alive, 3, "one live layout per remaining fragment");
+     }
++
++    /// A streamed reply replaces its document on every update; the layouts of
++    /// the replaced paragraphs must not pile up to the old 4096 entries.
++    #[gpui::test]
++    fn replaced_documents_do_not_pile_up_dead_layouts(cx: &mut TestAppContext) {
++        cx.update(crate::init);
++        let (view, cx) = cx.add_window_view(|_, cx| Once {
++            state: cx.new(|cx| TextViewState::markdown("start", cx)),
++        });
++        for n in 0..100 {
++            let text = (0..10).map(|p| format!("Paragraph {p} of update {n}.")).collect::<Vec<_>>().join("\n\n");
++            view.update(cx, |view, cx| view.state.update(cx, |state, cx| state.set_text(&text, cx)));
++            cx.run_until_parked();
++            cx.update(|window, cx| window.draw(cx).clear(cx));
++        }
++
++        let retained = RETAINED_LAYOUTS.with(|layouts| layouts.borrow().len());
++        assert!(retained <= 2 * super::RETAINED_SWEEP_MIN, "{retained} layouts retained for 10 live paragraphs");
++    }
+ }
+--- a/src/text/text_view.rs
++++ b/src/text/text_view.rs
+@@ -84,6 +84,46 @@
+ /// may hold a `ScrollHandle`.
+ pub(crate) type RevealHandlerFn = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
+ 
++type LinkHoverHandlerFn = dyn Fn(Option<SharedString>, &mut Window, &mut App);
++
++struct LinkHover {
++    handler: Rc<LinkHoverHandlerFn>,
++    current: Option<SharedString>,
++}
++
++impl Global for LinkHover {}
++
++/// Calls `handler` with the URL of the link under the pointer in any
++/// TextView of the app, and with `None` when the pointer leaves it, e.g. to
++/// show the URL in a status line. A later call replaces the handler.
++pub fn on_link_hover(
++    cx: &mut App,
++    handler: impl Fn(Option<SharedString>, &mut Window, &mut App) + 'static,
++) {
++    cx.set_global(LinkHover { handler: Rc::new(handler), current: None });
++}
++
++/// The pointer left the link `from` and entered `to` within one text.
++pub(crate) fn report_link_hover(
++    from: Option<SharedString>,
++    to: Option<SharedString>,
++    window: &mut Window,
++    cx: &mut App,
++) {
++    if !cx.has_global::<LinkHover>() {
++        return;
++    }
++    let hover = cx.global_mut::<LinkHover>();
++    // A leave clears only the link it left: in the same move another text
++    // may already have reported entering its link.
++    if (to.is_none() && hover.current != from) || hover.current == to {
++        return;
++    }
++    hover.current = to.clone();
++    let handler = hover.handler.clone();
++    handler(to, window, cx);
++}
++
+ pub(crate) fn handle_link_click(
+     handler: &Option<Arc<LinkClickHandlerFn>>,
+     url: SharedString,

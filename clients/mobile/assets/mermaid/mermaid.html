@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- Diagrams draw offline from the bundled mermaid.min.js; nothing may connect out. -->
+<meta http-equiv="Content-Security-Policy" content="connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; img-src data:">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=6">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body { -webkit-text-size-adjust: 100%; overflow: hidden; }
+  body.zoom { overflow: auto; }
+  #out { display: flex; justify-content: center; padding: 8px; box-sizing: border-box; }
+  #out svg { max-width: 100%; height: auto; }
+</style>
+<script src="mermaid.min.js"></script>
+</head>
+<body>
+<div id="out"></div>
+<script>
+  // The app calls aureliusRender(source, dark, maxHeight, zoom) and hears back
+  // on the MermaidChannel: "ok:<height>" once drawn, "error" when the
+  // source is not valid Mermaid (the app then shows the code block).
+  function post(message) {
+    if (window.MermaidChannel) window.MermaidChannel.postMessage(message);
+  }
+
+  function report() {
+    var out = document.getElementById('out');
+    post('ok:' + Math.ceil(out.getBoundingClientRect().height));
+  }
+
+  async function aureliusRender(source, dark, maxHeight, zoom) {
+    try {
+      if (!window.mermaid) throw new Error('mermaid did not load');
+      document.body.className = zoom ? 'zoom' : '';
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: 'strict',
+        suppressErrorRendering: true,
+        theme: dark ? 'dark' : 'default',
+        darkMode: dark,
+        fontFamily: '-apple-system, system-ui, "Segoe UI", Roboto, sans-serif',
+        themeVariables: { background: 'transparent' },
+      });
+      await mermaid.parse(source);
+      var result = await mermaid.render('aurelius-diagram', source);
+      var out = document.getElementById('out');
+      out.innerHTML = result.svg;
+      var svg = out.querySelector('svg');
+      if (svg && maxHeight > 0 && !zoom) svg.style.maxHeight = maxHeight + 'px';
+      report();
+      if (window.ResizeObserver) new ResizeObserver(report).observe(out);
+    } catch (e) {
+      post('error');
+    }
+  }
+</script>
+</body>
+</html>
