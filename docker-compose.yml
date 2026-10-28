@@ -6,7 +6,7 @@
 services:
   aurelius-mcp:
     # The release image; `docker compose up -d --build` builds it from this checkout instead.
-    image: ghcr.io/opteon-sdc/aurelius-mcp:latest
+    image: ghcr.io/segrusa/aurelius-mcp:latest
     build: .
     restart: unless-stopped
     ports:

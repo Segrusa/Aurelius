@@ -115,4 +115,4 @@ git push origin HEAD
 git push origin $tag
 $workflow = "release-$Product"
 Write-Host "Tagged $tag. GitHub Actions is building the signed release:"
-& $gh run list --repo opteon-sdc/aurelius --workflow $workflow --limit 1
+& $gh run list --repo Segrusa/Aurelius --workflow $workflow --limit 1

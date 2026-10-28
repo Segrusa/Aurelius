@@ -8,7 +8,7 @@
 # AURELIUS_SIGNING_KEY secret.
 # The zip also carries aurelius-mcp.exe (for outside apps; the updater does not
 # replace it), and the docker job publishes its Linux image to
-# ghcr.io/<owner>/aurelius-mcp:<version> and :latest, only after the Windows
+# ghcr.io/segrusa/aurelius-mcp:<version> and :latest, only after the Windows
 # release succeeded.
 name: release-server
 
@@ -109,7 +109,7 @@ jobs:
       contents: read
       packages: write
     env:
-      IMAGE: ghcr.io/${{ github.repository_owner }}/aurelius-mcp
+      IMAGE: ghcr.io/segrusa/aurelius-mcp
       VERSION: ${{ needs.release.outputs.version }}
     steps:
       - uses: actions/checkout@v4

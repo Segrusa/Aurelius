@@ -10,7 +10,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use std::path::Path;
 
 /// GitHub repository that publishes releases.
-pub const REPO: &str = "opteon-sdc/aurelius";
+pub const REPO: &str = "Segrusa/Aurelius";
 /// Release asset names.
 pub const ZIP_PREFIX: &str = "aurelius-";
 pub const ZIP_SUFFIX: &str = "-windows-x64.zip";

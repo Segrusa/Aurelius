@@ -105,12 +105,12 @@ send no `Authorization` header. Anyone who can reach port 7464 then acts as that
 only set it on a network you trust. The container itself speaks plain HTTP: keep port 7464
 on your LAN or tailnet, and put a TLS proxy in front of it if it must go further.
 
-Every server release publishes the image as `ghcr.io/opteon-sdc/aurelius-mcp:<version>`
+Every server release publishes the image as `ghcr.io/segrusa/aurelius-mcp:<version>`
 and `:latest` (linux/amd64). Start it:
 
 ```sh
 docker run -d --name aurelius-mcp -p 7464:7464 \
-  -e AURELIUS_MCP_URL=https://<pc>.<tailnet>.ts.net:8443 ghcr.io/opteon-sdc/aurelius-mcp:latest
+  -e AURELIUS_MCP_URL=https://<pc>.<tailnet>.ts.net:8443 ghcr.io/segrusa/aurelius-mcp:latest
 ```
 
 or with `docker-compose.yml` (set the variables in your shell or in a `.env` file next to it):
