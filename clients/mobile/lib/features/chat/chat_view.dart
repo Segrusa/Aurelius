@@ -25,6 +25,7 @@ import '../connection/connection_bloc.dart';
 import '../company_org/employee_run_sheet.dart';
 import '../inbox/inbox_bloc.dart';
 import '../load/load_widgets.dart';
+import '../team/mentions.dart';
 import 'answer_body.dart';
 import 'chat_bloc.dart';
 import 'collapse.dart';
@@ -285,6 +286,7 @@ class _MessagesState extends State<_Messages> {
                       ? _TaskUpdate(message: m)
                       : _AssistantMessage(
                           message: m,
+                          group: group,
                           version: versions[m.id],
                           blocking: !m.isStreaming ? null : group ? approvals.where((a) => a.runId == m.runId).firstOrNull : blocking,
                         ),
@@ -597,9 +599,12 @@ class _UserBubble extends StatelessWidget {
 }
 
 class _AssistantMessage extends StatelessWidget {
-  const _AssistantMessage({required this.message, this.version, this.blocking});
+  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking});
 
   final MessageView message;
+
+  /// In the Team chat: the sender shows with their role.
+  final bool group;
   final (int, int)? version;
   final ApprovalView? blocking;
 
@@ -671,8 +676,10 @@ class _AssistantMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final author = message.author?.trim();
+    final role = group && author != null && author.isNotEmpty ? context.select<CompanyBloc, String?>((b) => employeeRole(b.state, author)) : null;
     final header = [
-      if (message.author?.trim() case final author? when author.isNotEmpty) author,
+      if (author != null && author.isNotEmpty) withRole(author, role),
       if (message.producedBy != null) message.producedBy!,
       if (version != null) 'version ${version!.$1}/${version!.$2}',
     ].join(' · ');
@@ -1174,6 +1181,25 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Team chat: who the `@name` being typed can be, with their role.
+            if (group)
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _text,
+                builder: (context, value, _) {
+                  final people = mentionables(context.read<CompanyBloc>().state);
+                  final found = mentionSuggestions(value.text, [for (final p in people) p.$1]);
+                  if (found == null) return const SizedBox.shrink();
+                  return MentionRow(
+                    found: found.$2,
+                    roles: {for (final p in people) p.$1: p.$2},
+                    onPick: (name) {
+                      final text = completeMention(value.text, found.$1, name);
+                      _text.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+                      _focus.requestFocus();
+                    },
+                  );
+                },
+              ),
             if (state.images.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),

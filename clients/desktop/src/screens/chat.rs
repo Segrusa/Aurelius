@@ -18,6 +18,15 @@ pub fn message_author(m: &aurelius_protocol::MessageView, fallback: &SharedStrin
     }
 }
 
+/// An employee's name with their role, as the group chat shows senders and `@` suggestions:
+/// "Orion — Project Manager". Without a role, the name alone.
+pub fn with_role(name: &str, role: Option<&str>) -> String {
+    match role.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(role) => format!("{name} — {role}"),
+        None => name.to_owned(),
+    }
+}
+
 /// An employee's answer streaming into the group chat before it is a message there
 /// (its text and steps come from the stream); marked as a group post like it will be.
 /// Its run is what its Stop stops and what its approvals wait on.
@@ -566,7 +575,7 @@ impl AppView {
             })
             .child(
                 h().gap(px(8.)).text_size(px(12.)).text_color(c(theme::MUTED))
-                    .child(message_author(m, author))
+                    .child(self.author_label(m, author))
                     .when_some(m.produced_by.clone(), |el, label| el.child(div().text_color(c(theme::TEXT_2)).child(format!("· {label}"))))
                     .when(total > 1, |el| el.child(format!("· version {}/{}", index.unwrap_or(1), total)))
                     .child(div().flex_1())
@@ -1176,7 +1185,7 @@ fn mention_row(view: &AppView, cx: &mut Context<AppView>) -> Option<impl IntoEle
         h().id("mentions").aria_label("Mention an employee").flex_wrap().gap(px(6.)).pb(px(8.)).text_size(px(12.5))
             .child(div().text_color(c(theme::MUTED)).child("Mention"))
             .children(found.into_iter().enumerate().map(|(i, name)| {
-                let label = format!("@{name}");
+                let label = format!("@{}", with_role(&name, view.employee_role(&name)));
                 h().id(("mention", i)).role(Role::Button).aria_label(label.clone()).gap(px(6.)).px(px(8.)).py(px(2.)).rounded(px(6.)).cursor_pointer()
                     .border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE))
                     .hover(|s| s.bg(c(theme::SURFACE_2)).border_color(c(theme::BORDER_STRONG)))
@@ -1396,7 +1405,7 @@ fn activity_ring(busy: bool) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{artifact_url, fold, is_system_line, mention_suggestions, message_author, streaming_answer, web_search_summary};
+    use super::{artifact_url, fold, is_system_line, mention_suggestions, message_author, streaming_answer, web_search_summary, with_role};
     use aurelius_domain::conversation::{MessageRole, MessageStatus};
     use gpui_kit::SharedString;
 
@@ -1454,6 +1463,10 @@ mod tests {
         assert_eq!(mention_suggestions("mail me at me@or", &names), None, "an @ inside a word is an email address");
         assert_eq!(mention_suggestions("no mention", &names), None);
         assert_eq!(mention_suggestions("@x", &names), None, "nobody by that name");
+        // Each suggestion and each sender in the group chat carries the role.
+        assert_eq!(with_role("Orion", Some("Project Manager")), "Orion — Project Manager");
+        assert_eq!(with_role("Orion", Some("  ")), "Orion", "no dangling dash without a role");
+        assert_eq!(with_role("Aurelius", None), "Aurelius");
     }
 
     #[test]

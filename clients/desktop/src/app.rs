@@ -5142,6 +5142,20 @@ impl AppView {
         self.managers.iter().filter(|m| m.status != LifecycleStatus::Archived).map(|m| m.name.as_str()).collect()
     }
 
+    /// The role of the employee (not archived) by this name, from the company.
+    pub fn employee_role(&self, name: &str) -> Option<&str> {
+        self.managers.iter().find(|m| m.status != LifecycleStatus::Archived && m.name == name).map(|m| m.role.as_str())
+    }
+
+    /// Who wrote an answer: in the group chat an employee's name with their role ("Orion — Project Manager").
+    pub fn author_label(&self, m: &aurelius_protocol::MessageView, fallback: &SharedString) -> SharedString {
+        let name = crate::screens::chat::message_author(m, fallback);
+        if self.screen != Page::GroupChat || m.role == aurelius_domain::conversation::MessageRole::User {
+            return name;
+        }
+        crate::screens::chat::with_role(&name, self.employee_role(&name)).into()
+    }
+
     /// Complete the `@name` being typed at the end of the composer to `@<name> `.
     pub fn complete_mention(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value();
