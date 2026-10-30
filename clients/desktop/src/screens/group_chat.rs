@@ -6,7 +6,7 @@ use super::chat::composer;
 use crate::app::AppView;
 use crate::keymap::*;
 use crate::theme::{self, c};
-use crate::ui::{self, h, v};
+use crate::ui::{self, h, v, ButtonKind};
 use aurelius_domain::employee::LifecycleStatus;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -79,7 +79,18 @@ impl AppView {
     /// The group chat's scroll area, in the conversation pane.
     fn group_scroll(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let empty = self.messages.as_ref().is_some_and(|s| s.messages.is_empty()) && self.group_live.is_empty();
+        // It did not load: say why, instead of "Loading…" for good.
+        let failed = self.group_conversation.is_none().then(|| self.group_error.clone()).flatten();
         let body = v().w_full().max_w(px(700.)).gap(px(16.))
+            .when_some(failed.clone(), |el, why| {
+                el.child(
+                    v().gap(px(10.)).text_size(px(13.5)).text_color(c(theme::TEXT_2))
+                        .child(div().text_size(px(15.)).text_color(c(theme::TEXT)).child("The Team chat did not load."))
+                        .child(why)
+                        .child(h().child(ui::button("group-retry", "Try again", ButtonKind::Outline, None).h(px(28.))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.retry_group_chat(cx))))),
+                )
+            })
             .when(empty, |el| {
                 let first = self.group_answerer().map_or_else(|| "the top of the org chart".to_string(), str::to_owned);
                 el.child(
@@ -88,7 +99,7 @@ impl AppView {
                         .child(format!("Write @Name to ask an employee; without a name, {first} answers and brings in whoever is needed.")),
                 )
             })
-            .child(self.render_messages("Aurelius".into(), cx));
+            .when(failed.is_none(), |el| el.child(self.render_messages("Aurelius".into(), cx)));
         ui::scroll_frame(&self.scroll,
             div()
                 .id("group-scroll")

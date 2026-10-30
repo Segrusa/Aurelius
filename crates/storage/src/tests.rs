@@ -1124,3 +1124,56 @@ fn migration_17_adds_one_group_chat_and_keeps_every_conversation_and_message() {
     });
     assert!(owned.is_err(), "a group chat has no employee");
 }
+
+#[test]
+fn a_deleted_task_conversation_leaves_the_task_but_not_its_conversation_also_after_a_restart() {
+    use aurelius_domain::{TaskId, conversation::ConversationKind, task::TaskStatus};
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let (project, employee) = project_with_employee(&store, "Jean");
+    blob(&store, "g");
+    let (task, conversation) = (TaskId::new(), ConversationId::new());
+    store
+        .write(move |tx| {
+            assert!(employees::insert_thread(tx, employee, conversation, ConversationKind::Task, Some(project))?);
+            tasks::insert_task(tx, task, project, Some(employee), "Done", "g", "g", TaskStatus::Succeeded, None)?;
+            tasks::set_task_conversation(tx, task, conversation)
+        })
+        .unwrap();
+    let read = |_: &str| -> Option<String> { None };
+    let listed = |store: &Store| store.read(|c| tasks::list_tasks(c, None, &read)).unwrap().into_iter().find(|t| t.id == task);
+    assert_eq!(listed(&store).unwrap().conversation_id, Some(conversation));
+
+    store.write(move |tx| conversations::delete_conversation(tx, conversation)).unwrap();
+    // The task stays (in the list and on its own), without the deleted conversation.
+    assert_eq!(listed(&store).expect("the task stays").conversation_id, None);
+    assert_eq!(store.read(|c| tasks::task_view(c, task, &read)).unwrap().unwrap().conversation_id, None);
+    // A restart reads the same.
+    drop(store);
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(listed(&store).expect("the task stays after a restart").conversation_id, None);
+    // The employee's main chat was never touched.
+    let main: Option<i64> = store.read(|c| Ok(c.query_row("SELECT archived_at_ms FROM conversations WHERE employee_id = ?1 AND kind = 'employee'", [employee.to_string()], |r| r.get(0))?)).unwrap();
+    assert_eq!(main, None);
+}
+
+#[test]
+fn the_group_chat_exists_in_a_fresh_database_and_comes_back_when_its_row_is_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let fresh = store.read(conversations::group_conversation).unwrap().expect("migration 17 makes the group chat");
+    let groups = |store: &Store| store.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'group'", [], |r| r.get::<_, i64>(0))?)).unwrap();
+    // Opening again keeps the one there is.
+    drop(store);
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!((store.read(conversations::group_conversation).unwrap(), groups(&store)), (Some(fresh), 1));
+
+    // Its row gone (a database edited or restored by hand): the next open makes it again.
+    store.write(|tx| Ok(tx.execute("DELETE FROM conversations WHERE kind = 'group'", [])?)).unwrap();
+    assert_eq!(store.read(conversations::group_conversation).unwrap(), None);
+    drop(store);
+    let store = Store::open(dir.path()).unwrap();
+    let again = store.read(conversations::group_conversation).unwrap().expect("made again on open");
+    assert_ne!(again, fresh);
+    assert_eq!(groups(&store), 1);
+}

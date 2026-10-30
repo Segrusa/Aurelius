@@ -58,6 +58,39 @@ void main() {
   group('ChatBloc in the group chat (Team)', () {
     MessagesSnapshot team(List<MessageView> messages) => snapshotOf('team', messages: messages);
 
+    test('a server from before the Team chat (unknown_method) stops the loading and says to restart it; Try again loads it', () async {
+      var calls = 0;
+      when(() => repo.groupChat()).thenAnswer((_) async {
+        if (calls++ == 0) throw const ProtocolException(ErrorCode.unknownMethod, 'This server does not know the method group_chat.get.');
+        return team([message('u1', MessageRole.user, 'Hi all')]);
+      });
+      final bloc = ChatBloc.group(repo);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(bloc.state.loading, isFalse);
+      expect(bloc.state.loadError, contains('older than this app'));
+      expect(bloc.state.loadError, contains('Restart the server'));
+      bloc.add(const ChatRefreshed());
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect((bloc.state.loading, bloc.state.loadError, bloc.state.conversationId), (false, null, 'team'));
+      await bloc.close();
+    });
+
+    test('a server that never answers, or an answer the app cannot read, stops the loading with the reason', () async {
+      var calls = 0;
+      when(() => repo.groupChat()).thenAnswer((_) async {
+        if (calls++ == 0) throw const DisconnectedException('The PC did not answer in time.');
+        throw StateError('bad answer');
+      });
+      final bloc = ChatBloc.group(repo);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect((bloc.state.loading, bloc.state.loadError), (false, 'The PC did not answer in time.'));
+      bloc.add(const ChatRefreshed());
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(bloc.state.loading, isFalse);
+      expect(bloc.state.loadError, contains('could not be loaded'));
+      await bloc.close();
+    });
+
     blocTest<ChatBloc, ChatState>(
       'loads through group_chat.get and learns its id; each message keeps its author',
       build: () {

@@ -963,6 +963,8 @@ pub struct AppView {
     pub manager_thread: Option<ConversationId>,
     /// The group chat's conversation, once loaded (`group_chat.get`).
     pub group_conversation: Option<ConversationId>,
+    /// Why the group chat did not load (its page shows it with Try again instead of loading).
+    pub group_error: Option<String>,
     /// Answers streaming into the open group chat that are no message there yet.
     pub group_live: Vec<GroupLive>,
     /// The subagent chip's panel is open; which subagent shows its full prompt.
@@ -1422,6 +1424,7 @@ impl AppView {
             menu: None,
             manager_thread: None,
             group_conversation: None,
+            group_error: None,
             group_live: Vec::new(),
             subagents_open: false,
             subagents: None,
@@ -1961,9 +1964,13 @@ impl AppView {
             }
             Update::GroupChat(conversation) => {
                 self.group_conversation = Some(conversation);
+                self.group_error = None;
                 if self.screen == Page::GroupChat && self.open_conversation.is_none() {
                     self.open_conversation = Some(conversation);
                 }
+            }
+            Update::GroupChatFailed(why) => {
+                self.group_error = Some(why);
             }
             Update::Stream(delta) => {
                 if stream_stepped(self.streams.get(&delta.conversation_id), &delta) && self.chip_conversation() == Some(delta.conversation_id) {
@@ -5138,6 +5145,20 @@ impl AppView {
         self.managers.iter().filter(|m| m.status != LifecycleStatus::Archived).map(|m| m.name.as_str()).collect()
     }
 
+    /// The role of the employee (not archived) by this name, from the company.
+    pub fn employee_role(&self, name: &str) -> Option<&str> {
+        self.managers.iter().find(|m| m.status != LifecycleStatus::Archived && m.name == name).map(|m| m.role.as_str())
+    }
+
+    /// Who wrote an answer: in the group chat an employee's name with their role ("Orion — Project Manager").
+    pub fn author_label(&self, m: &aurelius_protocol::MessageView, fallback: &SharedString) -> SharedString {
+        let name = crate::screens::chat::message_author(m, fallback);
+        if self.screen != Page::GroupChat || m.role == aurelius_domain::conversation::MessageRole::User {
+            return name;
+        }
+        crate::screens::chat::with_role(&name, self.employee_role(&name)).into()
+    }
+
     /// Complete the `@name` being typed at the end of the composer to `@<name> `.
     pub fn complete_mention(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).value();
@@ -5488,6 +5509,13 @@ impl AppView {
         } else {
             self.focus.focus(window, cx);
         }
+        cx.notify();
+    }
+
+    /// Ask for the group chat again after it failed to load.
+    pub fn retry_group_chat(&mut self, cx: &mut Context<Self>) {
+        self.group_error = None;
+        let _ = self.requests.send(backend::Request::OpenGroupChat);
         cx.notify();
     }
 
@@ -6466,7 +6494,8 @@ impl AppView {
             return;
         }
         if self.thread_screen() == Page::GroupChat && self.group_conversation.is_none() {
-            self.notify_user("The Team chat is still loading.", true, cx);
+            let why = self.group_error.clone().unwrap_or_else(|| "The Team chat is still loading.".into());
+            self.notify_user(why, true, cx);
             return;
         }
         if !self.pending_files.is_empty() && !self.takes_manager_files() {

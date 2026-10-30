@@ -181,7 +181,8 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
                 t.parent_task_id, COALESCE((SELECT pm.name FROM tasks p JOIN employees pm ON pm.id = p.employee_id WHERE p.id = t.parent_task_id),
                                            (SELECT rm.name FROM employees rm WHERE rm.id = t.requested_by),
                                            CASE WHEN t.origin_conversation_id IS NOT NULL THEN 'Project assistant' END),
-                t.conversation_id,
+                -- A deleted (archived) conversation is gone for every client; the task itself stays.
+                (SELECT tc.id FROM conversations tc WHERE tc.id = t.conversation_id AND tc.archived_at_ms IS NULL),
                 CASE WHEN t.status = 'waiting' AND t.waiting_reason = 'quota' THEN
                     (SELECT MAX(qj.not_before_ms) FROM jobs qj JOIN runs r ON r.id = qj.id
                      WHERE r.task_id = t.id AND qj.state = 'ready' AND qj.last_error_code = 'quota') END,

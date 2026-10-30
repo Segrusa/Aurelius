@@ -471,6 +471,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Future<void> _refresh(ChatRefreshed event, Emitter<ChatState> emit) async {
     final id = state.conversationId;
     if (id == null && !group) return;
+    // Trying again after it failed: loading shows again.
+    if (group && state.loadError != null && state.messages.isEmpty) emit(state.copyWith(loading: true));
     try {
       final snapshot = group ? await _repository.groupChat() : await _repository.messages(id!);
       final messages = _deleting.isEmpty ? snapshot.messages : snapshot.messages.where((m) => !_deleting.contains(m.id)).toList();
@@ -488,12 +490,25 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         unsent: state.unsent.where((u) => !u.delivered).toList(),
         clearLoadError: true,
       ));
-    } on DisconnectedException {
-      emit(state.copyWith(loading: false));
+    } on DisconnectedException catch (e) {
+      // The Team chat that never loaded says why (a reconnect loads it again), not that it is empty.
+      emit(state.copyWith(loading: false, loadError: group && state.conversationId == null ? e.message : null));
     } on ProtocolException catch (e) {
-      emit(state.copyWith(loading: false, notice: e.shown, loadError: e.shown));
+      final shown = group ? groupChatFailure(e) : e.shown;
+      emit(state.copyWith(loading: false, notice: shown, loadError: shown));
+    } catch (e) {
+      // Anything else (an answer this app cannot read) stops the loading too.
+      if (!group) rethrow;
+      emit(state.copyWith(loading: false, loadError: 'The Team chat could not be loaded: $e'));
     }
   }
+
+  /// Why the Team chat did not load. A server from before the group chat does not
+  /// know `group_chat.get` (`unknown_method`): after an update it still runs the
+  /// old version and must be restarted.
+  static String groupChatFailure(ProtocolException e) => e.code == ErrorCode.unknownMethod
+      ? 'The server is older than this app and has no Team chat yet. Restart the server (or update it), then try again.'
+      : 'The Team chat could not be loaded: ${e.shown}';
 
   /// The streaming group answers the snapshot does not have yet. One that
   /// never became a message (an empty answer) goes once its run no longer

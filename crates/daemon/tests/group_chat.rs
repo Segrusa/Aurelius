@@ -327,3 +327,24 @@ async fn a_group_answer_shows_the_mode_it_was_given_in() {
 
     stop(dir.path(), daemon).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_group_chat_loads_in_a_fresh_database_and_after_its_row_went_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let fresh = client.group_chat().await.expect("a fresh database has the group chat");
+    assert!(fresh.messages.is_empty());
+    drop(client);
+    stop(dir.path(), daemon).await;
+
+    // Its row gone (a database edited or restored by hand): the server makes it again when it starts.
+    rusqlite::Connection::open(dir.path().join("data/aurelius.sqlite")).unwrap().execute("DELETE FROM conversations WHERE kind = 'group'", []).unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let again = client.group_chat().await.expect("the server made the group chat again");
+    assert_ne!(again.conversation_id, fresh.conversation_id);
+    send(&client, "Hallo team").await;
+    assert_eq!(client.group_chat().await.unwrap().messages.iter().filter(|m| m.role == MessageRole::User).count(), 1);
+    stop(dir.path(), daemon).await;
+}

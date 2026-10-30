@@ -13,6 +13,7 @@ import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/power/power_bloc.dart';
 import 'package:aurelius_mobile/features/project/task_page.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
+import 'package:aurelius_mobile/features/team/mentions.dart';
 import 'package:aurelius_mobile/features/team/team_page.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
@@ -66,7 +67,7 @@ void main() {
 
   group('the Team chat', () {
     // Orion answers the group in its own chat 'own-orion', in run r-orion.
-    final orion = employeeOf(id: 'o', name: 'Orion', conversationId: 'own-orion', agents: const [AgentView(kind: 'conversation', name: 'Conversation', detail: '', sinceMs: 1, steps: 0, runId: 'r-orion', conversationId: 'own-orion')]);
+    final orion = employeeOf(id: 'o', name: 'Orion', role: 'Project Manager', conversationId: 'own-orion', agents: const [AgentView(kind: 'conversation', name: 'Conversation', detail: '', sinceMs: 1, steps: 0, runId: 'r-orion', conversationId: 'own-orion')]);
     final atlas = employeeOf(id: 'a', name: 'Atlas', conversationId: 'own-atlas');
 
     Future<void> pump(WidgetTester tester, List<MessageView> messages, {List<ApprovalView> approvals = const []}) async {
@@ -126,6 +127,30 @@ void main() {
       expect(find.byKey(const Key('stop-run')), findsOneWidget);
     });
 
+    testWidgets('each sender shows with their role, and so does each @ suggestion; a tap completes the name', (tester) async {
+      await pump(tester, [
+        messageOf('u1', MessageRole.user, 'Status?'),
+        messageOf('a1', MessageRole.assistant, 'On track.', update: 'group', author: 'Orion'),
+        messageOf('a2', MessageRole.assistant, 'Agreed.', update: 'group', author: 'Atlas'),
+      ]);
+      expect(find.textContaining('Orion — Project Manager'), findsOneWidget);
+      expect(find.textContaining('Atlas — Writer'), findsOneWidget);
+      expect(find.byKey(const Key('mentions')), findsNothing, reason: 'no @ typed');
+
+      await tester.enterText(find.byType(TextField).last, 'Hi @o');
+      await tester.pump();
+      expect(find.text('@Orion — Project Manager'), findsOneWidget);
+      expect(find.byKey(const Key('mention-Atlas')), findsNothing);
+      await tester.enterText(find.byType(TextField).last, 'Hi @');
+      await tester.pump();
+      expect(find.text('@Atlas — Writer'), findsOneWidget, reason: 'a bare @ offers everyone');
+      await tester.tap(find.byKey(const Key('mention-Orion')));
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byType(TextField).last).controller!.text, 'Hi @Orion ');
+      expect(find.byKey(const Key('mentions')), findsNothing, reason: 'the mention is complete');
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets("a note of Aurelius (nobody was woken) is a quiet line, not somebody's answer", (tester) async {
       await pump(tester, [
         messageOf('u1', MessageRole.user, '@Atlas hi'),
@@ -139,6 +164,21 @@ void main() {
       expect(find.textContaining('Orion'), findsOneWidget, reason: "a cancelled answer stays the employee's");
       expect(tester.takeException(), isNull);
     });
+  });
+
+  test('@ suggestions follow the desktop: case-insensitive prefix, no e-mail, no name typed whole', () {
+    const names = ['Atlas', 'Titan', 'Trace', 'Orion'];
+    final found = mentionSuggestions('Hi @t', names)!;
+    expect(found.$1, 3);
+    expect(found.$2, ['Titan', 'Trace']);
+    expect(mentionSuggestions('@', names)?.$2.length, 4);
+    expect(mentionSuggestions('@Atlas', names), isNull);
+    expect(mentionSuggestions('@Atlas please', names), isNull);
+    expect(mentionSuggestions('mail me at me@or', names), isNull);
+    expect(mentionSuggestions('@x', names), isNull);
+    expect(completeMention('Hi @t', 3, 'Titan'), 'Hi @Titan ');
+    expect(withRole('Orion', 'Project Manager'), 'Orion — Project Manager');
+    expect(withRole('Orion', ' '), 'Orion');
   });
 
   test('a note the server writes is told apart from an answer, as on the desktop', () {
