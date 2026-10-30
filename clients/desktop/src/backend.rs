@@ -1599,6 +1599,8 @@ async fn session(
                     chat |= e.kind == aurelius_domain::EventKind::TaskPosted;
                     // A deleted conversation's artifacts leave the list (the chat lists refresh as usual).
                     artifact |= e.kind == aurelius_protocol::EventKind::ConversationDeleted;
+                    // So do the tasks: a task keeps no deleted conversation (its employee's page lists it by them).
+                    other |= e.kind == aurelius_protocol::EventKind::ConversationDeleted;
                     if e.kind == aurelius_domain::EventKind::McpLoginFinished {
                         logins.push(e.aggregate_id);
                         mcp = true;

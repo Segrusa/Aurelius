@@ -1124,3 +1124,35 @@ fn migration_17_adds_one_group_chat_and_keeps_every_conversation_and_message() {
     });
     assert!(owned.is_err(), "a group chat has no employee");
 }
+
+#[test]
+fn a_deleted_task_conversation_leaves_the_task_but_not_its_conversation_also_after_a_restart() {
+    use aurelius_domain::{TaskId, conversation::ConversationKind, task::TaskStatus};
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let (project, employee) = project_with_employee(&store, "Jean");
+    blob(&store, "g");
+    let (task, conversation) = (TaskId::new(), ConversationId::new());
+    store
+        .write(move |tx| {
+            assert!(employees::insert_thread(tx, employee, conversation, ConversationKind::Task, Some(project))?);
+            tasks::insert_task(tx, task, project, Some(employee), "Done", "g", "g", TaskStatus::Succeeded, None)?;
+            tasks::set_task_conversation(tx, task, conversation)
+        })
+        .unwrap();
+    let read = |_: &str| -> Option<String> { None };
+    let listed = |store: &Store| store.read(|c| tasks::list_tasks(c, None, &read)).unwrap().into_iter().find(|t| t.id == task);
+    assert_eq!(listed(&store).unwrap().conversation_id, Some(conversation));
+
+    store.write(move |tx| conversations::delete_conversation(tx, conversation)).unwrap();
+    // The task stays (in the list and on its own), without the deleted conversation.
+    assert_eq!(listed(&store).expect("the task stays").conversation_id, None);
+    assert_eq!(store.read(|c| tasks::task_view(c, task, &read)).unwrap().unwrap().conversation_id, None);
+    // A restart reads the same.
+    drop(store);
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!(listed(&store).expect("the task stays after a restart").conversation_id, None);
+    // The employee's main chat was never touched.
+    let main: Option<i64> = store.read(|c| Ok(c.query_row("SELECT archived_at_ms FROM conversations WHERE employee_id = ?1 AND kind = 'employee'", [employee.to_string()], |r| r.get(0))?)).unwrap();
+    assert_eq!(main, None);
+}
