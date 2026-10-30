@@ -12,6 +12,7 @@ mod theme;
 mod ui;
 mod screens {
     pub mod chat;
+    pub mod group_chat;
     pub mod projects;
     pub mod sidebar;
     pub mod dashboard;

@@ -48,7 +48,7 @@ class ProjectPage extends StatelessWidget {
           listener: (context, state) {
             if (state.notice != null) toast(context, state.notice!);
             final result = state.lastResult;
-            if (result is CommandResultTaskDiscussed) context.push('/employee/${result.employeeId}/chat?c=${result.conversationId}');
+            if (result is CommandResultTaskDiscussed) context.push('/conversation/${result.conversationId}?e=${result.employeeId}');
             context.read<ProjectBloc>().add(const ProjectNoticeShown());
           },
           builder: (context, state) {

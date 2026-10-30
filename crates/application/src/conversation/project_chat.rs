@@ -104,6 +104,7 @@ impl CommandService {
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
         let actor = ctx.principal_id.to_string();
+        let store = self.store.clone();
         self.commit(command_id, hash, move |tx| {
             if let Err(err) = open_project(tx, project_id)? {
                 return Ok(Err(err));
@@ -152,7 +153,7 @@ impl CommandService {
             crate::conversation::message_images::keep(tx, message_id, &images)?;
             conv::set_message_uploads(tx, message_id, &uploads)?;
             if interrupt && thread.is_some() {
-                notices.extend(crate::run::queue::interrupt_conversation(tx, &meta, &command_id.to_string(), conversation_id)?);
+                notices.extend(crate::run::queue::interrupt_conversation(tx, &store, &meta, &command_id.to_string(), conversation_id)?);
             }
             let (run_id, run_notice) = queue_run(tx, &meta, &command_id.to_string(), conversation_id, message_id)?;
             notices.push(run_notice);

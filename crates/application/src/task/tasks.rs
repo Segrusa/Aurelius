@@ -10,7 +10,7 @@ use aurelius_domain::{
     employee::{LifecycleStatus, TaskPolicy},
     task::{self, TaskStatus},
 };
-use aurelius_storage::{StorageError, Tx, blobs, employees, queries, tasks as store};
+use aurelius_storage::{StorageError, Store, Tx, blobs, employees, queries, tasks as store};
 
 pub const TASK_JOB_KIND: &str = "task.run";
 
@@ -219,7 +219,7 @@ pub(crate) fn wake_parent(tx: &Tx<'_>, task: TaskId) -> Result<(), StorageError>
 }
 
 /// Cancel the sub-tasks of a cancelled task (and theirs).
-pub(crate) fn cancel_children(tx: &Tx<'_>, task: TaskId, notices: &mut Vec<EventNotice>) -> Result<(), StorageError> {
+pub(crate) fn cancel_children(tx: &Tx<'_>, st: &Store, task: TaskId, notices: &mut Vec<EventNotice>) -> Result<(), StorageError> {
     for child in store::children_of(tx, task)? {
         if child.status.is_terminal() {
             continue;
@@ -228,8 +228,8 @@ pub(crate) fn cancel_children(tx: &Tx<'_>, task: TaskId, notices: &mut Vec<Event
         crate::task::task_line::set_status(tx, child.id, TaskStatus::Cancelled, None)?;
         tx.execute("UPDATE jobs SET state = 'cancelled' WHERE id = ?1 AND state = 'ready'", [child.id.to_string()])?;
         notices.push(task_event(tx, child.id, row.project_id, "task.cancelled", serde_json::json!({ "reason": "parent_cancelled" }))?);
-        notices.extend(crate::run::queue::stop_parked_runs_of_task(tx, child.id, &child.id.to_string())?);
-        cancel_children(tx, child.id, notices)?;
+        notices.extend(crate::run::queue::stop_parked_runs_of_task(tx, st, child.id, &child.id.to_string())?);
+        cancel_children(tx, st, child.id, notices)?;
     }
     Ok(())
 }
@@ -393,6 +393,7 @@ impl CommandService {
     pub(crate) fn cancel_task(&self, envelope: &CommandEnvelope, hash: String, cmd: &task::CancelTask) -> Result<Committed, AppError> {
         let task_id = cmd.task_id;
         let command_id = envelope.command_id;
+        let st = self.store.clone();
         self.commit(command_id, hash, move |tx| {
             let Some(row) = store::load_task(tx, task_id)? else {
                 return Ok(Err(domain_error(DomainError::TaskNotFound(task_id))));
@@ -406,8 +407,8 @@ impl CommandService {
             // Its variants stop too (their runs are stopped with the task's, their worktrees go).
             notices.extend(crate::task::variants::stop(tx, task_id, "cancelled")?);
             // Its runs parked for a usage limit end now; they must not start again at the reset.
-            notices.extend(crate::run::queue::stop_parked_runs_of_task(tx, task_id, &command_id.to_string())?);
-            cancel_children(tx, task_id, &mut notices)?;
+            notices.extend(crate::run::queue::stop_parked_runs_of_task(tx, &st, task_id, &command_id.to_string())?);
+            cancel_children(tx, &st, task_id, &mut notices)?;
             wake_parent(tx, task_id)?;
             notices.extend(crate::task::task_runs::origin_released(tx, task_id)?);
             Ok(Ok((CommandResult::TaskCancelled { task_id }, notices)))

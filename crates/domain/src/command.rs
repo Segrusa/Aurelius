@@ -40,6 +40,8 @@ pub enum CommandResult {
     EmployeeStatusChanged { employee_id: EmployeeId, status: LifecycleStatus },
     ProjectStatusChanged { project_id: ProjectId, status: LifecycleStatus },
     EmployeeMessageSent { conversation_id: ConversationId, message_id: MessageId, run_id: RunId },
+    /// A message in the group chat, with the employees it woke (each answers in a run of its own).
+    GroupMessageSent { conversation_id: ConversationId, message_id: MessageId, to: Vec<EmployeeId>, run_ids: Vec<RunId> },
     ApprovalDecided { approval_id: ApprovalId, status: ApprovalStatus, ok: bool, output: String },
     #[serde(rename = "connection_added")]
     ProviderAdded { connection_id: ProviderId },

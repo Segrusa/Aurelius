@@ -10,7 +10,7 @@ use aurelius_domain::EventNotice;
 use aurelius_storage::{StorageError, Store, Tx, blobs, conversations as conv, employees, tasks as store};
 
 /// Longest text posted at once (a colleague's result, a subagent's findings).
-const MAX_POST: usize = 12_000;
+pub(crate) const MAX_POST: usize = 12_000;
 
 /// Who says it in the task's conversation.
 #[derive(Debug, Clone, Copy)]

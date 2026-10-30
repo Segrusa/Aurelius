@@ -17,9 +17,9 @@
 use crate::Shared;
 use aurelius_domain::app_key::AppAudience;
 use aurelius_domain::webhook::{self, Envelope, EnvelopeApp, WebhookEvent};
-use aurelius_domain::{AppKeyId, EmployeeId, EventKind, EventNotice};
+use aurelius_domain::{AppKeyId, EmployeeId, EventKind, EventNotice, RunId};
 use aurelius_storage::app_keys::{self as keys, AppKeyRow, ManagementMember};
-use aurelius_storage::{Store, StorageError, queries, webhooks as outbox};
+use aurelius_storage::{Store, StorageError, conversations as conv, queries, webhooks as outbox};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -301,6 +301,12 @@ fn deliveries(store: &Store, conn: &Connection, apps: &[AppKeyRow], members: &[M
                 return Ok(out);
             }
             let Some((_, _, meta)) = outbox::event_detail(conn, notice.seq)? else { return Ok(out) };
+            // An answer to the group chat (the CEO's main chat is also the apps' channel) is not the app's reply.
+            if let Some(run) = meta["run_id"].as_str().and_then(|r| RunId::parse(r).ok())
+                && conv::group_run(conn, run)?.is_some()
+            {
+                return Ok(out);
+            }
             let message_id = meta["message_id"].as_str().unwrap_or("").to_owned();
             let text: Option<String> = conn
                 .query_row("SELECT b.storage_key FROM messages m JOIN blobs b ON b.id = m.content_blob_id WHERE m.id = ?1", [&message_id], |r| r.get(0))

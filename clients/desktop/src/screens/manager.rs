@@ -1,7 +1,8 @@
-//! The employee page (profile, its task conversations, its tasks across projects), the
-//! right panel (a task or conversation opened from another page) and 11 task history.
+//! The employee page (profile, its settings, its tasks across projects and their
+//! conversations; the user talks with it in the Team chat), the right panel (a task or
+//! conversation opened from another page) and 11 task history.
 
-use super::chat::{composer, user_bubble};
+use super::chat::{browser_chip, composer, mode_chip, screen_chip, user_bubble};
 use crate::app::{AppView, ManagerRef, NeedsYou, Panel, ProjectRef, Page};
 use aurelius_domain::employee::LifecycleStatus;
 use crate::keymap::*;
@@ -85,6 +86,28 @@ impl AppView {
                     .on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(ToggleHistory), cx))),
             ));
 
+        // Its own settings, for all its work: mode (the default for new work), browser and screen.
+        let settings = self.real_manager(manager.key).map(|m| {
+            let (id, mode, browser, screen) = (m.id, m.agent_mode, m.browser_allowed, m.screen_allowed);
+            let task_open = self.current_manager_thread().is_some();
+            h().flex_none().px(px(28.)).py(px(8.)).gap(px(10.)).gap_y(px(4.)).flex_wrap().border_b_1().border_color(c(theme::BORDER))
+                .text_size(px(12.5)).text_color(c(theme::TEXT_2))
+                .child(div().text_color(c(theme::MUTED)).child("Settings"))
+                .child(div().id("employee-mode").tooltip(ui::tip("Its mode for new work", None)).child(
+                    // Shift+Tab switches the open task's mode, else this one.
+                    mode_chip("employee-mode-chip", mode, (!task_open).then_some("shift-tab"), cx, move |this, _, cx| this.cycle_employee_mode(id, cx)),
+                ))
+                .child(browser_chip(browser, cx))
+                .child(screen_chip(screen, cx))
+                .child(div().flex_1())
+                .child(
+                    h().id("employee-team-chat").gap(px(6.)).cursor_pointer().text_color(c(theme::ACCENT_TEXT)).hover(|s| s.text_color(c(theme::TEXT)))
+                        .on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(GoTeamChat), cx)))
+                        .child(format!("Talk with {} in Team chat →", m.name))
+                        .child(ui::kbd("secondary-8", cx).opacity(0.6)),
+                )
+        });
+
         let agents = if real { self.real_manager(manager.key).map(|m| m.agents.clone()).unwrap_or_default() } else { Vec::new() };
         // What runs for the open conversation; its own answer already streams in the chat,
         // its subagents show in the chip above the composer.
@@ -100,6 +123,7 @@ impl AppView {
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.drop_files(paths.paths(), cx)))
             })
             .child(header)
+            .children(settings)
             .child(self.conversation_pane(move |this, _, cx| this.manager_scroll(key, cx), cx))
             .when(!here.is_empty(), |el| el.child(render_agents(&here, cx)))
             .when(current.is_some() || !real, |el| el.child(composer(self, "", false, cx)));
@@ -268,7 +292,13 @@ impl AppView {
             .when(!self.manager_extra.is_empty(), |el| {
                 el.child(div().text_size(px(12.)).text_color(c(theme::MUTED)).child("Sample employee: messages are not saved."))
             });
-        let conversation: AnyElement = if real {
+        let conversation: AnyElement = if real && self.current_manager_thread().is_none() {
+            // No task (yet): the page has no conversation of its own.
+            v().w_full().max_w(px(700.)).gap(px(6.)).text_size(px(13.5)).text_color(c(theme::TEXT_2))
+                .child(div().text_size(px(15.)).text_color(c(theme::TEXT)).child(format!("{} has no tasks yet.", manager.name)))
+                .child(format!("Tasks you give {} show on the right, each with its conversation. Talk with {} in the Team chat.", manager.name, manager.name))
+                .into_any_element()
+        } else if real {
             v().w_full().max_w(px(700.)).gap(px(16.))
                 .child(self.render_messages(manager.name.clone(), cx))
                 .into_any_element()
@@ -339,40 +369,18 @@ impl AppView {
             )
     }
 
-    /// The employee's conversations, on the right, in two tabs: Chat (its chat with you,
-    /// older chats read-only) and Tasks (its tasks across projects; a dot marks those at work).
+    /// The employee's tasks across projects, on the right, each opening its conversation
+    /// (a dot marks those at work).
     fn render_manager_threads(&self, agents: &[aurelius_protocol::AgentView], cx: &mut Context<Self>) -> AnyElement {
         let Page::Employee(key) = self.screen else { return div().into_any_element() };
         let Some(m) = self.real_manager(key) else { return div().into_any_element() };
         let current = self.current_manager_thread();
-        let main = m.conversation_id;
         let working: std::collections::HashSet<aurelius_domain::ConversationId> = agents.iter().filter_map(|a| a.conversation_id).collect();
         // Its tasks' conversations come from the task list: protocol 3 lists only its chats on the employee.
         let mut task_threads: Vec<(aurelius_domain::ConversationId, &aurelius_protocol::TaskView)> =
             self.tasks.iter().filter(|t| t.employee_id == Some(m.id)).filter_map(|t| t.conversation_id.map(|c| (c, t))).collect();
         // Those at work on top, then the latest change first.
         task_threads.sort_by_key(|(c, t)| (std::cmp::Reverse(working.contains(c)), std::cmp::Reverse(t.updated_at_ms)));
-        // A tab: its label, how many (accent while some are active), and on the
-        // other tab a dot when one is at work and a diamond when one waits for the user.
-        let tab = |id: &'static str, label: &'static str, on: bool, count: Option<String>, accent: bool, busy: bool, needs: bool, tasks: bool, cx: &mut Context<Self>| {
-            h().id(id).role(Role::Tab).aria_label(label)
-                .flex_1()
-                .justify_center()
-                .gap(px(6.))
-                .px(px(10.))
-                .py(px(5.))
-                .rounded(px(6.))
-                .cursor_pointer()
-                .text_size(px(13.))
-                .text_color(c(if on { theme::TEXT } else { theme::TEXT_2 }))
-                .when(on, |el| el.bg(c(theme::SURFACE_2)))
-                .hover(|s| s.bg(c(theme::SURFACE_2)).text_color(c(theme::TEXT)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_threads_tab(tasks, cx)))
-                .child(label)
-                .when_some(count, |el, n| el.child(div().text_size(px(11.5)).text_color(c(if accent { theme::ACCENT_TEXT } else { theme::MUTED })).child(n)))
-                .when(!on && busy, |el| el.child(ui::pulse_dot((id, 0usize), 6., theme::ACCENT)))
-                .when(!on && needs, |el| el.child(ui::diamond(7., theme::ACCENT_TEXT, true)))
-        };
         let mut panel = v().id("manager-threads")
             .size_full()
             .overflow_y_scrollbar()
@@ -388,31 +396,13 @@ impl AppView {
             (i, *id, *t, thread_group(ongoing, current == Some(*id), t.updated_at_ms, now))
         }).collect();
         let tasks_active = task_groups.iter().filter(|(.., g)| *g == ThreadGroup::Active).count();
-        let on_tasks = self.threads_on_tasks();
-        let chats_busy = m.conversations.iter().any(|c| working.contains(&c.id));
-        let chats_need = m.conversations.iter().any(|c| self.needs_you(c.id).is_some());
+        // How many (accent while some are active).
         let tasks_count = if tasks_active > 0 { format!("{tasks_active} active · {}", task_threads.len()) } else { task_threads.len().to_string() };
         panel = panel.child(
-            h().gap(px(4.)).pb(px(8.)).mb(px(4.)).border_b_1().border_color(c(theme::BORDER))
-                .child(tab("threads-tab-chat", "Chat", !on_tasks, None, false, chats_busy, chats_need, false, cx))
-                .child(tab(
-                    "threads-tab-tasks", "Tasks", on_tasks, Some(tasks_count), tasks_active > 0,
-                    task_threads.iter().any(|(c, _)| working.contains(c)), task_threads.iter().any(|(c, _)| self.needs_you(*c).is_some()), true, cx,
-                )),
+            h().gap(px(6.)).px(px(10.)).py(px(5.)).pb(px(8.)).mb(px(4.)).border_b_1().border_color(c(theme::BORDER)).text_size(px(13.))
+                .child("Tasks")
+                .child(div().text_size(px(11.5)).text_color(c(if tasks_active > 0 { theme::ACCENT_TEXT } else { theme::MUTED })).child(tasks_count)),
         );
-
-        if !on_tasks {
-            // Its chat with you first; chats from before protocol 3 below it, read-only.
-            let mut chats: Vec<&aurelius_protocol::ConversationSummary> = m.conversations.iter().collect();
-            chats.sort_by_key(|c| c.id != main);
-            for (i, chat) in chats.into_iter().enumerate() {
-                let persistent = chat.id == main;
-                let title: SharedString = if persistent { format!("Chat with {}", m.name).into() } else { chat.title.clone().into() };
-                let detail = if persistent { ui::fmt_when(chat.updated_at_ms) } else { format!("Earlier · read-only · {}", ui::fmt_when(chat.updated_at_ms)) };
-                panel = panel.child(self.thread_row(10_000 + i, chat.id, title, detail, current == Some(chat.id), !persistent, working.contains(&chat.id), self.needs_you(chat.id), None, cx));
-            }
-            return panel.into_any_element();
-        }
 
         // Within a section, what is going on comes first; below "Past" what ended
         // today, dimmed; the rest folds under "Earlier".

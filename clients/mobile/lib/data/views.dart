@@ -174,10 +174,10 @@ extension MessageViewState on MessageView {
   bool get isUser => role == MessageRole.user;
   bool get isStreaming => status == MessageStatus.partial;
 
-  MessageView withText(String next, {List<ActivityView>? activity}) => MessageView(
+  MessageView withText(String next, {List<ActivityView>? activity, String? author}) => MessageView(
         activity: activity ?? this.activity,
         approvalId: approvalId,
-        author: author,
+        author: author ?? this.author,
         createdAtMs: createdAtMs,
         files: files,
         id: id,

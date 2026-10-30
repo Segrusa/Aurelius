@@ -27,7 +27,7 @@ pub enum BridgeCall {
     #[serde(rename = "memory.run")]
     MemoryRun { run_id: RunId, op: EmployeeMemoryOp },
     /// An employee's action during a run: delegate, hand over, message a task, note an idea,
-    /// read tasks and conversations, propose a colleague.
+    /// read tasks and conversations, propose a colleague, read and post in the group chat.
     #[serde(rename = "employee.act")]
     EmployeeAct { run_id: RunId, op: EmployeeTaskOp },
     /// Stop the daemon (`aurelius-ctl shutdown`).
@@ -108,6 +108,11 @@ pub enum EmployeeTaskOp {
     /// Management chooses the mode of its own task conversation (`auto` or `plan`), with a reason
     /// that is shown in the thread. Only management, only without an open plan approval.
     SetMode { mode: String, #[serde(default)] reason: String },
+    /// The latest `last` messages of the company's group chat (default and most 50).
+    ReadGroupChat { #[serde(default, skip_serializing_if = "Option::is_none")] last: Option<u32> },
+    /// Post in the group chat under the employee's name; `@Name` wakes that colleague
+    /// (never the poster, at most `group_chat::MAX_HOPS` hops after the user's message).
+    PostToGroupChat { message: String },
 }
 
 fn yes() -> bool {

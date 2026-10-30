@@ -28,6 +28,8 @@ EmployeeSummary employeeOf({
   LifecycleStatus status = LifecycleStatus.active,
   bool working = false,
   AgentMode agentMode = AgentMode.ask,
+  bool browserAllowed = false,
+  bool screenAllowed = false,
   bool sequentialTasks = false,
   String conversationId = 'main',
   List<ConversationSummary> conversations = const [],
@@ -39,7 +41,7 @@ EmployeeSummary employeeOf({
     EmployeeSummary(
       agentMode: agentMode,
       agents: agents,
-      browserAllowed: false,
+      browserAllowed: browserAllowed,
       conversationId: conversationId,
       conversations: conversations,
       departmentId: departmentId,
@@ -50,7 +52,7 @@ EmployeeSummary employeeOf({
       projectsActive: projectsActive,
       reportsTo: reportsTo,
       role: role,
-      screenAllowed: false,
+      screenAllowed: screenAllowed,
       sequentialTasks: sequentialTasks,
       status: status,
       title: title,
@@ -182,6 +184,7 @@ ApprovalView approvalOf(
   int? expiresInMinutes = 30,
   String? taskId,
   bool alwaysAllowEligible = false,
+  String runId = 'run',
 }) =>
     ApprovalView(
       account: '',
@@ -196,7 +199,7 @@ ApprovalView approvalOf(
       requestedAtMs: 0,
       requester: requester,
       resources: const [],
-      runId: 'run',
+      runId: runId,
       status: status,
       taskId: taskId,
       tool: tool,

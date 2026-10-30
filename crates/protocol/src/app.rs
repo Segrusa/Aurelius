@@ -44,6 +44,8 @@ pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
             | Method::MemoryList { .. }
             | Method::MemoryGetContext { .. }
             | Method::IdeaList { .. } | Method::IdeaListAll {} => Ok(vec![Read]),
+            // The group chat is the user's own conversation with the team, like an employee's chat.
+            Method::GroupChatGet => Err(NOT_FOR_APPS),
             _ => Err(NOT_FOR_APPS),
         },
         Call::Write(WriteMethod::Domain(command)) => command_needs(command),
@@ -82,6 +84,7 @@ fn command_needs(command: &Command) -> Result<Vec<AppScope>, &'static str> {
         Command::SetAgentMode(m) => Ok(auto(Some(m.mode), if m.mode == AgentMode::Auto { vec![] } else { vec![Run] })),
         Command::DecideApproval(d) if d.always_allow => Err("Apps cannot choose 'always allow'; the user decides that in Aurelius."),
         Command::DecideApproval(_) | Command::AnswerQuestion(_) | Command::DecidePlan(_) => Ok(vec![Approve]),
+        Command::SendGroupMessage(_) => Err(NOT_FOR_APPS),
         _ => Err(NOT_FOR_APPS),
     }
 }
@@ -134,6 +137,14 @@ mod tests {
 
     fn exec(command: Command) -> Call {
         Call::Write(WriteMethod::Domain(command))
+    }
+
+    #[test]
+    fn apps_never_reach_the_group_chat() {
+        let send = exec(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text: "Hi".into(), images: vec![], files: vec![] }));
+        assert_eq!(required(&send), Err(NOT_FOR_APPS));
+        assert_eq!(required(&Call::Read(Method::GroupChatGet)), Err(NOT_FOR_APPS));
+        assert!(allowed_for(&[AppScope::Read, AppScope::Run, AppScope::Approve], AppAudience::Management, &send).is_err());
     }
 
     fn task(employee: bool, mode: Option<AgentMode>) -> Call {

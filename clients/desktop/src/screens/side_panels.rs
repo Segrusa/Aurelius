@@ -184,6 +184,12 @@ impl AppView {
     /// Show a conversation where it lives: with its project or its employee.
     pub fn open_conversation_anywhere(&mut self, conversation: ConversationId, window: &mut Window, cx: &mut Context<Self>) {
         self.overlay = Overlay::None;
+        // An employee's main chat is no longer shown: its runs answer in the group chat,
+        // which shows what they ask (`group_approvals`).
+        if Some(conversation) == self.group_conversation || self.is_main_chat(conversation) {
+            self.go_nav(crate::app::NavItem::Chat, window, cx);
+            return;
+        }
         // A task's conversation and an employee's chat open on the employee's page.
         let manager = self.tasks.iter().find(|t| t.conversation_id == Some(conversation)).and_then(|t| t.employee_id)
             .or_else(|| self.managers.iter().find(|m| m.conversation_id == conversation || m.conversations.iter().any(|t| t.id == conversation)).map(|m| m.id));

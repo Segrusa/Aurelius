@@ -450,6 +450,7 @@ impl CommandService {
         let actor = ctx.principal_id.to_string();
         // An app writing to the employee's chat gets the replies to it (management channel).
         let app_key = ctx.app.as_ref().map(|a| a.key_id);
+        let store = self.store.clone();
         self.commit(command_id, hash, move |tx| {
             let Some(current) = employees::load_employee(tx, employee_id)? else {
                 return Ok(Err(domain_error(DomainError::EmployeeNotFound(employee_id))));
@@ -510,7 +511,7 @@ impl CommandService {
             }
             let mut notices = vec![n];
             if interrupt {
-                notices.extend(crate::run::queue::interrupt_conversation(tx, &meta, &command_id.to_string(), conversation_id)?);
+                notices.extend(crate::run::queue::interrupt_conversation(tx, &store, &meta, &command_id.to_string(), conversation_id)?);
             }
             let (run_id, run_notice) = queue_run(tx, &meta, &command_id.to_string(), conversation_id, message_id)?;
             notices.push(run_notice);

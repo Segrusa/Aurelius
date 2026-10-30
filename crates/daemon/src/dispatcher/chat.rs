@@ -248,7 +248,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
             }
             RuntimeEvent::Progress { output_tokens } => {
                 shared.live.tokens(plan.run_id, output_tokens);
-                let _ = shared.streams.send(StreamDelta {
+                stream(&shared, &plan, StreamDelta {
                     run_id: plan.run_id,
                     conversation_id: plan.conversation_id,
                     message_id: plan.message_id,
@@ -265,7 +265,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                 if let Ok(mut live) = shared.live_text.lock() {
                     live.insert(plan.run_id, text.clone());
                 }
-                let _ = shared.streams.send(StreamDelta {
+                stream(&shared, &plan, StreamDelta {
                     run_id: plan.run_id,
                     conversation_id: plan.conversation_id,
                     message_id: plan.message_id,
@@ -310,7 +310,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                         let _ = blocking(move || s.service.record_activity_finished(&p, &call_id, ok, &output)).await;
                     }
                 }
-                let _ = shared.streams.send(StreamDelta {
+                stream(&shared, &plan, StreamDelta {
                     run_id: plan.run_id,
                     conversation_id: plan.conversation_id,
                     message_id: plan.message_id,
@@ -400,7 +400,7 @@ async fn park_for_quota(shared: &Arc<Shared>, plan: &ChatRunPlan, epoch: i64, re
 /// Since when the run's job runs and its tokens so far.
 /// A stream update without text, so clients see the run's phase change at once.
 fn send_progress(shared: &Shared, plan: &ChatRunPlan) {
-    let _ = shared.streams.send(StreamDelta {
+    stream(shared, plan, StreamDelta {
         run_id: plan.run_id,
         conversation_id: plan.conversation_id,
         message_id: plan.message_id,
@@ -409,6 +409,15 @@ fn send_progress(shared: &Shared, plan: &ChatRunPlan) {
         progress: progress(shared, plan.run_id),
         activity_changes: false,
     });
+}
+
+/// Send a stream update; a run the group chat woke streams there too, under the
+/// id its answer gets in the group (`GroupRun::message_id`).
+fn stream(shared: &Shared, plan: &ChatRunPlan, delta: StreamDelta) {
+    if let Some(group) = plan.group {
+        let _ = shared.streams.send(StreamDelta { conversation_id: group.conversation_id, message_id: group.message_id, ..delta.clone() });
+    }
+    let _ = shared.streams.send(delta);
 }
 
 fn progress(shared: &Shared, run_id: aurelius_domain::RunId) -> Option<aurelius_protocol::RunProgress> {

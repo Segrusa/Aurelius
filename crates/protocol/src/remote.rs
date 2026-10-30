@@ -54,6 +54,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ConversationGet { .. }
         | Method::EmployeeList { .. }
         | Method::EmployeeChat { .. }
+        | Method::GroupChatGet
         | Method::DepartmentList { .. }
         | Method::CompanyGet
         | Method::ProjectConversationList { .. }
@@ -210,6 +211,7 @@ fn command_needs(command: &Command) -> Needs {
         | Command::AttachFile(_)
         | Command::RemoveAttachment(_)
         | Command::SendEmployeeMessage(_)
+        | Command::SendGroupMessage(_)
         | Command::StartProjectConversation(_)
         | Command::SendProjectMessage(_)
         | Command::ShareMessage(_)
@@ -632,9 +634,12 @@ mod tests {
         ] {
             assert_eq!(required(&exec(command)), cap(Capability::TaskControl));
         }
-        for method in [Method::CompanyGet, Method::DepartmentList { archived: true }, Method::EmployeeChat { employee_id: EmployeeId::new() }] {
+        for method in [Method::CompanyGet, Method::DepartmentList { archived: true }, Method::EmployeeChat { employee_id: EmployeeId::new() }, Method::GroupChatGet] {
             assert_eq!(required(&read(method)), cap(Capability::Read));
         }
+        // Writing in the group chat is chatting.
+        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text: "Hi".into(), images: vec![], files: vec![] });
+        assert_eq!(required(&exec(group)), cap(Capability::Chat));
     }
 
     #[test]

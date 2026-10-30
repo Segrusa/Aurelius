@@ -1040,10 +1040,87 @@ fn migration_15_deletes_plain_chats_and_keeps_the_rest() {
     drop(store);
     let store = Store::open(dir.path()).unwrap();
     let count = |sql: &'static str| -> i64 { store.read(|c| Ok(c.query_row(sql, [], |r| r.get(0))?)).unwrap() };
-    assert_eq!(count("SELECT COUNT(*) FROM conversations"), 1, "only the project conversation is left");
+    // Migration 17 adds the group chat; of the old ones only the project conversation is left.
+    assert_eq!(count("SELECT COUNT(*) FROM conversations WHERE kind <> 'group'"), 1, "only the project conversation is left");
     assert_eq!(store.read(|c| conversations::project_of_conversation(c, kept)).unwrap(), Some(project));
     assert_eq!(count("SELECT COUNT(*) FROM runs"), 0);
     assert_eq!(count("SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'web_research'"), 0);
     let refused = store.write(move |tx| Ok(tx.execute("INSERT INTO conversations(id, kind, title, version, created_at_ms) VALUES ('x', 'chat', '', 1, 0)", [])?));
     assert!(refused.is_err(), "kind 'chat' is gone from the schema");
+}
+
+#[test]
+fn migration_17_adds_one_group_chat_and_keeps_every_conversation_and_message() {
+    use crate::conversations::NewMessage;
+    use aurelius_domain::{MessageId, conversation::{MessageRole, MessageStatus}};
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open_until(dir.path(), 16).unwrap();
+    let (project, plans, employee, chat) = (ProjectId::new(), ConversationId::new(), EmployeeId::new(), ConversationId::new());
+    store
+        .write(move |tx| {
+            events::insert_project_projection(tx, project, "Atlas", None)?;
+            conversations::insert_project_conversation(tx, plans, project, "Plans")?;
+            employees::insert_employee(tx, employee, "Simon", "Dev", None, None, None, None, &serde_json::json!({}), chat)?;
+            // The employee's settings live on its main chat row: they must come through.
+            tx.execute("UPDATE conversations SET agent_mode = 'auto', browser_allowed = 1, run_json = '{\"model\":\"m\"}' WHERE id = ?1", [chat.to_string()])?;
+            tx.execute("UPDATE conversations SET archived_at_ms = 5 WHERE id = ?1", [plans.to_string()])?;
+            for (i, conversation) in [plans, chat, chat].into_iter().enumerate() {
+                let appended = append(tx, event(&format!("message-{i}"), 1, &format!("k-message-{i}")))?;
+                conversations::insert_message(tx, NewMessage {
+                    id: MessageId::new(),
+                    conversation_id: conversation,
+                    role: MessageRole::User,
+                    content_blob_id: None,
+                    source_event_id: appended.id,
+                    status: MessageStatus::Complete,
+                    run_id: None,
+                    reply_to: None,
+                })?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    let rows = |store: &Store| -> (Vec<String>, Vec<String>) {
+        store
+            .read(|c| {
+                let conversations = c
+                    .prepare("SELECT id || ' ' || kind || ' ' || COALESCE(project_id, '-') || ' ' || COALESCE(employee_id, '-') || ' ' || title || ' ' || agent_mode || ' ' || browser_allowed || ' ' || COALESCE(run_json, '-') || ' ' || COALESCE(archived_at_ms, '-') FROM conversations WHERE kind <> 'group' ORDER BY id")?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<Result<Vec<String>, _>>()?;
+                let messages = c
+                    .prepare("SELECT id || ' ' || conversation_id || ' ' || ordinal FROM messages ORDER BY id")?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<Result<Vec<String>, _>>()?;
+                Ok((conversations, messages))
+            })
+            .unwrap()
+    };
+    let count = |store: &Store, sql: &'static str| -> i64 { store.read(|c| Ok(c.query_row(sql, [], |r| r.get(0))?)).unwrap() };
+    let before = rows(&store);
+    let (conversations_before, messages_before) = (count(&store, "SELECT COUNT(*) FROM conversations"), count(&store, "SELECT COUNT(*) FROM messages"));
+    assert_eq!((conversations_before, messages_before), (2, 3));
+    drop(store);
+
+    let store = Store::open(dir.path()).unwrap();
+    // Every row, as it was; the only new one is the group chat.
+    assert_eq!(rows(&store), before);
+    assert_eq!(count(&store, "SELECT COUNT(*) FROM conversations"), conversations_before + 1);
+    assert_eq!(count(&store, "SELECT COUNT(*) FROM messages"), messages_before);
+    assert_eq!(count(&store, "SELECT COUNT(*) FROM conversations WHERE kind = 'group' AND project_id IS NULL AND employee_id IS NULL"), 1);
+    let group = store.read(conversations::group_conversation).unwrap().expect("the group chat exists");
+    assert!(group.to_string().len() == 36);
+    // The employee still loads through its main chat, with its settings.
+    let loaded = store.write(move |tx| employees::load_employee(tx, employee)).unwrap().unwrap();
+    assert_eq!(loaded.conversation_id, chat);
+    assert_eq!(store.read(|c| conversations::agent_mode(c, chat)).unwrap(), aurelius_domain::autonomy::AgentMode::Auto);
+    assert_eq!(count(&store, "SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
+
+    // One group chat only, and a group belongs to neither a project nor an employee.
+    let second = store.write(|tx| Ok(tx.execute("INSERT INTO conversations(id, kind, title, version, created_at_ms) VALUES ('x', 'group', '', 1, 0)", [])?));
+    assert!(second.is_err(), "one group chat per company");
+    let owned = store.write(move |tx| {
+        tx.execute("DELETE FROM conversations WHERE kind = 'group'", [])?;
+        Ok(tx.execute("INSERT INTO conversations(id, kind, employee_id, title, version, created_at_ms) VALUES ('y', 'group', ?1, '', 1, 0)", [employee.to_string()])?)
+    });
+    assert!(owned.is_err(), "a group chat has no employee");
 }

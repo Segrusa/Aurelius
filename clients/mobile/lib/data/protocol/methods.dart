@@ -114,6 +114,11 @@ abstract final class Methods {
   static const String gitGetDiff = 'git.get_diff';
   /// Branch and uncommitted change of the folder a conversation works in; none outside a Git repository.
   static const String gitGetStatus = 'git.get_status';
+  /// The company's group chat (Team chat): the user and every employee. Its
+  /// messages and settings, as `conversation.get` answers them; an employee's
+  /// messages carry its name as `author`. Write with `group_chat.send`.
+  static const String groupChatGet = 'group_chat.get';
+  static const String groupChatSend = 'group_chat.send';
   static const String heartbeatSet = 'heartbeat.set';
   static const String ideaAdd = 'idea.add';
   static const String ideaDelete = 'idea.delete';
@@ -481,6 +486,13 @@ Map<String, dynamic> gitGetStatus({required String conversationId}) => <String, 
   'params': <String, dynamic>{
     'conversation_id': conversationId,
   },
+};
+
+/// The company's group chat (Team chat): the user and every employee. Its
+/// messages and settings, as `conversation.get` answers them; an employee's
+/// messages carry its name as `author`. Write with `group_chat.send`.
+Map<String, dynamic> groupChatGet() => <String, dynamic>{
+  'method': Methods.groupChatGet,
 };
 
 Map<String, dynamic> ideaList({required String projectId}) => <String, dynamic>{
@@ -1398,6 +1410,11 @@ Map<String, dynamic> employeeSetStatus(SetEmployeeStatus params) => <String, dyn
 
 Map<String, dynamic> employeeUpdate(UpdateEmployee params) => <String, dynamic>{
   'method': Methods.employeeUpdate,
+  'params': params.toJson(),
+};
+
+Map<String, dynamic> groupChatSend(SendGroupMessage params) => <String, dynamic>{
+  'method': Methods.groupChatSend,
   'params': params.toJson(),
 };
 

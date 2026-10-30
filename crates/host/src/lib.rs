@@ -387,6 +387,12 @@ mod tests {
     /// 2026-10-25 (last Sunday of October): Brussels goes from UTC+2 to UTC+1 at 01:00 UTC.
     const BRUSSELS_FALL_BACK_MS: i64 = 1_792_890_000_000;
 
+    // POSIX `tzset`: not every `libc` target exports it (Linux glibc does not).
+    #[cfg(unix)]
+    unsafe extern "C" {
+        fn tzset();
+    }
+
     #[cfg(unix)]
     #[test]
     fn local_offset_follows_the_tz_variable() {
@@ -394,12 +400,12 @@ mod tests {
         unsafe {
             std::env::remove_var("AURELIUS_UTC_OFFSET_MIN");
             std::env::set_var("TZ", "Asia/Kolkata");
-            libc::tzset();
+            tzset();
         }
         assert_eq!(local_utc_offset_minutes(), 330);
         unsafe {
             std::env::set_var("TZ", "Europe/Brussels");
-            libc::tzset();
+            tzset();
         }
         assert_eq!(utc_offset_minutes_at(BRUSSELS_FALL_BACK_MS - 1000), 120);
         assert_eq!(utc_offset_minutes_at(BRUSSELS_FALL_BACK_MS), 60);

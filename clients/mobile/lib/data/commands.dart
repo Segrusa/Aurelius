@@ -52,6 +52,11 @@ abstract final class Commands {
         text: text,
       ));
 
+  /// A message of the user in the group chat (Team): `@Name` wakes those
+  /// employees, else the CEO answers.
+  static Map<String, dynamic> sendGroupMessage(String text, {List<String> images = const [], List<String> files = const []}) =>
+      groupChatSend(SendGroupMessage(files: files, images: images, text: text));
+
   /// A new conversation of the project. Auto, browser and screen need the Approve right.
   static Map<String, dynamic> startProjectConversation(String projectId, {AgentMode? mode, bool browserAllowed = false, bool screenAllowed = false}) =>
       projectConversationStart(StartProjectConversation(

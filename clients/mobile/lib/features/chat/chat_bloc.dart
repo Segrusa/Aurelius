@@ -28,6 +28,11 @@ class _AppendReceived extends ChatEvent {
   final StreamAppend append;
 }
 
+/// Group chat: a second passed while answers stream in (see [ChatBloc._tick]).
+class _LiveTicked extends ChatEvent {
+  const _LiveTicked();
+}
+
 class ChatMessageSent extends ChatEvent {
   const ChatMessageSent(this.text, {this.now = false});
 
@@ -340,15 +345,37 @@ class ChatState extends Equatable {
   List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress];
 }
 
-/// One conversation: an employee's chat or task conversation when [employeeId]
-/// is set (messages then go to the employee), or a project conversation when
-/// [projectId] is set (messages go to `project_conversation.send`).
+/// One conversation: an employee's task conversation when [employeeId] is set
+/// (messages then go to the employee), a project conversation when [projectId]
+/// is set (messages go to `project_conversation.send`), or the company's group
+/// chat with [ChatBloc.group] (`group_chat.get` / `group_chat.send`).
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc(this._repository, {String? conversationId, this.employeeId, this.projectId})
       : assert(employeeId != null || projectId != null, 'a conversation belongs to an employee or a project'),
+        group = false,
+        runAuthor = null,
+        liveTimeout = Duration.zero,
         super(ChatState(conversationId: conversationId, loading: conversationId != null)) {
+    _init(conversationId != null);
+  }
+
+  /// The group chat (Team). Its id comes with the first load. [runAuthor]
+  /// names the employee a run answers for while it streams (its answer is no
+  /// message in the group until it ends); `null` once that run no longer works.
+  /// A live answer that never becomes a message goes [liveTimeout] after its
+  /// last update once its run no longer works.
+  ChatBloc.group(this._repository, {this.runAuthor, this.liveTimeout = const Duration(seconds: 3)})
+      : employeeId = null,
+        projectId = null,
+        group = true,
+        super(const ChatState()) {
+    _init(true);
+  }
+
+  void _init(bool load) {
     on<ChatRefreshed>(_refresh, transformer: debounceRestartable(const Duration(milliseconds: 80)));
     on<_AppendReceived>(_append, transformer: sequential());
+    on<_LiveTicked>(_tick);
     on<ChatMessageSent>(_send, transformer: sequential());
     on<ChatUnsentRetried>(_retryUnsent, transformer: sequential());
     on<ChatUnsentDiscarded>(_discardUnsent);
@@ -377,12 +404,18 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       _repository.chatChanges.where((e) => e.aggregateId == state.conversationId || e.isRun).listen((_) => add(const ChatRefreshed())),
       _repository.appends.where((a) => a.conversationId == state.conversationId).listen((a) => add(_AppendReceived(a))),
     ];
-    if (conversationId != null && _repository.linkState.isOnline) add(const ChatRefreshed());
+    if (load && _repository.linkState.isOnline) add(const ChatRefreshed());
   }
 
   final AureliusRepository _repository;
   final String? employeeId;
   final String? projectId;
+
+  /// The company's group chat: messages carry their author, answers stream
+  /// before they are messages there (see [_live]).
+  final bool group;
+  final String? Function(String runId)? runAuthor;
+  final Duration liveTimeout;
   late final List<StreamSubscription<Object?>> _subs;
   static const _uuid = Uuid();
 
@@ -398,14 +431,53 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// as soon as their receipt says which message they became.
   final Set<String> _discarded = {};
 
+  /// Group chat: answers streaming in that are no message there yet, with
+  /// their last update. They show at the end until the snapshot has them.
+  final Map<String, DateTime> _live = {};
+
+  /// Runs while [_live] has answers: no refresh may come after the last one
+  /// ends (an answer that only posted with post_to_group_chat is never copied).
+  Timer? _ticker;
+
+  void _watchLive() {
+    if (_live.isEmpty) {
+      _ticker?.cancel();
+      _ticker = null;
+    } else {
+      _ticker ??= Timer.periodic(liveTimeout < const Duration(seconds: 1) ? liveTimeout : const Duration(seconds: 1), (_) => add(const _LiveTicked()));
+    }
+  }
+
+  /// Live answers whose run ended without a message go; one without its
+  /// author yet gets it once the company knows who runs it.
+  void _tick(_LiveTicked event, Emitter<ChatState> emit) {
+    final before = Set.of(_live.keys);
+    _expireLive(const {});
+    _watchLive();
+    final gone = before.difference(_live.keys.toSet());
+    var named = false;
+    final messages = <MessageView>[];
+    for (final m in state.messages) {
+      if (gone.contains(m.id)) continue;
+      final author = _live.containsKey(m.id) && _named(m.author) == null && m.runId != null ? _named(runAuthor?.call(m.runId!)) : null;
+      named |= author != null;
+      messages.add(author == null ? m : m.withText(m.text, author: author));
+    }
+    if (gone.isNotEmpty || named) emit(state.copyWith(messages: messages));
+  }
+
+  static String? _named(String? author) => author == null || author.trim().isEmpty ? null : author;
+
   Future<void> _refresh(ChatRefreshed event, Emitter<ChatState> emit) async {
     final id = state.conversationId;
-    if (id == null) return;
+    if (id == null && !group) return;
     try {
-      final snapshot = await _repository.messages(id);
+      final snapshot = group ? await _repository.groupChat() : await _repository.messages(id!);
+      final messages = _deleting.isEmpty ? snapshot.messages : snapshot.messages.where((m) => !_deleting.contains(m.id)).toList();
       emit(state.copyWith(
         loading: false,
-        messages: _deleting.isEmpty ? snapshot.messages : snapshot.messages.where((m) => !_deleting.contains(m.id)).toList(),
+        conversationId: snapshot.conversationId,
+        messages: group ? [...messages, ..._stillLive(messages)] : messages,
         attachments: snapshot.attachments,
         mode: snapshot.agentMode,
         browserAllowed: snapshot.browserAllowed,
@@ -423,22 +495,76 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
+  /// The streaming group answers the snapshot does not have yet. One that
+  /// never became a message (an empty answer) goes once its run no longer
+  /// works and no update came for a moment, as on the desktop.
+  List<MessageView> _stillLive(List<MessageView> snapshot) {
+    _expireLive({for (final m in snapshot) m.id});
+    _watchLive();
+    return [for (final m in state.messages) if (_live.containsKey(m.id)) m];
+  }
+
+  /// Drops the live answers that are messages now ([arrived]) or whose run
+  /// no longer works and that had no update for [liveTimeout].
+  void _expireLive(Set<String> arrived) {
+    final now = DateTime.now();
+    _live.removeWhere((id, at) {
+      if (arrived.contains(id)) return true;
+      final m = state.messages.where((m) => m.id == id).firstOrNull;
+      if (m == null) return true;
+      final running = m.runId != null && runAuthor?.call(m.runId!) != null;
+      return !running && now.difference(at) > liveTimeout;
+    });
+  }
+
   void _append(_AppendReceived event, Emitter<ChatState> emit) {
-    final index = state.messages.indexWhere((m) => m.id == event.append.messageId);
+    final append = event.append;
+    final index = state.messages.indexWhere((m) => m.id == append.messageId);
     if (index < 0) {
+      // Group chat: an answer that is no message there until it ends.
+      if (group) return _startLive(append, emit);
       // A message we have not seen yet (just started): fetch it.
       add(const ChatRefreshed());
       return;
     }
-    final next = event.append.applyTo(state.messages[index].text);
+    final next = append.applyTo(state.messages[index].text);
     if (next == null) {
-      add(const ChatRefreshed());
+      // A live group answer cannot be fetched; the next whole update repairs it.
+      if (!_live.containsKey(append.messageId)) add(const ChatRefreshed());
       return;
     }
+    if (_live.containsKey(append.messageId)) _live[append.messageId] = DateTime.now();
     final messages = [...state.messages];
-    messages[index] = messages[index].withText(next, activity: event.append.activity);
+    final author = _named(messages[index].author) ?? (_live.containsKey(append.messageId) ? runAuthor?.call(append.runId) : null);
+    messages[index] = messages[index].withText(next, activity: append.activity, author: author);
     final progress = event.append.progress;
     emit(state.copyWith(messages: messages, progress: progress == null ? null : {...state.progress, event.append.messageId: progress}));
+  }
+
+  /// The first update of a streaming group answer (each session's first one
+  /// carries the whole text so far; a later piece alone is not shown).
+  void _startLive(StreamAppend append, Emitter<ChatState> emit) {
+    final text = append.applyTo('');
+    if (text == null) return;
+    _live[append.messageId] = DateTime.now();
+    _watchLive();
+    final message = MessageView(
+      activity: append.activity ?? const [],
+      author: runAuthor?.call(append.runId),
+      createdAtMs: DateTime.now().millisecondsSinceEpoch,
+      files: const [],
+      id: append.messageId,
+      ordinal: state.messages.isEmpty ? 0 : state.messages.last.ordinal + 1,
+      queued: false,
+      role: MessageRole.assistant,
+      runId: append.runId,
+      sources: const [],
+      status: MessageStatus.partial,
+      text: text,
+      uploads: const [],
+    );
+    final progress = append.progress;
+    emit(state.copyWith(messages: [...state.messages, message], progress: progress == null ? null : {...state.progress, append.messageId: progress}));
   }
 
   Future<void> _send(ChatMessageSent event, Emitter<ChatState> emit) async {
@@ -450,7 +576,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // answer starts once it has stopped and sees what it had written. The PC
     // also stops it with the message itself (`interrupt`), even when this view
     // doesn't know the run yet; the separate stop is for PCs from before that.
-    final running = state.streaming?.runId;
+    // The group chat has no "Send now": a message there wakes whom it names.
+    final running = group ? null : state.streaming?.runId;
     if (event.now && running != null) {
       try {
         await _repository.write(Commands.stopRun(running), retry: false);
@@ -478,8 +605,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
     final images = [for (final i in unsent.images) i.path];
     final files = [for (final f in unsent.files) f.path];
-    final fresh = employeeId == null && state.conversationId == null;
-    final command = employeeId != null
+    final fresh = !group && employeeId == null && state.conversationId == null;
+    final command = group
+        ? Commands.sendGroupMessage(unsent.text, images: images, files: files)
+        : employeeId != null
         ? Commands.sendEmployeeMessage(employeeId!, unsent.text, conversationId: state.conversationId!, images: images, files: files, interrupt: unsent.interrupt)
         : Commands.sendProjectMessage(
             projectId!,
@@ -583,6 +712,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   (String?, String?) _sentMessage(Receipt receipt) => switch (receipt.command) {
         CommandResultEmployeeMessageSent(:final conversationId, :final messageId) => (conversationId, messageId),
         CommandResultProjectMessageSent(:final conversationId, :final messageId) => (conversationId, messageId),
+        CommandResultGroupMessageSent(:final conversationId, :final messageId) => (conversationId, messageId),
         _ => (null, null),
       };
 
@@ -755,6 +885,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   @override
   Future<void> close() async {
+    _ticker?.cancel();
     for (final s in _subs) {
       await s.cancel();
     }
