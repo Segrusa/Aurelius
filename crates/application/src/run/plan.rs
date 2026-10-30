@@ -65,7 +65,7 @@ pub const CHAT_TOOLS_GUIDANCE: &str = "Use list_tasks to find tasks of every pro
 
 /// What an employee in plan mode is told (in the system text, or in the note when a
 /// session that started in another mode switches to it).
-pub const PLAN_MODE_GUIDANCE: &str = "Plan mode: only make a plan or analysis. Do not run or change anything; actions are refused. When your plan is ready, present it with ExitPlanMode; the user approves it, asks for changes or rejects it. Do not start the work before it is approved. If the user switches you out of plan mode while you work, Claude Code tells you so: from then on follow the new mode.";
+pub const PLAN_MODE_GUIDANCE: &str = "Plan mode: only make a plan or analysis. Do not run or change anything: files, commands and external actions are refused. Aurelius' own memory tools (remember, recall, add_idea) do work in plan mode; use them as usual. When your plan is ready, present it with ExitPlanMode; the user approves it, asks for changes or rejects it. Do not start the work before it is approved. If the user switches you out of plan mode while you work, Claude Code tells you so: from then on follow the new mode.";
 
 /// What management is told in a task whose mode the user left to it: when to work in Auto and
 /// when to stay in Plan, and that it says why with `set_mode`.
@@ -596,7 +596,8 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 };
                 let seen = seen_history.into_iter().map(|h| h.item).collect();
                 let session = crate::run::session::SessionPlan { stored, seen, context, resume, claimed: None, planned_at_ms, compact, compaction: None, context_tokens: None };
-                let group = conv::group_run(conn, run_id)?;
+                // Its answer in the group shows the mode it started in.
+                let group = conv::group_run(conn, run_id)?.map(|g| conv::GroupRun { mode: Some(mode), ..g });
                 Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group }))
             })
             .map_err(storage_error)
@@ -606,6 +607,14 @@ You can look at the user's screen: list_windows lists the open windows, screensh
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_mode_guidance_keeps_the_own_memory_tools() {
+        for tool in ["remember", "recall", "add_idea"] {
+            assert!(PLAN_MODE_GUIDANCE.contains(tool), "{tool} is named as allowed in plan mode");
+        }
+        assert!(PLAN_MODE_GUIDANCE.contains("files, commands and external actions are refused"));
+    }
 
     fn turn(role: TurnRole, text: &str) -> Turn {
         Turn { role, text: text.into(), images: Vec::new() }

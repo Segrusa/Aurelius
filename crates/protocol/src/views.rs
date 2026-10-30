@@ -194,6 +194,10 @@ pub struct StreamDelta {
     /// update of a message in that session (that one carries every call).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub activity_changes: bool,
+    /// A group chat answer streaming: the mode its run started in. Left out
+    /// elsewhere and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<aurelius_domain::autonomy::AgentMode>,
 }
 
 /// Where the approval bridge keeps the agent's screenshots, under the data folder.

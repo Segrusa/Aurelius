@@ -417,6 +417,9 @@ pub struct StreamAppend {
     /// `activity` holds only new or changed calls (see `StreamDelta::activity_changes`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub activity_changes: bool,
+    /// A group chat answer: the mode its run started in (see `StreamDelta::mode`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<aurelius_domain::autonomy::AgentMode>,
 }
 
 #[cfg(test)]

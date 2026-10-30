@@ -526,6 +526,8 @@ pub struct GroupLive {
     /// Who writes it, kept from while the run worked: once it ends, the run no longer
     /// names its employee, but the message may not be in yet.
     pub author: Option<String>,
+    /// The mode its run started in (shown with the answer).
+    pub mode: Option<aurelius_domain::autonomy::AgentMode>,
 }
 
 /// What waits for the user in one project.
@@ -1985,8 +1987,9 @@ impl AppView {
                             Some(entry) => {
                                 entry.at = at;
                                 entry.author = entry.author.take().or(author);
+                                entry.mode = entry.mode.or(delta.mode);
                             }
-                            None => self.group_live.push(GroupLive { message: delta.message_id, run: delta.run_id, at, author }),
+                            None => self.group_live.push(GroupLive { message: delta.message_id, run: delta.run_id, at, author, mode: delta.mode }),
                         }
                     }
                     // Seen streaming: it stays whole when it ends, even if no message list came in meanwhile.
@@ -7688,7 +7691,7 @@ mod tests {
         use aurelius_domain::MessageId;
         use aurelius_protocol::{ActivityView, StreamDelta};
         let step = |call: &str, ok: Option<bool>| ActivityView { call_id: call.into(), tool: "Read".into(), input: serde_json::Value::Null, output: None, ok, offset: 0, truncated: false, output_bytes: None };
-        let first = StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "Look".into(), activity: vec![step("agent", None)], progress: None, activity_changes: false };
+        let first = StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "Look".into(), activity: vec![step("agent", None)], progress: None, activity_changes: false, mode: None };
         assert!(stream_stepped(None, &first), "the first delta of a conversation counts");
         let more_text = StreamDelta { text: "Looking at it".into(), ..first.clone() };
         assert!(!stream_stepped(Some(&first), &more_text), "text alone is no step");

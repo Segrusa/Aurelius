@@ -20,8 +20,8 @@ pub fn message_author(m: &aurelius_protocol::MessageView, fallback: &SharedStrin
 
 /// An employee's answer streaming into the group chat before it is a message there
 /// (its text and steps come from the stream); marked as a group post like it will be.
-/// Its run is what its Stop stops and what its approvals wait on.
-fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<String>) -> aurelius_protocol::MessageView {
+/// Its run is what its Stop stops and what its approvals wait on; `mode` is the one it started in.
+fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<String>, mode: Option<aurelius_domain::autonomy::AgentMode>) -> aurelius_protocol::MessageView {
     aurelius_protocol::MessageView {
         id,
         ordinal: 0,
@@ -41,6 +41,7 @@ fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<S
         uploads: Vec::new(),
         queued: false,
         usage: None,
+        mode,
     }
 }
 
@@ -247,7 +248,7 @@ impl AppView {
         }
         // Group chat: answers still streaming in, before they are messages there.
         for l in self.group_live.iter().filter(|l| !snapshot.messages.iter().any(|m| m.id == l.message)) {
-            let streaming = streaming_answer(l.message, l.run, l.author.clone().or_else(|| self.run_author(l.run)));
+            let streaming = streaming_answer(l.message, l.run, l.author.clone().or_else(|| self.run_author(l.run)), l.mode);
             rows.push(ui::rise(v().w_full().child(self.render_message(&streaming, &author, cx)), SharedString::from(format!("msg-{}", l.message)), 0).into_any_element());
         }
         // Group chat: what an employee's run asks that has no answer streaming here to show it under.
@@ -567,6 +568,8 @@ impl AppView {
             .child(
                 h().gap(px(8.)).text_size(px(12.)).text_color(c(theme::MUTED))
                     .child(message_author(m, author))
+                    // A group chat answer: the mode the employee answered in.
+                    .when_some(m.mode, |el, mode| el.child(mode_badge(mode)))
                     .when_some(m.produced_by.clone(), |el, label| el.child(div().text_color(c(theme::TEXT_2)).child(format!("· {label}"))))
                     .when(total > 1, |el| el.child(format!("· version {}/{}", index.unwrap_or(1), total)))
                     .child(div().flex_1())
@@ -1276,6 +1279,14 @@ pub fn mode_icon(mode: aurelius_domain::autonomy::AgentMode) -> &'static str {
     }
 }
 
+/// The mode an employee answered in (group chat), next to its name; not clickable.
+fn mode_badge(mode: aurelius_domain::autonomy::AgentMode) -> Div {
+    h().flex_none().gap(px(4.)).px(px(6.)).py(px(1.)).rounded(px(4.)).border_1().border_color(c(theme::BORDER))
+        .text_size(px(11.)).text_color(c(theme::TEXT_2))
+        .child(mode_icon(mode))
+        .child(mode.label())
+}
+
 /// Working mode of this agent; a click (or `keys`) switches it.
 pub fn mode_chip(id: &'static str, mode: aurelius_domain::autonomy::AgentMode, keys: Option<&'static str>, cx: &mut Context<AppView>, switch: impl Fn(&mut AppView, &mut Window, &mut Context<AppView>) + 'static) -> impl IntoElement {
     use aurelius_domain::autonomy::AgentMode;
@@ -1404,7 +1415,7 @@ mod tests {
     fn every_group_message_names_its_author() {
         let fallback = SharedString::from("Aurelius");
         let run = aurelius_domain::RunId::new();
-        let mut atlas = streaming_answer(aurelius_domain::MessageId::new(), run, Some("Atlas".into()));
+        let mut atlas = streaming_answer(aurelius_domain::MessageId::new(), run, Some("Atlas".into()), None);
         atlas.status = MessageStatus::Complete;
         let orion = aurelius_protocol::MessageView { author: Some("Orion".into()), ..atlas.clone() };
         let you = aurelius_protocol::MessageView { role: MessageRole::User, author: None, update: None, ..atlas.clone() };
@@ -1415,12 +1426,16 @@ mod tests {
         assert_eq!(atlas.update.as_deref(), Some(aurelius_domain::group_chat::GROUP_KIND));
         // Its run is what its Stop stops and its approvals wait on.
         assert_eq!(atlas.run_id, Some(run));
+        // The mode its run started in shows with it, streaming and once copied in.
+        let planning = streaming_answer(aurelius_domain::MessageId::new(), run, Some("Atlas".into()), Some(aurelius_domain::autonomy::AgentMode::Plan));
+        assert_eq!(planning.mode, Some(aurelius_domain::autonomy::AgentMode::Plan));
+        assert_eq!(atlas.mode, None, "no badge without a known mode");
     }
 
     #[test]
     fn a_line_the_server_writes_is_a_note_not_a_nameless_answer() {
         let fallback = SharedString::from("Aurelius");
-        let mut line = streaming_answer(aurelius_domain::MessageId::new(), aurelius_domain::RunId::new(), None);
+        let mut line = streaming_answer(aurelius_domain::MessageId::new(), aurelius_domain::RunId::new(), None, None);
         line.status = MessageStatus::Complete;
         assert!(is_system_line(&line, true), "a finished group post without an author");
         let blank = aurelius_protocol::MessageView { author: Some("  ".into()), ..line.clone() };

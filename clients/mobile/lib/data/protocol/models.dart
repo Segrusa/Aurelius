@@ -8594,6 +8594,7 @@ final class MessageView {
     required this.createdAtMs,
     required this.files,
     required this.id,
+    this.mode,
     required this.ordinal,
     this.producedBy,
     required this.queued,
@@ -8618,6 +8619,9 @@ final class MessageView {
   /// Files the message mentions, kept with it (open them with `query/file`).
   final List<FileRef> files;
   final String id;
+  /// An employee's answer in the group chat: the mode its run started in.
+  /// Left out for other messages and by older servers.
+  final AgentMode? mode;
   final int ordinal;
   /// "Connection · model" that produced an assistant message.
   final String? producedBy;
@@ -8651,6 +8655,7 @@ final class MessageView {
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     files: (json['files'] as List<dynamic>).map((x0) => FileRef.fromJson(x0 as Map<String, dynamic>)).toList(),
     id: (json['id'] as String),
+    mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
     ordinal: (json['ordinal'] as num).toInt(),
     producedBy: (json['produced_by'] == null ? null : (json['produced_by'] as String)),
     queued: (json['queued'] as bool),
@@ -8672,6 +8677,7 @@ final class MessageView {
     'created_at_ms': createdAtMs,
     'files': files.map((x0) => x0.toJson()).toList(),
     'id': id,
+    if (mode != null) 'mode': mode?.toJson(),
     'ordinal': ordinal,
     if (producedBy != null) 'produced_by': producedBy,
     'queued': queued,
@@ -14267,6 +14273,7 @@ final class StreamAppend {
     this.activityChanges,
     required this.conversationId,
     required this.messageId,
+    this.mode,
     required this.offset,
     this.progress,
     required this.runId,
@@ -14280,6 +14287,8 @@ final class StreamAppend {
   final bool? activityChanges;
   final String conversationId;
   final String messageId;
+  /// A group chat answer: the mode its run started in (see `StreamDelta::mode`).
+  final AgentMode? mode;
   final int offset;
   /// How long it runs and the tokens so far (see `StreamDelta`).
   final RunProgress? progress;
@@ -14291,6 +14300,7 @@ final class StreamAppend {
     activityChanges: (json['activity_changes'] == null ? null : (json['activity_changes'] as bool)),
     conversationId: (json['conversation_id'] as String),
     messageId: (json['message_id'] as String),
+    mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
     offset: (json['offset'] as num).toInt(),
     progress: (json['progress'] == null ? null : RunProgress.fromJson(json['progress'] as Map<String, dynamic>)),
     runId: (json['run_id'] as String),
@@ -14302,6 +14312,7 @@ final class StreamAppend {
     if (activityChanges != null) 'activity_changes': activityChanges,
     'conversation_id': conversationId,
     'message_id': messageId,
+    if (mode != null) 'mode': mode?.toJson(),
     'offset': offset,
     if (progress != null) 'progress': progress?.toJson(),
     'run_id': runId,
@@ -14317,6 +14328,7 @@ final class StreamDelta {
     this.activityChanges,
     required this.conversationId,
     required this.messageId,
+    this.mode,
     this.progress,
     required this.runId,
     required this.text,
@@ -14333,6 +14345,9 @@ final class StreamDelta {
   final bool? activityChanges;
   final String conversationId;
   final String messageId;
+  /// A group chat answer streaming: the mode its run started in. Left out
+  /// elsewhere and by older servers.
+  final AgentMode? mode;
   /// How long it runs and how many tokens it wrote so far.
   final RunProgress? progress;
   final String runId;
@@ -14344,6 +14359,7 @@ final class StreamDelta {
     activityChanges: (json['activity_changes'] == null ? null : (json['activity_changes'] as bool)),
     conversationId: (json['conversation_id'] as String),
     messageId: (json['message_id'] as String),
+    mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
     progress: (json['progress'] == null ? null : RunProgress.fromJson(json['progress'] as Map<String, dynamic>)),
     runId: (json['run_id'] as String),
     text: (json['text'] as String),
@@ -14354,6 +14370,7 @@ final class StreamDelta {
     if (activityChanges != null) 'activity_changes': activityChanges,
     'conversation_id': conversationId,
     'message_id': messageId,
+    if (mode != null) 'mode': mode?.toJson(),
     if (progress != null) 'progress': progress?.toJson(),
     'run_id': runId,
     'text': text,

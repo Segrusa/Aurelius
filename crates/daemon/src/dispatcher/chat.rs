@@ -256,6 +256,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     activity: activity.clone(),
                     progress: progress(&shared, plan.run_id),
                     activity_changes: false,
+                    mode: None,
                 });
             }
             RuntimeEvent::TextDelta(delta) => {
@@ -273,6 +274,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     activity: activity.clone(),
                     progress: progress(&shared, plan.run_id),
                     activity_changes: false,
+                    mode: None,
                 });
                 if last_checkpoint.elapsed() >= CHECKPOINT_EVERY {
                     last_checkpoint = tokio::time::Instant::now();
@@ -318,6 +320,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     activity: activity.clone(),
                     progress: progress(&shared, plan.run_id),
                     activity_changes: false,
+                    mode: None,
                 });
             }
             RuntimeEvent::ArtifactPublished { url, title, version, path } => {
@@ -408,6 +411,7 @@ fn send_progress(shared: &Shared, plan: &ChatRunPlan) {
         activity: Vec::new(),
         progress: progress(shared, plan.run_id),
         activity_changes: false,
+        mode: None,
     });
 }
 
@@ -415,7 +419,7 @@ fn send_progress(shared: &Shared, plan: &ChatRunPlan) {
 /// id its answer gets in the group (`GroupRun::message_id`).
 fn stream(shared: &Shared, plan: &ChatRunPlan, delta: StreamDelta) {
     if let Some(group) = plan.group {
-        let _ = shared.streams.send(StreamDelta { conversation_id: group.conversation_id, message_id: group.message_id, ..delta.clone() });
+        let _ = shared.streams.send(StreamDelta { conversation_id: group.conversation_id, message_id: group.message_id, mode: group.mode, ..delta.clone() });
     }
     let _ = shared.streams.send(delta);
 }

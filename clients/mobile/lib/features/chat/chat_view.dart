@@ -673,6 +673,8 @@ class _AssistantMessage extends StatelessWidget {
   Widget build(BuildContext context) {
     final header = [
       if (message.author?.trim() case final author? when author.isNotEmpty) author,
+      // A group chat answer: the mode the employee answered in.
+      if (message.mode case final mode?) '${mode.label} mode',
       if (message.producedBy != null) message.producedBy!,
       if (version != null) 'version ${version!.$1}/${version!.$2}',
     ].join(' · ');

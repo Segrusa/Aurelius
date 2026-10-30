@@ -22,6 +22,7 @@ use crate::run::events::{Ev, emit};
 use crate::run::queue::queue_run_marked;
 use crate::{CommandContext, CommandService, Committed, domain_error, storage_error};
 use aurelius_domain::group_chat::{self as group, CONTEXT_CHARS, CONTEXT_MESSAGES, GROUP_KIND, MAX_HOPS, OWNER, POST_MAX, WAKE_WINDOW_MS, WAKING_POSTS_PER_RUN, WAKING_POSTS_PER_WINDOW};
+use aurelius_domain::autonomy::AgentMode;
 use aurelius_domain::conversation::{MessageRole, MessageStatus};
 use aurelius_domain::views::MessageFileView;
 use aurelius_domain::{ActorKind, AppError, CommandEnvelope, CommandResult, ConversationId, EmployeeId, ErrorCode, EventNotice, MessageId, RunId};
@@ -172,7 +173,7 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     if !shared.images.is_empty() {
         conv::set_message_files(tx, update, shared.images)?;
     }
-    let marking = GroupRun { conversation_id: group_id, message_id: MessageId::new(), hop };
+    let marking = GroupRun { conversation_id: group_id, message_id: MessageId::new(), hop, mode: None };
     let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
     Ok(Some((run, vec![posted, queued])))
 }
@@ -180,7 +181,9 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
 /// The answer of a run the group chat woke, copied to the group as the
 /// employee's message (`GroupRun::message_id`, the id it streamed under).
 /// Nothing for another run, or for an answer that is empty and did not fail.
-pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation: ConversationId, text: &str, failed: Option<&str>, files: &[aurelius_domain::views::FileRef]) -> Result<Vec<EventNotice>, StorageError> {
+/// `mode`: the mode the run started in (none when it never started), shown with it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation: ConversationId, text: &str, failed: Option<&str>, files: &[aurelius_domain::views::FileRef], mode: Option<AgentMode>) -> Result<Vec<EventNotice>, StorageError> {
     let Some(marking) = conv::group_run(tx, run)? else { return Ok(Vec::new()) };
     // Already copied (the run's job finished twice: never).
     if conv::message_ordinal(tx, marking.message_id)?.is_some() {
@@ -195,7 +198,7 @@ pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation
         (text, Some("interrupted")) => format!("{}\n\n(interrupted)", group::shortened(text, crate::task::task_threads::MAX_POST)),
         (text, Some(code)) => format!("{}\n\n(interrupted: {code})", group::shortened(text, crate::task::task_threads::MAX_POST)),
     };
-    let notice = post_in_group(tx, store, marking.conversation_id, marking.message_id, GROUP_KIND, &name, &text, serde_json::json!({ "run_id": run, "hop": marking.hop }))?;
+    let notice = post_in_group(tx, store, marking.conversation_id, marking.message_id, GROUP_KIND, &name, &text, serde_json::json!({ "run_id": run, "hop": marking.hop, "mode": mode }))?;
     if !files.is_empty() {
         conv::set_message_files(tx, marking.message_id, files)?;
     }

@@ -750,6 +750,10 @@ pub struct MessageView {
     /// `run_usage`). Left out for user messages and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TokenUsage>,
+    /// An employee's answer in the group chat: the mode its run started in.
+    /// Left out for other messages and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<crate::autonomy::AgentMode>,
 }
 
 /// A file the user sent to an employee, copied into its work folder.

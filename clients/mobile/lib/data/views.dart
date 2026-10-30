@@ -181,6 +181,7 @@ extension MessageViewState on MessageView {
         createdAtMs: createdAtMs,
         files: files,
         id: id,
+        mode: mode,
         ordinal: ordinal,
         producedBy: producedBy,
         queued: queued,
