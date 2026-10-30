@@ -113,7 +113,8 @@ class _ChatViewState extends State<ChatView> {
               selector: (s) => s.awaitingStart,
               builder: (context, waiting) => LoadBanner(waiting: waiting),
             ),
-            if (bloc.state.conversationId != null)
+            // The group chat has no work folder and no subagents of its own.
+            if (bloc.state.conversationId != null && !bloc.group)
               Padding(
                 padding: const EdgeInsets.only(top: 6, bottom: 10),
                 child: Row(
@@ -267,7 +268,8 @@ class _MessagesState extends State<_Messages> {
           m.id,
           m.isUser
               ? _UserBubble(id: m.id, text: m.text, files: m.files, uploads: m.uploads, queuedId: m.queued ? m.id : null)
-              : m.update != null
+              // An employee's message in the group chat: an answer under its name.
+              : m.update != null && m.update != 'group'
                   ? _TaskUpdate(message: m)
                   : _AssistantMessage(message: m, version: versions[m.id], blocking: m.isStreaming ? blocking : null),
         ),
@@ -541,7 +543,7 @@ class _AssistantMessage extends StatelessWidget {
                 Navigator.pop(sheet);
               },
             ),
-            if (target != null && !message.isStreaming)
+            if (target != null && !message.isStreaming && !bloc.group)
               ListTile(
                 leading: const Icon(Icons.refresh),
                 title: const Text('Answer again'),
@@ -955,9 +957,12 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
             ListTile(enabled: !state.uploading, leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take a photo'), onTap: () => Navigator.pop(sheet, 'camera')),
             ListTile(enabled: !state.uploading, leading: const Icon(Icons.photo_library_outlined), title: const Text('Photo library'), onTap: () => Navigator.pop(sheet, 'gallery')),
             ListTile(enabled: !state.uploading, leading: const Icon(Icons.description_outlined), title: const Text('File'), onTap: () => Navigator.pop(sheet, 'file')),
-            const Divider(height: 1),
-            tool(sheet, 'browser', Icons.language, 'Browser', 'Let this agent use the browser.', state.browserAllowed),
-            tool(sheet, 'screen', Icons.screenshot_monitor, 'Screen', 'Screenshots of the PC without asking.', state.screenAllowed),
+            // In the group chat each employee answers with its own settings.
+            if (!bloc.group) ...[
+              const Divider(height: 1),
+              tool(sheet, 'browser', Icons.language, 'Browser', 'Let this agent use the browser.', state.browserAllowed),
+              tool(sheet, 'screen', Icons.screenshot_monitor, 'Screen', 'Screenshots of the PC without asking.', state.screenAllowed),
+            ],
           ],
         ),
       ),
@@ -1067,6 +1072,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
     final state = context.watch<ChatBloc>().state;
     final link = context.watch<ConnectionBloc>().state;
     final readOnly = state.history || (link.isOnline && !link.can('chat'));
+    final group = context.read<ChatBloc>().group;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.enter, meta: true): _sendDefault,
@@ -1074,7 +1080,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
         const SingleActivator(LogicalKeyboardKey.enter, alt: true): _queue,
         const SingleActivator(LogicalKeyboardKey.keyV, meta: true, shift: true): _pasteImage,
         const SingleActivator(LogicalKeyboardKey.keyV, control: true, shift: true): _pasteImage,
-        const SingleActivator(LogicalKeyboardKey.tab, shift: true): () => context.read<ChatBloc>().add(ChatModeSelected(state.mode.next)),
+        if (!group) const SingleActivator(LogicalKeyboardKey.tab, shift: true): () => context.read<ChatBloc>().add(ChatModeSelected(state.mode.next)),
       },
       child: Container(
         decoration: BoxDecoration(color: Tokens.plain, border: Border(top: BorderSide(color: Tokens.sep, width: 0.5))),
@@ -1184,7 +1190,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                       onContentInserted: _insert,
                     ),
                     decoration: InputDecoration(
-                      hintText: state.history ? 'Read-only: an earlier chat' : readOnly ? 'Read-only: this phone may not chat' : 'Message',
+                      hintText: state.history ? 'Read-only: an earlier chat' : readOnly ? 'Read-only: this phone may not chat' : group ? 'Message the team · @Name asks someone' : 'Message',
                       isDense: true,
                       fillColor: Tokens.cell2,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
@@ -1216,10 +1222,10 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                     }
                     // The tooltip must not claim the long press (it does on touch screens), so it shows on hover only.
                     return Tooltip(
-                      message: running != null ? 'Send now: interrupt the answer (⌘↩). Hold to send after it (⌥↩)' : 'Send (⌘↩)',
+                      message: running != null && !group ? 'Send now: interrupt the answer (⌘↩). Hold to send after it (⌥↩)' : 'Send (⌘↩)',
                       triggerMode: TooltipTriggerMode.manual,
                       child: GestureDetector(
-                        onLongPress: readOnly || running == null || empty ? null : _queue,
+                        onLongPress: readOnly || running == null || empty || group ? null : _queue,
                         child: IconButton.filled(
                           key: const Key('composer-send'),
                           onPressed: readOnly ? null : _sendDefault,
@@ -1232,9 +1238,9 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            if (!group) const SizedBox(height: 6),
             // Mode and model, then what is switched on under "+" (tap to switch it off).
-            SingleChildScrollView(
+            if (!group) SingleChildScrollView(
               key: const Key('composer-chips'),
               scrollDirection: Axis.horizontal,
               child: Row(

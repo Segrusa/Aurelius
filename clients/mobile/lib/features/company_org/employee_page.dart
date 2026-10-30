@@ -19,7 +19,7 @@ import '../plugins/employee_plugins_sheet.dart';
 import '../project/tasks_tab.dart';
 import 'employee_widgets.dart';
 
-/// An employee: chat with it, where it sits (department, boss, team), where it
+/// An employee: give it work, where it sits (department, boss, team), where it
 /// works now, its model, plugins and status, and its tasks across projects.
 class EmployeePage extends StatelessWidget {
   const EmployeePage({super.key, required this.employeeId});
@@ -95,25 +95,18 @@ class EmployeePage extends StatelessWidget {
                         child: Text(m.instructions!, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, color: Tokens.label2)),
                       ),
                     const SizedBox(height: 12),
-                    InsetGroup(
-                      dividerIndent: 60,
-                      children: [
-                        GroupRow(
-                          key: const ValueKey('employee-chat'),
-                          leading: const IconTile(CupertinoIcons.chat_bubble_2_fill),
-                          title: 'Chat with ${m.name}',
-                          subtitle: 'Outside a task; ${m.name} can give work in any project.',
-                          onTap: () => context.push('/employee/${m.id}/chat'),
-                        ),
-                        if (!archived)
+                    if (!archived)
+                      InsetGroup(
+                        dividerIndent: 60,
+                        children: [
                           GroupRow(
                             key: const ValueKey('employee-give-work'),
                             leading: const IconTile(CupertinoIcons.square_pencil),
                             title: 'Give ${m.name} work',
                             onTap: () => giveWork(context, employeeId: m.id),
                           ),
-                      ],
-                    ),
+                        ],
+                      ),
                     const GroupHeader('In the Company'),
                     InsetGroup(
                       children: [
@@ -169,7 +162,7 @@ class EmployeePage extends StatelessWidget {
                               title: c.title.isEmpty ? 'Conversation' : c.title,
                               subtitle: Fmt.ago(c.updatedAtMs),
                               value: 'Read-only',
-                              onTap: () => context.push('/employee/${m.id}/chat?c=${c.id}'),
+                              onTap: () => context.push('/conversation/${c.id}'),
                             ),
                         ],
                       ),
@@ -307,21 +300,23 @@ void _showInstructionVersions(BuildContext context, EmployeeSummary m) {
   );
 }
 
-/// The employee's persistent chat with the Board (no project), or one of its
-/// task conversations ([conversationId]).
-class EmployeeChatPage extends StatelessWidget {
-  const EmployeeChatPage({super.key, required this.employeeId, this.conversationId});
+/// One of an employee's task conversations (writable) or an earlier chat
+/// of it (read-only). The employee's own chat has no page: the group chat
+/// (Team) took its place.
+class ConversationPage extends StatelessWidget {
+  const ConversationPage({super.key, required this.conversationId, this.employeeId});
 
-  final String employeeId;
-  final String? conversationId;
+  final String conversationId;
+
+  /// Its employee, when the company does not know the conversation yet (a task
+  /// discussion that just started).
+  final String? employeeId;
 
   @override
   Widget build(BuildContext context) {
     final company = context.watch<CompanyBloc>().state;
-    final m = company.employee(employeeId);
-    final task = company.tasks.where((t) => conversationId != null && t.conversationId == conversationId).firstOrNull;
-    // The employee's persistent chat, unless a task conversation was asked for.
-    final id = conversationId ?? m?.conversationId;
+    final task = company.tasks.where((t) => t.conversationId == conversationId).firstOrNull;
+    final m = company.employee(task?.employeeId ?? employeeId ?? '') ?? company.employees.where((e) => e.conversations.any((c) => c.id == conversationId)).firstOrNull;
     return Scaffold(
       appBar: GlassAppBar(
         titleSpacing: 0,
@@ -332,9 +327,9 @@ class EmployeeChatPage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(task?.title ?? m?.name ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: Tokens.title(size: 18)),
+                  Text(task?.title ?? m?.threadTitle(conversationId) ?? m?.name ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: Tokens.title(size: 18)),
                   Text(
-                    task != null ? 'Task conversation with ${m?.name ?? ''}' : (conversationId == null || conversationId == m?.conversationId ? 'Chat' : 'Earlier chat, read-only'),
+                    task != null ? 'Task conversation with ${m?.name ?? ''}' : 'Conversation with ${m?.name ?? 'an employee'}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(fontSize: 12, color: Tokens.muted),
@@ -350,13 +345,13 @@ class EmployeeChatPage extends StatelessWidget {
         children: [
           const ConnectionBanner(),
           Expanded(
-            child: id == null
-                ? (company.loading ? const Center(child: CircularProgressIndicator()) : const EmptyState('This employee no longer exists'))
-                // One chat per conversation: switching starts a fresh bloc.
+            child: m == null
+                ? (company.loading ? const Center(child: CircularProgressIndicator()) : const EmptyState('This conversation no longer exists'))
+                // Messages go to its employee; one bloc per conversation.
                 : BlocProvider(
-                    key: ValueKey(id),
-                    create: (_) => ChatBloc(context.read<AureliusRepository>(), conversationId: id, employeeId: employeeId),
-                    child: ChatView(emptyTitle: 'Chat with ${m?.name ?? 'the employee'}', emptyDetail: m?.instructions),
+                    key: ValueKey(conversationId),
+                    create: (_) => ChatBloc(context.read<AureliusRepository>(), conversationId: conversationId, employeeId: m.id),
+                    child: ChatView(emptyTitle: 'Write to ${m.name}', emptyDetail: m.instructions),
                   ),
           ),
         ],

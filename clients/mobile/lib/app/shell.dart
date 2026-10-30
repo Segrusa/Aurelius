@@ -14,14 +14,18 @@ import '../features/power/power_widgets.dart';
 /// The bottom tabs, in this order (branch indices of the router's shell).
 const shellTabs = [
   GlassTab(CupertinoIcons.house, 'Home'),
+  GlassTab(CupertinoIcons.chat_bubble_2, 'Team'),
   GlassTab(CupertinoIcons.tray, 'Inbox'),
   GlassTab(CupertinoIcons.checkmark_square, 'Tasks'),
   GlassTab(CupertinoIcons.ellipsis_circle, 'More'),
 ];
 
-/// Tabs: Home · Inbox · Tasks · More in a floating glass tab bar,
+/// The inbox tab, with the badge of what waits for you.
+final inboxTab = shellTabs.indexWhere((t) => t.label == 'Inbox');
+
+/// Tabs: Home · Team · Inbox · Tasks · More in a floating glass tab bar,
 /// with the connection banner on top. Hardware keyboards (iPad, Android with a
-/// keyboard): ⌘/Ctrl+1…4 switch tabs, ⌘/Ctrl+N gives work (a new task).
+/// keyboard): ⌘/Ctrl+1…5 switch tabs, ⌘/Ctrl+N gives work (a new task).
 class HomeShell extends StatelessWidget {
   const HomeShell({super.key, required this.shell});
 
@@ -33,7 +37,7 @@ class HomeShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final badge = context.select<InboxBloc, int>((b) => b.state.badge);
     final bannerVisible = context.select<ConnectionBloc, bool>((b) => ConnectionBanner.visible(b.state));
-    final digits = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3, LogicalKeyboardKey.digit4];
+    final digits = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3, LogicalKeyboardKey.digit4, LogicalKeyboardKey.digit5];
     final shortcuts = <ShortcutActivator, VoidCallback>{
       for (final (i, key) in digits.indexed) ...{
         SingleActivator(key, meta: true): () => _go(i),
@@ -55,7 +59,7 @@ class HomeShell extends StatelessWidget {
             onTap: _go,
             fade: Tokens.bg,
             tabs: [
-              for (final (i, t) in shellTabs.indexed) i == 1 ? GlassTab(t.icon, t.label, badge: badge) : t,
+              for (final (i, t) in shellTabs.indexed) i == inboxTab ? GlassTab(t.icon, t.label, badge: badge) : t,
             ],
           ),
           child: shell,

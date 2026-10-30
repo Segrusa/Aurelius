@@ -218,8 +218,8 @@ void main() {
             BlocProvider<RuntimeBloc>.value(value: runtime),
             BlocProvider<InboxBloc>.value(value: inbox),
           ],
-          // A conversation opens the chat page (the employee's own chat or a task's), else the employee page.
-          child: app(conversationId == null ? const EmployeePage(employeeId: 'mgr') : EmployeeChatPage(employeeId: 'mgr', conversationId: conversationId)),
+          // A conversation opens the conversation page (a task's, or another of the employee's), else the employee page.
+          child: app(conversationId == null ? const EmployeePage(employeeId: 'mgr') : ConversationPage(conversationId: conversationId, employeeId: 'mgr')),
         ),
       ));
       await tester.pump(const Duration(milliseconds: 200));
@@ -244,7 +244,7 @@ void main() {
       when(() => repo.messages(any())).thenAnswer((i) async => snapshotOf(i.positionalArguments.first as String));
     });
 
-    testWidgets("shows the chat, the employee's tasks across projects (open ones first) and its setup", (tester) async {
+    testWidgets("shows no chat of its own, the employee's tasks across projects (open ones first) and its setup", (tester) async {
       tester.view.physicalSize = const Size(800, 2400);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -254,8 +254,9 @@ void main() {
         taskOf(id: 'other', title: 'Not Iris', employeeId: 'someone'),
       ]);
       expect(find.byKey(const ValueKey('employee-page')), findsOneWidget);
-      expect(find.byKey(const ValueKey('employee-chat')), findsOneWidget);
-      expect(find.text('Chat with Iris'), findsOneWidget);
+      expect(find.byKey(const ValueKey('employee-chat')), findsNothing, reason: 'the group chat (Team) took its place');
+      expect(find.text('Chat with Iris'), findsNothing);
+      expect(find.byKey(const ValueKey('employee-give-work')), findsOneWidget);
       expect(find.text('Not Iris'), findsNothing);
       expect(tester.getTopLeft(find.text('Open task')).dy, lessThan(tester.getTopLeft(find.text('Old task')).dy));
       expect(find.text('Head of marketing · Marketing · Marketing dept'), findsOneWidget, reason: 'title, role and department in the header');
@@ -284,7 +285,7 @@ void main() {
       expect(find.descendant(of: find.byKey(const ValueKey('employee-boss')), matching: find.text('Nobody · management team')), findsOneWidget);
     });
 
-    testWidgets("a task's conversation opens on the chat page with the task's title", (tester) async {
+    testWidgets("a task's conversation opens on its own page with the task's title", (tester) async {
       final tasks = [taskOf(id: 'run', title: 'Running task', employeeId: 'mgr', status: TaskStatus.running, conversationId: 'c-run')];
       await pump(tester, iris(conversations: [conversationOf('c-run', title: 'Running')]), tasks: tasks, conversationId: 'c-run');
       verify(() => repo.messages('c-run')).called(1);
@@ -293,10 +294,10 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets("the employee's own chat is titled Chat", (tester) async {
+    testWidgets('a conversation outside a task is one with the employee', (tester) async {
       await pump(tester, iris(), conversationId: 'main');
       verify(() => repo.messages('main')).called(1);
-      expect(find.text('Chat'), findsOneWidget);
+      expect(find.text('Conversation with Iris'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

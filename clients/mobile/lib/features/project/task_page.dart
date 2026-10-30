@@ -71,7 +71,7 @@ class TaskPage extends StatelessWidget {
         listener: (context, state) {
           if (state.notice != null) toast(context, state.notice!);
           final result = state.lastResult;
-          if (result is CommandResultTaskDiscussed) context.push('/employee/${result.employeeId}/chat?c=${result.conversationId}');
+          if (result is CommandResultTaskDiscussed) context.push('/conversation/${result.conversationId}?e=${result.employeeId}');
           context.read<ProjectBloc>().add(const ProjectNoticeShown());
         },
         builder: (context, state) {
@@ -263,7 +263,7 @@ class _TaskBody extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.only(top: 8),
               child: OutlinedButton.icon(
-                onPressed: task.employeeId == null ? null : () => context.push('/employee/${task.employeeId}/chat?c=${task.conversationId}'),
+                onPressed: task.employeeId == null ? null : () => context.push('/conversation/${task.conversationId}'),
                 icon: const Icon(Icons.forum_outlined, size: 18),
                 label: const Text('Open conversation'),
               ),

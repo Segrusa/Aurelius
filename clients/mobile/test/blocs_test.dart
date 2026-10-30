@@ -23,7 +23,7 @@ class MockRepository extends Mock implements AureliusRepository {}
 
 class MockApi extends Mock implements GatewayApi {}
 
-MessageView message(String id, MessageRole role, String text, {MessageStatus status = MessageStatus.complete}) => messageOf(id, role, text, status: status);
+MessageView message(String id, MessageRole role, String text, {MessageStatus status = MessageStatus.complete, String? author, String? update}) => messageOf(id, role, text, status: status, author: author, update: update);
 
 ApprovalView approval(String id) => approvalOf(id);
 
@@ -54,6 +54,96 @@ void main() {
   });
 
   tearDown(() => appends.close());
+
+  group('ChatBloc in the group chat (Team)', () {
+    MessagesSnapshot team(List<MessageView> messages) => snapshotOf('team', messages: messages);
+
+    blocTest<ChatBloc, ChatState>(
+      'loads through group_chat.get and learns its id; each message keeps its author',
+      build: () {
+        when(() => repo.groupChat()).thenAnswer((_) async => team([
+              message('u1', MessageRole.user, 'Who reviews this?'),
+              message('a1', MessageRole.assistant, 'I will.', author: 'Trace', update: 'group'),
+              message('a2', MessageRole.assistant, 'And I test it.', author: 'Pulse', update: 'group'),
+            ]));
+        return ChatBloc.group(repo);
+      },
+      wait: const Duration(milliseconds: 150),
+      verify: (bloc) {
+        expect(bloc.state.loading, isFalse);
+        expect(bloc.state.conversationId, 'team');
+        expect(bloc.state.messages.map((m) => m.author), [null, 'Trace', 'Pulse']);
+        verify(() => repo.groupChat()).called(1);
+        verifyNever(() => repo.messages(any()));
+      },
+    );
+
+    blocTest<ChatBloc, ChatState>(
+      'a message goes out with group_chat.send (text, images, files), never interrupting',
+      build: () {
+        when(() => repo.groupChat()).thenAnswer((_) async => team([message('a1', MessageRole.assistant, 'Working', status: MessageStatus.partial, author: 'Atlas')]));
+        when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
+            .thenAnswer((_) async => receipt(const CommandResultGroupMessageSent(conversationId: 'team', messageId: 'u2', runIds: ['r2'], to: ['Orion'])));
+        return ChatBloc.group(repo);
+      },
+      act: (bloc) async {
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        bloc.add(const ChatMessageSent('@Orion plan it', now: true));
+      },
+      wait: const Duration(milliseconds: 200),
+      verify: (bloc) {
+        final sent = writesOf(repo);
+        expect(sent.map((c) => c['method']), ['group_chat.send'], reason: 'no run.stop first');
+        expect(params(sent.single), {'text': '@Orion plan it', 'images': <String>[], 'files': <String>[]});
+        expect(bloc.state.unsent, isEmpty);
+      },
+    );
+
+    blocTest<ChatBloc, ChatState>(
+      'an answer streams in under its employee before it is a message, then the snapshot takes over',
+      build: () {
+        var calls = 0;
+        when(() => repo.groupChat()).thenAnswer((_) async => team([
+              message('u1', MessageRole.user, '@Orion status?'),
+              if (calls++ > 0) message('live', MessageRole.assistant, 'All on track.', author: 'Orion', update: 'group'),
+            ]));
+        return ChatBloc.group(repo, runAuthor: (run) => run == 'r-orion' ? 'Orion' : null);
+      },
+      act: (bloc) async {
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        appends.add(const StreamAppend(runId: 'r-orion', conversationId: 'team', messageId: 'live', offset: 0, text: 'All on'));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        appends.add(const StreamAppend(runId: 'r-orion', conversationId: 'team', messageId: 'live', offset: 6, text: ' track'));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final live = bloc.state.messages.last;
+        expect((live.id, live.text, live.author, live.isStreaming), ('live', 'All on track', 'Orion', true));
+        expect(bloc.state.streaming?.id, 'live');
+        verify(() => repo.groupChat()).called(1);
+        bloc.add(const ChatRefreshed());
+      },
+      wait: const Duration(milliseconds: 200),
+      verify: (bloc) {
+        expect(bloc.state.messages.map((m) => (m.id, m.text, m.author)), [('u1', '@Orion status?', null), ('live', 'All on track.', 'Orion')]);
+        expect(bloc.state.streaming, isNull);
+      },
+    );
+
+    blocTest<ChatBloc, ChatState>(
+      'a live answer stays through a refresh while its run works',
+      build: () {
+        when(() => repo.groupChat()).thenAnswer((_) async => team([message('u1', MessageRole.user, 'Hi all')]));
+        return ChatBloc.group(repo, runAuthor: (run) => 'Atlas');
+      },
+      act: (bloc) async {
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        appends.add(const StreamAppend(runId: 'r', conversationId: 'team', messageId: 'live', offset: 0, text: 'Hello'));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        bloc.add(const ChatRefreshed());
+      },
+      wait: const Duration(milliseconds: 200),
+      verify: (bloc) => expect(bloc.state.messages.map((m) => (m.id, m.author)), [('u1', null), ('live', 'Atlas')]),
+    );
+  });
 
   group('ChatBloc', () {
     blocTest<ChatBloc, ChatState>(

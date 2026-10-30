@@ -144,8 +144,9 @@ void main() {
     });
   });
 
-  test('the bottom tabs: Home, Inbox, Tasks, More; Projects, Ideas, Company and Settings are under More', () {
-    expect(shellTabs.map((t) => t.label), ['Home', 'Inbox', 'Tasks', 'More']);
+  test('the bottom tabs: Home, Team, Inbox, Tasks, More; Projects, Ideas, Company and Settings are under More', () {
+    expect(shellTabs.map((t) => t.label), ['Home', 'Team', 'Inbox', 'Tasks', 'More']);
+    expect(inboxTab, 2, reason: 'the inbox badge follows the Inbox tab');
   });
 
   group('company-wide pages', () {

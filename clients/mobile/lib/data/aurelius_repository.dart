@@ -64,6 +64,9 @@ class AureliusRepository {
   Future<MessagesSnapshot> messages(String conversationId) async =>
       (await _ask<ResponseBodyMessages>(conversationGet(conversationId: conversationId))).value;
 
+  /// The company's group chat (Team): the user and every employee.
+  Future<MessagesSnapshot> groupChat() async => (await _ask<ResponseBodyMessages>(groupChatGet())).value;
+
   /// One tool call of message [messageId] whole (`activity_preview`: messages
   /// and live updates carry shortened ones). Only on demand, when the user opens it.
   Future<ActivityView> activity(String messageId, String callId) async =>

@@ -243,7 +243,8 @@ class _TaskRow extends StatelessWidget {
   }
 }
 
-/// An employee answering in a conversation outside a task (its chat); opens it.
+/// An employee answering in a conversation outside a task; opens it. Its own
+/// chat is where it answers the group chat, so that opens Team.
 class _AnswerRow extends StatelessWidget {
   const _AnswerRow({required this.answer, required this.company});
 
@@ -256,7 +257,7 @@ class _AnswerRow extends StatelessWidget {
     final conversationId = answer.agent.conversationId;
     return GroupRow(
       key: ValueKey('inbox-answer-${m.id}-$conversationId'),
-      onTap: () => context.push(conversationId == null || conversationId == m.conversationId ? '/employee/${m.id}/chat' : '/employee/${m.id}/chat?c=$conversationId'),
+      onTap: () => conversationId == null || conversationId == m.conversationId ? context.go('/team') : context.push('/conversation/$conversationId'),
       title: '${m.name} · ${answer.agent.label}',
       subtitle: conversationId == null ? null : m.threadTitle(conversationId),
       trailing: Row(mainAxisSize: MainAxisSize.min, children: [

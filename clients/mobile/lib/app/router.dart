@@ -19,6 +19,7 @@ import '../features/dashboard/dashboard_page.dart';
 import '../features/more/more_page.dart';
 import '../features/more/recurring_page.dart';
 import '../features/tasks/tasks_page.dart';
+import '../features/team/team_page.dart';
 import '../features/inbox/approval_page.dart';
 import '../features/inbox/inbox_page.dart';
 import '../features/more/hosts_page.dart';
@@ -51,6 +52,9 @@ class AppRouter {
             GoRoute(path: '/home', pageBuilder: (context, state) => routePage(state, const DashboardPage())),
           ]),
           StatefulShellBranch(routes: [
+            GoRoute(path: '/team', pageBuilder: (context, state) => routePage(state, const TeamPage())),
+          ]),
+          StatefulShellBranch(routes: [
             GoRoute(path: '/inbox', pageBuilder: (context, state) => routePage(state, const InboxPage())),
           ]),
           StatefulShellBranch(routes: [
@@ -80,15 +84,16 @@ class AppRouter {
         routes: [
           GoRoute(
             parentNavigatorKey: _root,
-            path: 'chat',
-            pageBuilder: (context, state) => routePage(state, EmployeeChatPage(employeeId: state.pathParameters['eid']!, conversationId: state.uri.queryParameters['c'])),
-          ),
-          GoRoute(
-            parentNavigatorKey: _root,
             path: 'tasks',
             pageBuilder: (context, state) => routePage(state, TasksPage(employeeId: state.pathParameters['eid']!)),
           ),
         ],
+      ),
+      // A task conversation (writable) or an earlier chat of an employee.
+      GoRoute(
+        parentNavigatorKey: _root,
+        path: '/conversation/:cid',
+        pageBuilder: (context, state) => routePage(state, ConversationPage(conversationId: state.pathParameters['cid']!, employeeId: state.uri.queryParameters['e'])),
       ),
       GoRoute(
         parentNavigatorKey: _root,
