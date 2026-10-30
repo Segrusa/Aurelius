@@ -97,9 +97,10 @@ pub struct Shared {
     pub terminals: aurelius_host::terminal::Terminals,
     /// The pending shutdown of this PC (not kept over restarts).
     pub power: aurelius_host::power::Power,
-    /// The chat jobs this daemon drives right now; a leased one that is not
-    /// among them and whose lease ran out lost its driver (see the dispatcher).
-    pub drivers: Mutex<std::collections::HashSet<String>>,
+    /// The chat jobs this daemon drives right now, with the lease epoch each driver
+    /// holds; a leased one whose current lease is not among them and ran out lost
+    /// its driver (see the dispatcher).
+    pub drivers: Mutex<std::collections::HashSet<(String, i64)>>,
     /// How long a run may go without progress, when not the setting's;
     /// `AURELIUS_RUN_IDLE_MS` sets it (tests).
     pub run_idle_ms: Option<i64>,

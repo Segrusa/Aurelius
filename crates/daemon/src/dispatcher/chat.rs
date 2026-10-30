@@ -14,7 +14,7 @@ const STOP_GRACE: Duration = Duration::from_secs(10);
 /// terminal outcome. Every write is fenced by the lease epoch.
 pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     let epoch = job.lease_epoch;
-    let mut driver = super::Driver::new(&shared, &job.id);
+    let mut driver = super::Driver::new(&shared, &job.id, epoch);
     let s = shared.clone();
     let payload = job.payload.clone();
     let mut plan: ChatRunPlan = match blocking(move || s.service.prepare_chat_run(&payload)).await {
@@ -132,10 +132,8 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                 plan.session.compaction = Some(line);
                 send_progress(&shared, &plan);
             }
-            session::Compacted::LeaseLost => {
-                forget_run(&shared, plan.run_id);
-                return;
-            }
+            // Its driver forgets the run as it ends (unless a newer one drives it).
+            session::Compacted::LeaseLost => return,
         }
     }
     if let Some(system) = choice.system.clone() {
@@ -200,7 +198,6 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
         Some(Ok(None)) => {
             // Lease lost before we started: abandon this turn without writing.
             handle.canceller().cancel();
-            forget_run(&shared, plan.run_id);
             return;
         }
         other => {
@@ -247,9 +244,16 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
             _ = tokio::time::sleep_until(last_progress + limit) => None,
         };
         let Some(next) = next else {
-            // Waiting on the user's approval or on a colleague's task is not hanging.
+            // Stopped by the user, but its runtime does not end: it ends as stopped, not stalled.
             let (s, run_id) = (shared.clone(), plan.run_id);
-            if blocking(move || s.service.run_waits_on_others(run_id)).await == Some(true) {
+            if blocking(move || s.service.run_cancelling(run_id)).await == Some(true) {
+                tracing::warn!(run = %plan.run_id, "a stopped run's runtime did not end; ending it as stopped");
+                stop(&mut handle, idle).await;
+                break RunOutcome::Interrupted;
+            }
+            // Waiting on the user's approval or for its colleagues is not hanging; in doubt, neither.
+            let (s, run_id) = (shared.clone(), plan.run_id);
+            if blocking(move || s.service.run_waits_on_others(run_id)).await != Some(false) {
                 last_progress = tokio::time::Instant::now();
                 continue;
             }
@@ -271,7 +275,6 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
             if !matches!(renewed, Some(Ok(true))) {
                 tracing::warn!(run = %plan.run_id, "lease lost; stopping without further writes");
                 handle.canceller().cancel();
-                forget_run(&shared, plan.run_id);
                 return;
             }
         }
@@ -425,9 +428,8 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
             }
         }
     }
-    // A chat job is one answer: its clock stops here.
-    shared.live.run_ended(plan.run_id);
-    shared.live.job_ended(&job.id);
+    // A chat job is one answer: its clock stops as its driver ends.
+    drop(driver);
 }
 
 /// How long a run may go without progress: `AURELIUS_RUN_IDLE_MS`, else the setting.
@@ -476,7 +478,6 @@ async fn park_for_quota(shared: &Arc<Shared>, plan: &ChatRunPlan, epoch: i64, re
     if let Some(Ok(notices)) = blocking(move || s.service.park_runs_for_quota(at)).await {
         shared.publish(notices);
     }
-    forget_run(shared, plan.run_id);
 }
 
 /// Since when the run's job runs and its tokens so far.

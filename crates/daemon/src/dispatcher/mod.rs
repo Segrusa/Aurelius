@@ -8,6 +8,7 @@ use aurelius_application::CHAT_RUN_KIND;
 use aurelius_protocol::StreamDelta;
 use aurelius_runtime::{Activity, ApprovalBridge, RunRequest, RuntimeEvent, SessionUse, ToolProfile};
 use aurelius_storage::queries;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -121,32 +122,58 @@ pub async fn run(shared: Arc<Shared>) {
 
 /// While a chat job is worked on here, it is known as driven (see
 /// `end_abandoned_chat_runs`); however its driver ends, the run's live state
-/// ("Thinking…") and its switches go with it.
+/// ("Thinking…") and its switches go with it. A driver is known by its job and the
+/// lease epoch it holds: an old driver of a job that was deferred and claimed again
+/// may end after the new one started, and must neither make the job look undriven
+/// nor take the new driver's live state and switches with it.
 struct Driver {
     shared: Arc<Shared>,
-    job: String,
+    key: (String, i64),
     run: Option<aurelius_domain::RunId>,
 }
 
 impl Driver {
-    fn new(shared: &Arc<Shared>, job: &str) -> Self {
+    fn new(shared: &Arc<Shared>, job: &str, epoch: i64) -> Self {
+        let key = (job.to_owned(), epoch);
         if let Ok(mut driven) = shared.drivers.lock() {
-            driven.insert(job.to_owned());
+            driven.insert(key.clone());
         }
-        Driver { shared: shared.clone(), job: job.to_owned(), run: None }
+        Driver { shared: shared.clone(), key, run: None }
     }
 }
 
 impl Drop for Driver {
     fn drop(&mut self) {
+        let last = self.shared.drivers.lock().map(|mut driven| undrive(&mut driven, &self.key)).unwrap_or(true);
+        if !last {
+            return;
+        }
         if let Some(run) = self.run {
             chat::forget_run(&self.shared, run);
             self.shared.live.run_ended(run);
         }
-        self.shared.live.job_ended(&self.job);
-        if let Ok(mut driven) = self.shared.drivers.lock() {
-            driven.remove(&self.job);
-        }
+        self.shared.live.job_ended(&self.key.0);
+    }
+}
+
+/// Forget this driver; true when no other driver of its job is left.
+fn undrive(driven: &mut HashSet<(String, i64)>, key: &(String, i64)) -> bool {
+    driven.remove(key);
+    !driven.iter().any(|(job, _)| *job == key.0)
+}
+
+#[cfg(test)]
+mod driver_tests {
+    #[test]
+    fn an_old_driver_ending_after_the_new_one_started_leaves_it_driving() {
+        let mut driven = std::collections::HashSet::new();
+        // Claimed under epoch 1, deferred, claimed again under epoch 2 before the old driver dropped.
+        driven.insert(("job".to_string(), 1));
+        driven.insert(("job".to_string(), 2));
+        assert!(!super::undrive(&mut driven, &("job".into(), 1)), "the new driver still drives it");
+        assert!(driven.contains(&("job".to_string(), 2)));
+        assert!(super::undrive(&mut driven, &("job".into(), 2)));
+        assert!(driven.is_empty());
     }
 }
 
