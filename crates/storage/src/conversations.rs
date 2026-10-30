@@ -118,6 +118,10 @@ pub struct GroupRun {
     pub message_id: MessageId,
     /// How many employees woke each other before it (0: woken by the user).
     pub hop: u32,
+    /// The mode the run started in, shown with its answer in the group. Set
+    /// when the run starts (`run::plan`), never in the job's payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<aurelius_domain::autonomy::AgentMode>,
 }
 
 /// The conversation a run answers in.
@@ -348,7 +352,8 @@ pub fn list_messages(
     let mut stmt = conn.prepare(
         "SELECT m.id, m.ordinal, m.role, m.status, b.storage_key, m.created_at_ms, m.run_id, m.reply_to_id,
                 c.display_name, r.model_id, json_extract(r.resolved_config_json, '$.persona_name'),
-                json_extract(m.meta_json, '$.kind'), json_extract(m.meta_json, '$.from'), json_extract(m.meta_json, '$.approval_id'), json_extract(m.meta_json, '$.files'), json_extract(m.meta_json, '$.uploads')
+                json_extract(m.meta_json, '$.kind'), json_extract(m.meta_json, '$.from'), json_extract(m.meta_json, '$.approval_id'), json_extract(m.meta_json, '$.files'), json_extract(m.meta_json, '$.uploads'),
+                json_extract(m.meta_json, '$.mode')
          FROM messages m LEFT JOIN blobs b ON b.id = m.content_blob_id
          LEFT JOIN runs r ON r.id = m.run_id LEFT JOIN connections c ON c.id = r.connection_id
          WHERE m.conversation_id = ?1 ORDER BY m.ordinal",
@@ -371,11 +376,12 @@ pub fn list_messages(
             r.get::<_, Option<String>>(13)?,
             r.get::<_, Option<String>>(14)?,
             r.get::<_, Option<String>>(15)?,
+            r.get::<_, Option<String>>(16)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads) = row?;
+        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode) = row?;
         let produced_by = match (connection, model.filter(|m| !m.is_empty())) {
             (Some(c), Some(m)) => Some(format!("{c} · {m}")),
             (Some(c), None) => Some(format!("{c} · default model")),
@@ -403,6 +409,7 @@ pub fn list_messages(
             uploads,
             queued: false,
             usage: None,
+            mode: mode.and_then(|m| serde_json::from_value(serde_json::Value::String(m)).ok()),
         });
     }
     let waiting = queued_messages(conn, conversation)?;

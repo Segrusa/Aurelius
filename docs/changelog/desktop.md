@@ -11,6 +11,7 @@ see [CHANGELOG.md](../../CHANGELOG.md).
 
 ## Unreleased: v0.9.1
 
+- **Mode in the Team chat.** An employee's answer shows the mode it was given in (for example "◇ Plan") next to its name, while it streams and once it is done (mobile: "Plan mode" in the answer's header). Needs a server that sends it.
 - **Team chat.** One group chat with all your employees, right under Dashboard (mobile: the Team tab). `@Name` asks those employees; without a name the CEO answers. Answers stream in live with their author, and you can stop or approve them in place. An employee's page no longer has its own chat: it shows the employee's settings and tasks, and task conversations stay writable. Needs a server with `group_chat.get`.
 - **Linux install script.** `scripts/install-linux.sh` installs Aurelius on Linux.
 

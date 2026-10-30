@@ -554,6 +554,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       createdAtMs: DateTime.now().millisecondsSinceEpoch,
       files: const [],
       id: append.messageId,
+      // The mode the employee answers in, shown with its name.
+      mode: append.mode,
       ordinal: state.messages.isEmpty ? 0 : state.messages.last.ordinal + 1,
       queued: false,
       role: MessageRole.assistant,

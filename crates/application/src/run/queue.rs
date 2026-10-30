@@ -179,7 +179,7 @@ pub(crate) fn request_stop(
         }
         // Its process never finishes it: the group hears it here (a claimed run's in `finish_chat_run`).
         if let Some(conversation) = conv::run_conversation(tx, run_id)? {
-            notices.extend(crate::conversation::group_chat::mirror_answer(tx, store, run_id, conversation, "", Some("cancelled"), &[])?);
+            notices.extend(crate::conversation::group_chat::mirror_answer(tx, store, run_id, conversation, "", Some("cancelled"), &[], None)?);
         }
     } else {
         conv::set_run_status(tx, run_id, "cancelling", None)?;

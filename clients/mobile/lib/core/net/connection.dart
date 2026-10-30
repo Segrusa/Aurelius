@@ -398,6 +398,7 @@ class AureliusConnection {
       activity: calls,
       conversationId: append.conversationId,
       messageId: append.messageId,
+      mode: append.mode,
       offset: append.offset,
       progress: append.progress,
       runId: append.runId,

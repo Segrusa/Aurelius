@@ -286,3 +286,44 @@ async fn a_failed_answer_says_so_and_a_stopped_queued_one_too() {
     assert!(answers.iter().any(|m| m.text == "(Could not answer: cancelled.)"), "{:?}", answers.iter().map(|m| &m.text).collect::<Vec<_>>());
     stop(dir.path(), daemon).await;
 }
+
+/// The group shows the mode an employee answers in: the mode its run started in
+/// streams along with the answer and stays with it once it is copied there.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_answer_shows_the_mode_it_was_given_in() {
+    use aurelius_domain::autonomy::{AgentMode, SetAgentMode};
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let (events_tx, events) = mpsc::unbounded_channel();
+    let (streams_tx, mut streams) = mpsc::unbounded_channel::<StreamDelta>();
+    let client = Client::connect_with_streams(&aurelius_host::endpoint(dir.path()), "test", events_tx, Some(streams_tx)).await.unwrap();
+    std::mem::forget(events);
+    let after = client.health().await.unwrap().last_seq;
+    client.subscribe(after).await.unwrap();
+    let (atlas, atlas_chat) = hire(&client, "Atlas", "CEO", None).await;
+    hire(&client, "Ann", "Developer", Some(atlas)).await;
+    client.execute(envelope(Command::SetAgentMode(SetAgentMode { conversation_id: atlas_chat, mode: AgentMode::Plan }), None)).await.unwrap();
+    let group_id = client.group_chat().await.unwrap().conversation_id;
+
+    send(&client, "Wat is het plan?").await;
+    let answer = answers_of(&client, "Atlas", 1).await.remove(0);
+    assert_eq!(answer.mode, Some(AgentMode::Plan), "the answer says it was given in Plan");
+    let mut in_group = 0;
+    while let Ok(delta) = streams.try_recv() {
+        if delta.conversation_id == group_id && delta.message_id == answer.id {
+            in_group += 1;
+            assert_eq!(delta.mode, Some(AgentMode::Plan), "it streams with its mode");
+        } else {
+            assert_eq!(delta.mode, None, "only the group's copy carries the mode");
+        }
+    }
+    assert!(in_group > 0, "the answer streamed in the group chat");
+
+    // Another employee in its own (default) mode.
+    send(&client, "@Ann, jij ook?").await;
+    assert_eq!(answers_of(&client, "Ann", 1).await[0].mode, Some(AgentMode::Ask));
+    // The user's own messages carry no mode.
+    assert!(client.group_chat().await.unwrap().messages.iter().filter(|m| m.role == MessageRole::User).all(|m| m.mode.is_none()));
+
+    stop(dir.path(), daemon).await;
+}

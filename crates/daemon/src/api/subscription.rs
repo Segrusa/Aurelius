@@ -195,7 +195,7 @@ mod tests {
     }
 
     fn delta(message_id: MessageId, activity: Vec<ActivityView>) -> StreamDelta {
-        StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id, text: "x".into(), activity, progress: None, activity_changes: false }
+        StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id, text: "x".into(), activity, progress: None, activity_changes: false, mode: None }
     }
 
     fn ids(calls: &[ActivityView]) -> Vec<&str> {

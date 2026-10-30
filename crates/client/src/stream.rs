@@ -46,6 +46,7 @@ impl Rebuild {
             activity,
             progress: append.progress,
             activity_changes: append.activity_changes,
+            mode: append.mode,
         })
     }
 
@@ -118,7 +119,7 @@ mod tests {
     use aurelius_domain::{ConversationId, RunId};
 
     fn append(id: MessageId, offset: u64, text: &str) -> StreamAppend {
-        StreamAppend { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: id, offset, text: text.into(), activity: None, progress: None, activity_changes: false }
+        StreamAppend { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: id, offset, text: text.into(), activity: None, progress: None, activity_changes: false, mode: None }
     }
 
     #[test]
@@ -157,7 +158,7 @@ mod tests {
     }
 
     fn update(id: MessageId, activity: Vec<ActivityView>, activity_changes: bool) -> StreamDelta {
-        StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: id, text: "t".into(), activity, progress: None, activity_changes }
+        StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: id, text: "t".into(), activity, progress: None, activity_changes, mode: None }
     }
 
     #[test]

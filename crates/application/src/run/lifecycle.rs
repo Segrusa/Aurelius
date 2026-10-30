@@ -185,7 +185,7 @@ impl CommandService {
                     notices.extend(explain_failed_start(tx, run_id, blob)?);
                     // Woken by the group chat: the group hears it could not answer.
                     if let Some(conversation) = conv::run_conversation(tx, run_id)? {
-                        notices.extend(crate::conversation::group_chat::mirror_answer(tx, &st, run_id, conversation, "", Some("not started"), &[])?);
+                        notices.extend(crate::conversation::group_chat::mirror_answer(tx, &st, run_id, conversation, "", Some("not started"), &[], None)?);
                     }
                     // A task's run that never started: the task must not stay "running".
                     notices.extend(crate::task::task_runs::on_run_not_started(tx, &st, run_id)?);
@@ -324,6 +324,7 @@ impl CommandService {
         let reply = text.to_string();
         let files_store = self.store.clone();
         let session = plan.session.clone();
+        let group_mode = plan.group.and_then(|g| g.mode);
         self.store
             .write(move |tx| {
                 if !queries::complete_job(tx, &run_id.to_string(), epoch)? {
@@ -385,7 +386,7 @@ impl CommandService {
                     RunOutcome::Interrupted => Some("interrupted"),
                     RunOutcome::Completed => None,
                 };
-                notices.extend(crate::conversation::group_chat::mirror_answer(tx, &files_store, run_id, conversation_id, &reply, group_failure, &kept_files)?);
+                notices.extend(crate::conversation::group_chat::mirror_answer(tx, &files_store, run_id, conversation_id, &reply, group_failure, &kept_files, group_mode)?);
                 // The run of a task's conversation: its answer is the task's report.
                 let failed = match &outcome {
                     RunOutcome::Failed(code) => Some(code.as_str()),
