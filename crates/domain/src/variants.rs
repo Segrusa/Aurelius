@@ -226,7 +226,7 @@ pub enum ProbeVerdict {
 }
 
 /// Aurelius' own tools a probe may use: only those that read.
-const OWN_READ_TOOLS: [&str; 5] = ["mcp__aurelius__recall", "mcp__aurelius__list_tasks", "mcp__aurelius__read_task", "mcp__aurelius__list_conversations", "mcp__aurelius__read_conversation"];
+const OWN_READ_TOOLS: [&str; 6] = ["mcp__aurelius__recall", "mcp__aurelius__list_tasks", "mcp__aurelius__read_task", "mcp__aurelius__list_conversations", "mcp__aurelius__read_conversation", "mcp__aurelius__read_group_chat"];
 
 /// Commands that reach outside the worktree (network, remote, publishing).
 const OUTSIDE_COMMANDS: [&str; 22] = [

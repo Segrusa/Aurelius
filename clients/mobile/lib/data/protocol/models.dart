@@ -1342,6 +1342,8 @@ sealed class Command {
         return CommandSendChatMessage(value: SendChatMessage.fromJson(json as Map<String, dynamic>));
       case 'send_employee_message':
         return CommandSendEmployeeMessage(value: SendEmployeeMessage.fromJson(json as Map<String, dynamic>));
+      case 'send_group_message':
+        return CommandSendGroupMessage(value: SendGroupMessage.fromJson(json as Map<String, dynamic>));
       case 'send_project_message':
         return CommandSendProjectMessage(value: SendProjectMessage.fromJson(json as Map<String, dynamic>));
       case 'send_queued_now':
@@ -1908,6 +1910,20 @@ final class CommandSendEmployeeMessage extends Command {
     };
 }
 
+final class CommandSendGroupMessage extends Command {
+  const CommandSendGroupMessage({
+    required this.value,
+  });
+
+  final SendGroupMessage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'send_group_message',
+      ...value.toJson(),
+    };
+}
+
 final class CommandSendProjectMessage extends Command {
   const CommandSendProjectMessage({
     required this.value,
@@ -2397,6 +2413,13 @@ sealed class CommandResult {
       case 'follow_org_chart_set':
         return CommandResultFollowOrgChartSet(
           follow: (json['follow'] as bool),
+        );
+      case 'group_message_sent':
+        return CommandResultGroupMessageSent(
+          conversationId: (json['conversation_id'] as String),
+          messageId: (json['message_id'] as String),
+          runIds: (json['run_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+          to: (json['to'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
         );
       case 'heartbeat_set':
         return CommandResultHeartbeatSet(
@@ -2928,6 +2951,30 @@ final class CommandResultFollowOrgChartSet extends CommandResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'follow_org_chart_set',
       'follow': follow,
+    };
+}
+
+/// A message in the group chat, with the employees it woke (each answers in a run of its own).
+final class CommandResultGroupMessageSent extends CommandResult {
+  const CommandResultGroupMessageSent({
+    required this.conversationId,
+    required this.messageId,
+    required this.runIds,
+    required this.to,
+  });
+
+  final String conversationId;
+  final String messageId;
+  final List<String> runIds;
+  final List<String> to;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'group_message_sent',
+      'conversation_id': conversationId,
+      'message_id': messageId,
+      'run_ids': runIds,
+      'to': to,
     };
 }
 
@@ -8842,6 +8889,8 @@ sealed class Method {
           conversationId: (src['conversation_id'] as String),
         );
         }
+      case 'group_chat.get':
+        return const MethodGroupChatGet();
       case 'idea.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -9487,6 +9536,18 @@ final class MethodGitGetStatus extends Method {
       'params': <String, dynamic>{
       'conversation_id': conversationId,
     },
+    };
+}
+
+/// The company's group chat (Team chat): the user and every employee. Its
+/// messages and settings, as `conversation.get` answers them; an employee's
+/// messages carry its name as `author`. Write with `group_chat.send`.
+final class MethodGroupChatGet extends Method {
+  const MethodGroupChatGet();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'group_chat.get',
     };
 }
 
@@ -13205,6 +13266,33 @@ final class SendEmployeeMessage {
     'files': files,
     'images': images,
     if (interrupt != null) 'interrupt': interrupt,
+    'text': text,
+  };
+}
+
+/// A message of the user in the group chat (`group_chat.send`).
+final class SendGroupMessage {
+  const SendGroupMessage({
+    this.files = const [],
+    this.images = const [],
+    required this.text,
+  });
+
+  /// Files of any type for the employees (host paths, or this device's upload inbox).
+  final List<String> files;
+  /// Images that belong to this message (see `SendChatMessage::images`).
+  final List<String> images;
+  final String text;
+
+  factory SendGroupMessage.fromJson(Map<String, dynamic> json) => SendGroupMessage(
+    files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    text: (json['text'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'files': files,
+    'images': images,
     'text': text,
   };
 }

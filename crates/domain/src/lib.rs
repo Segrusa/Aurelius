@@ -17,6 +17,7 @@ pub mod department;
 pub mod error;
 pub mod events;
 pub mod files;
+pub mod group_chat;
 pub mod idea;
 pub mod ids;
 pub mod job;
@@ -105,6 +106,7 @@ pub enum Command {
     SetFollowOrgChart(employee::SetFollowOrgChart),
     SetHeartbeat(employee::SetHeartbeat),
     SendEmployeeMessage(employee::SendEmployeeMessage),
+    SendGroupMessage(group_chat::SendGroupMessage),
     DecideProposal(proposal::DecideProposal),
     RestoreEmployeeInstructions(proposal::RestoreEmployeeInstructions),
     DecideApproval(approval::DecideApproval),
@@ -177,6 +179,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("set_follow_org_chart", "company.set_follow_org_chart"),
     ("set_heartbeat", "heartbeat.set"),
     ("send_employee_message", "employee.send_message"),
+    ("send_group_message", "group_chat.send"),
     ("decide_proposal", "proposal.decide"),
     ("restore_employee_instructions", "employee.restore_instructions"),
     ("decide_approval", "approval.decide"),

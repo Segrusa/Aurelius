@@ -662,6 +662,11 @@ impl Client {
         self.read(Method::EmployeeChat { employee_id }, body!(Messages)).await
     }
 
+    /// The company's group chat (Team chat): the user and every employee.
+    pub async fn group_chat(&self) -> Result<MessagesSnapshot, ClientError> {
+        self.read(Method::GroupChatGet, body!(Messages)).await
+    }
+
     /// The departments by name (archived ones too with `archived`).
     pub async fn departments(&self, archived: bool) -> Result<aurelius_protocol::DepartmentsSnapshot, ClientError> {
         self.read(Method::DepartmentList { archived }, body!(Departments)).await
@@ -904,6 +909,14 @@ impl Client {
             *path = self.stage_file(Path::new(path.as_str())).await?;
         }
         self.execute(envelope(Command::SendEmployeeMessage(send), None)).await
+    }
+
+    /// A message in the group chat with images and files from this computer.
+    pub async fn send_group_message(&self, mut send: aurelius_domain::group_chat::SendGroupMessage) -> Result<CommandReceipt, ClientError> {
+        for path in send.images.iter_mut().chain(send.files.iter_mut()) {
+            *path = self.stage_file(Path::new(path.as_str())).await?;
+        }
+        self.execute(envelope(Command::SendGroupMessage(send), None)).await
     }
 
     /// A message in a project conversation (a new one without `conversation_id`).

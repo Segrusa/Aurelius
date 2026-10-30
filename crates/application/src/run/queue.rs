@@ -60,11 +60,16 @@ pub(crate) fn explain_failed_start(tx: &Tx<'_>, run_id: RunId, blob: &PreparedBl
     Ok(vec![notice])
 }
 
-fn job_payload(run: RunId, conversation: ConversationId, message: MessageId, reply_to: MessageId) -> serde_json::Value {
-    serde_json::json!({
+/// `group`: the group chat woke this run (see `conv::GroupRun`); its answer is copied there.
+fn job_payload(run: RunId, conversation: ConversationId, message: MessageId, reply_to: MessageId, group: Option<conv::GroupRun>) -> serde_json::Value {
+    let mut payload = serde_json::json!({
         "run_id": run, "conversation_id": conversation,
         "assistant_message_id": message, "reply_to": reply_to,
-    })
+    });
+    if let Some(group) = group {
+        payload["group"] = serde_json::json!(group);
+    }
+    payload
 }
 
 /// Queue a run for `reply_to`: runs row + `run.queued` + durable job (job id = run id).
@@ -74,6 +79,18 @@ pub(crate) fn queue_run(
     correlation: &str,
     conversation: ConversationId,
     reply_to: MessageId,
+) -> Result<(RunId, EventNotice), StorageError> {
+    queue_run_marked(tx, ctx_meta, correlation, conversation, reply_to, None)
+}
+
+/// `queue_run`, for a run the group chat woke (`group`).
+pub(crate) fn queue_run_marked(
+    tx: &Tx<'_>,
+    ctx_meta: &serde_json::Value,
+    correlation: &str,
+    conversation: ConversationId,
+    reply_to: MessageId,
+    group: Option<conv::GroupRun>,
 ) -> Result<(RunId, EventNotice), StorageError> {
     let run_id = RunId::new();
     let message_id = MessageId::new();
@@ -96,7 +113,7 @@ pub(crate) fn queue_run(
             dedupe: format!("run:{run_id}:queued"),
         },
     )?;
-    let payload = job_payload(run_id, conversation, message_id, reply_to);
+    let payload = job_payload(run_id, conversation, message_id, reply_to, group);
     events::insert_job(tx, &run_id.to_string(), CHAT_RUN_KIND, event_id, &format!("run:{run_id}"), &payload)?;
     Ok((run_id, notice))
 }

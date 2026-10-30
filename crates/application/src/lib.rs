@@ -203,6 +203,7 @@ impl CommandService {
             Command::SetEmployeeStatus(cmd) => self.set_employee_status(ctx, &envelope, hash, cmd),
             Command::SetProjectStatus(cmd) => self.set_project_status(ctx, &envelope, hash, cmd),
             Command::SendEmployeeMessage(cmd) => self.send_employee_message(ctx, &envelope, hash, cmd),
+            Command::SendGroupMessage(cmd) => self.send_group_message(ctx, &envelope, hash, cmd),
             Command::DecideApproval(cmd) => self.decide_approval(ctx, &envelope, hash, cmd),
             Command::AddProvider(cmd) => self.add_connection(ctx, &envelope, hash, cmd),
             Command::RemoveProvider(cmd) => self.remove_connection(ctx, &envelope, hash, cmd),

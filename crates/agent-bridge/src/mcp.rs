@@ -10,7 +10,8 @@
 //! employee's own memory, always on); `list_tasks`, `read_task`,
 //! `list_conversations`, `read_conversation`; `set_mode` (only for management in a task whose
 //! mode is theirs to choose, `--set-mode`); `delegate_task`, `message_task`,
-//! `hand_over_task`, `add_idea`, `propose_colleague` and `propose_instructions`. `--project` (the
+//! `hand_over_task`, `add_idea`, `propose_colleague` and `propose_instructions`; `read_group_chat`
+//! and `post_to_group_chat` (the company's group chat). `--project` (the
 //! assistant of a project conversation) leaves out `hand_over_task`.
 //!
 //! It also gives the agent eyes: `screenshot` and `list_windows`. Claude Code
@@ -87,6 +88,7 @@ fn tool_definitions(project: bool, set_mode: bool) -> Vec<Value> {
     tools.push(suggest_replies_definition());
     tools.extend(project_tool_definitions());
     tools.extend(task_tool_definitions().into_iter().filter(|t| !project || t["name"] != "hand_over_task"));
+    tools.extend(group_chat_tool_definitions());
     tools.push(json!({
         "name": "add_idea",
         "description": "Note an idea for a project that is worth doing later but is not part of the current work (an improvement, a follow-up, a risk to look at). The user sees it in the project's ideas and decides if and when it becomes a task.",
@@ -186,6 +188,8 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
             EmployeeTaskOp::Delegate { employee: text("employee"), title: text("title"), goal: text("goal"), criteria, project: optional("project") }
         }
         "set_mode" if set_mode => EmployeeTaskOp::SetMode { mode: text("mode"), reason: text("reason") },
+        "read_group_chat" => EmployeeTaskOp::ReadGroupChat { last: args["last"].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32) },
+        "post_to_group_chat" => EmployeeTaskOp::PostToGroupChat { message: text("message") },
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
         "propose_colleague" => EmployeeTaskOp::ProposeColleague {
             name: text("name"),
@@ -393,6 +397,29 @@ fn task_tool_definitions() -> Vec<Value> {
     ]
 }
 
+/// The company's group chat (Team chat): read it, post in it.
+fn group_chat_tool_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "read_group_chat",
+            "description": "Read the company's group chat (Team chat), where the user talks with the whole team: its latest messages, oldest first, each with who wrote it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "last": { "type": "integer", "minimum": 1, "maximum": 50, "description": "How many of the latest messages (default and at most 50)." } }
+            }
+        }),
+        json!({
+            "name": "post_to_group_chat",
+            "description": "Post a short message in the company's group chat under your name, when the group needs to know something (e.g. a task is done and needs a reviewer). Name a colleague with @Name to wake them: they answer in the group chat. Only the colleagues you name are woken, never yourself, and only a few times in a row after one message of the user. An answer to a group chat message is posted there by itself; do not post it again.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "message": { "type": "string", "description": "A few sentences at most." } },
+                "required": ["message"]
+            }
+        }),
+    ]
+}
+
 /// One employee action through the service; failures are reported to the model.
 async fn act_call(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId, op: EmployeeTaskOp) -> Value {
     let result = match connected(client, root).await {
@@ -455,7 +482,7 @@ mod tests {
         let names = |project| tool_definitions(project, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(false).contains(&"hand_over_task".to_owned()));
         assert!(!names(true).contains(&"hand_over_task".to_owned()));
-        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows"] {
+        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat"] {
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
         }
     }

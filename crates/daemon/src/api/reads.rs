@@ -31,6 +31,13 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method) -> Result<Respo
                 None => Err(ProtocolError::new(ErrorCode::NotFound, format!("employee {employee_id} does not exist"))),
             }
         }
+        Method::GroupChatGet => {
+            let store = shared.store().clone();
+            match storage_task(move || store.read(aurelius_storage::conversations::group_conversation)).await? {
+                Some(conversation_id) => messages(shared, conversation_id).await,
+                None => Err(ProtocolError::new(ErrorCode::NotFound, "the group chat does not exist")),
+            }
+        }
         Method::DepartmentList { archived } => {
             let store = shared.store().clone();
             storage_task(move || {

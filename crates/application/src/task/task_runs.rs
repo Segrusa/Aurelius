@@ -462,6 +462,10 @@ pub enum EmployeeAction {
     ProposeInstructions { employee: Option<String>, instructions: String, reason: String, evidence: Vec<String> },
     /// Management chooses the mode (`auto` or `plan`) of its own task, with a reason.
     SetMode { mode: String, reason: String },
+    /// The latest messages of the company's group chat (nothing changes).
+    ReadGroupChat { last: Option<u32> },
+    /// A message in the group chat under the employee's name; wakes the colleagues it names.
+    PostToGroupChat { message: String },
 }
 
 impl CommandService {
@@ -564,6 +568,22 @@ impl CommandService {
                 })
                 .map_err(storage_error);
         }
+        if let EmployeeAction::ReadGroupChat { last } = &action {
+            let last = *last;
+            return self
+                .store
+                .read(|conn| {
+                    if run_owner(conn, run)?.and_then(|o| o.employee).is_none() {
+                        return Ok((false, "Only an employee can read the group chat.".to_string(), vec![]));
+                    }
+                    Ok((true, crate::conversation::group_chat::read_text(conn, &st, last)?, vec![]))
+                })
+                .map_err(storage_error);
+        }
+        if let EmployeeAction::PostToGroupChat { message } = &action {
+            let message = message.clone();
+            return self.store.write(move |tx| crate::conversation::group_chat::post_from_run(tx, &st, run, &message)).map_err(storage_error);
+        }
         if let EmployeeAction::ProposeColleague { name, role, title, instructions, reports_to, reason, department } = &action {
             let input = crate::org::ProposalInput {
                 name: name.clone(),
@@ -665,7 +685,9 @@ impl CommandService {
                     | EmployeeAction::ReadConversation { .. }
                     | EmployeeAction::ProposeColleague { .. }
                     | EmployeeAction::ProposeInstructions { .. }
-                    | EmployeeAction::SetMode { .. } => unreachable!("handled above"),
+                    | EmployeeAction::SetMode { .. }
+                    | EmployeeAction::ReadGroupChat { .. }
+                    | EmployeeAction::PostToGroupChat { .. } => unreachable!("handled above"),
                     EmployeeAction::HandOver { employee, reason } => {
                         let Some(to) = find(&employee) else {
                             return Ok((false, format!("No active colleague called {employee} in the company."), vec![]));

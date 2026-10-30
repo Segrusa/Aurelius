@@ -1,5 +1,6 @@
 //! Conversations and messages. Every conversation belongs to
-//! a project, a task or an employee (3.1: standalone chats are gone). Messages are durable; streamed deltas are not.
+//! a project, a task or an employee (3.1: standalone chats are gone), except
+//! the company's one group chat. Messages are durable; streamed deltas are not.
 
 use crate::{ConversationId, DomainError, MessageId, RunId, optional_text, require_text};
 use serde::{Deserialize, Serialize};
@@ -20,8 +21,11 @@ pub enum ConversationKind {
     Project,
     /// An employee's conversation about one task (project and employee).
     Task,
-    /// An employee's chat with the user, outside projects (company scope).
+    /// An employee's chat with the user, outside projects (company scope). Also
+    /// its hidden workspace, where it answers the group chat.
     Employee,
+    /// The company's group chat: the user and every employee (no project, no employee).
+    Group,
 }
 
 impl ConversationKind {
@@ -30,6 +34,7 @@ impl ConversationKind {
             ConversationKind::Project => "project",
             ConversationKind::Task => "task",
             ConversationKind::Employee => "employee",
+            ConversationKind::Group => "group",
         }
     }
 
@@ -38,6 +43,7 @@ impl ConversationKind {
             "project" => Some(Self::Project),
             "task" => Some(Self::Task),
             "employee" => Some(Self::Employee),
+            "group" => Some(Self::Group),
             _ => None,
         }
     }

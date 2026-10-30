@@ -64,8 +64,45 @@ pub fn project_conversations(conn: &Connection, project: aurelius_domain::Projec
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// A project conversation (no employee). The group chat is not one: it takes
+/// messages only through `group_chat.send`.
 pub fn conversation_exists(tx: &Transaction<'_>, id: ConversationId) -> Result<bool, StorageError> {
-    Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND employee_id IS NULL)", [id.to_string()], |r| r.get(0))?)
+    Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND employee_id IS NULL AND kind <> 'group')", [id.to_string()], |r| r.get(0))?)
+}
+
+/// The company's group chat (migration 17 makes it).
+pub fn group_conversation(conn: &Connection) -> Result<Option<ConversationId>, StorageError> {
+    let id: Option<String> = conn.query_row("SELECT id FROM conversations WHERE kind = 'group' ORDER BY created_at_ms, id LIMIT 1", [], |r| r.get(0)).optional()?;
+    Ok(id.and_then(|c| ConversationId::parse(&c).ok()))
+}
+
+pub fn is_group_conversation(conn: &Connection, id: ConversationId) -> Result<bool, StorageError> {
+    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND kind = 'group')", [id.to_string()], |r| r.get(0))?)
+}
+
+/// A run woken by the group chat: the `group` of its job's payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GroupRun {
+    /// The group chat its answer is copied to.
+    pub conversation_id: ConversationId,
+    /// The message its answer becomes there (streamed under this id while it runs).
+    pub message_id: MessageId,
+    /// How many employees woke each other before it (0: woken by the user).
+    pub hop: u32,
+}
+
+/// The conversation a run answers in.
+pub fn run_conversation(conn: &Connection, run: RunId) -> Result<Option<ConversationId>, StorageError> {
+    let id: Option<Option<String>> = conn.query_row("SELECT conversation_id FROM runs WHERE id = ?1", [run.to_string()], |r| r.get(0)).optional()?;
+    Ok(id.flatten().and_then(|c| ConversationId::parse(&c).ok()))
+}
+
+/// The group chat marking of a run, if the group chat woke it.
+pub fn group_run(conn: &Connection, run: RunId) -> Result<Option<GroupRun>, StorageError> {
+    let marking: Option<Option<String>> = conn
+        .query_row("SELECT json_extract(payload_json, '$.group') FROM jobs WHERE id = ?1", [run.to_string()], |r| r.get(0))
+        .optional()?;
+    Ok(marking.flatten().and_then(|m| serde_json::from_str(&m).ok()))
 }
 
 pub struct NewMessage {

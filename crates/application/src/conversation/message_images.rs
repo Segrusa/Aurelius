@@ -107,7 +107,8 @@ pub fn for_run(
 ) -> Result<HashMap<MessageId, (String, Vec<ImagePart>)>, StorageError> {
     let sent: Vec<(MessageId, Vec<&FileRef>)> = history
         .iter()
-        .filter(|m| m.role == MessageRole::User && m.update.is_none())
+        // The user's messages, and group chat messages forwarded to an employee (updates with the images).
+        .filter(|m| (m.role == MessageRole::User && m.update.is_none()) || m.update.as_deref() == Some(aurelius_domain::group_chat::GROUP_KIND))
         .map(|m| (m.id, m.files.iter().filter(|f| f.media_type.starts_with("image/")).collect::<Vec<_>>()))
         .filter(|(_, files)| !files.is_empty())
         .collect();

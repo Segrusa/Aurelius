@@ -125,6 +125,7 @@ impl Peer {
                 Command::AttachFile(attach) => vec![&attach.path],
                 Command::SendChatMessage(send) => send.images.iter().collect(),
                 Command::SendEmployeeMessage(send) => send.images.iter().chain(&send.files).collect(),
+                Command::SendGroupMessage(send) => send.images.iter().chain(&send.files).collect(),
                 Command::SendProjectMessage(send) => send.images.iter().chain(&send.files).collect(),
                 Command::CreateTask(task) => task.files.iter().collect(),
                 Command::CreateTaskSchedule(schedule) => schedule.files.iter().collect(),

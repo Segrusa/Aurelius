@@ -49,6 +49,7 @@ async fn answer(shared: &Arc<Shared>, request: BridgeRequest) -> BridgeOutcome {
             EmployeeTaskOp::ReadTask { .. } => "read_task",
             EmployeeTaskOp::ListConversations { .. } => "list_conversations",
             EmployeeTaskOp::ReadConversation { .. } => "read_conversation",
+            EmployeeTaskOp::ReadGroupChat { .. } => "read_group_chat",
             _ => "act",
         })),
         _ => None,
@@ -98,6 +99,8 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         }
         EmployeeTaskOp::ProposeInstructions { employee, instructions, reason, evidence } => EmployeeAction::ProposeInstructions { employee, instructions, reason, evidence },
         EmployeeTaskOp::SetMode { mode, reason } => EmployeeAction::SetMode { mode, reason },
+        EmployeeTaskOp::ReadGroupChat { last } => EmployeeAction::ReadGroupChat { last },
+        EmployeeTaskOp::PostToGroupChat { message } => EmployeeAction::PostToGroupChat { message },
     };
     let switches = matches!(action, EmployeeAction::SetMode { .. });
     let interrupts = matches!(action, EmployeeAction::MessageTask { interrupt: true, .. });

@@ -183,6 +183,10 @@ impl CommandService {
                 }
                 if let Some(blob) = &explanation {
                     notices.extend(explain_failed_start(tx, run_id, blob)?);
+                    // Woken by the group chat: the group hears it could not answer.
+                    if let Some(conversation) = conv::run_conversation(tx, run_id)? {
+                        notices.extend(crate::conversation::group_chat::mirror_answer(tx, &st, run_id, conversation, "", Some("not started"), &[])?);
+                    }
                     // A task's run that never started: the task must not stay "running".
                     notices.extend(crate::task::task_runs::on_run_not_started(tx, &st, run_id)?);
                 }
@@ -351,6 +355,7 @@ impl CommandService {
                 // The conversation goes on in the run's session only when it completed there.
                 crate::run::session::on_run_finished(tx, conversation_id, run_id, message_id, &session, outcome == RunOutcome::Completed)?;
                 // Files the answer names (in the project's folders) are kept with it, to open in the app.
+                let mut kept_files = Vec::new();
                 if outcome == RunOutcome::Completed {
                     let project: Option<String> = tx.query_row("SELECT project_id FROM conversations WHERE id = ?1", [conversation_id.to_string()], |r| r.get(0)).ok().flatten();
                     let files = match project.and_then(|p| aurelius_domain::ProjectId::parse(&p).ok()) {
@@ -369,10 +374,18 @@ impl CommandService {
                         }
                     };
                     conv::set_message_files(tx, message_id, &files)?;
+                    kept_files = files;
                 }
                 if outcome == RunOutcome::Completed {
                     crate::memory::maybe_schedule_summary(tx, conversation_id, message_event_id)?;
                 }
+                // Woken by the group chat: the answer goes there too, under the employee's name.
+                let group_failure = match &outcome {
+                    RunOutcome::Failed(code) => Some(code.as_str()),
+                    RunOutcome::Interrupted => Some("interrupted"),
+                    RunOutcome::Completed => None,
+                };
+                notices.extend(crate::conversation::group_chat::mirror_answer(tx, &files_store, run_id, conversation_id, &reply, group_failure, &kept_files)?);
                 // The run of a task's conversation: its answer is the task's report.
                 let failed = match &outcome {
                     RunOutcome::Failed(code) => Some(code.as_str()),

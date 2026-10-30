@@ -328,6 +328,7 @@ impl CommandService {
                 Some("employee") if conv::is_main_employee_conversation(tx, id)? => {
                     return Ok(Err(domain_error(DomainError::Memory("This is the employee's main conversation; archive the employee instead.".into()))));
                 }
+                Some("group") => return Ok(Err(domain_error(DomainError::Memory("The company's group chat cannot be deleted.".into())))),
                 _ => {}
             }
             // What still runs or waits in it is stopped; a run stuck in 'cancelling' no longer blocks the delete.
