@@ -1,8 +1,8 @@
 //! The watchdog (AUR-BUG-05): a run that shows no progress at all is stopped with
 //! a note in its answer, its conversation goes on with the message that waited,
-//! and waiting on the user's approval does not count as hanging (AUR-BUG-05b: nor
-//! a task parked on its colleagues; open tasks given from the conversation do not
-//! switch the watchdog off, a stopped run ends as stopped, an open tool gets 3x).
+//! and waiting on the user's approval does not count as hanging (AUR-BUG-05b: open
+//! tasks, given from the conversation or waited for, do not switch the watchdog off;
+//! a stopped run ends as stopped, an open tool gets 3x).
 
 mod common;
 use common::*;
@@ -197,26 +197,28 @@ async fn open_tasks_given_from_the_conversation_do_not_switch_the_watchdog_off()
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_run_whose_task_waits_for_its_colleagues_is_not_hanging() {
+async fn a_live_run_of_a_task_waiting_for_its_colleagues_is_watched_and_the_parked_task_left_alone() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path(), Arc::new(Hangs::default())).await;
     let client = connect(dir.path()).await;
     let conversation = common::conversation(&client).await;
 
-    let (first, run) = send(&client, conversation, "Bring it together.").await;
+    // A manager's task waits for its colleagues (its own run ended); a message to it
+    // starts a run meanwhile, and that run hangs: it is not waiting, it is stopped.
+    let (first, run) = send(&client, conversation, "How far are they?").await;
     until_running(dir.path(), run).await;
-    // Its task is parked until the colleagues it gave parts to are done.
     let rw = rw(dir.path());
     task(&rw, run, "own", "waiting", Some("dependency"), false);
     rw.execute("UPDATE runs SET task_id = 'own' WHERE id = ?1", [run.to_string()]).unwrap();
-    tokio::time::sleep(Duration::from_millis(IDLE_MS * 4)).await;
-    assert_eq!(run_state(dir.path(), run).0, "running", "waiting for colleagues is not hanging");
+    // Another task of the conversation, parked until its colleagues finish: no run to watch.
+    task(&rw, run, "parked", "waiting", Some("dependency"), true);
 
-    // They are done, and still no progress: now it is stopped.
-    rw.execute("UPDATE tasks SET status = 'running', waiting_reason = NULL WHERE id = 'own'", []).unwrap();
     let (status, text) = settled(&client, conversation, first).await;
     assert_eq!(status, MessageStatus::Failed, "{text}");
     assert_eq!(run_state(dir.path(), run).1.as_deref(), Some("stalled"));
+    tokio::time::sleep(Duration::from_millis(IDLE_MS * 2)).await;
+    let parked: (String, Option<String>) = rw.query_row("SELECT status, waiting_reason FROM tasks WHERE id = 'parked'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!(parked, ("waiting".into(), Some("dependency".into())), "a task parked on its colleagues keeps waiting");
     stop(dir.path(), daemon).await;
 }
 

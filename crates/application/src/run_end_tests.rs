@@ -143,7 +143,8 @@ fn waiting_on_an_approval_is_not_hanging_an_open_task_is_and_the_limit_is_a_sett
         })
         .unwrap();
     assert!(!service.run_waits_on_others(run), "an open delegated task is no reason to wait");
-    // The run's own task, parked until its colleagues finish: that is waiting.
+    // The run's own task waits for its colleagues while this run is live (a message
+    // to it started the run): the run works, it does not wait on them.
     service
         .store()
         .write(move |tx| {
@@ -156,11 +157,9 @@ fn waiting_on_an_approval_is_not_hanging_an_open_task_is_and_the_limit_is_a_sett
             Ok(())
         })
         .unwrap();
-    assert!(!service.run_waits_on_others(run), "waiting for the user's input is not waiting for colleagues");
+    assert!(!service.run_waits_on_others(run), "its task waits for the user's input");
     service.store().write(|tx| Ok(tx.execute("UPDATE tasks SET waiting_reason = 'dependency' WHERE id = 'own'", [])?)).unwrap();
-    assert!(service.run_waits_on_others(run), "parked until its colleagues finish");
-    service.store().write(|tx| Ok(tx.execute("UPDATE tasks SET status = 'running', waiting_reason = NULL WHERE id = 'own'", [])?)).unwrap();
-    assert!(!service.run_waits_on_others(run), "going on again");
+    assert!(!service.run_waits_on_others(run), "its task waits for its colleagues");
     service
         .store()
         .write(move |tx| {

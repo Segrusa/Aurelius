@@ -251,11 +251,17 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                 stop(&mut handle, idle).await;
                 break RunOutcome::Interrupted;
             }
-            // Waiting on the user's approval or for its colleagues is not hanging; in doubt, neither.
+            // Waiting on the user's approval is not hanging; in doubt, neither.
             let (s, run_id) = (shared.clone(), plan.run_id);
-            if blocking(move || s.service.run_waits_on_others(run_id)).await != Some(false) {
-                last_progress = tokio::time::Instant::now();
-                continue;
+            match blocking(move || s.service.run_waits_on_others(run_id)).await {
+                Some(false) => {}
+                waits => {
+                    if waits.is_none() {
+                        tracing::warn!(run = %plan.run_id, "could not tell whether the run waits on others; not stopping it");
+                    }
+                    last_progress = tokio::time::Instant::now();
+                    continue;
+                }
             }
             tracing::warn!(run = %plan.run_id, idle_s = limit.as_secs(), open_tools = open_tools.len(), "no progress from the runtime; stopping the run");
             stop(&mut handle, idle).await;

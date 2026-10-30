@@ -359,16 +359,16 @@ impl CommandService {
     }
 
     /// The run waits on someone else, which is not hanging: an approval the user
-    /// has not decided yet, or its task parked until its colleagues finish. An open
-    /// task given from its conversation is no reason (delegate_task answers at once,
-    /// the result comes as a new run): a manager's conversation nearly always has one.
-    /// When this cannot be read, the run is given the benefit of the doubt.
+    /// has not decided yet. Only that blocks a running answer. Tasks never do:
+    /// delegate_task answers at once, and a task that waits for its colleagues has
+    /// ended its run (the next one starts when they are done), so a run that is
+    /// live while they work (a message to it) is working and is watched. A manager's
+    /// conversation nearly always has open tasks. When this cannot be read, the run
+    /// is given the benefit of the doubt.
     pub fn run_waits_on_others(&self, run_id: RunId) -> bool {
         let waits = self.store.read(|c| {
             Ok(c.query_row(
-                "SELECT EXISTS(SELECT 1 FROM approvals WHERE run_id = ?1 AND status = 'pending')
-                     OR EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id = r.task_id
-                               WHERE r.id = ?1 AND t.status = 'waiting' AND t.waiting_reason = 'dependency')",
+                "SELECT EXISTS(SELECT 1 FROM approvals WHERE run_id = ?1 AND status = 'pending')",
                 [run_id.to_string()],
                 |r| r.get::<_, bool>(0),
             )?)
@@ -505,8 +505,7 @@ impl CommandService {
 pub const RUN_IDLE_TIMEOUT: &str = "run_idle_timeout_s";
 /// 10 minutes: longer than Claude Code's own longest tool call (Bash stops at 10 minutes
 /// and then reports) and its retries of an overloaded API. While a tool call is open the
-/// daemon allows three times this; waiting on an approval, or a task parked until its
-/// colleagues finish, never counts.
+/// daemon allows three times this; waiting on an approval never counts.
 pub const DEFAULT_RUN_IDLE_MS: i64 = 600_000;
 
 /// Said in an answer the server ended because nobody drove it any more.
