@@ -4,12 +4,12 @@
 use crate::{CommandService, storage_error};
 use aurelius_domain::{ActorKind, RunId, EventNotice, AppError};
 use aurelius_storage::{PreparedBlob, StorageError, blobs, queries};
+use rusqlite::OptionalExtension;
 use aurelius_domain::conversation::{MessageRole, MessageStatus};
 use aurelius_storage::conversations::{self as conv, NewMessage};
 use crate::run::events::{Ev, emit};
 use crate::run::plan::{ChatRunPlan, RunOutcome};
 use crate::run::queue::{explain_failed_start, failed_start_text};
-
 impl CommandService {
     /// Record usage reported for a run (chat or task step). Runs that are not
     /// registered (internal memory jobs) are skipped.
@@ -79,17 +79,28 @@ impl CommandService {
                 } else {
                     vec![]
                 };
-                let (event_id, started) = emit(tx, Ev {
-                    aggregate_type: "run",
-                    aggregate_id: plan.run_id.to_string(),
-                    event_type: "run.started",
-                    actor: ActorKind::Runtime,
-                    actor_id: None,
-                    correlation: plan.run_id.to_string(),
-                    payload: None,
-                    metadata: serde_json::json!({ "runtime": plan.config.runtime_kind(), "model": plan.config.model, "lease_epoch": epoch }),
-                    dedupe: format!("run:{}:started:{epoch}", plan.run_id),
-                })?;
+                // A run that compacted its session first already started under this lease
+                // (its answer showed meanwhile): starting its turn records nothing twice.
+                let dedupe = format!("run:{}:started:{epoch}", plan.run_id);
+                let earlier: Option<String> = tx.query_row("SELECT id FROM events WHERE dedupe_key = ?1", [&dedupe], |r| r.get(0)).optional()?;
+                let (event_id, started) = match earlier.map(|id| aurelius_domain::EventId::parse(&id)) {
+                    Some(Ok(id)) => (id, None),
+                    Some(Err(e)) => return Err(StorageError::Rejected(e.to_string())),
+                    None => {
+                        let (id, notice) = emit(tx, Ev {
+                            aggregate_type: "run",
+                            aggregate_id: plan.run_id.to_string(),
+                            event_type: "run.started",
+                            actor: ActorKind::Runtime,
+                            actor_id: None,
+                            correlation: plan.run_id.to_string(),
+                            payload: None,
+                            metadata: serde_json::json!({ "runtime": plan.config.runtime_kind(), "model": plan.config.model, "lease_epoch": epoch }),
+                            dedupe,
+                        })?;
+                        (id, Some(notice))
+                    }
+                };
                 if conv::message_for_run(tx, plan.run_id)?.is_none() {
                     conv::insert_message(tx, NewMessage {
                         id: plan.message_id,
@@ -104,7 +115,7 @@ impl CommandService {
                 } else {
                     conv::update_message(tx, plan.message_id, None, MessageStatus::Partial)?;
                 }
-                let mut notices = vec![started];
+                let mut notices: Vec<EventNotice> = started.into_iter().collect();
                 notices.extend(resumed);
                 // A run of a finished task goes from queued to running.
                 notices.extend(crate::task::task_runs::live_run_notice(tx, plan.conversation_id)?);
@@ -330,91 +341,7 @@ impl CommandService {
                 if !queries::complete_job(tx, &run_id.to_string(), epoch)? {
                     return Err(StorageError::Rejected("lease lost; a newer owner is responsible".into()));
                 }
-                if let Some(blob) = &blob {
-                    blobs::register(tx, blob)?;
-                }
-                let (message_event, message_status, run_event, run_status, error) = match &outcome {
-                    RunOutcome::Completed => ("message.assistant_committed", MessageStatus::Complete, "run.completed", "succeeded", None),
-                    RunOutcome::Interrupted => ("message.interrupted", MessageStatus::Interrupted, "run.cancelled", "cancelled", None),
-                    RunOutcome::Failed(code) => ("message.interrupted", MessageStatus::Failed, "run.failed", "failed", Some(code.clone())),
-                };
-                let blob_id = blob.as_ref().map(|b| b.id.to_string());
-                let mut notices = Vec::new();
-                let (message_event_id, message_notice) = emit(tx, Ev {
-                    aggregate_type: "conversation",
-                    aggregate_id: conversation_id.to_string(),
-                    event_type: message_event,
-                    actor: ActorKind::Runtime,
-                    actor_id: Some("fake".into()),
-                    correlation: run_id.to_string(),
-                    payload: blob_id.clone(),
-                    metadata: serde_json::json!({ "run_id": run_id, "message_id": message_id }),
-                    dedupe: format!("run:{run_id}:message"),
-                })?;
-                notices.push(message_notice);
-                conv::update_message(tx, message_id, blob_id.as_deref(), message_status)?;
-                // The conversation goes on in the run's session only when it completed there.
-                crate::run::session::on_run_finished(tx, conversation_id, run_id, message_id, &session, outcome == RunOutcome::Completed)?;
-                // Files the answer names (in the project's folders) are kept with it, to open in the app.
-                let mut kept_files = Vec::new();
-                if outcome == RunOutcome::Completed {
-                    let project: Option<String> = tx.query_row("SELECT project_id FROM conversations WHERE id = ?1", [conversation_id.to_string()], |r| r.get(0)).ok().flatten();
-                    let files = match project.and_then(|p| aurelius_domain::ProjectId::parse(&p).ok()) {
-                        Some(project) => crate::conversation::message_files::keep_for_project(tx, &files_store, &reply, project)?,
-                        // A chat outside projects (also an employee's): its own work folder,
-                        // and an employee's own workspace.
-                        None => {
-                            let own = files_store.root().join("workspaces").join(conversation_id.to_string());
-                            let roots: Vec<std::path::PathBuf> = conv::work_folders(tx, conversation_id)?
-                                .into_iter()
-                                .map(std::path::PathBuf::from)
-                                .chain(std::iter::once(own))
-                                .filter_map(|r| r.canonicalize().ok())
-                                .collect();
-                            crate::conversation::message_files::keep(tx, &files_store, &reply, &roots)?
-                        }
-                    };
-                    conv::set_message_files(tx, message_id, &files)?;
-                    kept_files = files;
-                }
-                if outcome == RunOutcome::Completed {
-                    crate::memory::maybe_schedule_summary(tx, conversation_id, message_event_id)?;
-                }
-                // Woken by the group chat: the answer goes there too, under the employee's name.
-                let group_failure = match &outcome {
-                    RunOutcome::Failed(code) => Some(code.as_str()),
-                    RunOutcome::Interrupted => Some("interrupted"),
-                    RunOutcome::Completed => None,
-                };
-                notices.extend(crate::conversation::group_chat::mirror_answer(tx, &files_store, run_id, conversation_id, &reply, group_failure, &kept_files, group_mode)?);
-                // The run of a task's conversation: its answer is the task's report.
-                let failed = match &outcome {
-                    RunOutcome::Failed(code) => Some(code.as_str()),
-                    _ => None,
-                };
-                notices.extend(crate::task::task_runs::on_run_finished(tx, &files_store, run_id, outcome == RunOutcome::Completed, failed, &reply)?);
-                // Results of tasks given from here that came in during this run.
-                notices.extend(crate::task::task_runs::answer_results(tx, run_id, outcome == RunOutcome::Completed)?);
-                notices.push(
-                    emit(tx, Ev {
-                        aggregate_type: "run",
-                        aggregate_id: run_id.to_string(),
-                        event_type: run_event,
-                        actor: ActorKind::Runtime,
-                        actor_id: Some("fake".into()),
-                        correlation: run_id.to_string(),
-                        payload: None,
-                        metadata: serde_json::json!({ "error_code": error }),
-                        dedupe: format!("run:{run_id}:terminal"),
-                    })?
-                    .1,
-                );
-                notices.extend(CommandService::invalidate_run_approvals(tx, run_id)?);
-                conv::set_run_status(tx, run_id, run_status, error.as_deref())?;
-                if let Some(n) = crate::run::heartbeat::on_run_finished(tx, run_id, outcome == RunOutcome::Completed, &reply)? {
-                    notices.push(n);
-                }
-                Ok(notices)
+                commit_end(tx, &files_store, End { run_id, message_id, conversation_id, outcome, blob: blob.as_ref(), reply: &reply, session: Some(&session), group_mode })
             })
             .map_err(storage_error)
     }
@@ -429,6 +356,94 @@ impl CommandService {
         let (run, call, output) = (plan.run_id, call_id.to_owned(), output.to_owned());
         self.store.write(move |tx| conv::activity_finished(tx, run, &call, ok, &output)).map_err(storage_error)?;
         Ok(())
+    }
+
+    /// The run waits on someone else, which is not hanging: an approval the user
+    /// has not decided yet, or a task given from its conversation that is not done.
+    pub fn run_waits_on_others(&self, run_id: RunId) -> bool {
+        self.store
+            .read(|c| {
+                Ok(c.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM approvals WHERE run_id = ?1 AND status = 'pending')
+                         OR EXISTS(SELECT 1 FROM tasks t JOIN runs r ON r.id = ?1
+                                   WHERE t.origin_conversation_id = r.conversation_id AND t.status IN ('queued','running','waiting'))",
+                    [run_id.to_string()],
+                    |r| r.get::<_, bool>(0),
+                )?)
+            })
+            .unwrap_or(false)
+    }
+
+    /// How long a run may go without any progress before it is stopped (the
+    /// `run_idle_timeout_s` setting, in seconds; at least 30 s).
+    pub fn run_idle_limit_ms(&self) -> i64 {
+        let set = self.store.read(|c| aurelius_storage::settings::get(c, RUN_IDLE_TIMEOUT)).ok().flatten();
+        set.and_then(|j| serde_json::from_str::<i64>(j.trim()).ok()).map(|s| s.max(30) * 1000).unwrap_or(DEFAULT_RUN_IDLE_MS)
+    }
+
+    /// Chat runs whose job is still leased but whose lease ran out before `cutoff_ms`
+    /// while nobody drives them (`driven`: the jobs this daemon works on) end here, so
+    /// their conversation is free again and what waits in it goes next: one that had
+    /// started fails with a note in its answer (a stopped one counts as stopped), one
+    /// that never started is tried again while it has attempts left.
+    pub fn end_abandoned_chat_runs(&self, cutoff_ms: i64, driven: &std::collections::HashSet<String>) -> Result<Vec<EventNotice>, AppError> {
+        // Most of the time there is none: only then a write.
+        let candidates: Vec<String> = self
+            .store
+            .read(|c| {
+                let mut stmt = c.prepare("SELECT id FROM jobs WHERE kind = 'run.chat' AND state = 'leased' AND lease_until_ms < ?1")?;
+                let ids = stmt.query_map([cutoff_ms], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?;
+                Ok(ids)
+            })
+            .map_err(storage_error)?;
+        if candidates.iter().all(|job| driven.contains(job)) {
+            return Ok(Vec::new());
+        }
+        let store = self.store.clone();
+        let driven = driven.clone();
+        self.store
+            .write(move |tx| {
+                let mut stmt = tx.prepare("SELECT id, lease_epoch, attempts, max_attempts FROM jobs WHERE kind = 'run.chat' AND state = 'leased' AND lease_until_ms < ?1")?;
+                let jobs = stmt
+                    .query_map([cutoff_ms], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                drop(stmt);
+                let mut notices = Vec::new();
+                for (job, epoch, attempts, max_attempts) in jobs.into_iter().filter(|(job, ..)| !driven.contains(job)) {
+                    let Ok(run_id) = RunId::parse(&job) else { continue };
+                    tracing::warn!(run = %run_id, "a chat run lost its driver; ending it so its conversation goes on");
+                    let Some(message_id) = conv::message_for_run(tx, run_id)? else {
+                        // Never started: safe to run again, a few times.
+                        if attempts < max_attempts {
+                            queries::reschedule_job(tx, &job, epoch, aurelius_storage::now_ms(), "abandoned", true)?;
+                            conv::set_run_status(tx, run_id, "created", None)?;
+                        } else if queries::kill_job(tx, &job, epoch, "abandoned")? {
+                            conv::set_run_status(tx, run_id, "failed", Some("abandoned"))?;
+                            let blob = store.blobs().put(failed_start_text("abandoned").as_bytes(), "text/plain; charset=utf-8")?;
+                            notices.extend(explain_failed_start(tx, run_id, &blob)?);
+                            notices.extend(crate::task::task_runs::on_run_not_started(tx, &store, run_id)?);
+                        }
+                        continue;
+                    };
+                    let Some(conversation_id) = conv::run_conversation(tx, run_id)? else { continue };
+                    if !queries::complete_job(tx, &job, epoch)? {
+                        continue;
+                    }
+                    let stopped = conv::run_status(tx, run_id)?.as_deref() == Some("cancelling");
+                    // What it had written stays, with the reason after it.
+                    let key: Option<String> = tx
+                        .query_row("SELECT b.storage_key FROM messages m JOIN blobs b ON b.id = m.content_blob_id WHERE m.id = ?1", [message_id.to_string()], |r| r.get(0))
+                        .optional()?;
+                    let written = key.and_then(|k| store.blobs().read(&k).ok()).and_then(|b| String::from_utf8(b).ok()).unwrap_or_default();
+                    let reply = with_note(&written, ABANDONED_NOTE);
+                    let blob = store.blobs().put(reply.as_bytes(), "text/plain; charset=utf-8")?;
+                    let outcome = if stopped { RunOutcome::Interrupted } else { RunOutcome::Failed("abandoned".into()) };
+                    let group_mode = conv::group_run(tx, run_id)?.and_then(|g| g.mode);
+                    notices.extend(commit_end(tx, &store, End { run_id, message_id, conversation_id, outcome, blob: Some(&blob), reply: &reply, session: None, group_mode })?);
+                }
+                Ok(notices)
+            })
+            .map_err(storage_error)
     }
 
     /// Startup reconciliation: runs that were active when the daemon died end
@@ -477,4 +492,136 @@ impl CommandService {
             })
             .map_err(storage_error)
     }
+}
+
+/// The setting for how long a run may go without progress, in seconds.
+pub const RUN_IDLE_TIMEOUT: &str = "run_idle_timeout_s";
+/// 10 minutes: longer than Claude Code's own longest tool call (Bash stops at 10 minutes
+/// and then reports) and its retries of an overloaded API. While a tool call is open the
+/// daemon allows three times this; waiting on an approval or a task never counts.
+pub const DEFAULT_RUN_IDLE_MS: i64 = 600_000;
+
+/// Said in an answer the server ended because nobody drove it any more.
+pub const ABANDONED_NOTE: &str = "Aurelius stopped this answer: it was no longer being worked on (it stopped without an outcome). Messages sent meanwhile are answered next; send yours again to retry this one.";
+
+/// Said in an answer the watchdog stopped after `minutes` without progress.
+pub fn stalled_note(minutes: i64) -> String {
+    format!("Aurelius stopped this answer: Claude Code showed no progress for {minutes} min (no output, no tool use, no approval or task to wait for). Messages sent meanwhile are answered next; send yours again to retry this one.")
+}
+
+/// `text` with `note` after it, as a separate paragraph in italics.
+pub fn with_note(text: &str, note: &str) -> String {
+    if text.trim().is_empty() { format!("_{note}_") } else { format!("{}\n\n_{note}_", text.trim_end()) }
+}
+
+/// How a run ends: its answer (`blob`, `reply`) and outcome.
+pub(crate) struct End<'a> {
+    pub run_id: RunId,
+    pub message_id: aurelius_domain::MessageId,
+    pub conversation_id: aurelius_domain::ConversationId,
+    pub outcome: RunOutcome,
+    pub blob: Option<&'a PreparedBlob>,
+    pub reply: &'a str,
+    /// The run's session plan; none for a run whose driver is gone.
+    pub session: Option<&'a crate::run::session::SessionPlan>,
+    pub group_mode: Option<aurelius_domain::autonomy::AgentMode>,
+}
+
+/// Commit a run's terminal outcome (its job is already completed): the answer, the
+/// conversation's session, the group chat, its task and the results that wait for it.
+pub(crate) fn commit_end(tx: &aurelius_storage::Tx<'_>, store: &aurelius_storage::Store, end: End<'_>) -> Result<Vec<EventNotice>, StorageError> {
+    let (run_id, message_id, conversation_id) = (end.run_id, end.message_id, end.conversation_id);
+    if let Some(blob) = end.blob {
+        blobs::register(tx, blob)?;
+    }
+    let (message_event, message_status, run_event, run_status, error) = match &end.outcome {
+        RunOutcome::Completed => ("message.assistant_committed", MessageStatus::Complete, "run.completed", "succeeded", None),
+        RunOutcome::Interrupted => ("message.interrupted", MessageStatus::Interrupted, "run.cancelled", "cancelled", None),
+        RunOutcome::Failed(code) => ("message.interrupted", MessageStatus::Failed, "run.failed", "failed", Some(code.clone())),
+    };
+    let blob_id = end.blob.map(|b| b.id.to_string());
+    let mut notices = Vec::new();
+    let (message_event_id, message_notice) = emit(tx, Ev {
+        aggregate_type: "conversation",
+        aggregate_id: conversation_id.to_string(),
+        event_type: message_event,
+        actor: ActorKind::Runtime,
+        actor_id: Some("fake".into()),
+        correlation: run_id.to_string(),
+        payload: blob_id.clone(),
+        metadata: serde_json::json!({ "run_id": run_id, "message_id": message_id }),
+        dedupe: format!("run:{run_id}:message"),
+    })?;
+    notices.push(message_notice);
+    conv::update_message(tx, message_id, blob_id.as_deref(), message_status)?;
+    // The conversation goes on in the run's session only when it completed there.
+    match end.session {
+        Some(session) => {
+            crate::run::session::on_run_finished(tx, conversation_id, run_id, message_id, session, end.outcome == RunOutcome::Completed)?;
+        }
+        // Without its plan (a run nobody drives any more) it only gives the session back.
+        None => {
+            aurelius_storage::conversation_sessions::release(tx, conversation_id, run_id)?;
+        }
+    }
+    // Files the answer names (in the project's folders) are kept with it, to open in the app.
+    let mut kept_files = Vec::new();
+    if end.outcome == RunOutcome::Completed {
+        let project: Option<String> = tx.query_row("SELECT project_id FROM conversations WHERE id = ?1", [conversation_id.to_string()], |r| r.get(0)).ok().flatten();
+        let files = match project.and_then(|p| aurelius_domain::ProjectId::parse(&p).ok()) {
+            Some(project) => crate::conversation::message_files::keep_for_project(tx, store, end.reply, project)?,
+            // A chat outside projects (also an employee's): its own work folder,
+            // and an employee's own workspace.
+            None => {
+                let own = store.root().join("workspaces").join(conversation_id.to_string());
+                let roots: Vec<std::path::PathBuf> = conv::work_folders(tx, conversation_id)?
+                    .into_iter()
+                    .map(std::path::PathBuf::from)
+                    .chain(std::iter::once(own))
+                    .filter_map(|r| r.canonicalize().ok())
+                    .collect();
+                crate::conversation::message_files::keep(tx, store, end.reply, &roots)?
+            }
+        };
+        conv::set_message_files(tx, message_id, &files)?;
+        kept_files = files;
+    }
+    if end.outcome == RunOutcome::Completed {
+        crate::memory::maybe_schedule_summary(tx, conversation_id, message_event_id)?;
+    }
+    // Woken by the group chat: the answer goes there too, under the employee's name.
+    let group_failure = match &end.outcome {
+        RunOutcome::Failed(code) => Some(code.as_str()),
+        RunOutcome::Interrupted => Some("interrupted"),
+        RunOutcome::Completed => None,
+    };
+    notices.extend(crate::conversation::group_chat::mirror_answer(tx, store, run_id, conversation_id, end.reply, group_failure, &kept_files, end.group_mode)?);
+    // The run of a task's conversation: its answer is the task's report.
+    let failed = match &end.outcome {
+        RunOutcome::Failed(code) => Some(code.as_str()),
+        _ => None,
+    };
+    notices.extend(crate::task::task_runs::on_run_finished(tx, store, run_id, end.outcome == RunOutcome::Completed, failed, end.reply)?);
+    // Results of tasks given from here that came in during this run.
+    notices.extend(crate::task::task_runs::answer_results(tx, run_id, end.outcome == RunOutcome::Completed)?);
+    notices.push(
+        emit(tx, Ev {
+            aggregate_type: "run",
+            aggregate_id: run_id.to_string(),
+            event_type: run_event,
+            actor: ActorKind::Runtime,
+            actor_id: Some("fake".into()),
+            correlation: run_id.to_string(),
+            payload: None,
+            metadata: serde_json::json!({ "error_code": error }),
+            dedupe: format!("run:{run_id}:terminal"),
+        })?
+        .1,
+    );
+    notices.extend(CommandService::invalidate_run_approvals(tx, run_id)?);
+    conv::set_run_status(tx, run_id, run_status, error.as_deref())?;
+    if let Some(n) = crate::run::heartbeat::on_run_finished(tx, run_id, end.outcome == RunOutcome::Completed, end.reply)? {
+        notices.push(n);
+    }
+    Ok(notices)
 }

@@ -6,7 +6,7 @@ pub mod artifacts;
 pub mod connections;
 pub mod events;
 pub mod heartbeat;
-mod lifecycle;
+pub mod lifecycle;
 pub mod plan;
 pub mod queue;
 pub mod session;

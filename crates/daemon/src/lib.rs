@@ -97,6 +97,12 @@ pub struct Shared {
     pub terminals: aurelius_host::terminal::Terminals,
     /// The pending shutdown of this PC (not kept over restarts).
     pub power: aurelius_host::power::Power,
+    /// The chat jobs this daemon drives right now; a leased one that is not
+    /// among them and whose lease ran out lost its driver (see the dispatcher).
+    pub drivers: Mutex<std::collections::HashSet<String>>,
+    /// How long a run may go without progress, when not the setting's;
+    /// `AURELIUS_RUN_IDLE_MS` sets it (tests).
+    pub run_idle_ms: Option<i64>,
 }
 
 impl Shared {
@@ -329,6 +335,8 @@ async fn run_inner(
         load: load::Meter::default(),
         backoff_base_ms: std::env::var("AURELIUS_BACKOFF_BASE_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(aurelius_domain::scheduler::BASE_BACKOFF_MS),
         cancellers: Mutex::new(HashMap::new()),
+        drivers: Mutex::new(Default::default()),
+        run_idle_ms: std::env::var("AURELIUS_RUN_IDLE_MS").ok().and_then(|v| v.parse().ok()).filter(|v: &i64| *v > 0),
         subscription: Mutex::new(None),
         subscription_busy: std::sync::atomic::AtomicBool::new(false),
         update: Mutex::new(Default::default()),

@@ -3,12 +3,18 @@
 use super::*;
 
 const CHECKPOINT_EVERY: Duration = Duration::from_millis(1500);
+/// While a tool call is open the run may be silent this many times the idle limit
+/// (a long build or test run says nothing until it ends).
+const TOOL_IDLE_FACTOR: u32 = 3;
+/// How long a stopped runtime gets to end its stream before the run ends anyway.
+const STOP_GRACE: Duration = Duration::from_secs(10);
 
 /// Execute one chat run: plan, ask the runtime to start (retry, park or fail
 /// on error), then stream deltas with durable checkpoints and commit the
 /// terminal outcome. Every write is fenced by the lease epoch.
 pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     let epoch = job.lease_epoch;
+    let mut driver = super::Driver::new(&shared, &job.id);
     let s = shared.clone();
     let payload = job.payload.clone();
     let mut plan: ChatRunPlan = match blocking(move || s.service.prepare_chat_run(&payload)).await {
@@ -31,6 +37,9 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
             return;
         }
     };
+
+    driver.run = Some(plan.run_id);
+    let idle = idle_limit(&shared).await;
 
     if let Some(explanation) = plan.context_error.clone() {
         // Mandatory context does not fit: fail explicitly, never truncate silently.
@@ -163,7 +172,9 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
         let (s, p, r, resumed) = (shared.clone(), plan.clone(), request.clone(), choice.resumed);
         traced = matches!(blocking(move || s.service.record_trace_request(&p, &r, resumed)).await, Some(Ok(true)));
     }
-    let mut handle = match runtime.start(request).await {
+    // A runtime that does not even start counts as unavailable (tried again later).
+    let started = tokio::time::timeout(idle, runtime.start(request)).await.unwrap_or_else(|_| Err(aurelius_runtime::RuntimeError::Unavailable(format!("the runtime did not start within {} s", idle.as_secs()))));
+    let mut handle = match started {
         Ok(handle) => handle,
         Err(err) => {
             let store = shared.store().clone();
@@ -186,10 +197,28 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     }
     match blocking(move || s.service.start_chat_run(&p, epoch)).await {
         Some(Ok(Some(notices))) => shared.publish(notices),
-        _ => {
+        Some(Ok(None)) => {
             // Lease lost before we started: abandon this turn without writing.
             handle.canceller().cancel();
             forget_run(&shared, plan.run_id);
+            return;
+        }
+        other => {
+            // The start could not be recorded: never leave the run "running" without a
+            // driver (its conversation would wait for it forever). The turn stops and the
+            // run is tried again later, or fails with the reason in its answer.
+            tracing::error!(run = %plan.run_id, ?other, "could not record the run's start; stopping its turn");
+            stop(&mut handle, STOP_GRACE).await;
+            let store = shared.store().clone();
+            let id = job.id.clone();
+            let (attempt, max) = blocking(move || store.write(move |tx| queries::job_attempts(tx, &id))).await.and_then(Result::ok).unwrap_or((1, 3));
+            let failure = aurelius_domain::scheduler::Failure::Transient("start_not_recorded".into());
+            let disposition = aurelius_domain::scheduler::dispose(&failure, attempt, max, aurelius_storage::now_ms(), shared.backoff_base_ms, &job.id);
+            let (s, p) = (shared.clone(), plan.clone());
+            match blocking(move || s.service.defer_chat_run(&p, epoch, disposition)).await {
+                Some(Ok(notices)) => shared.publish(notices),
+                other => tracing::error!(run = %plan.run_id, ?other, "could not release the run after its start failed"),
+            }
             return;
         }
     }
@@ -207,8 +236,30 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     let mut last_checkpoint = tokio::time::Instant::now();
     let mut last_renew = tokio::time::Instant::now();
     let mut quota: Option<Option<i64>> = None;
+    // The watchdog: a run that shows no progress at all (no output, no tool use)
+    // for the idle limit is stopped with a note, so its conversation goes on.
+    let mut open_tools: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut last_progress = tokio::time::Instant::now();
     let outcome = loop {
-        let Some(event) = handle.events.recv().await else {
+        let limit = if open_tools.is_empty() { idle } else { idle * TOOL_IDLE_FACTOR };
+        let next = tokio::select! {
+            event = handle.events.recv() => Some(event),
+            _ = tokio::time::sleep_until(last_progress + limit) => None,
+        };
+        let Some(next) = next else {
+            // Waiting on the user's approval or on a colleague's task is not hanging.
+            let (s, run_id) = (shared.clone(), plan.run_id);
+            if blocking(move || s.service.run_waits_on_others(run_id)).await == Some(true) {
+                last_progress = tokio::time::Instant::now();
+                continue;
+            }
+            tracing::warn!(run = %plan.run_id, idle_s = limit.as_secs(), open_tools = open_tools.len(), "no progress from the runtime; stopping the run");
+            stop(&mut handle, idle).await;
+            text = aurelius_application::run::lifecycle::with_note(&text, &aurelius_application::run::lifecycle::stalled_note(limit.as_secs().div_ceil(60) as i64));
+            break RunOutcome::Failed("stalled".into());
+        };
+        last_progress = tokio::time::Instant::now();
+        let Some(event) = next else {
             // Stream ended without a terminal event: never success.
             break RunOutcome::Failed("stream_incomplete".into());
         };
@@ -289,6 +340,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                 let (s, p) = (shared.clone(), plan.clone());
                 match event {
                     Activity::Started { call_id, tool, input, parent } => {
+                        open_tools.insert(call_id.clone());
                         let offset = text.len() as u32;
                         // Live updates carry tool use shortened; `activity.get` has it whole.
                         activity.push(aurelius_domain::activity::preview(aurelius_protocol::ActivityView {
@@ -304,6 +356,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                         let _ = blocking(move || s.service.record_activity_started(&p, &call_id, &tool, &input, parent.as_deref(), offset)).await;
                     }
                     Activity::Finished { call_id, ok, output } => {
+                        open_tools.remove(&call_id);
                         if let Some(a) = activity.iter_mut().find(|a| a.call_id == call_id) {
                             a.ok = Some(ok);
                             a.output = Some(output.clone());
@@ -377,6 +430,32 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     shared.live.job_ended(&job.id);
 }
 
+/// How long a run may go without progress: `AURELIUS_RUN_IDLE_MS`, else the setting.
+async fn idle_limit(shared: &Arc<Shared>) -> Duration {
+    let ms = match shared.run_idle_ms {
+        Some(ms) => ms,
+        None => {
+            let s = shared.clone();
+            blocking(move || s.service.run_idle_limit_ms()).await.unwrap_or(aurelius_application::run::lifecycle::DEFAULT_RUN_IDLE_MS)
+        }
+    };
+    Duration::from_millis(ms.max(1) as u64)
+}
+
+/// Stop the runtime's turn and give it a moment to end its stream (a runtime that
+/// hangs does not get to keep the run).
+async fn stop(handle: &mut aurelius_runtime::RunHandle, grace: Duration) {
+    handle.canceller().cancel();
+    let _ = tokio::time::timeout(grace.min(STOP_GRACE), async {
+        while let Some(event) = handle.events.recv().await {
+            if matches!(event, RuntimeEvent::Completed | RuntimeEvent::Interrupted | RuntimeEvent::Failed { .. } | RuntimeEvent::Quota { .. }) {
+                break;
+            }
+        }
+    })
+    .await;
+}
+
 /// Added to the prompt of a run that waited for the usage limit.
 const QUOTA_RESUME_NOTE: &str = "(Your earlier attempt at this was interrupted by a Claude usage limit. Whatever it already did is still in place: check the work folder and carry on where it stopped instead of starting over.)";
 
@@ -428,7 +507,7 @@ fn progress(shared: &Shared, run_id: aurelius_domain::RunId) -> Option<aurelius_
     shared.live.for_run(run_id).map(|(started_at_ms, output_tokens)| aurelius_protocol::RunProgress { started_at_ms, output_tokens, compacting: shared.live.run_compacting(run_id) })
 }
 
-fn forget_run(shared: &Shared, run_id: aurelius_domain::RunId) {
+pub(super) fn forget_run(shared: &Shared, run_id: aurelius_domain::RunId) {
     if let Ok(mut map) = shared.cancellers.lock() {
         map.remove(&run_id);
     }
