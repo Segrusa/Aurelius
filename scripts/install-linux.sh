@@ -10,7 +10,9 @@
 #
 # Running it again replaces the programs in place (that's how you update: git
 # pull, then run it again). Your data in ~/.local/share/Aurelius and your
-# secrets stay. A running Aurelius keeps the old version until you restart it.
+# secrets stay. A running server (aurelius-daemon) is restarted on the new
+# version, which stops the answers it is working on; a running app keeps its
+# old version until you restart it.
 #
 # The app starts its own server (aurelius-daemon) in the background. The programs
 # must stay together in one folder: the app finds the server and the approval
@@ -133,6 +135,12 @@ if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-datab
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then gtk-update-icon-cache -q -t "$prefix/share/icons/hicolor" || true; fi
 
 echo "Aurelius $version is installed in $bin"
+# The app connects to a server that is already running and never restarts it,
+# so without this the old server would keep going.
+if pgrep -u "$(id -u)" -x aurelius-daemon >/dev/null 2>&1; then
+    echo "Restarting the running server on the new version ..."
+    "$bin/aurelius-ctl" restart || echo "Could not restart the server: run '$bin/aurelius-ctl restart' yourself." >&2
+fi
 case ":$PATH:" in
     *":$bin:"*) ;;
     *) echo "Note: $bin is not on your PATH. The application menu entry works anyway." ;;
