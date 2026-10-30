@@ -113,10 +113,13 @@ impl StreamState {
                 let extra_servers: Vec<String> = names("mcp_servers", "name").into_iter().filter(|s| !self.allowed_servers.contains(s)).collect();
                 self.tools = names("tools", "name");
                 if !extra_tools.is_empty() || !extra_servers.is_empty() {
+                    // Named, so a tool a new CLI version adds can be found and allowed.
+                    tracing::warn!(tools = ?extra_tools, servers = ?extra_servers, "claude code init listed tools or MCP servers outside the profile");
+                    let list = |names: &[String]| if names.is_empty() { "none".to_owned() } else { names.join(", ") };
                     return Err(format!(
                         "Claude Code unexpectedly loaded tools ({}) or MCP servers ({}); the run was stopped.",
-                        extra_tools.len(),
-                        extra_servers.len()
+                        list(&extra_tools),
+                        list(&extra_servers)
                     ));
                 }
                 // Plugins listed here are built into Claude Code (none are installed
@@ -555,6 +558,15 @@ mod tests {
         let mut s = StreamState::default();
         let init = r#"{"type":"system","subtype":"init","tools":[],"mcp_servers":[{"name":"x"}],"plugins":[]}"#;
         assert!(s.feed(init).is_err());
+    }
+
+    #[test]
+    fn a_profile_violation_names_the_tools_and_servers() {
+        let init = r#"{"type":"system","subtype":"init","tools":["Bash","Monitor"],"mcp_servers":[{"name":"x"}],"plugins":[]}"#;
+        let message = StreamState::default().feed(init).unwrap_err();
+        assert!(message.contains("tools (Bash, Monitor)") && message.contains("MCP servers (x)"), "{message}");
+        let init = r#"{"type":"system","subtype":"init","tools":["Bash"],"mcp_servers":[],"plugins":[]}"#;
+        assert!(StreamState::default().feed(init).unwrap_err().contains("MCP servers (none)"));
     }
 
     #[test]
