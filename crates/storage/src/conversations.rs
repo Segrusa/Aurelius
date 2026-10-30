@@ -70,6 +70,21 @@ pub fn conversation_exists(tx: &Transaction<'_>, id: ConversationId) -> Result<b
     Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND employee_id IS NULL AND kind <> 'group')", [id.to_string()], |r| r.get(0))?)
 }
 
+/// The schema version whose migration makes the group chat.
+pub const GROUP_CHAT_SCHEMA: i64 = 17;
+
+/// Make the company's group chat again when its row is missing (a database
+/// edited or restored by hand): migration 17 makes it once, and `group_chat.get`
+/// only reads. Called when the store opens; true when it had to make it.
+pub fn ensure_group_conversation(conn: &Connection) -> Result<bool, StorageError> {
+    let made = conn.execute(
+        "INSERT INTO conversations(id, kind, title, version, created_at_ms)
+         SELECT ?1, 'group', 'Team chat', 1, ?2 WHERE NOT EXISTS (SELECT 1 FROM conversations WHERE kind = 'group')",
+        params![ConversationId::new().to_string(), now_ms()],
+    )?;
+    Ok(made == 1)
+}
+
 /// The company's group chat (migration 17 makes it).
 pub fn group_conversation(conn: &Connection) -> Result<Option<ConversationId>, StorageError> {
     let id: Option<String> = conn.query_row("SELECT id FROM conversations WHERE kind = 'group' ORDER BY created_at_ms, id LIMIT 1", [], |r| r.get(0)).optional()?;

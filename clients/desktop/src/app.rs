@@ -961,6 +961,8 @@ pub struct AppView {
     pub manager_thread: Option<ConversationId>,
     /// The group chat's conversation, once loaded (`group_chat.get`).
     pub group_conversation: Option<ConversationId>,
+    /// Why the group chat did not load (its page shows it with Try again instead of loading).
+    pub group_error: Option<String>,
     /// Answers streaming into the open group chat that are no message there yet.
     pub group_live: Vec<GroupLive>,
     /// The subagent chip's panel is open; which subagent shows its full prompt.
@@ -1420,6 +1422,7 @@ impl AppView {
             menu: None,
             manager_thread: None,
             group_conversation: None,
+            group_error: None,
             group_live: Vec::new(),
             subagents_open: false,
             subagents: None,
@@ -1959,9 +1962,13 @@ impl AppView {
             }
             Update::GroupChat(conversation) => {
                 self.group_conversation = Some(conversation);
+                self.group_error = None;
                 if self.screen == Page::GroupChat && self.open_conversation.is_none() {
                     self.open_conversation = Some(conversation);
                 }
+            }
+            Update::GroupChatFailed(why) => {
+                self.group_error = Some(why);
             }
             Update::Stream(delta) => {
                 if stream_stepped(self.streams.get(&delta.conversation_id), &delta) && self.chip_conversation() == Some(delta.conversation_id) {
@@ -5488,6 +5495,13 @@ impl AppView {
         cx.notify();
     }
 
+    /// Ask for the group chat again after it failed to load.
+    pub fn retry_group_chat(&mut self, cx: &mut Context<Self>) {
+        self.group_error = None;
+        let _ = self.requests.send(backend::Request::OpenGroupChat);
+        cx.notify();
+    }
+
     /// Load the conversation the page shows: the open employee's task, the right panel's,
     /// or the group chat (asked for by name until its id is known).
     fn open_thread(&mut self) {
@@ -6463,7 +6477,8 @@ impl AppView {
             return;
         }
         if self.thread_screen() == Page::GroupChat && self.group_conversation.is_none() {
-            self.notify_user("The Team chat is still loading.", true, cx);
+            let why = self.group_error.clone().unwrap_or_else(|| "The Team chat is still loading.".into());
+            self.notify_user(why, true, cx);
             return;
         }
         if !self.pending_files.is_empty() && !self.takes_manager_files() {

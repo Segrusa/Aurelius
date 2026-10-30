@@ -1156,3 +1156,24 @@ fn a_deleted_task_conversation_leaves_the_task_but_not_its_conversation_also_aft
     let main: Option<i64> = store.read(|c| Ok(c.query_row("SELECT archived_at_ms FROM conversations WHERE employee_id = ?1 AND kind = 'employee'", [employee.to_string()], |r| r.get(0))?)).unwrap();
     assert_eq!(main, None);
 }
+
+#[test]
+fn the_group_chat_exists_in_a_fresh_database_and_comes_back_when_its_row_is_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    let fresh = store.read(conversations::group_conversation).unwrap().expect("migration 17 makes the group chat");
+    let groups = |store: &Store| store.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'group'", [], |r| r.get::<_, i64>(0))?)).unwrap();
+    // Opening again keeps the one there is.
+    drop(store);
+    let store = Store::open(dir.path()).unwrap();
+    assert_eq!((store.read(conversations::group_conversation).unwrap(), groups(&store)), (Some(fresh), 1));
+
+    // Its row gone (a database edited or restored by hand): the next open makes it again.
+    store.write(|tx| Ok(tx.execute("DELETE FROM conversations WHERE kind = 'group'", [])?)).unwrap();
+    assert_eq!(store.read(conversations::group_conversation).unwrap(), None);
+    drop(store);
+    let store = Store::open(dir.path()).unwrap();
+    let again = store.read(conversations::group_conversation).unwrap().expect("made again on open");
+    assert_ne!(again, fresh);
+    assert_eq!(groups(&store), 1);
+}

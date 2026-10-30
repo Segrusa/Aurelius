@@ -576,6 +576,8 @@ pub enum Update {
     Messages(MessagesSnapshot),
     /// The group chat's conversation (its messages follow as `Messages`).
     GroupChat(ConversationId),
+    /// The group chat could not be loaded: what to tell the user (see [`group_chat_failure`]).
+    GroupChatFailed(String),
     Stream(StreamDelta),
     EmployeeCreated(EmployeeId),
     Info(String),
@@ -880,6 +882,19 @@ fn shown<T>(result: Result<T, ClientError>, updates: &mpsc::UnboundedSender<Upda
     }
 }
 
+/// Why the group chat did not load, for its page. A server from before the group
+/// chat does not know `group_chat.get` (`unknown_method`): it still runs the old
+/// version after an update and must be restarted.
+pub fn group_chat_failure(e: &ClientError) -> String {
+    match e {
+        ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::UnknownMethod => {
+            "The server is older than this app and has no Team chat yet. Restart the server (or update it), then try again.".into()
+        }
+        ClientError::TimedOut(_) => "The server did not answer in time. Try again; if it keeps happening, restart the server.".into(),
+        e => format!("The Team chat could not be loaded: {e}"),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn session(
     client: &Client,
@@ -936,10 +951,20 @@ async fn session(
                     continue;
                 }
                 if let Request::OpenGroupChat = request {
-                    if let Some(messages) = shown(client.group_chat().await, updates)? {
-                        *open_conversation = Some(messages.conversation_id);
-                        let _ = updates.send(Update::GroupChat(messages.conversation_id));
-                        let _ = updates.send(Update::Messages(messages));
+                    match client.group_chat().await {
+                        Ok(messages) => {
+                            *open_conversation = Some(messages.conversation_id);
+                            let _ = updates.send(Update::GroupChat(messages.conversation_id));
+                            let _ = updates.send(Update::Messages(messages));
+                        }
+                        Err(e) if e.is_final() => return Err(e.into()),
+                        // The page stops loading and says why; a lost connection reconnects as usual.
+                        Err(e) => {
+                            let _ = updates.send(Update::GroupChatFailed(group_chat_failure(&e)));
+                            if e.is_disconnect() {
+                                return Err(e.into());
+                            }
+                        }
                     }
                     continue;
                 }
@@ -2061,6 +2086,17 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_team_chat_that_does_not_load_says_why() {
+        use aurelius_domain::error::{AppError, ErrorCode};
+        // What a server from before the group chat answers to `group_chat.get` (`reject_unparsed`).
+        let old = AppError::new(ErrorCode::UnknownMethod, "This server does not know the method group_chat.get.");
+        assert!(group_chat_failure(&ClientError::Protocol(old)).contains("older than this app"));
+        assert!(group_chat_failure(&ClientError::TimedOut(60)).contains("did not answer in time"));
+        let missing = ClientError::Protocol(AppError::new(ErrorCode::NotFound, "the group chat does not exist"));
+        assert_eq!(group_chat_failure(&missing), "The Team chat could not be loaded: the group chat does not exist");
+    }
 
     /// Refreshes the throttle lets through while `marks` (ms after start) arrive, until `end_ms`.
     async fn refreshes(marks: &[u64], end_ms: u64) -> Vec<u64> {
