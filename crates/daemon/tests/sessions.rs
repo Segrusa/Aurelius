@@ -79,6 +79,18 @@ impl AgentRuntime for Sessions {
         if request.session == SessionUse::Continue && !self.kept.lock().unwrap().contains(&id) {
             return Err(RuntimeError::Unavailable("session gone".into()));
         }
+        if request.turns.last().is_some_and(|t| t.text.trim() == "/compact") {
+            // Compacting the session, as Claude Code reports it; the session stays.
+            let (tx, rx) = mpsc::channel(8);
+            let (input_tx, _input_rx) = mpsc::channel(1);
+            let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(false);
+            tokio::spawn(async move {
+                let _ = tx.send(RuntimeEvent::Started).await;
+                let _ = tx.send(RuntimeEvent::Compacted { pre_tokens: 170_258, post_tokens: 6_036 }).await;
+                let _ = tx.send(RuntimeEvent::Completed).await;
+            });
+            return Ok(RunHandle::new(request.run_id, rx, input_tx, cancel_tx));
+        }
         let hold = request.turns.last().is_some_and(|t| t.text.trim_end().ends_with("[hold]"));
         // The first attempt of a run asking for it reaches the usage limit; Claude Code keeps its session.
         let limited = request.turns.iter().any(|t| t.text.contains("[limit]")) && self.limited.lock().unwrap().insert(request.run_id.to_string());
@@ -617,5 +629,46 @@ async fn after_an_answer_that_posted_a_plan_the_session_goes_on() {
     assert_eq!((seen[1].session, seen[1].session_id.clone()), (SessionUse::Continue, Some(run.to_string())), "{:?}", seen[1]);
     assert!(seen[1].text.ends_with("Next question") && !seen[1].text.contains("# Plan"), "the plan and decision are in the session: {:?}", seen[1]);
     assert_eq!(seen[1].system, seen[0].system);
+    stop(dir.path(), daemon).await;
+}
+
+/// AUR-BUG-05: after compacting the session first, the run's own turn must still start
+/// and answer (its start was recorded twice under one lease, which failed and left
+/// the run "running" without anyone driving it), and the next message must go.
+#[tokio::test(flavor = "multi_thread")]
+async fn after_compacting_the_session_the_run_answers_and_the_next_message_goes() {
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = Sessions::default();
+    let daemon = start_with(dir.path(), Arc::new(runtime.clone())).await;
+    let client = connect(dir.path()).await;
+    claude_code(&client, dir.path()).await;
+
+    let (conversation, first) = ask(&client, None, "Fix the team chat.", vec![]).await;
+    // Its context grew past the threshold: the next run compacts it first.
+    write(dir.path(), "UPDATE conversation_sessions SET context_tokens = 170258 WHERE conversation_id = ?1", [conversation.to_string()]);
+    let (_, second) = ask(&client, Some(conversation), "Your colleagues finished their parts.", vec![]).await;
+    let (_, third) = ask(&client, Some(conversation), "Hello?", vec![]).await;
+
+    let seen = seen_in(dir.path(), &runtime, conversation);
+    let of = |run: RunId| seen.iter().filter(|s| s.run == run).map(|s| s.text.clone()).collect::<Vec<_>>();
+    let second_seen = of(second);
+    assert_eq!(second_seen.len(), 2, "{seen:?}");
+    assert_eq!(second_seen[0], "/compact");
+    assert!(second_seen[1].ends_with("Your colleagues finished their parts."), "{second_seen:?}");
+    assert!(seen.iter().filter(|s| s.run != first).all(|s| s.session_id.as_deref() == Some(first.to_string().as_str())), "it went on in the compacted session: {seen:?}");
+    let conn = db(dir.path());
+    let compacted: i64 = conn
+        .query_row("SELECT COUNT(*) FROM messages WHERE conversation_id = ?1 AND json_extract(meta_json, '$.kind') = 'compacted'", [conversation.to_string()], |r| r.get(0))
+        .unwrap();
+    // (The test runtime reports no context size, so the third compacts again.)
+    let compacts = seen.iter().filter(|s| s.text == "/compact").count() as i64;
+    assert!(compacts >= 1);
+    assert_eq!(compacted, compacts, "the conversation says each time it was compacted");
+    for run in [second, third] {
+        let (status, started): (String, i64) = conn
+            .query_row("SELECT status, (SELECT COUNT(*) FROM events WHERE aggregate_id = ?1 AND type = 'run.started') FROM runs WHERE id = ?1", [run.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!((status.as_str(), started), ("succeeded", 1), "{run}");
+    }
     stop(dir.path(), daemon).await;
 }

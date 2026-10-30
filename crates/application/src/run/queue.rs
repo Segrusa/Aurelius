@@ -13,6 +13,8 @@ pub(crate) fn failed_start_text(code: &str) -> String {
     let reason = code.strip_prefix("retries_exhausted:").unwrap_or(code);
     let reason = match reason {
         "plan_failed" => "the server could not prepare this answer",
+        "abandoned" => "the server stopped working on it",
+        "start_not_recorded" => "the server could not record its start",
         other => other,
     };
     format!("This answer could not be started: {reason}\n\nSend the message again to retry.")

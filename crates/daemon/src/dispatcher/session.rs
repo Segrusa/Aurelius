@@ -176,7 +176,8 @@ pub(super) async fn compact_first(shared: &Arc<Shared>, plan: &ChatRunPlan, runt
         keep_session: true,
         ..request.clone()
     };
-    let outcome = match runtime.start(compact).await {
+    let begun = tokio::time::timeout(COMPACT_TIMEOUT, runtime.start(compact)).await;
+    let outcome = match begun.unwrap_or_else(|_| Err(aurelius_runtime::RuntimeError::Unavailable(format!("it did not start within {} s", COMPACT_TIMEOUT.as_secs())))) {
         Ok(mut handle) => {
             // A stop meanwhile ends it (the run then stops when it starts).
             if let Ok(mut map) = shared.cancellers.lock() {

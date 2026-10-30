@@ -37,6 +37,15 @@ pub async fn run(shared: Arc<Shared>) {
             if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.expire_approvals()).await {
                 shared.publish(notices);
             }
+            // A chat run nobody drives any more (its lease ran out) must not hold its
+            // conversation: it ends with a note, and what waits there goes next.
+            let driven = shared.drivers.lock().map(|d| d.clone()).ok();
+            if let Some(driven) = driven {
+                let s = shared.clone();
+                if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.end_abandoned_chat_runs(aurelius_storage::now_ms(), &driven)).await {
+                    shared.publish(notices);
+                }
+            }
         }
         // After a restore nothing starts until the user resumes.
         if shared.paused.load(std::sync::atomic::Ordering::Relaxed) {
@@ -110,6 +119,36 @@ pub async fn run(shared: Arc<Shared>) {
     }
 }
 
+/// While a chat job is worked on here, it is known as driven (see
+/// `end_abandoned_chat_runs`); however its driver ends, the run's live state
+/// ("Thinking…") and its switches go with it.
+struct Driver {
+    shared: Arc<Shared>,
+    job: String,
+    run: Option<aurelius_domain::RunId>,
+}
+
+impl Driver {
+    fn new(shared: &Arc<Shared>, job: &str) -> Self {
+        if let Ok(mut driven) = shared.drivers.lock() {
+            driven.insert(job.to_owned());
+        }
+        Driver { shared: shared.clone(), job: job.to_owned(), run: None }
+    }
+}
+
+impl Drop for Driver {
+    fn drop(&mut self) {
+        if let Some(run) = self.run {
+            chat::forget_run(&self.shared, run);
+            self.shared.live.run_ended(run);
+        }
+        self.shared.live.job_ended(&self.job);
+        if let Ok(mut driven) = self.shared.drivers.lock() {
+            driven.remove(&self.job);
+        }
+    }
+}
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     tokio::task::spawn_blocking(f).await.ok()
