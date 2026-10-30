@@ -511,7 +511,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-agent-bridge"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "aurelius-client",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-application"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "aurelius-domain",
  "aurelius-host",
@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-client"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "aurelius-domain",
@@ -572,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-daemon"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -611,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-desktop"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "aurelius-client",
@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-domain"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "hex",
  "schemars",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-host"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "aurelius-domain",
@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-mcp"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "aurelius-client",
@@ -687,7 +687,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-protocol"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "aurelius-domain",
  "base64 0.22.1",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-remote-gateway"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "aurelius-client",
  "aurelius-domain",
@@ -728,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-runtime"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "async-trait",
  "aurelius-domain",
@@ -744,7 +744,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-storage"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "aurelius-domain",
  "hex",
@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "aurelius-tools"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "hex",
  "pdf-extract",
@@ -10431,7 +10431,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "aurelius-domain",
  "aurelius-protocol",

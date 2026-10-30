@@ -9,7 +9,10 @@ The server and the desktop app are released separately. They work together
 as long as their protocol major matches. Releases up to v0.6.0 were combined:
 see [CHANGELOG.md](../../CHANGELOG.md).
 
-## Unreleased
+## Unreleased: v0.9.1
+
+- **Team chat.** One group chat with all your employees, right under Dashboard (mobile: the Team tab). `@Name` asks those employees; without a name the CEO answers. Answers stream in live with their author, and you can stop or approve them in place. An employee's page no longer has its own chat: it shows the employee's settings and tasks, and task conversations stay writable. Needs a server with `group_chat.get`.
+- **Linux install script.** `scripts/install-linux.sh` installs Aurelius on Linux.
 
 **A cleaner Aurelius (wave 1).** This release only removes things from the screens. Nothing is deleted on the server: all data (notes, shares, artifacts, timelines, project conversations, project plugins, functions) stays stored and keeps working, and the features themselves stay. Ideas are untouched. Nothing is migrated yet; server clean-up follows in wave 2.
 
