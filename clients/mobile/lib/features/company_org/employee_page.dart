@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -7,7 +9,9 @@ import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/commands.dart';
 import '../../data/company.dart';
+import '../../data/mode_memory.dart';
 import '../../data/views.dart';
 import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
@@ -144,7 +148,22 @@ class EmployeePage extends StatelessWidget {
                             title: 'Model and effort',
                             onTap: () => showEmployeeRunSheet(context, m),
                           ),
-                          GroupRow(title: 'Mode', value: m.agentMode.label, chevron: false),
+                          // Its own chat has no page; its group chat answers run there, with these.
+                          GroupRow(key: const ValueKey('employee-mode'), title: 'Mode', value: m.agentMode.label, onTap: () => _pickMode(context, m)),
+                          SwitchListTile(
+                            key: const ValueKey('employee-browser'),
+                            title: const Text('Browser'),
+                            subtitle: Text('Let ${m.name} use the browser.', style: TextStyle(color: Tokens.muted, fontSize: 12.5)),
+                            value: m.browserAllowed,
+                            onChanged: (value) => context.read<CompanyBloc>().send(Commands.setBrowserAllowed(m.conversationId, value), retry: false),
+                          ),
+                          SwitchListTile(
+                            key: const ValueKey('employee-screen'),
+                            title: const Text('Screen'),
+                            subtitle: Text('Screenshots of the PC without asking.', style: TextStyle(color: Tokens.muted, fontSize: 12.5)),
+                            value: m.screenAllowed,
+                            onChanged: (value) => _setScreen(context, m, value),
+                          ),
                           GroupRow(title: heartbeatLine(m.heartbeat), chevron: false),
                           GroupRow(key: const ValueKey('employee-edit'), title: 'Edit', onTap: () => editEmployee(context, m)),
                           _Advanced(employee: m),
@@ -182,6 +201,60 @@ class EmployeePage extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// The mode of [m]'s own chat, where its group chat answers run.
+  Future<void> _pickMode(BuildContext context, EmployeeSummary m) async {
+    final company = context.read<CompanyBloc>();
+    final repository = context.read<AureliusRepository>();
+    final mode = await showModalBottomSheet<AgentMode>(
+      context: context,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final mode in agentModes)
+              ListTile(
+                key: ValueKey('employee-mode-${mode.wire}'),
+                title: Text(mode.label),
+                trailing: mode == m.agentMode ? Icon(Icons.check, color: Tokens.accent) : null,
+                onTap: () => Navigator.pop(sheet, mode),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (mode == null || mode == m.agentMode) return;
+    company.send(Commands.setAgentMode(m.conversationId, mode), retry: false);
+    // As in a conversation: its next task starts in this mode too (see ModeMemory).
+    try {
+      unawaited(ModeMemory.write(repository.host.hostId, m.id, mode.wire));
+    } on Object {
+      // No host (tests): not remembered.
+    }
+  }
+
+  /// Turning the screen on asks first, as in a conversation: screenshots show anything that is open.
+  Future<void> _setScreen(BuildContext context, EmployeeSummary m, bool value) async {
+    final company = context.read<CompanyBloc>();
+    if (value) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: Text('Let ${m.name} see your screen?'),
+          content: const Text(
+            'It can then take screenshots of the PC screen or of one window without asking. '
+            'A screenshot shows anything that is open. Off, it still asks you for each screenshot.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
+            FilledButton(key: const ValueKey('employee-screen-allow'), onPressed: () => Navigator.pop(dialog, true), child: const Text('Allow')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    company.send(Commands.setScreenAllowed(m.conversationId, value), retry: false);
   }
 
   void _showPeople(BuildContext context, String title, List<EmployeeSummary> people) {
@@ -317,6 +390,13 @@ class ConversationPage extends StatelessWidget {
     final company = context.watch<CompanyBloc>().state;
     final task = company.tasks.where((t) => t.conversationId == conversationId).firstOrNull;
     final m = company.employee(task?.employeeId ?? employeeId ?? '') ?? company.employees.where((e) => e.conversations.any((c) => c.id == conversationId)).firstOrNull;
+    // An employee's own chat has no page: the group chat (Team) took its place.
+    if (company.employees.any((e) => e.conversationId == conversationId)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) context.go('/team');
+      });
+      return const Scaffold(body: SizedBox.shrink());
+    }
     return Scaffold(
       appBar: GlassAppBar(
         titleSpacing: 0,

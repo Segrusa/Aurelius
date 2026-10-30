@@ -143,6 +143,48 @@ void main() {
       wait: const Duration(milliseconds: 200),
       verify: (bloc) => expect(bloc.state.messages.map((m) => (m.id, m.author)), [('u1', null), ('live', 'Atlas')]),
     );
+
+    blocTest<ChatBloc, ChatState>(
+      'a live answer whose run ended without a message goes by itself, with no refresh',
+      build: () {
+        when(() => repo.groupChat()).thenAnswer((_) async => team([message('u1', MessageRole.user, 'Hi all')]));
+        var running = true;
+        final bloc = ChatBloc.group(repo, runAuthor: (run) => running ? 'Atlas' : null, liveTimeout: const Duration(milliseconds: 100));
+        // The run ends without its answer being copied (it only posted with post_to_group_chat).
+        Timer(const Duration(milliseconds: 250), () => running = false);
+        return bloc;
+      },
+      act: (bloc) async {
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        appends.add(const StreamAppend(runId: 'r', conversationId: 'team', messageId: 'live', offset: 0, text: ''));
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        expect(bloc.state.streaming?.id, 'live', reason: 'its run still works');
+      },
+      wait: const Duration(milliseconds: 700),
+      verify: (bloc) {
+        expect(bloc.state.messages.map((m) => m.id), ['u1']);
+        expect(bloc.state.streaming, isNull);
+        verify(() => repo.groupChat()).called(1);
+      },
+    );
+
+    blocTest<ChatBloc, ChatState>(
+      'a live answer gets its author once the company knows the run, without a next delta',
+      build: () {
+        when(() => repo.groupChat()).thenAnswer((_) async => team([message('u1', MessageRole.user, 'Hi all')]));
+        String? author;
+        Timer(const Duration(milliseconds: 220), () => author = 'Orion');
+        return ChatBloc.group(repo, runAuthor: (run) => author, liveTimeout: const Duration(seconds: 5));
+      },
+      act: (bloc) async {
+        await Future<void>.delayed(const Duration(milliseconds: 150));
+        appends.add(const StreamAppend(runId: 'r', conversationId: 'team', messageId: 'live', offset: 0, text: 'Looking'));
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(bloc.state.messages.last.author, isNull);
+      },
+      wait: const Duration(milliseconds: 1300),
+      verify: (bloc) => expect(bloc.state.messages.map((m) => (m.id, m.author)), [('u1', null), ('live', 'Orion')]),
+    );
   });
 
   group('ChatBloc', () {

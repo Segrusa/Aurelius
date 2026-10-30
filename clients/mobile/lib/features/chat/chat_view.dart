@@ -236,17 +236,21 @@ class _MessagesState extends State<_Messages> {
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<ChatBloc>().state;
+    final bloc = context.watch<ChatBloc>();
+    final state = bloc.state;
     final blocking = context.select<InboxBloc, ApprovalView?>((b) => b.state.blocking(state.conversationId));
+    // The group chat: an answer runs in its employee's own chat, so what it asks carries that run.
+    final approvals = bloc.group ? context.select<InboxBloc, List<ApprovalView>>((b) => b.state.approvals) : const <ApprovalView>[];
+    final mainChats = bloc.group ? context.select<CompanyBloc, List<String>>((b) => [for (final e in b.state.employees) e.conversationId]) : const <String>[];
     // Sending a message of your own goes back to the end and follows again.
     return BlocListener<ChatBloc, ChatState>(
       listenWhen: (a, b) => b.unsent.length > a.unsent.length,
       listener: (context, _) => WidgetsBinding.instance.addPostFrameCallback((_) => _list.currentState?.scrollToEnd()),
-      child: _build(state, blocking),
+      child: _build(state, blocking, bloc.group, approvals, mainChats),
     );
   }
 
-  Widget _build(ChatState state, ApprovalView? blocking) {
+  Widget _build(ChatState state, ApprovalView? blocking, bool group, List<ApprovalView> approvals, List<String> mainChats) {
     if (state.loading && state.messages.isEmpty) return const Center(child: CircularProgressIndicator());
     if (state.messages.isEmpty && state.unsent.isEmpty && state.loadError != null) {
       return EmptyState(
@@ -259,6 +263,11 @@ class _MessagesState extends State<_Messages> {
     if (state.messages.isEmpty && state.unsent.isEmpty) return EmptyState(widget.emptyTitle, detail: widget.emptyDetail);
 
     final versions = _versions(state.messages);
+    // What a run in an employee's own chat asks with no answer streaming here to show it under.
+    final asks = [
+      for (final a in approvals)
+        if (mainChats.contains(a.conversationId) && !state.messages.any((m) => m.isStreaming && m.runId == a.runId)) a,
+    ];
     final live = state.messages.indexWhere((m) => m.isStreaming);
     final shared = state.shares.isNotEmpty ? 1 : 0;
     final items = <FollowItem>[
@@ -268,11 +277,19 @@ class _MessagesState extends State<_Messages> {
           m.id,
           m.isUser
               ? _UserBubble(id: m.id, text: m.text, files: m.files, uploads: m.uploads, queuedId: m.queued ? m.id : null)
-              // An employee's message in the group chat: an answer under its name.
-              : m.update != null && m.update != 'group'
-                  ? _TaskUpdate(message: m)
-                  : _AssistantMessage(message: m, version: versions[m.id], blocking: m.isStreaming ? blocking : null),
+              // A line the server writes in the group chat itself: a quiet note.
+              : isSystemLine(m, inGroup: group)
+                  ? _SystemLine(message: m)
+                  // An employee's message in the group chat: an answer under its name.
+                  : m.update != null && m.update != 'group'
+                      ? _TaskUpdate(message: m)
+                      : _AssistantMessage(
+                          message: m,
+                          version: versions[m.id],
+                          blocking: !m.isStreaming ? null : group ? approvals.where((a) => a.runId == m.runId).firstOrNull : blocking,
+                        ),
         ),
+      for (final a in asks) FollowItem('ask-${a.id}', _GroupAsk(approval: a)),
       for (final u in state.unsent) FollowItem('unsent-${u.localId}', _UserBubble(id: 'unsent-${u.localId}', text: u.text, unsent: u)),
     ];
     // Newest at the bottom; the list starts there and holds still when you
@@ -302,6 +319,75 @@ class _MessagesState extends State<_Messages> {
         if (ids.length > 1)
           for (final (i, id) in ids.indexed) id: (i + 1, ids.length),
     };
+  }
+}
+
+/// A note the server writes in the group chat itself: kind `status` there
+/// (nobody was woken), kind `system`, or a finished group post without an
+/// author. A streaming answer whose employee is not known yet is no note; in a
+/// task, `status` stays an update card. As on the desktop.
+bool isSystemLine(MessageView m, {required bool inGroup}) {
+  if (m.isUser) return false;
+  final unnamed = m.author == null || m.author!.trim().isEmpty;
+  return switch (m.update) {
+    'system' => true,
+    'status' => inGroup,
+    'group' => unnamed && !m.isStreaming,
+    _ => false,
+  };
+}
+
+class _SystemLine extends StatelessWidget {
+  const _SystemLine({required this.message});
+
+  final MessageView message;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = message.text.trim();
+    return Padding(
+      key: const Key('system-line'),
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+      child: Text(text.isEmpty ? '…' : text, textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, height: 1.4, color: Tokens.muted)),
+    );
+  }
+}
+
+/// Something a run in an employee's own chat asks, in the group chat while
+/// no answer of that run streams there.
+class _GroupAsk extends StatelessWidget {
+  const _GroupAsk({required this.approval});
+
+  final ApprovalView approval;
+
+  @override
+  Widget build(BuildContext context) {
+    final a = approval;
+    return Padding(
+      key: ValueKey('group-ask-${a.id}'),
+      padding: const EdgeInsets.only(top: 14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+        decoration: BoxDecoration(color: Tokens.attentionBg, border: Border.all(color: Tokens.attentionBorder), borderRadius: BorderRadius.circular(8)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${a.isQuestion ? 'QUESTION · WAITING FOR YOU' : a.isPlan ? 'PLAN · WAITING FOR YOU' : 'WAITING FOR YOU'} · ${a.requester}', style: Tokens.eyebrow().copyWith(fontSize: 10.5)),
+            const SizedBox(height: 6),
+            Text(a.title, style: TextStyle(fontSize: 14, color: Tokens.text2)),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: FilledButton.icon(
+                onPressed: () => context.push('/approval/${a.id}'),
+                icon: Icon(a.isQuestion ? Icons.help_outline : Icons.pan_tool_outlined, size: 18),
+                label: Text(a.isQuestion ? 'Answer' : 'Decide'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -586,7 +672,7 @@ class _AssistantMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final header = [
-      if (message.author != null) message.author!,
+      if (message.author?.trim() case final author? when author.isNotEmpty) author,
       if (message.producedBy != null) message.producedBy!,
       if (version != null) 'version ${version!.$1}/${version!.$2}',
     ].join(' · ');
@@ -1210,7 +1296,8 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                     final running = state.streaming;
                     final empty = value.text.trim().isEmpty && state.images.isEmpty && state.files.isEmpty;
                     final style = IconButton.styleFrom(backgroundColor: Tokens.accent, foregroundColor: Tokens.accentInk, fixedSize: const Size.square(42), minimumSize: const Size.square(42));
-                    final runId = running?.runId;
+                    // The group chat: several may answer at once; each answer has its own Stop.
+                    final runId = group ? null : running?.runId;
                     if (runId != null && empty) {
                       return IconButton.filled(
                         key: const Key('composer-stop'),

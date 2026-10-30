@@ -28,6 +28,11 @@ class _AppendReceived extends ChatEvent {
   final StreamAppend append;
 }
 
+/// Group chat: a second passed while answers stream in (see [ChatBloc._tick]).
+class _LiveTicked extends ChatEvent {
+  const _LiveTicked();
+}
+
 class ChatMessageSent extends ChatEvent {
   const ChatMessageSent(this.text, {this.now = false});
 
@@ -349,6 +354,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       : assert(employeeId != null || projectId != null, 'a conversation belongs to an employee or a project'),
         group = false,
         runAuthor = null,
+        liveTimeout = Duration.zero,
         super(ChatState(conversationId: conversationId, loading: conversationId != null)) {
     _init(conversationId != null);
   }
@@ -356,7 +362,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// The group chat (Team). Its id comes with the first load. [runAuthor]
   /// names the employee a run answers for while it streams (its answer is no
   /// message in the group until it ends); `null` once that run no longer works.
-  ChatBloc.group(this._repository, {this.runAuthor})
+  /// A live answer that never becomes a message goes [liveTimeout] after its
+  /// last update once its run no longer works.
+  ChatBloc.group(this._repository, {this.runAuthor, this.liveTimeout = const Duration(seconds: 3)})
       : employeeId = null,
         projectId = null,
         group = true,
@@ -367,6 +375,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   void _init(bool load) {
     on<ChatRefreshed>(_refresh, transformer: debounceRestartable(const Duration(milliseconds: 80)));
     on<_AppendReceived>(_append, transformer: sequential());
+    on<_LiveTicked>(_tick);
     on<ChatMessageSent>(_send, transformer: sequential());
     on<ChatUnsentRetried>(_retryUnsent, transformer: sequential());
     on<ChatUnsentDiscarded>(_discardUnsent);
@@ -406,6 +415,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// before they are messages there (see [_live]).
   final bool group;
   final String? Function(String runId)? runAuthor;
+  final Duration liveTimeout;
   late final List<StreamSubscription<Object?>> _subs;
   static const _uuid = Uuid();
 
@@ -424,6 +434,39 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// Group chat: answers streaming in that are no message there yet, with
   /// their last update. They show at the end until the snapshot has them.
   final Map<String, DateTime> _live = {};
+
+  /// Runs while [_live] has answers: no refresh may come after the last one
+  /// ends (an answer that only posted with post_to_group_chat is never copied).
+  Timer? _ticker;
+
+  void _watchLive() {
+    if (_live.isEmpty) {
+      _ticker?.cancel();
+      _ticker = null;
+    } else {
+      _ticker ??= Timer.periodic(liveTimeout < const Duration(seconds: 1) ? liveTimeout : const Duration(seconds: 1), (_) => add(const _LiveTicked()));
+    }
+  }
+
+  /// Live answers whose run ended without a message go; one without its
+  /// author yet gets it once the company knows who runs it.
+  void _tick(_LiveTicked event, Emitter<ChatState> emit) {
+    final before = Set.of(_live.keys);
+    _expireLive(const {});
+    _watchLive();
+    final gone = before.difference(_live.keys.toSet());
+    var named = false;
+    final messages = <MessageView>[];
+    for (final m in state.messages) {
+      if (gone.contains(m.id)) continue;
+      final author = _live.containsKey(m.id) && _named(m.author) == null && m.runId != null ? _named(runAuthor?.call(m.runId!)) : null;
+      named |= author != null;
+      messages.add(author == null ? m : m.withText(m.text, author: author));
+    }
+    if (gone.isNotEmpty || named) emit(state.copyWith(messages: messages));
+  }
+
+  static String? _named(String? author) => author == null || author.trim().isEmpty ? null : author;
 
   Future<void> _refresh(ChatRefreshed event, Emitter<ChatState> emit) async {
     final id = state.conversationId;
@@ -456,16 +499,22 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// never became a message (an empty answer) goes once its run no longer
   /// works and no update came for a moment, as on the desktop.
   List<MessageView> _stillLive(List<MessageView> snapshot) {
-    final ids = {for (final m in snapshot) m.id};
+    _expireLive({for (final m in snapshot) m.id});
+    _watchLive();
+    return [for (final m in state.messages) if (_live.containsKey(m.id)) m];
+  }
+
+  /// Drops the live answers that are messages now ([arrived]) or whose run
+  /// no longer works and that had no update for [liveTimeout].
+  void _expireLive(Set<String> arrived) {
     final now = DateTime.now();
     _live.removeWhere((id, at) {
-      if (ids.contains(id)) return true;
+      if (arrived.contains(id)) return true;
       final m = state.messages.where((m) => m.id == id).firstOrNull;
       if (m == null) return true;
       final running = m.runId != null && runAuthor?.call(m.runId!) != null;
-      return !running && now.difference(at) > const Duration(seconds: 3);
+      return !running && now.difference(at) > liveTimeout;
     });
-    return [for (final m in state.messages) if (_live.containsKey(m.id)) m];
   }
 
   void _append(_AppendReceived event, Emitter<ChatState> emit) {
@@ -486,7 +535,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
     if (_live.containsKey(append.messageId)) _live[append.messageId] = DateTime.now();
     final messages = [...state.messages];
-    final author = messages[index].author ?? (_live.containsKey(append.messageId) ? runAuthor?.call(append.runId) : null);
+    final author = _named(messages[index].author) ?? (_live.containsKey(append.messageId) ? runAuthor?.call(append.runId) : null);
     messages[index] = messages[index].withText(next, activity: append.activity, author: author);
     final progress = event.append.progress;
     emit(state.copyWith(messages: messages, progress: progress == null ? null : {...state.progress, event.append.messageId: progress}));
@@ -498,6 +547,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     final text = append.applyTo('');
     if (text == null) return;
     _live[append.messageId] = DateTime.now();
+    _watchLive();
     final message = MessageView(
       activity: append.activity ?? const [],
       author: runAuthor?.call(append.runId),
@@ -835,6 +885,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   @override
   Future<void> close() async {
+    _ticker?.cancel();
     for (final s in _subs) {
       await s.cancel();
     }

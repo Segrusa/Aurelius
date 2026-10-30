@@ -40,7 +40,7 @@ class MockInboxBloc extends MockBloc<InboxEvent, InboxState> implements InboxBlo
 const online = LinkState(status: LinkStatus.online, capabilities: ['chat']);
 
 EmployeeSummary iris({List<ConversationSummary> conversations = const [], List<AgentView> agents = const [], String? title, String? reportsTo}) =>
-    employeeOf(id: 'mgr', departmentId: 'd', name: 'Iris', role: 'Marketing', title: title, reportsTo: reportsTo, conversationId: 'main', conversations: conversations, agents: agents);
+    employeeOf(id: 'mgr', departmentId: 'd', name: 'Iris', role: 'Marketing', title: title, reportsTo: reportsTo, conversationId: 'own', conversations: conversations, agents: agents);
 
 AgentView subagent(String name, String conversationId, int sinceMs, {String detail = '', String? prompt, String? doing, int steps = 0}) =>
     AgentView(kind: 'subagent', name: name, detail: detail, conversationId: conversationId, sinceMs: sinceMs, prompt: prompt, doing: doing, steps: steps);
@@ -268,6 +268,58 @@ void main() {
       expect(find.byIcon(Icons.call_outlined), findsNothing, reason: 'the Call button is gone');
       verifyNever(() => repo.messages(any()));
       expect(tester.takeException(), isNull);
+    });
+
+    group("its own chat's mode, browser and screen (where its group chat answers run)", () {
+      List<Map<String, dynamic>> sent() => [for (final c in verify(() => company.send(captureAny(), retry: false)).captured) c as Map<String, dynamic>];
+
+      Future<void> open(WidgetTester tester, EmployeeSummary m) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await pump(tester, m);
+      }
+
+      testWidgets('the mode is set on its own chat', (tester) async {
+        await open(tester, iris());
+        expect(find.descendant(of: find.byKey(const ValueKey('employee-mode')), matching: find.text('Ask')), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('employee-mode')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('employee-mode-auto')));
+        await tester.pumpAndSettle();
+        final command = sent().single;
+        expect(command['method'], 'conversation.set_agent_mode');
+        expect(command['params'], {'conversation_id': 'own', 'mode': 'auto'});
+      });
+
+      testWidgets('the browser is allowed on its own chat', (tester) async {
+        await open(tester, employeeOf(id: 'mgr', name: 'Iris', conversationId: 'own', departmentId: 'd'));
+        await tester.tap(find.byKey(const ValueKey('employee-browser')));
+        await tester.pump();
+        final command = sent().single;
+        expect(command['method'], 'conversation.set_browser_allowed');
+        expect(command['params'], {'conversation_id': 'own', 'allowed': true});
+      });
+
+      testWidgets('the screen asks first, then is allowed on its own chat', (tester) async {
+        await open(tester, iris());
+        await tester.tap(find.byKey(const ValueKey('employee-screen')));
+        await tester.pumpAndSettle();
+        expect(find.text('Let Iris see your screen?'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('employee-screen-allow')));
+        await tester.pumpAndSettle();
+        final command = sent().single;
+        expect(command['method'], 'conversation.set_screen_allowed');
+        expect(command['params'], {'conversation_id': 'own', 'allowed': true});
+      });
+
+      testWidgets('turning the screen off asks nothing', (tester) async {
+        await open(tester, employeeOf(id: 'mgr', name: 'Iris', conversationId: 'own', departmentId: 'd', screenAllowed: true));
+        await tester.tap(find.byKey(const ValueKey('employee-screen')));
+        await tester.pumpAndSettle();
+        expect(find.text('Let Iris see your screen?'), findsNothing);
+        expect(sent().single['params'], {'conversation_id': 'own', 'allowed': false});
+      });
     });
 
     testWidgets('the page tells the department, who the employee reports to and who reports to it', (tester) async {

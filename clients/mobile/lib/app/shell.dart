@@ -20,8 +20,8 @@ const shellTabs = [
   GlassTab(CupertinoIcons.ellipsis_circle, 'More'),
 ];
 
-/// The inbox tab, with the badge of what waits for you.
-final inboxTab = shellTabs.indexWhere((t) => t.label == 'Inbox');
+/// The inbox tab, with the badge of what waits for you (its index in [shellTabs]).
+const inboxTab = 2;
 
 /// Tabs: Home · Team · Inbox · Tasks · More in a floating glass tab bar,
 /// with the connection banner on top. Hardware keyboards (iPad, Android with a
