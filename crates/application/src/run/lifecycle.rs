@@ -359,19 +359,24 @@ impl CommandService {
     }
 
     /// The run waits on someone else, which is not hanging: an approval the user
-    /// has not decided yet, or a task given from its conversation that is not done.
+    /// has not decided yet. Only that blocks a running answer. Tasks never do:
+    /// delegate_task answers at once, and a task that waits for its colleagues has
+    /// ended its run (the next one starts when they are done), so a run that is
+    /// live while they work (a message to it) is working and is watched. A manager's
+    /// conversation nearly always has open tasks. When this cannot be read, the run
+    /// is given the benefit of the doubt.
     pub fn run_waits_on_others(&self, run_id: RunId) -> bool {
-        self.store
-            .read(|c| {
-                Ok(c.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM approvals WHERE run_id = ?1 AND status = 'pending')
-                         OR EXISTS(SELECT 1 FROM tasks t JOIN runs r ON r.id = ?1
-                                   WHERE t.origin_conversation_id = r.conversation_id AND t.status IN ('queued','running','waiting'))",
-                    [run_id.to_string()],
-                    |r| r.get::<_, bool>(0),
-                )?)
-            })
-            .unwrap_or(false)
+        let waits = self.store.read(|c| {
+            Ok(c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM approvals WHERE run_id = ?1 AND status = 'pending')",
+                [run_id.to_string()],
+                |r| r.get::<_, bool>(0),
+            )?)
+        });
+        waits.unwrap_or_else(|err| {
+            tracing::warn!(run = %run_id, %err, "could not tell whether the run waits on others; not stopping it");
+            true
+        })
     }
 
     /// How long a run may go without any progress before it is stopped (the
@@ -382,17 +387,19 @@ impl CommandService {
     }
 
     /// Chat runs whose job is still leased but whose lease ran out before `cutoff_ms`
-    /// while nobody drives them (`driven`: the jobs this daemon works on) end here, so
-    /// their conversation is free again and what waits in it goes next: one that had
-    /// started fails with a note in its answer (a stopped one counts as stopped), one
-    /// that never started is tried again while it has attempts left.
-    pub fn end_abandoned_chat_runs(&self, cutoff_ms: i64, driven: &std::collections::HashSet<String>) -> Result<Vec<EventNotice>, AppError> {
+    /// while nobody drives them (`driven`: the jobs this daemon works on, each with the
+    /// lease epoch its driver holds) end here, so their conversation is free again and
+    /// what waits in it goes next: one that had started fails with a note in its answer
+    /// (a stopped one counts as stopped), one that never started is tried again while
+    /// it has attempts left. Only a driver of the job's current lease counts: one left
+    /// from an earlier lease can no longer write.
+    pub fn end_abandoned_chat_runs(&self, cutoff_ms: i64, driven: &std::collections::HashSet<(String, i64)>) -> Result<Vec<EventNotice>, AppError> {
         // Most of the time there is none: only then a write.
-        let candidates: Vec<String> = self
+        let candidates: Vec<(String, i64)> = self
             .store
             .read(|c| {
-                let mut stmt = c.prepare("SELECT id FROM jobs WHERE kind = 'run.chat' AND state = 'leased' AND lease_until_ms < ?1")?;
-                let ids = stmt.query_map([cutoff_ms], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?;
+                let mut stmt = c.prepare("SELECT id, lease_epoch FROM jobs WHERE kind = 'run.chat' AND state = 'leased' AND lease_until_ms < ?1")?;
+                let ids = stmt.query_map([cutoff_ms], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<Vec<(String, i64)>, _>>()?;
                 Ok(ids)
             })
             .map_err(storage_error)?;
@@ -409,7 +416,7 @@ impl CommandService {
                     .collect::<Result<Vec<_>, _>>()?;
                 drop(stmt);
                 let mut notices = Vec::new();
-                for (job, epoch, attempts, max_attempts) in jobs.into_iter().filter(|(job, ..)| !driven.contains(job)) {
+                for (job, epoch, attempts, max_attempts) in jobs.into_iter().filter(|(job, epoch, ..)| !driven.contains(&(job.clone(), *epoch))) {
                     let Ok(run_id) = RunId::parse(&job) else { continue };
                     tracing::warn!(run = %run_id, "a chat run lost its driver; ending it so its conversation goes on");
                     let Some(message_id) = conv::message_for_run(tx, run_id)? else {
@@ -498,7 +505,7 @@ impl CommandService {
 pub const RUN_IDLE_TIMEOUT: &str = "run_idle_timeout_s";
 /// 10 minutes: longer than Claude Code's own longest tool call (Bash stops at 10 minutes
 /// and then reports) and its retries of an overloaded API. While a tool call is open the
-/// daemon allows three times this; waiting on an approval or a task never counts.
+/// daemon allows three times this; waiting on an approval never counts.
 pub const DEFAULT_RUN_IDLE_MS: i64 = 600_000;
 
 /// Said in an answer the server ended because nobody drove it any more.

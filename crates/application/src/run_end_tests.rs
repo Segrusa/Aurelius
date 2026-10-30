@@ -85,7 +85,7 @@ fn a_run_nobody_drives_ends_with_a_note_and_the_next_message_goes() {
     assert!(claim(&service, None).is_none(), "the conversation is still held");
 
     // Still driven here: nothing happens.
-    let driven: std::collections::HashSet<String> = [job.id.clone()].into();
+    let driven: std::collections::HashSet<(String, i64)> = [(job.id.clone(), job.lease_epoch)].into();
     assert!(service.end_abandoned_chat_runs(aurelius_storage::now_ms(), &driven).unwrap().is_empty());
     assert_eq!(run_state(&service, run).0, "running");
 
@@ -122,11 +122,44 @@ fn a_stopped_run_nobody_drives_ends_as_stopped_and_one_that_never_started_goes_a
 }
 
 #[test]
-fn waiting_on_an_approval_or_a_task_is_not_hanging_and_the_limit_is_a_setting() {
+fn waiting_on_an_approval_is_not_hanging_an_open_task_is_and_the_limit_is_a_setting() {
     let dir = tempfile::tempdir().unwrap();
     let service = CommandService::new(Arc::new(aurelius_storage::Store::open(dir.path()).unwrap()));
     let run = send(&service, conversation(&service), "hello");
     assert!(!service.run_waits_on_others(run));
+    // A task delegated from this conversation and still running: the run does not
+    // block on it (delegate_task answers at once), so the watchdog stays on. A
+    // manager's conversation nearly always has one; this is where runs hung.
+    service
+        .store()
+        .write(move |tx| {
+            tx.execute(
+                "INSERT INTO tasks(id, project_id, title, brief_blob_id, status, version, created_at_ms, updated_at_ms, origin_conversation_id)
+                 SELECT 't1', c.project_id, 'Child', (SELECT id FROM blobs LIMIT 1), 'running', 1, 0, 0, c.id
+                 FROM runs r JOIN conversations c ON c.id = r.conversation_id WHERE r.id = ?1",
+                [run.to_string()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(!service.run_waits_on_others(run), "an open delegated task is no reason to wait");
+    // The run's own task waits for its colleagues while this run is live (a message
+    // to it started the run): the run works, it does not wait on them.
+    service
+        .store()
+        .write(move |tx| {
+            tx.execute(
+                "INSERT INTO tasks(id, project_id, title, brief_blob_id, status, waiting_reason, version, created_at_ms, updated_at_ms)
+                 SELECT 'own', project_id, 'Own', brief_blob_id, 'waiting', 'input', 1, 0, 0 FROM tasks WHERE id = 't1'",
+                [],
+            )?;
+            tx.execute("UPDATE runs SET task_id = 'own' WHERE id = ?1", [run.to_string()])?;
+            Ok(())
+        })
+        .unwrap();
+    assert!(!service.run_waits_on_others(run), "its task waits for the user's input");
+    service.store().write(|tx| Ok(tx.execute("UPDATE tasks SET waiting_reason = 'dependency' WHERE id = 'own'", [])?)).unwrap();
+    assert!(!service.run_waits_on_others(run), "its task waits for its colleagues");
     service
         .store()
         .write(move |tx| {
@@ -148,4 +181,42 @@ fn waiting_on_an_approval_or_a_task_is_not_hanging_and_the_limit_is_a_setting() 
     assert_eq!(service.run_idle_limit_ms(), 120_000);
     service.store().write(|tx| aurelius_storage::settings::put(tx, lifecycle::RUN_IDLE_TIMEOUT, "1", 0)).unwrap();
     assert_eq!(service.run_idle_limit_ms(), 30_000, "never below 30 s");
+}
+
+#[test]
+fn when_it_cannot_tell_whether_a_run_waits_it_does_not_stop_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = CommandService::new(Arc::new(aurelius_storage::Store::open(dir.path()).unwrap()));
+    let run = send(&service, conversation(&service), "hello");
+    assert!(!service.run_waits_on_others(run));
+    // The question fails (here: its table is gone): in doubt the run is not stopped.
+    service.store().write(|tx| Ok(tx.execute("ALTER TABLE approvals RENAME TO approvals_gone", [])?)).unwrap();
+    assert!(service.run_waits_on_others(run), "a read error is no reason to stop a run");
+}
+
+#[test]
+fn an_old_driver_of_a_job_claimed_again_does_not_count_and_the_new_one_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let service = CommandService::new(Arc::new(aurelius_storage::Store::open(dir.path()).unwrap()));
+    let run = send(&service, conversation(&service), "hello");
+    // Claimed, deferred (put back for a retry), and claimed again: a new lease epoch.
+    let old = claim(&service, Some(60_000)).expect("the run's job");
+    let (id, epoch) = (old.id.clone(), old.lease_epoch);
+    assert!(service.store().write(move |tx| queries::reschedule_job(tx, &id, epoch, 0, "retry", false)).unwrap());
+    let new = claim(&service, Some(60_000)).expect("claimed again");
+    assert_eq!((new.id.as_str(), new.lease_epoch), (old.id.as_str(), old.lease_epoch + 1));
+    let plan = plan(&service, &new);
+    service.start_chat_run(&plan, new.lease_epoch).unwrap().expect("the new driver started it");
+
+    // Both drivers are known, then the old one ends late: the new one still drives it.
+    let both: std::collections::HashSet<(String, i64)> = [(old.id.clone(), old.lease_epoch), (new.id.clone(), new.lease_epoch)].into();
+    assert!(service.end_abandoned_chat_runs(aurelius_storage::now_ms(), &both).unwrap().is_empty());
+    let new_only: std::collections::HashSet<(String, i64)> = [(new.id.clone(), new.lease_epoch)].into();
+    assert!(service.end_abandoned_chat_runs(aurelius_storage::now_ms(), &new_only).unwrap().is_empty());
+    assert_eq!(run_state(&service, run).0, "running", "not ended while its driver works on it");
+
+    // Only the old driver left: it can no longer write, so nobody drives the run.
+    let old_only: std::collections::HashSet<(String, i64)> = [(old.id.clone(), old.lease_epoch)].into();
+    assert!(!service.end_abandoned_chat_runs(aurelius_storage::now_ms(), &old_only).unwrap().is_empty());
+    assert_eq!(run_state(&service, run), ("failed".into(), Some("abandoned".into()), "done".into()));
 }
