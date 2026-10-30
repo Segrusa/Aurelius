@@ -13,13 +13,15 @@ use gpui_kit::*;
 pub fn message_author(m: &aurelius_protocol::MessageView, fallback: &SharedString) -> SharedString {
     match m.role {
         MessageRole::User => "You".into(),
-        MessageRole::Assistant => m.author.clone().map(SharedString::from).unwrap_or_else(|| fallback.clone()),
+        // A line the server writes itself (nobody was woken, say) may come without a name.
+        MessageRole::Assistant => m.author.as_deref().map(str::trim).filter(|a| !a.is_empty()).map(|a| SharedString::from(a.to_string())).unwrap_or_else(|| fallback.clone()),
     }
 }
 
 /// An employee's answer streaming into the group chat before it is a message there
 /// (its text and steps come from the stream); marked as a group post like it will be.
-fn streaming_answer(id: MessageId, author: Option<String>) -> aurelius_protocol::MessageView {
+/// Its run is what its Stop stops and what its approvals wait on.
+fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<String>) -> aurelius_protocol::MessageView {
     aurelius_protocol::MessageView {
         id,
         ordinal: 0,
@@ -27,7 +29,7 @@ fn streaming_answer(id: MessageId, author: Option<String>) -> aurelius_protocol:
         status: MessageStatus::Partial,
         text: String::new(),
         created_at_ms: 0,
-        run_id: None,
+        run_id: Some(run),
         reply_to: None,
         produced_by: None,
         author,
@@ -40,6 +42,20 @@ fn streaming_answer(id: MessageId, author: Option<String>) -> aurelius_protocol:
         queued: false,
         usage: None,
     }
+}
+
+/// A note the server writes in the group chat itself: kind `status` there (nobody was woken),
+/// kind `system`, or a finished group post without an author. A streaming answer whose
+/// employee is not known yet is no note; in a task, `status` stays an update card.
+fn is_system_line(m: &aurelius_protocol::MessageView, in_group: bool) -> bool {
+    let unnamed = m.author.as_deref().is_none_or(|a| a.trim().is_empty());
+    m.role == MessageRole::Assistant
+        && match m.update.as_deref() {
+            Some("system") => true,
+            Some("status") => in_group,
+            Some(kind) => kind == aurelius_domain::group_chat::GROUP_KIND && unnamed && m.status != MessageStatus::Partial,
+            None => false,
+        }
 }
 
 /// Messages longer than this many lines show only these until "Show more".
@@ -230,9 +246,13 @@ impl AppView {
             rows.push(ui::rise(v().w_full().child(el), SharedString::from(format!("msg-{}", m.id)), 0).into_any_element());
         }
         // Group chat: answers still streaming in, before they are messages there.
-        for (id, run, _) in self.group_live.iter().filter(|(id, ..)| !snapshot.messages.iter().any(|m| m.id == *id)) {
-            let streaming = streaming_answer(*id, self.run_author(*run));
-            rows.push(ui::rise(v().w_full().child(self.render_message(&streaming, &author, cx)), SharedString::from(format!("msg-{id}")), 0).into_any_element());
+        for l in self.group_live.iter().filter(|l| !snapshot.messages.iter().any(|m| m.id == l.message)) {
+            let streaming = streaming_answer(l.message, l.run, l.author.clone().or_else(|| self.run_author(l.run)));
+            rows.push(ui::rise(v().w_full().child(self.render_message(&streaming, &author, cx)), SharedString::from(format!("msg-{}", l.message)), 0).into_any_element());
+        }
+        // Group chat: what an employee's run asks that has no answer streaming here to show it under.
+        if self.open_conversation.is_some() && self.open_conversation == self.group_conversation {
+            rows.extend(self.group_approvals(cx));
         }
         v().w_full().max_w(px(700.)).gap(px(26.))
             .children(rows)
@@ -364,6 +384,14 @@ impl AppView {
             };
             return sent.into_any_element();
         }
+        // A line the server writes in the group chat itself (nobody could answer, an answer
+        // was cut off): a quiet note, not an answer by somebody.
+        if is_system_line(m, self.open_conversation.is_some() && self.open_conversation == self.group_conversation) {
+            let text = m.text.trim().to_string();
+            return h().w_full().justify_center().px(px(24.))
+                .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(c(theme::MUTED)).text_center().child(if text.is_empty() { "…".to_string() } else { text }))
+                .into_any_element();
+        }
         // An employee's message in the group chat reads as an answer under its name.
         if let Some(kind) = m.update.clone().filter(|k| k != aurelius_domain::group_chat::GROUP_KIND) {
             // A task update: the task itself, or what a worker, subagent or colleague reports back.
@@ -428,36 +456,7 @@ impl AppView {
                     .child(ui::button(SharedString::from(format!("plan-revise-{id}")), "Pas aan", ButtonKind::Outline, None)
                         .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.decide_plan_for(id, aurelius_domain::approval::PlanDecision::Revise, w, cx))))
             });
-            let actions = pending.map(|a| {
-                let (id, digest) = (a.id, a.action_digest.clone());
-                let reject_digest = digest.clone();
-                let el = h().gap(px(8.)).pt(px(4.));
-                if a.tool == crate::app::QUESTION_TOOL {
-                    el.child(ui::button(SharedString::from(format!("skip-{}", a.id)), "Skip", ButtonKind::Outline, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.decide_approval(id, reject_digest.clone(), false, cx);
-                    })))
-                    .child(ui::button(SharedString::from(format!("send-{}", a.id)), "Send answer", ButtonKind::Primary, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        if !this.send_answers(id) {
-                            this.notify_user("Answer every question first, or skip.", true, cx);
-                        }
-                        cx.notify();
-                    })))
-                } else if a.tool == crate::app::PLAN_TOOL {
-                    el.child(ui::button(SharedString::from(format!("plan-{}", a.id)), "Review plan", ButtonKind::Outline, None)
-                        .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_plan_approval(a.clone(), w, cx))))
-                    .child(ui::button(SharedString::from(format!("plan-auto-{id}")), "Goedkeuren + Auto", ButtonKind::Primary, None)
-                        .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.decide_plan_for(id, aurelius_domain::approval::PlanDecision::Approve, w, cx))))
-                } else {
-                    let always = self.always_allow_button(&a, "upd", cx);
-                    el.child(ui::button(SharedString::from(format!("reject-upd-{}", a.id)), "Reject", ButtonKind::Outline, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.decide_approval(id, reject_digest.clone(), false, cx);
-                    })))
-                    .children(always)
-                    .child(ui::button(SharedString::from(format!("approve-upd-{}", a.id)), "Approve once", ButtonKind::Primary, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                        this.decide_approval(id, digest.clone(), true, cx);
-                    })))
-                }
-            });
+            let actions = pending.map(|a| self.approval_actions(a, "upd", cx));
             return v().gap(px(6.)).px(px(14.)).py(px(11.)).rounded(px(8.)).border_1()
                 .border_color(c(if accent { theme::ATTENTION_BORDER } else { theme::BORDER }))
                 .bg(c(if accent { theme::ATTENTION_BG } else { theme::SURFACE }))
@@ -518,8 +517,13 @@ impl AppView {
                 }
             })
                 .when_some(self.live_progress.get(&m.id), |el, p| el.child(div().text_color(c(theme::MUTED)).child(ui::fmt_progress(p.started_at_ms, p.output_tokens))))
-                // An answer streaming into the group chat runs in its employee's own conversation.
                 .when(m.update.is_none(), |el| el.child(ui::action_icon(SharedString::from(format!("stop-{}", m.id)), "■", "Stop", Some("secondary-."), Some(|| Box::new(StopGeneration)))))
+                // An answer streaming into the group chat runs in its employee's own conversation: stop that run.
+                .when_some(m.run_id.filter(|_| m.update.as_deref() == Some(aurelius_domain::group_chat::GROUP_KIND)), |el, run_id| {
+                    el.child(ui::action_icon(SharedString::from(format!("stop-{}", m.id)), "■", "Stop", None, None).on_click(cx.listener(move |this, _: &ClickEvent, _, _| {
+                        let _ = this.requests.send(crate::backend::Request::Stop { run_id });
+                    })))
+                })
                 .into_any_element(),
             MessageStatus::Interrupted => h().gap(px(7.)).child("Stopped; text up to that point is kept.")
                 .when(Some(m.id) == last_answer, |el| el.child(ui::action_icon(SharedString::from(format!("retry-{}", m.id)), "↻", "Retry", Some("secondary-r"), Some(|| Box::new(RetryAnswer)))))
@@ -592,6 +596,39 @@ impl AppView {
 }
 
 impl AppView {
+    /// The buttons that decide what a worker asks: answer a question, review a plan, or
+    /// approve an action (`key` keeps their ids apart where the same view shows two).
+    pub fn approval_actions(&self, a: aurelius_protocol::ApprovalView, key: &str, cx: &mut Context<Self>) -> Div {
+        let (id, digest) = (a.id, a.action_digest.clone());
+        let reject_digest = digest.clone();
+        let el = h().gap(px(8.)).pt(px(4.));
+        if a.tool == crate::app::QUESTION_TOOL {
+            el.child(ui::button(SharedString::from(format!("skip-{}", a.id)), "Skip", ButtonKind::Outline, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.decide_approval(id, reject_digest.clone(), false, cx);
+            })))
+            .child(ui::button(SharedString::from(format!("send-{}", a.id)), "Send answer", ButtonKind::Primary, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                if !this.send_answers(id) {
+                    this.notify_user("Answer every question first, or skip.", true, cx);
+                }
+                cx.notify();
+            })))
+        } else if a.tool == crate::app::PLAN_TOOL {
+            el.child(ui::button(SharedString::from(format!("plan-{}", a.id)), "Review plan", ButtonKind::Outline, None)
+                .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_plan_approval(a.clone(), w, cx))))
+            .child(ui::button(SharedString::from(format!("plan-auto-{id}")), "Goedkeuren + Auto", ButtonKind::Primary, None)
+                .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.decide_plan_for(id, aurelius_domain::approval::PlanDecision::Approve, w, cx))))
+        } else {
+            let always = self.always_allow_button(&a, key, cx);
+            el.child(ui::button(SharedString::from(format!("reject-{key}-{}", a.id)), "Reject", ButtonKind::Outline, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.decide_approval(id, reject_digest.clone(), false, cx);
+            })))
+            .children(always)
+            .child(ui::button(SharedString::from(format!("approve-{key}-{}", a.id)), "Approve once", ButtonKind::Primary, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.decide_approval(id, digest.clone(), true, cx);
+            })))
+        }
+    }
+
     /// A long message as shown: its first lines and where they end in `text` while folded (None
     /// when shown whole), and the Show more / Show less toggle (None for a short message).
     fn fold_view(&self, id: MessageId, text: &str, cx: &mut Context<Self>) -> (Option<(String, usize)>, Option<Stateful<Div>>) {
@@ -1359,14 +1396,15 @@ fn activity_ring(busy: bool) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{artifact_url, fold, mention_suggestions, message_author, streaming_answer, web_search_summary};
+    use super::{artifact_url, fold, is_system_line, mention_suggestions, message_author, streaming_answer, web_search_summary};
     use aurelius_domain::conversation::{MessageRole, MessageStatus};
     use gpui_kit::SharedString;
 
     #[test]
     fn every_group_message_names_its_author() {
         let fallback = SharedString::from("Aurelius");
-        let mut atlas = streaming_answer(aurelius_domain::MessageId::new(), Some("Atlas".into()));
+        let run = aurelius_domain::RunId::new();
+        let mut atlas = streaming_answer(aurelius_domain::MessageId::new(), run, Some("Atlas".into()));
         atlas.status = MessageStatus::Complete;
         let orion = aurelius_protocol::MessageView { author: Some("Orion".into()), ..atlas.clone() };
         let you = aurelius_protocol::MessageView { role: MessageRole::User, author: None, update: None, ..atlas.clone() };
@@ -1375,6 +1413,35 @@ mod tests {
         assert_eq!(names, ["Atlas", "Orion", "You", "Aurelius"], "each message its own author, the user is You");
         // Streaming into the group chat it reads as that employee's group post.
         assert_eq!(atlas.update.as_deref(), Some(aurelius_domain::group_chat::GROUP_KIND));
+        // Its run is what its Stop stops and its approvals wait on.
+        assert_eq!(atlas.run_id, Some(run));
+    }
+
+    #[test]
+    fn a_line_the_server_writes_is_a_note_not_a_nameless_answer() {
+        let fallback = SharedString::from("Aurelius");
+        let mut line = streaming_answer(aurelius_domain::MessageId::new(), aurelius_domain::RunId::new(), None);
+        line.status = MessageStatus::Complete;
+        assert!(is_system_line(&line, true), "a finished group post without an author");
+        let blank = aurelius_protocol::MessageView { author: Some("  ".into()), ..line.clone() };
+        assert!(is_system_line(&blank, true), "a blank author is none");
+        assert_eq!(message_author(&blank, &fallback).as_ref(), "Aurelius", "never an empty name");
+        let system = aurelius_protocol::MessageView { author: Some("Aurelius".into()), update: Some("system".into()), ..line.clone() };
+        assert!(is_system_line(&system, true), "kind system");
+        // Nobody was woken: Aurelius' status note in the group; in a task a status stays a card.
+        let status = aurelius_protocol::MessageView { update: Some("status".into()), ..system.clone() };
+        assert!(is_system_line(&status, true));
+        assert!(!is_system_line(&status, false));
+        // Still streaming with its employee not known yet: an answer, not a note.
+        let streaming = aurelius_protocol::MessageView { status: MessageStatus::Partial, ..line.clone() };
+        assert!(!is_system_line(&streaming, true));
+        let named = aurelius_protocol::MessageView { author: Some("Atlas".into()), ..line.clone() };
+        assert!(!is_system_line(&named, true));
+        // Cut off: the post keeps its author and stays an answer.
+        let cut = aurelius_protocol::MessageView { status: MessageStatus::Interrupted, ..named.clone() };
+        assert!(!is_system_line(&cut, true));
+        let chat = aurelius_protocol::MessageView { update: None, ..line };
+        assert!(!is_system_line(&chat, true), "a plain answer is never a note");
     }
 
     #[test]

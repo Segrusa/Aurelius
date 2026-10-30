@@ -15,7 +15,7 @@ impl AppView {
     pub fn render_group_chat(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let team = self.managers.iter().filter(|m| m.status == LifecycleStatus::Active).count();
         // Who is writing an answer here right now.
-        let answering: Vec<String> = self.group_live.iter().filter_map(|(_, run, _)| self.run_author(*run)).collect();
+        let answering: Vec<String> = self.group_live.iter().filter_map(|l| l.author.clone().or_else(|| self.run_author(l.run))).collect();
         let header = h()
             .h(px(68.))
             .flex_none()
@@ -44,6 +44,36 @@ impl AppView {
             .child(self.conversation_pane(|this, _, cx| this.group_scroll(cx), cx))
             .child(composer(self, "", false, cx))
             .into_any_element()
+    }
+
+    /// What employees' runs ask from their main chat (where group chat answers are written)
+    /// with no answer streaming here to show it under: decided right here, under the asker's name.
+    pub fn group_approvals(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let asks: Vec<_> = self.pending_approvals()
+            .filter(|a| a.conversation_id.is_some_and(|id| self.is_main_chat(id)) && !self.group_live.iter().any(|l| l.run == a.run_id))
+            .cloned()
+            .collect();
+        asks.into_iter().map(|a| {
+            let (label, body): (&str, AnyElement) = if a.tool == crate::app::QUESTION_TOOL {
+                ("QUESTION · WAITING FOR YOU", self.question_form(&a, None, cx).into_any_element())
+            } else if a.tool == crate::app::PLAN_TOOL {
+                ("PLAN · WAITING FOR YOU", div().text_size(px(13.5)).text_color(c(theme::TEXT_2)).child("A plan to decide on.").into_any_element())
+            } else {
+                let summary = crate::screens::approval::approval_summary(&a, &self.approval_folders(&a));
+                ("WAITING FOR YOU", v().gap(px(8.))
+                    .child(div().text_size(px(13.5)).text_color(c(theme::TEXT)).child(summary.title))
+                    .child(self.approval_detail(&a, "group", cx))
+                    .into_any_element())
+            };
+            let id = a.id;
+            v().gap(px(6.)).px(px(14.)).py(px(11.)).rounded(px(8.)).border_1()
+                .border_color(c(theme::ATTENTION_BORDER)).bg(c(theme::ATTENTION_BG))
+                .child(h().gap(px(8.)).text_size(px(11.5)).text_color(c(theme::MUTED)).child(ui::eyebrow(label)).child(div().flex_1().min_w_0().text_color(c(theme::TEXT_2)).child(a.requester.clone())))
+                .child(body)
+                .child(self.approval_actions(a, "group", cx))
+                .id(SharedString::from(format!("group-ask-{id}")))
+                .into_any_element()
+        }).collect()
     }
 
     /// The group chat's scroll area, in the conversation pane.

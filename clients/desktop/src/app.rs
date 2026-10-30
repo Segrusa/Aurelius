@@ -515,6 +515,19 @@ pub struct WorkingNow {
     pub since_ms: i64,
 }
 
+/// An employee's answer streaming into the open group chat that is no message there yet
+/// (it is copied in when it ends).
+#[derive(Clone, Debug)]
+pub struct GroupLive {
+    pub message: MessageId,
+    pub run: aurelius_domain::RunId,
+    /// When the last delta came.
+    pub at: std::time::Instant,
+    /// Who writes it, kept from while the run worked: once it ends, the run no longer
+    /// names its employee, but the message may not be in yet.
+    pub author: Option<String>,
+}
+
 /// What waits for the user in one project.
 #[derive(Clone, Copy, Default, PartialEq, Debug)]
 pub struct Waiting {
@@ -948,9 +961,8 @@ pub struct AppView {
     pub manager_thread: Option<ConversationId>,
     /// The group chat's conversation, once loaded (`group_chat.get`).
     pub group_conversation: Option<ConversationId>,
-    /// Answers streaming into the open group chat that are no message there yet
-    /// (an employee's answer is copied in when it ends): (message, run, last delta).
-    pub group_live: Vec<(MessageId, aurelius_domain::RunId, std::time::Instant)>,
+    /// Answers streaming into the open group chat that are no message there yet.
+    pub group_live: Vec<GroupLive>,
     /// The subagent chip's panel is open; which subagent shows its full prompt.
     pub subagents_open: bool,
     /// Subagents running in a conversation, from `query/subagents` (protocol 1.6).
@@ -1621,7 +1633,12 @@ impl AppView {
                 // A streamed group answer that never became a message (an empty answer):
                 // gone once its run no longer works and no delta came for a moment.
                 let managers = &self.managers;
-                self.group_live.retain(|(_, run, at)| at.elapsed() < Duration::from_secs(3) || managers.iter().any(|m| m.agents.iter().any(|a| a.run_id == Some(*run))));
+                self.group_live.retain(|l| l.at.elapsed() < Duration::from_secs(3) || managers.iter().any(|m| m.agents.iter().any(|a| a.run_id == Some(l.run))));
+                for i in 0..self.group_live.len() {
+                    if self.group_live[i].author.is_none() {
+                        self.group_live[i].author = self.run_author(self.group_live[i].run);
+                    }
+                }
                 // The last subagent finished: its panel goes away with the chip.
                 if self.subagents_open && self.subagents_here().is_empty() {
                     self.subagents_open = false;
@@ -1928,7 +1945,7 @@ impl AppView {
                     }
                     self.message_cache.get_mut().retain(&snapshot.messages);
                     // A streamed group answer is a message now.
-                    self.group_live.retain(|(id, ..)| !snapshot.messages.iter().any(|m| m.id == *id));
+                    self.group_live.retain(|l| !snapshot.messages.iter().any(|m| m.id == l.message));
                     // No answer running: the totals are final for now (again after each answer ends).
                     let settled = !snapshot.messages.iter().any(|m| m.status == MessageStatus::Partial);
                     let conversation_id = snapshot.conversation_id;
@@ -1962,10 +1979,14 @@ impl AppView {
                 if open {
                     // An employee's answer streams into the group chat under the id it gets there once done.
                     if Some(conversation) == self.group_conversation && !self.messages.as_ref().is_some_and(|s| s.messages.iter().any(|m| m.id == delta.message_id)) {
-                        let now = std::time::Instant::now();
-                        match self.group_live.iter_mut().find(|(id, ..)| *id == delta.message_id) {
-                            Some(entry) => entry.2 = now,
-                            None => self.group_live.push((delta.message_id, delta.run_id, now)),
+                        let at = std::time::Instant::now();
+                        let author = self.run_author(delta.run_id);
+                        match self.group_live.iter_mut().find(|l| l.message == delta.message_id) {
+                            Some(entry) => {
+                                entry.at = at;
+                                entry.author = entry.author.take().or(author);
+                            }
+                            None => self.group_live.push(GroupLive { message: delta.message_id, run: delta.run_id, at, author }),
                         }
                     }
                     // Seen streaming: it stays whole when it ends, even if no message list came in meanwhile.
@@ -5139,6 +5160,20 @@ impl AppView {
         self.managers.iter().find(|m| m.agents.iter().any(|a| a.run_id == Some(run))).map(|m| m.name.clone())
     }
 
+    /// The latest answer streaming into the open group chat (what Stop stops there).
+    pub fn group_run(&self) -> Option<aurelius_domain::RunId> {
+        if self.open_conversation.is_none() || self.open_conversation != self.group_conversation {
+            return None;
+        }
+        self.group_live.last().map(|l| l.run)
+    }
+
+    /// Whether `conversation` is an employee's main chat: no longer shown on its own; its
+    /// runs answer in the group chat, so what they ask is decided there.
+    pub fn is_main_chat(&self, conversation: ConversationId) -> bool {
+        self.managers.iter().any(|m| m.conversation_id == conversation)
+    }
+
     /// The mode chosen when giving work becomes the employee's mode: the default for its next
     /// tasks and conversations, and the one the Give work chip shows. Nothing picked: no change.
     pub fn remember_mode(&mut self, employee: Option<EmployeeId>, mode: Option<aurelius_domain::autonomy::AgentMode>) {
@@ -7026,7 +7061,7 @@ impl Render for AppView {
             .on_action(cx.listener(Self::on_confirm_primary))
             .on_action(cx.listener(Self::on_dialog_next_field))
             .on_action(cx.listener(|this, _: &StopGeneration, _, cx| {
-                match this.active_run() {
+                match this.active_run().or_else(|| this.group_run()) {
                     Some(run_id) => {
                         let _ = this.requests.send(backend::Request::Stop { run_id });
                     }
