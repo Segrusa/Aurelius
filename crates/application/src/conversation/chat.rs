@@ -49,6 +49,7 @@ impl CommandService {
         let meta = ctx.metadata();
         let actor = ctx.principal_id.to_string();
         let interrupt = cmd.interrupt;
+        let store = self.store.clone();
         self.commit(command_id, hash, move |tx| {
             let mut notices = Vec::new();
             let correlation = command_id.to_string();
@@ -80,7 +81,7 @@ impl CommandService {
             })?;
             crate::conversation::message_images::keep(tx, message_id, &images)?;
             if interrupt {
-                notices.extend(interrupt_conversation(tx, &meta, &correlation, conversation_id)?);
+                notices.extend(interrupt_conversation(tx, &store, &meta, &correlation, conversation_id)?);
             }
             let (run_id, n) = queue_run(tx, &meta, &correlation, conversation_id, message_id)?;
             notices.push(n);
@@ -124,11 +125,12 @@ impl CommandService {
         let run_id = cmd.run_id;
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
+        let store = self.store.clone();
         self.commit(command_id, hash, move |tx| {
             let Some(status) = conv::run_status(tx, run_id)? else {
                 return Ok(Err(domain_error(DomainError::RunNotFound(run_id))));
             };
-            match request_stop(tx, &meta, &command_id.to_string(), run_id, &status, format!("cmd:{command_id}:cancel"))? {
+            match request_stop(tx, &store, &meta, &command_id.to_string(), run_id, &status, format!("cmd:{command_id}:cancel"))? {
                 None => Ok(Ok((CommandResult::StopRequested { run_id, already_finished: true }, vec![]))),
                 Some(notices) => Ok(Ok((CommandResult::StopRequested { run_id, already_finished: false }, notices))),
             }
@@ -147,7 +149,7 @@ impl CommandService {
                 Ok(run) => run,
                 Err(err) => return Ok(Err(err)),
             };
-            let mut notices = request_stop(tx, &meta, &correlation, run_id, "created", format!("cmd:{command_id}:cancel"))?.unwrap_or_default();
+            let mut notices = request_stop(tx, &store, &meta, &correlation, run_id, "created", format!("cmd:{command_id}:cancel"))?.unwrap_or_default();
             conv::delete_message(tx, message_id)?;
             let (_, mut n) = emit(tx, Ev {
                 aggregate_type: "conversation",
@@ -182,6 +184,7 @@ impl CommandService {
         let (conversation_id, message_id) = (cmd.conversation_id, cmd.message_id);
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
+        let store = self.store.clone();
         self.commit(command_id, hash, move |tx| {
             let correlation = command_id.to_string();
             let run_id = match waiting_run(tx, conversation_id, message_id)? {
@@ -195,7 +198,7 @@ impl CommandService {
                 if status == "cancelling" {
                     continue;
                 }
-                if let Some(n) = request_stop(tx, &meta, &correlation, ahead, &status, format!("cmd:{command_id}:cancel:{ahead}"))? {
+                if let Some(n) = request_stop(tx, &store, &meta, &correlation, ahead, &status, format!("cmd:{command_id}:cancel:{ahead}"))? {
                     notices.extend(n);
                 }
             }
@@ -321,6 +324,7 @@ impl CommandService {
         let keys = self.store.read(|c| conv::content_blob_keys(c, id)).map_err(storage_error)?;
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
+        let store = self.store.clone();
         let committed = self.commit(command_id, hash, move |tx| {
             let kind: Option<String> = tx.query_row("SELECT kind FROM conversations WHERE id = ?1 AND archived_at_ms IS NULL", [id.to_string()], |r| r.get(0)).ok();
             match kind.as_deref() {
@@ -333,7 +337,7 @@ impl CommandService {
             }
             // What still runs or waits in it is stopped; a run stuck in 'cancelling' no longer blocks the delete.
             // shortcut: text an interrupted answer flushes after this commit isn't erased; erase it at run end if that matters.
-            let mut notices = interrupt_conversation(tx, &meta, &command_id.to_string(), id)?;
+            let mut notices = interrupt_conversation(tx, &store, &meta, &command_id.to_string(), id)?;
             conv::delete_conversation(tx, id)?;
             let (_, n) = emit(tx, Ev {
                 aggregate_type: "conversation",

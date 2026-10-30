@@ -15,6 +15,7 @@ use aurelius_domain::{
     Command, ConversationId, EmployeeId, ProjectId,
     app_key::{AppAudience, AppScope, CreateAppKey},
     employee::{CreateEmployee, SendEmployeeMessage},
+    group_chat::SendGroupMessage,
     project::CreateProject,
     task::{CreateTask, RunSettings},
     webhook,
@@ -258,6 +259,36 @@ async fn a_managers_reply_is_posted_to_the_app_that_asked() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(receiver.delivery_of("manager.replied", 1).await.len(), 1);
     assert!(other.requests().is_empty());
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_chat_answer_of_the_ceo_is_not_the_apps_reply() {
+    env();
+    let dir = tempfile::tempdir().unwrap();
+    // Slow answers: the group chat's run is still busy in the CEO's main chat when the app asks there.
+    let daemon = start_with_delay(dir.path(), 30).await;
+    let owner = connect(dir.path()).await;
+    let c = company(&owner).await;
+    let receiver = Receiver::start(0, "none").await;
+    let (_, secret, _) = key_with_webhook(&owner, "Marcus", AppAudience::Management, &receiver.url).await;
+    let marcus = app(dir.path(), &secret).await;
+
+    owner.execute(envelope(Command::SendGroupMessage(SendGroupMessage { text: "Hallo team".into(), images: vec![], files: vec![] }), None)).await.unwrap();
+    marcus
+        .execute(envelope(Command::SendEmployeeMessage(SendEmployeeMessage { employee_id: c.jean.0, text: "Question from the app".into(), conversation_id: c.jean.1, images: vec![], files: vec![], interrupt: false }), None))
+        .await
+        .unwrap();
+    // The group's answer comes first, the app's reply after it: only that one is posted.
+    let requests = receiver.delivery_of("manager.replied", 1).await;
+    let body: Value = serde_json::from_str(&requests[0].body).unwrap();
+    assert!(body["data"]["text"].as_str().is_some_and(|t| t.contains("Question from the app")), "{body}");
+    let message = body["data"]["message_id"].as_str().unwrap().to_owned();
+    let group: Option<String> = db(dir.path()).query_row("SELECT json_extract(j.payload_json, '$.group') FROM messages m JOIN jobs j ON j.id = m.run_id WHERE m.id = ?1", [&message], |r| r.get(0)).unwrap();
+    assert!(group.is_none(), "the reply is not the group chat's run");
+    assert!(owner.group_chat().await.unwrap().messages.iter().any(|m| m.author.as_deref() == Some("Jean")), "the CEO did answer the group");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(receiver.delivery_of("manager.replied", 1).await.len(), 1);
     stop(dir.path(), daemon).await;
 }
 

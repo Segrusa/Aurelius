@@ -22,6 +22,14 @@ pub const CONTEXT_CHARS: usize = 600;
 pub const MAX_HOPS: u32 = 3;
 /// Longest post of an employee in the group chat (characters).
 pub const POST_MAX: usize = 4_000;
+/// Most posts of one run that wake colleagues (RULE 08); later posts are shown but wake nobody.
+pub const WAKING_POSTS_PER_RUN: u32 = 2;
+/// Most posts of one employee that wake colleagues within `WAKE_WINDOW_MS`, over
+/// all its runs. The hop count restarts in a run the group chat did not wake (a
+/// task's, a heartbeat's), so this bounds a loop through `delegate_task` or
+/// `message_task` too (RULE 08).
+pub const WAKING_POSTS_PER_WINDOW: u32 = 4;
+pub const WAKE_WINDOW_MS: i64 = 60 * 60 * 1000;
 
 /// A message of the user in the group chat (`group_chat.send`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -53,7 +61,7 @@ pub fn mentions(text: &str, employees: &[(EmployeeId, String)]) -> Vec<EmployeeI
     let mut out = Vec::new();
     for (at, _) in lower.match_indices('@') {
         // `@` inside a word (an email address) is no mention.
-        if lower[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '.' || c == '_') {
+        if lower[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '+')) {
             continue;
         }
         let rest = &lower[at + 1..];
@@ -89,7 +97,7 @@ mod tests {
         let team = vec![(ann, "Ann".to_owned()), (anna, "Anna".to_owned()), (bo, "Bo".to_owned()), (jean_paul, "Jean Paul".to_owned())];
         assert_eq!(mentions("@anna and @BO, then @Ann again @anna", &team), vec![anna, bo, ann]);
         assert_eq!(mentions("Hi @Jean Paul!", &team), vec![jean_paul]);
-        assert!(mentions("no one here, mail bo@bo.com or @Bob", &team).is_empty());
+        assert!(mentions("no one here, mail bo@bo.com, x-@Bo, x_@Bo, x+@Bo or @Bob", &team).is_empty());
         assert!(mentions("@ Ann", &team).is_empty());
         assert_eq!(mentions("(@Bo)", &team), vec![bo]);
     }

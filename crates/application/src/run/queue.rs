@@ -3,7 +3,7 @@
 use crate::run::events::{Ev, emit};
 use crate::{CHAT_RUN_KIND, CommandService};
 use aurelius_domain::{ActorKind, ConversationId, MessageId, RunId, EventNotice};
-use aurelius_storage::{PreparedBlob, StorageError, Tx, blobs};
+use aurelius_storage::{PreparedBlob, StorageError, Store, Tx, blobs};
 use aurelius_domain::conversation::{MessageRole, MessageStatus};
 use aurelius_storage::conversations::{self as conv, NewMessage};
 use aurelius_storage::events;
@@ -120,9 +120,11 @@ pub(crate) fn queue_run_marked(
 
 /// Stop one run that has status `status`; `None` when it had already finished.
 /// A run that was not claimed yet is cancelled outright; otherwise it becomes
-/// 'cancelling' and the daemon interrupts its process.
+/// 'cancelling' and the daemon interrupts its process. A run the group chat
+/// woke tells the group it was stopped (`store`: for that message).
 pub(crate) fn request_stop(
     tx: &Tx<'_>,
+    store: &Store,
     ctx_meta: &serde_json::Value,
     correlation: &str,
     run_id: RunId,
@@ -175,6 +177,10 @@ pub(crate) fn request_stop(
         if status == "waiting" {
             notices.extend(crate::task::task_runs::on_parked_run_stopped(tx, run_id)?);
         }
+        // Its process never finishes it: the group hears it here (a claimed run's in `finish_chat_run`).
+        if let Some(conversation) = conv::run_conversation(tx, run_id)? {
+            notices.extend(crate::conversation::group_chat::mirror_answer(tx, store, run_id, conversation, "", Some("cancelled"), &[])?);
+        }
     } else {
         conv::set_run_status(tx, run_id, "cancelling", None)?;
     }
@@ -184,7 +190,7 @@ pub(crate) fn request_stop(
 /// A cancelled task: its runs parked for a usage limit (job back in the queue)
 /// end now, so they never start again at the reset. Live runs are interrupted
 /// by the daemon.
-pub(crate) fn stop_parked_runs_of_task(tx: &Tx<'_>, task: aurelius_domain::TaskId, correlation: &str) -> Result<Vec<EventNotice>, StorageError> {
+pub(crate) fn stop_parked_runs_of_task(tx: &Tx<'_>, store: &Store, task: aurelius_domain::TaskId, correlation: &str) -> Result<Vec<EventNotice>, StorageError> {
     let parked: Vec<String> = tx
         .prepare(
             "SELECT r.id FROM runs r JOIN jobs j ON j.id = r.id
@@ -195,7 +201,7 @@ pub(crate) fn stop_parked_runs_of_task(tx: &Tx<'_>, task: aurelius_domain::TaskI
     let mut notices = Vec::new();
     for run_id in parked.iter().filter_map(|r| RunId::parse(r).ok()) {
         let meta = serde_json::json!({ "task_id": task });
-        if let Some(n) = request_stop(tx, &meta, correlation, run_id, "waiting", format!("task:{task}:cancel:{run_id}"))? {
+        if let Some(n) = request_stop(tx, store, &meta, correlation, run_id, "waiting", format!("task:{task}:cancel:{run_id}"))? {
             notices.extend(n);
         }
     }
@@ -226,6 +232,7 @@ fn interrupt_parked_message(tx: &Tx<'_>, run_id: RunId, correlation: &str) -> Re
 /// before the new message's run is queued.
 pub(crate) fn interrupt_conversation(
     tx: &Tx<'_>,
+    store: &Store,
     ctx_meta: &serde_json::Value,
     correlation: &str,
     conversation: ConversationId,
@@ -236,7 +243,7 @@ pub(crate) fn interrupt_conversation(
         if status == "cancelling" {
             continue;
         }
-        if let Some(n) = request_stop(tx, ctx_meta, correlation, run_id, &status, format!("cmd:{correlation}:cancel:{run_id}"))? {
+        if let Some(n) = request_stop(tx, store, ctx_meta, correlation, run_id, &status, format!("cmd:{correlation}:cancel:{run_id}"))? {
             notices.extend(n);
         }
     }

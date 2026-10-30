@@ -782,7 +782,7 @@ fn message_task(tx: &Tx<'_>, st: &Store, run: RunId, needle: &str, message: &str
     let (posted_id, posted) = thread::post_returning(tx, st, conversation, task, Speaker::Update { kind: "message", from: &from }, message)?;
     notices.push(posted);
     if interrupt {
-        notices.extend(crate::run::queue::interrupt_conversation(tx, &serde_json::json!({ "task_id": task, "from_employee": me }), &task.to_string(), conversation)?);
+        notices.extend(crate::run::queue::interrupt_conversation(tx, st, &serde_json::json!({ "task_id": task, "from_employee": me }), &task.to_string(), conversation)?);
     }
     notices.extend(run_for(tx, task, conversation, posted_id)?);
     let how = if interrupt { "interrupted them and they are answering it now" } else { "queued it behind what they are doing" };
