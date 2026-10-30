@@ -205,6 +205,8 @@ pub enum Request {
     SendQueuedNow { conversation_id: ConversationId, message_id: MessageId },
     /// Show this conversation; its messages are kept up to date.
     OpenConversation(Option<ConversationId>),
+    /// Show the group chat (Team chat), kept up to date like `OpenConversation`.
+    OpenGroupChat,
     CreateEmployee { department_id: Option<aurelius_domain::DepartmentId>, name: String, role: String, title: Option<String>, reports_to: Option<EmployeeId>, instructions: Option<String>, folder: Option<String> },
     /// Move an employee to a department (or out of any).
     SetEmployeeDepartment { employee_id: EmployeeId, department_id: Option<aurelius_domain::DepartmentId> },
@@ -234,6 +236,8 @@ pub enum Request {
     SetEmployeeStatus { employee_id: EmployeeId, status: LifecycleStatus },
     SetProjectStatus { project_id: ProjectId, status: LifecycleStatus },
     SendManager { employee_id: EmployeeId, text: String, conversation_id: ConversationId, images: Vec<String>, files: Vec<String>, interrupt: bool },
+    /// A message in the group chat (`group_chat.send`).
+    SendGroup { text: String, images: Vec<String>, files: Vec<String> },
     /// `always_allow`: approve and allow this MCP tool from now on (only for `always_allow_eligible` approvals).
     DecideApproval { approval_id: ApprovalId, action_digest: String, approve: bool, always_allow: bool },
     AnswerQuestion { approval_id: ApprovalId, answers: std::collections::BTreeMap<String, String> },
@@ -570,6 +574,8 @@ pub enum Update {
     /// Colleagues managers proposed: pending first, then the latest decisions.
     Proposals(Vec<ProposalView>),
     Messages(MessagesSnapshot),
+    /// The group chat's conversation (its messages follow as `Messages`).
+    GroupChat(ConversationId),
     Stream(StreamDelta),
     EmployeeCreated(EmployeeId),
     Info(String),
@@ -655,13 +661,15 @@ async fn run(target: Option<Target>, mut requests: mpsc::UnboundedReceiver<Reque
                             // The window closed or switched servers.
                             None => return,
                             Some(Request::OpenConversation(id)) => open_conversation = id,
+                            // Its id is known once connected; the window asks again then.
+                            Some(Request::OpenGroupChat) => {}
                             Some(Request::LoadMemory(project_id)) => open_memory = Some(project_id),
                             Some(Request::LoadIdeas(project_id)) => open_ideas = Some(project_id),
-                            Some(Request::SendManager { ref images, .. }) if remote_target && !images.is_empty() => {
+                            Some(Request::SendManager { ref images, .. } | Request::SendGroup { ref images, .. }) if remote_target && !images.is_empty() => {
                                 let _ = updates.send(Update::Error("Not connected to the server; send the message with its images again when it is back.".into()));
                             }
                             // Whether the server takes files is only known once connected.
-                            Some(Request::SendManager { ref files, .. }) if !files.is_empty() => {
+                            Some(Request::SendManager { ref files, .. } | Request::SendGroup { ref files, .. }) if !files.is_empty() => {
                                 let _ = updates.send(Update::Error("Not connected to the server; send the message with its files again when it is back.".into()));
                             }
                             Some(Request::CreateTask { ref files, .. }) if !files.is_empty() => {
@@ -750,7 +758,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SendQueuedNow { conversation_id, message_id } => {
             envelope(Command::SendQueuedNow(conversation::SendQueuedNow { conversation_id, message_id }), None)
         }
-        Request::OpenConversation(_) => return None,
+        Request::OpenConversation(_) | Request::OpenGroupChat => return None,
         Request::CreateEmployee { department_id, name, role, title, reports_to, instructions, folder } => {
             envelope(Command::CreateEmployee(employee::CreateEmployee { department_id, name, role, title, reports_to, instructions, folder }), None)
         }
@@ -780,6 +788,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SendManager { employee_id, text, conversation_id, images, files, interrupt } => {
             envelope(Command::SendEmployeeMessage(employee::SendEmployeeMessage { employee_id, text, conversation_id, images, files, interrupt }), None)
         }
+        Request::SendGroup { text, images, files } => envelope(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text, images, files }), None),
         Request::DecideApproval { approval_id, action_digest, approve, always_allow } => {
             envelope(Command::DecideApproval(approval::DecideApproval { approval_id, action_digest, approve, always_allow }), None)
         }
@@ -924,6 +933,14 @@ async fn session(
                 if let Request::OpenConversation(id) = request {
                     *open_conversation = id;
                     refresh_messages(client, updates, id).await?;
+                    continue;
+                }
+                if let Request::OpenGroupChat = request {
+                    if let Some(messages) = shown(client.group_chat().await, updates)? {
+                        *open_conversation = Some(messages.conversation_id);
+                        let _ = updates.send(Update::GroupChat(messages.conversation_id));
+                        let _ = updates.send(Update::Messages(messages));
+                    }
                     continue;
                 }
                 if let Request::LoadMemory(project_id) = request {
@@ -1470,7 +1487,7 @@ async fn session(
                     continue;
                 }
                 let mut request = request;
-                if let Request::SendManager { images, .. } = &mut request {
+                if let Request::SendManager { images, .. } | Request::SendGroup { images, .. } = &mut request {
                     // Images on this computer: as they are for the local service, uploaded for a remote one.
                     let mut staged = Vec::new();
                     for path in images.iter() {
@@ -1488,7 +1505,7 @@ async fn session(
                     }
                     *images = staged;
                 }
-                if let Request::SendManager { files, .. } = &mut request {
+                if let Request::SendManager { files, .. } | Request::SendGroup { files, .. } = &mut request {
                     // Files on this computer: as they are for the local service, uploaded for a remote one.
                     let mut staged = Vec::new();
                     for path in files.iter() {

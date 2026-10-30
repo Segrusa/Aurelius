@@ -99,6 +99,7 @@ impl AppView {
                 let dashboard = self.render_dashboard(wide, cx);
                 self.with_preview(dashboard, wide, cx)
             }
+            Page::GroupChat => self.render_group_chat(cx),
             Page::Projects => self.render_projects_page(cx),
             Page::Project(project, tab) => self.render_project(project, tab, window, cx).into_any_element(),
             Page::Employee(manager) => self.render_manager(manager, window, cx).into_any_element(),

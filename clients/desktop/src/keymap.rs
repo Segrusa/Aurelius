@@ -10,6 +10,7 @@ actions!(
     [
         OpenPalette,
         GoDashboard,
+        GoTeamChat,
         GoEmployees,
         GoOrgChart,
         GoDepartments,
@@ -231,6 +232,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     // General: work everywhere, also while typing.
     sc!(&["secondary-k"], Some(APP), NONE, "Search and commands", General, false, OpenPalette),
     sc!(&["secondary-1"], Some(APP), NONE, "Go to Dashboard", General, true, GoDashboard),
+    sc!(&["secondary-8"], Some(APP), NONE, "Go to Team chat (you and every employee)", General, true, GoTeamChat),
     sc!(&["secondary-3"], Some(APP), NONE, "Go to Employees", General, true, GoEmployees),
     sc!(&["secondary-4"], Some(APP), NONE, "Go to Org chart (Employees tab)", General, true, GoOrgChart),
     sc!(&["secondary-5"], Some(APP), NONE, "Go to Departments (Employees tab)", General, true, GoDepartments),

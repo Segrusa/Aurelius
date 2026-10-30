@@ -1,5 +1,5 @@
-//! The fixed left sidebar: Dashboard, Inbox, Tasks, Employees and Projects (each foldable, with its pinned
-//! employees or projects) and the server picker at the bottom (a click on it opens Settings).
+//! The fixed left sidebar: Dashboard, Team chat, Inbox, Tasks, Employees and Projects (the last two foldable,
+//! with their pinned employees or projects) and the server picker at the bottom (a click on it opens Settings).
 
 use crate::app::{AppView, ManagerRef, MenuDo, MenuEntry, MenuItems, NavItem, Page, ProjectRef};
 use crate::backend::Connection;
@@ -28,6 +28,8 @@ fn nav_icon(nav: NavItem, color: u32) -> Div {
         NavItem::Dashboard => boxed.child(
             v().gap(px(2.)).child(h().gap(px(2.)).child(fill(5., 5., 1.)).child(fill(5., 5., 1.))).child(h().gap(px(2.)).child(fill(5., 5., 1.)).child(fill(5., 5., 1.))),
         ),
+        // A speech bubble: a box with two lines of text.
+        NavItem::Chat => boxed.child(frame(14., 11., 3.).flex_col().justify_center().items_start().gap(px(2.)).pl(px(2.5)).child(fill(7., 1.5, 1.)).child(fill(5., 1.5, 1.))),
         // A tray: a box with a slot line.
         NavItem::Inbox => boxed.child(frame(14., 10., 2.).items_end().justify_center().pb(px(2.)).child(fill(6., 1.5, 1.))),
         // A checkbox.
@@ -38,6 +40,11 @@ fn nav_icon(nav: NavItem, color: u32) -> Div {
         // A ring with a hub.
         NavItem::Settings => boxed.child(h().size(px(12.)).rounded(px(6.)).border_2().border_color(c(color)).justify_center().items_center().child(fill(3., 3., 2.))),
     }
+}
+
+/// The sidebar's rows, top to bottom: every entry but Settings (the server picker opens it).
+pub fn sidebar_items() -> impl Iterator<Item = NavItem> {
+    NavItem::ALL.into_iter().filter(|n| *n != NavItem::Settings)
 }
 
 impl AppView {
@@ -159,9 +166,9 @@ impl AppView {
             let lead = ui::monogram(&name, 16., cx).into_any_element();
             pin_row(("pin-employee", i), open_employee == Some(id), lead, name.clone(), format!("{name} · {role}"), PinOpen::Employee(id), MenuDo::TogglePinEmployee(id), cx)
         }).collect();
-        // Dashboard, Inbox, Tasks, Employees and Projects; the pinned rows sit under their item, unless it is folded.
+        // Every item but Settings, Team chat right under Dashboard; the pinned rows sit under their item, unless it is folded.
         let mut nav = v().gap(px(1.));
-        for n in [NavItem::Dashboard, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects] {
+        for n in sidebar_items() {
             nav = nav.child(item(n, cx));
             let rows = match n {
                 NavItem::Employees => std::mem::take(&mut employee_rows),
@@ -261,5 +268,19 @@ impl AppView {
                     .when(!state.is_empty(), |d| d.child(div().truncate().text_size(px(11.)).text_color(c(if update_needed { theme::NEGATIVE } else { theme::MUTED })).child(state))),
             )
             .child(ui::chevron(true, 11., theme::MUTED))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sidebar_items;
+    use crate::app::{NavItem, Page};
+
+    #[test]
+    fn team_chat_sits_right_under_dashboard() {
+        let rows: Vec<NavItem> = sidebar_items().collect();
+        assert_eq!(rows, [NavItem::Dashboard, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects]);
+        assert_eq!(NavItem::Chat.label(), "Team chat");
+        assert_eq!(NavItem::of(Page::GroupChat), NavItem::Chat, "the group chat page lights up its row");
     }
 }

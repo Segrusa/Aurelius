@@ -77,6 +77,8 @@ pub type DepartmentKey = aurelius_domain::DepartmentId;
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Page {
     Dashboard,
+    /// The group chat ("Team chat"): the user and every employee.
+    GroupChat,
     /// Employees, with the tabs of `EmployeesTab` (list, org chart, departments).
     Employees,
     Employee(ManagerRef),
@@ -144,6 +146,8 @@ pub enum Panel {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NavItem {
     Dashboard,
+    /// The group chat, right under Dashboard.
+    Chat,
     Inbox,
     Tasks,
     Employees,
@@ -157,11 +161,12 @@ impl NavItem {
         if self == NavItem::Employees { "employees" } else { "projects" }
     }
 
-    pub const ALL: [NavItem; 6] = [NavItem::Dashboard, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Settings];
+    pub const ALL: [NavItem; 7] = [NavItem::Dashboard, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Settings];
 
     pub fn label(self) -> &'static str {
         match self {
             NavItem::Dashboard => "Dashboard",
+            NavItem::Chat => "Team chat",
             NavItem::Inbox => "Inbox",
             NavItem::Tasks => "Tasks",
             NavItem::Employees => "Employees",
@@ -172,10 +177,11 @@ impl NavItem {
 
     /// Its shortcut. The numbers keep their meaning from before the sidebar was cut down:
     /// Ctrl+4 (org chart), Ctrl+5 (departments) and Ctrl+0 (ideas) open a tab of
-    /// Employees / Projects (see `keymap.rs`), Ctrl+8 is free.
+    /// Employees / Projects (see `keymap.rs`); Team chat took the free Ctrl+8.
     pub fn keys(self) -> &'static str {
         match self {
             NavItem::Dashboard => "secondary-1",
+            NavItem::Chat => "secondary-8",
             NavItem::Inbox => "secondary-2",
             NavItem::Employees => "secondary-3",
             NavItem::Projects => "secondary-6",
@@ -188,6 +194,7 @@ impl NavItem {
     pub fn of(page: Page) -> NavItem {
         match page {
             Page::Dashboard => NavItem::Dashboard,
+            Page::GroupChat => NavItem::Chat,
             Page::Employees | Page::Employee(..) | Page::Department(_) => NavItem::Employees,
             Page::Projects | Page::Project(..) => NavItem::Projects,
             Page::Tasks => NavItem::Tasks,
@@ -297,6 +304,8 @@ pub const PLAN_TOOL: &str = "claude.ExitPlanMode";
 
 /// The mode picker's default for a management lead: it picks Auto or Plan itself.
 pub const MANAGER_CHOOSES: &str = "Manager chooses";
+/// The group chat composer's placeholder.
+pub const GROUP_PLACEHOLDER: &str = "Message the team… (@Name asks someone)";
 
 /// One inline comment on a plan: the selected fragment and what the user says about it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -935,8 +944,13 @@ pub struct AppView {
     pub update: Option<aurelius_protocol::UpdateStatus>,
     pub backups: Option<aurelius_protocol::BackupsSnapshot>,
     pub menu: Option<Menu>,
-    /// The open conversation of the open manager (`None`: its most recent one).
+    /// The open task conversation of the open employee (`None`: its most recent one).
     pub manager_thread: Option<ConversationId>,
+    /// The group chat's conversation, once loaded (`group_chat.get`).
+    pub group_conversation: Option<ConversationId>,
+    /// Answers streaming into the open group chat that are no message there yet
+    /// (an employee's answer is copied in when it ends): (message, run, last delta).
+    pub group_live: Vec<(MessageId, aurelius_domain::RunId, std::time::Instant)>,
     /// The subagent chip's panel is open; which subagent shows its full prompt.
     pub subagents_open: bool,
     /// Subagents running in a conversation, from `query/subagents` (protocol 1.6).
@@ -945,13 +959,8 @@ pub struct AppView {
     subagents_stepped: bool,
     pub subagent_expanded: Option<String>,
     pub subagents_closed_at: Option<std::time::Instant>,
-    /// Employee view, right panel: the Tasks tab was picked (an open task shows it anyway).
-    pub threads_tasks_tab: bool,
-    /// Manager view, right panel: the Conversations section is open.
-    pub threads_convs_open: bool,
-    /// The folded "Earlier" groups: ended tasks and quiet conversations from before today.
+    /// Employee view, right panel: the folded "Earlier" group of tasks that ended before today is open.
     pub threads_tasks_earlier_open: bool,
-    pub threads_convs_earlier_open: bool,
     /// Background service registered to start at sign-in (read when Settings opens).
     pub login_start: bool,
     /// Which browser Claude in Chrome uses on the server (fetched when Settings opens), or why not.
@@ -1398,15 +1407,14 @@ impl AppView {
             backups: None,
             menu: None,
             manager_thread: None,
+            group_conversation: None,
+            group_live: Vec::new(),
             subagents_open: false,
             subagents: None,
             subagents_stepped: false,
             subagent_expanded: None,
             subagents_closed_at: None,
-            threads_tasks_tab: false,
-            threads_convs_open: true,
             threads_tasks_earlier_open: false,
-            threads_convs_earlier_open: false,
             login_start: aurelius_host::startup::enabled(),
             browser: None,
             artifacts_enabled: None,
@@ -1524,6 +1532,10 @@ impl AppView {
                 let online = matches!(connection, Connection::Online { .. }) && !matches!(self.connection, Connection::Online { .. });
                 self.connection = connection;
                 if online {
+                    // The Team chat opened while offline: its id is known only now.
+                    if self.screen == Page::GroupChat && self.group_conversation.is_none() {
+                        let _ = self.requests.send(backend::Request::OpenGroupChat);
+                    }
                     // The Trace buttons follow the server's trace mode.
                     if self.trace_supported() {
                         let _ = self.requests.send(backend::Request::LoadTraceSetting);
@@ -1606,6 +1618,10 @@ impl AppView {
             Update::Managers(managers) => {
                 self.managers = managers;
                 self.open_pending_manager();
+                // A streamed group answer that never became a message (an empty answer):
+                // gone once its run no longer works and no delta came for a moment.
+                let managers = &self.managers;
+                self.group_live.retain(|(_, run, at)| at.elapsed() < Duration::from_secs(3) || managers.iter().any(|m| m.agents.iter().any(|a| a.run_id == Some(*run))));
                 // The last subagent finished: its panel goes away with the chip.
                 if self.subagents_open && self.subagents_here().is_empty() {
                     self.subagents_open = false;
@@ -1626,6 +1642,10 @@ impl AppView {
             Update::Tasks(tasks) => {
                 self.tasks = tasks;
                 self.request_upload_thumbs();
+                // The open employee got its first task: show it.
+                if matches!(self.screen, Page::Employee(ManagerRef::Real(_))) && self.open_conversation.is_none() && self.current_manager_thread().is_some() {
+                    self.open_thread();
+                }
                 // The task in the right panel got its conversation (or another one): load it.
                 if matches!(self.panel, Panel::Task(_)) {
                     let conversation = self.current_manager_thread();
@@ -1907,6 +1927,8 @@ impl AppView {
                         }
                     }
                     self.message_cache.get_mut().retain(&snapshot.messages);
+                    // A streamed group answer is a message now.
+                    self.group_live.retain(|(id, ..)| !snapshot.messages.iter().any(|m| m.id == *id));
                     // No answer running: the totals are final for now (again after each answer ends).
                     let settled = !snapshot.messages.iter().any(|m| m.status == MessageStatus::Partial);
                     let conversation_id = snapshot.conversation_id;
@@ -1916,6 +1938,12 @@ impl AppView {
                         let _ = self.requests.send(backend::Request::LoadUsageTotals { conversation_id, task_id });
                     }
                     self.request_upload_thumbs();
+                }
+            }
+            Update::GroupChat(conversation) => {
+                self.group_conversation = Some(conversation);
+                if self.screen == Page::GroupChat && self.open_conversation.is_none() {
+                    self.open_conversation = Some(conversation);
                 }
             }
             Update::Stream(delta) => {
@@ -1932,6 +1960,14 @@ impl AppView {
                 }
                 self.stream_repaint_app |= shown;
                 if open {
+                    // An employee's answer streams into the group chat under the id it gets there once done.
+                    if Some(conversation) == self.group_conversation && !self.messages.as_ref().is_some_and(|s| s.messages.iter().any(|m| m.id == delta.message_id)) {
+                        let now = std::time::Instant::now();
+                        match self.group_live.iter_mut().find(|(id, ..)| *id == delta.message_id) {
+                            Some(entry) => entry.2 = now,
+                            None => self.group_live.push((delta.message_id, delta.run_id, now)),
+                        }
+                    }
                     // Seen streaming: it stays whole when it ends, even if no message list came in meanwhile.
                     self.expanded_messages.insert(delta.message_id);
                     self.live.insert(delta.message_id, delta.text);
@@ -1976,8 +2012,8 @@ impl AppView {
             self.pending_manager = None;
             self.pending_placeholder = Some(format!("Message {}…", m.name));
             self.navigate(Page::Employee(ManagerRef::Real(id)));
-            self.open_conversation = Some(m.conversation_id);
-            let _ = self.requests.send(backend::Request::OpenConversation(Some(m.conversation_id)));
+            self.manager_thread = None;
+            self.open_thread();
         }
     }
 
@@ -2048,6 +2084,8 @@ impl AppView {
         self.live_progress.clear();
         self.open_conversation = None;
         self.manager_thread = None;
+        self.group_conversation = None;
+        self.group_live.clear();
         self.screen = Page::Dashboard;
         tracing::info!(panel = ?self.panel, "server state reset (see B6)");
         self.panel = Panel::None;
@@ -2300,6 +2338,7 @@ impl AppView {
             self.live.clear();
             self.live_activity.clear();
             self.live_progress.clear();
+            self.group_live.clear();
             self.messages = None;
             self.message_cache.take();
             self.subagents_open = false;
@@ -2445,7 +2484,7 @@ impl AppView {
     /// The scroll handle of what the main area shows: the conversation or a list page.
     fn active_scroll(&self) -> ScrollHandle {
         match self.screen {
-            Page::Employee(..) => self.scroll.clone(),
+            Page::Employee(..) | Page::GroupChat => self.scroll.clone(),
             _ => self.page_scroll.clone(),
         }
     }
@@ -2481,9 +2520,9 @@ impl AppView {
         self.schedules.iter().filter(|s| s.project_id == project).collect()
     }
 
-    /// An employee screen: where the open conversation and its modes live.
+    /// An employee screen or the group chat: where the open conversation lives.
     pub fn on_thread_screen(&self) -> bool {
-        matches!(self.screen, Page::Employee(..)) || self.panel_shown()
+        matches!(self.screen, Page::Employee(..) | Page::GroupChat) || self.panel_shown()
     }
 
     /// The Dashboard's Give work box takes the task dropdowns (mode, model, effort, who).
@@ -2532,10 +2571,10 @@ impl AppView {
         .detach();
     }
 
-    /// The open screen is a real manager conversation (plain or a task's),
-    /// which takes files with a message.
+    /// The open screen is a real employee's task conversation or the group chat,
+    /// which take files with a message.
     pub fn takes_manager_files(&self) -> bool {
-        matches!(self.thread_screen(), Page::Employee(ManagerRef::Real(_))) && self.current_manager_thread().is_some()
+        matches!(self.thread_screen(), Page::Employee(ManagerRef::Real(_)) | Page::GroupChat) && self.current_manager_thread().is_some()
     }
 
     /// Files dropped on the conversation wait beside the composer like picked ones.
@@ -4115,16 +4154,18 @@ impl AppView {
         );
     }
 
-    /// The conversation the browser switch acts on, and whether the browser is on.
-    pub fn browser_target(&self) -> Option<(ConversationId, bool)> {
-        let (conversation_id, _, _) = self.mode_target()?;
-        // A task's conversation is not the manager's main one: the setting is the manager's.
-        let open_manager = match self.thread_screen() {
-            Page::Employee(ManagerRef::Real(m)) => Some(m),
+    /// The employee whose settings (mode, browser, screen) apply here: the open employee,
+    /// or the right panel's. They live on its main chat, its hidden workspace.
+    pub fn settings_employee(&self) -> Option<&EmployeeSummary> {
+        match self.thread_screen() {
+            Page::Employee(ManagerRef::Real(id)) => self.managers.iter().find(|m| m.id == id),
             _ => None,
-        };
-        let allowed = self.managers.iter().any(|m| (m.conversation_id == conversation_id || Some(m.id) == open_manager) && m.browser_allowed);
-        Some((conversation_id, allowed))
+        }
+    }
+
+    /// The conversation the browser switch acts on (the employee's main chat), and whether the browser is on.
+    pub fn browser_target(&self) -> Option<(ConversationId, bool)> {
+        self.settings_employee().map(|m| (m.conversation_id, m.browser_allowed))
     }
 
     /// Turning the browser on asks first (it is the user's own Chrome, with their logins); off is immediate.
@@ -4134,11 +4175,7 @@ impl AppView {
             return;
         };
         if allowed {
-            let open_manager = match self.thread_screen() {
-                Page::Employee(ManagerRef::Real(m)) => Some(m),
-                _ => None,
-            };
-            for m in self.managers.iter_mut().filter(|m| m.conversation_id == conversation_id || Some(m.id) == open_manager) {
+            for m in self.managers.iter_mut().filter(|m| m.conversation_id == conversation_id) {
                 m.browser_allowed = false;
             }
             let _ = self.requests.send(backend::Request::SetBrowserAllowed { conversation_id, allowed: false });
@@ -4150,11 +4187,9 @@ impl AppView {
         }
     }
 
-    /// The conversation the screen switch acts on, and whether screenshots are allowed without asking.
+    /// The conversation the screen switch acts on (the employee's main chat), and whether screenshots are allowed without asking.
     pub fn screen_target(&self) -> Option<(ConversationId, bool)> {
-        let (conversation_id, _, _) = self.mode_target()?;
-        let allowed = self.managers.iter().any(|m| m.conversation_id == conversation_id && m.screen_allowed);
-        Some((conversation_id, allowed))
+        self.settings_employee().map(|m| (m.conversation_id, m.screen_allowed))
     }
 
     /// Turning the screen on asks first (the agent may then look at anything on screen); off is immediate.
@@ -4474,10 +4509,7 @@ impl AppView {
         self.overlay = Overlay::None;
         self.screen = place.screen;
         self.selected = 0;
-        if self.on_thread_screen() {
-            let conversation = self.current_manager_thread();
-            self.open(conversation);
-        }
+        self.open_thread();
         // A jump through history is not a new step.
         self.last_place = Some(self.place());
         self.focus.focus(window, cx);
@@ -5062,8 +5094,49 @@ impl AppView {
                 let _ = self.requests.send(backend::Request::SetAgentMode { conversation_id, mode: next });
                 cx.notify();
             }
-            None => self.notify_user("Modes belong to employees: open an employee (or select its card) to switch its mode.", false, cx),
+            // No task open on the employee's page: its own mode (the default for its next work).
+            None => match self.settings_employee().map(|m| m.id) {
+                Some(id) => self.cycle_employee_mode(id, cx),
+                None => self.notify_user("Modes belong to employees: open an employee (or select its card) to switch its mode.", false, cx),
+            },
         }
+    }
+
+    /// The employee's own mode, one step on (the mode chip on its page).
+    pub fn cycle_employee_mode(&mut self, employee: EmployeeId, cx: &mut Context<Self>) {
+        let next = self.managers.iter().find(|m| m.id == employee).map(|m| m.agent_mode.next());
+        self.remember_mode(Some(employee), next);
+        cx.notify();
+    }
+
+    /// The names an `@` in the group chat can mention: the employees not archived.
+    pub fn mention_names(&self) -> Vec<&str> {
+        self.managers.iter().filter(|m| m.status != LifecycleStatus::Archived).map(|m| m.name.as_str()).collect()
+    }
+
+    /// Complete the `@name` being typed at the end of the composer to `@<name> `.
+    pub fn complete_mention(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.composer.read(cx).value();
+        let Some((at, _)) = crate::screens::chat::mention_suggestions(&text, &self.mention_names()) else { return };
+        let end = text.len();
+        let mention = format!("@{name} ");
+        self.composer.update(cx, |input, cx| {
+            input.set_selected_range(at..end, cx);
+            input.replace(mention, window, cx);
+            input.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Who answers a group chat message without an `@name`: the top of the org chart.
+    pub fn group_answerer(&self) -> Option<&str> {
+        let top = crate::screens::dashboard::roots(&self.managers);
+        top.first().and_then(|id| self.managers.iter().find(|m| m.id == *id)).map(|m| m.name.as_str())
+    }
+
+    /// The employee a run works for (its answer streams into the group chat under its name).
+    pub fn run_author(&self, run: aurelius_domain::RunId) -> Option<String> {
+        self.managers.iter().find(|m| m.agents.iter().any(|a| a.run_id == Some(run))).map(|m| m.name.clone())
     }
 
     /// The mode chosen when giving work becomes the employee's mode: the default for its next
@@ -5266,8 +5339,7 @@ impl AppView {
         self.panel = Panel::None;
         let name = self.manager_card(manager).map_or_else(|| SharedString::from("manager"), |m| m.name);
         self.manager_thread = None;
-        let conversation = self.current_manager_thread();
-        self.open(conversation);
+        self.open_thread();
         self.composer.update(cx, |input, cx| input.set_placeholder(format!("Message {name}…"), window, cx));
         self.focus.focus(window, cx);
         cx.notify();
@@ -5316,9 +5388,6 @@ impl AppView {
         } else if self.screen == Page::Inbox {
             let at = InboxTab::ALL.iter().position(|t| *t == self.inbox_tab).unwrap_or(0) as isize;
             self.set_inbox_tab(InboxTab::ALL[(at + delta).rem_euclid(InboxTab::ALL.len() as isize) as usize], cx);
-        } else if matches!(self.screen, Page::Employee(_)) {
-            let tasks = !self.threads_on_tasks();
-            self.set_threads_tab(tasks, cx);
         }
     }
 
@@ -5366,6 +5435,7 @@ impl AppView {
             NavItem::Inbox => return self.open_inbox(&OpenInbox, window, cx),
             NavItem::Settings => return self.open_settings(&OpenSettings, window, cx),
             NavItem::Dashboard => Page::Dashboard,
+            NavItem::Chat => Page::GroupChat,
             NavItem::Employees => Page::Employees,
             NavItem::Projects => Page::Projects,
             NavItem::Tasks => Page::Tasks,
@@ -5373,12 +5443,35 @@ impl AppView {
         self.close_overlay();
         self.navigate(page);
         self.selected = 0;
+        self.open_thread();
+        if page == Page::GroupChat {
+            // The group chat is for writing: straight into its composer.
+            self.composer.update(cx, |input, cx| input.focus(window, cx));
+        } else {
+            self.focus.focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// Load the conversation the page shows: the open employee's task, the right panel's,
+    /// or the group chat (asked for by name until its id is known).
+    fn open_thread(&mut self) {
+        if self.screen == Page::GroupChat {
+            self.pending_placeholder = Some(GROUP_PLACEHOLDER.into());
+            if self.group_conversation.is_none() {
+                self.open(None);
+                let _ = self.requests.send(backend::Request::OpenGroupChat);
+                return;
+            }
+        }
         if self.on_thread_screen() {
             let conversation = self.current_manager_thread();
+            // The task it opens on stays open while other tasks change.
+            if matches!(self.screen, Page::Employee(_)) && !self.panel_shown() {
+                self.manager_thread = conversation;
+            }
             self.open(conversation);
         }
-        self.focus.focus(window, cx);
-        cx.notify();
     }
 
     /// Go Org chart / Go Departments: the Employees page on that tab.
@@ -5465,14 +5558,18 @@ impl AppView {
     }
 
     /// The right panel shows beside this page: not beside a page with a conversation of its
-    /// own (an employee, a project's Conversations tab).
+    /// own (an employee, the group chat).
     pub fn panel_shown(&self) -> bool {
-        self.panel != Panel::None && !matches!(self.screen, Page::Employee(..))
+        self.panel != Panel::None && !matches!(self.screen, Page::Employee(..) | Page::GroupChat)
     }
 
-    /// The conversation shown for the open manager: the chosen one, else the
-    /// most recently active, else its main conversation.
+    /// The conversation shown: the group chat on its page, else the right panel's, else the
+    /// open employee's task conversation (the chosen one, else its latest; none without tasks).
+    /// An employee's own main chat is its hidden workspace: the user talks with it in the group chat.
     pub fn current_manager_thread(&self) -> Option<ConversationId> {
+        if self.screen == Page::GroupChat {
+            return self.group_conversation;
+        }
         // The right panel owns the open conversation while it shows one.
         match self.panel {
             Panel::Chat(id) if self.panel_shown() => return Some(id),
@@ -5481,12 +5578,10 @@ impl AppView {
         }
         let Page::Employee(manager) = self.screen else { return None };
         let m = self.real_manager(manager)?;
-        // The chosen one (one of its chats or its tasks' conversations), else its chat with you.
-        let own_task = |id: ConversationId| self.tasks.iter().any(|t| t.conversation_id == Some(id) && t.employee_id == Some(m.id));
-        let thread = self.manager_thread
-            .filter(|t| m.conversations.iter().any(|c| c.id == *t) || own_task(*t))
-            .unwrap_or(m.conversation_id);
-        Some(thread)
+        let own = || self.tasks.iter().filter(|t| t.employee_id == Some(m.id)).filter_map(|t| t.conversation_id.map(|c| (c, t.updated_at_ms)));
+        self.manager_thread
+            .filter(|chosen| own().any(|(c, _)| c == *chosen))
+            .or_else(|| own().max_by_key(|(_, at)| *at).map(|(c, _)| c))
     }
 
     /// The conversation the subagent chip belongs to: the open manager conversation.
@@ -5533,65 +5628,31 @@ impl AppView {
         }
     }
 
-    /// Employee page, right panel: the Tasks tab shows, picked or because one of its tasks is open.
-    pub fn threads_on_tasks(&self) -> bool {
-        let Page::Employee(key) = self.screen else { return false };
-        let Some(m) = self.real_manager(key) else { return false };
-        self.threads_tasks_tab || self.current_manager_thread().is_some_and(|id| !m.conversations.iter().any(|c| c.id == id) && id != m.conversation_id)
-    }
-
-    /// Switch the employee panel's tab; Chat also opens its chat with you when a task was open.
-    pub fn set_threads_tab(&mut self, tasks: bool, cx: &mut Context<Self>) {
-        self.threads_tasks_tab = tasks;
-        if !tasks && self.threads_on_tasks() {
-            if let Page::Employee(key) = self.screen {
-                if let Some(chat) = self.real_manager(key).map(|m| m.conversation_id) {
-                    self.select_manager_thread(chat, cx);
-                }
-            }
-        }
-        cx.notify();
-    }
-
     pub fn select_manager_thread(&mut self, conversation: ConversationId, cx: &mut Context<Self>) {
         self.manager_thread = Some(conversation);
-        // Opening a chat (Ctrl+N included) brings its tab back.
-        if !self.tasks.iter().any(|t| t.conversation_id == Some(conversation)) {
-            self.threads_tasks_tab = false;
-        }
         self.open(Some(conversation));
         cx.notify();
     }
 
-    /// Ctrl+N on a manager page or the "New conversation" button.
-    pub fn new_manager_thread(&mut self, cx: &mut Context<Self>) {
-        // An employee has one chat with you: Ctrl+N goes back to it.
-        if let Page::Employee(ManagerRef::Real(id)) = self.screen {
-            if let Some(chat) = self.managers.iter().find(|m| m.id == id).map(|m| m.conversation_id) {
-                self.select_manager_thread(chat, cx);
-            }
-        } else {
-            self.notify_user("Sample employees can't start conversations.", false, cx);
-        }
-    }
-
-    /// Delete the open conversation of a manager (not its main one).
+    /// Delete the open task conversation of an employee.
     pub fn ask_delete_thread(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Page::Employee(manager) = self.screen else { return };
-        let main = self.real_manager(manager).map(|m| m.conversation_id);
+        if !matches!(self.screen, Page::Employee(_)) {
+            return;
+        }
         match self.current_manager_thread() {
-            Some(t) if Some(t) != main => {
+            Some(t) => {
                 self.overlay = Overlay::Confirm(ConfirmKind::DeleteConversation(t));
                 self.focus.focus(window, cx);
                 cx.notify();
             }
-            _ => self.notify_user("The main conversation stays with the employee; archive the employee instead.", false, cx),
+            None => self.notify_user("Open one of the employee's tasks first.", false, cx),
         }
     }
 
     fn on_new_item(&mut self, _: &NewItem, window: &mut Window, cx: &mut Context<Self>) {
         match self.screen {
-            Page::Employee(ManagerRef::Real(_)) => self.new_manager_thread(cx),
+            // Work for the open employee: the Dashboard's Give work box, the employee chosen.
+            Page::Employee(ManagerRef::Real(_)) => self.on_new_task(&NewTask, window, cx),
             Page::Project(ProjectRef::Real(_), Tab::Tasks) => self.on_new_task(&NewTask, window, cx),
             Page::Project(ProjectRef::Real(project), Tab::Memory) => self.open_dialog(DialogKind::NewMemory { project }, window, cx),
             Page::Project(ProjectRef::Real(project), Tab::Ideas) => self.open_dialog(DialogKind::NewIdea { project }, window, cx),
@@ -6056,8 +6117,10 @@ impl AppView {
                         self.overlay = Overlay::None;
                         if self.manager_thread == Some(conversation_id) {
                             self.manager_thread = None;
-                            if let Page::Employee(manager) = self.screen {
-                                let next = self.real_manager(manager).and_then(|m| m.conversations.iter().map(|c| c.id).find(|c| *c != conversation_id).or(Some(m.conversation_id)));
+                            if let Page::Employee(ManagerRef::Real(id)) = self.screen {
+                                // Its latest other task, if any.
+                                let next = self.tasks.iter().filter(|t| t.employee_id == Some(id)).filter_map(|t| t.conversation_id.map(|c| (c, t.updated_at_ms))).filter(|(c, _)| *c != conversation_id).max_by_key(|(_, at)| *at).map(|(c, _)| c);
+                                self.manager_thread = next;
                                 self.open(next);
                             }
                         }
@@ -6066,11 +6129,7 @@ impl AppView {
                         return;
                     }
                     ConfirmKind::AllowBrowser(conversation_id) => {
-                        let open_manager = match self.screen {
-                            Page::Employee(ManagerRef::Real(m)) => Some(m),
-                            _ => None,
-                        };
-                        for m in self.managers.iter_mut().filter(|m| m.conversation_id == conversation_id || Some(m.id) == open_manager) {
+                        for m in self.managers.iter_mut().filter(|m| m.conversation_id == conversation_id) {
                             m.browser_allowed = true;
                         }
                         let _ = self.requests.send(backend::Request::SetBrowserAllowed { conversation_id, allowed: true });
@@ -6242,10 +6301,7 @@ impl AppView {
         } else if let Some(previous) = self.back_stack.pop() {
             self.screen = previous;
             self.selected = 0;
-            if self.on_thread_screen() {
-                let conversation = self.current_manager_thread();
-                self.open(conversation);
-            }
+            self.open_thread();
         } else if self.screen != Page::Dashboard {
             self.screen = Page::Dashboard;
         }
@@ -6255,9 +6311,9 @@ impl AppView {
 
     pub fn on_focus_composer(&mut self, _: &FocusComposer, window: &mut Window, cx: &mut Context<Self>) {
         let has_composer = match self.thread_screen() {
-            // Managers with tasks only have a composer inside a task; a read-only conversation has none.
+            // Employees have a composer only inside a task.
             Page::Employee(ManagerRef::Real(_)) => self.current_manager_thread().is_some(),
-            Page::Employee(..) => true,
+            Page::Employee(..) | Page::GroupChat => true,
             _ => false,
         };
         if has_composer {
@@ -6366,9 +6422,13 @@ impl AppView {
         if text.is_empty() && self.pending_images.is_empty() && self.pending_files.is_empty() {
             return;
         }
-        // Managers have tasks only: a message goes into a task's conversation.
+        // On an employee's page a message goes into one of its tasks; talk with it in the Team chat.
         if matches!(self.thread_screen(), Page::Employee(ManagerRef::Real(_))) && self.current_manager_thread().is_none() {
-            self.notify_user("Open one of this employee's tasks to message it, or talk with the project's assistant in the Conversations tab.", true, cx);
+            self.notify_user("Open one of this employee's tasks to message it, or talk with it in the Team chat (Ctrl+8).", true, cx);
+            return;
+        }
+        if self.thread_screen() == Page::GroupChat && self.group_conversation.is_none() {
+            self.notify_user("The Team chat is still loading.", true, cx);
             return;
         }
         if !self.pending_files.is_empty() && !self.takes_manager_files() {
@@ -6381,6 +6441,10 @@ impl AppView {
             Page::Employee(ManagerRef::Real(employee_id)) => {
                 let Some(conversation_id) = self.current_manager_thread() else { return };
                 let _ = self.requests.send(backend::Request::SendManager { employee_id, text, conversation_id, images, files, interrupt });
+            }
+            // Who answers follows from the @names in it (else the top of the org chart); nothing to interrupt.
+            Page::GroupChat => {
+                let _ = self.requests.send(backend::Request::SendGroup { text, images, files });
             }
             _ => {
                 self.manager_extra.push(text.into());
@@ -6666,6 +6730,7 @@ impl Render for AppView {
             .on_action(cx.listener(Self::on_open_palette))
             .on_action(cx.listener(Self::on_open_memory))
             .on_action(cx.listener(|this, _: &GoDashboard, w, cx| this.go_nav(NavItem::Dashboard, w, cx)))
+            .on_action(cx.listener(|this, _: &GoTeamChat, w, cx| this.go_nav(NavItem::Chat, w, cx)))
             .on_action(cx.listener(|this, _: &GoEmployees, w, cx| this.go_nav(NavItem::Employees, w, cx)))
             .on_action(cx.listener(|this, _: &GoOrgChart, w, cx| this.go_employees_tab(EmployeesTab::OrgChart, w, cx)))
             .on_action(cx.listener(|this, _: &GoDepartments, w, cx| this.go_employees_tab(EmployeesTab::Departments, w, cx)))
@@ -7337,15 +7402,17 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn the_sidebar_lists_five_pages_and_settings_keeps_its_shortcut() {
+    fn the_sidebar_lists_six_pages_and_settings_keeps_its_shortcut() {
         use super::{EmployeesTab, NavItem, Page, ProjectRef, ProjectsTab, Tab};
         let labels: Vec<&str> = NavItem::ALL.iter().map(|n| n.label()).collect();
-        assert_eq!(labels, ["Dashboard", "Inbox", "Tasks", "Employees", "Projects", "Settings"]);
+        assert_eq!(labels, ["Dashboard", "Team chat", "Inbox", "Tasks", "Employees", "Projects", "Settings"]);
         // Every entry's shortcut is bound in the shortcut table; Settings keeps Ctrl+9.
         for nav in NavItem::ALL {
             assert!(crate::keymap::SHORTCUTS.iter().any(|s| s.keys.contains(&nav.keys())), "{} has its shortcut", nav.label());
         }
         assert_eq!(NavItem::Settings.keys(), "secondary-9");
+        assert_eq!(NavItem::Chat.keys(), "secondary-8", "Team chat took the free Ctrl+8");
+        assert_eq!(NavItem::of(Page::GroupChat), NavItem::Chat);
         // Go Org chart / Departments / Ideas keep working: each opens a tab of Employees / Projects.
         for key in ["secondary-4", "secondary-5", "secondary-0"] {
             assert!(crate::keymap::SHORTCUTS.iter().any(|s| s.keys.contains(&key)), "{key} is bound");
