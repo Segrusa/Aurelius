@@ -54,6 +54,11 @@ base64 = "0.22"
 getrandom = "0.3"
 # Board members' passwords: argon2id, PHC strings (RustCrypto; MIT OR Apache-2.0).
 argon2 = { version = "0.5", features = ["std"] }
+# The vault (phase 4): the redactor's automaton, swapped atomically, and plaintext wiped from memory.
+aho-corasick = "1"
+arc-swap = "1"
+zeroize = { version = "1", features = ["std"] }
+ring = "0.17"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 schemars = { version = "1", features = ["uuid1"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }

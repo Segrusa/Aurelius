@@ -44,6 +44,7 @@ async fn timeline_tells_the_story_and_notifies_once() {
     let (other, _) = setup(&client, "Ander project", "Bo").await;
 
     let cmd = CreateTask {
+        confirm_secret: false,
         files: vec![],
         run: Default::default(),
         project_id: atlas,

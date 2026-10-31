@@ -217,6 +217,7 @@ fn an_image_stays_with_the_message_and_reaches_the_model() {
         command_id: CommandId::new(),
         expected_version: None,
         command: Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage {
+            confirm_secret: false,
             conversation_id: conversation(&service),
             text: String::new(),
             images: vec![shot.display().to_string()],
@@ -332,6 +333,7 @@ fn a_waiting_run_whose_job_is_claimed_still_goes_through_cancelling() {
         command_id: CommandId::new(),
         expected_version: None,
         command: Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage {
+            confirm_secret: false,
             conversation_id: conversation(&service),
             text: "hello".into(),
             images: Vec::new(),

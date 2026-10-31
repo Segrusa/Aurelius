@@ -105,6 +105,10 @@ pub struct SendChatMessage {
     /// the same step, so this message is answered right away.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub interrupt: bool,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// The wire form of what a new project conversation starts with (see
@@ -294,7 +298,7 @@ mod tests {
 
     #[test]
     fn empty_message_is_rejected() {
-        let cmd = SendChatMessage { conversation_id: ConversationId::new(), text: "  ".into(), images: Vec::new(), interrupt: false };
+        let cmd = SendChatMessage { confirm_secret: false, conversation_id: ConversationId::new(), text: "  ".into(), images: Vec::new(), interrupt: false };
         assert!(cmd.validate().is_err());
     }
 
@@ -311,7 +315,7 @@ mod tests {
     fn a_message_needs_its_conversation() {
         let id = ConversationId::new();
         let sent: SendChatMessage = serde_json::from_value(serde_json::json!({ "conversation_id": id, "text": "hoi" })).unwrap();
-        assert_eq!(sent, SendChatMessage { conversation_id: id, text: "hoi".into(), images: Vec::new(), interrupt: false });
+        assert_eq!(sent, SendChatMessage { confirm_secret: false, conversation_id: id, text: "hoi".into(), images: Vec::new(), interrupt: false });
         assert!(serde_json::from_value::<SendChatMessage>(serde_json::json!({ "text": "hoi" })).is_err(), "no standalone chats");
     }
 

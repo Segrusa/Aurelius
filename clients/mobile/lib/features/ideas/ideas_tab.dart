@@ -8,6 +8,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/commands.dart';
 import '../../data/company.dart';
 import '../../data/views.dart';
+import '../chat/secret_check.dart' show sendAnywayDialog;
 import '../company/company_bloc.dart';
 import 'idea_list.dart';
 import 'idea_page.dart';
@@ -31,6 +32,8 @@ Future<void> _editIdea(BuildContext context, {IdeaView? idea, String? projectId}
         ? Commands.addIdea(project!, edit.title, edit.note, kind: edit.kind, files: edit.files)
         : Commands.updateIdea(idea.id, edit.title, edit.note, kind: edit.kind, addFiles: edit.files, removeFiles: edit.removeFiles),
     done: idea == null ? 'Idea noted.' : 'Saved.',
+    // B10 (AUR-MU-04-F5): a vault value in the title or note asks first.
+    ask: context.mounted ? sendAnywayDialog(context) : null,
   ));
 }
 

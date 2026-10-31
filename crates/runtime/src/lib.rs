@@ -6,6 +6,7 @@ pub mod claude_code;
 #[cfg(feature = "testing")]
 pub mod fake;
 pub mod http_api;
+pub mod redact;
 
 use aurelius_domain::RunId;
 use serde::{Deserialize, Serialize};
@@ -299,11 +300,77 @@ impl RunHandle {
         inputs: mpsc::Sender<RuntimeInput>,
         cancel: watch::Sender<bool>,
     ) -> Self {
-        Self { run_id, events, inputs, cancel }
+        Self { run_id, events: redacted(events), inputs, cancel }
     }
 
     pub fn canceller(&self) -> Canceller {
         Canceller(self.cancel.clone())
+    }
+}
+
+/// The events of a run as they leave its adapter, every value of the vault
+/// redacted (SEC0 E14 a): text deltas with a tail buffer, so a value split over
+/// two deltas is still found; tool input and output, the result, errors and
+/// stderr whole. Whatever reads a run's events (messages, traces, activity,
+/// approvals, memory) sees only this.
+fn redacted(mut raw: mpsc::Receiver<RuntimeEvent>) -> mpsc::Receiver<RuntimeEvent> {
+    let (tx, rx) = mpsc::channel(EVENT_BUFFER);
+    tokio::spawn(async move {
+        let mut text = redact::Stream::default();
+        while let Some(event) = raw.recv().await {
+            let redactor = redact::current();
+            let out = match event {
+                RuntimeEvent::TextDelta(delta) => {
+                    let ready = text.push(&redactor, &delta);
+                    if ready.is_empty() {
+                        continue;
+                    }
+                    RuntimeEvent::TextDelta(ready)
+                }
+                other => {
+                    let rest = text.flush(&redactor);
+                    if !rest.is_empty() && tx.send(RuntimeEvent::TextDelta(rest)).await.is_err() {
+                        return;
+                    }
+                    redact_event(&redactor, other)
+                }
+            };
+            if tx.send(out).await.is_err() {
+                return;
+            }
+        }
+        let rest = text.flush(&redact::current());
+        if !rest.is_empty() {
+            let _ = tx.send(RuntimeEvent::TextDelta(rest)).await;
+        }
+    });
+    rx
+}
+
+fn redact_event(r: &redact::Redactor, event: RuntimeEvent) -> RuntimeEvent {
+    if r.is_empty() {
+        return event;
+    }
+    let s = |text: String| match r.redact(&text) {
+        std::borrow::Cow::Borrowed(_) => text,
+        std::borrow::Cow::Owned(clean) => clean,
+    };
+    match event {
+        RuntimeEvent::Sent(mut sent) => {
+            sent.args = sent.args.into_iter().map(s).collect();
+            sent.prompt = s(std::mem::take(&mut sent.prompt));
+            RuntimeEvent::Sent(sent)
+        }
+        RuntimeEvent::ModelReported(model) => RuntimeEvent::ModelReported(s(model)),
+        RuntimeEvent::TextDelta(delta) => RuntimeEvent::TextDelta(s(delta)),
+        RuntimeEvent::Activity(Activity::Started { call_id, tool, mut input, parent }) => {
+            r.redact_json(&mut input);
+            RuntimeEvent::Activity(Activity::Started { call_id, tool: s(tool), input, parent })
+        }
+        RuntimeEvent::Activity(Activity::Finished { call_id, ok, output }) => RuntimeEvent::Activity(Activity::Finished { call_id, ok, output: s(output) }),
+        RuntimeEvent::ArtifactPublished { url, title, version, path } => RuntimeEvent::ArtifactPublished { url: s(url), title: s(title), version, path: path.map(s) },
+        RuntimeEvent::Failed { code, message } => RuntimeEvent::Failed { code, message: s(message) },
+        other => other,
     }
 }
 
@@ -331,7 +398,17 @@ pub trait AgentRuntime: Send + Sync {
     }
     /// Remove what the runtime keeps of session `id`. Best effort.
     fn remove_session(&self, _id: &str) {}
+    /// This runtime with the vault's values for one run (a work run's
+    /// environment, SEC0 E15); `None`: it cannot take them, the run goes
+    /// without.
+    fn with_vault(&self, _vault: claude_code::VaultEnv) -> Option<std::sync::Arc<dyn AgentRuntime>> {
+        None
+    }
 }
 
 /// Bounded channel size for runtime events.
 pub const EVENT_BUFFER: usize = 256;
+
+#[cfg(test)]
+#[path = "redact_events_tests.rs"]
+mod redact_events_tests;

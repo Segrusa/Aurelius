@@ -158,7 +158,7 @@ async fn claude_code(client: &Client, root: &Path) {
 }
 
 async fn send(client: &Client, conversation_id: Option<ConversationId>, text: &str, images: Vec<String>) -> (ConversationId, MessageId, RunId) {
-    let send = SendChatMessage { conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images, interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images, interrupt: false };
     match client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, message_id, run_id, .. } => (conversation_id, message_id, run_id),
         other => panic!("{other:?}"),
@@ -363,7 +363,7 @@ async fn a_task_conversation_goes_on_in_its_session_after_the_task_succeeded() {
     };
     let create = CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
-    let cmd = CreateTask { project_id, employee_id: Some(employee_id), title: "Login page".into(), goal: "Fix the login page".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: "Login page".into(), goal: "Fix the login page".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     // The task succeeds at its first answer.
     let mut task = None;
@@ -383,7 +383,7 @@ async fn a_task_conversation_goes_on_in_its_session_after_the_task_succeeded() {
     let say = |text: &'static str, images: Vec<String>| {
         let client = &client;
         async move {
-            let send = SendEmployeeMessage { employee_id, text: text.into(), conversation_id: conversation, images, files: Vec::new(), interrupt: false };
+            let send = SendEmployeeMessage { confirm_secret: false, employee_id, text: text.into(), conversation_id: conversation, images, files: Vec::new(), interrupt: false };
             let CommandResult::EmployeeMessageSent { message_id, run_id, .. } = client.execute(envelope(Command::SendEmployeeMessage(send), None)).await.unwrap().result else { panic!() };
             answered(client, conversation, message_id, MessageStatus::Complete).await;
             run_id
@@ -514,7 +514,7 @@ async fn after_a_colleagues_result_the_employee_goes_on_in_its_session() {
     }
 
     // A task conversation: Alex gives a part to Iris while he works, and goes on when it is done.
-    let cmd = CreateTask { project_id, employee_id: alex, title: "Dark mode".into(), goal: "Fix dark mode [wait]".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: alex, title: "Dark mode".into(), goal: "Fix dark mode [wait]".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     let first = running(dir.path(), "task_id", task_id.to_string()).await;
     delegate(dir.path(), first, "Iris", "Dark mode UI").await;
@@ -536,7 +536,7 @@ async fn after_a_colleagues_result_the_employee_goes_on_in_its_session() {
 
     // A project conversation: the assistant gives work to Iris; her result is answered in its session.
     runtime.waited.store(false, std::sync::atomic::Ordering::SeqCst);
-    let send = SendProjectMessage { project_id, text: "A logo please [wait]".into(), conversation_id: None, images: Vec::new(), files: Vec::new(), interrupt: false, start: ChatStart::default() };
+    let send = SendProjectMessage { confirm_secret: false, project_id, text: "A logo please [wait]".into(), conversation_id: None, images: Vec::new(), files: Vec::new(), interrupt: false, start: ChatStart::default() };
     let CommandResult::ProjectMessageSent { conversation_id, run_id: asked, .. } = client.send_project_message(send).await.unwrap().result else { panic!() };
     running(dir.path(), "id", asked.to_string()).await;
     delegate(dir.path(), asked, "Iris", "Logo").await;
@@ -615,7 +615,7 @@ async fn after_an_answer_that_posted_a_plan_the_session_goes_on() {
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     };
-    client.execute(envelope(Command::DecidePlan(DecidePlan { approval_id: approval.id, decision: PlanDecision::Approve, feedback: None }), None)).await.unwrap();
+    client.execute(envelope(Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id: approval.id, decision: PlanDecision::Approve, feedback: None }), None)).await.unwrap();
     assert!(asked.await.unwrap().allow);
     runtime.release.notify_one();
     answered(&client, conversation, message, MessageStatus::Complete).await;

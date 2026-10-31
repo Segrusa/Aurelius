@@ -422,7 +422,9 @@ async fn deliver_due(shared: &Arc<Shared>, client: &reqwest::Client, config: &Co
 /// One signed POST; the HTTP status, or why it did not get one.
 async fn attempt(client: &reqwest::Client, url: &str, secret: &str, row: &outbox::OutboxRow) -> Result<u16, String> {
     let timestamp = aurelius_storage::now_ms() / 1000;
-    let signature = webhook::signature(secret, timestamp, &row.id, &row.body_json);
+    // Stored text is redacted already; once more as it leaves (SEC0 E14).
+    let body = aurelius_runtime::redact::string(row.body_json.clone());
+    let signature = webhook::signature(secret, timestamp, &row.id, &body);
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -431,7 +433,7 @@ async fn attempt(client: &reqwest::Client, url: &str, secret: &str, row: &outbox
         .header(webhook::HEADER_TIMESTAMP, timestamp.to_string())
         .header(webhook::HEADER_ATTEMPT, (row.attempts + 1).to_string())
         .header(webhook::HEADER_SIGNATURE, signature)
-        .body(row.body_json.clone())
+        .body(body)
         .send()
         .await
         .map_err(|err| {

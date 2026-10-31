@@ -552,7 +552,7 @@ async fn drive(
     wipe(&mut after);
     result?;
     // Linked? Claude says so itself (C14), never the credentials file.
-    let runtime = ClaudeCodeRuntime { executable: program.to_path_buf(), run_root: shared.root.join("runtimes"), model: None, login: Some(login.clone()) };
+    let runtime = ClaudeCodeRuntime { executable: program.to_path_buf(), run_root: shared.root.join("runtimes"), model: None, login: Some(login.clone()), vault: Default::default() };
     match runtime.auth_status().await {
         Ok(status) if status.logged_in => {
             tracing::info!(link = %link_id, state = "ok", "Claude sign-in");
@@ -589,7 +589,7 @@ pub async fn unlink(shared: &Arc<Shared>, user: UserId) -> Result<(), ProtocolEr
     if login.config_dir().exists() {
         let logged_out = match claude_program(shared).await {
             Ok(program) => {
-                let runtime = ClaudeCodeRuntime { executable: program, run_root: shared.root.join("runtimes"), model: None, login: Some(login.clone()) };
+                let runtime = ClaudeCodeRuntime { executable: program, run_root: shared.root.join("runtimes"), model: None, login: Some(login.clone()), vault: Default::default() };
                 match tokio::time::timeout(Duration::from_secs(30), runtime.logout()).await.unwrap_or(Err(aurelius_runtime::RuntimeError::Unavailable("timed out".into()))) {
                     Ok(()) => true,
                     Err(e) => {

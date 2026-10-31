@@ -21,7 +21,7 @@ async fn start(root: &Path) -> Daemon {
 }
 
 async fn chat(client: &aurelius_client::Client, text: &str) -> ConversationId {
-    let env = envelope(Command::SendChatMessage(SendChatMessage { conversation_id: common::conversation(&client).await, text: text.into(), images: Vec::new(), interrupt: false }), None);
+    let env = envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: text.into(), images: Vec::new(), interrupt: false }), None);
     match client.execute(env).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, .. } => conversation_id,
         other => panic!("{other:?}"),

@@ -18,7 +18,7 @@ use common::*;
 use std::time::Duration;
 
 async fn chat(client: &Client, id: Option<ConversationId>, text: &str) -> (ConversationId, RunId) {
-    match client.execute(envelope(Command::SendChatMessage(SendChatMessage { conversation_id: match id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), interrupt: false }), None)).await.unwrap().result {
+    match client.execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: match id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), interrupt: false }), None)).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, run_id, .. } => (conversation_id, run_id),
         other => panic!("{other:?}"),
     }
@@ -113,6 +113,7 @@ async fn a_task_conversation_works_in_the_employees_mode() {
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     set_mode(&client, conversation_id, AgentMode::Plan).await;
     let cmd = CreateTask {
+        confirm_secret: false,
         project_id,
         employee_id: Some(employee_id),
         title: "Onboarding".into(),

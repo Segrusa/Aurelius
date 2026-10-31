@@ -39,4 +39,8 @@ pub struct SendProjectMessage {
     /// Ignored for an existing one.
     #[serde(default, flatten)]
     pub start: ChatStart,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }

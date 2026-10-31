@@ -36,6 +36,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId) {
 
 async fn create(client: &Client, project_id: ProjectId, employee_id: Option<EmployeeId>, title: &str, deps: Vec<TaskId>) -> Result<TaskId, aurelius_client::ClientError> {
     let cmd = CreateTask {
+        confirm_secret: false,
         files: vec![],
         run: Default::default(),
         project_id,

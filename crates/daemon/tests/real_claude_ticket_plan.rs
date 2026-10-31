@@ -96,6 +96,7 @@ async fn a_real_ticket_plan_stops_after_the_deny_and_goes_on_once_approved() {
     let (employee, project, folder) = setup(&client).await;
     let made = client
         .create_ticket(CreateTicket {
+            confirm_secret: false,
             project_id: project,
             title: "Hello file".into(),
             description: Some(

@@ -53,7 +53,7 @@ async fn tool_use_is_short_in_the_conversation_and_whole_on_request() {
     let client = connect(dir.path()).await;
     assert!(client.supports(feature::ACTIVITY_PREVIEW));
 
-    let send = SendChatMessage { conversation_id: common::conversation(&client).await, text: "Write the spec".into(), images: Vec::new(), interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "Write the spec".into(), images: Vec::new(), interrupt: false };
     let conversation_id = match client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, .. } => conversation_id,
         other => panic!("{other:?}"),

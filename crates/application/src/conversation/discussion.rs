@@ -989,3 +989,18 @@ pub(crate) fn read_text(conn: &rusqlite::Connection, store: &Store, d: &Discussi
     let read_only = d.read_only().map(|why| format!("\n\n{why}")).unwrap_or_default();
     Ok(format!("{head}, latest {} of {total} messages (oldest first, one JSON object per message):\n\n[\n{}\n]{read_only}", lines.len(), lines.join(",\n")))
 }
+
+impl CommandService {
+    /// A notice of the server to every board member: a system line in the
+    /// general channel of the Team chat (a vault key export, a vault name runs
+    /// may no longer have). Nothing when there is no Team chat (yet).
+    pub fn team_notice(&self, text: &str) -> Result<Vec<EventNotice>, AppError> {
+        let text = text.to_owned();
+        self.store
+            .write(move |tx| {
+                let Some(d) = general(tx)? else { return Ok(Vec::new()) };
+                Ok(vec![system_line(tx, d.id, &SystemLine::new(SystemLineKind::Limit), Some(&text))?])
+            })
+            .map_err(storage_error)
+    }
+}

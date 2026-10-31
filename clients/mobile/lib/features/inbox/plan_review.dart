@@ -7,6 +7,7 @@ import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart' show InfoIcon;
 import '../../data/views.dart';
 import '../chat/chat_view.dart' show markdownStyle;
+import '../chat/secret_check.dart' show sendAnywayDialog;
 import '../markdown/links.dart';
 import '../markdown/markdown_page.dart' show markdownLinkTap;
 import '../connection/connection_bloc.dart';
@@ -80,7 +81,7 @@ class _PlanReviewState extends State<PlanReview> {
     HapticFeedback.mediumImpact();
     // Feedback goes with changes and with a rejection; an approval carries it only when there are comments.
     final text = decision.approves && _comments.isEmpty ? '' : composePlanFeedback(_comments, _feedback.text);
-    context.read<InboxBloc>().add(PlanDecided(widget.approval, decision, feedback: text.isEmpty ? null : text));
+    context.read<InboxBloc>().add(PlanDecided(widget.approval, decision, feedback: text.isEmpty ? null : text, ask: sendAnywayDialog(context)));
   }
 
   /// Ask for the comment on the selected fragment and keep it.

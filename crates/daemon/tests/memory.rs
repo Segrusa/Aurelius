@@ -45,6 +45,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str) -> Employe
 /// Give the employee a task and wait until it is done: returns the task's conversation.
 async fn work(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str, goal: &str) -> ConversationId {
     let task = CreateTask {
+        confirm_secret: false,
         project_id,
         employee_id: Some(employee_id),
         title: title.into(),
@@ -72,7 +73,7 @@ async fn memory(client: &Client, project: ProjectId, employee: EmployeeId) -> Ve
 
 /// A message to the employee in a task conversation, and the answer to it.
 async fn ask(client: &Client, employee: EmployeeId, conversation: ConversationId, text: &str) -> MessageView {
-    let send = SendEmployeeMessage { employee_id: employee, text: text.into(), conversation_id: conversation, images: Vec::new(), files: Vec::new(), interrupt: false };
+    let send = SendEmployeeMessage { confirm_secret: false, employee_id: employee, text: text.into(), conversation_id: conversation, images: Vec::new(), files: Vec::new(), interrupt: false };
     let CommandResult::EmployeeMessageSent { message_id, .. } = client.execute(envelope(Command::SendEmployeeMessage(send), None)).await.unwrap().result else { panic!("not sent") };
     for _ in 0..400 {
         let messages = client.messages(conversation).await.unwrap().messages;

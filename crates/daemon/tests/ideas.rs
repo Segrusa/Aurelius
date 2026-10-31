@@ -36,11 +36,11 @@ async fn ideas_are_noted_started_as_tasks_or_dropped() {
     };
 
     // The user notes ideas; a title is required.
-    assert!(client.execute(envelope(Command::AddIdea(AddIdea { project_id, title: " ".into(), note: None, kind: Default::default(), files: vec![] }), None)).await.is_err());
-    let add = |title: &str, note: Option<&str>| Command::AddIdea(AddIdea { project_id, title: title.into(), note: note.map(str::to_owned), kind: Default::default(), files: vec![] });
+    assert!(client.execute(envelope(Command::AddIdea(AddIdea { confirm_secret: false, project_id, title: " ".into(), note: None, kind: Default::default(), files: vec![] }), None)).await.is_err());
+    let add = |title: &str, note: Option<&str>| Command::AddIdea(AddIdea { confirm_secret: false, project_id, title: title.into(), note: note.map(str::to_owned), kind: Default::default(), files: vec![] });
     let CommandResult::IdeaAdded { idea_id: dark } = client.execute(envelope(add("Dark mode", Some("Voor 's avonds")), None)).await.unwrap().result else { panic!() };
     let CommandResult::IdeaAdded { idea_id: export } = client.execute(envelope(add("CSV export", None), None)).await.unwrap().result else { panic!() };
-    client.execute(envelope(Command::UpdateIdea(UpdateIdea { idea_id: export, title: "CSV-export".into(), note: Some("Per project".into()), kind: Some(IdeaKind::Bug), add_files: vec![], remove_files: vec![] }), None)).await.unwrap();
+    client.execute(envelope(Command::UpdateIdea(UpdateIdea { confirm_secret: false, idea_id: export, title: "CSV-export".into(), note: Some("Per project".into()), kind: Some(IdeaKind::Bug), add_files: vec![], remove_files: vec![] }), None)).await.unwrap();
 
     // An employee notes one while working (the bridge's add_idea tool).
     let CommandResult::IdeaStarted { task_id, .. } = client.execute(envelope(Command::StartIdea(StartIdea { idea_id: dark, employee_id, run: Default::default() }), None)).await.unwrap().result else { panic!() };
@@ -133,7 +133,7 @@ async fn ideas_keep_files_that_go_with_them_into_the_task() {
 
     // Added with a file and a note of several lines, kept as written.
     let note = "Steps:\n  1. open\n  2. look\n\nThat's it.";
-    let add = AddIdea { project_id, title: "Dark mode".into(), note: Some(note.into()), kind: Default::default(), files: vec![path(&sketch)] };
+    let add = AddIdea { confirm_secret: false, project_id, title: "Dark mode".into(), note: Some(note.into()), kind: Default::default(), files: vec![path(&sketch)] };
     let CommandResult::IdeaAdded { idea_id } = client.execute(envelope(Command::AddIdea(add), None)).await.unwrap().result else { panic!() };
     let idea = |ideas: Vec<aurelius_protocol::IdeaView>| ideas.into_iter().find(|i| i.id == idea_id).unwrap();
     let shown = idea(client.ideas(project_id).await.unwrap().ideas);
@@ -146,7 +146,7 @@ async fn ideas_keep_files_that_go_with_them_into_the_task() {
 
     // Update: one more, then the first removed (its copy goes too); too many is refused.
     let update = |add_files: Vec<String>, remove_files: Vec<String>| {
-        Command::UpdateIdea(UpdateIdea { idea_id, title: "Dark mode".into(), note: Some(note.into()), kind: None, add_files, remove_files })
+        Command::UpdateIdea(UpdateIdea { confirm_secret: false, idea_id, title: "Dark mode".into(), note: Some(note.into()), kind: None, add_files, remove_files })
     };
     client.execute(envelope(update(vec![path(&notes)], vec![]), None)).await.unwrap();
     client.execute(envelope(update(vec![], vec![".aurelius/uploads/sketch.png".into()]), None)).await.unwrap();

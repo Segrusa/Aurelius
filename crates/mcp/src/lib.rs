@@ -552,6 +552,7 @@ impl Server {
         };
         let criteria: Vec<String> = args["criteria"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
         let command = Command::CreateTask(aurelius_domain::task::CreateTask {
+            confirm_secret: false,
             project_id: project.id,
             employee_id: employee.as_ref().map(|m| m.id),
             title: title.clone(),
@@ -589,7 +590,7 @@ impl Server {
             Some("bug") => aurelius_domain::idea::IdeaKind::Bug,
             _ => aurelius_domain::idea::IdeaKind::Feature,
         };
-        let command = Command::AddIdea(aurelius_domain::idea::AddIdea { project_id: project.id, title: title.clone(), note: optional_arg(args, "note"), kind, files: Vec::new() });
+        let command = Command::AddIdea(aurelius_domain::idea::AddIdea { confirm_secret: false, project_id: project.id, title: title.clone(), note: optional_arg(args, "note"), kind, files: Vec::new() });
         self.execute(command).await?;
         Ok(format!("Added the idea \"{title}\" to {}.", project.name))
     }
@@ -622,7 +623,7 @@ impl Server {
         let (Some(employee_id), Some(conversation_id)) = (task.employee_id, task.conversation_id) else {
             return Err(format!("\"{}\" has not started yet (no employee conversation); message it once it runs.", task.title));
         };
-        let command = Command::SendEmployeeMessage(aurelius_domain::employee::SendEmployeeMessage {
+        let command = Command::SendEmployeeMessage(aurelius_domain::employee::SendEmployeeMessage { confirm_secret: false,
             employee_id,
             text,
             conversation_id,
@@ -649,6 +650,7 @@ impl Server {
         };
         let wait = args["wait_seconds"].as_u64().unwrap_or(120).min(ASSISTANT_WAIT_MAX_SECS);
         let command = Command::SendProjectMessage(aurelius_domain::project_conversation::SendProjectMessage {
+            confirm_secret: false,
             project_id: project.id,
             text,
             conversation_id: conversation,
@@ -775,7 +777,7 @@ impl Server {
         if let Some(p) = &project {
             body = format!("About the project \"{}\" (id {}).\n\n{body}", p.name, p.id);
         }
-        let command = Command::SendEmployeeMessage(aurelius_domain::employee::SendEmployeeMessage {
+        let command = Command::SendEmployeeMessage(aurelius_domain::employee::SendEmployeeMessage { confirm_secret: false,
             employee_id: manager.id,
             text: body,
             conversation_id: manager.conversation_id,
@@ -874,7 +876,7 @@ impl Server {
                 }
                 (None, None) => unreachable!("checked above"),
             };
-            self.execute(Command::AnswerQuestion(AnswerQuestion { approval_id: approval.id, answers })).await?;
+            self.execute(Command::AnswerQuestion(AnswerQuestion { confirm_secret: false, approval_id: approval.id, answers })).await?;
             return Ok(json_text(&json!({ "answered": "question", "id": approval.id, "from": approval.requester })));
         }
         let Some(answer) = answer else { return Err(format!("No open question matches \"{id}\". Look at list_open_questions.")) };
@@ -885,7 +887,7 @@ impl Server {
         let (Some(employee_id), Some(conversation_id)) = (task.employee_id, task.conversation_id) else {
             return Err(format!("\"{}\" has no employee to answer.", task.title));
         };
-        let command = Command::SendEmployeeMessage(aurelius_domain::employee::SendEmployeeMessage { employee_id, text: answer, conversation_id, images: vec![], files: vec![], interrupt: false });
+        let command = Command::SendEmployeeMessage(aurelius_domain::employee::SendEmployeeMessage { confirm_secret: false, employee_id, text: answer, conversation_id, images: vec![], files: vec![], interrupt: false });
         self.execute(command).await?;
         Ok(json_text(&json!({ "answered": "task_message", "id": task.id, "employee": task.employee_name, "conversation_id": conversation_id })))
     }
@@ -918,14 +920,14 @@ impl Server {
                     "reject" | "deny" => PlanDecision::Reject,
                     _ => return Err("A plan takes decision approve, approve_edits, revise (with feedback) or reject.".into()),
                 };
-                Command::DecidePlan(DecidePlan { approval_id: approval.id, decision, feedback })
+                Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id: approval.id, decision, feedback })
             }
             QUESTION_TOOL => {
                 let Some(answers) = args["answers"].as_object() else {
                     return Err("A question takes `answers`: an object from each question to its answer.".into());
                 };
                 let answers = answers.iter().map(|(q, a)| (q.clone(), a.as_str().map(str::to_owned).unwrap_or_else(|| a.to_string()))).collect();
-                Command::AnswerQuestion(AnswerQuestion { approval_id: approval.id, answers })
+                Command::AnswerQuestion(AnswerQuestion { confirm_secret: false, approval_id: approval.id, answers })
             }
             _ => {
                 let approve = match decision.as_str() {

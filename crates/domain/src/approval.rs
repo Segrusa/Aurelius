@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 pub struct AnswerQuestion {
     pub approval_id: ApprovalId,
     pub answers: std::collections::BTreeMap<String, String>,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// What the user decided about a plan Claude Code proposed (ExitPlanMode).
@@ -33,6 +37,10 @@ pub struct DecidePlan {
     pub decision: PlanDecision,
     #[serde(default)]
     pub feedback: Option<String>,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// The user's decision on exactly one action. `action_digest` must match the

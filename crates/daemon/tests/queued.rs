@@ -77,7 +77,7 @@ async fn running(root: &Path, run: RunId) {
 }
 
 async fn chat(client: &Client, conversation_id: Option<ConversationId>, text: &str) -> (ConversationId, MessageId, RunId) {
-    let send = SendChatMessage { conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), interrupt: false };
     match client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, message_id, run_id } => (conversation_id, message_id, run_id),
         other => panic!("{other:?}"),
@@ -85,7 +85,7 @@ async fn chat(client: &Client, conversation_id: Option<ConversationId>, text: &s
 }
 
 async fn to_employee(client: &Client, employee_id: EmployeeId, conversation_id: ConversationId, text: &str) -> (ConversationId, MessageId, RunId) {
-    let send = SendEmployeeMessage { employee_id, text: text.into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false };
+    let send = SendEmployeeMessage { confirm_secret: false, employee_id, text: text.into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false };
     match client.execute(envelope(Command::SendEmployeeMessage(send), None)).await.unwrap().result {
         CommandResult::EmployeeMessageSent { conversation_id, message_id, run_id } => (conversation_id, message_id, run_id),
         other => panic!("{other:?}"),
@@ -124,7 +124,7 @@ async fn project_with_employee(client: &Client) -> (ProjectId, EmployeeId) {
 }
 
 async fn create_task(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str, goal: &str) -> TaskId {
-    let cmd = CreateTask { files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![] };
     match client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result {
         CommandResult::TaskCreated { task_id } => task_id,
         other => panic!("{other:?}"),

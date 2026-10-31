@@ -24,6 +24,7 @@ pub mod sessions;
 mod sql;
 mod subscription;
 mod users;
+mod vault;
 mod writes;
 
 pub(crate) use bridge::serve as serve_bridge;
@@ -351,6 +352,11 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
                 }
                 None => Err(ProtocolError::new(ErrorCode::InvalidRequest, "writes need an idempotency_key")),
             },
+            // The vault: a value never enters the host pipeline (its receipt, request hash or event).
+            Call::Write(WriteMethod::Host(write @ (HostWrite::VaultCreate(_) | HostWrite::VaultUpdate(_) | HostWrite::VaultArchive { .. }))) => match request.idempotency_key {
+                Some(key) => vault::write(&shared, &peer, request_id, key, request.expected_version, write).await,
+                None => Err(ProtocolError::new(ErrorCode::InvalidRequest, "writes need an idempotency_key")),
+            },
             Call::Write(write) => writes::execute(&shared, &mut peer, request_id, request.idempotency_key, request.expected_version, write).await,
             Call::Read(Method::SessionHello(params)) => {
                 activity_changes = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::ACTIVITY_CHANGES);
@@ -367,6 +373,9 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             Call::Read(Method::UserLogout) => users::logout(&shared, &mut peer).await.map(ResponseBody::WhoAmI),
             Call::Read(Method::UserWhoami) => users::whoami_of(&shared, &peer).await.map(ResponseBody::WhoAmI),
             Call::Read(method @ (Method::SessionList { .. } | Method::ClaudeLoginStatus | Method::ClaudeLoginInput(_))) => users::session_read(&shared, &peer, method).await,
+            // The password is checked again and counted like a sign-in (E9).
+            Call::Read(Method::VaultKeyExport(params)) => vault::key_export(&shared, &peer, &mut attempts, params).await,
+            Call::Read(method @ (Method::VaultList { .. } | Method::VaultReveal { .. } | Method::VaultAudit { .. })) => vault::read(&shared, &peer, method).await,
             Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, activity_changes, team_channels, out_tx.clone()).await {
                 Ok((body, task)) => {
                     if let Some(old) = forwarder.replace(task) {

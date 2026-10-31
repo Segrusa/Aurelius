@@ -47,7 +47,7 @@ impl AgentRuntime for Hold {
 /// A chat run that stays alive until `release`.
 async fn waiting_run(client: &Client, root: &std::path::Path) -> (ConversationId, RunId) {
     let sent = client
-        .execute(envelope(Command::SendChatMessage(SendChatMessage { conversation_id: common::conversation(&client).await, text: "Keep me awake".into(), images: Vec::new(), interrupt: false }), None))
+        .execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "Keep me awake".into(), images: Vec::new(), interrupt: false }), None))
         .await
         .unwrap()
         .result;

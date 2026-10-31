@@ -110,6 +110,10 @@ fn method_needs(method: &Method) -> Needs {
         | Method::BoardGet { .. }
         | Method::TicketGet { .. }
         | Method::TicketList { .. }
+        // The vault: every own device of a board member lists it and its audit log
+        // (one role, MU4-10); the session decides who.
+        | Method::VaultList { .. }
+        | Method::VaultAudit { .. }
         // Every own client must sign in and pass the onboarding (MU1-20, MU3-02):
         // the board member's session is the second layer, not a device right.
         | Method::UserList
@@ -121,6 +125,10 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ClaudeLoginStatus
         | Method::ClaudeLoginInput(_) => Needs::Cap(Read),
         // Functions and API keys let outside apps start work on the server.
+        // Showing or copying a secret controls what it unlocks, like managing items.
+        Method::VaultReveal { .. } => Needs::Cap(TaskControl),
+        // The vault key opens every secret of a backup: like backups, only on an owner's device.
+        Method::VaultKeyExport(_) => Needs::Owner,
         Method::AgentFunctionList { .. }
         | Method::FunctionCallList { .. }
         | Method::ApiKeyList
@@ -176,6 +184,8 @@ fn host_needs(host: &HostWrite) -> Needs {
         | HostWrite::PluginSetForProject { .. } => Needs::Cap(Approve),
         // Notes are project content, like ideas.
         HostWrite::NoteCreate { .. } | HostWrite::NoteUpdate { .. } | HostWrite::NoteSetPinned { .. } | HostWrite::NoteDelete { .. } => Needs::Cap(TaskControl),
+        // Vault items are company content, managed like projects and notes (MU4-10).
+        HostWrite::VaultCreate(_) | HostWrite::VaultUpdate(_) | HostWrite::VaultArchive { .. } => Needs::Cap(TaskControl),
         // Every own client must be able to make the first board member (MU1-20).
         HostWrite::UserCreate(_) => Needs::Cap(Read),
         // One role: every board member manages sessions, passwords and board members,
@@ -526,7 +536,7 @@ mod tests {
     fn project_conversations_need_chat_and_auto_needs_approve() {
         use aurelius_domain::{conversation::ChatStart, project_conversation::{SendProjectMessage, StartProjectConversation}};
         let project_id = aurelius_domain::ProjectId::new();
-        let send = |start: ChatStart, conversation_id| exec(Command::SendProjectMessage(SendProjectMessage { project_id, text: "x".into(), conversation_id, images: vec![], files: vec![], interrupt: false, start }));
+        let send = |start: ChatStart, conversation_id| exec(Command::SendProjectMessage(SendProjectMessage { confirm_secret: false, project_id, text: "x".into(), conversation_id, images: vec![], files: vec![], interrupt: false, start }));
         let auto = ChatStart { agent_mode: Some(AgentMode::Auto), ..Default::default() };
         assert_eq!(required(&send(ChatStart::default(), None)), cap(Capability::Chat));
         assert_eq!(required(&send(auto.clone(), None)), cap(Capability::Approve));
@@ -674,7 +684,7 @@ mod tests {
             assert_eq!(required(&read(method)), cap(Capability::Read));
         }
         // Writing in the group chat is chatting.
-        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text: "Hi".into(), images: vec![], files: vec![], channel: None });
+        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: "Hi".into(), images: vec![], files: vec![], channel: None });
         assert_eq!(required(&exec(group)), cap(Capability::Chat));
     }
 
@@ -684,6 +694,7 @@ mod tests {
         use aurelius_domain::{EmployeeId, ProjectId, TaskScheduleId, task::RunSettings};
         let create = |mode| {
             exec(Command::CreateTaskSchedule(CreateTaskSchedule {
+                confirm_secret: false,
                 project_id: ProjectId::new(),
                 employee_id: EmployeeId::new(),
                 title: "T".into(),
@@ -735,7 +746,7 @@ mod tests {
         let off = exec(Command::SetBrowserAllowed(SetBrowserAllowed { conversation_id: id, allowed: false }));
         assert_eq!(required(&on), cap(Capability::Approve));
         assert_eq!(required(&off), cap(Capability::Chat));
-        let plan = exec(Command::DecidePlan(DecidePlan { approval_id: ApprovalId::new(), decision: PlanDecision::Approve, feedback: None }));
+        let plan = exec(Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id: ApprovalId::new(), decision: PlanDecision::Approve, feedback: None }));
         assert_eq!(required(&plan), cap(Capability::Approve));
     }
 

@@ -18,7 +18,7 @@ use std::path::Path;
 use std::time::Duration;
 
 async fn send(client: &Client, conversation_id: Option<ConversationId>, text: &str) -> ConversationId {
-    let env = envelope(Command::SendChatMessage(SendChatMessage { conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), interrupt: false }), None);
+    let env = envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), interrupt: false }), None);
     match client.execute(env).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, .. } => conversation_id,
         other => panic!("{other:?}"),
@@ -70,6 +70,7 @@ async fn backup_restore_paused_scrub_and_export() {
         panic!()
     };
     let task = CreateTask {
+        confirm_secret: false,
         files: vec![],
         run: Default::default(),
         project_id,

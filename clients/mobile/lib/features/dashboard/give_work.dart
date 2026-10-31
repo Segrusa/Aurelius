@@ -8,7 +8,9 @@ import '../../core/net/protocol.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/commands.dart';
+import '../../data/secret_write.dart';
 import '../../data/views.dart';
+import '../chat/secret_check.dart';
 import '../company/company_bloc.dart';
 import '../project/new_task_page.dart';
 
@@ -77,6 +79,7 @@ Future<void> giveWork(BuildContext context, {String? title, String? employeeId, 
   final company = context.read<CompanyBloc>().state;
   final lastLead = company.activeEmployees.any((e) => e.id == LastGiven.lead) ? LastGiven.lead : null;
   final lastProject = company.openProjects.any((p) => p.id == LastGiven.project) ? LastGiven.project : null;
+  Receipt? created;
   final task = await NewTaskPage.open(
     context,
     company.activeEmployees,
@@ -84,26 +87,44 @@ Future<void> giveWork(BuildContext context, {String? title, String? employeeId, 
     projectId: projectId ?? lastProject,
     employeeId: employeeId ?? lastLead,
     title: title,
+    submit: (form, task) async => (created = await writeTask(form, task.projectId!, task)) != null,
   );
-  if (task == null || task.projectId == null || !context.mounted) return;
-  await sendTask(context, task.projectId!, task);
+  if (task == null || task.projectId == null || created == null || !context.mounted) return;
+  _created(context, task.projectId!, task, created!.command);
 }
 
-/// Create [task] in [projectId] and open it; a notice if it could not be sent.
-Future<void> sendTask(BuildContext context, String projectId, NewTask task) async {
+/// Create [task] in [projectId] and open it; false when it was not created
+/// (a notice, or the B10 dialog), so the caller can give the typed text back.
+Future<bool> sendTask(BuildContext context, String projectId, NewTask task) async {
+  final created = await writeTask(context, projectId, task);
+  if (created == null || !context.mounted) return false;
+  _created(context, projectId, task, created.command);
+  return true;
+}
+
+/// Writes `task.create`; null when it was not created. Refused because it
+/// holds a vault value (B10, QA2 m8), it shows the dialog with the item names
+/// instead of a toast that asks without a button; Send anyway creates it with
+/// `confirm_secret` (AUR-MU-04-F5). Refused again, a notice: no loop. Either
+/// way the form keeps what was typed.
+Future<Receipt?> writeTask(BuildContext context, String projectId, NewTask task) async {
   final repository = context.read<AureliusRepository>();
-  final router = GoRouter.of(context);
   try {
-    final receipt = await repository.write(
+    return await writeConfirmingSecret(
+      repository,
       Commands.createTask(projectId, task.title, task.goal, task.criteria, employeeId: task.employeeId, run: task.run, files: task.files, variants: task.variants),
+      sendAnywayDialog(context),
     );
-    if (!context.mounted) return;
-    if (LastGiven.hostOf(context) case final host?) LastGiven.remember(host, projectId: projectId, employeeId: task.employeeId);
-    toast(context, task.variants > 1 ? 'Task created; it is tried ${task.variants} ways first.' : 'Task created.');
-    if (receipt.command case CommandResultTaskCreated(:final taskId)) router.push('/project/$projectId/task/$taskId');
   } on NotSentException catch (e) {
     if (context.mounted) toast(context, e.toString());
   } on ProtocolException catch (e) {
     if (context.mounted) toast(context, e.message);
   }
+  return null;
+}
+
+void _created(BuildContext context, String projectId, NewTask task, CommandResult? result) {
+  if (LastGiven.hostOf(context) case final host?) LastGiven.remember(host, projectId: projectId, employeeId: task.employeeId);
+  toast(context, task.variants > 1 ? 'Task created; it is tried ${task.variants} ways first.' : 'Task created.');
+  if (result case CommandResultTaskCreated(:final taskId)) GoRouter.of(context).push('/project/$projectId/task/$taskId');
 }

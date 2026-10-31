@@ -108,6 +108,7 @@ impl AppView {
             Page::Tasks => self.render_all_tasks(cx),
             Page::Inbox => self.render_inbox_page(cx),
             Page::Settings => self.render_settings_page(window, cx),
+            Page::Vault => self.render_vault_page(window, cx),
         }
     }
 
@@ -512,6 +513,11 @@ impl AppView {
                 ProjectRef::Sample(_) => div().mt(px(24.)).text_color(c(theme::MUTED)).child("Ideas of your own projects show here.").into_any_element(),
             },
             (Tab::Memory, true) => div().mt(px(24.)).text_color(c(theme::MUTED)).child("The memory of your own projects shows here.").into_any_element(),
+            (Tab::Vault, true) => div().mt(px(24.)).text_color(c(theme::MUTED)).child("The vault of your own projects shows here.").into_any_element(),
+            (Tab::Vault, false) => match project {
+                ProjectRef::Real(id) => self.render_vault_body(Some(id), true, window, cx),
+                ProjectRef::Sample(_) => unreachable!(),
+            },
             (Tab::Memory, false) => match project {
                 ProjectRef::Real(id) => self.render_real_memory(id, cx).into_any_element(),
                 ProjectRef::Sample(_) => unreachable!(),

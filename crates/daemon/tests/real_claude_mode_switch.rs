@@ -102,6 +102,7 @@ async fn switch_during(client: &Client, employee: EmployeeId, project: ProjectId
          if it does not, say so. Do not call ExitPlanMode and do not ask questions."
     );
     let cmd = CreateTask {
+        confirm_secret: false,
         files: vec![],
         run: RunSettings { mode: Some(AgentMode::Plan), ..Default::default() },
         project_id: project,

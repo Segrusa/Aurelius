@@ -30,7 +30,7 @@ async fn hire(client: &Client, name: &str, role: &str, reports_to: Option<Employ
 }
 
 async fn send(client: &Client, text: &str) -> (Vec<EmployeeId>, Vec<RunId>) {
-    let send = SendGroupMessage { text: text.into(), images: vec![], files: vec![], channel: None };
+    let send = SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel: None };
     let CommandResult::GroupMessageSent { to, run_ids, .. } = client.execute(envelope(Command::SendGroupMessage(send), None)).await.unwrap().result else { panic!("not sent") };
     (to, run_ids)
 }
@@ -152,7 +152,7 @@ async fn the_ceo_answers_named_employees_answer_and_posts_stop_at_the_hop_limit(
     assert!(refused_post, "the post itself is still shown");
 
     // The group chat is not a project conversation: no chat.send, no delete. The main chats stay.
-    let wrong = Command::SendChatMessage(SendChatMessage { conversation_id: group_id, text: "x".into(), images: vec![], interrupt: false });
+    let wrong = Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: group_id, text: "x".into(), images: vec![], interrupt: false });
     assert!(client.execute(envelope(wrong, None)).await.is_err());
     assert!(client.execute(envelope(Command::DeleteConversation(DeleteConversation { conversation_id: group_id }), None)).await.is_err());
     assert_eq!(client.group_chat().await.unwrap().conversation_id, group_id);

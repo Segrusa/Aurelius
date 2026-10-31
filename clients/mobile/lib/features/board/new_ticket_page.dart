@@ -15,8 +15,10 @@ import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/company.dart';
 import '../../data/discussion.dart';
+import '../../data/secret_write.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
+import '../chat/secret_check.dart' show sendAnywayDialog;
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../project/new_task_page.dart' show maxTaskFileBytes, maxTaskFiles;
@@ -100,7 +102,8 @@ class _NewTicketPageState extends State<NewTicketPage> {
     try {
       // Only a server of Phase 2 knows `from_message`; an older one refuses unknown fields.
       final from = repository.linkState.has(ticketDiscussionFeature) ? widget.draft?.fromMessage : null;
-      final receipt = await repository.write(ticketCreate(
+      // B10 (AUR-MU-04-F5): Send anyway creates it with `confirm_secret`; Cancel keeps the form.
+      final receipt = await writeConfirmingSecret(repository, ticketCreate(
         fromMessage: from,
         title: title,
         projectId: _project!,
@@ -112,7 +115,8 @@ class _NewTicketPageState extends State<NewTicketPage> {
         deadlineMs: _deadline?.millisecondsSinceEpoch,
         run: _mode == null ? null : TaskRun(mode: _mode),
         start: start ? true : null,
-      ));
+      ), sendAnywayDialog(context));
+      if (receipt == null) return;
       final number = switch (receipt.command) { CommandResultTicketCreated(:final number) => number, _ => null };
       final ticketId = switch (receipt.command) { CommandResultTicketCreated(:final ticketId) => ticketId, _ => null };
       messenger.showSnackBar(SnackBar(

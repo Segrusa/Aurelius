@@ -44,6 +44,10 @@ pub struct SendGroupMessage {
     /// The channel (feature `team_channels`): a project's, or none for the general one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel: Option<crate::ConversationId>,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 impl SendGroupMessage {
@@ -107,8 +111,8 @@ mod tests {
 
     #[test]
     fn a_message_needs_text_or_files() {
-        assert!(SendGroupMessage { text: "  ".into(), images: vec![], files: vec![], channel: None }.validate().is_err());
-        assert_eq!(SendGroupMessage { text: " Hi ".into(), images: vec![], files: vec![], channel: None }.validate().unwrap(), "Hi");
+        assert!(SendGroupMessage { confirm_secret: false, text: "  ".into(), images: vec![], files: vec![], channel: None }.validate().is_err());
+        assert_eq!(SendGroupMessage { confirm_secret: false, text: " Hi ".into(), images: vec![], files: vec![], channel: None }.validate().unwrap(), "Hi");
         assert_eq!(shortened("abcdef", 3), "abc…");
         assert_eq!(shortened(" ab ", 3), "ab");
     }

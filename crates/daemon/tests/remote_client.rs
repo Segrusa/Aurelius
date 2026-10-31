@@ -66,7 +66,7 @@ async fn a_remote_window_works_like_a_local_one() {
     let after = client.health().await.unwrap().last_seq;
     client.subscribe(after).await.unwrap();
     let talk = common::conversation(&client).await;
-    let send = Command::SendChatMessage(SendChatMessage { conversation_id: talk, text: "Tell me a long story".into(), images: Vec::new(), interrupt: false });
+    let send = Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: talk, text: "Tell me a long story".into(), images: Vec::new(), interrupt: false });
     client.execute(envelope(send, None)).await.unwrap();
     let mut last = None::<StreamDelta>;
     loop {

@@ -68,7 +68,7 @@ async fn start(root: &Path, runtime: Arc<dyn AgentRuntime>) -> Daemon {
 }
 
 async fn send(client: &Client, conversation_id: ConversationId, text: &str) -> (MessageId, RunId) {
-    let send = SendChatMessage { conversation_id, text: text.into(), images: Vec::new(), interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images: Vec::new(), interrupt: false };
     match client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap().result {
         CommandResult::ChatMessageSent { message_id, run_id, .. } => (message_id, run_id),
         other => panic!("{other:?}"),

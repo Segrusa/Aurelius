@@ -126,6 +126,18 @@ pub enum EmployeeTaskOp {
     ReadDiscussion { #[serde(default, skip_serializing_if = "Option::is_none")] last: Option<u32> },
     /// Post in the discussion of the run's ticket; `@Name` wakes as in a channel (`--discussion` only).
     PostToDiscussion { message: String },
+    /// The vault items a run may use (the bridge's `vault_list`, feature `vault`):
+    /// name, kind, scope, description and env name, never a value. `project` (a
+    /// name or id): another project's; none: the company's plus the run's project.
+    VaultList { #[serde(default, skip_serializing_if = "Option::is_none")] project: Option<String> },
+    /// One item (the bridge's `vault_read`; `item`: its name or env name). A text
+    /// or url answers its value (audit `tool_read`); a secret only "available as
+    /// $ENV_NAME", never its value (B3: secrets reach runs as environment only).
+    VaultRead {
+        item: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
+    },
     /// The dispatcher of a ticket chooses its owner (the bridge's `assign_ticket`, `--triage` only).
     AssignTicket { employee: String, #[serde(default)] reason: String },
 }

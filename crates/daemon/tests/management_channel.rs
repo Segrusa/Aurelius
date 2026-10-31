@@ -65,11 +65,11 @@ async fn app(root: &Path, secret: &str) -> Client {
 }
 
 fn task(project: ProjectId, employee: Option<EmployeeId>, title: &str) -> Command {
-    Command::CreateTask(CreateTask { project_id: project, employee_id: employee, title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: RunSettings::default(), files: vec![] })
+    Command::CreateTask(CreateTask { confirm_secret: false, project_id: project, employee_id: employee, title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: RunSettings::default(), files: vec![] })
 }
 
 fn message(employee: EmployeeId, conversation: ConversationId) -> Command {
-    Command::SendEmployeeMessage(SendEmployeeMessage { employee_id: employee, text: "Status?".into(), conversation_id: conversation, images: vec![], files: vec![], interrupt: false })
+    Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id: employee, text: "Status?".into(), conversation_id: conversation, images: vec![], files: vec![], interrupt: false })
 }
 
 fn refusal(result: Result<impl std::fmt::Debug, ClientError>) -> String {
@@ -104,7 +104,7 @@ async fn a_management_key_reaches_the_ceo_and_the_ceos_reports_only() {
     assert!(why.contains("management"), "{why}");
     refusal(marcus.execute(envelope(message(c.dev.0, c.dev.1), None)).await);
     refusal(marcus.messages(c.dev.1).await);
-    let assistant = Command::SendProjectMessage(SendProjectMessage { project_id: c.project, text: "hi".into(), conversation_id: None, images: vec![], files: vec![], interrupt: false, start: Default::default() });
+    let assistant = Command::SendProjectMessage(SendProjectMessage { confirm_secret: false, project_id: c.project, text: "hi".into(), conversation_id: None, images: vec![], files: vec![], interrupt: false, start: Default::default() });
     let why = refusal(marcus.execute(envelope(assistant, None)).await);
     assert!(why.contains("management"), "{why}");
 

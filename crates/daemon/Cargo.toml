@@ -24,6 +24,7 @@ aurelius-runtime.workspace = true
 aurelius-tools.workspace = true
 aurelius-remote-gateway.workspace = true
 tokio = { workspace = true, features = ["process"] }
+serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -39,6 +40,9 @@ rusqlite.workspace = true
 hex.workspace = true
 getrandom.workspace = true
 argon2.workspace = true
+# The vault: its AEAD, HKDF and HMAC; plaintext wiped from memory.
+ring.workspace = true
+zeroize.workspace = true
 sysinfo = { version = "0.31", default-features = false, features = ["system"] }
 # Connecting a board member's Claude login: `claude auth login` in a PTY, without a shell.
 portable-pty = "0.9"

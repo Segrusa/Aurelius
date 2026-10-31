@@ -147,9 +147,11 @@ impl Pusher {
         };
         let jwt = self.token(key_pem, key_id, team_id)?;
         let host = if target.environment == "sandbox" { "api.sandbox.push.apple.com" } else { "api.push.apple.com" };
+        // Stored text is redacted already; once more as it leaves (SEC0 E14).
+        let (title, text) = (aurelius_runtime::redact::text(&alert.title), aurelius_runtime::redact::text(&alert.body));
         let mut body = serde_json::json!({
             "aps": {
-                "alert": { "title": alert.title, "body": alert.body },
+                "alert": { "title": title, "body": text },
                 "sound": "default",
                 "thread-id": alert.data["target_type"],
             },

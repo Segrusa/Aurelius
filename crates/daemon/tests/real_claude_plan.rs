@@ -77,6 +77,7 @@ async fn setup(client: &Client) -> (EmployeeId, ProjectId, PathBuf) {
 /// A task that starts in plan mode.
 async fn plan_task(client: &Client, employee: EmployeeId, project: ProjectId, goal: &str) -> TaskId {
     let cmd = CreateTask {
+        confirm_secret: false,
         files: vec![],
         run: RunSettings { mode: Some(AgentMode::Plan), ..Default::default() },
         project_id: project,
@@ -101,7 +102,7 @@ async fn pending_plan(client: &Client, not: &[ApprovalId]) -> ApprovalView {
 }
 
 async fn decide(client: &Client, id: ApprovalId, decision: PlanDecision, feedback: Option<&str>) {
-    client.execute(envelope(Command::DecidePlan(DecidePlan { approval_id: id, decision, feedback: feedback.map(str::to_owned) }), None)).await.unwrap();
+    client.execute(envelope(Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id: id, decision, feedback: feedback.map(str::to_owned) }), None)).await.unwrap();
 }
 
 /// The task's conversation and the text of its last finished answer, once the task has ended.

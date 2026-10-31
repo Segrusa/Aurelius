@@ -35,6 +35,7 @@ pub mod task;
 pub mod ticket;
 pub mod user;
 pub mod variants;
+pub mod vault;
 pub mod views;
 pub mod webhook;
 

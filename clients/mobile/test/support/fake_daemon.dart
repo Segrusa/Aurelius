@@ -123,6 +123,9 @@ class FakeDaemon {
   /// Methods this server refuses with an error code (e.g. `password_change_required`).
   final Map<String, String> refuse = {};
 
+  /// Methods this server refuses with a whole error (`AppError`, e.g. `looks_like_secret` with `matched_items`).
+  final Map<String, Map<String, dynamic>> errors = {};
+
   /// The freeze's user.login: a session on the connection, but no token yet.
   bool emptyTokens = false;
 
@@ -230,6 +233,7 @@ class FakeDaemon {
     final method = request['method'] as String;
     if (notYet.contains(method)) return fail('validation', 'This server cannot do this yet.');
     if (refuse[method] case final code?) return fail(code, '');
+    if (errors[method] case final error?) return scheduleMicrotask(() => socket.push({'type': 'response', 'request_id': id, 'error': error}));
     void receipt(Map<String, dynamic> result) => reply('receipt', {
           'idempotency_key': request['idempotency_key'],
           'committed_seq': 11,

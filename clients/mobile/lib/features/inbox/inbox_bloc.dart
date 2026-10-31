@@ -9,6 +9,7 @@ import '../../core/net/connection.dart';
 import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/commands.dart';
+import '../../data/secret_write.dart';
 import '../../data/views.dart';
 
 sealed class InboxEvent {
@@ -41,19 +42,25 @@ class ApprovalAllowedAlways extends InboxEvent {
 
 /// The user's answers to Claude's question (see `Commands.answerQuestion`).
 class QuestionAnswered extends InboxEvent {
-  const QuestionAnswered(this.approval, this.answers);
+  const QuestionAnswered(this.approval, this.answers, {this.ask});
 
   final ApprovalView approval;
   final Map<String, String> answers;
+
+  /// Asks about a vault value in an own answer (B10); without it a refusal is a notice.
+  final SendAnywayAsk? ask;
 }
 
 /// The user's decision on Claude's plan. Revise needs feedback; reject may have some.
 class PlanDecided extends InboxEvent {
-  const PlanDecided(this.approval, this.decision, {this.feedback});
+  const PlanDecided(this.approval, this.decision, {this.feedback, this.ask});
 
   final ApprovalView approval;
   final PlanDecision decision;
   final String? feedback;
+
+  /// Asks about a vault value in the feedback (B10); without it a refusal is a notice.
+  final SendAnywayAsk? ask;
 }
 
 /// How a plan ended up, for the status the plan sheet shows after a choice.
@@ -127,6 +134,7 @@ class InboxState extends Equatable {
     this.variants = const {},
     this.variantsOn = false,
     this.notice,
+    this.notSent,
   });
 
   final bool loading;
@@ -151,6 +159,10 @@ class InboxState extends Equatable {
   /// The server has `task_variants`: tasks with variants ready show a compare card.
   final bool variantsOn;
   final String? notice;
+
+  /// The approval whose answer or decision the board member just chose not to
+  /// send (a vault value, B10): it stays open to change.
+  final String? notSent;
 
   /// The badge: decisions waiting, plus unread notifications that need you or
   /// say a task failed. Results (finished work) give no badge.
@@ -182,6 +194,7 @@ class InboxState extends Equatable {
     Map<String, TaskVariantsView>? variants,
     bool? variantsOn,
     String? notice,
+    String? notSent,
   }) =>
       InboxState(
         loading: loading ?? this.loading,
@@ -194,10 +207,11 @@ class InboxState extends Equatable {
         variants: variants ?? this.variants,
         variantsOn: variantsOn ?? this.variantsOn,
         notice: notice,
+        notSent: notSent,
       );
 
   @override
-  List<Object?> get props => [loading, approvals, proposals, notifications, unread, deciding, planOutcomes, variants, variantsOn, notice];
+  List<Object?> get props => [loading, approvals, proposals, notifications, unread, deciding, planOutcomes, variants, variantsOn, notice, notSent];
 }
 
 extension NotificationAttention on NotificationView {
@@ -300,17 +314,31 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     emit(state.copyWith(deciding: {...state.deciding, id}));
     String? notice;
     try {
-      final receipt = await _repository.write(Commands.answerQuestion(id, event.answers), retry: false);
+      final receipt = await _write(Commands.answerQuestion(id, event.answers), event.ask);
+      if (receipt == null) {
+        emit(state.copyWith(deciding: {...state.deciding}..remove(id), notice: 'Not sent. Nothing was answered.', notSent: id));
+        return;
+      }
       final status = switch (receipt.command) { CommandResultApprovalDecided(:final status) => status, _ => null };
       notice = status == ApprovalStatus.consumed ? 'Answer sent.' : 'This question expired; Claude continues on its own judgment.';
     } on NotSentException {
       notice = 'Not sent. The PC was not reachable; nothing was answered.';
     } on ProtocolException catch (e) {
+      // Refused again after Send anyway: it stays to change, no new question.
+      if (e.looksLikeSecret) {
+        emit(state.copyWith(deciding: {...state.deciding}..remove(id), notice: e.message, notSent: id));
+        return;
+      }
       notice = e.code == ErrorCode.validation || e.code == ErrorCode.notFound ? 'This question changed or was already answered.' : e.message;
     }
     emit(state.copyWith(deciding: {...state.deciding}..remove(id), notice: notice));
     add(const InboxRefreshed());
   }
+
+  /// A decision with the board member's own text: with [ask], a vault value
+  /// in it asks first and Send anyway sends it once more (B10). Null: not sent.
+  Future<Receipt?> _write(Map<String, dynamic> request, SendAnywayAsk? ask) =>
+      ask == null ? _repository.write(request, retry: false) : writeConfirmingSecret(_repository, request, ask, retry: false);
 
   Future<void> _decidePlan(PlanDecided event, Emitter<InboxState> emit) async {
     final id = event.approval.id;
@@ -323,7 +351,11 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     String? notice;
     PlanOutcome? outcome;
     try {
-      final receipt = await _repository.write(Commands.decidePlan(id, event.decision, feedback: feedback), retry: false);
+      final receipt = await _write(Commands.decidePlan(id, event.decision, feedback: feedback), event.ask);
+      if (receipt == null) {
+        emit(state.copyWith(deciding: {...state.deciding}..remove(id), notice: 'Not sent. Nothing was decided.', notSent: id));
+        return;
+      }
       final status = switch (receipt.command) { CommandResultApprovalDecided(:final status) => status, _ => null };
       if (status == ApprovalStatus.expired) {
         outcome = PlanOutcome.expired;
@@ -339,6 +371,11 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     } on NotSentException {
       notice = 'Not sent. The PC was not reachable; nothing was decided.';
     } on ProtocolException catch (e) {
+      // Refused again after Send anyway: it stays to change, no new question.
+      if (e.looksLikeSecret) {
+        emit(state.copyWith(deciding: {...state.deciding}..remove(id), notice: e.message, notSent: id));
+        return;
+      }
       // Decided elsewhere (the desktop, another phone) or gone.
       final gone = e.code == ErrorCode.validation || e.code == ErrorCode.notFound;
       if (gone) outcome = PlanOutcome.handledElsewhere;

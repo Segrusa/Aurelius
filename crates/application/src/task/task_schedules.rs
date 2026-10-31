@@ -371,6 +371,7 @@ mod tests {
 
     fn schedule(s: &Setup, recurrence: Recurrence) -> CreateTaskSchedule {
         CreateTaskSchedule {
+            confirm_secret: false,
             project_id: s.project,
             employee_id: s.employee,
             title: "Weekly report".into(),
@@ -505,6 +506,7 @@ mod tests {
         let id = create(&s, schedule(&s, Recurrence::EveryHours { hours: 2 }));
         s.service.fire_due_task_schedules(view(&s, id).next_run_ms.unwrap(), |_| 0).unwrap();
         let update = UpdateTaskSchedule {
+            confirm_secret: false,
             schedule_id: id,
             employee_id: s.employee,
             title: "Daily digest".into(),

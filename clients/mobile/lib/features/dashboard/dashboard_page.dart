@@ -182,7 +182,8 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
       paused: false,
       variants: 1,
     );
-    await sendTask(context, _projectId!, task);
+    // Not created (B10, offline): the title comes back to change it (QA2 m8).
+    if (!await sendTask(context, _projectId!, task) && mounted && _title.text.isEmpty) setState(() => _title.text = title);
   }
 
   Future<void> _details() async {

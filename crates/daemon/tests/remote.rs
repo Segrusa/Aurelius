@@ -259,7 +259,7 @@ async fn closed_with(socket: &mut Socket) -> Option<u16> {
 }
 
 fn chat(conversation_id: ConversationId, text: &str, images: Vec<String>) -> Command {
-    Command::SendChatMessage(SendChatMessage { conversation_id, text: text.into(), images, interrupt: false })
+    Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images, interrupt: false })
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -368,7 +368,7 @@ async fn paired_phone_uses_the_same_sessions_with_limits() {
         panic!()
     };
     // The message goes to the conversation of one of its tasks.
-    let task = CreateTask { files: vec![], run: Default::default(), project_id: atlas.id, employee_id: Some(employee_id), title: "Read".into(), goal: "Read what comes".into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let task = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id: atlas.id, employee_id: Some(employee_id), title: "Read".into(), goal: "Read what comes".into(), acceptance_criteria: vec![], depends_on: vec![] };
     desktop.execute(envelope(Command::CreateTask(task), None)).await.unwrap();
     let mut thread = None;
     for _ in 0..400 {
@@ -379,7 +379,7 @@ async fn paired_phone_uses_the_same_sessions_with_limits() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     let thread = thread.expect("the task's conversation");
-    let send_files = |files: Vec<String>| Command::SendEmployeeMessage(SendEmployeeMessage { employee_id, text: "Read this".into(), conversation_id: thread, images: Vec::new(), files, interrupt: false });
+    let send_files = |files: Vec<String>| Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id, text: "Read this".into(), conversation_id: thread, images: Vec::new(), files, interrupt: false });
     assert!(forbidden(command(&mut socket, 44, send_files(vec![host_file])).await), "no arbitrary host files as uploads");
     let uploaded = phone.upload(&token, "brief.md", b"# Brief".to_vec()).await;
     assert!(accepted(&command(&mut socket, 45, send_files(vec![uploaded["path"].as_str().unwrap().into()])).await));

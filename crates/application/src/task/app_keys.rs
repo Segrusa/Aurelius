@@ -163,6 +163,7 @@ mod tests {
 
     fn task(project_id: aurelius_domain::ProjectId, employee_id: Option<aurelius_domain::EmployeeId>, mode: Option<AgentMode>) -> Command {
         Command::CreateTask(CreateTask {
+            confirm_secret: false,
             project_id,
             employee_id,
             title: "From the app".into(),

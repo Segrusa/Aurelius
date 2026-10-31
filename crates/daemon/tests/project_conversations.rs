@@ -49,7 +49,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str) -> Employe
 }
 
 fn send(project_id: ProjectId, conversation_id: Option<ConversationId>, text: &str) -> SendProjectMessage {
-    SendProjectMessage { project_id, text: text.into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false, start: ChatStart::default() }
+    SendProjectMessage { confirm_secret: false, project_id, text: text.into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false, start: ChatStart::default() }
 }
 
 /// Wait until `count` answers in the conversation are complete.

@@ -18,7 +18,7 @@ fn setup() -> (tempfile::TempDir, CommandService, RunId) {
     let env = CommandEnvelope {
         command_id: CommandId::new(),
         expected_version: None,
-        command: Command::SendChatMessage(SendChatMessage { conversation_id: crate::tests::conversation(&service), text: "hoi".into(), images: Vec::new(), interrupt: false }),
+        command: Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: crate::tests::conversation(&service), text: "hoi".into(), images: Vec::new(), interrupt: false }),
     };
     let CommandResult::ChatMessageSent { run_id, .. } = service.execute(&ctx(), env).unwrap().receipt.result else { panic!() };
     // Running, so its job is claimed by the dispatcher.
@@ -142,6 +142,7 @@ fn questions_are_answered_once_and_kept_for_the_bridge() {
                 command_id: CommandId::new(),
                 expected_version: None,
                 command: Command::AnswerQuestion(aurelius_domain::approval::AnswerQuestion {
+                    confirm_secret: false,
                     approval_id,
                     answers: [("Which format?".to_string(), text.to_string())].into_iter().collect(),
                 }),
@@ -176,7 +177,7 @@ fn questions_are_answered_once_and_kept_for_the_bridge() {
         CommandEnvelope {
             command_id: CommandId::new(),
             expected_version: None,
-            command: Command::AnswerQuestion(aurelius_domain::approval::AnswerQuestion { approval_id: approval, answers: [("x".to_string(), "y".to_string())].into_iter().collect() }),
+            command: Command::AnswerQuestion(aurelius_domain::approval::AnswerQuestion { confirm_secret: false, approval_id: approval, answers: [("x".to_string(), "y".to_string())].into_iter().collect() }),
         },
     );
     assert!(other.is_err());
@@ -206,7 +207,7 @@ fn stopping_a_run_invalidates_its_open_approvals() {
     let answer = CommandEnvelope {
         command_id: CommandId::new(),
         expected_version: None,
-        command: Command::AnswerQuestion(aurelius_domain::approval::AnswerQuestion { approval_id: question, answers: [("Which format?".to_string(), "Summary".to_string())].into_iter().collect() }),
+        command: Command::AnswerQuestion(aurelius_domain::approval::AnswerQuestion { confirm_secret: false, approval_id: question, answers: [("Which format?".to_string(), "Summary".to_string())].into_iter().collect() }),
     };
     assert!(service.execute(&ctx(), answer).is_err(), "no longer pending");
     assert_eq!(status(), "cancelling", "a late decision does not revive the stopped run");
@@ -231,7 +232,7 @@ fn plans_are_decided_once_and_the_decision_is_kept_for_the_bridge() {
             CommandEnvelope {
                 command_id: CommandId::new(),
                 expected_version: None,
-                command: Command::DecidePlan(DecidePlan { approval_id, decision, feedback: feedback.map(str::to_owned) }),
+                command: Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id, decision, feedback: feedback.map(str::to_owned) }),
             },
         )
     };

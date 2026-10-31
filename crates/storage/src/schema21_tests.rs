@@ -41,8 +41,8 @@ fn phase_2_migrations_are_unchanged_and_21_rebuilds() {
         let m = migrate::MIGRATIONS.iter().find(|m| m.version == version).unwrap();
         assert_eq!(migrate::checksum(m.sql), sum, "migration {version} changed");
     }
-    let last = migrate::MIGRATIONS.last().unwrap();
-    assert_eq!((last.version, last.rebuild), (21, true));
+    let m21 = migrate::MIGRATIONS.iter().find(|m| m.version == 21).unwrap();
+    assert!(m21.rebuild);
 }
 
 /// A schema 20 database with two board members, two tickets (one each), a
@@ -91,7 +91,7 @@ fn a_phase_2_database_migrates_without_losing_anything() {
     };
     assert_eq!((tickets_before.len(), tasks_before.len()), (2, 2));
 
-    drop(Store::open(dir.path()).unwrap());
+    drop(Store::open_until(dir.path(), 21).unwrap());
     let conn = db(dir.path());
     assert_eq!(count(&conn, "SELECT MAX(version) FROM schema_migrations"), 21);
     assert!(strings(&conn, "SELECT \"table\" FROM pragma_foreign_key_check").is_empty());

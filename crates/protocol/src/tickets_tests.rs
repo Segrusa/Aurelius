@@ -13,6 +13,7 @@ use aurelius_domain::{BoardColumnId, Command, CommandId, EmployeeId, ProjectId, 
 
 fn create(mode: Option<AgentMode>) -> CreateTicket {
     CreateTicket {
+        confirm_secret: false,
         project_id: ProjectId::new(),
         title: "Login".into(),
         description: None,
@@ -31,14 +32,14 @@ fn writes() -> Vec<Command> {
     let t = TicketId::new();
     vec![
         Command::CreateTicket(create(None)),
-        Command::UpdateTicket(UpdateTicket { ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }),
+        Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }),
         Command::MoveTicket(MoveTicket { ticket_id: t, column_id: BoardColumnId::new(), before_ticket_id: None }),
         Command::StartTicket(StartTicket { ticket_id: t, employee_id: None }),
         Command::AssignTicket(AssignTicket { ticket_id: t, employee_id: Some(EmployeeId::new()), reason: None }),
         Command::ApprovePlan(ApprovePlan { ticket_id: t, decision: PlanApproval::Approve, feedback: None }),
-        Command::RevisePlan(RevisePlan { ticket_id: t, feedback: "f".into() }),
-        Command::AcceptTicket(AcceptTicket { ticket_id: t, note: None }),
-        Command::SendBackTicket(SendBackTicket { ticket_id: t, feedback: "f".into() }),
+        Command::RevisePlan(RevisePlan { confirm_secret: false, ticket_id: t, feedback: "f".into() }),
+        Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: t, note: None }),
+        Command::SendBackTicket(SendBackTicket { confirm_secret: false, ticket_id: t, feedback: "f".into() }),
         Command::CancelTicket(CancelTicket { ticket_id: t }),
         Command::ArchiveTicket(ArchiveTicket { ticket_id: t }),
         Command::UpdateBoardColumns(UpdateBoardColumns { columns: vec![BoardColumnEdit { column_id: BoardColumnId::new(), name: "Ideas".into() }] }),
@@ -135,7 +136,7 @@ fn a_move_with_the_old_position_is_refused_on_the_wire() {
 #[test]
 fn discussion_writes_travel_as_method_and_params() {
     let t = TicketId::new();
-    let post = Command::PostTicketMessage(PostTicketMessage { ticket_id: t, text: "@Ann can you look?".into(), images: vec![], files: vec![] });
+    let post = Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: t, text: "@Ann can you look?".into(), images: vec![], files: vec![] });
     let json = serde_json::to_value(WriteMethod::Domain(post.clone())).unwrap();
     assert_eq!(json["method"], "ticket.post");
     assert_eq!(serde_json::from_value::<WriteMethod>(json).unwrap(), WriteMethod::Domain(post));
@@ -144,7 +145,7 @@ fn discussion_writes_travel_as_method_and_params() {
     assert_eq!(json["method"], "ticket.retry_summary");
     assert_eq!(serde_json::from_value::<WriteMethod>(json).unwrap(), WriteMethod::Domain(retry));
     // A post is a chat (like `group_chat.send`); trying the summary again a ticket write.
-    assert_eq!(required(&Call::Write(WriteMethod::Domain(Command::PostTicketMessage(PostTicketMessage { ticket_id: t, text: "x".into(), images: vec![], files: vec![] })))), Needs::Cap(Capability::Chat));
+    assert_eq!(required(&Call::Write(WriteMethod::Domain(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: t, text: "x".into(), images: vec![], files: vec![] })))), Needs::Cap(Capability::Chat));
     assert_eq!(required(&Call::Write(WriteMethod::Domain(Command::RetryTicketSummary(RetryTicketSummary { ticket_id: t })))), Needs::Cap(Capability::TaskControl));
     // `from_message` is optional and left out when none.
     let made = serde_json::to_value(create(None)).unwrap();

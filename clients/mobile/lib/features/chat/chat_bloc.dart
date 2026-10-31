@@ -13,6 +13,7 @@ import '../../data/aurelius_repository.dart';
 import '../../data/commands.dart';
 import '../../data/discussion.dart';
 import '../../data/mode_memory.dart';
+import '../../data/vault.dart' show secretCheckNoSendAnyway;
 import '../../data/views.dart';
 
 sealed class ChatEvent {
@@ -173,6 +174,19 @@ class ChatNoticeShown extends ChatEvent {
   const ChatNoticeShown();
 }
 
+/// "Send anyway" after `looks_like_secret` (B10): send the message again with
+/// `confirm_secret`; the PC stores it with the value redacted.
+class ChatSecretConfirmed extends ChatEvent {
+  const ChatSecretConfirmed(this.localId);
+
+  final String localId;
+}
+
+/// The B10 question was answered or dismissed.
+class ChatSecretCheckShown extends ChatEvent {
+  const ChatSecretCheckShown();
+}
+
 /// An uploaded image waiting to go with the next message.
 class PendingImage extends Equatable {
   const PendingImage({required this.local, required this.path, required this.name});
@@ -203,7 +217,7 @@ class PendingFile extends Equatable {
 
 /// A message typed on this phone that the PC has not confirmed yet.
 class UnsentMessage extends Equatable {
-  const UnsentMessage({required this.localId, required this.idempotencyKey, required this.text, this.images = const [], this.files = const [], this.interrupt = false, this.failed = false, this.delivered = false});
+  const UnsentMessage({required this.localId, required this.idempotencyKey, required this.text, this.images = const [], this.files = const [], this.interrupt = false, this.failed = false, this.delivered = false, this.secretItems = const [], this.confirmSecret = false});
 
   final String localId;
   final String idempotencyKey;
@@ -218,12 +232,28 @@ class UnsentMessage extends Equatable {
   /// Committed on the PC; shown until the next snapshot contains it.
   final bool delivered;
 
-  UnsentMessage asFailed(bool value) => UnsentMessage(localId: localId, idempotencyKey: idempotencyKey, text: text, images: images, files: files, interrupt: interrupt, failed: value);
+  /// The PC refused it with `looks_like_secret` (B10): the names of the vault
+  /// items whose value it holds. Never a value.
+  final List<String> secretItems;
 
-  UnsentMessage asDelivered() => UnsentMessage(localId: localId, idempotencyKey: idempotencyKey, text: text, images: images, files: files, interrupt: interrupt, delivered: true);
+  /// The board member chose "Send anyway": it goes with `confirm_secret` and
+  /// the PC stores it with the value redacted.
+  final bool confirmSecret;
+
+  UnsentMessage asFailed(bool value) =>
+      UnsentMessage(localId: localId, idempotencyKey: idempotencyKey, text: text, images: images, files: files, interrupt: interrupt, failed: value, confirmSecret: confirmSecret);
+
+  UnsentMessage asDelivered() => UnsentMessage(localId: localId, idempotencyKey: idempotencyKey, text: text, images: images, files: files, interrupt: interrupt, delivered: true, confirmSecret: confirmSecret);
+
+  /// Refused as holding [items]' values; it waits for the board member's choice.
+  UnsentMessage asSecret(List<String> items) =>
+      UnsentMessage(localId: localId, idempotencyKey: idempotencyKey, text: text, images: images, files: files, interrupt: interrupt, failed: true, secretItems: items);
+
+  /// "Send anyway": a new idempotency key, since the request differs from the refused one.
+  UnsentMessage asConfirmed(String key) => UnsentMessage(localId: localId, idempotencyKey: key, text: text, images: images, files: files, interrupt: interrupt, confirmSecret: true);
 
   @override
-  List<Object?> get props => [localId, idempotencyKey, text, images, files, interrupt, failed, delivered];
+  List<Object?> get props => [localId, idempotencyKey, text, images, files, interrupt, failed, delivered, secretItems, confirmSecret];
 }
 
 class ChatState extends Equatable {
@@ -247,6 +277,7 @@ class ChatState extends Equatable {
     this.loadError,
     this.progress = const {},
     this.boardMembers = const [],
+    this.secretCheck,
   });
 
   final bool loading;
@@ -294,6 +325,10 @@ class ChatState extends Equatable {
   /// are marked, not woken). Empty elsewhere and when they could not be read.
   final List<String> boardMembers;
 
+  /// The unsent message whose `looks_like_secret` waits for the board
+  /// member's choice (B10): a one-off, like [notice].
+  final String? secretCheck;
+
   /// The run that is streaming now, if any.
   MessageView? get streaming {
     for (final m in messages.reversed) {
@@ -335,6 +370,7 @@ class ChatState extends Equatable {
     bool clearLoadError = false,
     Map<String, RunProgress>? progress,
     List<String>? boardMembers,
+    String? secretCheck,
   }) =>
       ChatState(
         loading: loading ?? this.loading,
@@ -356,10 +392,11 @@ class ChatState extends Equatable {
         loadError: clearLoadError ? null : loadError ?? this.loadError,
         progress: progress ?? this.progress,
         boardMembers: boardMembers ?? this.boardMembers,
+        secretCheck: secretCheck,
       );
 
   @override
-  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers];
+  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers, secretCheck];
 }
 
 /// One conversation: an employee's task conversation when [employeeId] is set
@@ -415,6 +452,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<ChatMessageSent>(_send, transformer: sequential());
     on<ChatUnsentRetried>(_retryUnsent, transformer: sequential());
     on<ChatUnsentDiscarded>(_discardUnsent);
+    on<ChatSecretConfirmed>(_confirmSecret, transformer: sequential());
+    on<ChatSecretCheckShown>((e, emit) => emit(state.copyWith()));
     on<ChatQueuedDeleted>(_deleteQueued);
     on<ChatQueuedSentNow>(_sendQueuedNow);
     on<ChatStopRequested>((e, emit) => _run(emit, Commands.stopRun(e.runId)));
@@ -707,11 +746,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     final files = [for (final f in unsent.files) f.path];
     final fresh = !group && employeeId == null && state.conversationId == null;
     final command = discussion
-        ? Commands.postTicketMessage(ticketId!, unsent.text, images: images, files: files)
+        ? Commands.postTicketMessage(ticketId!, unsent.text, images: images, files: files, confirmSecret: unsent.confirmSecret)
         : group
-        ? Commands.sendGroupMessage(unsent.text, images: images, files: files, channel: channel)
+        ? Commands.sendGroupMessage(unsent.text, images: images, files: files, channel: channel, confirmSecret: unsent.confirmSecret)
         : employeeId != null
-        ? Commands.sendEmployeeMessage(employeeId!, unsent.text, conversationId: state.conversationId!, images: images, files: files, interrupt: unsent.interrupt)
+        ? Commands.sendEmployeeMessage(employeeId!, unsent.text, conversationId: state.conversationId!, images: images, files: files, interrupt: unsent.interrupt, confirmSecret: unsent.confirmSecret)
         : Commands.sendProjectMessage(
             projectId!,
             unsent.text,
@@ -722,6 +761,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
             mode: fresh && state.mode != AgentMode.ask ? state.mode : null,
             browserAllowed: fresh && state.browserAllowed,
             screenAllowed: fresh && state.screenAllowed,
+            confirmSecret: unsent.confirmSecret,
           );
     try {
       final receipt = await _repository.write(command, idempotencyKey: unsent.idempotencyKey);
@@ -740,9 +780,28 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     } on NotSentException {
       emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asFailed(true) : u).toList()));
     } on ProtocolException catch (e) {
+      // Sent anyway and refused again (a value in an attached file): asking
+      // again would only loop (M-m5). It stays unsent, to change or discard.
+      if (e.looksLikeSecret && unsent.confirmSecret) {
+        emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asFailed(true) : u).toList(), notice: secretCheckNoSendAnyway));
+        return;
+      }
+      if (e.looksLikeSecret) {
+        // B10: nothing was stored; the board member chooses (only the names are shown).
+        emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asSecret(e.matchedItems) : u).toList(), secretCheck: unsent.localId));
+        return;
+      }
       // A server without the discussion engine (`unknown_method`): kept, to try again after an update.
       emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asFailed(true) : u).toList(), notice: discussion ? discussionPostFailure(e) : e.message));
     }
+  }
+
+  Future<void> _confirmSecret(ChatSecretConfirmed event, Emitter<ChatState> emit) async {
+    final unsent = state.unsent.where((u) => u.localId == event.localId).firstOrNull;
+    if (unsent == null) return;
+    final confirmed = unsent.asConfirmed(_uuid.v7());
+    emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? confirmed : u).toList()));
+    await _deliver(confirmed, emit);
   }
 
   Future<void> _discardUnsent(ChatUnsentDiscarded event, Emitter<ChatState> emit) async {

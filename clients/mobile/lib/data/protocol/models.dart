@@ -85,6 +85,7 @@ final class AddConnection {
 
 final class AddIdea {
   const AddIdea({
+    this.confirmSecret,
     this.files = const [],
     this.kind,
     this.note,
@@ -92,6 +93,9 @@ final class AddIdea {
     required this.title,
   });
 
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   /// Files on the server to attach (feature `idea_attachments`): copied into
   /// the project's uploads area, as with a task's `files`.
   final List<String> files;
@@ -101,6 +105,7 @@ final class AddIdea {
   final String title;
 
   factory AddIdea.fromJson(Map<String, dynamic> json) => AddIdea(
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     kind: (json['kind'] == null ? null : IdeaKind.fromJson(json['kind'] as String)),
     note: (json['note'] == null ? null : (json['note'] as String)),
@@ -109,6 +114,7 @@ final class AddIdea {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'files': files,
     if (kind != null) 'kind': kind?.toJson(),
     if (note != null) 'note': note,
@@ -321,19 +327,25 @@ final class AnswerQuestion {
   const AnswerQuestion({
     required this.answers,
     required this.approvalId,
+    this.confirmSecret,
   });
 
   final Map<String, String> answers;
   final String approvalId;
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
 
   factory AnswerQuestion.fromJson(Map<String, dynamic> json) => AnswerQuestion(
     answers: (json['answers'] as Map<String, dynamic>).map((k0, v0) => MapEntry(k0, (v0 as String))),
     approvalId: (json['approval_id'] as String),
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'answers': answers,
     'approval_id': approvalId,
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
   };
 }
 
@@ -418,11 +430,14 @@ enum AppAudience {
 final class AppError {
   const AppError({
     required this.code,
+    this.matchedItems = const [],
     required this.message,
     this.retryAfterMs,
   });
 
   final ErrorCode code;
+  /// `looks_like_secret`: the names of the vault items the text holds the value of.
+  final List<String> matchedItems;
   /// User-facing explanation.
   final String message;
   /// `too_many_attempts`: how long until the next try is taken.
@@ -430,12 +445,14 @@ final class AppError {
 
   factory AppError.fromJson(Map<String, dynamic> json) => AppError(
     code: ErrorCode.fromJson(json['code'] as String),
+    matchedItems: (json['matched_items'] == null ? const [] : (json['matched_items'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     message: (json['message'] as String),
     retryAfterMs: (json['retry_after_ms'] == null ? null : (json['retry_after_ms'] as num).toInt()),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'code': code.toJson(),
+    'matched_items': matchedItems,
     'message': message,
     if (retryAfterMs != null) 'retry_after_ms': retryAfterMs,
   };
@@ -1532,6 +1549,7 @@ sealed class Command {
     switch (tag) {
       case 'accept_ticket':
         return CommandAcceptTicket(
+          confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
           note: (json['note'] == null ? null : (json['note'] as String)),
           ticketId: (json['ticket_id'] as String),
         );
@@ -1581,6 +1599,7 @@ sealed class Command {
         return CommandCreateTaskSchedule(value: CreateTaskSchedule.fromJson(json as Map<String, dynamic>));
       case 'create_ticket':
         return CommandCreateTicket(
+          confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
           deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
           description: (json['description'] == null ? null : (json['description'] as String)),
           files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
@@ -1623,6 +1642,7 @@ sealed class Command {
         return CommandPinMemory(value: PinMemory.fromJson(json as Map<String, dynamic>));
       case 'post_ticket_message':
         return CommandPostTicketMessage(
+          confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
           files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           text: (json['text'] as String),
@@ -1648,6 +1668,7 @@ sealed class Command {
         return CommandReviseMemory(value: ReviseMemory.fromJson(json as Map<String, dynamic>));
       case 'revise_plan':
         return CommandRevisePlan(
+          confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
           feedback: (json['feedback'] as String),
           ticketId: (json['ticket_id'] as String),
         );
@@ -1657,6 +1678,7 @@ sealed class Command {
         return CommandRunTaskScheduleNow(value: RunTaskScheduleNow.fromJson(json as Map<String, dynamic>));
       case 'send_back_ticket':
         return CommandSendBackTicket(
+          confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
           feedback: (json['feedback'] as String),
           ticketId: (json['ticket_id'] as String),
         );
@@ -1734,6 +1756,7 @@ sealed class Command {
       case 'update_ticket':
         return CommandUpdateTicket(
           clearDeadline: (json['clear_deadline'] == null ? null : (json['clear_deadline'] as bool)),
+          confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
           deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
           description: (json['description'] == null ? null : (json['description'] as String)),
           labels: (json['labels'] == null ? null : (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
@@ -1759,16 +1782,21 @@ sealed class Command {
 /// Review → Done. Only a board member; only when no linked task still works (B6).
 final class CommandAcceptTicket extends Command {
   const CommandAcceptTicket({
+    this.confirmSecret,
     this.note,
     required this.ticketId,
   });
 
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final String? note;
   final String ticketId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'accept_ticket',
+      if (confirmSecret != null) 'confirm_secret': confirmSecret,
       if (note != null) 'note': note,
       'ticket_id': ticketId,
     };
@@ -2022,6 +2050,7 @@ final class CommandCreateTaskSchedule extends Command {
 /// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
 final class CommandCreateTicket extends Command {
   const CommandCreateTicket({
+    this.confirmSecret,
     this.deadlineMs,
     this.description,
     this.files = const [],
@@ -2035,6 +2064,9 @@ final class CommandCreateTicket extends Command {
     required this.title,
   });
 
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final int? deadlineMs;
   final String? description;
   /// Files to copy into the project's uploads area, as for a task.
@@ -2055,6 +2087,7 @@ final class CommandCreateTicket extends Command {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'create_ticket',
+      if (confirmSecret != null) 'confirm_secret': confirmSecret,
       if (deadlineMs != null) 'deadline_ms': deadlineMs,
       if (description != null) 'description': description,
       'files': files,
@@ -2258,12 +2291,16 @@ final class CommandPinMemory extends Command {
 /// employees. Refused on Done (the discussion is read-only there). Not for apps.
 final class CommandPostTicketMessage extends Command {
   const CommandPostTicketMessage({
+    this.confirmSecret,
     this.files = const [],
     this.images = const [],
     required this.text,
     required this.ticketId,
   });
 
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   /// Files of any type for the employees (host paths, or this device's upload inbox).
   final List<String> files;
   /// Images that belong to this message (see `SendChatMessage::images`).
@@ -2274,6 +2311,7 @@ final class CommandPostTicketMessage extends Command {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'post_ticket_message',
+      if (confirmSecret != null) 'confirm_secret': confirmSecret,
       'files': files,
       'images': images,
       'text': text,
@@ -2398,16 +2436,21 @@ final class CommandReviseMemory extends Command {
 /// Plan review → Doing in Plan mode: the owner makes a new plan with the feedback.
 final class CommandRevisePlan extends Command {
   const CommandRevisePlan({
+    this.confirmSecret,
     required this.feedback,
     required this.ticketId,
   });
 
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final String feedback;
   final String ticketId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'revise_plan',
+      if (confirmSecret != null) 'confirm_secret': confirmSecret,
       'feedback': feedback,
       'ticket_id': ticketId,
     };
@@ -2444,16 +2487,21 @@ final class CommandRunTaskScheduleNow extends Command {
 /// Review → Doing with feedback (required) for the owner.
 final class CommandSendBackTicket extends Command {
   const CommandSendBackTicket({
+    this.confirmSecret,
     required this.feedback,
     required this.ticketId,
   });
 
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final String feedback;
   final String ticketId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'send_back_ticket',
+      if (confirmSecret != null) 'confirm_secret': confirmSecret,
       'feedback': feedback,
       'ticket_id': ticketId,
     };
@@ -2925,6 +2973,7 @@ final class CommandUpdateTaskSchedule extends Command {
 final class CommandUpdateTicket extends Command {
   const CommandUpdateTicket({
     this.clearDeadline,
+    this.confirmSecret,
     this.deadlineMs,
     this.description,
     this.labels,
@@ -2935,6 +2984,9 @@ final class CommandUpdateTicket extends Command {
   });
 
   final bool? clearDeadline;
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final int? deadlineMs;
   /// An empty text clears it.
   final String? description;
@@ -2949,6 +3001,7 @@ final class CommandUpdateTicket extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'update_ticket',
       if (clearDeadline != null) 'clear_deadline': clearDeadline,
+      if (confirmSecret != null) 'confirm_secret': confirmSecret,
       if (deadlineMs != null) 'deadline_ms': deadlineMs,
       if (description != null) 'description': description,
       if (labels != null) 'labels': labels,
@@ -4803,6 +4856,7 @@ final class CreateProject {
 final class CreateTask {
   const CreateTask({
     this.acceptanceCriteria = const [],
+    this.confirmSecret,
     this.dependsOn = const [],
     this.employeeId,
     this.files = const [],
@@ -4813,6 +4867,9 @@ final class CreateTask {
   });
 
   final List<String> acceptanceCriteria;
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   /// Tasks that must succeed first.
   final List<String> dependsOn;
   /// Without an employee the task stays a draft.
@@ -4829,6 +4886,7 @@ final class CreateTask {
 
   factory CreateTask.fromJson(Map<String, dynamic> json) => CreateTask(
     acceptanceCriteria: (json['acceptance_criteria'] == null ? const [] : (json['acceptance_criteria'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     dependsOn: (json['depends_on'] == null ? const [] : (json['depends_on'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
@@ -4840,6 +4898,7 @@ final class CreateTask {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'acceptance_criteria': acceptanceCriteria,
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'depends_on': dependsOn,
     if (employeeId != null) 'employee_id': employeeId,
     'files': files,
@@ -4854,6 +4913,7 @@ final class CreateTask {
 final class CreateTaskSchedule {
   const CreateTaskSchedule({
     this.acceptanceCriteria = const [],
+    this.confirmSecret,
     required this.employeeId,
     this.files = const [],
     required this.goal,
@@ -4865,6 +4925,9 @@ final class CreateTaskSchedule {
   });
 
   final List<String> acceptanceCriteria;
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final String employeeId;
   /// Files to attach to every task made from it (host paths, or this
   /// device's upload inbox); copied when the schedule is saved.
@@ -4881,6 +4944,7 @@ final class CreateTaskSchedule {
 
   factory CreateTaskSchedule.fromJson(Map<String, dynamic> json) => CreateTaskSchedule(
     acceptanceCriteria: (json['acceptance_criteria'] == null ? const [] : (json['acceptance_criteria'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     employeeId: (json['employee_id'] as String),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     goal: (json['goal'] as String),
@@ -4893,6 +4957,7 @@ final class CreateTaskSchedule {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'acceptance_criteria': acceptanceCriteria,
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'employee_id': employeeId,
     'files': files,
     'goal': goal,
@@ -4961,22 +5026,28 @@ final class DecideMemory {
 final class DecidePlan {
   const DecidePlan({
     required this.approvalId,
+    this.confirmSecret,
     required this.decision,
     this.feedback,
   });
 
   final String approvalId;
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final PlanDecision decision;
   final String? feedback;
 
   factory DecidePlan.fromJson(Map<String, dynamic> json) => DecidePlan(
     approvalId: (json['approval_id'] as String),
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     decision: PlanDecision.fromJson(json['decision'] as String),
     feedback: (json['feedback'] == null ? null : (json['feedback'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'approval_id': approvalId,
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'decision': decision.toJson(),
     if (feedback != null) 'feedback': feedback,
   };
@@ -5426,6 +5497,11 @@ enum ErrorCode {
   invalidUsername('invalid_username'),
   /// `user.disable`: the last active board member cannot be disabled.
   lastBoardMember('last_board_member'),
+  /// A board member's message (an employee's chat, `ticket.post`, the Team
+  /// chat) holds the value of a vault secret (B10): nothing was stored.
+  /// `AppError::matched_items` names the items (never a value); send again
+  /// with `confirm_secret` to store it with the value redacted.
+  looksLikeSecret('looks_like_secret'),
   notFound('not_found'),
   /// The session's board member signed in with a temporary password (set by
   /// another board member): only `user.set_password` (own), `user.logout`,
@@ -5445,6 +5521,12 @@ enum ErrorCode {
   /// `user.create`: another board member has this name (case does not count).
   usernameTaken('username_taken'),
   validation('validation'),
+  /// `vault.update`: a secret stays a secret and nothing becomes one (B7);
+  /// make a new item and archive the old one. Text and url may trade places.
+  vaultKindLocked('vault_kind_locked'),
+  /// `vault.reveal` / `vault.key_export`: the server's vault key is missing or
+  /// does not fit this value (a restore without the key, MU4-04 AC3).
+  vaultUndecryptable('vault_undecryptable'),
   versionConflict('version_conflict'),
   /// `user.create` / `user.set_password`: the password is shorter than 12 characters.
   weakPassword('weak_password'),
@@ -5624,6 +5706,9 @@ enum EventKind {
   ticketUpdated('ticket.updated'),
   userCreated('user.created'),
   userDisabled('user.disabled'),
+  vaultItemArchived('vault.item_archived'),
+  vaultItemCreated('vault.item_created'),
+  vaultItemUpdated('vault.item_updated'),
   wakeRequested('wake.requested');
 
   const EventKind(this.wire);
@@ -6300,6 +6385,8 @@ sealed class HostResult {
         return HostResultUser(value: UserView.fromJson(json as Map<String, dynamic>));
       case 'variants_setting':
         return HostResultVariantsSetting(value: VariantsSetting.fromJson(json as Map<String, dynamic>));
+      case 'vault_item':
+        return HostResultVaultItem(value: VaultItemView.fromJson(json as Map<String, dynamic>));
       default:
         throw FormatException('Unknown HostResult type: $tag');
     }
@@ -6759,6 +6846,22 @@ final class HostResultVariantsSetting extends HostResult {
     };
 }
 
+/// `vault.create` / `vault.update` / `vault.archive`: the item as it is now.
+/// A replayed receipt has no value: read it with `vault.list` or `vault.reveal`.
+final class HostResultVaultItem extends HostResult {
+  const HostResultVaultItem({
+    required this.value,
+  });
+
+  final VaultItemView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'vault_item',
+      ...value.toJson(),
+    };
+}
+
 /// Writes only the host can do. Secrets in parameters are never printed.
 sealed class HostWrite {
   const HostWrite();
@@ -7122,6 +7225,17 @@ sealed class HostWrite {
           enabled: (src['enabled'] as bool),
         );
         }
+      case 'vault.archive':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteVaultArchive(
+          itemId: (src['item_id'] as String),
+        );
+        }
+      case 'vault.create':
+        return HostWriteVaultCreate(params: VaultCreateParams.fromJson(json['params'] as Map<String, dynamic>));
+      case 'vault.update':
+        return HostWriteVaultUpdate(params: VaultUpdateParams.fromJson(json['params'] as Map<String, dynamic>));
       default:
         throw FormatException('Unknown HostWrite method: $tag');
     }
@@ -8158,6 +8272,65 @@ final class HostWriteVariantsSetEnabled extends HostWrite {
     };
 }
 
+/// Archive ("Delete") an item: runs and employees no longer get it; its audit
+/// history stays. Answers `VaultItem`. Not for apps.
+final class HostWriteVaultArchive extends HostWrite {
+  const HostWriteVaultArchive({
+    required this.itemId,
+  });
+
+  final String itemId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'vault.archive',
+      'params': <String, dynamic>{
+      'item_id': itemId,
+    },
+    };
+}
+
+/// A new vault item (feature `vault`), in the company (no `project_id`) or a
+/// project. Answers `VaultItem` (`value` only for text/url). The server
+/// encrypts the value before anything is recorded: the receipt, its request
+/// hash and the event `vault.item_created` hold no value (MU4-05 AC2).
+/// `validation` for a name or env name used in the scope, an env name that
+/// is not UPPER_SNAKE or that the runtime reserves (`PATH`, `ANTHROPIC_*`,
+/// …), a url without `https://`/`http://`, a secret under 8 characters.
+/// Board members with a session only (employees and agent tools never); not for apps.
+final class HostWriteVaultCreate extends HostWrite {
+  const HostWriteVaultCreate({
+    required this.params,
+  });
+
+  final VaultCreateParams params;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'vault.create',
+      'params': params.toJson(),
+    };
+}
+
+/// Change an item; what is left out stays. `value`: a new value (a secret's
+/// is never sent back to the editor, so "leave empty to keep"). `kind` only
+/// between text and url: to or from secret is `vault_kind_locked` (B7).
+/// With `expected_version` in the envelope a stale edit is `version_conflict`.
+/// Answers `VaultItem`. As `vault.create`: no value in receipt, hash or event.
+final class HostWriteVaultUpdate extends HostWrite {
+  const HostWriteVaultUpdate({
+    required this.params,
+  });
+
+  final VaultUpdateParams params;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'vault.update',
+      'params': params.toJson(),
+    };
+}
+
 /// What an idea is about: something new or better, or something broken.
 enum IdeaKind {
   bug('bug'),
@@ -8383,6 +8556,24 @@ final class JobsSnapshot {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'as_of_seq': asOfSeq,
     'jobs': jobs.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// `vault.key_export`. The password is never printed.
+final class KeyExportParams {
+  const KeyExportParams({
+    required this.password,
+  });
+
+  /// The signed-in board member's own password, asked again.
+  final String password;
+
+  factory KeyExportParams.fromJson(Map<String, dynamic> json) => KeyExportParams(
+    password: (json['password'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'password': password,
   };
 }
 
@@ -10087,6 +10278,34 @@ sealed class Method {
         return const MethodUserWhoami();
       case 'variants.get_setting':
         return const MethodVariantsGetSetting();
+      case 'vault.audit':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodVaultAudit(
+          all: (src['all'] == null ? null : (src['all'] as bool)),
+          before: (src['before'] == null ? null : (src['before'] as num).toInt()),
+          itemId: (src['item_id'] == null ? null : (src['item_id'] as String)),
+          limit: (src['limit'] == null ? null : (src['limit'] as num).toInt()),
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
+      case 'vault.key_export':
+        return MethodVaultKeyExport(params: KeyExportParams.fromJson(json['params'] as Map<String, dynamic>));
+      case 'vault.list':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodVaultList(
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
+      case 'vault.reveal':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodVaultReveal(
+          itemId: (src['item_id'] as String),
+          purpose: RevealPurpose.fromJson(src['purpose'] as String),
+        );
+        }
       default:
         throw FormatException('Unknown Method method: $tag');
     }
@@ -11391,6 +11610,101 @@ final class MethodVariantsGetSetting extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'variants.get_setting',
+    };
+}
+
+/// The audit log, newest first (`VaultAuditPage`): the company's (nothing
+/// given), a project's, or every scope's (`all`); one item's with `item_id`.
+/// `before`: rows older than that row id; `limit` at most 200 (default 50).
+/// Never a value. Not for apps.
+final class MethodVaultAudit extends Method {
+  const MethodVaultAudit({
+    this.all,
+    this.before,
+    this.itemId,
+    this.limit,
+    this.projectId,
+  });
+
+  final bool? all;
+  final int? before;
+  final String? itemId;
+  final int? limit;
+  final String? projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'vault.audit',
+      'params': <String, dynamic>{
+      if (all != null) 'all': all,
+      if (before != null) 'before': before,
+      if (itemId != null) 'item_id': itemId,
+      if (limit != null) 'limit': limit,
+      if (projectId != null) 'project_id': projectId,
+    },
+    };
+}
+
+/// The server's vault key (`VaultKeyExport`, never printed), for a restore on
+/// another machine (B8): a board member with a session that needs no new
+/// password, who gives their password again (`wrong_password`; it counts
+/// for the sign-in limits, `too_many_attempts`). Writes an audit row
+/// `key_export` and tells every board member. Not found before the first
+/// item. Not for apps.
+final class MethodVaultKeyExport extends Method {
+  const MethodVaultKeyExport({
+    required this.params,
+  });
+
+  final KeyExportParams params;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'vault.key_export',
+      'params': params.toJson(),
+    };
+}
+
+/// The vault of a scope (feature `vault`): none, the company's items; a
+/// project, its items plus the company's apart (`VaultList::company_items`),
+/// with `overrides_company` on a project item whose env name the company
+/// has too, and the item count of every scope. Never a secret's value.
+/// Archived items are left out. Board members only; not for apps (B5).
+final class MethodVaultList extends Method {
+  const MethodVaultList({
+    this.projectId,
+  });
+
+  final String? projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'vault.list',
+      'params': <String, dynamic>{
+      if (projectId != null) 'project_id': projectId,
+    },
+    };
+}
+
+/// One item's value (`VaultValue`, never printed), for a board member with a
+/// session. Writes an audit row `reveal` (show) or `copy` with the session's
+/// device. `vault_undecryptable` when the key does not fit. Not for apps.
+final class MethodVaultReveal extends Method {
+  const MethodVaultReveal({
+    required this.itemId,
+    required this.purpose,
+  });
+
+  final String itemId;
+  final RevealPurpose purpose;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'vault.reveal',
+      'params': <String, dynamic>{
+      'item_id': itemId,
+      'purpose': purpose.toJson(),
+    },
     };
 }
 
@@ -13007,6 +13321,14 @@ sealed class ResponseBody {
         return ResponseBodyUsers(value: UsersSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'variants_setting':
         return ResponseBodyVariantsSetting(value: VariantsSetting.fromJson(json['value'] as Map<String, dynamic>));
+      case 'vault':
+        return ResponseBodyVault(value: VaultList.fromJson(json['value'] as Map<String, dynamic>));
+      case 'vault_audit':
+        return ResponseBodyVaultAudit(value: VaultAuditPage.fromJson(json['value'] as Map<String, dynamic>));
+      case 'vault_key':
+        return ResponseBodyVaultKey(value: VaultKeyExport.fromJson(json['value'] as Map<String, dynamic>));
+      case 'vault_value':
+        return ResponseBodyVaultValue(value: VaultValue.fromJson(json['value'] as Map<String, dynamic>));
       case 'who_am_i':
         return ResponseBodyWhoAmI(value: WhoAmI.fromJson(json['value'] as Map<String, dynamic>));
       default:
@@ -14132,6 +14454,66 @@ final class ResponseBodyVariantsSetting extends ResponseBody {
     };
 }
 
+/// `vault.list`.
+final class ResponseBodyVault extends ResponseBody {
+  const ResponseBodyVault({
+    required this.value,
+  });
+
+  final VaultList value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'vault',
+      'value': value.toJson(),
+    };
+}
+
+/// `vault.audit`.
+final class ResponseBodyVaultAudit extends ResponseBody {
+  const ResponseBodyVaultAudit({
+    required this.value,
+  });
+
+  final VaultAuditPage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'vault_audit',
+      'value': value.toJson(),
+    };
+}
+
+/// `vault.key_export`: never printed.
+final class ResponseBodyVaultKey extends ResponseBody {
+  const ResponseBodyVaultKey({
+    required this.value,
+  });
+
+  final VaultKeyExport value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'vault_key',
+      'value': value.toJson(),
+    };
+}
+
+/// `vault.reveal`: never printed.
+final class ResponseBodyVaultValue extends ResponseBody {
+  const ResponseBodyVaultValue({
+    required this.value,
+  });
+
+  final VaultValue value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'vault_value',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodyWhoAmI extends ResponseBody {
   const ResponseBodyWhoAmI({
     required this.value,
@@ -14189,6 +14571,23 @@ final class RetryReply {
     'conversation_id': conversationId,
     'user_message_id': userMessageId,
   };
+}
+
+/// Why `vault.reveal` is asked: written to the audit log as `reveal` or `copy`.
+enum RevealPurpose {
+  copy('copy'),
+  show('show');
+
+  const RevealPurpose(this.wire);
+
+  final String wire;
+
+  static RevealPurpose fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown RevealPurpose value: $value'),
+      );
+
+  String toJson() => wire;
 }
 
 /// Replace the content with a new version; the old one is superseded, not erased.
@@ -14402,12 +14801,16 @@ final class RunTrace {
 /// there are no standalone chats any more, so the conversation is required).
 final class SendChatMessage {
   const SendChatMessage({
+    this.confirmSecret,
     required this.conversationId,
     this.images = const [],
     this.interrupt,
     required this.text,
   });
 
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final String conversationId;
   /// Images that belong to this message: files on the server (a remote
   /// device's own uploads), kept with the message.
@@ -14418,6 +14821,7 @@ final class SendChatMessage {
   final String text;
 
   factory SendChatMessage.fromJson(Map<String, dynamic> json) => SendChatMessage(
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     conversationId: (json['conversation_id'] as String),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     interrupt: (json['interrupt'] == null ? null : (json['interrupt'] as bool)),
@@ -14425,6 +14829,7 @@ final class SendChatMessage {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'conversation_id': conversationId,
     'images': images,
     if (interrupt != null) 'interrupt': interrupt,
@@ -14434,6 +14839,7 @@ final class SendChatMessage {
 
 final class SendEmployeeMessage {
   const SendEmployeeMessage({
+    this.confirmSecret,
     required this.conversationId,
     required this.employeeId,
     this.files = const [],
@@ -14442,6 +14848,9 @@ final class SendEmployeeMessage {
     required this.text,
   });
 
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   /// The conversation the message goes to: one of its tasks' conversations,
   /// or its persistent chat (`EmployeeSummary::conversation_id`).
   final String conversationId;
@@ -14456,6 +14865,7 @@ final class SendEmployeeMessage {
   final String text;
 
   factory SendEmployeeMessage.fromJson(Map<String, dynamic> json) => SendEmployeeMessage(
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     conversationId: (json['conversation_id'] as String),
     employeeId: (json['employee_id'] as String),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
@@ -14465,6 +14875,7 @@ final class SendEmployeeMessage {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'conversation_id': conversationId,
     'employee_id': employeeId,
     'files': files,
@@ -14478,6 +14889,7 @@ final class SendEmployeeMessage {
 final class SendGroupMessage {
   const SendGroupMessage({
     this.channel,
+    this.confirmSecret,
     this.files = const [],
     this.images = const [],
     required this.text,
@@ -14485,6 +14897,9 @@ final class SendGroupMessage {
 
   /// The channel (feature `team_channels`): a project's, or none for the general one.
   final String? channel;
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   /// Files of any type for the employees (host paths, or this device's upload inbox).
   final List<String> files;
   /// Images that belong to this message (see `SendChatMessage::images`).
@@ -14493,6 +14908,7 @@ final class SendGroupMessage {
 
   factory SendGroupMessage.fromJson(Map<String, dynamic> json) => SendGroupMessage(
     channel: (json['channel'] == null ? null : (json['channel'] as String)),
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     text: (json['text'] as String),
@@ -14500,6 +14916,7 @@ final class SendGroupMessage {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (channel != null) 'channel': channel,
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'files': files,
     'images': images,
     'text': text,
@@ -14513,6 +14930,7 @@ final class SendProjectMessage {
   const SendProjectMessage({
     this.agentMode,
     this.browserAllowed,
+    this.confirmSecret,
     this.conversationId,
     this.files = const [],
     this.images = const [],
@@ -14524,6 +14942,9 @@ final class SendProjectMessage {
 
   final AgentMode? agentMode;
   final bool? browserAllowed;
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final String? conversationId;
   /// Files of any type to copy into the project folder (under
   /// `.aurelius/uploads/`): host paths, or this device's upload inbox.
@@ -14539,6 +14960,7 @@ final class SendProjectMessage {
   factory SendProjectMessage.fromJson(Map<String, dynamic> json) => SendProjectMessage(
     agentMode: (json['agent_mode'] == null ? null : AgentMode.fromJson(json['agent_mode'] as String)),
     browserAllowed: (json['browser_allowed'] == null ? null : (json['browser_allowed'] as bool)),
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
@@ -14551,6 +14973,7 @@ final class SendProjectMessage {
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (agentMode != null) 'agent_mode': agentMode?.toJson(),
     if (browserAllowed != null) 'browser_allowed': browserAllowed,
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     if (conversationId != null) 'conversation_id': conversationId,
     'files': files,
     'images': images,
@@ -17195,6 +17618,7 @@ final class UpdateEmployee {
 final class UpdateIdea {
   const UpdateIdea({
     this.addFiles = const [],
+    this.confirmSecret,
     required this.ideaId,
     this.kind,
     this.note,
@@ -17204,6 +17628,9 @@ final class UpdateIdea {
 
   /// Files on the server to attach next to the ones the idea has.
   final List<String> addFiles;
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final String ideaId;
   /// None keeps the idea's kind (older clients).
   final IdeaKind? kind;
@@ -17214,6 +17641,7 @@ final class UpdateIdea {
 
   factory UpdateIdea.fromJson(Map<String, dynamic> json) => UpdateIdea(
     addFiles: (json['add_files'] == null ? const [] : (json['add_files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     ideaId: (json['idea_id'] as String),
     kind: (json['kind'] == null ? null : IdeaKind.fromJson(json['kind'] as String)),
     note: (json['note'] == null ? null : (json['note'] as String)),
@@ -17223,6 +17651,7 @@ final class UpdateIdea {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'add_files': addFiles,
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'idea_id': ideaId,
     if (kind != null) 'kind': kind?.toJson(),
     if (note != null) 'note': note,
@@ -17315,6 +17744,7 @@ final class UpdateTaskSchedule {
   const UpdateTaskSchedule({
     this.acceptanceCriteria = const [],
     this.addFiles = const [],
+    this.confirmSecret,
     required this.employeeId,
     required this.goal,
     required this.recurrence,
@@ -17327,6 +17757,9 @@ final class UpdateTaskSchedule {
   final List<String> acceptanceCriteria;
   /// New files to attach (as `CreateTaskSchedule::files`).
   final List<String> addFiles;
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
   final String employeeId;
   final String goal;
   final Recurrence recurrence;
@@ -17339,6 +17772,7 @@ final class UpdateTaskSchedule {
   factory UpdateTaskSchedule.fromJson(Map<String, dynamic> json) => UpdateTaskSchedule(
     acceptanceCriteria: (json['acceptance_criteria'] == null ? const [] : (json['acceptance_criteria'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     addFiles: (json['add_files'] == null ? const [] : (json['add_files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     employeeId: (json['employee_id'] as String),
     goal: (json['goal'] as String),
     recurrence: Recurrence.fromJson(json['recurrence'] as Map<String, dynamic>),
@@ -17351,6 +17785,7 @@ final class UpdateTaskSchedule {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'acceptance_criteria': acceptanceCriteria,
     'add_files': addFiles,
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'employee_id': employeeId,
     'goal': goal,
     'recurrence': recurrence.toJson(),
@@ -17673,6 +18108,27 @@ final class UserCreateParams {
   };
 }
 
+/// A board member as an item or an audit row names them.
+final class UserRef {
+  const UserRef({
+    required this.id,
+    required this.username,
+  });
+
+  final String id;
+  final String username;
+
+  factory UserRef.fromJson(Map<String, dynamic> json) => UserRef(
+    id: (json['id'] as String),
+    username: (json['username'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'username': username,
+  };
+}
+
 /// A board member as every client sees it; never the password's hash.
 final class UserView {
   const UserView({
@@ -17799,6 +18255,461 @@ final class VariantsSetting {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'enabled': enabled,
     'max_variants': maxVariants,
+  };
+}
+
+/// Who did it: a board member (on a device), or an employee in a run.
+sealed class VaultActor {
+  const VaultActor();
+
+  factory VaultActor.fromJson(Map<String, dynamic> json) {
+    final tag = json['type'] as String;
+    switch (tag) {
+      case 'board_member':
+        return VaultActorBoardMember(
+          user: UserRef.fromJson(json['user'] as Map<String, dynamic>),
+        );
+      case 'employee':
+        return VaultActorEmployee(
+          employeeId: (json['employee_id'] as String),
+          name: (json['name'] as String),
+          runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
+          taskId: (json['task_id'] == null ? null : (json['task_id'] as String)),
+          ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+        );
+      default:
+        throw FormatException('Unknown VaultActor type: $tag');
+    }
+  }
+
+  Map<String, dynamic> toJson();
+}
+
+final class VaultActorBoardMember extends VaultActor {
+  const VaultActorBoardMember({
+    required this.user,
+  });
+
+  final UserRef user;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'board_member',
+      'user': user.toJson(),
+    };
+}
+
+final class VaultActorEmployee extends VaultActor {
+  const VaultActorEmployee({
+    required this.employeeId,
+    required this.name,
+    this.runId,
+    this.taskId,
+    this.ticketId,
+  });
+
+  final String employeeId;
+  final String name;
+  final String? runId;
+  final String? taskId;
+  final String? ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee',
+      'employee_id': employeeId,
+      'name': name,
+      if (runId != null) 'run_id': runId,
+      if (taskId != null) 'task_id': taskId,
+      if (ticketId != null) 'ticket_id': ticketId,
+    };
+}
+
+/// What an audit row records. Never a value, also not an old or a new one.
+enum VaultAuditAction {
+  archive('archive'),
+  /// A board member copied it (`vault.reveal` copy).
+  copy('copy'),
+  create('create'),
+  /// A run got it as an environment variable (one row per run and item).
+  deliver('deliver'),
+  /// Name, env name, description or kind (`changed_fields`).
+  edit('edit'),
+  /// A board member exported the vault key (no item).
+  keyExport('key_export'),
+  /// A new value (for a secret: "Replaced").
+  replace('replace'),
+  /// A board member showed the value (`vault.reveal` show).
+  reveal('reveal'),
+  /// A run read a text or url with `vault_read`.
+  toolRead('tool_read');
+
+  const VaultAuditAction(this.wire);
+
+  final String wire;
+
+  static VaultAuditAction fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown VaultAuditAction value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
+/// `vault.audit`: newest first.
+final class VaultAuditPage {
+  const VaultAuditPage({
+    required this.more,
+    required this.rows,
+  });
+
+  /// Older rows exist: ask again with `before` = the last row's id.
+  final bool more;
+  final List<VaultAuditRow> rows;
+
+  factory VaultAuditPage.fromJson(Map<String, dynamic> json) => VaultAuditPage(
+    more: (json['more'] as bool),
+    rows: (json['rows'] as List<dynamic>).map((x0) => VaultAuditRow.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'more': more,
+    'rows': rows.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// One row of the audit log (append-only).
+final class VaultAuditRow {
+  const VaultAuditRow({
+    required this.action,
+    required this.actor,
+    required this.atMs,
+    this.changedFields = const [],
+    required this.id,
+    this.itemId,
+    this.itemName,
+    this.projectId,
+    this.via,
+  });
+
+  final VaultAuditAction action;
+  final VaultActor actor;
+  final int atMs;
+  /// `edit`: which fields changed (`name`, `env_name`, `description`, `kind`); never their values.
+  final List<String> changedFields;
+  /// Newest is highest; `vault.audit { before }` pages on it.
+  final int id;
+  /// None: a key export.
+  final String? itemId;
+  /// The item's name at the time (also for an archived item).
+  final String? itemName;
+  /// The item's scope; none: the company (or a key export).
+  final String? projectId;
+  /// The board member's device (the session's name, "Desktop · dev-laptop").
+  final String? via;
+
+  factory VaultAuditRow.fromJson(Map<String, dynamic> json) => VaultAuditRow(
+    action: VaultAuditAction.fromJson(json['action'] as String),
+    actor: VaultActor.fromJson(json['actor'] as Map<String, dynamic>),
+    atMs: (json['at_ms'] as num).toInt(),
+    changedFields: (json['changed_fields'] == null ? const [] : (json['changed_fields'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    id: (json['id'] as num).toInt(),
+    itemId: (json['item_id'] == null ? null : (json['item_id'] as String)),
+    itemName: (json['item_name'] == null ? null : (json['item_name'] as String)),
+    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+    via: (json['via'] == null ? null : (json['via'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'action': action.toJson(),
+    'actor': actor.toJson(),
+    'at_ms': atMs,
+    'changed_fields': changedFields,
+    'id': id,
+    if (itemId != null) 'item_id': itemId,
+    if (itemName != null) 'item_name': itemName,
+    if (projectId != null) 'project_id': projectId,
+    if (via != null) 'via': via,
+  };
+}
+
+/// `vault.create`. The value is never printed.
+final class VaultCreateParams {
+  const VaultCreateParams({
+    this.description,
+    required this.envName,
+    required this.kind,
+    required this.name,
+    this.projectId,
+    required this.value,
+  });
+
+  final String? description;
+  final String envName;
+  final VaultKind kind;
+  final String name;
+  /// None: the company's.
+  final String? projectId;
+  final String value;
+
+  factory VaultCreateParams.fromJson(Map<String, dynamic> json) => VaultCreateParams(
+    description: (json['description'] == null ? null : (json['description'] as String)),
+    envName: (json['env_name'] as String),
+    kind: VaultKind.fromJson(json['kind'] as String),
+    name: (json['name'] as String),
+    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+    value: (json['value'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (description != null) 'description': description,
+    'env_name': envName,
+    'kind': kind.toJson(),
+    'name': name,
+    if (projectId != null) 'project_id': projectId,
+    'value': value,
+  };
+}
+
+/// One item as every client sees it.
+final class VaultItemView {
+  const VaultItemView({
+    required this.createdAtMs,
+    required this.createdBy,
+    this.description,
+    required this.envName,
+    required this.id,
+    required this.kind,
+    required this.name,
+    this.overridesCompany,
+    this.projectId,
+    this.undecryptable,
+    required this.updatedAtMs,
+    required this.updatedBy,
+    this.value,
+    required this.version,
+  });
+
+  final int createdAtMs;
+  final UserRef createdBy;
+  final String? description;
+  /// How a run gets it (UPPER_SNAKE, unique in the scope): the environment
+  /// variable, and the name in the vault tools.
+  final String envName;
+  final String id;
+  final VaultKind kind;
+  final String name;
+  /// A project item whose env name a company item has too: in runs of the
+  /// project this one wins (pill "overrides Company", B4).
+  final bool? overridesCompany;
+  /// None: the company's.
+  final String? projectId;
+  /// The server's vault key is missing or does not fit this value (a restore
+  /// on another machine without the key, MU4-04 AC3): the client shows
+  /// "Cannot be decrypted" instead of a value. The rest still works.
+  final bool? undecryptable;
+  final int updatedAtMs;
+  final UserRef updatedBy;
+  /// The value of a text or url item; never a secret's (`vault.reveal`), and
+  /// none when it cannot be decrypted.
+  final String? value;
+  /// Goes up with every change (the envelope's `expected_version`).
+  final int version;
+
+  factory VaultItemView.fromJson(Map<String, dynamic> json) => VaultItemView(
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    createdBy: UserRef.fromJson(json['created_by'] as Map<String, dynamic>),
+    description: (json['description'] == null ? null : (json['description'] as String)),
+    envName: (json['env_name'] as String),
+    id: (json['id'] as String),
+    kind: VaultKind.fromJson(json['kind'] as String),
+    name: (json['name'] as String),
+    overridesCompany: (json['overrides_company'] == null ? null : (json['overrides_company'] as bool)),
+    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+    undecryptable: (json['undecryptable'] == null ? null : (json['undecryptable'] as bool)),
+    updatedAtMs: (json['updated_at_ms'] as num).toInt(),
+    updatedBy: UserRef.fromJson(json['updated_by'] as Map<String, dynamic>),
+    value: (json['value'] == null ? null : (json['value'] as String)),
+    version: (json['version'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'created_at_ms': createdAtMs,
+    'created_by': createdBy.toJson(),
+    if (description != null) 'description': description,
+    'env_name': envName,
+    'id': id,
+    'kind': kind.toJson(),
+    'name': name,
+    if (overridesCompany != null) 'overrides_company': overridesCompany,
+    if (projectId != null) 'project_id': projectId,
+    if (undecryptable != null) 'undecryptable': undecryptable,
+    'updated_at_ms': updatedAtMs,
+    'updated_by': updatedBy.toJson(),
+    if (value != null) 'value': value,
+    'version': version,
+  };
+}
+
+/// `vault.key_export`: the server's vault key, to keep apart (a restore on
+/// another machine needs it, B8). Never printed.
+final class VaultKeyExport {
+  const VaultKeyExport({
+    required this.key,
+    required this.keyId,
+  });
+
+  /// The key as one line: `aurelius-vault-key:v1:<env>:<key_id>:<base64url>`
+  /// (`<env>` `dev` or `prod`, the 32 bytes in base64url without padding).
+  /// What `aurelius-daemon vault-key import` reads.
+  final String key;
+  /// The key's fingerprint: what `aurelius-daemon vault-key import` checks
+  /// against the stored values.
+  final String keyId;
+
+  factory VaultKeyExport.fromJson(Map<String, dynamic> json) => VaultKeyExport(
+    key: (json['key'] as String),
+    keyId: (json['key_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'key': key,
+    'key_id': keyId,
+  };
+}
+
+/// What an item holds. Text and url may change into each other; a secret stays
+/// a secret, and nothing becomes one (`vault_kind_locked`, B7).
+enum VaultKind {
+  /// Masked everywhere; reaches runs only as an environment variable.
+  secret('secret'),
+  text('text'),
+  /// `https://` or `http://`.
+  url('url');
+
+  const VaultKind(this.wire);
+
+  final String wire;
+
+  static VaultKind fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown VaultKind value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
+/// `vault.list`: the items of the scope asked for (by name), and for a project
+/// the company's apart (a run of the project gets those too, MU4-02 AC1).
+final class VaultList {
+  const VaultList({
+    this.companyItems = const [],
+    this.counts = const [],
+    required this.items,
+    this.projectId,
+  });
+
+  /// For a project: the company's items (empty for the company itself).
+  final List<VaultItemView> companyItems;
+  /// Every scope that has items, the company first (zero items included for it).
+  final List<VaultScopeCount> counts;
+  final List<VaultItemView> items;
+  /// The scope asked for; none: the company.
+  final String? projectId;
+
+  factory VaultList.fromJson(Map<String, dynamic> json) => VaultList(
+    companyItems: (json['company_items'] == null ? const [] : (json['company_items'] as List<dynamic>).map((x0) => VaultItemView.fromJson(x0 as Map<String, dynamic>)).toList()),
+    counts: (json['counts'] == null ? const [] : (json['counts'] as List<dynamic>).map((x0) => VaultScopeCount.fromJson(x0 as Map<String, dynamic>)).toList()),
+    items: (json['items'] as List<dynamic>).map((x0) => VaultItemView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'company_items': companyItems.map((x0) => x0.toJson()).toList(),
+    'counts': counts.map((x0) => x0.toJson()).toList(),
+    'items': items.map((x0) => x0.toJson()).toList(),
+    if (projectId != null) 'project_id': projectId,
+  };
+}
+
+/// How many items a scope has (the scope list of the vault screen).
+final class VaultScopeCount {
+  const VaultScopeCount({
+    required this.count,
+    this.projectId,
+  });
+
+  final int count;
+  /// None: the company.
+  final String? projectId;
+
+  factory VaultScopeCount.fromJson(Map<String, dynamic> json) => VaultScopeCount(
+    count: (json['count'] as num).toInt(),
+    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'count': count,
+    if (projectId != null) 'project_id': projectId,
+  };
+}
+
+/// `vault.update`. The value is never printed.
+final class VaultUpdateParams {
+  const VaultUpdateParams({
+    this.description,
+    this.envName,
+    required this.itemId,
+    this.kind,
+    this.name,
+    this.value,
+  });
+
+  /// `Some("")` clears it.
+  final String? description;
+  final String? envName;
+  final String itemId;
+  final VaultKind? kind;
+  final String? name;
+  final String? value;
+
+  factory VaultUpdateParams.fromJson(Map<String, dynamic> json) => VaultUpdateParams(
+    description: (json['description'] == null ? null : (json['description'] as String)),
+    envName: (json['env_name'] == null ? null : (json['env_name'] as String)),
+    itemId: (json['item_id'] as String),
+    kind: (json['kind'] == null ? null : VaultKind.fromJson(json['kind'] as String)),
+    name: (json['name'] == null ? null : (json['name'] as String)),
+    value: (json['value'] == null ? null : (json['value'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (description != null) 'description': description,
+    if (envName != null) 'env_name': envName,
+    'item_id': itemId,
+    if (kind != null) 'kind': kind?.toJson(),
+    if (name != null) 'name': name,
+    if (value != null) 'value': value,
+  };
+}
+
+/// `vault.reveal`: one item's value. Never printed.
+final class VaultValue {
+  const VaultValue({
+    required this.itemId,
+    required this.value,
+  });
+
+  final String itemId;
+  final String value;
+
+  factory VaultValue.fromJson(Map<String, dynamic> json) => VaultValue(
+    itemId: (json['item_id'] as String),
+    value: (json['value'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'item_id': itemId,
+    'value': value,
   };
 }
 

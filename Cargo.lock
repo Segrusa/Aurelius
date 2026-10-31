@@ -609,8 +609,10 @@ dependencies = [
  "libc",
  "portable-pty",
  "reqwest",
+ "ring",
  "rusqlite",
  "schemars",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "sysinfo",
@@ -623,6 +625,7 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "winresource",
+ "zeroize",
 ]
 
 [[package]]
@@ -725,6 +728,7 @@ dependencies = [
  "aurelius-host",
  "aurelius-mcp",
  "aurelius-protocol",
+ "aurelius-runtime",
  "aurelius-storage",
  "axum",
  "base64 0.22.1",
@@ -748,6 +752,8 @@ dependencies = [
 name = "aurelius-runtime"
 version = "0.9.1"
 dependencies = [
+ "aho-corasick",
+ "arc-swap",
  "async-trait",
  "aurelius-domain",
  "base64 0.22.1",
@@ -758,6 +764,7 @@ dependencies = [
  "tokio",
  "tracing",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]

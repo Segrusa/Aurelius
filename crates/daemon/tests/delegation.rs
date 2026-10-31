@@ -63,7 +63,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId, EmployeeId) {
 }
 
 async fn create(client: &Client, project_id: ProjectId, employee_id: Option<EmployeeId>, title: &str) -> TaskId {
-    let cmd = CreateTask { files: vec![], run: Default::default(), project_id, employee_id, title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id, title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![], depends_on: vec![] };
     match client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result {
         CommandResult::TaskCreated { task_id } => task_id,
         other => panic!("{other:?}"),
@@ -259,7 +259,7 @@ async fn two_tasks_given_from_one_conversation_are_answered_in_one_run() {
     employee(&client, project, "Bob", "Illustrator").await;
 
     // The user talks with the assistant of the project, which gives work to two employees.
-    let send = SendProjectMessage { project_id: project, text: "Logo en icoon graag".into(), conversation_id: None, images: Vec::new(), files: Vec::new(), interrupt: false, start: ChatStart::default() };
+    let send = SendProjectMessage { confirm_secret: false, project_id: project, text: "Logo en icoon graag".into(), conversation_id: None, images: Vec::new(), files: Vec::new(), interrupt: false, start: ChatStart::default() };
     let CommandResult::ProjectMessageSent { conversation_id, run_id: first_run, .. } = client.send_project_message(send).await.unwrap().result else { panic!() };
     let conn = db(dir.path());
     let runs = || conn.query_row("SELECT COUNT(*) FROM runs WHERE conversation_id = ?1", [conversation_id.to_string()], |r| r.get::<_, i64>(0)).unwrap();
@@ -572,7 +572,7 @@ async fn a_task_whose_run_cannot_start_after_its_colleagues_waits_for_the_user_a
 
     // The user sends again in the task's conversation: Alex answers and the task is done.
     runtime.broken.store(false, Ordering::SeqCst);
-    let send = Command::SendEmployeeMessage(aurelius_domain::employee::SendEmployeeMessage { employee_id: alex, text: "Probeer opnieuw".into(), conversation_id: t.conversation_id.unwrap(), images: Vec::new(), files: Vec::new(), interrupt: false });
+    let send = Command::SendEmployeeMessage(aurelius_domain::employee::SendEmployeeMessage { confirm_secret: false, employee_id: alex, text: "Probeer opnieuw".into(), conversation_id: t.conversation_id.unwrap(), images: Vec::new(), files: Vec::new(), interrupt: false });
     client.execute(envelope(send, None)).await.unwrap();
     let t = wait_task(&client, parent, |t| t.status.is_terminal()).await;
     assert_eq!(t.status, TaskStatus::Succeeded, "{t:?}");

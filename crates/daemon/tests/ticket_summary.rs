@@ -91,6 +91,7 @@ async fn employee(client: &Client, name: &str, boss: Option<EmployeeId>) -> Empl
 async fn ticket(client: &Client, project_id: ProjectId, title: &str, description: &str, owner: EmployeeId) -> TicketId {
     let made = client
         .create_ticket(CreateTicket {
+            confirm_secret: false,
             project_id,
             title: title.into(),
             description: Some(description.into()),
@@ -232,9 +233,9 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     assert_eq!(extractions_of(dir.path(), main.id), 0, "none for the main task before Done");
 
     // A board member's word in Review (wakes nobody: no owner run in Review), then Done.
-    let posted = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { ticket_id: id, text: "Keep the old file name.".into(), images: vec![], files: vec![] }), None).await;
+    let posted = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: id, text: "Keep the old file name.".into(), images: vec![], files: vec![] }), None).await;
     assert!(posted.is_ok(), "{posted:?}");
-    client.ticket_command(Command::AcceptTicket(AcceptTicket { ticket_id: id, note: None }), None).await.unwrap();
+    client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await.unwrap();
     let done = until(&client, id, ColumnKind::Done, TaskStatus::Succeeded).await;
     let summary = line_of(&client, id, SystemLineKind::Summary).await;
     for _ in 0..800 {
@@ -290,7 +291,7 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     // Never waking: no run of an employee came from the discussion (the board member's word in Review woke nobody either).
     assert_eq!(group_runs(dir.path(), done.ticket.conversation_id.unwrap()), 0);
     // B7: closed for people, also for a retry of the summary that is there already.
-    let closed = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { ticket_id: id, text: "One more thing".into(), images: vec![], files: vec![] }), None).await;
+    let closed = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: id, text: "One more thing".into(), images: vec![], files: vec![] }), None).await;
     assert_eq!(code(closed), ErrorCode::Validation);
     assert_eq!(code(client.ticket_command(Command::RetryTicketSummary(RetryTicketSummary { ticket_id: id }), None).await), ErrorCode::Validation);
     assert_eq!(ticket_summaries(&client, atlas).await.len(), 1);
@@ -315,7 +316,7 @@ async fn a_failed_summary_is_visible_and_a_retry_writes_it_once() {
     assert_eq!(code(client.ticket_command(Command::RetryTicketSummary(RetryTicketSummary { ticket_id: id }), None).await), ErrorCode::Validation);
 
     // AC4: the extraction fails (as on a usage limit): the ticket stays on Done, the discussion says so.
-    client.ticket_command(Command::AcceptTicket(AcceptTicket { ticket_id: id, note: None }), None).await.unwrap();
+    client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await.unwrap();
     let failed = line_of(&client, id, SystemLineKind::SummaryFailed).await;
     // Pulse m3: neutral words, never the runtime's error (which may name a path on the server).
     assert_eq!(failed.text, aurelius_application::memory::SUMMARY_FAILED);

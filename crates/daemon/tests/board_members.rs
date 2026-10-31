@@ -60,6 +60,7 @@ async fn project(client: &Client) -> ProjectId {
 
 fn ticket(project_id: ProjectId, title: &str) -> Command {
     Command::CreateTicket(CreateTicket {
+        confirm_secret: false,
         project_id,
         title: title.into(),
         description: None,
@@ -357,7 +358,7 @@ async fn apps_may_list_board_members_but_never_create_or_become_one() {
     let _ = grace;
     // So tickets are out of reach (board_member_required), and the review gate is refused outright.
     assert_eq!(code(app.ticket_command(ticket(project, "From an app"), None).await), ErrorCode::BoardMemberRequired);
-    let accept = Command::AcceptTicket(aurelius_domain::ticket::AcceptTicket { ticket_id: aurelius_domain::TicketId::new(), note: None });
+    let accept = Command::AcceptTicket(aurelius_domain::ticket::AcceptTicket { confirm_secret: false, ticket_id: aurelius_domain::TicketId::new(), note: None });
     assert_eq!(code(app.ticket_command(accept, None).await), ErrorCode::Forbidden);
     drop((owner, app));
     common::stop(dir.path(), daemon).await;

@@ -232,6 +232,10 @@ pub struct CreateTicket {
     /// the discussion starts with a link to it, and its chat gets a link to the ticket.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_message: Option<MessageId>,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// Change the fields of a ticket. Left out: unchanged. The creator never
@@ -257,6 +261,10 @@ pub struct UpdateTicket {
     pub clear_deadline: bool,
     #[serde(default)]
     pub run: Option<RunSettings>,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// Drag a card. Within its column: only the order. To Todo: start it. To
@@ -326,6 +334,10 @@ pub struct ApprovePlan {
 pub struct RevisePlan {
     pub ticket_id: TicketId,
     pub feedback: String,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// Review → Done. Only a board member; only when no linked task still works (B6).
@@ -335,6 +347,10 @@ pub struct AcceptTicket {
     pub ticket_id: TicketId,
     #[serde(default)]
     pub note: Option<String>,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// Review → Doing with feedback (required) for the owner.
@@ -343,6 +359,10 @@ pub struct AcceptTicket {
 pub struct SendBackTicket {
     pub ticket_id: TicketId,
     pub feedback: String,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// Stop the work on a ticket: its main task is cancelled and it goes back to Backlog.
@@ -367,6 +387,10 @@ pub struct PostTicketMessage {
     /// Files of any type for the employees (host paths, or this device's upload inbox).
     #[serde(default)]
     pub files: Vec<String>,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 impl PostTicketMessage {

@@ -60,7 +60,7 @@ pub struct AppActor {
 }
 
 impl CommandContext {
-    pub(crate) fn metadata(&self) -> serde_json::Value {
+    pub fn metadata(&self) -> serde_json::Value {
         let mut meta = serde_json::json!({
             "principal_id": self.principal_id,
             "client_id": self.client_id,

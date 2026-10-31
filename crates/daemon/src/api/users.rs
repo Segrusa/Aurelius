@@ -155,6 +155,38 @@ pub(super) async fn create(
     Ok(Receipt { idempotency_key: receipt.command_id, committed_seq: receipt.committed_seq, replayed: receipt.replayed, result: WriteResult::Command(receipt.result) })
 }
 
+/// The signed-in board member's own password, asked again (`vault.key_export`,
+/// SEC0 E9): the same per-connection tries, sign-in limits per username,
+/// argon2 work and wrong answer as `user.login`.
+pub(super) async fn confirm_password(shared: &Arc<Shared>, peer: &Peer, attempts: &mut Attempts, password: String) -> Result<UserId, ProtocolError> {
+    let Some(user) = peer.user.filter(|_| peer.app.is_none() && peer.session.is_some()) else {
+        return Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "Only a signed-in board member can do this."));
+    };
+    let now = Instant::now();
+    attempts.take(now)?;
+    let store = shared.store().clone();
+    let id = user.to_string();
+    let stored = storage_task(move || {
+        store.read(|c| {
+            let Some(row) = aurelius_storage::users::get(c, &id)? else { return Ok(None) };
+            Ok(aurelius_storage::users::password_hash(c, &id)?.map(|phc| (phc, row.username)))
+        })
+    })
+    .await?;
+    let Some((phc, username)) = stored else { return Err(wrong_login()) };
+    let name = super::limits::key(&username);
+    let attempt = shared.sign_in_limits.login_begin(&name, now)?;
+    let right = argon2_task(move || password.len() <= PASSWORD_MAX && verify(&password, &phc)).await?;
+    if !right {
+        let (failures, _) = attempt.failed(Instant::now());
+        tracing::info!(username = %name, conn = peer.conn, failures, "password check failed");
+        tokio::time::sleep(WRONG_DELAY).await;
+        return Err(wrong_login());
+    }
+    attempt.succeeded();
+    Ok(user)
+}
+
 /// The session of a connection (protocol 5). `id` none: the first board member
 /// of the onboarding, on that connection only.
 #[derive(Debug, Clone, PartialEq)]

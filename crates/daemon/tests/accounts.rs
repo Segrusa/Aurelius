@@ -53,6 +53,7 @@ async fn project(client: &Client) -> ProjectId {
 
 fn ticket(project_id: ProjectId, title: &str) -> Command {
     Command::CreateTicket(CreateTicket {
+        confirm_secret: false,
         project_id,
         title: title.into(),
         description: None,
@@ -317,7 +318,7 @@ async fn the_author_of_every_message_and_write_is_the_sessions_board_member() {
     let alex_id: UserId = alex.user_whoami().await.unwrap().user.unwrap().id;
     let robin_id: UserId = robin.user_whoami().await.unwrap().user.unwrap().id;
     for (client, text) in [(&alex, "From Alex"), (&robin, "From Robin")] {
-        let send = SendGroupMessage { text: text.into(), images: vec![], files: vec![], channel: None };
+        let send = SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel: None };
         client.execute(aurelius_client::envelope(Command::SendGroupMessage(send), None)).await.unwrap();
     }
     let messages = alex.group_chat().await.unwrap().messages;

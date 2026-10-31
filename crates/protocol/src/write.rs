@@ -279,6 +279,84 @@ pub enum HostWrite {
     /// removed). Answers `ClaudeLogin`.
     #[serde(rename = "claude_login.unlink")]
     ClaudeLoginUnlink,
+    /// A new vault item (feature `vault`), in the company (no `project_id`) or a
+    /// project. Answers `VaultItem` (`value` only for text/url). The server
+    /// encrypts the value before anything is recorded: the receipt, its request
+    /// hash and the event `vault.item_created` hold no value (MU4-05 AC2).
+    /// `validation` for a name or env name used in the scope, an env name that
+    /// is not UPPER_SNAKE or that the runtime reserves (`PATH`, `ANTHROPIC_*`,
+    /// …), a url without `https://`/`http://`, a secret under 8 characters.
+    /// Board members with a session only (employees and agent tools never); not for apps.
+    #[serde(rename = "vault.create")]
+    VaultCreate(VaultCreateParams),
+    /// Change an item; what is left out stays. `value`: a new value (a secret's
+    /// is never sent back to the editor, so "leave empty to keep"). `kind` only
+    /// between text and url: to or from secret is `vault_kind_locked` (B7).
+    /// With `expected_version` in the envelope a stale edit is `version_conflict`.
+    /// Answers `VaultItem`. As `vault.create`: no value in receipt, hash or event.
+    #[serde(rename = "vault.update")]
+    VaultUpdate(VaultUpdateParams),
+    /// Archive ("Delete") an item: runs and employees no longer get it; its audit
+    /// history stays. Answers `VaultItem`. Not for apps.
+    #[serde(rename = "vault.archive")]
+    VaultArchive { item_id: aurelius_domain::VaultItemId },
+}
+
+/// `vault.create`. The value is never printed.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct VaultCreateParams {
+    /// None: the company's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    pub kind: aurelius_domain::vault::VaultKind,
+    pub name: String,
+    pub env_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub value: String,
+}
+
+impl fmt::Debug for VaultCreateParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VaultCreateParams")
+            .field("project_id", &self.project_id)
+            .field("kind", &self.kind)
+            .field("name", &self.name)
+            .field("env_name", &self.env_name)
+            .field("description", &self.description)
+            .field("value", &"<redacted>")
+            .finish()
+    }
+}
+
+/// `vault.update`. The value is never printed.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct VaultUpdateParams {
+    pub item_id: aurelius_domain::VaultItemId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_name: Option<String>,
+    /// `Some("")` clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<aurelius_domain::vault::VaultKind>,
+}
+
+impl fmt::Debug for VaultUpdateParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VaultUpdateParams")
+            .field("item_id", &self.item_id)
+            .field("name", &self.name)
+            .field("env_name", &self.env_name)
+            .field("description", &self.description)
+            .field("value", &self.value.as_ref().map(|_| "<redacted>"))
+            .field("kind", &self.kind)
+            .finish()
+    }
 }
 
 /// `user.create`. The password is never printed.
@@ -380,6 +458,9 @@ impl HostWrite {
         "claude_login.link",
         "claude_login.cancel",
         "claude_login.unlink",
+        "vault.create",
+        "vault.update",
+        "vault.archive",
     ];
 
     pub fn name(&self) -> String {
@@ -443,6 +524,9 @@ pub enum HostResult {
     ClaudeLoginLink { link_id: String },
     /// `claude_login.cancel` / `claude_login.unlink`: the login as it is now.
     ClaudeLogin(aurelius_domain::user::ClaudeLoginView),
+    /// `vault.create` / `vault.update` / `vault.archive`: the item as it is now.
+    /// A replayed receipt has no value: read it with `vault.list` or `vault.reveal`.
+    VaultItem(aurelius_domain::vault::VaultItemView),
 }
 
 impl HostResult {
@@ -453,6 +537,7 @@ impl HostResult {
             HostResult::AppKeyCreated(created) => HostResult::AppKeyCreated(aurelius_domain::app_key::AppKeyCreated { key: created.key.clone(), secret: String::new(), webhook_secret: None }),
             HostResult::PairingCode(code) => HostResult::PairingCode(PairingCode { code: String::new(), qr: String::new(), expires_at_ms: code.expires_at_ms, pairing_text: String::new() }),
             HostResult::Note(note) => HostResult::Note(aurelius_domain::views::NoteView { summary: note.summary.clone(), body: String::new() }),
+            HostResult::VaultItem(item) => HostResult::VaultItem(aurelius_domain::vault::VaultItemView { value: None, ..item.clone() }),
             other => other.clone(),
         }
     }

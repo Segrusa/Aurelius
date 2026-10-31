@@ -97,6 +97,7 @@ async fn a_real_dispatcher_assigns_the_ticket() {
     client.ticket_command(Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id: Some(dispatcher) }) }), None).await.unwrap();
     let made = client
         .create_ticket(CreateTicket {
+            confirm_secret: false,
             project_id: project,
             title: "New colour palette and icons for the settings screen".into(),
             description: Some("Design a new colour palette and icon set for the settings screen (visual design only).".into()),

@@ -69,6 +69,7 @@ fn new_ticket(s: &Setup, title: &str) -> TicketId {
     let created = run(
         s,
         Command::CreateTicket(ticket::CreateTicket {
+            confirm_secret: false,
             project_id: s.project,
             title: title.into(),
             description: Some("**Why**: because".into()),
@@ -128,15 +129,15 @@ fn every_ticket_board_and_company_write_needs_a_board_member() {
     let s = setup();
     let ticket = new_ticket(&s, "Mine");
     let commands = [
-        Command::CreateTicket(ticket::CreateTicket { project_id: s.project, title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None }),
-        Command::UpdateTicket(ticket::UpdateTicket { ticket_id: ticket, title: Some("y".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }),
+        Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: s.project, title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None }),
+        Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: ticket, title: Some("y".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }),
         Command::MoveTicket(ticket::MoveTicket { ticket_id: ticket, column_id: column(&s, ColumnKind::Todo), before_ticket_id: None }),
         Command::StartTicket(ticket::StartTicket { ticket_id: ticket, employee_id: None }),
         Command::AssignTicket(ticket::AssignTicket { ticket_id: ticket, employee_id: Some(EmployeeId::new()), reason: None }),
         Command::ApprovePlan(ticket::ApprovePlan { ticket_id: ticket, decision: ticket::PlanApproval::Approve, feedback: None }),
-        Command::RevisePlan(ticket::RevisePlan { ticket_id: ticket, feedback: "again".into() }),
-        Command::AcceptTicket(ticket::AcceptTicket { ticket_id: ticket, note: None }),
-        Command::SendBackTicket(ticket::SendBackTicket { ticket_id: ticket, feedback: "no".into() }),
+        Command::RevisePlan(ticket::RevisePlan { confirm_secret: false, ticket_id: ticket, feedback: "again".into() }),
+        Command::AcceptTicket(ticket::AcceptTicket { confirm_secret: false, ticket_id: ticket, note: None }),
+        Command::SendBackTicket(ticket::SendBackTicket { confirm_secret: false, ticket_id: ticket, feedback: "no".into() }),
         Command::CancelTicket(ticket::CancelTicket { ticket_id: ticket }),
         Command::ArchiveTicket(ticket::ArchiveTicket { ticket_id: ticket }),
         Command::UpdateBoardColumns(ticket::UpdateBoardColumns { columns: vec![] }),
@@ -170,13 +171,13 @@ fn a_new_ticket_is_in_backlog_by_its_author_with_normal_priority() {
     assert_eq!(meta["created_by_user"], serde_json::json!(s.user));
     assert_eq!(meta["by"], serde_json::json!({ "kind": "board_member", "user_id": s.user }));
 
-    let err = run(&s, Command::CreateTicket(ticket::CreateTicket { project_id: s.project, title: " ".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None })).unwrap_err();
+    let err = run(&s, Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: s.project, title: " ".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None })).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation, "MU1-07 AC2: a title is needed");
-    let err = run(&s, Command::CreateTicket(ticket::CreateTicket { project_id: ProjectId::new(), title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None })).unwrap_err();
+    let err = run(&s, Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: ProjectId::new(), title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None })).unwrap_err();
     assert_eq!(err.code, ErrorCode::NotFound, "and an existing project");
 
     // `start`: straight to Todo.
-    let started = run(&s, Command::CreateTicket(ticket::CreateTicket { project_id: s.project, title: "Now".into(), description: None, priority: TicketPriority::Urgent, labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None })).unwrap();
+    let started = run(&s, Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: s.project, title: "Now".into(), description: None, priority: TicketPriority::Urgent, labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None })).unwrap();
     let CommandResult::TicketCreated { ticket_id, number } = started else { panic!() };
     assert_eq!(number, 2);
     let t = view(&s, ticket_id);
@@ -259,9 +260,9 @@ fn plan_review_and_review_are_decided_by_buttons_with_feedback() {
     run(&s, Command::StartTicket(ticket::StartTicket { ticket_id: id, employee_id: Some(forge) })).unwrap();
     engine_puts(&s, id, ColumnKind::PlanReview);
     root_is(&s, id, TaskStatus::Waiting, Some("plan_review"));
-    let err = run(&s, Command::RevisePlan(ticket::RevisePlan { ticket_id: id, feedback: "  ".into() })).unwrap_err();
+    let err = run(&s, Command::RevisePlan(ticket::RevisePlan { confirm_secret: false, ticket_id: id, feedback: "  ".into() })).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation, "a new plan needs feedback");
-    run(&s, Command::RevisePlan(ticket::RevisePlan { ticket_id: id, feedback: "Smaller steps".into() })).unwrap();
+    run(&s, Command::RevisePlan(ticket::RevisePlan { confirm_secret: false, ticket_id: id, feedback: "Smaller steps".into() })).unwrap();
     assert_eq!((view(&s, id).column, view(&s, id).review_feedback.as_deref()), (ColumnKind::Doing, Some("Smaller steps")));
     engine_puts(&s, id, ColumnKind::PlanReview);
     root_is(&s, id, TaskStatus::Waiting, Some("plan_review"));
@@ -271,16 +272,16 @@ fn plan_review_and_review_are_decided_by_buttons_with_feedback() {
     // Review: send back needs feedback (MU1-16 AC3), accept closes.
     engine_puts(&s, id, ColumnKind::Review);
     root_is(&s, id, TaskStatus::Review, None);
-    let err = run(&s, Command::SendBackTicket(ticket::SendBackTicket { ticket_id: id, feedback: "".into() })).unwrap_err();
+    let err = run(&s, Command::SendBackTicket(ticket::SendBackTicket { confirm_secret: false, ticket_id: id, feedback: "".into() })).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation);
-    run(&s, Command::SendBackTicket(ticket::SendBackTicket { ticket_id: id, feedback: "Add a test".into() })).unwrap();
+    run(&s, Command::SendBackTicket(ticket::SendBackTicket { confirm_secret: false, ticket_id: id, feedback: "Add a test".into() })).unwrap();
     let t = view(&s, id);
     assert_eq!((t.column, t.review_feedback.as_deref()), (ColumnKind::Doing, Some("Add a test")));
-    let err = run(&s, Command::AcceptTicket(ticket::AcceptTicket { ticket_id: id, note: None })).unwrap_err();
+    let err = run(&s, Command::AcceptTicket(ticket::AcceptTicket { confirm_secret: false, ticket_id: id, note: None })).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation, "only from Review");
     engine_puts(&s, id, ColumnKind::Review);
     root_is(&s, id, TaskStatus::Review, None);
-    run(&s, Command::AcceptTicket(ticket::AcceptTicket { ticket_id: id, note: Some("Fine".into()) })).unwrap();
+    run(&s, Command::AcceptTicket(ticket::AcceptTicket { confirm_secret: false, ticket_id: id, note: Some("Fine".into()) })).unwrap();
     let t = view(&s, id);
     assert_eq!(t.column, ColumnKind::Done);
     assert!(t.done_at_ms.is_some());
@@ -302,7 +303,7 @@ fn plan_review_and_review_are_decided_by_buttons_with_feedback() {
         .collect();
     assert_eq!(said, [("Smaller steps".to_string(), Some(s.user)), ("Add a test".to_string(), Some(s.user))], "no message for an approval without feedback");
     // Done is read-only: no update, no move, no cancel.
-    let err = run(&s, Command::UpdateTicket(ticket::UpdateTicket { ticket_id: id, title: Some("New".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None })).unwrap_err();
+    let err = run(&s, Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("New".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None })).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation);
     assert!(run(&s, Command::CancelTicket(ticket::CancelTicket { ticket_id: id })).is_err());
     // But it can leave the board.
@@ -316,6 +317,7 @@ fn update_changes_fields_but_never_the_author_and_checks_the_version() {
     let s = setup();
     let id = new_ticket(&s, "Draft");
     let update = |title: Option<&str>, priority: Option<TicketPriority>| ticket::UpdateTicket {
+        confirm_secret: false,
         ticket_id: id,
         title: title.map(str::to_owned),
         description: Some("".into()),
@@ -340,7 +342,7 @@ fn update_changes_fields_but_never_the_author_and_checks_the_version() {
         .unwrap();
     run_as(&s, Some(other), Command::UpdateTicket(update(None, Some(TicketPriority::High))), None).unwrap();
     assert_eq!(view(&s, id).created_by_user, s.user);
-    let nothing = ticket::UpdateTicket { ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None };
+    let nothing = ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None };
     assert_eq!(run(&s, Command::UpdateTicket(nothing)).unwrap_err().code, ErrorCode::Validation);
 }
 
@@ -421,14 +423,14 @@ fn accept_waits_for_linked_tasks_that_still_work() {
         })
         .unwrap();
     engine_puts(&s, id, ColumnKind::Review);
-    let err = run(&s, Command::AcceptTicket(ticket::AcceptTicket { ticket_id: id, note: None })).unwrap_err();
+    let err = run(&s, Command::AcceptTicket(ticket::AcceptTicket { confirm_secret: false, ticket_id: id, note: None })).unwrap_err();
     assert!(err.message.contains("still work"), "B6: {}", err.message);
 }
 
 fn ticket_in(s: &Setup, project: ProjectId, title: &str, owner: Option<EmployeeId>, start: bool) -> TicketId {
     let created = run(
         s,
-        Command::CreateTicket(ticket::CreateTicket { project_id: project, title: title.into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: owner, run: Default::default(), files: vec![], start, from_message: None }),
+        Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: project, title: title.into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: owner, run: Default::default(), files: vec![], start, from_message: None }),
     )
     .unwrap();
     let CommandResult::TicketCreated { ticket_id, .. } = created else { panic!("{created:?}") };
@@ -538,6 +540,7 @@ fn a_card_put_above_itself_stays_where_it_is() {
 fn a_deadline_must_be_a_real_moment() {
     let s = setup();
     let mut create = ticket::CreateTicket {
+        confirm_secret: false,
         project_id: s.project,
         title: "Late".into(),
         description: None,
@@ -553,7 +556,7 @@ fn a_deadline_must_be_a_real_moment() {
     assert_eq!(run(&s, Command::CreateTicket(create.clone())).unwrap_err().code, ErrorCode::Validation);
     create.deadline_ms = Some(1_800_000_000_000);
     let CommandResult::TicketCreated { ticket_id: id, .. } = run(&s, Command::CreateTicket(create)).unwrap() else { panic!() };
-    let update = |deadline_ms| ticket::UpdateTicket { ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms, clear_deadline: false, run: None };
+    let update = |deadline_ms| ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms, clear_deadline: false, run: None };
     for bad in [0, -1, ticket::DEADLINE_MAX_MS + 1] {
         assert_eq!(run(&s, Command::UpdateTicket(update(Some(bad)))).unwrap_err().code, ErrorCode::Validation, "{bad}");
     }

@@ -1236,7 +1236,7 @@ pub fn expected_version_for(command: &Command, version: Option<u64>) -> Option<u
 
 /// An update that changes nothing but the ticket it names.
 pub fn empty_update(ticket_id: TicketId) -> ticket::UpdateTicket {
-    ticket::UpdateTicket { ticket_id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }
+    ticket::UpdateTicket { confirm_secret: false, ticket_id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }
 }
 
 // ---- Behaviour --------------------------------------------------------------
@@ -2880,7 +2880,7 @@ pub(crate) mod tests {
         for w in &writes {
             assert_eq!(expected_version_for(w, Some(5)), Some(5), "{w:?}");
         }
-        assert_eq!(expected_version_for(&Command::AcceptTicket(ticket::AcceptTicket { ticket_id: id, note: None }), Some(5)), None, "a decision follows the column");
+        assert_eq!(expected_version_for(&Command::AcceptTicket(ticket::AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), Some(5)), None, "a decision follows the column");
         assert_eq!(expected_version_for(&Command::CancelTicket(ticket::CancelTicket { ticket_id: id }), Some(5)), None);
     }
 

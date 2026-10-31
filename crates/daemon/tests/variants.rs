@@ -88,6 +88,7 @@ async fn setup(client: &Client, folder: Option<&Path>, name: &str) -> (ProjectId
 
 fn task(project_id: ProjectId, employee: EmployeeId, variants: u8, mode: Option<AgentMode>) -> Command {
     Command::CreateTask(CreateTask {
+        confirm_secret: false,
         project_id,
         employee_id: Some(employee),
         title: "Greeting".into(),

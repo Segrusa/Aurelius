@@ -10,13 +10,20 @@ export '../../data/protocol/protocol.dart' show protocolMajor;
 
 /// A daemon error (`code` is the snake_case ErrorCode).
 class ProtocolException implements Exception {
-  const ProtocolException(this.code, this.message, {this.retryAfterMs});
+  const ProtocolException(this.code, this.message, {this.retryAfterMs, this.matchedItems = const []});
 
   final ErrorCode code;
   final String message;
 
   /// `too_many_attempts`: how long until the server takes the next try.
   final int? retryAfterMs;
+
+  /// `looks_like_secret` (B10): the names of the vault items the text holds
+  /// the value of. Never a value.
+  final List<String> matchedItems;
+
+  /// The text holds a vault secret's value: nothing was stored (B10).
+  bool get looksLikeSecret => code == ErrorCode.looksLikeSecret;
 
   bool get isForbidden => code == ErrorCode.forbidden;
   bool get isConflict => code == ErrorCode.versionConflict || code == ErrorCode.idempotencyConflict;

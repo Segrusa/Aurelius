@@ -6,9 +6,9 @@ import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart';
 import '../../core/widgets/ios.dart';
 import '../../core/widgets/refresh.dart';
-import '../../data/commands.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
+import '../dashboard/give_work.dart' show writeTask;
 import 'new_task_page.dart';
 import 'task_status_mark.dart';
 import 'project_bloc.dart';
@@ -19,10 +19,11 @@ Future<void> createTask(BuildContext context) async {
   final project = context.read<ProjectBloc>().state.project;
   if (project == null) return;
   final company = context.read<CompanyBloc>().state;
-  final task = await NewTaskPage.open(context, company.activeEmployees);
+  // The form sends it itself, so a B10 refusal keeps what was typed (QA2 m8).
+  final task = await NewTaskPage.open(context, company.activeEmployees, submit: (form, task) async => await writeTask(form, project.id, task) != null);
   if (task == null || !context.mounted) return;
-  final bloc = context.read<ProjectBloc>();
-  bloc.send(Commands.createTask(project.id, task.title, task.goal, task.criteria, employeeId: task.employeeId, run: task.run, files: task.files, variants: task.variants), done: task.variants > 1 ? 'Task created; it is tried ${task.variants} ways first.' : 'Task created.');
+  context.read<ProjectBloc>().add(const ProjectRefreshed());
+  toast(context, task.variants > 1 ? 'Task created; it is tried ${task.variants} ways first.' : 'Task created.');
 }
 
 class TasksTab extends StatefulWidget {

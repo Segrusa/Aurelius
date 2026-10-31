@@ -61,7 +61,7 @@ async fn start_scripted(root: &Path, runtime: Arc<dyn AgentRuntime>) -> Daemon {
 }
 
 async fn chat(client: &Client, text: &str) -> ConversationId {
-    let env = envelope(Command::SendChatMessage(SendChatMessage { conversation_id: common::conversation(&client).await, text: text.into(), images: Vec::new(), interrupt: false }), None);
+    let env = envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: text.into(), images: Vec::new(), interrupt: false }), None);
     match client.execute(env).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, .. } => conversation_id,
         other => panic!("{other:?}"),
@@ -181,7 +181,7 @@ async fn a_run_that_cannot_be_planned_fails_and_frees_the_conversation() {
 
     // The next message in the same conversation is no longer blocked.
     rw.execute_batch("DROP TRIGGER break_plan;").unwrap();
-    let env = envelope(Command::SendChatMessage(SendChatMessage { conversation_id: id, text: "nu wel".into(), images: Vec::new(), interrupt: false }), None);
+    let env = envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: id, text: "nu wel".into(), images: Vec::new(), interrupt: false }), None);
     client.execute(env).await.unwrap();
     let mut done = false;
     for _ in 0..200 {

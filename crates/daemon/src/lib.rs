@@ -25,6 +25,7 @@ pub(crate) mod live;
 mod load;
 mod sessions;
 pub mod claude_connect;
+pub mod vault;
 
 use aurelius_application::{CommandService, Followup};
 use aurelius_domain::RunId;
@@ -100,6 +101,8 @@ pub struct Shared {
     pub terminals: aurelius_host::terminal::Terminals,
     /// The pending shutdown of this PC (not kept over restarts).
     pub power: aurelius_host::power::Power,
+    /// The vault's key (feature `vault`).
+    pub vault: vault::Vault,
     /// The chat jobs this daemon drives right now, with the lease epoch each driver
     /// holds; a leased one whose current lease is not among them and ran out lost
     /// its driver (see the dispatcher).
@@ -210,6 +213,23 @@ fn fake_runtime() -> aurelius_runtime::fake::FakeRuntime {
         fake.delay = std::time::Duration::from_millis(ms);
     }
     fake
+}
+
+/// A panic's message and place go to the log redacted of the vault's values,
+/// never as they are to stderr (SEC1 m7): a host that keeps the daemon's
+/// stderr would otherwise hold a value a panic quoted.
+pub fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "(no message)".to_owned());
+        let at = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
+        let thread = std::thread::current().name().unwrap_or("unnamed").to_owned();
+        tracing::error!(%thread, %at, message = %aurelius_runtime::redact::text(&message), "panic");
+    }));
 }
 
 /// Run until the bridge channel's `daemon.shutdown` (or the tray's quit) is received.
@@ -352,6 +372,7 @@ async fn run_inner(
     let (events, _) = broadcast::channel(1024);
     let (streams, _) = broadcast::channel(512);
     let (shutdown, mut shutdown_rx) = watch::channel(false);
+    let vault = vault::Vault::open(&root, own_root, service.store().clone());
     let shared = Arc::new(Shared {
         host_id,
         principal_id,
@@ -393,7 +414,18 @@ async fn run_inner(
         restart: std::sync::atomic::AtomicBool::new(false),
         terminals: aurelius_host::terminal::Terminals::default(),
         power: aurelius_host::power::Power::default(),
+        vault,
     });
+    // Every stored secret in the redactor before any run starts (SEC0 E16).
+    {
+        let s = shared.clone();
+        match tokio::task::spawn_blocking(move || vault::refresh_redactor(&s)).await {
+            Ok(Ok(count)) if count > 0 => tracing::info!(count, "vault values in the redactor"),
+            Ok(Ok(_)) => {}
+            Ok(Err(why)) => tracing::warn!(%why, "the vault's values could not be loaded into the redactor"),
+            Err(_) => tracing::warn!("the vault's redactor could not be loaded"),
+        }
+    }
 
     let endpoint = aurelius_host::endpoint(&root);
     let mut listener = aurelius_host::ipc::Listener::bind(&endpoint)?;

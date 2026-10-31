@@ -348,6 +348,9 @@ impl CommandService {
         text: &str,
         epoch: i64,
     ) -> Result<Vec<EventNotice>, AppError> {
+        // The whole answer once more before it is stored (SEC0 E12): the
+        // deltas were redacted as they came, this catches what they could not.
+        let text = &*aurelius_runtime::redact::text(text);
         let blob: Option<PreparedBlob> = if text.is_empty() {
             None
         } else {

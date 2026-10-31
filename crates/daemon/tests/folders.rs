@@ -34,7 +34,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str) -> (Employ
 }
 
 fn task(project_id: ProjectId, employee_id: Option<EmployeeId>, title: &str, goal: &str) -> Command {
-    Command::CreateTask(CreateTask { project_id, employee_id, title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] })
+    Command::CreateTask(CreateTask { confirm_secret: false, project_id, employee_id, title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] })
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -56,6 +56,7 @@ async fn each_project_has_its_own_folder() {
     client
         .execute(envelope(
             Command::CreateTask(CreateTask {
+                confirm_secret: false,
                 project_id: atlas,
                 employee_id: Some(alex),
                 title: "Onboarding".into(),

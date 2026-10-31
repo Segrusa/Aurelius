@@ -36,6 +36,7 @@ async fn employee(client: &Client, name: &str) -> EmployeeId {
 async fn create(client: &Client, project_id: ProjectId, title: &str, priority: TicketPriority) -> (TicketId, u32) {
     let made = client
         .create_ticket(CreateTicket {
+            confirm_secret: false,
             project_id,
             title: title.into(),
             description: Some("As a board member I want …".into()),
@@ -111,7 +112,7 @@ async fn a_board_member_fills_and_works_the_board() {
     // Never to Done by hand (MU1-15 AC2 / MU1-16).
     let done = board.columns[5].column.id;
     assert_eq!(code(client.ticket_command(Command::MoveTicket(MoveTicket { ticket_id: login, column_id: done, before_ticket_id: None }), None).await), ErrorCode::Validation);
-    assert_eq!(code(client.ticket_command(Command::AcceptTicket(AcceptTicket { ticket_id: login, note: None }), None).await), ErrorCode::Validation);
+    assert_eq!(code(client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: login, note: None }), None).await), ErrorCode::Validation);
     // Cancel: back to Backlog.
     client.ticket_command(Command::CancelTicket(CancelTicket { ticket_id: login }), None).await.unwrap();
     let cancelled = client.ticket(login).await.unwrap();
@@ -177,7 +178,7 @@ async fn start_with_an_owner_then_update_the_fields() {
     assert_ne!(ticket.column, ColumnKind::Backlog);
     assert_eq!((ticket.owner_employee_id, ticket.owner_name.as_deref()), (Some(forge), Some("Forge")));
     // Update: the fields change while the engine works (its moves give the ticket new versions, so none is expected here).
-    let rename = Command::UpdateTicket(UpdateTicket { ticket_id: id, title: Some("Owned, renamed".into()), description: None, priority: Some(TicketPriority::Low), labels: None, deadline_ms: None, clear_deadline: true, run: None });
+    let rename = Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("Owned, renamed".into()), description: None, priority: Some(TicketPriority::Low), labels: None, deadline_ms: None, clear_deadline: true, run: None });
     client.ticket_command(rename, None).await.unwrap();
     let ticket = client.ticket(id).await.unwrap().ticket;
     assert_eq!((ticket.title.as_str(), ticket.priority, ticket.deadline_ms), ("Owned, renamed", TicketPriority::Low, None));

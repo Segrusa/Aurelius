@@ -17,7 +17,7 @@ use std::time::Duration;
 async fn live_run(client: &Client, root: &std::path::Path, conversation_id: ConversationId) -> RunId {
     let sent = client
         .execute(envelope(
-            Command::SendChatMessage(SendChatMessage { conversation_id, text: "houd me wakker".into(), images: Vec::new(), interrupt: false }),
+            Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: "houd me wakker".into(), images: Vec::new(), interrupt: false }),
             None,
         ))
         .await

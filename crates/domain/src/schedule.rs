@@ -126,6 +126,10 @@ pub struct CreateTaskSchedule {
     /// Start paused: nothing is made until it is resumed.
     #[serde(default)]
     pub paused: bool,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// Replace a schedule's template and recurrence (the project stays the same).
@@ -146,6 +150,10 @@ pub struct UpdateTaskSchedule {
     #[serde(default, skip_serializing_if = "RunSettings::is_empty")]
     pub run: RunSettings,
     pub recurrence: Recurrence,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -177,6 +185,7 @@ pub fn validate_template(project_id: ProjectId, employee_id: EmployeeId, title: 
         return Err(DomainError::File(format!("Too many files: attach at most {UPLOADS_MAX}.")));
     }
     let probe = CreateTask {
+        confirm_secret: false,
         project_id,
         employee_id: Some(employee_id),
         title: title.into(),

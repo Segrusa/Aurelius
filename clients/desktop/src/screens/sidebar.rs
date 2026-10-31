@@ -39,6 +39,8 @@ fn nav_icon(nav: NavItem, color: u32) -> Div {
         // A person: head over shoulders.
         NavItem::Employees => boxed.child(v().items_center().gap(px(1.)).child(fill(6., 6., 3.)).child(div().w(px(12.)).h(px(5.)).rounded_tl(px(5.)).rounded_tr(px(5.)).bg(c(color)))),
         NavItem::Projects => boxed.child(ui::folder_glyph(color)),
+        // A padlock: a shackle over a body.
+        NavItem::Vault => boxed.child(v().items_center().child(div().w(px(8.)).h(px(5.)).rounded_tl(px(4.)).rounded_tr(px(4.)).border_2().border_b_0().border_color(c(color))).child(fill(12., 7., 2.))),
         // A ring with a hub.
         NavItem::Settings => boxed.child(h().size(px(12.)).rounded(px(6.)).border_2().border_color(c(color)).justify_center().items_center().child(fill(3., 3., 2.))),
     }
@@ -305,7 +307,7 @@ mod tests {
     #[test]
     fn team_chat_sits_right_under_dashboard() {
         let rows: Vec<NavItem> = sidebar_items().collect();
-        assert_eq!(rows, [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects]);
+        assert_eq!(rows, [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Vault]);
         assert_eq!(NavItem::Chat.label(), "Team chat");
         assert_eq!(NavItem::of(Page::GroupChat), NavItem::Chat, "the group chat page lights up its row");
     }

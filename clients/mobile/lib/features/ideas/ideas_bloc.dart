@@ -7,6 +7,7 @@ import '../../core/bloc/transformers.dart';
 import '../../core/net/connection.dart';
 import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/secret_write.dart';
 import '../../data/views.dart';
 
 sealed class IdeasEvent {
@@ -37,10 +38,13 @@ class IdeasKindChanged extends IdeasEvent {
 }
 
 class IdeasCommandSent extends IdeasEvent {
-  const IdeasCommandSent(this.command, {this.done});
+  const IdeasCommandSent(this.command, {this.done, this.ask});
 
   final Map<String, dynamic> command;
   final String? done;
+
+  /// Asks about a vault value in the text (B10); without it a refusal is a notice.
+  final SendAnywayAsk? ask;
 }
 
 class IdeasNoticeShown extends IdeasEvent {
@@ -122,7 +126,13 @@ class IdeasBloc extends Bloc<IdeasEvent, IdeasState> {
 
   Future<void> _command(IdeasCommandSent event, Emitter<IdeasState> emit) async {
     try {
-      await _repository.write(event.command, retry: false);
+      final ask = event.ask;
+      if (ask == null) {
+        await _repository.write(event.command, retry: false);
+      } else if (await writeConfirmingSecret(_repository, event.command, ask, retry: false) == null) {
+        emit(state.copyWith(notice: 'Not saved.'));
+        return;
+      }
       emit(state.copyWith(notice: event.done));
       add(const IdeasRefreshed());
     } on NotSentException catch (e) {

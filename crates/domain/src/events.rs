@@ -188,6 +188,12 @@ event_kinds! {
     // A board member's Claude login was connected, expired or disconnected, or became
     // the company's background login; the aggregate is the user. Never a token.
     ClaudeLoginUpdated => "claude_login.updated",
+    // A vault item (feature `vault`); the aggregate is the item, `project_id` its
+    // project (none: the company). `metadata` is a `vault::VaultEventMeta`: id,
+    // name, kind, project, version, by, changed fields. Never a value.
+    VaultItemCreated => "vault.item_created",
+    VaultItemUpdated => "vault.item_updated",
+    VaultItemArchived => "vault.item_archived",
 }
 
 impl EventKind {

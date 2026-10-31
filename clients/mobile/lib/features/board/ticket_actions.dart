@@ -12,9 +12,11 @@ import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/company.dart';
 import '../../data/discussion.dart';
+import '../../data/secret_write.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../account/claude_login.dart' show claudeLoginMissing;
+import '../chat/secret_check.dart' show sendAnywayDialog;
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 
@@ -42,7 +44,10 @@ Future<bool> ticketWrite(BuildContext context, Map<String, dynamic> request, {in
     ?..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(text), action: action, persist: false, duration: action == null ? const Duration(seconds: 4) : const Duration(seconds: 5)));
   try {
-    await repository.write(request, expectedVersion: expectedVersion, retry: retry);
+    // B10 (AUR-MU-04-F5): a text holding a vault value asks first; Send anyway
+    // writes it again with `confirm_secret`, once.
+    final sent = await writeConfirmingSecret(repository, request, sendAnywayDialog(context), expectedVersion: expectedVersion, retry: retry);
+    if (sent == null) return false;
     if (done != null) show(done, action);
     return true;
   } on Object catch (e) {

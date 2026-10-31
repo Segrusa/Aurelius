@@ -26,6 +26,10 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         | Method::SessionList { .. }
         | Method::ClaudeLoginStatus
         | Method::ClaudeLoginInput(_)
+        | Method::VaultList { .. }
+        | Method::VaultReveal { .. }
+        | Method::VaultAudit { .. }
+        | Method::VaultKeyExport(_)
         | Method::UserWhoami => {
             Err(internal("a session method reached the reads"))
         }

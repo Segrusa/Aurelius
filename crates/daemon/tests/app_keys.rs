@@ -61,6 +61,7 @@ async fn app(root: &Path, secret: &str) -> Client {
 
 fn task(project_id: ProjectId, employee_id: Option<EmployeeId>, mode: Option<AgentMode>) -> Command {
     Command::CreateTask(CreateTask {
+        confirm_secret: false,
         project_id,
         employee_id,
         title: "From the app".into(),

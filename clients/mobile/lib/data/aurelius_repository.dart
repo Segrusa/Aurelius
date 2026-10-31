@@ -339,6 +339,38 @@ class AureliusRepository {
   /// Revoke a key at once, also for the app's open sessions.
   Future<AppKeyView> revokeAppKey(String keyId) async => ((await _host(appKeyRevoke(keyId: keyId))) as HostResultAppKey).value;
 
+  /// The server has the vault (feature `vault`, Fase 4).
+  bool get vaultEnabled => linkState.has('vault');
+
+  /// A scope's vault: [projectId] null is the company's; a project's comes
+  /// with the company's items apart. Never a secret's value.
+  Future<VaultList> vault({String? projectId}) async => (await _ask<ResponseBodyVault>(vaultList(projectId: projectId))).value;
+
+  /// One item's value (`vault.reveal`, audited as show or copy). The answer is
+  /// never kept, logged or printed: callers hold it only while it is shown.
+  Future<String> revealVaultValue(String itemId, RevealPurpose purpose) async =>
+      (await _ask<ResponseBodyVaultValue>(vaultReveal(itemId: itemId, purpose: purpose))).value.value;
+
+  /// The vault's audit log, newest first: the company's, [projectId]'s, every
+  /// scope's ([all]) or one item's.
+  Future<VaultAuditPage> vaultAuditLog({String? projectId, bool all = false, String? itemId, int? before, int limit = 50}) async =>
+      (await _ask<ResponseBodyVaultAudit>(vaultAudit(all: all ? true : null, before: before, itemId: itemId, limit: limit, projectId: projectId))).value;
+
+  /// A new item; never retried, so the value leaves this phone's outbox at once.
+  Future<VaultItemView> createVaultItem(VaultCreateParams params) async => ((await _host(vaultCreate(params))) as HostResultVaultItem).value;
+
+  /// Change an item that is still at [version] (`version_conflict` otherwise).
+  Future<VaultItemView> updateVaultItem(VaultUpdateParams params, {required int version}) async {
+    final receipt = await connection.write(vaultUpdate(params), expectedVersion: version, retry: false);
+    return ((receipt.result as WriteResultHost).value as HostResultVaultItem).value;
+  }
+
+  /// "Delete": runs and employees no longer get it; its history stays.
+  Future<VaultItemView> archiveVaultItem(String itemId) async => ((await _host(vaultArchive(itemId: itemId))) as HostResultVaultItem).value;
+
+  /// An item was created, changed or archived (here or on another client).
+  Stream<Event> get vaultChanges => events.where((e) => e.kind.wire.startsWith('vault.'));
+
   /// The user's Claude Code MCP servers and which are on for every chat, conversation, employee and task.
   Future<McpServers> mcpServers() async => (await _ask<ResponseBodyMcpServers>(mcpList())).value;
 

@@ -116,6 +116,7 @@ async fn employee(client: &Client, name: &str) -> EmployeeId {
 async fn ticket(client: &Client, project_id: ProjectId, title: &str, description: &str, owner: Option<EmployeeId>, start: bool) -> TicketId {
     let made = client
         .create_ticket(CreateTicket {
+            confirm_secret: false,
             project_id,
             title: title.into(),
             description: Some(description.into()),
@@ -190,8 +191,8 @@ async fn a_ticket_is_worked_reported_sent_back_and_accepted() {
     assert_eq!(moves, [Some("todo".into()), Some("doing".into()), Some("review".into())], "Backlog → Todo → Doing → Review");
 
     // Send back: the feedback is required and goes to the main task's conversation (B2).
-    assert_eq!(code(client.ticket_command(Command::SendBackTicket(SendBackTicket { ticket_id: id, feedback: " ".into() }), None).await), ErrorCode::Validation);
-    client.ticket_command(Command::SendBackTicket(SendBackTicket { ticket_id: id, feedback: "Add a forgot-password link".into() }), None).await.unwrap();
+    assert_eq!(code(client.ticket_command(Command::SendBackTicket(SendBackTicket { confirm_secret: false, ticket_id: id, feedback: " ".into() }), None).await), ErrorCode::Validation);
+    client.ticket_command(Command::SendBackTicket(SendBackTicket { confirm_secret: false, ticket_id: id, feedback: "Add a forgot-password link".into() }), None).await.unwrap();
     let again = until(&client, id, ColumnKind::Review, TaskStatus::Review).await;
     assert_eq!(again.ticket.review_feedback.as_deref(), Some("Add a forgot-password link"));
     let conversation = again.root_task.as_ref().unwrap().conversation_id.expect("the main task's conversation");
@@ -202,7 +203,7 @@ async fn a_ticket_is_worked_reported_sent_back_and_accepted() {
     assert!(messages.last().unwrap().text.contains("forgot-password"), "{:?}", messages.last());
 
     // Accept: Done, and the main task succeeds, accepted by the board member.
-    client.ticket_command(Command::AcceptTicket(AcceptTicket { ticket_id: id, note: Some("Good".into()) }), None).await.unwrap();
+    client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: Some("Good".into()) }), None).await.unwrap();
     let done = until(&client, id, ColumnKind::Done, TaskStatus::Succeeded).await;
     assert!(done.ticket.done_at_ms.is_some());
     let reason: String = common::db(dir.path())
@@ -235,7 +236,7 @@ async fn a_failed_main_task_stays_in_doing_and_starts_again() {
     let id = ticket(&client, atlas, "Flaky", "FAIL-ME please", Some(builder), true).await;
     let failed = until(&client, id, ColumnKind::Doing, TaskStatus::Failed).await;
     let first = failed.root_task.unwrap().id;
-    assert_eq!(code(client.ticket_command(Command::AcceptTicket(AcceptTicket { ticket_id: id, note: None }), None).await), ErrorCode::Validation);
+    assert_eq!(code(client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await), ErrorCode::Validation);
     // Start again: a new main task, the old one stays linked to the ticket.
     client.ticket_command(Command::StartTicket(StartTicket { ticket_id: id, employee_id: None }), None).await.unwrap();
     let detail = until(&client, id, ColumnKind::Doing, TaskStatus::Failed).await;
@@ -268,6 +269,7 @@ async fn without_a_ticket_a_task_still_succeeds_on_its_report() {
     let builder = employee(&client, "Builder").await;
     let atlas = project(&client, "Atlas").await;
     let create = aurelius_domain::task::CreateTask {
+        confirm_secret: false,
         project_id: atlas,
         employee_id: Some(builder),
         title: "Plain".into(),
@@ -302,10 +304,10 @@ async fn accept_waits_for_a_run_in_the_main_tasks_conversation() {
     let detail = until(&client, id, ColumnKind::Review, TaskStatus::Review).await;
     let conversation = detail.root_task.unwrap().conversation_id.unwrap();
 
-    let ask = SendEmployeeMessage { employee_id: builder, text: "HOLD-MAIN one more question".into(), conversation_id: conversation, images: vec![], files: vec![], interrupt: false };
+    let ask = SendEmployeeMessage { confirm_secret: false, employee_id: builder, text: "HOLD-MAIN one more question".into(), conversation_id: conversation, images: vec![], files: vec![], interrupt: false };
     client.execute(aurelius_client::envelope(Command::SendEmployeeMessage(ask), None)).await.unwrap();
     live_run(dir.path(), conversation).await;
-    let refused = client.ticket_command(Command::AcceptTicket(AcceptTicket { ticket_id: id, note: None }), None).await;
+    let refused = client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await;
     assert!(message(refused).contains("still running"));
     let still = client.ticket(id).await.unwrap();
     assert_eq!((still.ticket.column, still.root_task.map(|t| t.status)), (ColumnKind::Review, Some(TaskStatus::Review)));
@@ -322,7 +324,7 @@ async fn accept_waits_for_a_run_in_the_main_tasks_conversation() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     until(&client, id, ColumnKind::Review, TaskStatus::Review).await;
-    client.ticket_command(Command::AcceptTicket(AcceptTicket { ticket_id: id, note: None }), None).await.unwrap();
+    client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await.unwrap();
     until(&client, id, ColumnKind::Done, TaskStatus::Succeeded).await;
 
     drop(client);
@@ -467,6 +469,7 @@ async fn a_ticket_in_done_leaves_one_summary_in_its_projects_memory() {
     until(&client, id, ColumnKind::Review, TaskStatus::Review).await;
     until(&client, waits, ColumnKind::Review, TaskStatus::Review).await;
     let create = aurelius_domain::task::CreateTask {
+        confirm_secret: false,
         project_id: atlas,
         employee_id: Some(builder),
         title: "Plain".into(),
@@ -485,7 +488,7 @@ async fn a_ticket_in_done_leaves_one_summary_in_its_projects_memory() {
     }
     assert!(ticket_summaries(&client, atlas).await.is_empty(), "no summary before Done, none for a task without a ticket");
 
-    client.ticket_command(Command::AcceptTicket(AcceptTicket { ticket_id: id, note: None }), None).await.unwrap();
+    client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await.unwrap();
     let done = until(&client, id, ColumnKind::Done, TaskStatus::Succeeded).await;
     let mut summaries = Vec::new();
     for _ in 0..400 {

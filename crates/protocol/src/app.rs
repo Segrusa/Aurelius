@@ -18,7 +18,7 @@
 
 use crate::method::Method;
 use crate::rpc::Call;
-use crate::write::WriteMethod;
+use crate::write::{HostWrite, WriteMethod};
 use aurelius_domain::Command;
 use aurelius_domain::app_key::{AppAudience, AppScope};
 use aurelius_domain::autonomy::AgentMode;
@@ -54,9 +54,12 @@ pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
             | Method::TicketList { .. } => Ok(vec![Read]),
             // The group chat is the user's own conversation with the team, like an employee's chat.
             Method::GroupChatGet { .. } | Method::ChannelList => Err(NOT_FOR_APPS),
+            // The vault is the board members' and the runs' (B5): an app reads nothing of it.
+            Method::VaultList { .. } | Method::VaultReveal { .. } | Method::VaultAudit { .. } | Method::VaultKeyExport(_) => Err(NOT_FOR_APPS),
             _ => Err(NOT_FOR_APPS),
         },
         Call::Write(WriteMethod::Domain(command)) => command_needs(command),
+        Call::Write(WriteMethod::Host(HostWrite::VaultCreate(_) | HostWrite::VaultUpdate(_) | HostWrite::VaultArchive { .. })) => Err(NOT_FOR_APPS),
         Call::Write(WriteMethod::Host(_)) => Err(NOT_FOR_APPS),
     }
 }
@@ -145,7 +148,6 @@ pub fn allowed_for(held: &[AppScope], audience: AppAudience, call: &Call) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::write::HostWrite;
     use aurelius_domain::{
         ApprovalId, ConversationId, EmployeeId, ProjectId, TaskId,
         approval::{DecideApproval, DecidePlan, PlanDecision},
@@ -164,7 +166,7 @@ mod tests {
 
     #[test]
     fn apps_never_reach_the_group_chat() {
-        let send = exec(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text: "Hi".into(), images: vec![], files: vec![], channel: None }));
+        let send = exec(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: "Hi".into(), images: vec![], files: vec![], channel: None }));
         assert_eq!(required(&send), Err(NOT_FOR_APPS));
         assert_eq!(required(&Call::Read(Method::GroupChatGet { channel: None })), Err(NOT_FOR_APPS));
         assert_eq!(required(&Call::Read(Method::ChannelList)), Err(NOT_FOR_APPS));
@@ -174,7 +176,7 @@ mod tests {
     #[test]
     fn apps_never_reach_a_ticket_discussion() {
         let ticket = aurelius_domain::TicketId::new();
-        let post = exec(Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { ticket_id: ticket, text: "Hi".into(), images: vec![], files: vec![] }));
+        let post = exec(Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket, text: "Hi".into(), images: vec![], files: vec![] }));
         assert_eq!(required(&post), Err(NOT_FOR_APPS));
         let retry = exec(Command::RetryTicketSummary(aurelius_domain::ticket::RetryTicketSummary { ticket_id: ticket }));
         assert_eq!(required(&retry), Err(NOT_FOR_APPS));
@@ -182,6 +184,7 @@ mod tests {
 
     fn task(employee: bool, mode: Option<AgentMode>) -> Call {
         exec(Command::CreateTask(CreateTask {
+            confirm_secret: false,
             project_id: ProjectId::new(),
             employee_id: employee.then(EmployeeId::new),
             title: "t".into(),
@@ -227,7 +230,7 @@ mod tests {
 
     #[test]
     fn running_work_and_approvals() {
-        let message = exec(Command::SendEmployeeMessage(SendEmployeeMessage {
+        let message = exec(Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false,
             employee_id: EmployeeId::new(),
             text: "hi".into(),
             conversation_id: ConversationId::new(),
@@ -237,6 +240,7 @@ mod tests {
         }));
         let cancel = exec(Command::CancelTask(CancelTask { task_id: TaskId::new() }));
         let assistant = exec(Command::SendProjectMessage(SendProjectMessage {
+            confirm_secret: false,
             project_id: ProjectId::new(),
             text: "hi".into(),
             conversation_id: None,
@@ -253,15 +257,15 @@ mod tests {
         assert!(may(&[AppScope::Approve], &auto) && !may(&[AppScope::Run], &auto));
         assert!(may(&[AppScope::Run], &ask));
         let decide = exec(Command::DecideApproval(DecideApproval { approval_id: ApprovalId::new(), action_digest: "d".into(), approve: true, always_allow: false }));
-        let plan = exec(Command::DecidePlan(DecidePlan { approval_id: ApprovalId::new(), decision: PlanDecision::Approve, feedback: None }));
+        let plan = exec(Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id: ApprovalId::new(), decision: PlanDecision::Approve, feedback: None }));
         for call in [&decide, &plan] {
             assert!(may(&[AppScope::Approve], call) && !may(&[AppScope::Run, AppScope::Read, AppScope::Draft], call));
         }
         let always = exec(Command::DecideApproval(DecideApproval { approval_id: ApprovalId::new(), action_digest: "d".into(), approve: true, always_allow: true }));
         assert!(!may(&AppScope::ALL, &always));
-        let idea = exec(Command::AddIdea(AddIdea { project_id: ProjectId::new(), title: "i".into(), note: None, kind: Default::default(), files: vec![] }));
+        let idea = exec(Command::AddIdea(AddIdea { confirm_secret: false, project_id: ProjectId::new(), title: "i".into(), note: None, kind: Default::default(), files: vec![] }));
         assert!(may(&[AppScope::Draft], &idea) && !may(&[AppScope::Read], &idea));
-        let with_file = exec(Command::AddIdea(AddIdea { project_id: ProjectId::new(), title: "i".into(), note: None, kind: Default::default(), files: vec!["C:/x.txt".into()] }));
+        let with_file = exec(Command::AddIdea(AddIdea { confirm_secret: false, project_id: ProjectId::new(), title: "i".into(), note: None, kind: Default::default(), files: vec!["C:/x.txt".into()] }));
         assert!(!may(&AppScope::ALL, &with_file), "apps never pass server files");
     }
 
@@ -269,12 +273,13 @@ mod tests {
     #[test]
     fn a_management_app_answers_with_run_and_cannot_use_the_project_assistant() {
         use aurelius_domain::approval::AnswerQuestion;
-        let answer = exec(Command::AnswerQuestion(AnswerQuestion { approval_id: ApprovalId::new(), answers: Default::default() }));
+        let answer = exec(Command::AnswerQuestion(AnswerQuestion { confirm_secret: false, approval_id: ApprovalId::new(), answers: Default::default() }));
         let for_all = |held: &[AppScope]| allowed_for(held, AppAudience::All, &answer).is_ok();
         let for_management = |held: &[AppScope]| allowed_for(held, AppAudience::Management, &answer).is_ok();
         assert!(for_all(&[AppScope::Approve]) && !for_all(&[AppScope::Run]), "unchanged for other keys");
         assert!(for_management(&[AppScope::Run]) && !for_management(&[AppScope::Read, AppScope::Draft]));
         let assistant = exec(Command::SendProjectMessage(SendProjectMessage {
+            confirm_secret: false,
             project_id: ProjectId::new(),
             text: "hi".into(),
             conversation_id: None,
@@ -293,7 +298,7 @@ mod tests {
 
     #[test]
     fn apps_never_pass_files_or_manage_the_server() {
-        let with_file = exec(Command::SendEmployeeMessage(SendEmployeeMessage {
+        let with_file = exec(Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false,
             employee_id: EmployeeId::new(),
             text: "hi".into(),
             conversation_id: ConversationId::new(),

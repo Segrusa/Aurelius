@@ -90,9 +90,17 @@ pub fn reject_unparsed(value: Option<&serde_json::Value>, err: &dyn std::fmt::Di
         Some(name) if !Method::knows(name) && !WriteMethod::knows(name) => {
             AppError::new(ErrorCode::UnknownMethod, format!("This server does not know the method {name}."))
         }
+        // serde quotes values it could not take: never for a method with a secret in it (SEC0 E5).
+        Some(name) if quotes_no_params(name) => AppError::new(ErrorCode::InvalidRequest, format!("The request for {name} is not valid.")),
         _ => AppError::new(ErrorCode::InvalidRequest, err.to_string()),
     };
     ServerMessage::Response { request_id, outcome: Outcome::Error(error) }
+}
+
+/// Methods whose params may hold a value, a password or a code: an error never
+/// repeats what serde said about them.
+pub fn quotes_no_params(name: &str) -> bool {
+    name.starts_with("vault.") || matches!(name, "user.login" | "user.create" | "user.set_password" | "claude_login.input" | "session.hello")
 }
 
 impl<'de> Deserialize<'de> for Call {
@@ -265,6 +273,14 @@ pub mod feature {
     /// `group_chat.send { channel }`. Live events of project channels go only to
     /// connections whose `HelloParams::accepts` names `team_channels`.
     pub const TEAM_CHANNELS: &str = "team_channels";
+    /// The vault (protocol 5, additive): `vault.list`, `vault.reveal`,
+    /// `vault.audit`, `vault.key_export`, the writes `vault.create`,
+    /// `vault.update`, `vault.archive`, the events `vault.item_created` /
+    /// `_updated` / `_archived` (never a value), the error codes
+    /// `vault_kind_locked`, `vault_undecryptable` and `looks_like_secret`
+    /// (`AppError::matched_items`), and `confirm_secret` on `employee.send_message`,
+    /// `ticket.post` and `group_chat.send` (B10). Board members only; never apps.
+    pub const VAULT: &str = "vault";
 }
 
 /// Every feature this build has.
@@ -292,6 +308,7 @@ pub const FEATURES: &[&str] = &[
     feature::AUTO_ALLOW,
     feature::TICKET_DISCUSSION,
     feature::TEAM_CHANNELS,
+    feature::VAULT,
 ];
 
 /// Daemon → client.
@@ -395,6 +412,14 @@ pub enum ResponseBody {
     Login(aurelius_domain::user::LoginResult),
     Sessions(aurelius_domain::user::SessionsSnapshot),
     ClaudeLogin(aurelius_domain::user::ClaudeLoginView),
+    /// `vault.list`.
+    Vault(aurelius_domain::vault::VaultList),
+    /// `vault.reveal`: never printed.
+    VaultValue(aurelius_domain::vault::VaultValue),
+    /// `vault.audit`.
+    VaultAudit(aurelius_domain::vault::VaultAuditPage),
+    /// `vault.key_export`: never printed.
+    VaultKey(aurelius_domain::vault::VaultKeyExport),
     ProjectConversations(ProjectConversationsSnapshot),
     Approvals(ApprovalsSnapshot),
     Connections(ProvidersSnapshot),

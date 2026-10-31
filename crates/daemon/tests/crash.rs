@@ -44,7 +44,7 @@ async fn send(client: &Client, text: &str) -> ConversationId {
 }
 
 async fn send_in(client: &Client, conversation_id: ConversationId, text: &str) -> ConversationId {
-    match client.execute(envelope(Command::SendChatMessage(SendChatMessage { conversation_id, text: text.into(), images: Vec::new(), interrupt: false }), None)).await.unwrap().result {
+    match client.execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images: Vec::new(), interrupt: false }), None)).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, .. } => conversation_id,
         other => panic!("{other:?}"),
     }
@@ -118,7 +118,7 @@ async fn storage_write_failure_fails_the_command_cleanly() {
     let staging = dir.path().join("blobs").join("tmp");
     std::fs::remove_dir_all(&staging).unwrap();
     std::fs::write(&staging, b"not a folder").unwrap();
-    let failed = client.execute(envelope(Command::SendChatMessage(SendChatMessage { conversation_id: conversation, text: "lost?".into(), images: Vec::new(), interrupt: false }), None)).await;
+    let failed = client.execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: conversation, text: "lost?".into(), images: Vec::new(), interrupt: false }), None)).await;
     assert!(failed.is_err(), "the command reports the failure");
     assert_eq!(asked(client.messages(conversation).await.unwrap().messages), 0, "nothing half-written");
 

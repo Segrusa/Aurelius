@@ -237,7 +237,7 @@ mod tests {
 
         // Something relevant happens: a task of Alex's fails (written as Alex's
         // without starting it, so the only run is the wake's).
-        let CommandResult::TaskCreated { task_id, .. } = run(&service, Command::CreateTask(CreateTask { files: vec![], run: Default::default(),
+        let CommandResult::TaskCreated { task_id, .. } = run(&service, Command::CreateTask(CreateTask { confirm_secret: false, files: vec![], run: Default::default(),
             project_id,
             employee_id: None,
             title: "Launch".into(),

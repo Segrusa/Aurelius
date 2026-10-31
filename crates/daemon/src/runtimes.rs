@@ -50,6 +50,7 @@ pub fn runtime_for_config(shared: &Arc<Shared>, config: &ResolvedRunConfig) -> R
                 run_root: shared.root.join("runtimes").join(connection_id.to_string()).join("runs"),
                 model: config.model.clone(),
                 login: Some(login),
+                vault: Default::default(),
             }))
         }
         ProviderKind::AnthropicApi | ProviderKind::OpenaiApi => {
@@ -94,6 +95,7 @@ pub fn spawn_verification(shared: Arc<Shared>, id: ProviderId) {
                     run_root: shared.root.join("runtimes"),
                     model: None,
                     login: None,
+                    vault: Default::default(),
                 };
                 match runtime.version().await {
                     Err(e) => ("unavailable", vec![], Some(e.to_string())),
@@ -205,7 +207,7 @@ async fn fetch_subscription(shared: &Arc<Shared>, user: aurelius_domain::UserId)
         (None, _) => failed("No working Claude Code connection (Settings → Connections).".into()),
         (Some(_), false) => failed("Connect your Claude login to see your usage.".into()),
         (Some(path), true) => {
-            let runtime = ClaudeCodeRuntime { executable: PathBuf::from(path), run_root: shared.root.join("runtimes").join("usage"), model: None, login: Some(ClaudeLogin::at(&shared.root, user)) };
+            let runtime = ClaudeCodeRuntime { executable: PathBuf::from(path), run_root: shared.root.join("runtimes").join("usage"), model: None, login: Some(ClaudeLogin::at(&shared.root, user)), vault: Default::default() };
             let plan = runtime.auth_status().await.ok().and_then(|s| s.plan);
             match runtime.subscription_usage().await {
                 Ok(raw) => SubscriptionUsage {

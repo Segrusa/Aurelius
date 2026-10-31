@@ -30,6 +30,7 @@ async fn setup(client: &Client) -> (EmployeeId, ProjectId) {
 async fn planned_ticket(client: &Client, project_id: ProjectId, owner: EmployeeId, mode: Option<AgentMode>) -> TicketId {
     let made = client
         .create_ticket(CreateTicket {
+            confirm_secret: false,
             project_id,
             title: "Export".into(),
             description: Some("Export the report as CSV.".into()),
@@ -123,11 +124,11 @@ async fn a_tickets_plan_waits_for_the_board_and_is_revised_then_approved() {
     assert_eq!(root.waiting_reason.as_deref(), Some("plan_review"));
     assert!(root.result.is_none(), "no report yet");
     // Not a Review: accept and send back do not apply here.
-    assert_eq!(code(client.ticket_command(Command::AcceptTicket(AcceptTicket { ticket_id: id, note: None }), None).await), ErrorCode::Validation);
+    assert_eq!(code(client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await), ErrorCode::Validation);
 
     // Revise (feedback required): Plan mode stays, the feedback goes in, a new plan follows.
-    assert_eq!(code(client.ticket_command(Command::RevisePlan(RevisePlan { ticket_id: id, feedback: "".into() }), None).await), ErrorCode::Validation);
-    client.ticket_command(Command::RevisePlan(RevisePlan { ticket_id: id, feedback: "Also a JSON export".into() }), None).await.unwrap();
+    assert_eq!(code(client.ticket_command(Command::RevisePlan(RevisePlan { confirm_secret: false, ticket_id: id, feedback: "".into() }), None).await), ErrorCode::Validation);
+    client.ticket_command(Command::RevisePlan(RevisePlan { confirm_secret: false, ticket_id: id, feedback: "Also a JSON export".into() }), None).await.unwrap();
     assert_eq!(mode_of(dir.path(), conversation), "plan");
     let messages = client.messages(conversation).await.unwrap().messages;
     assert!(messages.iter().any(|m| m.author.as_deref() == Some("grace") && m.text.contains("Also a JSON export")), "B2: the feedback is in the conversation");

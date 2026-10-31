@@ -692,7 +692,7 @@ impl CommandService {
                     Err(e) => return Ok((false, e.to_string(), vec![])),
                 };
                 if memory::looks_secret(&content) {
-                    return Ok((false, "This looks like a secret; secrets are never stored in memory.".into(), vec![]));
+                    return Ok((false, "This looks like a secret; secrets are never stored in memory. Keep it in the vault and remember only its name (the environment variable, e.g. $NAME).".into(), vec![]));
                 }
                 let wanted = scope.trim().to_lowercase();
                 let blob = self.store.blobs().put(content.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;

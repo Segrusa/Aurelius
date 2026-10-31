@@ -26,7 +26,55 @@ use aurelius_runtime::RuntimeInput;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Whether a Bash command prints the environment or a vault variable
+/// (`echo $GITHUB_TOKEN`, `printf '%s' "${GITHUB_TOKEN}"`, `env`, `printenv`,
+/// `/proc/*/environ`), SEC0 E17. Defence in depth, not a boundary: a script,
+/// `sh -c` or a rewritten value gets past it; what Aurelius keeps is redacted
+/// anyway. `curl -H "Authorization: Bearer $TOKEN"` passes.
+pub fn prints_vault_env(command: &str, names: &[String]) -> bool {
+    let mentions = |segment: &str| {
+        names.iter().any(|n| {
+            let (plain, braced) = (format!("${n}"), format!("${{{n}"));
+            segment.match_indices(&plain).any(|(i, _)| !segment[i + plain.len()..].starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')) || segment.contains(&braced)
+        })
+    };
+    command
+        .split(|c| matches!(c, ';' | '|' | '&' | '\n' | '(' | ')' | '`'))
+        .map(|segment| segment.trim().trim_start_matches('$').trim())
+        .any(|segment| {
+            let mut words = segment.split_whitespace().skip_while(|w| matches!(*w, "sudo" | "command" | "builtin" | "exec" | "nohup" | "time") || w.contains('='));
+            let first = words.next().unwrap_or("").rsplit('/').next().unwrap_or("");
+            let rest: Vec<&str> = words.collect();
+            match first {
+                "env" | "printenv" => rest.iter().all(|w| w.starts_with('-') || names.iter().any(|n| n == w)) || rest.is_empty(),
+                "set" => rest.is_empty(),
+                "export" | "declare" | "typeset" => rest.iter().any(|w| matches!(*w, "-p" | "-x" | "-px" | "-xp")),
+                "echo" | "printf" | "print" | "cat" | "tee" | "logger" => mentions(segment) || (first == "cat" && segment.contains("/environ")),
+                "strings" | "xargs" | "tr" | "od" | "xxd" | "base64" | "hexdump" => segment.contains("/environ") || mentions(segment),
+                _ => segment.contains("/proc/") && segment.contains("environ"),
+            }
+        })
+}
+
+/// The env names of the vault's items (any scope): what `prints_vault_env` looks for.
+async fn vault_names(shared: &Arc<Shared>) -> Vec<String> {
+    let store = shared.store().clone();
+    tokio::task::spawn_blocking(move || {
+        store.read(|c| aurelius_storage::vault::env_names(c, None)).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 pub async fn ask(shared: &Arc<Shared>, run_id: RunId, call_id: Option<String>, tool: String, input: serde_json::Value) -> Result<BridgeOutcome, ProtocolError> {
+    // A command that would print the vault's values is refused in every mode
+    // this is asked in (E17; in Auto the `--settings` deny rules do it).
+    if tool == "Bash" {
+        let command = input["command"].as_str().unwrap_or("");
+        if !command.is_empty() && prints_vault_env(command, &vault_names(shared).await) {
+            return Ok(deny("Aurelius refuses commands that print the environment or a vault variable. Use $NAME only inside the command that needs it (for example curl -H \"Authorization: Bearer $NAME\"), and never show its value.".into()));
+        }
+    }
     // A trial of a task (variants) runs unattended in its own worktree: nobody is
     // asked; what stays inside goes, anything outside is refused.
     let s = shared.clone();
@@ -411,5 +459,48 @@ mod tests {
         assert!(!covers(AgentMode::AcceptEdits, "Artifact") && !covers(AgentMode::Auto, "Artifact"));
         // Auto lets artifact calls through only because they are artifact calls (enabling them is the consent).
         assert!(!auto_allows("Artifact"));
+    }
+}
+
+#[cfg(test)]
+mod vault_env_tests {
+    use super::prints_vault_env;
+
+    /// SEC0 E17: printing a vault variable or the environment is refused, using it is not.
+    #[test]
+    fn printing_the_vault_or_the_environment_is_refused_using_it_is_not() {
+        let names = vec!["GITHUB_TOKEN".to_owned(), "CANARY_TOKEN".to_owned()];
+        for refused in [
+            "echo $GITHUB_TOKEN",
+            "echo \"token: ${GITHUB_TOKEN}\"",
+            "printf '%s' \"$CANARY_TOKEN\"",
+            "ls && echo $GITHUB_TOKEN | base64",
+            "/bin/echo $GITHUB_TOKEN",
+            "env",
+            "env | grep TOKEN",
+            "printenv",
+            "printenv GITHUB_TOKEN",
+            "export -p",
+            "declare -x",
+            "set",
+            "cat /proc/self/environ",
+            "strings /proc/1234/environ",
+            "tr '\\0' '\\n' < /proc/self/environ",
+            "echo $GITHUB_TOKEN > token.txt",
+        ] {
+            assert!(prints_vault_env(refused, &names), "{refused}");
+        }
+        for allowed in [
+            "curl -H \"Authorization: Bearer $GITHUB_TOKEN\" https://api.example",
+            "git push https://x:${GITHUB_TOKEN}@example/repo.git",
+            "echo $GITHUB_TOKEN_URL_HINT",
+            "echo hello",
+            "env FOO=1 cargo test",
+            "cargo test",
+            "set -e",
+            "export PATH=$PATH:/x",
+        ] {
+            assert!(!prints_vault_env(allowed, &names), "{allowed}");
+        }
     }
 }

@@ -26,11 +26,13 @@ pub mod write;
 mod sessions_tests;
 #[cfg(test)]
 mod tickets_tests;
+#[cfg(test)]
+mod vault_tests;
 
 pub use aurelius_domain::{AppError as ProtocolError, CommandResult, ErrorCode, EventKind};
 pub use bridge::{BridgeCall, BridgeOutcome, BridgeRequest, BridgeResponse, EmployeeTaskOp};
 pub use events::Event;
-pub use method::{ClaudeLoginInputParams, HelloParams, LoginParams, Method, client_feature};
+pub use method::{ClaudeLoginInputParams, HelloParams, KeyExportParams, LoginParams, Method, client_feature};
 pub use rpc::{Call, ClaudeLoginPrompt, FEATURE_TERMINAL_MULTI, FEATURES, HelloResult, Outcome, PROTOCOL_MAJOR, Request, ResponseBody, ServerMessage, feature, incompatible_message, reject_unparsed};
 pub use views::*;
-pub use write::{HostResult, HostWrite, Receipt, SetPasswordParams, UserCreateParams, WriteMethod, WriteResult};
+pub use write::{HostResult, HostWrite, Receipt, SetPasswordParams, UserCreateParams, VaultCreateParams, VaultUpdateParams, WriteMethod, WriteResult};

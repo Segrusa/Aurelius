@@ -76,6 +76,10 @@ pub struct AddIdea {
     /// the project's uploads area, as with a task's `files`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -93,6 +97,10 @@ pub struct UpdateIdea {
     /// Attachments to drop, by their `path` in `IdeaView::attachments`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remove_files: Vec<String>,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
 }
 
 /// Delete an idea for good, with its attachments (feature `idea_attachments`).

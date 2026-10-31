@@ -41,6 +41,7 @@ import '../features/usage/context_page.dart';
 import '../features/plugins/plugins_page.dart';
 import '../features/updates/updates_page.dart';
 import '../features/usage/usage_page.dart';
+import '../features/vault/vault_page.dart';
 import 'shell.dart';
 
 /// Routes for one host. Detail screens cover the tab bar (root navigator).
@@ -99,6 +100,8 @@ class AppRouter {
       ),
       // Tasks without a ticket stay reachable (B7): More → Tasks.
       GoRoute(parentNavigatorKey: _root, path: '/tasks', pageBuilder: (context, state) => routePage(state, const TasksPage())),
+      // The vault (Fase 4): the company's, or a project's with `?project=`.
+      GoRoute(parentNavigatorKey: _root, path: '/vault', pageBuilder: (context, state) => routePage(state, VaultPage(projectId: state.uri.queryParameters['project']))),
       GoRoute(
         parentNavigatorKey: _root,
         path: '/board/new',

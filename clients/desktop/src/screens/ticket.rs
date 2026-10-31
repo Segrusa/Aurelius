@@ -72,7 +72,7 @@ impl AppView {
                 cx.notify();
                 return;
             }
-            None => Command::RevisePlan(ticket::RevisePlan { ticket_id: id, feedback }),
+            None => Command::RevisePlan(ticket::RevisePlan { confirm_secret: false, ticket_id: id, feedback }),
         };
         let done = match decision {
             Some(PlanApproval::Approve) => format!("Plan of #{number} approved. The owner goes on in Auto."),
@@ -105,7 +105,7 @@ impl AppView {
         let t = self.board.ticket(id).cloned();
         let who = t.as_ref().and_then(|t| t.owner_name.clone()).unwrap_or_else(|| "The owner".into());
         let number = t.map_or(0, |t| t.number);
-        self.board_send(Command::SendBackTicket(ticket::SendBackTicket { ticket_id: id, feedback }), Some(format!("#{number} is back in Doing. {who} gets your feedback.")));
+        self.board_send(Command::SendBackTicket(ticket::SendBackTicket { confirm_secret: false, ticket_id: id, feedback }), Some(format!("#{number} is back in Doing. {who} gets your feedback.")));
         self.board_feedback_sent(discussion, window, cx);
     }
 
@@ -121,7 +121,7 @@ impl AppView {
             return;
         }
         let number = self.board.ticket(id).map_or(0, |t| t.number);
-        self.board_send(Command::AcceptTicket(ticket::AcceptTicket { ticket_id: id, note: None }), Some(format!("#{number} is Done. A summary goes to project memory.")));
+        self.board_send(Command::AcceptTicket(ticket::AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), Some(format!("#{number} is Done. A summary goes to project memory.")));
         self.board_close_dialog(window, cx);
     }
 
@@ -161,7 +161,7 @@ impl AppView {
             return;
         };
         let from_message = crate::screens::discussion::from_message(self.board.form.from_message, self.ticket_discussion_supported());
-        let create = ticket::CreateTicket { project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start, from_message };
+        let create = ticket::CreateTicket { confirm_secret: false, project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start, from_message };
         let done = start.then(|| match owner.and_then(|e| self.employee_name(e)) {
             Some(name) => format!("Created and started with {name}."),
             None => {

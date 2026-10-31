@@ -22,6 +22,8 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite, user: Option
         | HostWrite::ClaudeLoginLink
         | HostWrite::ClaudeLoginCancel { .. }
         | HostWrite::ClaudeLoginUnlink => return Err(super::internal("a session write reached the host pipeline")),
+        // Answered by `vault` before the pipeline (which would keep the value).
+        HostWrite::VaultCreate(_) | HostWrite::VaultUpdate(_) | HostWrite::VaultArchive { .. } => return Err(super::internal("a vault write reached the host pipeline")),
         HostWrite::SecretSet { connection_id, secret } => {
             crate::runtimes::store_secret(shared, connection_id, secret).await?;
             HostResult::Done
@@ -70,12 +72,15 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite, user: Option
             let store = shared.store().clone();
             HostResult::VariantsSetting(storage_task(move || store.write(move |tx| aurelius_storage::variants::set_enabled(tx, enabled, aurelius_storage::now_ms()))).await?)
         }
+        // Runs read the notes as context: a vault value in one is refused, before anything is stored (R1 m7).
         HostWrite::NoteCreate { project_id, body } => {
+            crate::vault::refuse_secret_text(&[Some(&body)])?;
             let (note, notices) = app_task(move || s.service.create_note(project_id, body)).await?;
             shared.publish(notices);
             HostResult::Note(note)
         }
         HostWrite::NoteUpdate { note_id, body, base_revision } => {
+            crate::vault::refuse_secret_text(&[Some(&body)])?;
             let (note, notices) = app_task(move || s.service.update_note(note_id, body, base_revision)).await?;
             shared.publish(notices);
             HostResult::Note(note)

@@ -72,6 +72,7 @@ fn run_config(root: &Path, task: TaskId) -> serde_json::Value {
 
 fn new_task(w: &World, title: &str, goal: &str) -> CreateTask {
     CreateTask {
+        confirm_secret: false,
         files: vec![],
         run: Default::default(),
         project_id: w.project,
@@ -151,6 +152,7 @@ async fn recurring_tasks_are_listed_changed_paused_run_and_deleted() {
     std::fs::write(&note, "data").unwrap();
 
     let create = CreateTaskSchedule {
+        confirm_secret: false,
         project_id: w.project,
         employee_id: w.employee,
         title: "Weekrapport".into(),
@@ -189,6 +191,7 @@ async fn recurring_tasks_are_listed_changed_paused_run_and_deleted() {
 
     // Update: other text and recurrence, the file dropped.
     let update = UpdateTaskSchedule {
+        confirm_secret: false,
         schedule_id,
         employee_id: w.employee,
         title: "Dagrapport".into(),

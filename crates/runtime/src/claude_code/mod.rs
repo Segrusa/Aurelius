@@ -41,6 +41,43 @@ pub struct ClaudeCodeRuntime {
     /// without, `start` refuses). Without one (`--version`) the child gets an
     /// empty config folder of Aurelius' own, never `~/.claude`.
     pub login: Option<ClaudeLogin>,
+    /// The vault's values this run gets as environment variables (E7, E15):
+    /// only a work run, after the allow-list and before Aurelius' own.
+    pub vault: VaultEnv,
+}
+
+/// One environment variable from the vault. Never printed.
+#[derive(Clone)]
+pub struct VaultVar {
+    pub name: String,
+    pub value: zeroize::Zeroizing<String>,
+    /// A secret: delivered only when the redactor knows its value.
+    pub secret: bool,
+}
+
+/// Environment variables from the vault, never printed. Set by the daemon on
+/// a runtime for one run; nothing of it is in `RunRequest` (Debug, traces).
+#[derive(Clone, Default)]
+pub struct VaultEnv(pub std::sync::Arc<Vec<VaultVar>>);
+
+impl VaultEnv {
+    pub fn new(vars: Vec<VaultVar>) -> Self {
+        Self(std::sync::Arc::new(vars))
+    }
+
+    pub fn names(&self) -> Vec<&str> {
+        self.0.iter().map(|v| v.name.as_str()).collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl std::fmt::Debug for VaultEnv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("VaultEnv").field(&self.names()).finish()
+    }
 }
 
 /// Environment variables passed to the child. Everything else (including any
@@ -349,6 +386,9 @@ pub fn deny_rules(login: &ClaudeLogin) -> Vec<String> {
         }
         if let Some(data) = logins.parent() {
             paths.push(format!("{}*", rule_path(&data.join("data").join("aurelius.sqlite"))));
+            // The vault's key on Linux (and every other file secret), E8.
+            paths.push(format!("{}/**", rule_path(&data.join("secrets"))));
+            searched.push(rule_path(&data.join("secrets")));
         }
     }
     paths.extend(["~/.claude/**", "~/.claude*", "~/.config/claude/**"].map(str::to_owned));
@@ -367,9 +407,45 @@ pub fn holds_logins(folders: &[std::path::PathBuf], login: &ClaudeLogin) -> bool
     folders.iter().filter_map(|f| f.canonicalize().ok()).any(|f| logins.starts_with(f))
 }
 
-/// `--settings` of a run: its deny rules (D5).
-fn deny_settings(login: &ClaudeLogin) -> String {
-    serde_json::json!({ "permissions": { "deny": deny_rules(login) } }).to_string()
+/// Bash commands that print the whole environment (SEC0 E17), denied in every
+/// mode as `--settings` rules once a run has vault values. Defence in depth,
+/// not a boundary: `/usr/bin/env`, `python -c` or `sh -c` get past them, and
+/// the values are redacted from what Aurelius keeps anyway. `curl -H "$TOKEN"`
+/// keeps working.
+pub const ENV_DUMP_RULES: &[&str] = &[
+    "Bash(env)", "Bash(env:*)", "Bash(printenv)", "Bash(printenv:*)", "Bash(set)", "Bash(export -p)", "Bash(export -p:*)",
+    "Bash(declare -x)", "Bash(declare -x:*)", "Bash(declare -p)", "Bash(declare -p:*)", "Bash(typeset -x)", "Bash(compgen -v)",
+    "Bash(cat /proc/*/environ)", "Bash(cat /proc/*/environ:*)", "Bash(strings /proc/*/environ)", "Bash(strings /proc/*/environ:*)",
+    "Bash(xargs -0 < /proc/*/environ)", "Bash(tr:*/proc/*/environ*)",
+];
+
+/// `--settings` of a run: its deny rules (D5, E8), and with vault values the
+/// rules against printing the environment (E17).
+fn deny_settings(login: &ClaudeLogin, vault: bool) -> String {
+    let mut deny = deny_rules(login);
+    if vault {
+        deny.extend(ENV_DUMP_RULES.iter().map(|r| r.to_string()));
+    }
+    serde_json::json!({ "permissions": { "deny": deny } }).to_string()
+}
+
+/// The vault values a run gets: only names the vault may give (checked again
+/// at delivery, E7) and only values the redactor knows (E14: never a value
+/// that could reach a transcript, an event or a log unredacted).
+fn deliverable(vault: &VaultEnv) -> Vec<(String, zeroize::Zeroizing<String>)> {
+    let redactor = crate::redact::current();
+    vault
+        .0
+        .iter()
+        .filter(|var| {
+            let ok = aurelius_domain::vault::check_env_name(&var.name).is_ok() && (!var.secret || !redactor.names_in(&var.value).is_empty());
+            if !ok {
+                tracing::warn!(name = %var.name, "a vault value was not delivered: its name is not allowed or the redactor does not know it");
+            }
+            ok
+        })
+        .map(|var| (var.name.clone(), var.value.clone()))
+        .collect()
 }
 
 /// Whether `--session-id` takes this: a lowercase hyphenated UUID.
@@ -548,7 +624,7 @@ impl AuthStatus {
 
 impl ClaudeCodeRuntime {
     fn command(&self, args: &[String]) -> Command {
-        self.command_from(args, |key| std::env::var_os(key))
+        self.command_from(args, |key| std::env::var_os(key), &[])
     }
 
     /// The folder the child keeps its config, login and sessions in: the run's
@@ -562,13 +638,19 @@ impl ClaudeCodeRuntime {
 
     /// `command` with the daemon's environment given, so a test can show what
     /// of it reaches the child.
-    fn command_from(&self, args: &[String], parent: impl Fn(&str) -> Option<std::ffi::OsString>) -> Command {
+    /// Never print the result (`Debug` of a `Command` shows its environment, E20).
+    fn command_from(&self, args: &[String], parent: impl Fn(&str) -> Option<std::ffi::OsString>, vault: &[(String, zeroize::Zeroizing<String>)]) -> Command {
         let mut command = Command::new(&self.executable);
         command.args(args).env_clear().kill_on_drop(true);
         for key in ENV_ALLOWLIST {
             if let Some(value) = parent(key) {
                 command.env(key, value);
             }
+        }
+        // The vault after the allow-list and before Aurelius' own variables, so
+        // these always win, even over a name the checks let through (E7).
+        for (name, value) in vault {
+            command.env(name, value.as_str());
         }
         // The run's own login, after the allowlist: the only one the child gets.
         command.env(login::CONFIG_DIR_ENV, self.config_dir());
@@ -701,7 +783,7 @@ impl AgentRuntime for ClaudeCodeRuntime {
         // Its file tools stay out of the other logins, the database and ~/.claude (D5).
         if let Some(login) = &self.login {
             args.push("--settings".into());
-            args.push(deny_settings(login));
+            args.push(deny_settings(login, matches!(request.profile, ToolProfile::Work { .. }) && !self.vault.is_empty()));
             if let ToolProfile::Work { folders, .. } = &request.profile {
                 if holds_logins(folders, login) {
                     tracing::warn!(run = %request.run_id, "a work folder of this run holds the Claude login folders; only Claude Code's best effort keeps its searches out of them");
@@ -745,7 +827,9 @@ impl AgentRuntime for ClaudeCodeRuntime {
             }
         }
         let sent = sent_request(&args, session, turns);
-        let mut command = self.command(&args);
+        let vault = if work { deliverable(&self.vault) } else { Vec::new() };
+        let mut command = self.command_from(&args, |key| std::env::var_os(key), &vault);
+        drop(vault);
         if matches!(request.profile, ToolProfile::Work { artifacts: true, .. }) {
             command.env(ARTIFACT_ENV, "1").env(ARTIFACT_AUTO_OPEN_ENV, "0");
         }
@@ -908,6 +992,10 @@ impl AgentRuntime for ClaudeCodeRuntime {
         true
     }
 
+    fn with_vault(&self, vault: VaultEnv) -> Option<std::sync::Arc<dyn AgentRuntime>> {
+        Some(std::sync::Arc::new(Self { vault, ..self.clone() }))
+    }
+
     /// Only in this login's folder: a session of another login is never found (R4).
     fn has_session(&self, id: &str) -> bool {
         is_session_id(id) && self.login.is_some() && session::transcript(&self.config_dir(), id).is_some()
@@ -954,6 +1042,134 @@ pub fn parse_plan_limits(text: &str) -> Vec<PlanLimit> {
             Some(PlanLimit { label, percent: percent.min(100), resets })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod vault_env_tests {
+    use super::*;
+
+    /// A vault item never takes a name the runtime passes or sets (MU4-06 AC4).
+    #[test]
+    fn every_name_the_runtime_passes_or_sets_is_reserved_for_the_vault() {
+        let set = [login::CONFIG_DIR_ENV, DISABLE_BACKGROUND_TASKS, SUBAGENT_MODEL, SUBAGENT_MODEL_SETTING, CARGO_BUILD_JOBS, ARTIFACT_ENV, ARTIFACT_AUTO_OPEN_ENV];
+        for name in ENV_ALLOWLIST.iter().chain(set.iter()) {
+            assert!(aurelius_domain::vault::env_name_reserved(name), "{name}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod vault_delivery_tests {
+    use super::*;
+    use crate::redact::{self, Redactor, Secret};
+    use zeroize::Zeroizing;
+
+    const FAKE: &str = "sk-test-FAKE-0000-delivery";
+
+    fn vault(pairs: &[(&str, &str)]) -> VaultEnv {
+        VaultEnv::new(pairs.iter().map(|(k, v)| VaultVar { name: k.to_string(), value: Zeroizing::new(v.to_string()), secret: true }).collect())
+    }
+
+    /// E7: the allow-list, then the vault, then Aurelius' own variables, which win.
+    #[test]
+    fn aurelius_own_variables_win_over_the_vault_and_the_vault_over_the_allow_list() {
+        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "/srv/a/runs".into(), model: None, login: None, vault: VaultEnv::default() };
+        let pairs = vec![("HOME".to_string(), Zeroizing::new("/vault-home".to_string())), ("CLAUDE_CONFIG_DIR".to_string(), Zeroizing::new("/vault-config".to_string())), ("CARGO_BUILD_JOBS".to_string(), Zeroizing::new("999".to_string())), ("GITHUB_TOKEN".to_string(), Zeroizing::new(FAKE.to_string()))];
+        let command = runtime.command_from(&["-p".into()], |k| (k == "HOME").then(|| "/home/daemon".into()), &pairs);
+        let env: std::collections::BTreeMap<String, String> = command.as_std().get_envs().filter_map(|(k, v)| Some((k.to_string_lossy().into_owned(), v?.to_string_lossy().into_owned()))).collect();
+        assert_eq!(env["HOME"], "/vault-home", "the vault comes after the allow-list (and HOME is refused at create and delivery)");
+        assert_eq!(env["CLAUDE_CONFIG_DIR"], "/srv/a/runs/no-login", "Aurelius' own come last");
+        assert_ne!(env["CARGO_BUILD_JOBS"], "999");
+        assert_eq!(env["GITHUB_TOKEN"], FAKE);
+        assert!(!format!("{:?}", runtime.vault).contains("FAKE"));
+    }
+
+    /// E7 at delivery, E14: a name refused since, or a value the redactor does
+    /// not know, is not delivered.
+    #[test]
+    fn only_allowed_names_with_values_the_redactor_knows_are_delivered() {
+        let _global = redact::TEST_GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+        let mut env = vault(&[("GITHUB_TOKEN", FAKE), ("NODE_OPTIONS", FAKE), ("OTHER_TOKEN", "sk-test-FAKE-unknown-to-it")]);
+        redact::install(Redactor::default());
+        assert!(deliverable(&env).is_empty(), "no redactor, no delivery");
+        let mut vars = (*env.0).clone();
+        vars.push(VaultVar { name: "DOCS_URL".into(), value: Zeroizing::new("https://docs.example".into()), secret: false });
+        env = VaultEnv::new(vars);
+        redact::install(Redactor::new(&[Secret { name: "GITHUB_TOKEN".into(), label: String::new(), value: Zeroizing::new(FAKE.into()) }]));
+        let names: Vec<String> = deliverable(&env).into_iter().map(|(k, _)| k).collect();
+        redact::install(Redactor::default());
+        assert_eq!(names, vec!["GITHUB_TOKEN".to_string(), "DOCS_URL".to_string()], "a text or url needs no redaction");
+    }
+
+    /// E8: the secrets folder is closed to every file tool and to searches; E17
+    /// the environment dumps are denied as settings once a run has values.
+    #[test]
+    fn the_secrets_folder_and_the_environment_dumps_are_denied() {
+        let data = std::env::temp_dir().join(format!("aurelius-deny-secrets-{}", aurelius_domain::UserId::new()));
+        std::fs::create_dir_all(&data).unwrap();
+        let own = ClaudeLogin::of(&data, aurelius_domain::UserId::new()).unwrap();
+        let rules = deny_rules(&own);
+        let secrets = format!("//{}/secrets", data.display().to_string().trim_start_matches('/'));
+        for tool in ["Read", "Edit", "Write", "Glob", "Grep"] {
+            assert!(rules.contains(&format!("{tool}({secrets}/**)")), "{tool}: {rules:?}");
+        }
+        for tool in ["Read", "Glob", "Grep"] {
+            assert!(rules.contains(&format!("{tool}({secrets})")), "{tool}: {rules:?}");
+        }
+        let with: serde_json::Value = serde_json::from_str(&deny_settings(&own, true)).unwrap();
+        let deny: Vec<&str> = with["permissions"]["deny"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+        for rule in ["Bash(env)", "Bash(env:*)", "Bash(printenv:*)", "Bash(set)", "Bash(export -p)", "Bash(declare -x)", "Bash(cat /proc/*/environ)"] {
+            assert!(deny.contains(&rule), "{rule}");
+        }
+        assert!(!deny.iter().any(|r| r.starts_with("Bash(curl")), "curl -H \"$TOKEN\" keeps working");
+        let without: serde_json::Value = serde_json::from_str(&deny_settings(&own, false)).unwrap();
+        assert!(!without.to_string().contains("printenv"));
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    /// E20: a `Command` prints its environment in `Debug`: never in this adapter.
+    #[test]
+    fn the_adapter_never_prints_a_command() {
+        // The adapter, without this test (which names the patterns).
+        let source = include_str!("mod.rs").split(concat!("mod vault_", "delivery_tests")).next().unwrap();
+        let code: String = source.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+        for printed in ["{command:?}", "{cmd:?}", "?command", "?cmd", "{:?}\", command", "dbg!(command", "dbg!(&command"] {
+            assert!(!code.contains(printed), "{printed}");
+        }
+    }
+
+    /// E15: only a work run gets the vault in its environment.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn only_a_work_run_gets_the_vault() {
+        use std::os::unix::fs::PermissionsExt;
+        let _global = redact::TEST_GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+        redact::install(Redactor::new(&[Secret { name: "GITHUB_TOKEN".into(), label: String::new(), value: Zeroizing::new(FAKE.into()) }]));
+        let dir = std::env::temp_dir().join(format!("aurelius-vault-env-{}", aurelius_domain::UserId::new()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("env.txt");
+        let script = dir.join("fake-claude");
+        std::fs::write(&script, format!("#!/bin/sh\nprintf '%s\\n' \"GITHUB_TOKEN=${{GITHUB_TOKEN:-none}}\" >> {}\n", out.display())).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let login = ClaudeLogin::of(&dir, aurelius_domain::UserId::new()).unwrap();
+        let runtime = ClaudeCodeRuntime { executable: script, run_root: dir.join("runs"), model: None, login: Some(login), vault: vault(&[("GITHUB_TOKEN", FAKE)]) };
+        let bridge = ApprovalBridge { program: "/bin/true".into(), args: vec![] };
+        let work = ToolProfile::Work { folders: vec![dir.clone()], permission_mode: "default".into(), approval_bridge: bridge.clone(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let triage = ToolProfile::Triage { approval_bridge: bridge, tools: vec![], max_turns: 1 };
+        for profile in [ToolProfile::TextOnly, triage, work] {
+            let request = RunRequest {
+                run_id: aurelius_domain::RunId::new(), model_id: "sonnet".into(), system: None,
+                turns: vec![Turn { role: TurnRole::User, text: "hi".into(), images: Vec::new() }],
+                effort: None, profile, subagent_model: None, session: SessionUse::None, session_id: None, keep_session: false,
+            };
+            let mut handle = runtime.start(request).await.unwrap();
+            while handle.events.recv().await.is_some() {}
+        }
+        redact::install(Redactor::default());
+        let seen = std::fs::read_to_string(&out).unwrap();
+        assert_eq!(seen, format!("GITHUB_TOKEN=none\nGITHUB_TOKEN=none\nGITHUB_TOKEN={FAKE}\n"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 #[cfg(test)]
@@ -1167,7 +1383,7 @@ Look"));
 
     #[test]
     fn every_child_runs_without_background_tasks() {
-        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None, login: None };
+        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None, login: None, vault: VaultEnv::default() };
         let command = runtime.command(&["--version".into()]);
         let value = command.as_std().get_envs().find(|(k, _)| *k == DISABLE_BACKGROUND_TASKS).and_then(|(_, v)| v);
         assert_eq!(value, Some(std::ffi::OsStr::new("1")));
@@ -1183,7 +1399,7 @@ Look"));
         assert_eq!(subagent_model(None, Some("")), None, "set to Disabled: the CLI decides");
         assert_eq!(subagent_model(Some("opus"), Some("haiku")).as_deref(), Some("opus"));
         // The child gets it (this test binary does not set AURELIUS_SUBAGENT_MODEL).
-        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None, login: None };
+        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None, login: None, vault: VaultEnv::default() };
         let command = runtime.command(&["--version".into()]);
         let value = command.as_std().get_envs().find(|(k, _)| *k == SUBAGENT_MODEL).and_then(|(_, v)| v);
         let expected = subagent_model(std::env::var(SUBAGENT_MODEL_SETTING).ok().as_deref(), None);
@@ -1192,7 +1408,7 @@ Look"));
 
     #[test]
     fn every_child_builds_with_half_the_cores() {
-        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None, login: None };
+        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None, login: None, vault: VaultEnv::default() };
         let command = runtime.command(&["--version".into()]);
         let value = command.as_std().get_envs().find(|(k, _)| *k == CARGO_BUILD_JOBS).and_then(|(_, v)| v);
         let jobs: usize = value.and_then(|v| v.to_str()).and_then(|v| v.parse().ok()).unwrap();
@@ -1225,11 +1441,11 @@ mod login_tests {
     }
 
     fn runtime(login: Option<ClaudeLogin>) -> ClaudeCodeRuntime {
-        ClaudeCodeRuntime { executable: "claude".into(), run_root: "/srv/aurelius/runtimes/c/runs".into(), model: None, login }
+        ClaudeCodeRuntime { executable: "claude".into(), run_root: "/srv/aurelius/runtimes/c/runs".into(), model: None, login, vault: VaultEnv::default() }
     }
 
     fn env_of(login: Option<ClaudeLogin>) -> Vec<(String, Option<String>)> {
-        let command = runtime(login).command_from(&["-p".into()], parent);
+        let command = runtime(login).command_from(&["-p".into()], parent, &[]);
         let mut env: Vec<_> = command.as_std().get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
         env.sort();
         env
@@ -1275,7 +1491,7 @@ mod login_tests {
             turns: vec![Turn { role: TurnRole::User, text: "hi".into(), images: Vec::new() }],
             effort: None, profile: ToolProfile::TextOnly, subagent_model: None, session: SessionUse::Keep, session_id: None, keep_session: false,
         };
-        let runtime = ClaudeCodeRuntime { executable: "/nonexistent/claude-that-must-not-run".into(), run_root: std::env::temp_dir().join("aurelius-no-login"), model: None, login: None };
+        let runtime = ClaudeCodeRuntime { executable: "/nonexistent/claude-that-must-not-run".into(), run_root: std::env::temp_dir().join("aurelius-no-login"), model: None, login: None, vault: VaultEnv::default() };
         assert!(matches!(runtime.start(request).await, Err(RuntimeError::Login(_))));
         assert!(!runtime.has_session("0199c3a2-0000-7000-8000-000000000001"), "no login, no sessions (not even ~/.claude's)");
     }
@@ -1289,7 +1505,7 @@ mod login_tests {
         let id = "0199c3a2-0000-7000-8000-000000000001";
         std::fs::create_dir_all(alex.config_dir().join("projects").join("-work")).unwrap();
         std::fs::write(alex.config_dir().join("projects").join("-work").join(format!("{id}.jsonl")), "{}\n").unwrap();
-        let on = |login: &ClaudeLogin| ClaudeCodeRuntime { executable: "claude".into(), run_root: data.join("runs"), model: None, login: Some(login.clone()) };
+        let on = |login: &ClaudeLogin| ClaudeCodeRuntime { executable: "claude".into(), run_root: data.join("runs"), model: None, login: Some(login.clone()), vault: VaultEnv::default() };
         assert!(on(&alex).has_session(id));
         assert!(!on(&robin).has_session(id), "Alex's transcript is never resumed on Robin's login (R4)");
         on(&robin).remove_session(id);
@@ -1333,10 +1549,10 @@ mod login_tests {
         assert!(holds_logins(&[workspace.clone(), data.clone()], &own));
         assert!(!holds_logins(&[workspace], &own));
         // They go in with the run, as --settings.
-        let settings: serde_json::Value = serde_json::from_str(&deny_settings(&own)).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&deny_settings(&own, false)).unwrap();
         assert_eq!(settings["permissions"]["deny"].as_array().unwrap().len(), rules.len());
         // The trace of what was sent names no folder.
-        let args = vec!["-p".to_string(), "--settings".into(), deny_settings(&own)];
+        let args = vec!["-p".to_string(), "--settings".into(), deny_settings(&own, false)];
         let shown = sent_request(&args, SessionUse::None, &[]).args.join(" ");
         assert!(!shown.contains("logins") && shown.contains("deny rule(s)"), "{shown}");
         let _ = std::fs::remove_dir_all(data);

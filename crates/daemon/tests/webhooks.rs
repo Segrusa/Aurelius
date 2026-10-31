@@ -151,7 +151,7 @@ async fn app(root: &Path, secret: &str) -> Client {
 }
 
 fn task(project: ProjectId, employee: EmployeeId, title: &str) -> Command {
-    Command::CreateTask(CreateTask { project_id: project, employee_id: Some(employee), title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: RunSettings::default(), files: vec![] })
+    Command::CreateTask(CreateTask { confirm_secret: false, project_id: project, employee_id: Some(employee), title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: RunSettings::default(), files: vec![] })
 }
 
 fn now_secs() -> i64 {
@@ -242,12 +242,12 @@ async fn a_managers_reply_is_posted_to_the_app_that_asked() {
     let marcus = app(dir.path(), &secret).await;
 
     // The user's own chat with Jean is not the app's: its replies are not posted.
-    owner.execute(envelope(Command::SendEmployeeMessage(SendEmployeeMessage { employee_id: c.jean.0, text: "A private word".into(), conversation_id: c.jean.1, images: vec![], files: vec![], interrupt: false }), None)).await.unwrap();
+    owner.execute(envelope(Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id: c.jean.0, text: "A private word".into(), conversation_id: c.jean.1, images: vec![], files: vec![], interrupt: false }), None)).await.unwrap();
     tokio::time::sleep(Duration::from_millis(800)).await;
     assert!(receiver.requests().is_empty(), "{:?}", receiver.requests());
 
     marcus
-        .execute(envelope(Command::SendEmployeeMessage(SendEmployeeMessage { employee_id: c.jean.0, text: "Question from the app".into(), conversation_id: c.jean.1, images: vec![], files: vec![], interrupt: false }), None))
+        .execute(envelope(Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id: c.jean.0, text: "Question from the app".into(), conversation_id: c.jean.1, images: vec![], files: vec![], interrupt: false }), None))
         .await
         .unwrap();
     let requests = receiver.delivery_of("manager.replied", 1).await;
@@ -273,9 +273,9 @@ async fn a_group_chat_answer_of_the_ceo_is_not_the_apps_reply() {
     let (_, secret, _) = key_with_webhook(&owner, "Marcus", AppAudience::Management, &receiver.url).await;
     let marcus = app(dir.path(), &secret).await;
 
-    owner.execute(envelope(Command::SendGroupMessage(SendGroupMessage { text: "Hallo team".into(), images: vec![], files: vec![], channel: None }), None)).await.unwrap();
+    owner.execute(envelope(Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "Hallo team".into(), images: vec![], files: vec![], channel: None }), None)).await.unwrap();
     marcus
-        .execute(envelope(Command::SendEmployeeMessage(SendEmployeeMessage { employee_id: c.jean.0, text: "Question from the app".into(), conversation_id: c.jean.1, images: vec![], files: vec![], interrupt: false }), None))
+        .execute(envelope(Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id: c.jean.0, text: "Question from the app".into(), conversation_id: c.jean.1, images: vec![], files: vec![], interrupt: false }), None))
         .await
         .unwrap();
     // The group's answer comes first, the app's reply after it: only that one is posted.

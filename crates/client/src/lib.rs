@@ -1037,6 +1037,49 @@ impl Client {
         self.host(HostWrite::ClaudeLoginUnlink, done!(ClaudeLogin)).await
     }
 
+    // ---- the vault (feature `vault`) ----
+
+    /// The company's items (none) or a project's, with the company's apart.
+    pub async fn vault_list(&self, project_id: Option<aurelius_domain::ProjectId>) -> Result<aurelius_domain::vault::VaultList, ClientError> {
+        self.read(Method::VaultList { project_id }, body!(Vault)).await
+    }
+
+    /// One item's value; written to the audit log as shown or copied.
+    pub async fn vault_reveal(&self, item_id: aurelius_domain::VaultItemId, purpose: aurelius_domain::vault::RevealPurpose) -> Result<aurelius_domain::vault::VaultValue, ClientError> {
+        self.read(Method::VaultReveal { item_id, purpose }, body!(VaultValue)).await
+    }
+
+    /// The audit log, newest first: the company's, a project's or (`all`) every scope's.
+    pub async fn vault_audit(
+        &self,
+        project_id: Option<aurelius_domain::ProjectId>,
+        all: bool,
+        item_id: Option<aurelius_domain::VaultItemId>,
+        before: Option<i64>,
+        limit: Option<u32>,
+    ) -> Result<aurelius_domain::vault::VaultAuditPage, ClientError> {
+        self.read(Method::VaultAudit { project_id, all, item_id, before, limit }, body!(VaultAudit)).await
+    }
+
+    /// The server's vault key, to keep apart, for the signed-in board member's
+    /// password; written to the audit log.
+    pub async fn vault_key_export(&self, password: String) -> Result<aurelius_domain::vault::VaultKeyExport, ClientError> {
+        self.read(Method::VaultKeyExport(aurelius_protocol::KeyExportParams { password }), body!(VaultKey)).await
+    }
+
+    pub async fn vault_create(&self, params: aurelius_protocol::VaultCreateParams) -> Result<aurelius_domain::vault::VaultItemView, ClientError> {
+        self.host(HostWrite::VaultCreate(params), done!(VaultItem)).await
+    }
+
+    /// Change an item; `vault_kind_locked` for a kind to or from secret.
+    pub async fn vault_update(&self, params: aurelius_protocol::VaultUpdateParams) -> Result<aurelius_domain::vault::VaultItemView, ClientError> {
+        self.host(HostWrite::VaultUpdate(params), done!(VaultItem)).await
+    }
+
+    pub async fn vault_archive(&self, item_id: aurelius_domain::VaultItemId) -> Result<aurelius_domain::vault::VaultItemView, ClientError> {
+        self.host(HostWrite::VaultArchive { item_id }, done!(VaultItem)).await
+    }
+
     // ---- the board and its tickets (protocol 4) ----
 
     /// The board's columns with their cards, for one project or all.

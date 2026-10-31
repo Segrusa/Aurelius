@@ -445,6 +445,46 @@ abstract final class Methods {
   static const String variantsGetSetting = 'variants.get_setting';
   /// Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
   static const String variantsSetEnabled = 'variants.set_enabled';
+  /// Archive ("Delete") an item: runs and employees no longer get it; its audit
+  /// history stays. Answers `VaultItem`. Not for apps.
+  static const String vaultArchive = 'vault.archive';
+  /// The audit log, newest first (`VaultAuditPage`): the company's (nothing
+  /// given), a project's, or every scope's (`all`); one item's with `item_id`.
+  /// `before`: rows older than that row id; `limit` at most 200 (default 50).
+  /// Never a value. Not for apps.
+  static const String vaultAudit = 'vault.audit';
+  /// A new vault item (feature `vault`), in the company (no `project_id`) or a
+  /// project. Answers `VaultItem` (`value` only for text/url). The server
+  /// encrypts the value before anything is recorded: the receipt, its request
+  /// hash and the event `vault.item_created` hold no value (MU4-05 AC2).
+  /// `validation` for a name or env name used in the scope, an env name that
+  /// is not UPPER_SNAKE or that the runtime reserves (`PATH`, `ANTHROPIC_*`,
+  /// …), a url without `https://`/`http://`, a secret under 8 characters.
+  /// Board members with a session only (employees and agent tools never); not for apps.
+  static const String vaultCreate = 'vault.create';
+  /// The server's vault key (`VaultKeyExport`, never printed), for a restore on
+  /// another machine (B8): a board member with a session that needs no new
+  /// password, who gives their password again (`wrong_password`; it counts
+  /// for the sign-in limits, `too_many_attempts`). Writes an audit row
+  /// `key_export` and tells every board member. Not found before the first
+  /// item. Not for apps.
+  static const String vaultKeyExport = 'vault.key_export';
+  /// The vault of a scope (feature `vault`): none, the company's items; a
+  /// project, its items plus the company's apart (`VaultList::company_items`),
+  /// with `overrides_company` on a project item whose env name the company
+  /// has too, and the item count of every scope. Never a secret's value.
+  /// Archived items are left out. Board members only; not for apps (B5).
+  static const String vaultList = 'vault.list';
+  /// One item's value (`VaultValue`, never printed), for a board member with a
+  /// session. Writes an audit row `reveal` (show) or `copy` with the session's
+  /// device. `vault_undecryptable` when the key does not fit. Not for apps.
+  static const String vaultReveal = 'vault.reveal';
+  /// Change an item; what is left out stays. `value`: a new value (a secret's
+  /// is never sent back to the editor, so "leave empty to keep"). `kind` only
+  /// between text and url: to or from secret is `vault_kind_locked` (B7).
+  /// With `expected_version` in the envelope a stale edit is `version_conflict`.
+  /// Answers `VaultItem`. As `vault.create`: no value in receipt, hash or event.
+  static const String vaultUpdate = 'vault.update';
 }
 
 // Reads and session methods.
@@ -1067,6 +1107,55 @@ Map<String, dynamic> variantsGetSetting() => <String, dynamic>{
   'method': Methods.variantsGetSetting,
 };
 
+/// The audit log, newest first (`VaultAuditPage`): the company's (nothing
+/// given), a project's, or every scope's (`all`); one item's with `item_id`.
+/// `before`: rows older than that row id; `limit` at most 200 (default 50).
+/// Never a value. Not for apps.
+Map<String, dynamic> vaultAudit({bool? all, int? before, String? itemId, int? limit, String? projectId}) => <String, dynamic>{
+  'method': Methods.vaultAudit,
+  'params': <String, dynamic>{
+    if (all != null) 'all': all,
+    if (before != null) 'before': before,
+    if (itemId != null) 'item_id': itemId,
+    if (limit != null) 'limit': limit,
+    if (projectId != null) 'project_id': projectId,
+  },
+};
+
+/// The server's vault key (`VaultKeyExport`, never printed), for a restore on
+/// another machine (B8): a board member with a session that needs no new
+/// password, who gives their password again (`wrong_password`; it counts
+/// for the sign-in limits, `too_many_attempts`). Writes an audit row
+/// `key_export` and tells every board member. Not found before the first
+/// item. Not for apps.
+Map<String, dynamic> vaultKeyExport(KeyExportParams params) => <String, dynamic>{
+  'method': Methods.vaultKeyExport,
+  'params': params.toJson(),
+};
+
+/// The vault of a scope (feature `vault`): none, the company's items; a
+/// project, its items plus the company's apart (`VaultList::company_items`),
+/// with `overrides_company` on a project item whose env name the company
+/// has too, and the item count of every scope. Never a secret's value.
+/// Archived items are left out. Board members only; not for apps (B5).
+Map<String, dynamic> vaultList({String? projectId}) => <String, dynamic>{
+  'method': Methods.vaultList,
+  'params': <String, dynamic>{
+    if (projectId != null) 'project_id': projectId,
+  },
+};
+
+/// One item's value (`VaultValue`, never printed), for a board member with a
+/// session. Writes an audit row `reveal` (show) or `copy` with the session's
+/// device. `vault_undecryptable` when the key does not fit. Not for apps.
+Map<String, dynamic> vaultReveal({required String itemId, required RevealPurpose purpose}) => <String, dynamic>{
+  'method': Methods.vaultReveal,
+  'params': <String, dynamic>{
+    'item_id': itemId,
+    'purpose': purpose.toJson(),
+  },
+};
+
 // Writes only the host can do.
 
 Map<String, dynamic> agentFunctionCreate(CreateAgentFunction params) => <String, dynamic>{
@@ -1540,6 +1629,38 @@ Map<String, dynamic> variantsSetEnabled({required bool enabled}) => <String, dyn
   },
 };
 
+/// Archive ("Delete") an item: runs and employees no longer get it; its audit
+/// history stays. Answers `VaultItem`. Not for apps.
+Map<String, dynamic> vaultArchive({required String itemId}) => <String, dynamic>{
+  'method': Methods.vaultArchive,
+  'params': <String, dynamic>{
+    'item_id': itemId,
+  },
+};
+
+/// A new vault item (feature `vault`), in the company (no `project_id`) or a
+/// project. Answers `VaultItem` (`value` only for text/url). The server
+/// encrypts the value before anything is recorded: the receipt, its request
+/// hash and the event `vault.item_created` hold no value (MU4-05 AC2).
+/// `validation` for a name or env name used in the scope, an env name that
+/// is not UPPER_SNAKE or that the runtime reserves (`PATH`, `ANTHROPIC_*`,
+/// …), a url without `https://`/`http://`, a secret under 8 characters.
+/// Board members with a session only (employees and agent tools never); not for apps.
+Map<String, dynamic> vaultCreate(VaultCreateParams params) => <String, dynamic>{
+  'method': Methods.vaultCreate,
+  'params': params.toJson(),
+};
+
+/// Change an item; what is left out stays. `value`: a new value (a secret's
+/// is never sent back to the editor, so "leave empty to keep"). `kind` only
+/// between text and url: to or from secret is `vault_kind_locked` (B7).
+/// With `expected_version` in the envelope a stale edit is `version_conflict`.
+/// Answers `VaultItem`. As `vault.create`: no value in receipt, hash or event.
+Map<String, dynamic> vaultUpdate(VaultUpdateParams params) => <String, dynamic>{
+  'method': Methods.vaultUpdate,
+  'params': params.toJson(),
+};
+
 // Domain commands.
 
 Map<String, dynamic> approvalAnswer(AnswerQuestion params) => <String, dynamic>{
@@ -1874,9 +1995,10 @@ Map<String, dynamic> taskDiscuss(DiscussTask params) => <String, dynamic>{
 };
 
 /// Review → Done. Only a board member; only when no linked task still works (B6).
-Map<String, dynamic> ticketAccept({String? note, required String ticketId}) => <String, dynamic>{
+Map<String, dynamic> ticketAccept({bool? confirmSecret, String? note, required String ticketId}) => <String, dynamic>{
   'method': Methods.ticketAccept,
   'params': <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     if (note != null) 'note': note,
     'ticket_id': ticketId,
   },
@@ -1924,9 +2046,10 @@ Map<String, dynamic> ticketCancel({required String ticketId}) => <String, dynami
 };
 
 /// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
-Map<String, dynamic> ticketCreate({int? deadlineMs, String? description, List<String> files = const [], String? fromMessage, List<String> labels = const [], String? ownerEmployeeId, TicketPriority? priority, required String projectId, TaskRun? run, bool? start, required String title}) => <String, dynamic>{
+Map<String, dynamic> ticketCreate({bool? confirmSecret, int? deadlineMs, String? description, List<String> files = const [], String? fromMessage, List<String> labels = const [], String? ownerEmployeeId, TicketPriority? priority, required String projectId, TaskRun? run, bool? start, required String title}) => <String, dynamic>{
   'method': Methods.ticketCreate,
   'params': <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     if (deadlineMs != null) 'deadline_ms': deadlineMs,
     if (description != null) 'description': description,
     'files': files,
@@ -1962,9 +2085,10 @@ Map<String, dynamic> ticketMove({String? beforeTicketId, required String columnI
 /// Without `@Name` it goes to the owner while the ticket is in Todo (with an
 /// owner), Doing or Plan review; else it wakes nobody. `@Name` wakes those
 /// employees. Refused on Done (the discussion is read-only there). Not for apps.
-Map<String, dynamic> ticketPost({List<String> files = const [], List<String> images = const [], required String text, required String ticketId}) => <String, dynamic>{
+Map<String, dynamic> ticketPost({bool? confirmSecret, List<String> files = const [], List<String> images = const [], required String text, required String ticketId}) => <String, dynamic>{
   'method': Methods.ticketPost,
   'params': <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'files': files,
     'images': images,
     'text': text,
@@ -1982,18 +2106,20 @@ Map<String, dynamic> ticketRetrySummary({required String ticketId}) => <String, 
 };
 
 /// Plan review → Doing in Plan mode: the owner makes a new plan with the feedback.
-Map<String, dynamic> ticketRevisePlan({required String feedback, required String ticketId}) => <String, dynamic>{
+Map<String, dynamic> ticketRevisePlan({bool? confirmSecret, required String feedback, required String ticketId}) => <String, dynamic>{
   'method': Methods.ticketRevisePlan,
   'params': <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'feedback': feedback,
     'ticket_id': ticketId,
   },
 };
 
 /// Review → Doing with feedback (required) for the owner.
-Map<String, dynamic> ticketSendBack({required String feedback, required String ticketId}) => <String, dynamic>{
+Map<String, dynamic> ticketSendBack({bool? confirmSecret, required String feedback, required String ticketId}) => <String, dynamic>{
   'method': Methods.ticketSendBack,
   'params': <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'feedback': feedback,
     'ticket_id': ticketId,
   },
@@ -2012,10 +2138,11 @@ Map<String, dynamic> ticketStart({String? employeeId, required String ticketId})
 /// Change the fields of a ticket. Left out: unchanged. The creator never
 /// changes; the owner only through `ticket.assign`; mode and model only while
 /// the main task does not run.
-Map<String, dynamic> ticketUpdate({bool? clearDeadline, int? deadlineMs, String? description, List<String>? labels, TicketPriority? priority, TaskRun? run, required String ticketId, String? title}) => <String, dynamic>{
+Map<String, dynamic> ticketUpdate({bool? clearDeadline, bool? confirmSecret, int? deadlineMs, String? description, List<String>? labels, TicketPriority? priority, TaskRun? run, required String ticketId, String? title}) => <String, dynamic>{
   'method': Methods.ticketUpdate,
   'params': <String, dynamic>{
     if (clearDeadline != null) 'clear_deadline': clearDeadline,
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
     if (deadlineMs != null) 'deadline_ms': deadlineMs,
     if (description != null) 'description': description,
     if (labels != null) 'labels': labels,

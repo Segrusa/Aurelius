@@ -30,7 +30,7 @@ async fn an_employee_chats_outside_projects_and_keeps_its_task_conversations() {
     let CommandResult::EmployeeCreated { employee_id: alex, conversation_id: chat } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else {
         panic!()
     };
-    let message = |employee_id: EmployeeId, conversation_id| Command::SendEmployeeMessage(SendEmployeeMessage { employee_id, text: "Hallo".into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false });
+    let message = |employee_id: EmployeeId, conversation_id| Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id, text: "Hallo".into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false });
 
     // Its chat: no project, reachable with employee.chat, and it answers there.
     let opened = client.employee_chat(alex).await.unwrap();
@@ -51,7 +51,7 @@ async fn an_employee_chats_outside_projects_and_keeps_its_task_conversations() {
     assert!(client.employee_chat(EmployeeId::new()).await.is_err(), "an unknown employee has no chat");
 
     // Tasks keep their conversation, in the task's project, and the user can still write in it.
-    let cmd = CreateTask { project_id, employee_id: Some(alex), title: "Dark mode".into(), goal: "Werk aan dark mode".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: Some(alex), title: "Dark mode".into(), goal: "Werk aan dark mode".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
     client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap();
     let mut conversation = None;
     for _ in 0..600 {

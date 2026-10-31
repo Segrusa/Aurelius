@@ -110,6 +110,46 @@ pub enum Method {
     /// request hash, no event, never printed or logged. Answers `ClaudeLogin`.
     #[serde(rename = "claude_login.input")]
     ClaudeLoginInput(ClaudeLoginInputParams),
+    /// The vault of a scope (feature `vault`): none, the company's items; a
+    /// project, its items plus the company's apart (`VaultList::company_items`),
+    /// with `overrides_company` on a project item whose env name the company
+    /// has too, and the item count of every scope. Never a secret's value.
+    /// Archived items are left out. Board members only; not for apps (B5).
+    #[serde(rename = "vault.list")]
+    VaultList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+    },
+    /// One item's value (`VaultValue`, never printed), for a board member with a
+    /// session. Writes an audit row `reveal` (show) or `copy` with the session's
+    /// device. `vault_undecryptable` when the key does not fit. Not for apps.
+    #[serde(rename = "vault.reveal")]
+    VaultReveal { item_id: aurelius_domain::VaultItemId, purpose: aurelius_domain::vault::RevealPurpose },
+    /// The audit log, newest first (`VaultAuditPage`): the company's (nothing
+    /// given), a project's, or every scope's (`all`); one item's with `item_id`.
+    /// `before`: rows older than that row id; `limit` at most 200 (default 50).
+    /// Never a value. Not for apps.
+    #[serde(rename = "vault.audit")]
+    VaultAudit {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        item_id: Option<aurelius_domain::VaultItemId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
+    /// The server's vault key (`VaultKeyExport`, never printed), for a restore on
+    /// another machine (B8): a board member with a session that needs no new
+    /// password, who gives their password again (`wrong_password`; it counts
+    /// for the sign-in limits, `too_many_attempts`). Writes an audit row
+    /// `key_export` and tells every board member. Not found before the first
+    /// item. Not for apps.
+    #[serde(rename = "vault.key_export")]
+    VaultKeyExport(KeyExportParams),
     /// The conversations of a project, most recently active first.
     #[serde(rename = "project_conversation.list")]
     ProjectConversationList { project_id: ProjectId },
@@ -416,6 +456,19 @@ pub struct LoginParams {
 impl std::fmt::Debug for LoginParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LoginParams").field("username", &self.username).field("password", &"<redacted>").field("device_name", &self.device_name).finish()
+    }
+}
+
+/// `vault.key_export`. The password is never printed.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct KeyExportParams {
+    /// The signed-in board member's own password, asked again.
+    pub password: String,
+}
+
+impl std::fmt::Debug for KeyExportParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyExportParams").field("password", &"<redacted>").finish()
     }
 }
 

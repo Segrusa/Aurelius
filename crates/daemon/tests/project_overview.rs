@@ -51,7 +51,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str) -> Employe
 }
 
 async fn task(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str) -> TaskId {
-    let cmd = CreateTask { files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![], depends_on: vec![] };
     match client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result {
         CommandResult::TaskCreated { task_id } => task_id,
         other => panic!("{other:?}"),
@@ -60,7 +60,7 @@ async fn task(client: &Client, project_id: ProjectId, employee_id: EmployeeId, t
 
 /// A message in a project conversation (a new one without `conversation_id`): its conversation and run.
 async fn say(client: &Client, project_id: ProjectId, conversation_id: Option<ConversationId>, text: &str) -> (ConversationId, RunId) {
-    let send = SendProjectMessage { project_id, text: text.into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false, start: ChatStart::default() };
+    let send = SendProjectMessage { confirm_secret: false, project_id, text: text.into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false, start: ChatStart::default() };
     match client.send_project_message(send).await.unwrap().result {
         CommandResult::ProjectMessageSent { conversation_id, run_id, .. } => (conversation_id, run_id),
         other => panic!("{other:?}"),

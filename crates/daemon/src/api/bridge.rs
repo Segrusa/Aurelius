@@ -30,12 +30,32 @@ pub(crate) async fn serve(shared: Arc<Shared>, stream: BoxStream) {
     }
 }
 
+/// A request with every vault value in it redacted (SEC0 E14 b): what a run
+/// sends through any of Aurelius' tools (`approve` included, so approvals, the
+/// inbox and push), before anything stores or forwards it. Fail-closed (SEC1
+/// m2): a call that cannot be redacted is refused, never let through as it is.
+pub(crate) fn redacted<T: serde::Serialize + serde::de::DeserializeOwned>(call: T) -> Result<T, String> {
+    let redactor = aurelius_runtime::redact::current();
+    if redactor.is_empty() {
+        return Ok(call);
+    }
+    let refused = |_| "This request could not be checked for vault values, so it was not carried out.".to_owned();
+    let mut value = serde_json::to_value(&call).map_err(refused)?;
+    redactor.redact_json(&mut value);
+    serde_json::from_value(value).map_err(refused)
+}
+
 async fn answer(shared: &Arc<Shared>, request: BridgeRequest) -> BridgeOutcome {
     if request.protocol != PROTOCOL_MAJOR {
         return BridgeOutcome::Error {
             message: format!("Update Aurelius: this bridge speaks protocol {}, the server protocol {PROTOCOL_MAJOR}.", request.protocol),
         };
     }
+    let call = match redacted(request.call) {
+        Ok(call) => call,
+        Err(message) => return BridgeOutcome::Error { message },
+    };
+    let request = BridgeRequest { call, ..request };
     // A trial of a task (variants) may only read with Aurelius' own tools: Claude Code
     // never asks for them, so the sandbox is kept here.
     let own_tool = match &request.call {
@@ -51,6 +71,8 @@ async fn answer(shared: &Arc<Shared>, request: BridgeRequest) -> BridgeOutcome {
             EmployeeTaskOp::ReadConversation { .. } => "read_conversation",
             EmployeeTaskOp::ReadGroupChat { .. } => "read_group_chat",
             EmployeeTaskOp::ReadDiscussion { .. } => "read_discussion",
+            EmployeeTaskOp::VaultList { .. } => "vault_list",
+            EmployeeTaskOp::VaultRead { .. } => "vault_read",
             _ => "act",
         })),
         _ => None,
@@ -105,6 +127,11 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         EmployeeTaskOp::ReadDiscussion { last } => EmployeeAction::ReadDiscussion { last },
         EmployeeTaskOp::PostToDiscussion { message } => EmployeeAction::PostToDiscussion { message },
         EmployeeTaskOp::AssignTicket { employee, reason } => EmployeeAction::AssignTicket { employee, reason },
+        op @ (EmployeeTaskOp::VaultList { .. } | EmployeeTaskOp::VaultRead { .. }) => {
+            let s = shared.clone();
+            let (ok, text) = app_task(move || Ok(crate::vault::tool(&s, run_id, op))).await?;
+            return Ok(BridgeOutcome::Text { ok, text });
+        }
     };
     let switches = matches!(action, EmployeeAction::SetMode { .. });
     let interrupts = matches!(action, EmployeeAction::MessageTask { interrupt: true, .. });
@@ -126,4 +153,21 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         crate::permissions::forward_modes(shared.clone());
     }
     Ok(BridgeOutcome::Text { ok, text })
+}
+
+#[cfg(test)]
+mod tests {
+    /// SEC1 m2: what cannot be redacted is refused, not passed on unredacted.
+    #[test]
+    fn a_call_that_cannot_be_redacted_is_refused() {
+        let owner = "bridge-fail-closed-test";
+        let value = "sk-test-FAKE-bridge-fail-closed";
+        aurelius_runtime::redact::add_to_set(owner, aurelius_runtime::redact::Secret { name: "BRIDGE_FC".into(), label: String::new(), value: zeroize::Zeroizing::new(value.into()) });
+        // A map with keys that are not strings serializes to no JSON value.
+        let call: std::collections::BTreeMap<(u8, u8), String> = [((1, 2), value.to_owned())].into();
+        let outcome = super::redacted(call);
+        aurelius_runtime::redact::install_set(owner, Vec::new());
+        assert!(outcome.is_err(), "passed through: {outcome:?}");
+        assert!(!outcome.unwrap_err().contains(value));
+    }
 }

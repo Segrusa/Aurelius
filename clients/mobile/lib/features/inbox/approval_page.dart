@@ -7,6 +7,7 @@ import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/views.dart';
 import '../connection/connection_banner.dart';
+import '../chat/secret_check.dart' show sendAnywayDialog;
 import '../connection/connection_bloc.dart';
 import 'inbox_bloc.dart';
 import 'plan_review.dart';
@@ -28,7 +29,8 @@ class ApprovalPage extends StatelessWidget {
       listenWhen: (a, b) => a.deciding.contains(approvalId) && !b.deciding.contains(approvalId),
       listener: (context, state) {
         // A plan's sheet shows what became of it; leaving it is the user's call.
-        if (state.planOutcomes.containsKey(approvalId)) return;
+        // Not sent (a vault value, B10): it stays to change.
+        if (state.planOutcomes.containsKey(approvalId) || state.notSent == approvalId) return;
         if (context.canPop()) context.pop();
       },
       child: BlocConsumer<InboxBloc, InboxState>(
@@ -68,7 +70,7 @@ class ApprovalPage extends StatelessWidget {
               onSkip: () => decide(false),
               onAnswer: (answers) {
                 HapticFeedback.mediumImpact();
-                context.read<InboxBloc>().add(QuestionAnswered(approval, answers));
+                context.read<InboxBloc>().add(QuestionAnswered(approval, answers, ask: sendAnywayDialog(context)));
               },
             );
           }

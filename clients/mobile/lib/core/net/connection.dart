@@ -513,7 +513,7 @@ class AureliusConnection {
             default:
               break;
           }
-          waiting?.completeError(ProtocolException(error.code, error.message, retryAfterMs: error.retryAfterMs));
+          waiting?.completeError(ProtocolException(error.code, error.message, retryAfterMs: error.retryAfterMs, matchedItems: error.matchedItems));
         } else if (ok != null) {
           waiting?.complete(ok);
         }

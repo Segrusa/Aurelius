@@ -81,9 +81,15 @@ class NewTaskPage extends StatefulWidget {
     this.title,
     this.recurring = false,
     this.schedule,
+    this.submit,
   });
 
   final List<EmployeeSummary> employees;
+
+  /// Sends the task from the form itself: false keeps the form open with
+  /// what was typed (a B10 refusal, not sent). Without it the form just
+  /// returns the task.
+  final Future<bool> Function(BuildContext context, NewTask task)? submit;
 
   /// The projects to choose from; null when the project is already known.
   final List<ProjectSummary>? projects;
@@ -104,6 +110,7 @@ class NewTaskPage extends StatefulWidget {
     String? title,
     bool recurring = false,
     TaskScheduleView? schedule,
+    Future<bool> Function(BuildContext context, NewTask task)? submit,
   }) =>
       Navigator.of(context).push<NewTask>(
         MaterialPageRoute(
@@ -116,6 +123,7 @@ class NewTaskPage extends StatefulWidget {
             title: title,
             recurring: recurring || schedule != null,
             schedule: schedule,
+            submit: submit,
           ),
         ),
       );
@@ -167,6 +175,7 @@ class _NewTaskPageState extends State<NewTaskPage> {
   late List<_Attached> _files = [for (final f in widget.schedule?.attachments ?? const []) _Attached(name: f.name, byteLength: f.byteLength, path: f.path, existing: true)];
   final _removed = <String>[];
   bool _uploading = false;
+  bool _sending = false;
 
   late Recurrence _recurrence = widget.schedule?.recurrence ?? const RecurrenceDaily(atMinute: 9 * 60);
   late final _hours = TextEditingController(text: _recurrence is RecurrenceEveryHours ? '${(_recurrence as RecurrenceEveryHours).hours}' : '6');
@@ -396,30 +405,37 @@ class _NewTaskPageState extends State<NewTaskPage> {
       _title.text.trim().isNotEmpty &&
       _criteriaList.length <= maxCriteria &&
       !_uploading &&
+      !_sending &&
       (widget.projects == null || _project != null) &&
       (!widget.recurring || (_employee != null && _recurrenceValid));
 
-  void _create() {
+  Future<void> _create() async {
     if (!_valid) return;
     // The next task for this lead starts in the mode used now (none: its default).
     final host = _hostId;
     if (host != null && _employee != null && !widget.recurring && widget.schedule == null) ModeMemory.write(host, _employee!, _mode);
-    Navigator.pop<NewTask>(
-      context,
-      (
-        title: _title.text.trim(),
-        goal: _goal.text.trim(),
-        criteria: _criteriaList,
-        employeeId: _employee,
-        projectId: _project,
-        run: _run,
-        files: [for (final f in _files) if (!f.existing) f.path],
-        removeFiles: _removed,
-        recurrence: widget.recurring ? _recurrence : null,
-        paused: _paused,
-        variants: _variantsSetting == null ? 1 : _variants,
-      ),
+    final NewTask task = (
+      title: _title.text.trim(),
+      goal: _goal.text.trim(),
+      criteria: _criteriaList,
+      employeeId: _employee,
+      projectId: _project,
+      run: _run,
+      files: [for (final f in _files) if (!f.existing) f.path],
+      removeFiles: _removed,
+      recurrence: widget.recurring ? _recurrence : null,
+      paused: _paused,
+      variants: _variantsSetting == null ? 1 : _variants,
     );
+    if (widget.submit case final submit?) {
+      setState(() => _sending = true);
+      final sent = await submit(context, task);
+      if (!mounted) return;
+      setState(() => _sending = false);
+      // Not sent: everything typed stays (QA2 m8).
+      if (!sent) return;
+    }
+    Navigator.pop<NewTask>(context, task);
   }
 
   @override

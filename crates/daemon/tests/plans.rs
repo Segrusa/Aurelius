@@ -19,7 +19,7 @@ use std::time::Duration;
 /// A chat run that stays alive (the fake streams slowly; `start_with_delay`).
 async fn live_run(root: &Path, client: &Client) -> (ConversationId, RunId) {
     let sent = client
-        .execute(envelope(Command::SendChatMessage(SendChatMessage { conversation_id: common::conversation(&client).await, text: "houd me wakker".into(), images: Vec::new(), interrupt: false }), None))
+        .execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "houd me wakker".into(), images: Vec::new(), interrupt: false }), None))
         .await
         .unwrap()
         .result;
@@ -56,7 +56,7 @@ async fn hand_in(root: &Path, run: RunId, call: &str) -> tokio::task::JoinHandle
 }
 
 async fn decide(client: &Client, approval_id: ApprovalId, decision: PlanDecision, feedback: Option<&str>) -> Result<aurelius_domain::CommandReceipt, aurelius_client::ClientError> {
-    client.execute(envelope(Command::DecidePlan(DecidePlan { approval_id, decision, feedback: feedback.map(str::to_owned) }), None)).await
+    client.execute(envelope(Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id, decision, feedback: feedback.map(str::to_owned) }), None)).await
 }
 
 #[tokio::test(flavor = "multi_thread")]

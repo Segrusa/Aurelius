@@ -12,6 +12,7 @@ import '../../data/aurelius_repository.dart';
 import '../../data/commands.dart';
 import '../../data/views.dart';
 import '../connection/connection_banner.dart';
+import '../connection/connection_bloc.dart';
 import '../ideas/ideas_bloc.dart';
 import '../ideas/ideas_tab.dart';
 import '../board/dispatcher_row.dart';
@@ -239,6 +240,18 @@ class _Overview extends StatelessWidget {
               ),
             const GroupHeader('Board'),
             ProjectDispatcherRow(project: project),
+            if (context.select<ConnectionBloc, bool>((b) => b.state.has('vault'))) ...[
+              const SizedBox(height: 12),
+              InsetGroup(children: [
+                GroupRow(
+                  key: const ValueKey('project-vault'),
+                  leading: const IconTile(CupertinoIcons.lock_fill),
+                  title: 'Vault',
+                  chevron: true,
+                  onTap: () => context.push('/vault?project=${project.id}'),
+                ),
+              ]),
+            ],
             if (waiting.isNotEmpty) ...[
               const GroupHeader('Needs Your Attention'),
               InsetGroup(

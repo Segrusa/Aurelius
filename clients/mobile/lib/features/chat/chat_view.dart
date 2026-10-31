@@ -34,6 +34,7 @@ import '../team/mentions.dart';
 import 'answer_body.dart';
 import 'chat_bloc.dart';
 import 'collapse.dart';
+import 'secret_check.dart';
 import 'file_page.dart';
 import '../markdown/links.dart';
 import '../markdown/markdown_page.dart';
@@ -140,7 +141,14 @@ class _ChatViewState extends State<ChatView> {
         toast(context, state.notice!);
         context.read<ChatBloc>().add(const ChatNoticeShown());
       },
-      child: BlocListener<RuntimeBloc, RuntimeState>(
+      child: BlocListener<ChatBloc, ChatState>(
+        listenWhen: (a, b) => b.secretCheck != null && a.secretCheck != b.secretCheck,
+        listener: (context, state) {
+          final bloc = context.read<ChatBloc>()..add(const ChatSecretCheckShown());
+          final unsent = state.unsent.where((u) => u.localId == state.secretCheck).firstOrNull;
+          if (unsent != null) unawaited(sendAnywayAsked(context, bloc, unsent));
+        },
+        child: BlocListener<RuntimeBloc, RuntimeState>(
         listenWhen: (a, b) => b.notice != null && a.notice != b.notice,
         listener: (context, state) {
           toast(context, state.notice!);
@@ -179,6 +187,7 @@ class _ChatViewState extends State<ChatView> {
               ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -687,8 +696,15 @@ class _UserBubble extends StatelessWidget {
                 children: [
                   Icon(Icons.error_outline, size: 14, color: Tokens.negative),
                   const SizedBox(width: 4),
-                  Text('Not sent', style: TextStyle(fontSize: 12, color: Tokens.negative)),
-                  TextButton(onPressed: () => context.read<ChatBloc>().add(ChatUnsentRetried(unsent!.localId)), child: const Text('Try again')),
+                  Text(unsent!.secretItems.isEmpty ? 'Not sent' : 'Not sent · looks like a vault secret', style: TextStyle(fontSize: 12, color: Tokens.negative)),
+                  if (unsent!.secretItems.isEmpty)
+                    TextButton(onPressed: () => context.read<ChatBloc>().add(ChatUnsentRetried(unsent!.localId)), child: const Text('Try again'))
+                  else
+                    TextButton(
+                      key: const Key('unsent-send-anyway'),
+                      onPressed: () => sendAnywayAsked(context, context.read<ChatBloc>(), unsent!),
+                      child: const Text('Send anyway…'),
+                    ),
                   TextButton(
                     onPressed: () => context.read<ChatBloc>().add(ChatUnsentDiscarded(unsent!.localId)),
                     style: TextButton.styleFrom(foregroundColor: Tokens.muted),

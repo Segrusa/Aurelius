@@ -96,7 +96,7 @@ fn chat_run(s: &CommandService, conversation: ConversationId) -> RunId {
 
 /// A task of `employee` that is running, with a run in its conversation.
 fn task_run(s: &CommandService, project: ProjectId, employee: EmployeeId, title: &str) -> (TaskId, RunId) {
-    let create = CreateTask { project_id: project, employee_id: Some(employee), title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: project, employee_id: Some(employee), title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = run(s, Command::CreateTask(create)).unwrap().receipt.result else { panic!() };
     (task_id, start_task(s, task_id, employee))
 }
@@ -339,7 +339,7 @@ fn delegation_goes_to_direct_reports_only_while_the_chart_is_followed() {
     assert!(!ok && text.contains("Dean, Max"), "{text}");
 
     // The project assistant is not on the chart.
-    let sent = run(&s, Command::SendProjectMessage(SendProjectMessage { project_id: t.project, text: "hi".into(), conversation_id: None, images: vec![], files: vec![], interrupt: false, start: Default::default() })).unwrap();
+    let sent = run(&s, Command::SendProjectMessage(SendProjectMessage { confirm_secret: false, project_id: t.project, text: "hi".into(), conversation_id: None, images: vec![], files: vec![], interrupt: false, start: Default::default() })).unwrap();
     let CommandResult::ProjectMessageSent { run_id, .. } = sent.receipt.result else { panic!() };
     assert!(delegate(&s, run_id, "Max").0);
 }
@@ -583,7 +583,7 @@ fn the_project_assistant_cannot_propose_a_colleague() {
     let (_d, s) = setup();
     let p = project(&s);
     hire(&s, p, "Ann", None, None);
-    let sent = run(&s, Command::SendProjectMessage(SendProjectMessage { project_id: p, text: "hi".into(), conversation_id: None, images: vec![], files: vec![], interrupt: false, start: Default::default() })).unwrap();
+    let sent = run(&s, Command::SendProjectMessage(SendProjectMessage { confirm_secret: false, project_id: p, text: "hi".into(), conversation_id: None, images: vec![], files: vec![], interrupt: false, start: Default::default() })).unwrap();
     let CommandResult::ProjectMessageSent { run_id, .. } = sent.receipt.result else { panic!() };
     let (ok, text) = propose(&s, run_id, "Eva", None);
     assert!(!ok);
@@ -748,7 +748,7 @@ fn mode_of_run(s: &CommandService, run: RunId) -> AgentMode {
 }
 
 fn task_with_mode(s: &CommandService, project: ProjectId, employee: EmployeeId, mode: Option<AgentMode>) -> RunId {
-    let create = CreateTask { project_id: project, employee_id: Some(employee), title: "T".into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: aurelius_domain::task::RunSettings { mode, ..Default::default() }, files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: project, employee_id: Some(employee), title: "T".into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: aurelius_domain::task::RunSettings { mode, ..Default::default() }, files: vec![] };
     let CommandResult::TaskCreated { task_id } = run(s, Command::CreateTask(create)).unwrap().receipt.result else { panic!() };
     let run_id = start_task(s, task_id, employee);
     s.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [run_id.to_string()])?)).unwrap();

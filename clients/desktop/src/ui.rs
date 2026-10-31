@@ -542,7 +542,8 @@ pub fn tip(label: impl Into<SharedString>, keys: Option<&'static str>) -> impl F
 /// shortcut sit in the tooltip and the aria label. With `action`, a click does what the key does.
 pub fn action_icon(id: impl Into<ElementId>, glyph: &'static str, label: impl Into<SharedString>, keys: Option<&'static str>, action: Option<fn() -> Box<dyn Action>>) -> Stateful<Div> {
     let label: SharedString = label.into();
-    icon_button(id)
+    // Its own hover: gpui allows one per element (a second panics in debug builds).
+    icon_base(id)
         .size(px(24.))
         .line_height(px(24.))
         .text_size(px(14.))
@@ -556,6 +557,11 @@ pub fn action_icon(id: impl Into<ElementId>, glyph: &'static str, label: impl In
 
 /// Small square button for a glyph (⋯, ⚙).
 pub fn icon_button(id: impl Into<ElementId>) -> Stateful<Div> {
+    icon_base(id).hover(|s| s.bg(c(theme::SURFACE_2)))
+}
+
+/// [`icon_button`] without its hover, for a button with a hover of its own.
+fn icon_base(id: impl Into<ElementId>) -> Stateful<Div> {
     div()
         .id(id)
         .role(Role::Button)
@@ -570,7 +576,6 @@ pub fn icon_button(id: impl Into<ElementId>) -> Stateful<Div> {
         .cursor_pointer()
         .text_size(px(15.))
         .text_color(c(theme::TEXT))
-        .hover(|s| s.bg(c(theme::SURFACE_2)))
 }
 
 /// Text field with room for descenders (g, j, y). The component's medium
@@ -1060,5 +1065,14 @@ mod tests {
         assert!(MEMBER_COLOURS.contains(&member_colour("robin")));
         let distinct: std::collections::HashSet<u32> = MEMBER_COLOURS.into_iter().collect();
         assert_eq!(distinct.len(), 8);
+    }
+
+    /// QA2 T1: a message's action icons (Copy, Stop, Retry) set one hover; a second one is
+    /// gpui's debug assert "hover style already set", which crashed every chat with a plan card.
+    #[test]
+    fn an_action_icon_sets_one_hover() {
+        let _ = super::action_icon("copy-1", "⧉", "Copy", None, None);
+        let _ = super::action_icon("stop-1", "■", "Stop", Some("secondary-."), None);
+        let _ = super::icon_button("more-1");
     }
 }

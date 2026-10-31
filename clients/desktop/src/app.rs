@@ -33,11 +33,13 @@ pub enum Tab {
     /// The project's memory list: not a tab of the bar, opened from the project menu
     /// (and from Memory in the app menu, with a project picker).
     Memory,
+    /// The project's vault: the vault page on this project's scope (ui-ontwerp Fase 4 §1).
+    Vault,
 }
 
 impl Tab {
     /// The tabs of the project bar.
-    pub const ALL: [Tab; 3] = [Tab::Overview, Tab::Tasks, Tab::Ideas];
+    pub const ALL: [Tab; 4] = [Tab::Overview, Tab::Tasks, Tab::Ideas, Tab::Vault];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -45,6 +47,7 @@ impl Tab {
             Tab::Tasks => "Tasks",
             Tab::Ideas => "Ideas",
             Tab::Memory => "Memory",
+            Tab::Vault => "Vault",
         }
     }
 
@@ -89,6 +92,8 @@ pub enum Page {
     /// Approvals, questions, plans, proposals and results across all projects.
     Inbox,
     Settings,
+    /// The vault of the company and its projects (feature `vault`, Fase 4).
+    Vault,
 }
 
 /// The tabs of the Employees page.
@@ -152,6 +157,8 @@ pub enum NavItem {
     Tasks,
     Employees,
     Projects,
+    /// The vault, under Projects (P-41).
+    Vault,
     Settings,
 }
 
@@ -161,7 +168,7 @@ impl NavItem {
         if self == NavItem::Employees { "employees" } else { "projects" }
     }
 
-    pub const ALL: [NavItem; 8] = [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Settings];
+    pub const ALL: [NavItem; 9] = [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Vault, NavItem::Settings];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -172,6 +179,7 @@ impl NavItem {
             NavItem::Tasks => "Tasks",
             NavItem::Employees => "Employees",
             NavItem::Projects => "Projects",
+            NavItem::Vault => "Vault",
             NavItem::Settings => "Settings",
         }
     }
@@ -188,6 +196,8 @@ impl NavItem {
             NavItem::Employees => "secondary-3",
             NavItem::Projects => "secondary-6",
             NavItem::Tasks => "secondary-7",
+            // P-41 asks Ctrl+9, which Settings keeps: the vault takes Ctrl+Shift+V.
+            NavItem::Vault => "secondary-shift-v",
             NavItem::Settings => "secondary-9",
         }
     }
@@ -203,6 +213,7 @@ impl NavItem {
             Page::Tasks => NavItem::Tasks,
             Page::Inbox => NavItem::Inbox,
             Page::Settings => NavItem::Settings,
+            Page::Vault => NavItem::Vault,
         }
     }
 }
@@ -620,6 +631,10 @@ pub enum ConfirmKind {
     DisconnectClaude,
     /// Run a ticket that waits for another's login on the own Claude login (B4).
     UseMyLogin(aurelius_domain::TicketId),
+    /// Delete ("archive") a vault item (MU4-11 AC2).
+    ArchiveVaultItem(aurelius_domain::VaultItemId),
+    /// A message held back by `looks_like_secret` (B10, `vault.held`): "Send anyway?".
+    LooksLikeSecret,
 }
 
 /// One manager card, from the daemon or from the design samples.
@@ -898,6 +913,8 @@ pub struct AppView {
     pub remote_host: Option<(aurelius_domain::HostId, String)>,
     /// Board members: who is signed in in this window, the onboarding and the sign-in.
     pub members: crate::screens::board_members::Members,
+    /// The vault page: its lists, a value shown for 30 s, the editor, the key export (Fase 4).
+    pub vault: crate::screens::vault::Vault,
     /// The signed-in board member's own Claude login (Settings → Account).
     pub claude: crate::screens::account::Claude,
     /// The board, the open ticket and their dialogs.
@@ -1339,6 +1356,8 @@ impl AppView {
         subscriptions.extend(claude.subscriptions(window, cx));
         let board = crate::screens::board::Board::new(window, cx);
         subscriptions.extend(board.subscriptions(window, cx));
+        let vault = crate::screens::vault::Vault::new(window, cx);
+        subscriptions.extend(vault.subscriptions(window, cx));
 
         listen(backend.updates, 0, cx);
         poll_subagents(cx);
@@ -1369,6 +1388,7 @@ impl AppView {
             members,
             claude,
             board,
+            vault,
             folded: folded_load(&ui_prefs()),
             panel_widths: serde_json::from_value(ui_prefs()["panel_widths"].clone()).unwrap_or_default(),
             panel_save: None,
@@ -1676,12 +1696,20 @@ impl AppView {
                 self.deleted_queued.remove(&message_id);
             }
             Update::DescriptionSaved(project, result) => self.project_settings_description_saved(project, result, cx),
-            Update::Who(who) => self.apply_who(who, cx),
+            Update::Who(who) => {
+                if who.user.as_ref().map(|u| u.id) != self.active_member().map(|u| u.id) {
+                    // Another board member (or none) here now: nothing of the vault stays on screen.
+                    self.vault_reset();
+                }
+                self.apply_who(who, cx)
+            }
             Update::SignedOut(reason) => self.apply_signed_out(reason, cx),
             Update::Sessions(of, result) => self.apply_sessions(of, result, cx),
             Update::Account(update) => self.apply_account(update, cx),
             Update::Claude(update) => self.apply_claude(update, cx),
             Update::Board(update) => self.apply_board(update, cx),
+            Update::Vault(update) => self.apply_vault(update, cx),
+            Update::LooksLikeSecret(hold) => self.apply_secret_hold(hold, cx),
             Update::BoardMembers(list) => {
                 self.members.list = list;
                 cx.notify();
@@ -2162,6 +2190,7 @@ impl AppView {
         self.reset_server_state();
         self.members_reset(None, cx);
         self.claude_reset();
+        self.vault_reset();
         cx.notify();
     }
 
@@ -5547,6 +5576,7 @@ impl AppView {
             NavItem::Employees => Page::Employees,
             NavItem::Projects => Page::Projects,
             NavItem::Tasks => Page::Tasks,
+            NavItem::Vault => Page::Vault,
         };
         self.close_overlay();
         self.navigate(page);
@@ -6068,6 +6098,7 @@ impl AppView {
                 let run = std::mem::take(&mut self.pending_task_run);
                 match schedule {
                     None => backend::Request::CreateSchedule(aurelius_domain::schedule::CreateTaskSchedule {
+                        confirm_secret: false,
                         project_id: project,
                         employee_id,
                         title: name,
@@ -6079,6 +6110,7 @@ impl AppView {
                         paused: self.pending_schedule_paused,
                     }),
                     Some(schedule_id) => backend::Request::UpdateSchedule(aurelius_domain::schedule::UpdateTaskSchedule {
+                        confirm_secret: false,
                         schedule_id,
                         employee_id,
                         title: name,
@@ -6292,6 +6324,21 @@ impl AppView {
                         cx.notify();
                         return;
                     }
+                    ConfirmKind::ArchiveVaultItem(item) => {
+                        self.vault_archive(item, cx);
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
+                    ConfirmKind::LooksLikeSecret => {
+                        self.vault_send_anyway(cx);
+                        self.overlay = Overlay::None;
+                        self.vault_hold_next(cx);
+                        self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
                     ConfirmKind::DisconnectClaude => {
                         self.claude_unlink(cx);
                         self.overlay = Overlay::None;
@@ -6407,6 +6454,18 @@ impl AppView {
         }
         if self.overlay == Overlay::ServerFolder {
             self.folder_back(window, cx);
+            return;
+        }
+        if self.overlay == Overlay::Confirm(ConfirmKind::LooksLikeSecret) {
+            // Not sent: the message goes back to its composer (B10).
+            self.vault_hold_cancel(window, cx);
+            self.overlay = Overlay::None;
+            self.vault_hold_next(cx);
+            self.focus.focus(window, cx);
+            cx.notify();
+            return;
+        }
+        if self.vault_back(window, cx) {
             return;
         }
         if self.overlay == Overlay::ConnectClaude {
@@ -6906,6 +6965,7 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &GoDashboard, w, cx| this.go_nav(NavItem::Dashboard, w, cx)))
             .on_action(cx.listener(|this, _: &GoTeamChat, w, cx| this.go_nav(NavItem::Chat, w, cx)))
             .on_action(cx.listener(|this, _: &GoBoard, w, cx| this.go_nav(NavItem::Board, w, cx)))
+            .on_action(cx.listener(|this, _: &GoVault, w, cx| this.go_nav(NavItem::Vault, w, cx)))
             .on_action(cx.listener(|this, _: &GoEmployees, w, cx| this.go_nav(NavItem::Employees, w, cx)))
             .on_action(cx.listener(|this, _: &GoOrgChart, w, cx| this.go_employees_tab(EmployeesTab::OrgChart, w, cx)))
             .on_action(cx.listener(|this, _: &GoProjects, w, cx| this.go_nav(NavItem::Projects, w, cx)))
@@ -7588,7 +7648,7 @@ mod tests {
     fn the_sidebar_lists_six_pages_and_settings_keeps_its_shortcut() {
         use super::{EmployeesTab, NavItem, Page, ProjectRef, ProjectsTab, Tab};
         let labels: Vec<&str> = NavItem::ALL.iter().map(|n| n.label()).collect();
-        assert_eq!(labels, ["Dashboard", "Board", "Team chat", "Inbox", "Tasks", "Employees", "Projects", "Settings"]);
+        assert_eq!(labels, ["Dashboard", "Board", "Team chat", "Inbox", "Tasks", "Employees", "Projects", "Vault", "Settings"]);
         // Every entry's shortcut is bound in the shortcut table; Settings keeps Ctrl+9.
         for nav in NavItem::ALL {
             assert!(crate::keymap::SHORTCUTS.iter().any(|s| s.keys.contains(&nav.keys())), "{} has its shortcut", nav.label());
@@ -7608,7 +7668,8 @@ mod tests {
         assert_eq!(NavItem::of(Page::Settings), NavItem::Settings);
         assert_eq!(EmployeesTab::ALL.map(|t| t.label()), ["List", "Org chart"]);
         assert_eq!(ProjectsTab::ALL.map(|t| t.label()), ["Projects", "Ideas"]);
-        assert_eq!(Tab::ALL.map(|t| t.title()), ["Overview", "Tasks", "Ideas"], "memory is not a tab of the bar");
+        assert_eq!(Tab::ALL.map(|t| t.title()), ["Overview", "Tasks", "Ideas", "Vault"], "memory is not a tab of the bar");
+        assert_eq!(NavItem::of(Page::Vault), NavItem::Vault);
     }
 
     #[test]

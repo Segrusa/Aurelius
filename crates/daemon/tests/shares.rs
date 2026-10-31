@@ -40,7 +40,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str) -> Employe
 }
 
 async fn give_task(client: &Client, project_id: ProjectId, employee: EmployeeId, title: &str, goal: &str) -> TaskId {
-    let cmd = CreateTask { files: vec![], run: Default::default(), project_id, employee_id: Some(employee), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![] };
     match client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result {
         CommandResult::TaskCreated { task_id } => task_id,
         other => panic!("{other:?}"),
@@ -100,7 +100,7 @@ async fn sharing_moves_only_the_snapshot_and_revoking_stops_it() {
     // An answer in a project conversation to share.
     let CommandResult::ChatMessageSent { conversation_id: chat, .. } = client
         .execute(envelope(
-            Command::SendChatMessage(SendChatMessage { conversation_id: common::conversation(&client).await, text: "Pricing idea: three tiers".into(), images: Vec::new(), interrupt: false }),
+            Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "Pricing idea: three tiers".into(), images: Vec::new(), interrupt: false }),
             None,
         ))
         .await
@@ -150,7 +150,7 @@ async fn sharing_moves_only_the_snapshot_and_revoking_stops_it() {
     client.execute(envelope(Command::RevokeShare(RevokeShare { share_id: memory_share }), None)).await.unwrap();
     client
         .execute(envelope(
-            Command::SendEmployeeMessage(SendEmployeeMessage { employee_id: sam, text: "And now, pricing?".into(), conversation_id: sam_conv, images: Vec::new(), files: Vec::new(), interrupt: false }),
+            Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id: sam, text: "And now, pricing?".into(), conversation_id: sam_conv, images: Vec::new(), files: Vec::new(), interrupt: false }),
             None,
         ))
         .await
@@ -179,6 +179,7 @@ async fn discussing_a_task_gives_its_result_to_the_lead_employees_chat() {
     let atlas = project(&client, "Atlas").await;
     let alex = employee(&client, atlas, "Alex").await;
     let cmd = CreateTask {
+        confirm_secret: false,
         files: vec![],
         run: Default::default(),
         project_id: atlas,
@@ -206,7 +207,7 @@ async fn discussing_a_task_gives_its_result_to_the_lead_employees_chat() {
 
     client
         .execute(envelope(
-            Command::SendEmployeeMessage(SendEmployeeMessage { employee_id: alex, text: "Summarize the result".into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false }),
+            Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id: alex, text: "Summarize the result".into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false }),
             None,
         ))
         .await

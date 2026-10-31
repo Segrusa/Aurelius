@@ -163,6 +163,32 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
         }
         tracing::debug!(run = %plan.run_id, "going on in the conversation's session");
     }
+    // The vault, for a work run on a runtime that takes it (SEC0 E15): its
+    // values as environment variables, their names in the instructions.
+    // Every event of the run leaves the adapter redacted (E14 a) and every
+    // bridge request is redacted where it comes in (E14 b).
+    let runtime = if matches!(request.profile, ToolProfile::Work { .. }) && runtime.with_vault(Default::default()).is_some() {
+        let (s, run) = (shared.clone(), plan.run_id);
+        match blocking(move || crate::vault::deliver(&s, run)).await.flatten() {
+            Some(delivery) => {
+                shared.publish(delivery.notices);
+                match runtime.with_vault(delivery.env).filter(|_| !delivery.names.is_empty()) {
+                    Some(with_vault) => {
+                        let note = crate::vault::prompt_note(&delivery.names);
+                        request.system = Some(match request.system.take().filter(|s| !s.trim().is_empty()) {
+                            Some(system) => format!("{system}\n\n{note}"),
+                            None => note,
+                        });
+                        with_vault
+                    }
+                    None => runtime,
+                }
+            }
+            None => runtime,
+        }
+    } else {
+        runtime
+    };
     // Trace mode: keep what goes to the runtime (the runtime adds what it sent exactly).
     let s = shared.clone();
     let mut traced = blocking(move || s.service.trace_enabled()).await == Some(true);

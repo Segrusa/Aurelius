@@ -42,8 +42,10 @@ abstract final class Commands {
   /// A message to an employee in its own chat or one of its task conversations.
   /// `files`: upload paths of files sent with the message; the PC copies them
   /// into the employee's work folder.
-  static Map<String, dynamic> sendEmployeeMessage(String employeeId, String text, {required String conversationId, List<String> images = const [], List<String> files = const [], bool interrupt = false}) =>
+  /// [confirmSecret]: sent again after `looks_like_secret` (B10); the PC stores it with the value redacted.
+  static Map<String, dynamic> sendEmployeeMessage(String employeeId, String text, {required String conversationId, List<String> images = const [], List<String> files = const [], bool interrupt = false, bool confirmSecret = false}) =>
       employeeSendMessage(SendEmployeeMessage(
+        confirmSecret: confirmSecret ? true : null,
         conversationId: conversationId,
         files: files,
         images: images,
@@ -54,12 +56,12 @@ abstract final class Commands {
 
   /// A message of the user in the group chat (Team): `@Name` wakes those
   /// employees, else the CEO answers (in a project's [channel]: its dispatcher).
-  static Map<String, dynamic> sendGroupMessage(String text, {List<String> images = const [], List<String> files = const [], String? channel}) =>
-      groupChatSend(SendGroupMessage(channel: channel, files: files, images: images, text: text));
+  static Map<String, dynamic> sendGroupMessage(String text, {List<String> images = const [], List<String> files = const [], String? channel, bool confirmSecret = false}) =>
+      groupChatSend(SendGroupMessage(channel: channel, confirmSecret: confirmSecret ? true : null, files: files, images: images, text: text));
 
   /// A board member's message in a ticket's discussion (feature `ticket_discussion`).
-  static Map<String, dynamic> postTicketMessage(String ticketId, String text, {List<String> images = const [], List<String> files = const []}) =>
-      ticketPost(ticketId: ticketId, text: text, images: images, files: files);
+  static Map<String, dynamic> postTicketMessage(String ticketId, String text, {List<String> images = const [], List<String> files = const [], bool confirmSecret = false}) =>
+      ticketPost(confirmSecret: confirmSecret ? true : null, ticketId: ticketId, text: text, images: images, files: files);
 
   /// A new conversation of the project. Auto, browser and screen need the Approve right.
   static Map<String, dynamic> startProjectConversation(String projectId, {AgentMode? mode, bool browserAllowed = false, bool screenAllowed = false}) =>
@@ -72,6 +74,7 @@ abstract final class Commands {
 
   /// A message in a project conversation; without [conversationId] it starts
   /// a new one with the mode, browser and screen given here.
+  /// [confirmSecret] as for [sendEmployeeMessage] (AUR-MU-04-F5).
   static Map<String, dynamic> sendProjectMessage(
     String projectId,
     String text, {
@@ -82,10 +85,12 @@ abstract final class Commands {
     AgentMode? mode,
     bool browserAllowed = false,
     bool screenAllowed = false,
+    bool confirmSecret = false,
   }) =>
       projectConversationSend(SendProjectMessage(
         agentMode: mode,
         browserAllowed: browserAllowed ? true : null,
+        confirmSecret: confirmSecret ? true : null,
         conversationId: conversationId,
         files: files,
         images: images,

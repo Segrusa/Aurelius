@@ -415,7 +415,7 @@ async fn employee(client: &Client, name: &str) -> (aurelius_domain::EmployeeId, 
 
 async fn say(client: &Client, to: (aurelius_domain::EmployeeId, aurelius_domain::ConversationId), text: &str) -> aurelius_domain::RunId {
     use aurelius_domain::employee::SendEmployeeMessage;
-    let send = SendEmployeeMessage { employee_id: to.0, text: text.into(), conversation_id: to.1, images: vec![], files: vec![], interrupt: false };
+    let send = SendEmployeeMessage { confirm_secret: false, employee_id: to.0, text: text.into(), conversation_id: to.1, images: vec![], files: vec![], interrupt: false };
     match client.execute(envelope(Command::SendEmployeeMessage(send), None)).await.unwrap().result {
         CommandResult::EmployeeMessageSent { run_id, .. } => run_id,
         other => panic!("{other:?}"),

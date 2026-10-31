@@ -72,7 +72,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId) {
 
 /// A task for the employee; the conversation it is worked on in, once it exists.
 async fn start_task(client: &Client, project_id: ProjectId, employee_id: EmployeeId) -> ConversationId {
-    let cmd = CreateTask { files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: "Find the chip".into(), goal: "Where is the chip?".into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: "Find the chip".into(), goal: "Where is the chip?".into(), acceptance_criteria: vec![], depends_on: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     task_conversation(client, task_id).await
 }
@@ -137,7 +137,7 @@ async fn each_conversation_sees_only_its_own_subagents() {
     let client = connect(dir.path()).await;
     let (project_id, alex) = setup(&client).await;
     let idle = match client
-        .execute(envelope(Command::SendChatMessage(SendChatMessage { conversation_id: common::conversation(&client).await, text: "Hello".into(), images: Vec::new(), interrupt: false }), None))
+        .execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "Hello".into(), images: Vec::new(), interrupt: false }), None))
         .await
         .unwrap()
         .result

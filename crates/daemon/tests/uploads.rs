@@ -37,7 +37,7 @@ async fn employee(client: &Client) -> (EmployeeId, ConversationId, PathBuf) {
     else {
         panic!()
     };
-    let cmd = CreateTask { files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: "Intro".into(), goal: "Say hello".into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: "Intro".into(), goal: "Say hello".into(), acceptance_criteria: vec![], depends_on: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     for _ in 0..400 {
         if let Some(t) = client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.id == task_id && t.status == TaskStatus::Succeeded) {
@@ -49,7 +49,7 @@ async fn employee(client: &Client) -> (EmployeeId, ConversationId, PathBuf) {
 }
 
 fn send(employee_id: EmployeeId, conversation_id: ConversationId, text: &str, files: Vec<String>) -> Command {
-    Command::SendEmployeeMessage(SendEmployeeMessage { employee_id, text: text.into(), conversation_id, images: Vec::new(), files, interrupt: false })
+    Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id, text: text.into(), conversation_id, images: Vec::new(), files, interrupt: false })
 }
 
 /// Send and wait for the answer; returns (the user's message, the answer).
@@ -131,6 +131,7 @@ async fn task_attachments_have_ids_and_thumbnails() {
     let shot = dir.path().join("shot.png");
     image::RgbImage::from_pixel(600, 300, image::Rgb([10, 200, 30])).save(&shot).unwrap();
     let cmd = CreateTask {
+        confirm_secret: false,
         files: vec![shot.display().to_string()],
         run: Default::default(),
         project_id,

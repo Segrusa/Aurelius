@@ -82,7 +82,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str
 }
 
 async fn task(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str, goal: &str) -> TaskId {
-    let cmd = CreateTask { files: vec![], project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default() };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default() };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     task_id
 }
@@ -116,7 +116,7 @@ async fn a_background_subagent_answers_before_the_answer_ends() {
     let client = connect(dir.path()).await;
     claude(&client).await;
     let send = |conversation_id, text: &str| {
-        Command::SendChatMessage(SendChatMessage { conversation_id, text: text.into(), images: Vec::new(), interrupt: false })
+        Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images: Vec::new(), interrupt: false })
     };
     let CommandResult::ChatMessageSent { conversation_id, .. } = client.execute(envelope(send(common::conversation(&client).await, "Hallo"), None)).await.unwrap().result else { panic!() };
     wait_answers(&client, conversation_id, 1).await;
@@ -223,6 +223,7 @@ async fn from_a_project_conversation_the_assistant_lets_an_employee_do_it() {
     let iris = employee(&client, project, "Iris", "Frontend designer", AgentMode::Auto).await;
     // Not in a task, and the tool is not named: the assistant decides how to let Iris do it.
     let send = Command::SendProjectMessage(SendProjectMessage {
+        confirm_secret: false,
         project_id: project,
         text: "I need colors.css with one CSS rule that makes the body background white. That is frontend work: let Iris do it, don't write it yourself. Tell me when she is done.".into(),
         conversation_id: None,

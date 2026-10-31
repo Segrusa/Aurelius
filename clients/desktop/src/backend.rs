@@ -87,6 +87,8 @@ pub struct ServerInfo {
     /// Tickets have their discussion and a ticket can be made from a message
     /// (feature `ticket_discussion`, `CreateTicket::from_message`).
     pub ticket_discussion: bool,
+    /// The vault of the company and its projects (feature `vault`).
+    pub vault: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -390,7 +392,284 @@ pub enum Request {
     Claude(ClaudeCall),
     /// The board, a ticket and their writes (protocol 4; see [`BoardCall`]).
     Board(BoardCall),
+    /// The vault (feature `vault`; see [`VaultCall`]).
+    Vault(VaultCall),
+    /// A message `looks_like_secret` held back, sent again after "Send anyway" (B10):
+    /// its `confirm_secret` is set, so the server stores it with the value redacted.
+    SendConfirmed(Command),
 }
+
+/// A vault value from `vault.reveal` or the vault key from `vault.key_export`, on its
+/// way to the screen or the clipboard: never printed, wiped when dropped (E19, E20).
+pub struct Revealed(String);
+
+impl Revealed {
+    pub fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Drop for Revealed {
+    fn drop(&mut self) {
+        wipe(&mut self.0);
+    }
+}
+
+impl std::fmt::Debug for Revealed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+/// Overwrite a string's bytes before its memory goes back (E20, without a new dependency).
+pub fn wipe(text: &mut String) {
+    let mut bytes = std::mem::take(text).into_bytes();
+    bytes.fill(0);
+    std::hint::black_box(&bytes);
+}
+
+/// Which audit log a read asks for: a scope's (none: the company's), every scope's, or one item's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuditAsk {
+    pub project_id: Option<ProjectId>,
+    pub all: bool,
+    pub item_id: Option<aurelius_domain::VaultItemId>,
+}
+
+/// The vault's reads and writes (feature `vault`). None is kept for a reconnect:
+/// a value or a password does not wait in an outbox, and the screen reloads.
+#[derive(Debug)]
+pub enum VaultCall {
+    /// `vault.list` of the company (none) or a project.
+    List(Option<ProjectId>),
+    /// `vault.reveal`: show or copy one value (an audit row on the server).
+    Reveal { item_id: aurelius_domain::VaultItemId, purpose: aurelius_domain::vault::RevealPurpose },
+    /// `vault.audit`, newest first; `before`: the page after that row.
+    Audit { ask: AuditAsk, before: Option<i64> },
+    /// `vault.key_export` with the own password again (E9).
+    KeyExport { password: Password },
+    Create(aurelius_protocol::VaultCreateParams),
+    Update(aurelius_protocol::VaultUpdateParams),
+    Archive(aurelius_domain::VaultItemId),
+}
+
+impl VaultCall {
+    /// A read the gate keeps for after the sign-in (the vault page loads then).
+    pub fn is_list(&self) -> bool {
+        matches!(self, VaultCall::List(_) | VaultCall::Audit { .. })
+    }
+
+    /// What a call that could not go answers, so nothing keeps waiting.
+    pub fn refused(&self, message: String) -> VaultUpdate {
+        match self {
+            VaultCall::List(scope) => VaultUpdate::Listed(*scope, Err(message)),
+            VaultCall::Reveal { item_id, purpose } => VaultUpdate::Value { item_id: *item_id, purpose: *purpose, result: Err(message) },
+            VaultCall::Audit { ask, before } => VaultUpdate::Audit { ask: *ask, before: *before, result: Err(message) },
+            VaultCall::KeyExport { .. } => VaultUpdate::Key(Err(message)),
+            VaultCall::Create(_) | VaultCall::Update(_) => VaultUpdate::Saved(Err(message)),
+            VaultCall::Archive(item_id) => VaultUpdate::Archived(*item_id, Err(message)),
+        }
+    }
+}
+
+/// The vault key as `vault.key_export` gave it, to save or show once (B8, E9).
+#[derive(Debug)]
+pub struct KeyFile {
+    pub key_id: String,
+    pub key: Revealed,
+}
+
+/// What the vault hears back. A value only ever travels as [`Revealed`].
+#[derive(Debug)]
+pub enum VaultUpdate {
+    Listed(Option<ProjectId>, Result<aurelius_domain::vault::VaultList, String>),
+    Value { item_id: aurelius_domain::VaultItemId, purpose: aurelius_domain::vault::RevealPurpose, result: Result<Revealed, String> },
+    Audit { ask: AuditAsk, before: Option<i64>, result: Result<aurelius_domain::vault::VaultAuditPage, String> },
+    Key(Result<KeyFile, String>),
+    /// `vault.create` or `vault.update` answered.
+    Saved(Result<aurelius_domain::vault::VaultItemView, String>),
+    Archived(aurelius_domain::VaultItemId, Result<aurelius_domain::vault::VaultItemView, String>),
+    /// A `vault.item_*` event (also of another device): read again what shows (MU4-01 AC2).
+    Changed,
+}
+
+/// A message the server held back because it holds a vault secret's value (B10):
+/// the items' names and the message again, with `confirm_secret` set. Its text is
+/// the user's own and is never printed.
+pub struct SecretHold {
+    pub names: Vec<String>,
+    pub command: Command,
+    /// A board write goes again as one, with the version and the words it had (none: not a board write).
+    pub board: Option<(Option<u64>, Option<String>)>,
+}
+
+impl std::fmt::Debug for SecretHold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretHold").field("names", &self.names).finish_non_exhaustive()
+    }
+}
+
+impl SecretHold {
+    pub fn new(names: Vec<String>, command: Command) -> Self {
+        Self { names, command, board: None }
+    }
+
+    /// A ticket write held back: it goes again with the version it checked and what the board says when it works.
+    pub fn on_board(mut self, expected_version: Option<u64>, done: Option<String>) -> Self {
+        self.board = Some((expected_version, done));
+        self
+    }
+
+    /// How it goes again after "Send anyway": a ticket write as the board's write, the others as a message.
+    pub fn resend(self) -> Request {
+        match (self.command, self.board) {
+            (command @ Command::PostTicketMessage(_), None) => Request::Board(BoardCall::Write { command, expected_version: None, done: None }),
+            (command, Some((expected_version, done))) => Request::Board(BoardCall::Write { command, expected_version, done }),
+            (command, None) => Request::SendConfirmed(command),
+        }
+    }
+
+    /// The text that was held back, to put back where it was written on Cancel.
+    pub fn text(&self) -> &str {
+        match &self.command {
+            Command::SendEmployeeMessage(m) => &m.text,
+            Command::SendGroupMessage(m) => &m.text,
+            Command::PostTicketMessage(m) => &m.text,
+            Command::RevisePlan(c) => &c.feedback,
+            Command::SendBackTicket(c) => &c.feedback,
+            Command::DecidePlan(c) => c.feedback.as_deref().unwrap_or_default(),
+            _ => "",
+        }
+    }
+}
+
+/// The `confirm_secret` of a command B10 can hold back and "Send anyway" can store
+/// redacted (AUR-MU-04-F5); none for the rest: names, instructions, memories and paths.
+fn confirm_flag(command: &mut Command) -> Option<&mut bool> {
+    Some(match command {
+        Command::SendEmployeeMessage(m) => &mut m.confirm_secret,
+        Command::SendGroupMessage(m) => &mut m.confirm_secret,
+        Command::PostTicketMessage(m) => &mut m.confirm_secret,
+        Command::SendChatMessage(m) => &mut m.confirm_secret,
+        Command::SendProjectMessage(m) => &mut m.confirm_secret,
+        Command::CreateTask(c) => &mut c.confirm_secret,
+        Command::CreateTaskSchedule(c) => &mut c.confirm_secret,
+        Command::UpdateTaskSchedule(c) => &mut c.confirm_secret,
+        Command::AddIdea(c) => &mut c.confirm_secret,
+        Command::UpdateIdea(c) => &mut c.confirm_secret,
+        Command::CreateTicket(c) => &mut c.confirm_secret,
+        Command::UpdateTicket(c) => &mut c.confirm_secret,
+        Command::RevisePlan(c) => &mut c.confirm_secret,
+        Command::SendBackTicket(c) => &mut c.confirm_secret,
+        Command::AcceptTicket(c) => &mut c.confirm_secret,
+        Command::DecidePlan(c) => &mut c.confirm_secret,
+        Command::AnswerQuestion(c) => &mut c.confirm_secret,
+        _ => return None,
+    })
+}
+
+/// A command B10 can hold back, with `confirm_secret` set for "Send anyway"; none for the
+/// rest, and none for one that went with it already: refused again, asking again would never end (D-m5).
+pub fn confirmed(command: &Command) -> Option<Command> {
+    let mut command = command.clone();
+    let flag = confirm_flag(&mut command)?;
+    if *flag {
+        return None;
+    }
+    *flag = true;
+    Some(command)
+}
+
+/// Refused although it went with `confirm_secret`: the server redacts the text, never
+/// an attached file, so the value is in one of those.
+pub fn secret_in_file(command: &Command) -> bool {
+    let mut command = command.clone();
+    confirm_flag(&mut command).is_some_and(|f| *f) && has_files(&command)
+}
+
+/// Whether a command carries files of its own (the server reads them, it cannot redact them).
+fn has_files(command: &Command) -> bool {
+    match command {
+        Command::SendEmployeeMessage(m) => !m.files.is_empty(),
+        Command::SendGroupMessage(m) => !m.files.is_empty(),
+        Command::PostTicketMessage(m) => !m.files.is_empty(),
+        Command::CreateTask(c) => !c.files.is_empty(),
+        Command::CreateTaskSchedule(c) => !c.files.is_empty(),
+        Command::UpdateTaskSchedule(c) => !c.add_files.is_empty(),
+        Command::AddIdea(c) => !c.files.is_empty(),
+        Command::UpdateIdea(c) => !c.add_files.is_empty(),
+        Command::CreateTicket(c) => !c.files.is_empty(),
+        _ => false,
+    }
+}
+
+/// What the server's refusal tells the user: none when "Send anyway?" can ask; else that the
+/// value has to come out, from the attached file when "Send anyway" went already (no second ask).
+pub fn secret_refused(command: &Command, names: &[String]) -> Option<String> {
+    let mut sent = command.clone();
+    match confirm_flag(&mut sent).map(|f| *f) {
+        Some(false) => None,
+        Some(true) if has_files(command) => Some(secret_in_file_refusal(names)),
+        Some(true) => Some(secret_still_refusal(names)),
+        None => Some(secret_refusal(names)),
+    }
+}
+
+/// What "Send anyway" says when the server refuses it again.
+pub fn secret_in_file_refusal(names: &[String]) -> String {
+    match names {
+        [] => "Not sent: a vault secret's value is in an attached file, which is never redacted. Take it out of the attached file and send again.".into(),
+        names => format!("Not sent: the value of {} is in an attached file, which is never redacted. Take it out of the attached file and send again.", names.join(", ")),
+    }
+}
+
+/// "Send anyway" refused again without a file: the server could not store it redacted.
+pub fn secret_still_refusal(names: &[String]) -> String {
+    match names {
+        [] => "Not sent: the server still refuses this as a vault secret. Take the value out and try again.".into(),
+        names => format!("Not sent: the server still refuses the value of {}. Take the value out and try again.", names.join(", ")),
+    }
+}
+
+/// `looks_like_secret`: the names of the items the text holds a value of (never a value).
+pub fn secret_names(err: &ClientError) -> Option<Vec<String>> {
+    match err {
+        ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::LooksLikeSecret => Some(p.matched_items.clone()),
+        _ => None,
+    }
+}
+
+/// A refused text that is no message (a ticket, a task): the value must come out first.
+pub fn secret_refusal(names: &[String]) -> String {
+    format!("This looks like a vault secret: {}. Take the value out and try again.", names.join(", "))
+}
+
+/// What a refused vault call tells the user (never a value, never the params).
+pub fn vault_failure(err: &ClientError) -> String {
+    use aurelius_domain::error::ErrorCode;
+    match err {
+        e if not_built(e) => VAULT_NOT_BUILT.into(),
+        ClientError::Protocol(p) if p.code == ErrorCode::UnknownMethod => VAULT_NOT_BUILT.into(),
+        ClientError::Protocol(p) if p.code == ErrorCode::VaultKindLocked => VAULT_KIND_LOCKED.into(),
+        ClientError::Protocol(p) if p.code == ErrorCode::VaultUndecryptable => VAULT_UNDECRYPTABLE.into(),
+        ClientError::Protocol(p) if p.code == ErrorCode::BoardMemberRequired => BOARD_MEMBER_REQUIRED.into(),
+        ClientError::Protocol(p) if p.code == ErrorCode::VersionConflict => BOARD_CONFLICT.into(),
+        ClientError::Protocol(p) if p.code == ErrorCode::WrongPassword => "That password is wrong.".into(),
+        ClientError::Protocol(p) => p.message.clone(),
+        e if ends(e) => VAULT_CONNECTION_DROPPED.into(),
+        ClientError::TimedOut(_) => "The server did not answer in time.".into(),
+        e => e.to_string(),
+    }
+}
+
+pub const VAULT_NOT_BUILT: &str = "This server does not have the vault yet. Update the server.";
+pub const VAULT_KIND_LOCKED: &str = "A secret stays a secret, and nothing becomes one. Make a new item instead.";
+pub const VAULT_UNDECRYPTABLE: &str = "Cannot be decrypted: the server's vault key is missing or does not fit this value.";
+pub const VAULT_CONNECTION_DROPPED: &str = "The connection dropped before the server answered. The vault reloads with what the server has.";
 
 /// The board's reads and writes. Writes are not kept for a reconnect: the
 /// board disables its actions while offline, and a write the connection lost
@@ -518,10 +797,14 @@ pub fn board_write_failure(e: &ClientError) -> String {
         e if ends(e) => BOARD_CONNECTION_DROPPED.into(),
         e if not_built(e) => NOT_BUILT.into(),
         ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::VersionConflict => BOARD_CONFLICT.into(),
+        ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::LooksLikeSecret => secret_refusal(&p.matched_items),
         ClientError::Protocol(p) => p.message.clone(),
         e => e.to_string(),
     }
 }
+
+/// A ticket post held back by B10, under its draft while the window asks.
+pub const NOT_SENT_SECRET: &str = "Not sent: this looks like a vault secret.";
 
 /// A password on its way to the server: never printed, never kept after the call.
 pub struct Password(String);
@@ -1060,6 +1343,9 @@ pub enum Update {
     /// A write was refused for want of an active board member.
     BoardMemberRequired,
     Board(BoardUpdate),
+    Vault(VaultUpdate),
+    /// A message held back by `looks_like_secret` (B10): ask "Send anyway?".
+    LooksLikeSecret(SecretHold),
 }
 
 pub struct Handle {
@@ -1093,6 +1379,7 @@ async fn idle(requests: &mut mpsc::UnboundedReceiver<Request>, updates: &mpsc::U
         let _ = updates.send(match request {
             Request::BoardMembers(call) if call.waits() => Update::BoardMemberFailed(MemberFailure::general(text)),
             Request::Board(call) if call.is_write() => Update::Board(call.refused(text.into())),
+            Request::Vault(call) => Update::Vault(call.refused(text.into())),
             _ => Update::Error(text.into()),
         });
     }
@@ -1180,6 +1467,10 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                             Some(Request::Board(call)) => if call.is_write() {
                                 let _ = updates.send(Update::Board(call.refused("Not connected to the server. Try again when it is back.".into())));
                             },
+                            // Nor the vault's: no value or password waits for later; the page reloads once online.
+                            Some(Request::Vault(call)) => {
+                                let _ = updates.send(Update::Vault(call.refused("Not connected to the server. Try again when it is back.".into())));
+                            }
                             Some(other) => match me {
                                 Some(by) => if let Some(env) = to_envelope(other) { outbox.push_back((by, env)) },
                                 // Signed out: nobody's write to keep (the gate refuses it too).
@@ -1233,6 +1524,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 management_chooses_mode: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::MANAGEMENT_CHOOSES_MODE),
                 auto_allow: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::AUTO_ALLOW),
                 ticket_discussion: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_DISCUSSION),
+                vault: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::VAULT),
             },
         }));
 
@@ -1477,6 +1769,7 @@ async fn gate_call(client: &Client, call: UserCall, updates: &mpsc::UnboundedSen
 fn held_read(request: &Request) -> bool {
     match request {
         Request::Board(call) => !call.is_write(),
+        Request::Vault(call) => call.is_list(),
         Request::AppKeys(call) => matches!(call, AppKeyCall::List),
         Request::Plugins(call) => matches!(call, PluginsCall::List | PluginsCall::Available | PluginsCall::ManagerGet(_) | PluginsCall::ProjectGet(_)),
         Request::Backups(call) => matches!(call, BackupsCall::List),
@@ -1497,6 +1790,7 @@ fn refuse_at_gate(request: Request, updates: &mpsc::UnboundedSender<Update>) {
         Request::BoardMembers(call) if call.waits() => Update::BoardMemberFailed(MemberFailure::general(BOARD_MEMBER_REQUIRED)),
         Request::Claude(_) => Update::Claude(ClaudeUpdate::Failed(BOARD_MEMBER_REQUIRED.into())),
         Request::Board(call) => Update::Board(call.refused(BOARD_MEMBER_REQUIRED.into())),
+        Request::Vault(call) => Update::Vault(call.refused(BOARD_MEMBER_REQUIRED.into())),
         Request::AppKeys(_) => Update::AppKeys(AppKeyUpdate::Failed(BOARD_MEMBER_REQUIRED.into())),
         _ => Update::Error(BOARD_MEMBER_REQUIRED.into()),
     });
@@ -1558,19 +1852,19 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
             envelope(Command::SetProjectStatus(employee::SetProjectStatus { project_id, status }), None)
         }
         Request::SendManager { employee_id, text, conversation_id, images, files, interrupt } => {
-            envelope(Command::SendEmployeeMessage(employee::SendEmployeeMessage { employee_id, text, conversation_id, images, files, interrupt }), None)
+            envelope(Command::SendEmployeeMessage(employee::SendEmployeeMessage { confirm_secret: false, employee_id, text, conversation_id, images, files, interrupt }), None)
         }
-        Request::SendGroup { text, images, files, channel } => envelope(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text, images, files, channel }), None),
+        Request::SendGroup { text, images, files, channel } => envelope(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text, images, files, channel }), None),
         Request::DecideApproval { approval_id, action_digest, approve, always_allow } => {
             envelope(Command::DecideApproval(approval::DecideApproval { approval_id, action_digest, approve, always_allow }), None)
         }
-        Request::AnswerQuestion { approval_id, answers } => envelope(Command::AnswerQuestion(approval::AnswerQuestion { approval_id, answers }), None),
+        Request::AnswerQuestion { approval_id, answers } => envelope(Command::AnswerQuestion(approval::AnswerQuestion { confirm_secret: false, approval_id, answers }), None),
         Request::AddConnection { provider, name, runtime_path } => envelope(
             Command::AddProvider(connection::AddProvider { provider, display_name: name, runtime_path, default_model: None }),
             None,
         ),
         Request::CreateTask { project_id, employee_id, title, goal, criteria, run, files } => envelope(
-            Command::CreateTask(aurelius_domain::task::CreateTask { files, project_id, employee_id, title, goal, acceptance_criteria: criteria, depends_on: vec![], run }),
+            Command::CreateTask(aurelius_domain::task::CreateTask { confirm_secret: false, files, project_id, employee_id, title, goal, acceptance_criteria: criteria, depends_on: vec![], run }),
             None,
         ),
         Request::CreateSchedule(schedule) => envelope(Command::CreateTaskSchedule(schedule), None),
@@ -1589,8 +1883,8 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::UseConnection { .. } | Request::SetSecret { .. } => return None,
         // Queries, not commands.
         Request::MarkNotificationsRead | Request::ClearResults(_) | Request::LoadMemory(_) | Request::LoadMemoryContext { .. } | Request::LoadContext(_) | Request::LoadScreenshot(_) | Request::LoadFullActivity(..) | Request::LoadFile(_) | Request::LoadUpload(_) | Request::LoadUploadThumb(_) | Request::LoadIdeas(_) | Request::LoadSubagents(_) | Request::LoadMarkdownFile(..) | Request::LoadArtifactContent { .. } | Request::LoadPreviewMessages(_) => return None,
-        Request::AddIdea { project_id, title, note, kind, files } => envelope(Command::AddIdea(aurelius_domain::idea::AddIdea { project_id, title, note, kind, files }), None),
-        Request::UpdateIdea { idea_id, title, note, kind, add_files, remove_files } => envelope(Command::UpdateIdea(aurelius_domain::idea::UpdateIdea { idea_id, title, note, kind, add_files, remove_files }), None),
+        Request::AddIdea { project_id, title, note, kind, files } => envelope(Command::AddIdea(aurelius_domain::idea::AddIdea { confirm_secret: false, project_id, title, note, kind, files }), None),
+        Request::UpdateIdea { idea_id, title, note, kind, add_files, remove_files } => envelope(Command::UpdateIdea(aurelius_domain::idea::UpdateIdea { confirm_secret: false, idea_id, title, note, kind, add_files, remove_files }), None),
         Request::DeleteIdea(idea_id) => envelope(Command::DeleteIdea(aurelius_domain::idea::DeleteIdea { idea_id }), None),
         Request::SetIdeaStatus { idea_id, status } => envelope(Command::SetIdeaStatus(aurelius_domain::idea::SetIdeaStatus { idea_id, status }), None),
         Request::StartIdea { idea_id, employee_id, mode, model } => {
@@ -1613,7 +1907,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         }
         Request::SetBrowserAllowed { conversation_id, allowed } => envelope(Command::SetBrowserAllowed(aurelius_domain::autonomy::SetBrowserAllowed { conversation_id, allowed }), None),
         Request::SetScreenAllowed { conversation_id, allowed } => envelope(Command::SetScreenAllowed(aurelius_domain::autonomy::SetScreenAllowed { conversation_id, allowed }), None),
-        Request::DecidePlan { approval_id, decision, feedback } => envelope(Command::DecidePlan(aurelius_domain::approval::DecidePlan { approval_id, decision, feedback }), None),
+        Request::DecidePlan { approval_id, decision, feedback } => envelope(Command::DecidePlan(aurelius_domain::approval::DecidePlan { confirm_secret: false, approval_id, decision, feedback }), None),
         Request::SetHeartbeat { employee_id, every_minutes } => envelope(
             Command::SetHeartbeat(employee::SetHeartbeat { employee_id, every_minutes, quiet_start_min: None, quiet_end_min: None, daily_token_budget: None }),
             None,
@@ -1622,7 +1916,8 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SetEmployeeFolder { employee_id, path } => envelope(Command::SetEmployeeFolder(employee::SetEmployeeFolder { employee_id, path }), None),
         Request::SetProjectFolder { project_id, path } => envelope(Command::SetProjectFolder(project::SetProjectFolder { project_id, path }), None),
         Request::LoadUsage | Request::LoadUsageHours(_) | Request::LoadSubscription(_) | Request::CheckUpdate(_) | Request::InstallUpdate | Request::InstallAppUpdate | Request::RestartServer | Request::Power(_) | Request::AppKeys(_) | Request::Plugins(_) | Request::LoadServerLoad | Request::SetLoadLimits(_) | Request::LoadBrowser | Request::SetBrowser(_) | Request::SetBrowserBackend(_) | Request::LoadArtifactSetting | Request::SetArtifactsEnabled(_) | Request::LoadUsageTotals { .. } | Request::LoadTraceSetting | Request::SetTraceEnabled(_) | Request::LoadTrace(_) | Request::LoadInstructionVersions(_) | Request::LoadAutoAllow | Request::SetAutoAllow(_) | Request::LoadManagementMode | Request::SetManagementMode(_) | Request::LoadMcp | Request::SetMcp(_) | Request::McpAdd(_) | Request::McpRemove(_) | Request::McpAuth(_) | Request::LoadMcpAlwaysAllow | Request::McpAlwaysAllowRemove(_) | Request::Backups(_) | Request::ExportProject(_) | Request::Remote(_) => return None,
-        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode | Request::BoardMembers(_) | Request::Claude(_) | Request::Board(_) => return None,
+        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode | Request::BoardMembers(_) | Request::Claude(_) | Request::Board(_) | Request::Vault(_) => return None,
+        Request::SendConfirmed(command) => envelope(command, None),
     })
 }
 
@@ -2327,6 +2622,10 @@ async fn session(
                     claude_login(client, call, updates).await?;
                     continue;
                 }
+                if let Request::Vault(call) = request {
+                    vault(client, call, updates).await?;
+                    continue;
+                }
                 if let Request::Board(call) = request {
                     if let BoardCall::Discussion(conversation) = call {
                         *open_discussion = conversation;
@@ -2463,6 +2762,7 @@ async fn session(
                 let (mut memory, mut ideas, mut schedules, mut task, mut users, mut settings, mut tickets) = (false, false, false, false, false, false, false);
                 let mut board_tasks: Vec<String> = Vec::new();
                 let mut claude = false;
+                let mut vault = false;
                 for e in std::iter::once(first).chain(std::iter::from_fn(|| events.try_recv().ok())) {
                     // 'Always allow' on an approval adds its tool to the always-allowed list.
                     approval |= e.kind.area() == "approval";
@@ -2483,6 +2783,8 @@ async fn session(
                         ideas = true;
                     } else if e.kind.area() == "recurring_task" {
                         schedules = true;
+                    } else if e.kind.area() == "vault" {
+                        vault = true;
                     } else if is_artifact(&e) { artifact = true } else if is_chat(&e) { chat = true } else { other = true }
                     task |= e.kind.area() == "task";
                     users |= e.kind.area() == "user";
@@ -2496,6 +2798,10 @@ async fn session(
                 }
                 if tickets || settings || !board_tasks.is_empty() {
                     let _ = updates.send(Update::Board(BoardUpdate::Changed { tickets, settings, tasks: board_tasks }));
+                }
+                if vault {
+                    // The window reads again only what shows (MU4-01 AC2).
+                    let _ = updates.send(Update::Vault(VaultUpdate::Changed));
                 }
                 if users {
                     // Another window made or disabled a board member.
@@ -2833,7 +3139,10 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
         // The discussion's writes answer the discussion: the draft stays when they fail.
         BoardCall::Write { command: Command::PostTicketMessage(post), .. } => {
             let ticket = post.ticket_id;
-            match client.execute(envelope(Command::PostTicketMessage(post), None)).await {
+            let command = Command::PostTicketMessage(post);
+            let held = confirmed(&command);
+            let sent = held.is_none().then(|| command.clone());
+            match client.execute(envelope(command, None)).await {
                 Ok(receipt) => {
                     // Whether the owner took it in the main task, the window reads from `to`
                     // and the ticket (`discussion::reached`): `run_ids` cannot tell, the
@@ -2847,6 +3156,15 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
                 Err(e) if needs_board_member(&e) => {
                     let _ = updates.send(Update::Board(BoardUpdate::PostFailed { ticket, message: BOARD_MEMBER_REQUIRED.into() }));
                     let _ = updates.send(Update::BoardMemberRequired);
+                }
+                // B10: the draft stays, and the window asks "Send anyway?".
+                Err(e) if secret_names(&e).is_some() => {
+                    let names = secret_names(&e).unwrap_or_default();
+                    let message = sent.as_ref().and_then(|c| secret_refused(c, &names)).unwrap_or_else(|| NOT_SENT_SECRET.into());
+                    let _ = updates.send(Update::Board(BoardUpdate::PostFailed { ticket, message }));
+                    if let Some(command) = held {
+                        let _ = updates.send(Update::LooksLikeSecret(SecretHold::new(names, command)));
+                    }
                 }
                 Err(e) => {
                     let _ = updates.send(Update::Board(BoardUpdate::PostFailed { ticket, message: crate::screens::discussion::post_failure(&e) }));
@@ -2894,7 +3212,10 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
         BoardCall::Write { mut command, expected_version, done } => {
             let ticket = ticket_of(&command);
             // A new ticket's files: as they are for the local service, uploaded for a remote one.
-            if let Command::CreateTicket(create) = &mut command {
+            // Sent anyway (B10), they went up already with the first try.
+            if let Command::CreateTicket(create) = &mut command
+                && !create.confirm_secret
+            {
                 let mut staged = Vec::new();
                 for path in &create.files {
                     match client.stage_file(std::path::Path::new(path)).await {
@@ -2909,6 +3230,9 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
                 }
                 create.files = staged;
             }
+            // B10: a ticket's text the server may hold back, ready to go again with `confirm_secret`.
+            let held = confirmed(&command);
+            let sent = held.is_none().then(|| command.clone());
             match client.execute(envelope(command, expected_version)).await {
                 Ok(receipt) => {
                     let _ = updates.send(Update::Board(match receipt.result {
@@ -2920,6 +3244,15 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
                     let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket, message: BOARD_MEMBER_REQUIRED.into() }));
                     let _ = updates.send(Update::BoardMemberRequired);
                 }
+                // The form or the card waits, and the window asks "Send anyway?"; refused again, it says why (D-m5).
+                Err(e) if secret_names(&e).is_some() => {
+                    let names = secret_names(&e).unwrap_or_default();
+                    let message = sent.as_ref().and_then(|c| secret_refused(c, &names)).unwrap_or_else(|| NOT_SENT_SECRET.into());
+                    let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket, message }));
+                    if let Some(command) = held {
+                        let _ = updates.send(Update::LooksLikeSecret(SecretHold::new(names, command).on_board(expected_version, done)));
+                    }
+                }
                 Err(e) => {
                     let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket, message: board_write_failure(&e) }));
                     if lost(&e) {
@@ -2930,6 +3263,48 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
         }
     }
     Ok(())
+}
+
+/// A vault call's answer: the refusal in the user's words; a lost connection is kept in `lost`.
+fn vault_said<T>(result: Result<T, ClientError>, lost: &mut Option<ClientError>) -> Result<T, String> {
+    result.map_err(|e| {
+        let text = vault_failure(&e);
+        if ends(&e) {
+            *lost = Some(e);
+        }
+        text
+    })
+}
+
+/// The vault's calls (feature `vault`). Reveal and key export answers go to the
+/// window as [`Revealed`] and are never logged or kept here (E19).
+async fn vault(client: &Client, call: VaultCall, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
+    let mut lost = None;
+    let answer = match call {
+        VaultCall::List(scope) => VaultUpdate::Listed(scope, vault_said(client.vault_list(scope).await, &mut lost)),
+        VaultCall::Reveal { item_id, purpose } => {
+            let result = client.vault_reveal(item_id, purpose).await.map(|v| Revealed::new(v.value));
+            VaultUpdate::Value { item_id, purpose, result: vault_said(result, &mut lost) }
+        }
+        VaultCall::Audit { ask, before } => {
+            let result = client.vault_audit(ask.project_id, ask.all, ask.item_id, before, Some(crate::screens::vault::AUDIT_PAGE)).await;
+            VaultUpdate::Audit { ask, before, result: vault_said(result, &mut lost) }
+        }
+        VaultCall::KeyExport { password } => {
+            // E9: the own password again, moved into the protocol's params (redacted Debug); no copy stays here.
+            let Password(password) = password;
+            let result = client.vault_key_export(password).await.map(|k| KeyFile { key_id: k.key_id, key: Revealed::new(k.key) });
+            VaultUpdate::Key(vault_said(result, &mut lost))
+        }
+        VaultCall::Create(params) => VaultUpdate::Saved(vault_said(client.vault_create(params).await, &mut lost)),
+        VaultCall::Update(params) => VaultUpdate::Saved(vault_said(client.vault_update(params).await, &mut lost)),
+        VaultCall::Archive(item_id) => VaultUpdate::Archived(item_id, vault_said(client.vault_archive(item_id).await, &mut lost)),
+    };
+    let _ = updates.send(Update::Vault(answer));
+    match lost {
+        Some(e) => Err(e.into()),
+        None => Ok(()),
+    }
 }
 
 /// The Team chat's channels (`channel.list`): none from a server without channels
@@ -3201,6 +3576,9 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
         _ => None,
     };
     let deciding = matches!(&envelope.command, Command::DecideProposal(_));
+    // B10: a text the server may hold back, ready to go again with `confirm_secret`.
+    let held = confirmed(&envelope.command);
+    let sent = held.is_none().then(|| envelope.command.clone());
     match client.execute(envelope).await {
         Ok(receipt) => {
             if let Some(project_id) = describing {
@@ -3294,6 +3672,19 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
         Err(err) if retryable(&err) || err.is_final() => Err(err.into()),
         Err(err) if needs_board_member(&err) => {
             let _ = updates.send(Update::BoardMemberRequired);
+            Ok(())
+        }
+        Err(err) if secret_names(&err).is_some() => {
+            let names = secret_names(&err).unwrap_or_default();
+            // A description is no message: refused, its Save comes back.
+            if let Some(project_id) = describing {
+                let _ = updates.send(Update::DescriptionSaved(project_id, Err(secret_refusal(&names))));
+                return Ok(());
+            }
+            let _ = updates.send(match held {
+                Some(command) => Update::LooksLikeSecret(SecretHold::new(names, command)),
+                None => Update::Error(sent.as_ref().and_then(|c| secret_refused(c, &names)).unwrap_or_else(|| secret_refusal(&names))),
+            });
             Ok(())
         }
         Err(err) => {
@@ -3897,6 +4288,7 @@ mod tests {
 
         fn new_ticket(project_id: ProjectId, title: &str) -> Command {
             Command::CreateTicket(ticket::CreateTicket {
+                confirm_secret: false,
                 project_id,
                 title: title.into(),
                 description: Some("What and why.".into()),
@@ -4115,7 +4507,7 @@ mod tests {
             let discussion = ticket.conversation_id.expect("every ticket has its discussion");
 
             // MU2-02 / MU2-04: a post with a mention; in Backlog with no owner it wakes nobody.
-            let post = Command::PostTicketMessage(ticket::PostTicketMessage { ticket_id: ticket.id, text: "@marie can you look?".into(), images: vec![], files: vec![] });
+            let post = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket.id, text: "@marie can you look?".into(), images: vec![], files: vec![] });
             app.requests.send(Request::Board(BoardCall::Write { command: post, expected_version: None, done: None })).unwrap();
             let to = next(&mut app, |u| match u {
                 Update::Board(BoardUpdate::Posted { ticket: t, to }) if t == ticket.id => Some(to),
@@ -4603,7 +4995,7 @@ mod tests {
     #[test]
     fn a_discussion_write_that_cannot_go_answers_the_discussion() {
         let ticket = aurelius_domain::TicketId::new();
-        let post = BoardCall::Write { command: Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { ticket_id: ticket, text: "Hi".into(), images: vec![], files: vec![] }), expected_version: None, done: None };
+        let post = BoardCall::Write { command: Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket, text: "Hi".into(), images: vec![], files: vec![] }), expected_version: None, done: None };
         assert!(matches!(post.refused("offline".into()), BoardUpdate::PostFailed { ticket: t, .. } if t == ticket), "the Sending… state ends, the draft stays");
         let retry = BoardCall::Write { command: Command::RetryTicketSummary(aurelius_domain::ticket::RetryTicketSummary { ticket_id: ticket }), expected_version: None, done: None };
         assert!(matches!(retry.refused("offline".into()), BoardUpdate::SummaryRetried { failure: Some(_), .. }));
@@ -4619,5 +5011,543 @@ mod tests {
         assert_eq!(refreshes(&[], 5000).await, Vec::<u64>::new());
         // A lone event after a quiet spell refreshes at once.
         assert_eq!(refreshes(&[3000], 5000).await, vec![3000]);
+    }
+
+    /// E19: no vault value, key or held message is ever printed by this window.
+    #[test]
+    fn a_vault_value_or_key_is_never_printed() {
+        const FAKE: &str = "sk-test-FAKE-0000";
+        let item_id = aurelius_domain::VaultItemId::new();
+        let create = Request::Vault(VaultCall::Create(aurelius_protocol::VaultCreateParams { project_id: None, kind: aurelius_domain::vault::VaultKind::Secret, name: "GitHub token".into(), env_name: "GITHUB_TOKEN".into(), description: None, value: FAKE.into() }));
+        let update = Request::Vault(VaultCall::Update(aurelius_protocol::VaultUpdateParams { item_id, name: None, env_name: None, description: None, value: Some(FAKE.into()), kind: None }));
+        let export = Request::Vault(VaultCall::KeyExport { password: Password::new("Tr0ub4dor&3-zebra-alex".into()) });
+        let shown = Update::Vault(VaultUpdate::Value { item_id, purpose: aurelius_domain::vault::RevealPurpose::Show, result: Ok(Revealed::new(FAKE.into())) });
+        let key = Update::Vault(VaultUpdate::Key(Ok(KeyFile { key_id: "k1".into(), key: Revealed::new("aurelius-vault-key:v1:dev:k1:c2stdGVzdC1GQUtFLTAwMDA".into()) })));
+        let post = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: format!("the token is {FAKE}"), images: vec![], files: vec![], channel: None });
+        let held = Update::LooksLikeSecret(SecretHold::new(vec!["GitHub token".into()], confirmed(&post).unwrap()));
+        for printed in [format!("{create:?}"), format!("{update:?}"), format!("{export:?}"), format!("{shown:?}"), format!("{key:?}"), format!("{held:?}")] {
+            assert!(!printed.contains("FAKE") && !printed.contains("c2st") && !printed.contains("Tr0ub4dor"), "{printed}");
+        }
+        assert!(format!("{held:?}").contains("GitHub token"), "the names may show");
+    }
+
+    /// B10: the three messages a board member writes are held back and go again with
+    /// `confirm_secret`; a ticket post as the board's write, a chat message as a message.
+    #[test]
+    fn a_held_message_goes_again_confirmed() {
+        use aurelius_domain::error::{AppError, ErrorCode};
+        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: "Hi Robin".into(), images: vec![], files: vec![], channel: None });
+        let chat = Command::SendEmployeeMessage(employee::SendEmployeeMessage { confirm_secret: false, employee_id: EmployeeId::new(), text: "Hi Forge".into(), conversation_id: ConversationId::new(), images: vec![], files: vec![], interrupt: false });
+        let post = Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: false, ticket_id: aurelius_domain::TicketId::new(), text: "Hi Alex".into(), images: vec![], files: vec![] });
+        for command in [&group, &chat, &post] {
+            let flag = match confirmed(command).expect("a message B10 checks") {
+                Command::SendGroupMessage(m) => m.confirm_secret,
+                Command::SendEmployeeMessage(m) => m.confirm_secret,
+                Command::PostTicketMessage(m) => m.confirm_secret,
+                _ => false,
+            };
+            assert!(flag);
+        }
+        assert!(confirmed(&Command::CreateProject(project::CreateProject { name: "x".into(), description: None, folder: None })).is_none(), "anything else is refused, not held");
+        let hold = SecretHold::new(vec!["GitHub token".into()], confirmed(&post).unwrap());
+        assert_eq!(hold.text(), "Hi Alex");
+        assert!(matches!(hold.resend(), Request::Board(BoardCall::Write { command: Command::PostTicketMessage(p), .. }) if p.confirm_secret));
+        let hold = SecretHold::new(vec![], confirmed(&group).unwrap());
+        assert_eq!(hold.text(), "Hi Robin");
+        assert!(matches!(hold.resend(), Request::SendConfirmed(Command::SendGroupMessage(m)) if m.confirm_secret));
+        // The server's refusal: the names only; for a text that is no message, what to do.
+        let err = ClientError::Protocol(AppError::looks_like_secret(vec!["GitHub token".into()]));
+        assert_eq!(secret_names(&err), Some(vec!["GitHub token".to_string()]));
+        assert_eq!(board_write_failure(&err), "This looks like a vault secret: GitHub token. Take the value out and try again.");
+        assert_eq!(secret_names(&ClientError::Protocol(AppError::new(ErrorCode::Validation, "x"))), None);
+        // R2 D-m5: refused although confirmed (a value in an attached file): no new hold, but what to do.
+        let sent_anyway = confirmed(&chat).unwrap();
+        assert!(!secret_in_file(&sent_anyway) && !secret_in_file(&chat), "no file: the server still refused the text");
+        assert_eq!(secret_refused(&sent_anyway, &[]), Some(secret_still_refusal(&[])));
+        assert_eq!(secret_refused(&chat, &[]), None, "the first refusal asks");
+        let mut with_file = sent_anyway.clone();
+        if let Command::SendEmployeeMessage(m) = &mut with_file {
+            m.files.push("/tmp/notes.txt".into());
+        }
+        assert!(secret_in_file(&with_file));
+        assert_eq!(secret_refused(&with_file, &["GitHub token".into()]), Some(secret_in_file_refusal(&["GitHub token".into()])));
+        assert!(confirmed(&sent_anyway).is_none(), "\"Send anyway?\" is not asked again");
+        assert_eq!(secret_in_file_refusal(&["GitHub token".into()]), "Not sent: the value of GitHub token is in an attached file, which is never redacted. Take it out of the attached file and send again.");
+        // Sent again, it is a plain envelope with a fresh command id.
+        let a = to_envelope(Request::SendConfirmed(confirmed(&group).unwrap())).unwrap();
+        let b = to_envelope(Request::SendConfirmed(confirmed(&group).unwrap())).unwrap();
+        assert_ne!(a.command_id, b.command_id);
+    }
+
+    /// AUR-MU-04-D3: every text command of F5 the desktop sends asks "Send anyway?" once; a ticket
+    /// write goes again as the board's write with its version and words; refused again, it says why.
+    #[test]
+    fn every_f5_command_is_held_once() {
+        use aurelius_domain::schedule::{CreateTaskSchedule, Recurrence, UpdateTaskSchedule};
+        use aurelius_domain::task::RunSettings;
+        let (project_id, employee_id, ticket_id, approval_id) = (ProjectId::new(), EmployeeId::new(), aurelius_domain::TicketId::new(), aurelius_domain::ApprovalId::new());
+        let feedback = || "x".to_string();
+        let commands = [
+            to_envelope(Request::CreateTask { project_id, employee_id: None, title: "x".into(), goal: "x".into(), criteria: vec![], run: RunSettings::default(), files: vec![] }).unwrap().command,
+            Command::CreateTaskSchedule(CreateTaskSchedule { confirm_secret: false, project_id, employee_id, title: "x".into(), goal: "x".into(), acceptance_criteria: vec![], files: vec![], run: RunSettings::default(), recurrence: Recurrence::Daily { at_minute: 1 }, paused: true }),
+            Command::UpdateTaskSchedule(UpdateTaskSchedule { confirm_secret: false, schedule_id: aurelius_domain::TaskScheduleId::new(), employee_id, title: "x".into(), goal: "x".into(), acceptance_criteria: vec![], add_files: vec![], remove_files: vec![], run: RunSettings::default(), recurrence: Recurrence::Daily { at_minute: 1 } }),
+            to_envelope(Request::AddIdea { project_id, title: "x".into(), note: None, kind: Default::default(), files: vec![] }).unwrap().command,
+            to_envelope(Request::UpdateIdea { idea_id: aurelius_domain::IdeaId::new(), title: "x".into(), note: None, kind: None, add_files: vec![], remove_files: vec![] }).unwrap().command,
+            Command::UpdateTicket(crate::screens::board::empty_update(ticket_id)),
+            Command::RevisePlan(aurelius_domain::ticket::RevisePlan { confirm_secret: false, ticket_id, feedback: feedback() }),
+            Command::SendBackTicket(aurelius_domain::ticket::SendBackTicket { confirm_secret: false, ticket_id, feedback: feedback() }),
+            Command::AcceptTicket(aurelius_domain::ticket::AcceptTicket { confirm_secret: false, ticket_id, note: None }),
+            to_envelope(Request::DecidePlan { approval_id, decision: aurelius_domain::approval::PlanDecision::Revise, feedback: Some(feedback()) }).unwrap().command,
+            to_envelope(Request::AnswerQuestion { approval_id, answers: Default::default() }).unwrap().command,
+        ];
+        for command in &commands {
+            assert_eq!(secret_refused(command, &[]), None, "the first refusal asks: {command:?}");
+            let again = confirmed(command).unwrap_or_else(|| panic!("held: {command:?}"));
+            assert!(confirmed(&again).is_none(), "asked once: {command:?}");
+            assert_eq!(secret_refused(&again, &["D3 token".into()]), Some(secret_still_refusal(&["D3 token".into()])), "{command:?}");
+        }
+        let hold = SecretHold::new(vec![], confirmed(&commands[6]).unwrap()).on_board(Some(7), Some("done".into()));
+        assert!(matches!(hold.resend(), Request::Board(BoardCall::Write { command: Command::RevisePlan(c), expected_version: Some(7), done: Some(d) }) if c.confirm_secret && d == "done"));
+        let hold = SecretHold::new(vec![], confirmed(&commands[9]).unwrap());
+        assert!(matches!(hold.resend(), Request::SendConfirmed(Command::DecidePlan(c)) if c.confirm_secret));
+        // Names, instructions, memories and paths: "take the value out", never "Send anyway?".
+        let memory = to_envelope(Request::Remember { project_id, kind: aurelius_domain::memory::MemoryKind::Decision, content: "x".into() }).unwrap().command;
+        assert!(confirmed(&memory).is_none());
+        assert_eq!(secret_refused(&memory, &["D3 token".into()]), Some(secret_refusal(&["D3 token".into()])));
+    }
+
+    /// The vault's refusals in the user's words; nothing of it waits in the outbox, and
+    /// without a session only its lists wait for the sign-in.
+    #[test]
+    fn the_vault_says_why_and_keeps_nothing_for_later() {
+        use aurelius_domain::error::{AppError, ErrorCode};
+        let say = |code, message: &str| vault_failure(&ClientError::Protocol(AppError::new(code, message)));
+        assert_eq!(say(ErrorCode::VaultUndecryptable, "x"), VAULT_UNDECRYPTABLE);
+        assert_eq!(say(ErrorCode::VaultKindLocked, "x"), VAULT_KIND_LOCKED);
+        assert_eq!(say(ErrorCode::UnknownMethod, "x"), VAULT_NOT_BUILT);
+        assert_eq!(say(ErrorCode::BoardMemberRequired, "x"), BOARD_MEMBER_REQUIRED);
+        assert_eq!(say(ErrorCode::Validation, "GITHUB_TOKEN is used in this scope."), "GITHUB_TOKEN is used in this scope.");
+        assert_eq!(vault_failure(&ClientError::Disconnected), VAULT_CONNECTION_DROPPED);
+        let item = aurelius_domain::VaultItemId::new();
+        assert!(held_read(&Request::Vault(VaultCall::List(None))));
+        assert!(held_read(&Request::Vault(VaultCall::Audit { ask: AuditAsk { project_id: None, all: true, item_id: None }, before: None })));
+        assert!(!held_read(&Request::Vault(VaultCall::Reveal { item_id: item, purpose: aurelius_domain::vault::RevealPurpose::Show })));
+        assert!(!held_read(&Request::Vault(VaultCall::KeyExport { password: Password::new("pw".into()) })));
+        assert!(to_envelope(Request::Vault(VaultCall::Archive(item))).is_none(), "never in the outbox");
+        assert!(matches!(VaultCall::Archive(item).refused("offline".into()), VaultUpdate::Archived(i, Err(_)) if i == item));
+        assert!(matches!(VaultCall::KeyExport { password: Password::new("pw".into()) }.refused("offline".into()), VaultUpdate::Key(Err(_))));
+    }
+
+    /// The vault through this app's backend against a daemon of this branch (protocol 5,
+    /// feature `vault`): the feature is announced, a board member's calls reach the vault and
+    /// come back in its words, a list is a read that waits for the sign-in, and a reveal
+    /// without a session is refused.
+    mod vault_against_a_daemon {
+        use super::super::*;
+
+        async fn next<T>(handle: &mut Handle, mut pick: impl FnMut(Update) -> Option<T>) -> T {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    if let Some(found) = pick(handle.updates.recv().await.expect("the backend runs")) {
+                        return found;
+                    }
+                }
+            })
+            .await
+            .expect("the update came")
+        }
+
+        async fn daemon(root: &std::path::Path) -> tokio::task::JoinHandle<anyhow::Result<()>> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let handle = tokio::spawn(aurelius_daemon::run(root.to_path_buf(), Some(tx)));
+            tokio::time::timeout(Duration::from_secs(20), rx).await.expect("daemon ready").expect("ready signal");
+            handle
+        }
+
+        async fn stop(root: &std::path::Path, handle: tokio::task::JoinHandle<anyhow::Result<()>>) {
+            aurelius_client::bridge::shutdown_daemon(root).await.expect("shutdown");
+            tokio::time::timeout(Duration::from_secs(20), handle).await.expect("daemon stops").expect("join").expect("clean stop");
+        }
+
+        async fn saved(app: &mut Handle) -> aurelius_domain::vault::VaultItemView {
+            next(app, |u| match u {
+                Update::Vault(VaultUpdate::Saved(r)) => Some(r.expect("saved")),
+                _ => None,
+            })
+            .await
+        }
+
+        async fn listed(app: &mut Handle, scope: Option<ProjectId>) -> Result<aurelius_domain::vault::VaultList, String> {
+            app.requests.send(Request::Vault(VaultCall::List(scope))).unwrap();
+            next(app, |u| match u {
+                Update::Vault(VaultUpdate::Listed(s, result)) if s == scope => Some(result),
+                _ => None,
+            })
+            .await
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn the_vault_calls_reach_the_server() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let server = daemon(&root).await;
+            let target = || Some(Target::Local { root: root.clone(), spawn: false });
+
+            // Alex is the first board member: the vault is announced and its calls are answered.
+            let mut alex = start(target(), super::memory_tokens().0);
+            let online = next(&mut alex, |u| match u {
+                Update::Connection(Connection::Online { server, .. }) => Some(server),
+                _ => None,
+            })
+            .await;
+            assert!(online.vault, "this daemon has the feature `vault`");
+            alex.requests.send(Request::BoardMembers(UserCall::Create { username: "alex".into(), password: Password::new("Tr0ub4dor&3-zebra-alex".into()) })).unwrap();
+            next(&mut alex, |u| matches!(u, Update::Who(w) if w.user.is_some()).then_some(())).await;
+            let empty = listed(&mut alex, None).await.expect("a board member lists the vault");
+            assert!(empty.items.is_empty() && empty.company_items.is_empty());
+            assert_eq!(empty.counts.iter().map(|c| (c.project_id, c.count)).collect::<Vec<_>>(), vec![(None, 0)], "the company, empty");
+            alex.requests.send(Request::Vault(VaultCall::Reveal { item_id: aurelius_domain::VaultItemId::new(), purpose: aurelius_domain::vault::RevealPurpose::Show })).unwrap();
+            let reveal = next(&mut alex, |u| match u {
+                Update::Vault(VaultUpdate::Value { result, .. }) => Some(result),
+                _ => None,
+            })
+            .await;
+            assert!(reveal.is_err());
+            alex.requests.send(Request::Vault(VaultCall::Create(aurelius_protocol::VaultCreateParams { project_id: None, kind: aurelius_domain::vault::VaultKind::Secret, name: "GitHub token".into(), env_name: "GITHUB_TOKEN".into(), description: None, value: "sk-test-FAKE-0000".into() }))).unwrap();
+            let saved = next(&mut alex, |u| match u {
+                Update::Vault(VaultUpdate::Saved(result)) => Some(result),
+                _ => None,
+            })
+            .await;
+            let saved = saved.expect("created");
+            assert!(saved.value.is_none() && !format!("{saved:?}").contains("FAKE"), "a secret's value never comes back");
+            // The next read has it, still without its value.
+            let list = listed(&mut alex, None).await.expect("listed");
+            assert!(list.items.iter().any(|i| i.id == saved.id && i.value.is_none()));
+
+            // Robin's device without a session: a reveal is refused at the gate; a list waits for the sign-in.
+            let mut robin = start(target(), super::memory_tokens().0);
+            next(&mut robin, |u| matches!(u, Update::Who(w) if w.user.is_none()).then_some(())).await;
+            robin.requests.send(Request::Vault(VaultCall::Reveal { item_id: aurelius_domain::VaultItemId::new(), purpose: aurelius_domain::vault::RevealPurpose::Copy })).unwrap();
+            let refused = next(&mut robin, |u| match u {
+                Update::Vault(VaultUpdate::Value { result: Err(why), .. }) => Some(why),
+                _ => None,
+            })
+            .await;
+            assert_eq!(refused, BOARD_MEMBER_REQUIRED);
+            drop(robin);
+            drop(alex);
+            stop(&root, server).await;
+        }
+
+        /// The whole vault: company and project items, "overrides Company", reveal, kind locked,
+        /// url → text without a new value (B7), the audit log, archive, the event to another
+        /// device, and B10 in the Team chat with the items' names.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn the_vault_end_to_end() {
+            use aurelius_domain::vault::{RevealPurpose, VaultKind};
+            const FAKE: &str = "sk-test-FAKE-0000";
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let server = daemon(&root).await;
+            let target = || Some(Target::Local { root: root.clone(), spawn: false });
+            let mut alex = start(target(), super::memory_tokens().0);
+            alex.requests.send(Request::BoardMembers(UserCall::Create { username: "alex".into(), password: Password::new("Tr0ub4dor&3-zebra-alex".into()) })).unwrap();
+            next(&mut alex, |u| matches!(u, Update::Who(w) if w.user.is_some()).then_some(())).await;
+            alex.requests.send(Request::CreateProject { name: "aurelius".into(), description: None, folder: None }).unwrap();
+            let project = next(&mut alex, |u| match u {
+                Update::Created(id) => Some(id),
+                _ => None,
+            })
+            .await;
+            let create = |project_id: Option<ProjectId>, kind: VaultKind, name: &str, env: &str, value: &str| {
+                Request::Vault(VaultCall::Create(aurelius_protocol::VaultCreateParams { project_id, kind, name: name.into(), env_name: env.into(), description: None, value: value.into() }))
+            };
+            // MU4-01: company items of each type.
+            alex.requests.send(create(None, VaultKind::Secret, "GitHub token", "GITHUB_TOKEN", FAKE)).unwrap();
+            let token = saved(&mut alex).await;
+            alex.requests.send(create(None, VaultKind::Url, "Staging URL", "STAGING_URL", "https://stg.example.test")).unwrap();
+            let url = saved(&mut alex).await;
+            assert!(token.value.is_none() && url.value.as_deref() == Some("https://stg.example.test"));
+            // MU4-02 + B4: a project item with the company's key overrides it.
+            alex.requests.send(create(Some(project), VaultKind::Secret, "GitHub token (aurelius)", "GITHUB_TOKEN", "sk-test-FAKE-0001")).unwrap();
+            let own = saved(&mut alex).await;
+            let list = listed(&mut alex, Some(project)).await.unwrap();
+            assert!(list.items.iter().any(|i| i.id == own.id && i.overrides_company));
+            assert!(list.company_items.iter().any(|i| i.id == token.id));
+            // B6: reveal shows the value, only in the reveal's answer.
+            alex.requests.send(Request::Vault(VaultCall::Reveal { item_id: token.id, purpose: RevealPurpose::Show })).unwrap();
+            let value = next(&mut alex, |u| match u {
+                Update::Vault(VaultUpdate::Value { result, .. }) => Some(result.unwrap()),
+                _ => None,
+            })
+            .await;
+            assert_eq!(value.expose(), FAKE);
+            drop(value);
+            // B7: a secret stays a secret; a url becomes text.
+            alex.requests.send(Request::Vault(VaultCall::Update(aurelius_protocol::VaultUpdateParams { item_id: token.id, name: None, env_name: None, description: None, value: None, kind: Some(VaultKind::Text) }))).unwrap();
+            let locked = next(&mut alex, |u| match u {
+                Update::Vault(VaultUpdate::Saved(r)) => Some(r),
+                _ => None,
+            })
+            .await;
+            assert_eq!(locked.unwrap_err(), VAULT_KIND_LOCKED);
+            alex.requests.send(Request::Vault(VaultCall::Update(aurelius_protocol::VaultUpdateParams { item_id: url.id, name: None, env_name: None, description: None, value: None, kind: Some(VaultKind::Text) }))).unwrap();
+            assert_eq!(saved(&mut alex).await.kind, VaultKind::Text);
+            // MU4-09: the audit log names the reveal, never a value.
+            alex.requests.send(Request::Vault(VaultCall::Audit { ask: AuditAsk { project_id: None, all: true, item_id: None }, before: None })).unwrap();
+            let page = next(&mut alex, |u| match u {
+                Update::Vault(VaultUpdate::Audit { result, .. }) => Some(result.unwrap()),
+                _ => None,
+            })
+            .await;
+            assert!(page.rows.iter().any(|r| r.action == aurelius_domain::vault::VaultAuditAction::Reveal && r.item_id == Some(token.id)));
+            assert!(!serde_json::to_string(&page.rows).unwrap().contains("FAKE"));
+            // B10: the Team chat holds back a message with the secret's value, then takes it confirmed.
+            alex.requests.send(Request::SendGroup { text: format!("token: {FAKE}"), images: vec![], files: vec![], channel: None }).unwrap();
+            let hold = next(&mut alex, |u| match u {
+                Update::LooksLikeSecret(h) => Some(h),
+                _ => None,
+            })
+            .await;
+            assert_eq!(hold.names, vec!["GitHub token".to_string()]);
+            alex.requests.send(hold.resend()).unwrap();
+            // B8 / E9: the key export asks the own password again; a wrong one gives nothing.
+            let export = |password: &str| Request::Vault(VaultCall::KeyExport { password: Password::new(password.into()) });
+            let key = |u: Update| match u {
+                Update::Vault(VaultUpdate::Key(result)) => Some(result),
+                _ => None,
+            };
+            alex.requests.send(export("not-alex-password")).unwrap();
+            assert_eq!(next(&mut alex, key).await.unwrap_err(), "That password is wrong.");
+            alex.requests.send(export("Tr0ub4dor&3-zebra-alex")).unwrap();
+            let file = next(&mut alex, key).await.unwrap();
+            let env = crate::screens::vault::key_env(file.key.expose()).expect("a v1 key line");
+            assert!(file.key.expose().starts_with(&format!("aurelius-vault-key:v1:{env}:{}:", file.key_id)));
+            // MU4-01 AC2: archived; the event reaches the window.
+            alex.requests.send(Request::Vault(VaultCall::Archive(url.id))).unwrap();
+            next(&mut alex, |u| matches!(u, Update::Vault(VaultUpdate::Archived(_, Ok(_)))).then_some(())).await;
+            next(&mut alex, |u| matches!(u, Update::Vault(VaultUpdate::Changed)).then_some(())).await;
+            drop(alex);
+            stop(&root, server).await;
+        }
+
+        /// The vault item of the B10 tests below: its value is a fake, no other test's prefix.
+        const D3: &str = "sk-test-FAKE-d3-0000";
+
+        /// A text the server refused for a vault secret's value: held back by the item's name, never told as an error.
+        async fn held(app: &mut Handle, request: Request) -> SecretHold {
+            app.requests.send(request).unwrap();
+            let hold = next(app, |u| match u {
+                Update::LooksLikeSecret(h) => Some(h),
+                Update::Error(e) if e.contains("vault secret") => panic!("not held: {e}"),
+                _ => None,
+            })
+            .await;
+            assert_eq!(hold.names, vec!["D3 token".to_string()]);
+            hold
+        }
+
+        /// What "Send anyway" brought, up to `pick`: never a second "Send anyway?" (D-m5), never a secret's refusal.
+        async fn sent_anyway<T>(app: &mut Handle, hold: SecretHold, mut pick: impl FnMut(Update) -> Option<T>) -> T {
+            assert!(confirmed(&hold.command).is_none(), "it goes with confirm_secret");
+            app.requests.send(hold.resend()).unwrap();
+            next(app, |u| match u {
+                Update::LooksLikeSecret(_) => panic!("\"Send anyway?\" asked again"),
+                Update::Error(e) if e.contains("vault secret") => panic!("refused again: {e}"),
+                Update::Board(BoardUpdate::Failed { message, .. }) if message.contains("vault secret") => panic!("refused again: {message}"),
+                u => pick(u),
+            })
+            .await
+        }
+
+        /// "Send anyway" refused again (the value is in an attached file): what it says, no second ask.
+        async fn refused_again(app: &mut Handle, hold: SecretHold) -> String {
+            app.requests.send(hold.resend()).unwrap();
+            next(app, |u| match u {
+                Update::LooksLikeSecret(_) => panic!("\"Send anyway?\" asked again"),
+                Update::Error(e) => Some(e),
+                Update::Board(BoardUpdate::Failed { message, .. }) => Some(message),
+                _ => None,
+            })
+            .await
+        }
+
+        /// B10 for every command of AUR-MU-04-F5 the desktop sends from a text field: refused, it asks
+        /// "Send anyway?" with the item's name; it goes again with `confirm_secret` and gets past B10
+        /// (stored redacted, or the server's own answer for a ticket that is not in that column);
+        /// refused again for a value in an attached file, it says so once. A text that cannot be
+        /// confirmed (a memory) says "take the value out" and does not ask.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn every_text_command_asks_send_anyway_once() {
+            use aurelius_domain::schedule::{CreateTaskSchedule, Recurrence, UpdateTaskSchedule};
+            use aurelius_domain::task::RunSettings;
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let server = daemon(&root).await;
+            let files = tempfile::tempdir().unwrap();
+            let notes = files.path().join("notes.txt");
+            std::fs::write(&notes, format!("token {D3}\n")).unwrap();
+            let notes = notes.display().to_string();
+            let mut alex = start(Some(Target::Local { root: root.clone(), spawn: false }), super::memory_tokens().0);
+            alex.requests.send(Request::BoardMembers(UserCall::Create { username: "alex".into(), password: Password::new("Tr0ub4dor&3-zebra-alex".into()) })).unwrap();
+            next(&mut alex, |u| matches!(u, Update::Who(w) if w.user.is_some()).then_some(())).await;
+            alex.requests.send(Request::CreateProject { name: "aurelius".into(), description: None, folder: None }).unwrap();
+            let project = next(&mut alex, |u| match u {
+                Update::Created(id) => Some(id),
+                _ => None,
+            })
+            .await;
+            alex.requests.send(Request::CreateEmployee { name: "Builder".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }).unwrap();
+            let builder = next(&mut alex, |u| match u {
+                Update::EmployeeCreated(e) => Some(e),
+                _ => None,
+            })
+            .await;
+            alex.requests.send(Request::Vault(VaultCall::Create(aurelius_protocol::VaultCreateParams { project_id: None, kind: aurelius_domain::vault::VaultKind::Secret, name: "D3 token".into(), env_name: "D3_TOKEN".into(), description: None, value: D3.into() }))).unwrap();
+            saved(&mut alex).await;
+            let ideas = |app: &mut Handle| app.requests.send(Request::LoadIdeas(Some(project))).unwrap();
+            let run = RunSettings::default;
+
+            // CreateTask: a draft task, created once sent anyway.
+            let task = |files: Vec<String>| Request::CreateTask { project_id: project, employee_id: None, title: "Rotate".into(), goal: format!("Rotate {D3}"), criteria: vec![], run: run(), files };
+            let hold = held(&mut alex, task(vec![])).await;
+            sent_anyway(&mut alex, hold, |u| matches!(u, Update::TaskCreated(_)).then_some(())).await;
+            let hold = held(&mut alex, task(vec![notes.clone()])).await;
+            assert_eq!(refused_again(&mut alex, hold).await, secret_in_file_refusal(&["D3 token".into()]));
+
+            // CreateTaskSchedule and UpdateTaskSchedule: stored without the value.
+            let schedule = |goal: String, files: Vec<String>| CreateTaskSchedule { confirm_secret: false, project_id: project, employee_id: builder, title: "Nightly".into(), goal, acceptance_criteria: vec![], files, run: run(), recurrence: Recurrence::Daily { at_minute: 120 }, paused: true };
+            let hold = held(&mut alex, Request::CreateSchedule(schedule(format!("Check {D3}"), vec![]))).await;
+            let made = sent_anyway(&mut alex, hold, |u| match u {
+                Update::Schedules(list) => list.into_iter().find(|s| s.title == "Nightly"),
+                _ => None,
+            })
+            .await;
+            assert!(!made.goal.contains(D3) && made.goal.contains("D3_TOKEN"), "{}", made.goal);
+            let hold = held(&mut alex, Request::CreateSchedule(schedule("Check the notes".into(), vec![notes.clone()]))).await;
+            assert_eq!(refused_again(&mut alex, hold).await, secret_in_file_refusal(&["D3 token".into()]));
+            let edit = |goal: String, add_files: Vec<String>| UpdateTaskSchedule { confirm_secret: false, schedule_id: made.id, employee_id: builder, title: "Nightly".into(), goal, acceptance_criteria: vec![], add_files, remove_files: vec![], run: run(), recurrence: Recurrence::Daily { at_minute: 180 } };
+            let hold = held(&mut alex, Request::UpdateSchedule(edit(format!("Check again {D3}"), vec![]))).await;
+            sent_anyway(&mut alex, hold, |u| match u {
+                Update::Schedules(list) => list.into_iter().find(|s| s.id == made.id && s.goal.starts_with("Check again")).map(|s| assert!(!s.goal.contains(D3))),
+                _ => None,
+            })
+            .await;
+            let hold = held(&mut alex, Request::UpdateSchedule(edit("Check the notes".into(), vec![notes.clone()]))).await;
+            assert_eq!(refused_again(&mut alex, hold).await, secret_in_file_refusal(&["D3 token".into()]));
+
+            // AddIdea and UpdateIdea.
+            let add = |note: String, files: Vec<String>| Request::AddIdea { project_id: project, title: "Key rotation".into(), note: Some(note), kind: Default::default(), files };
+            // No answer of its own: the list read after it shows it.
+            let hold = held(&mut alex, add(format!("now {D3}"), vec![])).await;
+            alex.requests.send(hold.resend()).unwrap();
+            ideas(&mut alex);
+            let idea = next(&mut alex, |u| match u {
+                Update::Ideas(_, list) => list.into_iter().find(|i| i.title == "Key rotation"),
+                Update::LooksLikeSecret(_) => panic!("\"Send anyway?\" asked again"),
+                Update::Error(e) if e.contains("vault secret") => panic!("refused again: {e}"),
+                _ => None,
+            })
+            .await;
+            assert!(idea.note.as_deref().is_some_and(|n| !n.contains(D3) && n.contains("D3_TOKEN")), "{:?}", idea.note);
+            let hold = held(&mut alex, add("see the notes".into(), vec![notes.clone()])).await;
+            assert_eq!(refused_again(&mut alex, hold).await, secret_in_file_refusal(&["D3 token".into()]));
+            let update = |note: String, add_files: Vec<String>| Request::UpdateIdea { idea_id: idea.id, title: "Key rotation".into(), note: Some(note), kind: None, add_files, remove_files: vec![] };
+            let hold = held(&mut alex, update(format!("later {D3}"), vec![])).await;
+            alex.requests.send(hold.resend()).unwrap();
+            ideas(&mut alex);
+            next(&mut alex, |u| match u {
+                Update::Ideas(_, list) => list.into_iter().find(|i| i.id == idea.id && i.note.as_deref().is_some_and(|n| n.starts_with("later"))).map(|i| assert!(!i.note.unwrap().contains(D3))),
+                Update::LooksLikeSecret(_) => panic!("asked again"),
+                Update::Error(e) if e.contains("vault secret") => panic!("refused again: {e}"),
+                _ => None,
+            })
+            .await;
+            let hold = held(&mut alex, update("see the notes".into(), vec![notes.clone()])).await;
+            assert_eq!(refused_again(&mut alex, hold).await, secret_in_file_refusal(&["D3 token".into()]));
+
+            // CreateTicket (the board's write; the form waits under "Not sent") and UpdateTicket.
+            let new_ticket = |description: String, files: Vec<String>| {
+                Command::CreateTicket(aurelius_domain::ticket::CreateTicket { confirm_secret: false, project_id: project, title: "Deploy".into(), description: Some(description), priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: run(), files, start: false, from_message: None })
+            };
+            let board = |command: Command, done: &str| Request::Board(BoardCall::Write { command, expected_version: None, done: Some(done.into()) });
+            alex.requests.send(board(new_ticket(format!("Deploy with {D3}"), vec![]), "created")).unwrap();
+            next(&mut alex, |u| match u {
+                Update::Board(BoardUpdate::Failed { ticket: None, message }) => Some(assert_eq!(message, NOT_SENT_SECRET)),
+                _ => None,
+            })
+            .await;
+            let hold = next(&mut alex, |u| match u {
+                Update::LooksLikeSecret(h) => Some(h),
+                _ => None,
+            })
+            .await;
+            assert_eq!(hold.names, vec!["D3 token".to_string()]);
+            let number = sent_anyway(&mut alex, hold, |u| match u {
+                Update::Board(BoardUpdate::Created { number, text }) => Some((number, text)),
+                _ => None,
+            })
+            .await;
+            assert_eq!(number.1.as_deref(), Some("created"), "it went again with what the board says");
+            let hold = held(&mut alex, board(new_ticket("see the notes".into(), vec![notes.clone()]), "created")).await;
+            assert_eq!(refused_again(&mut alex, hold).await, secret_in_file_refusal(&["D3 token".into()]));
+            alex.requests.send(Request::Board(BoardCall::Load(Some(project)))).unwrap();
+            let ticket = next(&mut alex, |u| match u {
+                Update::Board(BoardUpdate::Loaded(_, Ok(view))) => view.columns.into_iter().flat_map(|c| c.tickets).find(|t| t.number == number.0),
+                _ => None,
+            })
+            .await;
+            assert!(ticket.description.as_deref().is_some_and(|d| !d.contains(D3) && d.contains("D3_TOKEN")), "{:?}", ticket.description);
+            let mut edit = crate::screens::board::empty_update(ticket.id);
+            edit.description = Some(format!("Deploy later with {D3}"));
+            let hold = held(&mut alex, board(Command::UpdateTicket(edit), "saved")).await;
+            sent_anyway(&mut alex, hold, |u| match u {
+                Update::Board(BoardUpdate::Done { ticket: Some(t), text }) if t == ticket.id => Some(assert_eq!(text.as_deref(), Some("saved"))),
+                _ => None,
+            })
+            .await;
+
+            // RevisePlan and SendBackTicket on a Backlog ticket: past B10, the server says it is not in that column.
+            let revise = Command::RevisePlan(aurelius_domain::ticket::RevisePlan { confirm_secret: false, ticket_id: ticket.id, feedback: format!("Sign with {D3}") });
+            let send_back = Command::SendBackTicket(aurelius_domain::ticket::SendBackTicket { confirm_secret: false, ticket_id: ticket.id, feedback: format!("Leave out {D3}") });
+            for command in [revise, send_back] {
+                let hold = held(&mut alex, board(command, "decided")).await;
+                assert!(hold.text().contains(D3), "Cancel puts the feedback back");
+                let why = sent_anyway(&mut alex, hold, |u| match u {
+                    Update::Board(BoardUpdate::Failed { ticket: Some(t), message }) if t == ticket.id => Some(message),
+                    _ => None,
+                })
+                .await;
+                assert!(!why.contains("vault secret"), "{why}");
+            }
+
+            // DecidePlan and AnswerQuestion of a plan or a question no longer open: past B10, the server says so.
+            let approval_id = aurelius_domain::ApprovalId::new();
+            let decide = Request::DecidePlan { approval_id, decision: aurelius_domain::approval::PlanDecision::Revise, feedback: Some(format!("Deploy with {D3}")) };
+            let answer = Request::AnswerQuestion { approval_id, answers: [("Which token?".to_owned(), format!("This one: {D3}"))].into_iter().collect() };
+            for request in [decide, answer] {
+                let hold = held(&mut alex, request).await;
+                assert!(hold.board.is_none(), "a message, not the board's write");
+                let why = sent_anyway(&mut alex, hold, |u| match u {
+                    Update::Error(e) => Some(e),
+                    _ => None,
+                })
+                .await;
+                assert!(!why.contains("vault secret"), "{why}");
+            }
+
+            // A memory cannot be confirmed: "take the value out", no "Send anyway?".
+            alex.requests.send(Request::Remember { project_id: project, kind: aurelius_domain::memory::MemoryKind::ProjectKnowledge, content: format!("The token is {D3}") }).unwrap();
+            let why = next(&mut alex, |u| match u {
+                Update::LooksLikeSecret(_) => panic!("a memory is not held"),
+                Update::Error(e) => Some(e),
+                _ => None,
+            })
+            .await;
+            assert_eq!(why, secret_refusal(&["D3 token".into()]));
+            drop(alex);
+            stop(&root, server).await;
+        }
     }
 }

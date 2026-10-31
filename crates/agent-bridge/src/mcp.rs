@@ -97,6 +97,7 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool) -> Vec<Valu
     tools.extend(project_tool_definitions());
     tools.extend(task_tool_definitions().into_iter().filter(|t| !project || t["name"] != "hand_over_task"));
     tools.extend(group_chat_tool_definitions());
+    tools.extend(vault_tool_definitions());
     if discussion {
         tools.extend(discussion_tool_definitions());
     }
@@ -203,6 +204,8 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "post_to_group_chat" => EmployeeTaskOp::PostToGroupChat { message: text("message"), channel: optional("channel") },
         "read_discussion" if discussion => EmployeeTaskOp::ReadDiscussion { last: args["last"].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32) },
         "post_to_discussion" if discussion => EmployeeTaskOp::PostToDiscussion { message: text("message") },
+        "vault_list" => EmployeeTaskOp::VaultList { project: optional("project") },
+        "vault_read" => EmployeeTaskOp::VaultRead { item: text("item"), project: optional("project") },
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
         "propose_colleague" => EmployeeTaskOp::ProposeColleague {
             name: text("name"),
@@ -463,6 +466,27 @@ fn group_chat_tool_definitions() -> Vec<Value> {
     ]
 }
 
+/// The vault (feature `vault`): what a run may use, never a secret's value.
+fn vault_tool_definitions() -> Vec<Value> {
+    let project = json!({ "type": "string", "description": "Another project's name; default the company's items plus your project's." });
+    vec![
+        json!({
+            "name": "vault_list",
+            "description": "List the vault items you may use: name, kind (text, url, secret), scope, description and environment variable. Never a value. A secret is in your environment as $ENV_NAME when you work in its company or project: use it in commands as $ENV_NAME and never print, echo, write or repeat its value.",
+            "inputSchema": { "type": "object", "properties": { "project": project } }
+        }),
+        json!({
+            "name": "vault_read",
+            "description": "Read one vault item by name or environment variable: a text or url answers its value; a secret only says under which environment variable you have it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "item": { "type": "string", "description": "The item's name or environment variable." }, "project": project },
+                "required": ["item"]
+            }
+        }),
+    ]
+}
+
 /// The discussion of the run's ticket: read it, post in it (only with `--discussion`).
 fn discussion_tool_definitions() -> Vec<Value> {
     vec![
@@ -548,7 +572,7 @@ mod tests {
         let names = |project| tool_definitions(project, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(false).contains(&"hand_over_task".to_owned()));
         assert!(!names(true).contains(&"hand_over_task".to_owned()));
-        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat"] {
+        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat", "vault_list", "vault_read"] {
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
         }
     }

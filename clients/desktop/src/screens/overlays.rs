@@ -1500,6 +1500,14 @@ impl AppView {
                 format!("Run #{} on your Claude login?", self.board.ticket(ticket).map_or(0, |t| t.number)),
                 "From now on this ticket and all its work use your own Claude subscription instead of its creator's. Its creator stays. Nothing else runs on your login.",
             ),
+            ConfirmKind::ArchiveVaultItem(item) => (
+                crate::screens::vault::delete_title(self.vault.item(item)),
+                crate::screens::vault::DELETE_BODY,
+            ),
+            ConfirmKind::LooksLikeSecret => (
+                crate::screens::vault::held_title(self.vault.held.as_ref().map_or(&[][..], |h| h.names.as_slice())),
+                crate::screens::vault::held_body(self.vault.held.as_ref().map(|h| &h.command)),
+            ),
             ConfirmKind::DisconnectClaude => (
                 "Disconnect your Claude login?".to_string(),
                 "Claude Code signs out on the server and your login's folder there is removed. Your tickets wait until you connect again; nothing runs on someone else's login.",
@@ -1518,6 +1526,8 @@ impl AppView {
             ConfirmKind::DisableMember(_) => "Disable",
             ConfirmKind::DisconnectClaude => "Disconnect",
             ConfirmKind::UseMyLogin(_) => "Run on my login",
+            ConfirmKind::ArchiveVaultItem(_) => "Delete",
+            ConfirmKind::LooksLikeSecret => "Send anyway",
             _ => "Archive",
         };
         card(460.)

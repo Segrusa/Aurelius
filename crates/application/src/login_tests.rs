@@ -99,6 +99,7 @@ fn delegate(s: &Setup, run: RunId, to: &str, employee: EmployeeId) -> (TaskId, R
 
 fn ticket_of(s: &Setup, by: UserId, owner: EmployeeId) -> (TicketId, TaskId) {
     let create = ticket::CreateTicket {
+        confirm_secret: false,
         project_id: s.project,
         title: "Login".into(),
         description: None,
@@ -142,7 +143,7 @@ fn a_ticket_and_its_delegations_at_every_depth_run_on_the_tickets_login() {
     assert_eq!([one, two, three].map(|r| login_of(&s, r)), [Some(s.robin); 3]);
     // A board member's message in the main task's conversation still runs on the ticket's login.
     let conversation = s.service.store().read(|c| aurelius_storage::tasks::task_conversation(c, root)).unwrap().unwrap().0;
-    let send = SendEmployeeMessage { employee_id: s.ada.0, text: "Also this".into(), conversation_id: conversation, images: vec![], files: vec![], interrupt: false };
+    let send = SendEmployeeMessage { confirm_secret: false, employee_id: s.ada.0, text: "Also this".into(), conversation_id: conversation, images: vec![], files: vec![], interrupt: false };
     let CommandResult::EmployeeMessageSent { run_id, .. } = exec(&s, s.alex, Command::SendEmployeeMessage(send)) else { panic!() };
     assert_eq!(login_of(&s, run_id), Some(s.robin));
 
@@ -156,7 +157,7 @@ fn a_ticket_and_its_delegations_at_every_depth_run_on_the_tickets_login() {
 #[test]
 fn a_task_without_a_ticket_runs_on_who_made_it_and_its_parts_too() {
     let s = setup();
-    let create = CreateTask { project_id: s.project, employee_id: Some(s.ada.0), title: "Report".into(), goal: "Write it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(s.ada.0), title: "Report".into(), goal: "Write it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = exec(&s, s.robin, Command::CreateTask(create)) else { panic!() };
     let run = start_task(&s, task_id, s.ada.0);
     assert_eq!(login_of(&s, run), Some(s.robin));
@@ -168,7 +169,7 @@ fn a_task_without_a_ticket_runs_on_who_made_it_and_its_parts_too() {
 fn a_chat_runs_on_the_login_of_who_wrote_the_message() {
     let s = setup();
     let say = |by: UserId, text: &str| {
-        let send = SendEmployeeMessage { employee_id: s.ada.0, text: text.into(), conversation_id: s.ada.1, images: vec![], files: vec![], interrupt: false };
+        let send = SendEmployeeMessage { confirm_secret: false, employee_id: s.ada.0, text: text.into(), conversation_id: s.ada.1, images: vec![], files: vec![], interrupt: false };
         let CommandResult::EmployeeMessageSent { run_id, .. } = exec(&s, by, Command::SendEmployeeMessage(send)) else { panic!() };
         run_id
     };
@@ -186,7 +187,7 @@ fn in_a_shared_chat_work_given_away_runs_on_the_login_of_the_run_that_gave_it() 
     // R2 M1: Alex's run is running in Ada's chat; Robin writes meanwhile, so a newer run of Robin's waits (created).
     let s = setup();
     let say = |by: UserId, text: &str| {
-        let send = SendEmployeeMessage { employee_id: s.ada.0, text: text.into(), conversation_id: s.ada.1, images: vec![], files: vec![], interrupt: false };
+        let send = SendEmployeeMessage { confirm_secret: false, employee_id: s.ada.0, text: text.into(), conversation_id: s.ada.1, images: vec![], files: vec![], interrupt: false };
         let CommandResult::EmployeeMessageSent { run_id, .. } = exec(&s, by, Command::SendEmployeeMessage(send)) else { panic!() };
         run_id
     };
@@ -234,7 +235,7 @@ fn an_escalation_runs_on_the_escalated_tasks_login() {
 #[test]
 fn runs_the_team_chat_wakes_use_the_login_of_hop_0_at_every_hop() {
     let s = setup();
-    let CommandResult::GroupMessageSent { run_ids, .. } = exec(&s, s.robin, Command::SendGroupMessage(SendGroupMessage { text: "@Ada what do you think?".into(), images: vec![], files: vec![], channel: None })) else { panic!() };
+    let CommandResult::GroupMessageSent { run_ids, .. } = exec(&s, s.robin, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "@Ada what do you think?".into(), images: vec![], files: vec![], channel: None })) else { panic!() };
     let hop0 = run_ids[0];
     assert_eq!(login_of(&s, hop0), Some(s.robin));
     let woken = |employee: EmployeeId| -> RunId {
@@ -298,6 +299,7 @@ fn the_dispatchers_triage_and_the_summary_after_done_use_the_tickets_login() {
     let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }) };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
+        confirm_secret: false,
         project_id: s.project,
         title: "Search".into(),
         description: None,
@@ -485,6 +487,7 @@ fn the_dispatcher_waits_for_its_logins_limit_without_using_a_try() {
     let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }) };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
+        confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
         owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None,
     };
@@ -574,6 +577,7 @@ fn the_dispatcher_waits_for_the_tickets_login_without_using_a_try() {
     let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }) };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
+        confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
         owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None,
     };

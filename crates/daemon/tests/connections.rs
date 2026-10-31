@@ -58,6 +58,7 @@ async fn employee(client: &Client, project_id: aurelius_domain::ProjectId, name:
 
 fn new_task(project_id: aurelius_domain::ProjectId, employee_id: aurelius_domain::EmployeeId, title: &str) -> Command {
     Command::CreateTask(CreateTask {
+        confirm_secret: false,
         project_id,
         employee_id: Some(employee_id),
         title: title.into(),
@@ -81,7 +82,7 @@ async fn builtin_connection_and_inheritance_with_origin() {
     assert!(snapshot.defaults.iter().any(|d| d.scope == ConfigScope::Global && d.purpose == Purpose::Employee));
 
     // A project conversation's run: global default.
-    exec(&client, Command::SendChatMessage(SendChatMessage { conversation_id: common::conversation(&client).await, text: "hoi".into(), images: Vec::new(), interrupt: false })).await;
+    exec(&client, Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hoi".into(), images: Vec::new(), interrupt: false })).await;
     let config = last_run_config(dir.path());
     assert_eq!(config["connection_origin"], "global default");
     assert_eq!(config["provider"], "fake");
@@ -142,7 +143,7 @@ async fn api_connection_needs_a_key_and_disabled_means_no_fallback() {
     let settings = RunDefaults { connection: Setting::Disabled, model: Setting::Inherit, persona: Setting::Inherit, effort: Setting::Inherit };
     exec(&client, Command::SetRunDefaults(SetRunDefaults { scope: ConfigScope::Global, purpose: Purpose::Employee, settings })).await;
     let CommandResult::ChatMessageSent { conversation_id, .. } =
-        exec(&client, Command::SendChatMessage(SendChatMessage { conversation_id: common::conversation(&client).await, text: "hoi".into(), images: Vec::new(), interrupt: false })).await
+        exec(&client, Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hoi".into(), images: Vec::new(), interrupt: false })).await
     else {
         panic!()
     };
