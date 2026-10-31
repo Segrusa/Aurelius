@@ -156,7 +156,7 @@ impl CommandService {
                 notices.extend(crate::run::queue::interrupt_conversation(tx, &store, &meta, &command_id.to_string(), conversation_id)?);
             }
             let (run_id, run_notice) = queue_run(tx, &meta, &command_id.to_string(), conversation_id, message_id)?;
-            notices.push(run_notice);
+            notices.extend(run_notice);
             Ok(Ok((CommandResult::ProjectMessageSent { project_id, conversation_id, message_id, run_id }, notices)))
         })
     }
@@ -244,7 +244,7 @@ pub(crate) fn assistant_system(
     let mut text = format!("You are the assistant of the project “{}”.", name.unwrap_or_default());
     text.push_str(&format!("\n\n{}", ASSISTANT_GUIDANCE));
     text.push_str(&format!("\n\n{}", crate::run::plan::QUICK_REPLY_GUIDANCE));
-    // Every employee of the company, by department; the management team (no boss) marked.
+    // Every employee of the company; the management team (no boss) marked.
     let colleagues = crate::task::tasks::colleagues(conn, read_blob)?;
     let employees: Vec<&crate::task::tasks::Colleague> = colleagues.iter().collect();
     if employees.is_empty() {

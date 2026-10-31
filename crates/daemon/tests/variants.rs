@@ -81,7 +81,7 @@ fn repo(root: &Path) -> PathBuf {
 async fn setup(client: &Client, folder: Option<&Path>, name: &str) -> (ProjectId, EmployeeId) {
     let create = CreateProject { name: "Atlas".into(), description: None, folder: folder.map(|f| f.display().to_string()) };
     let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(Command::CreateProject(create), None)).await.unwrap().result else { panic!() };
-    let employee = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+    let employee = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(employee), None)).await.unwrap().result else { panic!() };
     (project_id, employee_id)
 }
@@ -198,7 +198,7 @@ async fn two_trials_are_compared_and_the_chosen_one_is_applied() {
     // The chosen approach is a signal for the task's lesson (Harness² A).
     let mut lesson = None;
     for _ in 0..400 {
-        lesson = client.memory_of(Some(project), Some(alex), None).await.unwrap().items.into_iter().find(|m| m.lesson.is_some());
+        lesson = client.memory_of(Some(project), Some(alex)).await.unwrap().items.into_iter().find(|m| m.lesson.is_some());
         if lesson.is_some() {
             break;
         }

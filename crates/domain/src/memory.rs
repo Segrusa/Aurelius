@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EmployeeMemoryOp {
-    /// Note something: kind decision | project_knowledge | episodic, scope employee | department | project.
+    /// Note something: kind decision | project_knowledge | episodic, scope employee | project.
     Remember { kind: String, scope: String, content: String },
     /// Search the memories this employee may read.
     Recall { query: String },
@@ -101,8 +101,6 @@ pub enum MemoryScope {
     Global,
     Project(ProjectId),
     Employee(EmployeeId),
-    /// Shared by the employees of one department.
-    Department(crate::DepartmentId),
 }
 
 /// The user writes a memory directly: active at once, the command is its source.
@@ -234,6 +232,31 @@ pub struct Extraction {
     /// Lessons from the signals S1..Sn; only asked for when there are signals.
     #[serde(default)]
     pub lessons: Vec<LessonCandidate>,
+    /// What a ticket delivered; only asked for after the ticket's Done (MU1-18).
+    #[serde(default)]
+    pub ticket_summary: Option<String>,
+}
+
+/// The ticket summary is cut here (the "#n “title”" line included).
+pub const TICKET_SUMMARY_MAX_CHARS: usize = 800;
+
+/// The one project memory of a ticket that went to Done (MU1-18): it names the
+/// ticket by number and title. Without a usable summary from the model, what
+/// the extraction kept for the project stands in; without that, only the close.
+pub fn ticket_summary(number: u32, title: &str, summary: Option<&str>, kept: &[&str]) -> String {
+    let flat = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let head = format!("Ticket #{number} “{}” is done", flat(title));
+    let body = summary.map(flat).filter(|s| !s.is_empty()).or_else(|| Some(kept.iter().map(|k| flat(k)).filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ")).filter(|s| !s.is_empty()));
+    let text = match body {
+        Some(body) => format!("{head}: {body}"),
+        None => format!("{head}."),
+    };
+    if text.chars().count() <= TICKET_SUMMARY_MAX_CHARS {
+        return text;
+    }
+    let mut cut: String = text.chars().take(TICKET_SUMMARY_MAX_CHARS - 1).collect();
+    cut.push('…');
+    cut
 }
 
 /// At most this many signals go to the extraction, labelled S1..S8.
@@ -749,6 +772,19 @@ mod tests {
         assert_eq!(place_employee_note(MemoryKind::ProjectKnowledge, "De build draait op Windows en macOS", &existing), NoteOutcome::New);
         assert_eq!(employee_note_kind("identity"), None);
         assert_eq!(employee_note_kind("decision"), Some(MemoryKind::Decision));
+    }
+
+    #[test]
+    fn a_ticket_summary_names_the_ticket_and_falls_back_on_what_was_kept() {
+        assert_eq!(ticket_summary(7, "Login  page", Some(" Added a\nlogin form. "), &["ignored"]), "Ticket #7 “Login page” is done: Added a login form.");
+        assert_eq!(ticket_summary(7, "Login page", Some("  "), &["Requested goal: a form", ""]), "Ticket #7 “Login page” is done: Requested goal: a form");
+        assert_eq!(ticket_summary(7, "Login page", None, &[]), "Ticket #7 “Login page” is done.");
+        let long = ticket_summary(7, "Login page", Some(&"word ".repeat(400)), &[]);
+        assert_eq!(long.chars().count(), TICKET_SUMMARY_MAX_CHARS);
+        assert!(long.starts_with("Ticket #7 “Login page” is done: ") && long.ends_with('…'));
+        let parsed: Extraction = serde_json::from_str(r#"{"items":[],"ticket_summary":"Shipped"}"#).unwrap();
+        assert_eq!(parsed.ticket_summary.as_deref(), Some("Shipped"));
+        assert_eq!(serde_json::from_str::<Extraction>(r#"{"items":[]}"#).unwrap().ticket_summary, None);
     }
 
     /// Fixed evaluation fixtures: model outputs as they could come back.

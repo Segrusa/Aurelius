@@ -47,7 +47,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 }
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+    let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     match client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result {
         CommandResult::EmployeeCreated { employee_id, .. } => employee_id,
         other => panic!("{other:?}"),
@@ -70,13 +70,13 @@ async fn work(client: &Client, project_id: ProjectId, employee_id: EmployeeId, t
 /// The memory of `project` and of `employee` (its own scope holds the lessons).
 async fn wait_memory(client: &Client, project: ProjectId, employee: EmployeeId, done: impl Fn(&[MemoryView]) -> bool) -> Vec<MemoryView> {
     for _ in 0..400 {
-        let items = client.memory_of(Some(project), Some(employee), None).await.unwrap().items;
+        let items = client.memory_of(Some(project), Some(employee)).await.unwrap().items;
         if done(&items) {
             return items;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("memory did not reach the expected state: {:#?}", client.memory_of(Some(project), Some(employee), None).await.unwrap().items);
+    panic!("memory did not reach the expected state: {:#?}", client.memory_of(Some(project), Some(employee)).await.unwrap().items);
 }
 
 /// The extraction job of a task has finished.

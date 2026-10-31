@@ -22,7 +22,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId) {
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Productpartner".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }),
+            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Productpartner".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -92,7 +92,7 @@ async fn a_task_is_worked_on_in_a_conversation_and_ends_with_a_report() {
     // The employee took it on in a conversation of its own, named after the task.
     let conversation = task.conversation_id.expect("a conversation");
     // The task conversation is the employee's, in the task's project; its chats list stays its own chat.
-    let alex = client.employees(None).await.unwrap().employees.into_iter().find(|m| m.id == employee).unwrap();
+    let alex = client.employees().await.unwrap().employees.into_iter().find(|m| m.id == employee).unwrap();
     assert!(!alex.conversations.iter().any(|c| c.id == conversation));
     let snapshot = client.messages(conversation).await.unwrap();
     assert_eq!((snapshot.employee_id, snapshot.project_id, snapshot.read_only), (Some(employee), Some(project), false));

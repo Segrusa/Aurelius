@@ -20,10 +20,6 @@ const MEANINGFUL: &[&str] = &[
     "employee.proposed",
     "employee.proposal_decided",
     "employee.instructions_proposed",
-    "employee.department_set",
-    "department.created",
-    "department.updated",
-    "department.archived",
     "settings.follow_org_chart",
     "company.converted",
     "task.created",
@@ -88,14 +84,6 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
         "employee.paused" => ("decision", "DECISION", "Employee paused".into(), String::new(), "You".into()),
         "employee.resumed" => ("decision", "DECISION", "Employee resumed".into(), String::new(), "You".into()),
         "employee.archived" => ("decision", "DECISION", "Employee archived".into(), String::new(), "You".into()),
-        "employee.department_set" => {
-            let name = lookup(conn, "SELECT name FROM employees WHERE id = ?1", &row.aggregate_id).unwrap_or_default();
-            let to = lookup(conn, "SELECT name FROM departments WHERE id = ?1", &s(&m["department_id"]));
-            ("minor", "DEPARTMENT", match to { Some(d) => format!("{name} joined {d}"), None => format!("{name} left its department") }, String::new(), "You".into())
-        }
-        "department.created" => ("start", "DEPARTMENT", format!("Department {} created", s(&m["name"])), String::new(), "You".into()),
-        "department.updated" => ("minor", "DEPARTMENT", format!("Department {} updated", s(&m["name"])), String::new(), "You".into()),
-        "department.archived" => ("decision", "DECISION", format!("Department {} archived", s(&m["name"])), String::new(), "You".into()),
         "settings.follow_org_chart" => (
             "decision",
             "DECISION",
@@ -203,7 +191,7 @@ pub fn cards(
         "SELECT e.seq, e.type, e.aggregate_type, e.aggregate_id, e.correlation_id, e.actor_kind, e.metadata_json, e.occurred_at_ms
          FROM events e
          WHERE e.seq < ?1
-           AND (?3 IS NULL OR e.correlation_id = ?3 OR (e.aggregate_type = 'task' AND e.aggregate_id = ?3))
+           AND (?3 IS NULL OR e.correlation_id = ?3 OR (e.aggregate_type IN ('task','ticket') AND e.aggregate_id = ?3))
            AND (?2 IS NULL
                 OR e.project_id = ?2
                 OR (e.aggregate_type = 'project' AND e.aggregate_id = ?2)

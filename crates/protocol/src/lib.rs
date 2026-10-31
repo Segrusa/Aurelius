@@ -1,4 +1,4 @@
-//! Protocol 3.0 between the daemon and its clients (desktop, mobile, the ctl tool).
+//! Protocol 4 between the daemon and its clients (desktop, mobile, the ctl tool).
 //!
 //! * Every method is `<area>.<verb>`: reads are `list` or `get`, writes are verbs.
 //! * Every write goes through one pipeline: an idempotency key in the envelope,
@@ -22,10 +22,13 @@ pub mod rpc;
 pub mod views;
 pub mod write;
 
+#[cfg(test)]
+mod tickets_tests;
+
 pub use aurelius_domain::{AppError as ProtocolError, CommandResult, ErrorCode, EventKind};
 pub use bridge::{BridgeCall, BridgeOutcome, BridgeRequest, BridgeResponse, EmployeeTaskOp};
 pub use events::Event;
-pub use method::{HelloParams, Method, client_feature};
+pub use method::{HelloParams, Method, UserUseParams, client_feature};
 pub use rpc::{Call, FEATURE_TERMINAL_MULTI, FEATURES, HelloResult, Outcome, PROTOCOL_MAJOR, Request, ResponseBody, ServerMessage, feature, incompatible_message, reject_unparsed};
 pub use views::*;
-pub use write::{HostResult, HostWrite, Receipt, WriteMethod, WriteResult};
+pub use write::{HostResult, HostWrite, Receipt, UserCreateParams, WriteMethod, WriteResult};

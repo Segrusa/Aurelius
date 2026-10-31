@@ -120,6 +120,10 @@ pub enum ToolProfile {
     /// unless the user turned them on server-wide. A publish always asks first
     /// except in Auto.
     Work { folders: Vec<std::path::PathBuf>, permission_mode: String, approval_bridge: ApprovalBridge, #[serde(default)] browser: bool, #[serde(default)] browser_session: Option<String>, #[serde(default)] playwright: Option<serde_json::Value>, #[serde(default)] mcp_servers: std::collections::BTreeMap<String, serde_json::Value>, #[serde(default)] plugins: Vec<std::path::PathBuf>, #[serde(default)] artifacts: bool },
+    /// A short decision with only the given tools of the bridge (`tools`: their
+    /// full names, allowed without asking): no files, commands, web or other MCP
+    /// servers, at most `max_turns` turns (the dispatcher of a ticket).
+    Triage { approval_bridge: ApprovalBridge, tools: Vec<String>, max_turns: u32 },
 }
 
 /// Program (the agent bridge, an MCP stdio server) that Claude Code asks for permission; it

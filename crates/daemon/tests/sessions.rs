@@ -361,7 +361,7 @@ async fn a_task_conversation_goes_on_in_its_session_after_the_task_succeeded() {
     else {
         panic!()
     };
-    let create = CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+    let create = CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let cmd = CreateTask { project_id, employee_id: Some(employee_id), title: "Login page".into(), goal: "Fix the login page".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
@@ -508,7 +508,7 @@ async fn after_a_colleagues_result_the_employee_goes_on_in_its_session() {
     };
     let mut alex = None;
     for name in ["Alex", "Iris"] {
-        let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+        let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
         let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
         alex = alex.or(Some(employee_id));
     }

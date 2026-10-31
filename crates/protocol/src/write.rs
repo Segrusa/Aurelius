@@ -235,6 +235,27 @@ pub enum HostWrite {
     /// A new folder `name` in the folder `parent`.
     #[serde(rename = "fs.create_dir")]
     FsCreateDir { parent: String, name: String },
+    /// A new board member (OV-12: `invalid_username`, `weak_password` (also a
+    /// password of only spaces), `username_taken`; `too_many_attempts` after five
+    /// a minute on one connection); answers `CommandResult::UserCreated` as a command
+    /// receipt. A connection without an active board member becomes the new one.
+    /// The server hashes the password before anything is recorded: the receipt,
+    /// its request hash and the event `user.created` hold the name only. Not for apps.
+    #[serde(rename = "user.create")]
+    UserCreate(UserCreateParams),
+}
+
+/// `user.create`. The password is never printed.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UserCreateParams {
+    pub username: String,
+    pub password: String,
+}
+
+impl fmt::Debug for UserCreateParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UserCreateParams").field("username", &self.username).field("password", &"<redacted>").finish()
+    }
 }
 
 impl HostWrite {
@@ -298,6 +319,7 @@ impl HostWrite {
         "push.configure",
         "push.test",
         "fs.create_dir",
+        "user.create",
     ];
 
     pub fn name(&self) -> String {

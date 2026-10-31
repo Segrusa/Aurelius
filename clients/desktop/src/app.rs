@@ -70,19 +70,17 @@ impl ManagerRef {
     }
 }
 
-/// A department (protocol 3).
-pub type DepartmentKey = aurelius_domain::DepartmentId;
-
 /// What the main area shows; picked in the sidebar.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Page {
     Dashboard,
+    /// The board: tickets in six columns (protocol 4).
+    Board,
     /// The group chat ("Team chat"): the user and every employee.
     GroupChat,
-    /// Employees, with the tabs of `EmployeesTab` (list, org chart, departments).
+    /// Employees, with the tabs of `EmployeesTab` (list, org chart).
     Employees,
     Employee(ManagerRef),
-    Department(DepartmentKey),
     /// Projects, with the tabs of `ProjectsTab` (projects, ideas of every project).
     Projects,
     Project(ProjectRef, Tab),
@@ -99,17 +97,15 @@ pub enum EmployeesTab {
     #[default]
     List,
     OrgChart,
-    Departments,
 }
 
 impl EmployeesTab {
-    pub const ALL: [EmployeesTab; 3] = [EmployeesTab::List, EmployeesTab::OrgChart, EmployeesTab::Departments];
+    pub const ALL: [EmployeesTab; 2] = [EmployeesTab::List, EmployeesTab::OrgChart];
 
     pub fn label(self) -> &'static str {
         match self {
             EmployeesTab::List => "List",
             EmployeesTab::OrgChart => "Org chart",
-            EmployeesTab::Departments => "Departments",
         }
     }
 }
@@ -140,12 +136,16 @@ pub enum Panel {
     None,
     Chat(ConversationId),
     Task(aurelius_domain::TaskId),
+    /// A ticket of the board (`screens/ticket.rs`).
+    Ticket(aurelius_domain::TicketId),
 }
 
 /// One entry of the sidebar, top to bottom (Settings has no row: Ctrl+, , Ctrl+9, the app menu and the server picker open it).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NavItem {
     Dashboard,
+    /// The board, right under Dashboard (D-02).
+    Board,
     /// The group chat, right under Dashboard.
     Chat,
     Inbox,
@@ -161,11 +161,12 @@ impl NavItem {
         if self == NavItem::Employees { "employees" } else { "projects" }
     }
 
-    pub const ALL: [NavItem; 7] = [NavItem::Dashboard, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Settings];
+    pub const ALL: [NavItem; 8] = [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Settings];
 
     pub fn label(self) -> &'static str {
         match self {
             NavItem::Dashboard => "Dashboard",
+            NavItem::Board => "Board",
             NavItem::Chat => "Team chat",
             NavItem::Inbox => "Inbox",
             NavItem::Tasks => "Tasks",
@@ -176,11 +177,12 @@ impl NavItem {
     }
 
     /// Its shortcut. The numbers keep their meaning from before the sidebar was cut down:
-    /// Ctrl+4 (org chart), Ctrl+5 (departments) and Ctrl+0 (ideas) open a tab of
-    /// Employees / Projects (see `keymap.rs`); Team chat took the free Ctrl+8.
+    /// Ctrl+4 (org chart) and Ctrl+0 (ideas) open a tab of Employees / Projects (see
+    /// `keymap.rs`); Team chat took the free Ctrl+8, the Board the freed Ctrl+5 (D-02).
     pub fn keys(self) -> &'static str {
         match self {
             NavItem::Dashboard => "secondary-1",
+            NavItem::Board => "secondary-5",
             NavItem::Chat => "secondary-8",
             NavItem::Inbox => "secondary-2",
             NavItem::Employees => "secondary-3",
@@ -194,8 +196,9 @@ impl NavItem {
     pub fn of(page: Page) -> NavItem {
         match page {
             Page::Dashboard => NavItem::Dashboard,
+            Page::Board => NavItem::Board,
             Page::GroupChat => NavItem::Chat,
-            Page::Employees | Page::Employee(..) | Page::Department(_) => NavItem::Employees,
+            Page::Employees | Page::Employee(..) => NavItem::Employees,
             Page::Projects | Page::Project(..) => NavItem::Projects,
             Page::Tasks => NavItem::Tasks,
             Page::Inbox => NavItem::Inbox,
@@ -277,10 +280,8 @@ pub fn tab_counts(head: usize, notes: &[&NotificationView]) -> [usize; 4] {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum DialogKind {
     NewProject,
-    /// Add an employee, into this department (`None`: none yet).
-    NewManager { department: Option<DepartmentKey> },
-    NewDepartment,
-    EditDepartment { id: DepartmentKey, version: u64 },
+    /// Add an employee.
+    NewManager,
     NewTask { project: ProjectId },
     /// A recurring task: new (`None`) or the one being edited (protocol 1.14).
     TaskSchedule { project: ProjectId, schedule: Option<aurelius_domain::TaskScheduleId> },
@@ -591,8 +592,6 @@ impl AppView {
 pub enum ConfirmKind {
     ArchiveManager(EmployeeId),
     ArchiveProject(ProjectId),
-    /// Its employees keep working without a department; cannot be undone.
-    ArchiveDepartment(DepartmentKey),
     ForgetMemory(aurelius_domain::MemoryId),
     /// Delete a recurring task; tasks it already made stay.
     DeleteSchedule(aurelius_domain::TaskScheduleId),
@@ -681,6 +680,8 @@ pub enum MenuDo {
     Assign(aurelius_domain::TaskId, Option<EmployeeId>),
     /// A choice in one of the new task dialog's dropdowns.
     Task(TaskChoice),
+    /// A board or ticket action (`screens/board.rs`).
+    Board(crate::screens::board::BoardDo),
 }
 
 /// New task dialog: a value picked from one of its dropdowns (`None`: as the manager / off).
@@ -690,12 +691,8 @@ pub enum TaskChoice {
     /// Dashboard "Give work": who gets it, and in which project.
     GiveManager(EmployeeId),
     GiveProject(ProjectId),
-    /// Add / Edit employee: its department; Add / Edit department: its head.
-    Department(Option<DepartmentKey>),
-    Head(Option<EmployeeId>),
     /// Tasks page filters (`None`: any).
     FilterEmployee(Option<EmployeeId>),
-    FilterDepartment(Option<DepartmentKey>),
     FilterProject(Option<ProjectId>),
     /// Ideas page filter (`None`: every project).
     IdeasProject(Option<ProjectId>),
@@ -752,6 +749,20 @@ pub fn entry(label: impl Into<SharedString>, keys: &'static str, action: fn() ->
 
 pub fn call(label: impl Into<SharedString>, keys: &'static str, f: fn(&mut AppView, &mut Window, &mut Context<AppView>)) -> Option<MenuEntry> {
     Some(MenuEntry { label: label.into(), keys: (!keys.is_empty()).then_some(keys), run: MenuDo::Call(f), danger: false, checked: false, detail: None })
+}
+
+/// The main task of a ticket: the Board starts, gives and stops it, not the Tasks tab
+/// (`task.assign` / `task.cancel` refuse it). A delegation below it carries the ticket too.
+pub fn is_ticket_main_task(t: &aurelius_protocol::TaskView) -> bool {
+    t.ticket_id.is_some() && t.parent_task_id.is_none()
+}
+
+/// Why Cancel task and Give to… do not apply to this task, if they do not.
+pub fn use_the_board(t: &aurelius_protocol::TaskView) -> Option<String> {
+    is_ticket_main_task(t).then(|| match t.ticket_number {
+        Some(n) => format!("This is the main task of ticket #{n}: assign or cancel it on the Board."),
+        None => "This is the main task of a ticket: assign or cancel it on the Board.".into(),
+    })
 }
 
 pub fn danger(e: Option<MenuEntry>) -> Option<MenuEntry> {
@@ -822,14 +833,8 @@ pub struct AppView {
     pub title_input: Entity<InputState>,
     /// Add / Edit manager: who the manager reports to (`None`: a root of the org chart).
     pub pending_reports_to: Option<EmployeeId>,
-    /// Add / Edit employee: its department; Add / Edit department: its head.
-    pub pending_department: Option<DepartmentKey>,
-    pub pending_head: Option<EmployeeId>,
-    /// The company (protocol 3): departments and the management team.
+    /// The company: its employees and the management team.
     pub company: Option<aurelius_protocol::CompanySnapshot>,
-    /// A department's own memories (Department page), and the one asked for.
-    pub department_memory: Option<(DepartmentKey, Vec<aurelius_protocol::MemoryView>)>,
-    department_memory_requested: Option<DepartmentKey>,
     pub composer: Entity<TextareaState>,
     /// Images pasted or picked for the next message (files on this computer).
     pub pending_images: Vec<std::path::PathBuf>,
@@ -875,6 +880,10 @@ pub struct AppView {
     pub servers: aurelius_client::servers::Servers,
     /// The server in use when it is another computer: (host id, name).
     pub remote_host: Option<(aurelius_domain::HostId, String)>,
+    /// Board members: who works in this window, the onboarding and the choice.
+    pub members: crate::screens::board_members::Members,
+    /// The board, the open ticket and their dialogs.
+    pub board: crate::screens::board::Board,
     pub adding_server: bool,
     pub server_input: Entity<InputState>,
     /// The folder browser's typed path (Ctrl+L) and new folder name.
@@ -1067,6 +1076,8 @@ pub struct AppView {
     pub dropdown_bounds: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<&'static str, Bounds<Pixels>>>>,
     /// Folder chosen in the New project / Add manager dialog.
     pub dialog_folder: Option<String>,
+    /// What to say once the server gave a task to the chosen employee (Give to…).
+    pub assign_said: HashMap<aurelius_domain::TaskId, String>,
     pub overlay_focus: FocusHandle,
     /// Scroll position of the open popup menu (keyboard selection scrolls into view).
     pub menu_scroll: ScrollHandle,
@@ -1185,7 +1196,8 @@ impl AppView {
         };
         let pin_server = remote_host.as_ref().map_or_else(|| "local".to_string(), |(id, _)| id.to_string());
         let servers = data_root.as_deref().map(aurelius_client::servers::Servers::load).unwrap_or_default();
-        let backend = backend::start(target);
+        let remembered = crate::screens::board_members::remembered_load(&ui_prefs(), &pin_server);
+        let backend = backend::start(target, remembered);
         let server_input = cx.new(|cx| InputState::new(window, cx).placeholder("Paste the pairing text (aurelius-pair:…)"));
         let palette_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search a project, employee or command…"));
         let folder_path_input = cx.new(|cx| InputState::new(window, cx).placeholder("Type or paste a folder path"));
@@ -1202,7 +1214,7 @@ impl AppView {
         let role_input = cx.new(|cx| InputState::new(window, cx).placeholder("Free-form role, for example Product partner"));
         // The goal of a task has several lines: Enter adds one, Ctrl+Enter confirms the dialog.
         let goal_input = cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 8).placeholder("Goal: what needs to be achieved?"));
-        let employee_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search employees by name, role or department"));
+        let employee_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search employees by name, role or title"));
         let give_goal = cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 6).placeholder("What needs doing? For example 'Compare three hosting options'"));
         let recur_hours_input = cx.new(|cx| InputState::new(window, cx).placeholder("Hours, for example 6"));
         let recur_time_input = cx.new(|cx| InputState::new(window, cx).placeholder("HH:MM, for example 09:00"));
@@ -1290,6 +1302,10 @@ impl AppView {
             }),
         ];
         subscriptions.push(cx.observe_window_appearance(window, |_, _, cx| theme::system_changed(cx)));
+        let members = crate::screens::board_members::Members::new(window, cx);
+        subscriptions.extend(members.subscriptions(window, cx));
+        let board = crate::screens::board::Board::new(window, cx);
+        subscriptions.extend(board.subscriptions(window, cx));
 
         listen(backend.updates, 0, cx);
         poll_subagents(cx);
@@ -1317,6 +1333,8 @@ impl AppView {
             pins: pins_load(&ui_prefs(), &pin_server),
             employee_pins: pins_load(&ui_prefs(), &pin_server),
             pin_server,
+            members,
+            board,
             folded: folded_load(&ui_prefs()),
             panel_widths: serde_json::from_value(ui_prefs()["panel_widths"].clone()).unwrap_or_default(),
             panel_save: None,
@@ -1335,11 +1353,7 @@ impl AppView {
             instructions_input,
             title_input,
             pending_reports_to: None,
-            pending_department: None,
-            pending_head: None,
             company: None,
-            department_memory: None,
-            department_memory_requested: None,
             composer,
             pending_images: Vec::new(),
             pending_files: Vec::new(),
@@ -1479,6 +1493,7 @@ impl AppView {
             pending_manager_delegation: Default::default(),
             dropdown_bounds: Default::default(),
             dialog_folder: None,
+            assign_said: HashMap::new(),
             overlay_focus: cx.focus_handle(),
             menu_scroll: ScrollHandle::new(),
             scroll: ScrollHandle::new(),
@@ -1547,8 +1562,12 @@ impl AppView {
                     self.subagents_stepped = true;
                 }
                 let online = matches!(connection, Connection::Online { .. }) && !matches!(self.connection, Connection::Online { .. });
+                self.members_connection(&connection, cx);
+                self.board_connection(&connection, cx);
                 self.connection = connection;
                 if online {
+                    // The board reads again what it missed while offline (also for the sidebar's count).
+                    self.board_refresh();
                     // The Team chat opened while offline: its id is known only now.
                     if self.screen == Page::GroupChat && self.group_conversation.is_none() {
                         let _ = self.requests.send(backend::Request::OpenGroupChat);
@@ -1615,6 +1634,15 @@ impl AppView {
                 self.deleted_queued.remove(&message_id);
             }
             Update::DescriptionSaved(project, result) => self.project_settings_description_saved(project, result, cx),
+            Update::Who(who) => self.apply_who(who, cx),
+            Update::Board(update) => self.apply_board(update, cx),
+            Update::BoardMembers(list) => {
+                self.members.list = list;
+                cx.notify();
+            }
+            Update::BoardMemberCreated(name) => self.apply_member_created(name, cx),
+            Update::BoardMemberFailed(failure) => self.apply_member_failure(failure, cx),
+            Update::BoardMemberRequired => self.apply_member_required(cx),
             Update::Error(message) => {
                 // A refused plan decision (already handled, expired) leaves the plan open to read.
                 self.plan_sending = None;
@@ -1626,10 +1654,6 @@ impl AppView {
             }
             Update::Company(company) => {
                 self.company = Some(company);
-                cx.notify();
-            }
-            Update::DepartmentMemory(department, items) => {
-                self.department_memory = Some((department, items));
                 cx.notify();
             }
             Update::Managers(managers) => {
@@ -1659,6 +1683,10 @@ impl AppView {
                 self.inbox_selected = self.inbox_selected.min(self.inbox_len().saturating_sub(1));
             }
             Update::Info(text) => self.notify_user(text, false, cx),
+            Update::TaskAssigned(task_id) => {
+                let text = self.assign_said.remove(&task_id).unwrap_or_else(|| "Task given.".into());
+                self.notify_user(text, false, cx);
+            }
             Update::AppKeys(update) => self.app_keys_update(update, cx),
             Update::Plugins(update) => self.plugins_update(update, cx),
             Update::Tasks(tasks) => {
@@ -2070,11 +2098,12 @@ impl AppView {
     /// Talk to another server: a new backend; the old one ends when its
     /// request channel is dropped, and its late updates are ignored.
     pub fn restart_backend(&mut self, target: Option<aurelius_client::Target>, cx: &mut Context<Self>) {
-        let handle = backend::start(target);
+        let handle = backend::start(target, self.remembered_member());
         self.requests = handle.requests;
         self.backend_epoch += 1;
         listen(handle.updates, self.backend_epoch, cx);
         self.reset_server_state();
+        self.members_reset(None, cx);
         cx.notify();
     }
 
@@ -2585,6 +2614,10 @@ impl AppView {
     }
 
     fn on_attach(&mut self, _: &AttachFiles, _: &mut Window, cx: &mut Context<Self>) {
+        if self.board.dialog == Some(crate::screens::board::BoardDialog::NewTicket) {
+            self.board_pick_files(cx);
+            return;
+        }
         if self.give_work_open() {
             self.pick_task_files(cx);
             return;
@@ -2679,33 +2712,7 @@ impl AppView {
             return;
         }
         let kept = self.pending_schedule_files.iter().filter(|f| !self.pending_schedule_remove.contains(&f.path)).count();
-        let mut problems = Vec::new();
-        for path in paths {
-            if self.pending_task_files.iter().any(|(p, _)| *p == path) {
-                continue;
-            }
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string());
-            let size = match std::fs::metadata(&path) {
-                Ok(m) if m.is_file() => m.len(),
-                Ok(_) => {
-                    problems.push(format!("{name} is a folder; add files only."));
-                    continue;
-                }
-                Err(e) => {
-                    problems.push(format!("Could not read {name}: {e}"));
-                    continue;
-                }
-            };
-            if size > aurelius_domain::conversation::UPLOAD_MAX_BYTES {
-                problems.push(format!("{name} is {}; files can be at most {} MB.", file_size(size), aurelius_domain::conversation::UPLOAD_MAX_BYTES / 1_048_576));
-                continue;
-            }
-            if self.pending_task_files.len() + kept >= aurelius_domain::conversation::UPLOADS_MAX {
-                problems.push(format!("At most {} files.", aurelius_domain::conversation::UPLOADS_MAX));
-                break;
-            }
-            self.pending_task_files.push((path, size));
-        }
+        let problems = take_files(&mut self.pending_task_files, paths, kept);
         if !problems.is_empty() {
             self.notify_user(problems.join(" "), true, cx);
         }
@@ -2938,7 +2945,7 @@ impl AppView {
     /// Those that already report to it, directly or not, are not offered: that would make a circle.
     fn on_cycle_reports_to(&mut self, _: &CycleReportsTo, window: &mut Window, cx: &mut Context<Self>) {
         let manager = match self.overlay {
-            Overlay::Dialog(DialogKind::NewManager { .. }) => None,
+            Overlay::Dialog(DialogKind::NewManager) => None,
             Overlay::Dialog(DialogKind::EditManager { id, .. }) => Some(id),
             _ => return,
         };
@@ -2968,48 +2975,16 @@ impl AppView {
         }
     }
 
-    /// Alt+D in the Add / Edit employee dialog: the employee's department.
-    fn on_cycle_department(&mut self, _: &CycleDepartment, window: &mut Window, cx: &mut Context<Self>) {
-        if !matches!(self.overlay, Overlay::Dialog(DialogKind::NewManager { .. } | DialogKind::EditManager { .. })) {
-            return;
-        }
-        let current = self.pending_department;
-        let mut items: MenuItems = self.company.iter().flat_map(|c| c.departments.iter())
-            .map(|d| Self::task_option(d.name.clone(), None, TaskChoice::Department(Some(d.id)), current == Some(d.id)))
-            .collect();
-        if !items.is_empty() {
-            items.push(None);
-        }
-        items.push(Self::task_option("No department", None, TaskChoice::Department(None), current.is_none()));
-        self.open_dropdown("department", items, window, cx);
-    }
-
-    /// Alt+H in the Add / Edit department dialog: who heads it.
-    fn on_cycle_department_head(&mut self, _: &CycleDepartmentHead, window: &mut Window, cx: &mut Context<Self>) {
-        if !matches!(self.overlay, Overlay::Dialog(DialogKind::NewDepartment | DialogKind::EditDepartment { .. })) {
-            return;
-        }
-        let current = self.pending_head;
-        let mut items: MenuItems = crate::screens::dashboard::assignee_order(&self.managers).into_iter()
-            .map(|m| Self::task_option(m.name.clone(), Some(crate::screens::org::position(m).into()), TaskChoice::Head(Some(m.id)), current == Some(m.id)))
-            .collect();
-        if !items.is_empty() {
-            items.push(None);
-        }
-        items.push(Self::task_option("No head", None, TaskChoice::Head(None), current.is_none()));
-        self.open_dropdown("department-head", items, window, cx);
-    }
-
     /// Alt+M in the new task dialog: the manager dropdown (or none: a draft).
     fn on_cycle_task_manager(&mut self, _: &CycleTaskManager, window: &mut Window, cx: &mut Context<Self>) {
         if self.task_dialog_project().is_none() && self.give_work_open() {
-            // The management team first, then everyone else by department.
+            // The management team first, then everyone else as the org chart orders them.
             let current = self.give_assignee();
             let team = crate::screens::dashboard::roots(&self.managers);
             let items: MenuItems = crate::screens::dashboard::assignee_order(&self.managers)
                 .into_iter()
                 .map(|m| {
-                    let detail = if team.contains(&m.id) { "Management team".to_string() } else { format!("{} · {}", m.role, self.department_name(m.department_id)) };
+                    let detail = if team.contains(&m.id) { "Management team".to_string() } else { m.role.clone() };
                     Self::task_option(m.name.clone(), Some(detail.into()), TaskChoice::GiveManager(m.id), current == Some(m.id))
                 })
                 .collect();
@@ -3430,6 +3405,10 @@ impl AppView {
             return;
         };
         let Some(task) = self.real_tasks(project).get(self.selected).map(|t| (*t).clone()) else { return };
+        if let Some(why) = use_the_board(&task) {
+            self.notify_user(why, false, cx);
+            return;
+        }
         if !matches!(task.status, TaskStatus::Draft | TaskStatus::Queued | TaskStatus::Waiting) {
             self.notify_user("A task can only be given to another employee while it is not running.", true, cx);
             return;
@@ -3456,12 +3435,14 @@ impl AppView {
 
     fn on_cancel_task(&mut self, _: &CancelSelectedTask, _: &mut Window, cx: &mut Context<Self>) {
         if let Page::Project(ProjectRef::Real(project), Tab::Tasks) = self.screen {
-            if let Some(task) = self.real_tasks(project).get(self.selected).map(|t| (t.id, t.status)) {
-                if task.1.is_terminal() {
+            if let Some(task) = self.real_tasks(project).get(self.selected).map(|t| (*t).clone()) {
+                if let Some(why) = use_the_board(&task) {
+                    self.notify_user(why, false, cx);
+                } else if task.status.is_terminal() {
                     self.notify_user("This task is already finished.", false, cx);
                 } else {
-                    let _ = self.requests.send(backend::Request::CancelTask(task.0));
-                    self.notify_user("Task cancelled.", false, cx);
+                    // "Task cancelled." comes with the server's answer (backend::send).
+                    let _ = self.requests.send(backend::Request::CancelTask(task.id));
                 }
             }
         }
@@ -4471,15 +4452,6 @@ impl AppView {
         cx.notify();
     }
 
-    /// A department's own memories, asked once per visit of its page.
-    pub fn ensure_department_memory(&mut self, department: DepartmentKey) {
-        let loaded = self.department_memory.as_ref().is_some_and(|(d, _)| *d == department);
-        if !loaded && self.department_memory_requested != Some(department) {
-            self.department_memory_requested = Some(department);
-            let _ = self.requests.send(backend::Request::LoadDepartmentMemory(department));
-        }
-    }
-
     pub fn ensure_memory(&mut self, project: ProjectId) {
         let loaded = self.memory.as_ref().is_some_and(|(p, _)| *p == project);
         if !loaded && self.memory_requested != Some(project) {
@@ -4751,7 +4723,10 @@ impl AppView {
         };
         let Some(t) = task else { return vec![] };
         let mut items = Vec::new();
-        if !t.status.is_terminal() {
+        // A ticket's main task is stopped and given on the Board (the server refuses it here).
+        if let Some(ticket) = t.ticket_id.filter(|_| is_ticket_main_task(&t)) {
+            items.push(crate::screens::board::menu_entry("Open ticket", crate::screens::board::BoardDo::Open(ticket), false, None));
+        } else if !t.status.is_terminal() {
             items.push(danger(entry("Cancel task", "secondary-shift-x", || Box::new(CancelSelectedTask))));
         }
         items
@@ -4880,20 +4855,19 @@ impl AppView {
             }
             MenuDo::Assign(task_id, employee_id) => {
                 let _ = self.requests.send(backend::Request::AssignTask { task_id, employee_id });
+                // Said when the server answers (Update::TaskAssigned); a refusal shows its error.
                 let who = employee_id.and_then(|m| self.managers.iter().find(|x| x.id == m).map(|x| x.name.clone()));
-                self.notify_user(match who {
+                self.assign_said.insert(task_id, match who {
                     Some(name) => format!("Task given to {name}."),
                     None => "The task is a draft again.".into(),
-                }, false, cx);
+                });
             }
+            MenuDo::Board(run) => self.board_do(run, window, cx),
             MenuDo::Task(choice) => match choice {
                 TaskChoice::Manager(m) => self.pending_task_manager = m,
                 TaskChoice::GiveManager(m) => self.give_manager = Some(m),
                 TaskChoice::GiveProject(p) => self.give_project = Some(p),
-                TaskChoice::Department(d) => self.pending_department = d,
-                TaskChoice::Head(h) => self.pending_head = h,
                 TaskChoice::FilterEmployee(m) => self.tasks_filter.employee = m,
-                TaskChoice::FilterDepartment(d) => self.tasks_filter.department = d,
                 TaskChoice::FilterProject(p) => self.tasks_filter.project = p,
                 TaskChoice::IdeasProject(p) => self.ideas_project_filter = p,
                 TaskChoice::IdeaDialogProject(p) => self.pending_idea_project = Some(p),
@@ -5013,7 +4987,7 @@ impl AppView {
             self.pick_task_files(cx);
             return;
         }
-        if !matches!(self.overlay, Overlay::Dialog(DialogKind::NewProject | DialogKind::NewManager { .. })) {
+        if !matches!(self.overlay, Overlay::Dialog(DialogKind::NewProject | DialogKind::NewManager)) {
             return;
         }
         self.pick_folder(crate::screens::servers::FolderPurpose::Dialog, "Choose folder", window, cx);
@@ -5290,6 +5264,8 @@ impl AppView {
     // ── Navigation ──────────────────────────────────────────────────────
 
     pub fn navigate(&mut self, screen: Page) {
+        // Going elsewhere leaves Switch / New board member (the gate itself stays).
+        self.members.stack.clear();
         if self.screen != screen {
             // A new page starts at the top.
             self.scroll.set_offset(point(px(0.), px(0.)));
@@ -5450,7 +5426,7 @@ impl AppView {
         }
     }
 
-    /// A tab of the Employees page (list, org chart, departments).
+    /// A tab of the Employees page (list, org chart).
     pub fn set_employees_tab(&mut self, tab: EmployeesTab, cx: &mut Context<Self>) {
         self.employees_tab = tab;
         self.selected = 0;
@@ -5494,6 +5470,7 @@ impl AppView {
             NavItem::Inbox => return self.open_inbox(&OpenInbox, window, cx),
             NavItem::Settings => return self.open_settings(&OpenSettings, window, cx),
             NavItem::Dashboard => Page::Dashboard,
+            NavItem::Board => Page::Board,
             NavItem::Chat => Page::GroupChat,
             NavItem::Employees => Page::Employees,
             NavItem::Projects => Page::Projects,
@@ -5540,7 +5517,7 @@ impl AppView {
         }
     }
 
-    /// Go Org chart / Go Departments: the Employees page on that tab.
+    /// Go Org chart: the Employees page on that tab.
     pub fn go_employees_tab(&mut self, tab: EmployeesTab, window: &mut Window, cx: &mut Context<Self>) {
         self.employees_tab = tab;
         self.go_nav(NavItem::Employees, window, cx);
@@ -5573,6 +5550,8 @@ impl AppView {
 
     /// Open a task or conversation in the right panel; the page stays.
     pub fn open_panel(&mut self, panel: Panel, window: &mut Window, cx: &mut Context<Self>) {
+        // "‹ #42" only for a task opened from its ticket (`open_ticket_task` sets it again).
+        self.board.back_to = None;
         if let Panel::Task(task) = panel {
             self.read_task_results(task);
         }
@@ -5609,7 +5588,7 @@ impl AppView {
         let id = match self.panel {
             Panel::Task(_) => self.panel_task()?.employee_id?,
             Panel::Chat(c) => self.managers.iter().find(|m| m.conversation_id == c || m.conversations.iter().any(|t| t.id == c))?.id,
-            Panel::None => return None,
+            Panel::None | Panel::Ticket(_) => return None,
         };
         self.managers.iter().find(|m| m.id == id)
     }
@@ -5732,7 +5711,9 @@ impl AppView {
                 }
             }
             Page::Projects => self.open_dialog(DialogKind::NewProject, window, cx),
-            Page::Employees | Page::Department(_) => self.on_add_employee(&AddEmployee, window, cx),
+            Page::Employees => self.on_add_employee(&AddEmployee, window, cx),
+            // On the board Ctrl+N is New ticket (§2).
+            Page::Board => self.board_new_ticket(window, cx),
             // Anywhere else Ctrl+N gives work: the Dashboard's box, in the current project when there is one.
             _ => {
                 if let Some(ProjectRef::Real(p)) = self.current_project() {
@@ -5772,19 +5753,6 @@ impl AppView {
             }
             return;
         }
-        if let Page::Department(id) = self.screen {
-            match self.company.iter().flat_map(|c| c.departments.iter()).find(|d| d.id == id).cloned() {
-                Some(d) => {
-                    self.open_dialog(DialogKind::EditDepartment { id, version: d.version }, window, cx);
-                    self.pending_head = d.head_id;
-                    self.name_input.update(cx, |input, cx| input.set_value(d.name.clone(), window, cx));
-                    let description = d.description.clone().unwrap_or_default();
-                    self.description_input.update(cx, |input, cx| input.set_value(description, window, cx));
-                }
-                None => self.notify_user("This department no longer exists.", true, cx),
-            }
-            return;
-        }
         if let Page::Employee(manager) = self.screen {
             match self.real_manager(manager).cloned() {
                 Some(m) => {
@@ -5795,7 +5763,6 @@ impl AppView {
                     self.pending_manager_delegation = DelegationRow::ALL.map(|row| self.run_layer(aurelius_domain::connection::ConfigScope::Employee(m.id), row.purpose()).unwrap_or_default());
                     self.pending_manager_sequential = m.sequential_tasks;
                     self.pending_reports_to = m.reports_to;
-                    self.pending_department = m.department_id;
                     let title = m.title.clone().unwrap_or_default();
                     self.title_input.update(cx, |input, cx| input.set_value(title, window, cx));
                     self.plugins_for_manager(m.id);
@@ -5831,13 +5798,7 @@ impl AppView {
     }
 
     fn on_add_employee(&mut self, _: &AddEmployee, window: &mut Window, cx: &mut Context<Self>) {
-        // On a department page the new employee joins it.
-        let department = match self.screen {
-            Page::Department(d) => Some(d),
-            _ => None,
-        };
-        self.open_dialog(DialogKind::NewManager { department }, window, cx);
-        self.pending_department = department;
+        self.open_dialog(DialogKind::NewManager, window, cx);
     }
 
     fn on_toggle_pause(&mut self, _: &TogglePause, _: &mut Window, cx: &mut Context<Self>) {
@@ -5863,7 +5824,6 @@ impl AppView {
     fn on_archive(&mut self, _: &ArchiveItem, window: &mut Window, cx: &mut Context<Self>) {
         let target = match self.screen {
             Page::Employee(manager) => self.real_manager(manager).map(|m| ConfirmKind::ArchiveManager(m.id)),
-            Page::Department(id) => Some(ConfirmKind::ArchiveDepartment(id)),
             _ => self.current_project().and_then(|p| self.real(p)).map(|p| ConfirmKind::ArchiveProject(p.id)),
         };
         match target {
@@ -5898,8 +5858,7 @@ impl AppView {
             DialogKind::NewMemory { .. } | DialogKind::ReviseMemory { .. } => ("For example: publishing requires a prior review", "", ""),
             DialogKind::NewIdea { .. } | DialogKind::EditIdea { .. } => ("The idea, for example 'Dark mode'", "", ""),
             DialogKind::QuestionAnswer { .. } => ("Your answer, in your own words", "", ""),
-            DialogKind::NewManager { .. } | DialogKind::EditManager { .. } => ("Name, for example Alex", "Short description (optional)", "Free-form role, for example Product partner"),
-            DialogKind::NewDepartment | DialogKind::EditDepartment { .. } => ("Name, for example Engineering", "What it is for (optional)", ""),
+            DialogKind::NewManager | DialogKind::EditManager { .. } => ("Name, for example Alex", "Short description (optional)", "Free-form role, for example Product partner"),
             _ => ("Name, for example Atlas", "Short description (optional)", "Free-form role, for example Product partner"),
         };
         self.name_input.update(cx, |i, cx| i.set_placeholder(name, window, cx));
@@ -5936,8 +5895,6 @@ impl AppView {
         self.pending_schedule_files.clear();
         self.pending_schedule_remove.clear();
         self.pending_reports_to = None;
-        self.pending_department = None;
-        self.pending_head = None;
         self.title_input.update(cx, |input, cx| input.set_value("", window, cx));
         self.instructions_input.update(cx, |input, cx| input.set_value("", window, cx));
         cx.notify();
@@ -5976,7 +5933,7 @@ impl AppView {
         let role = self.role_input.read(cx).value().trim().to_string();
         let instructions = self.instructions_input.read(cx).value().trim().to_string();
         let instructions = (!instructions.is_empty()).then_some(instructions);
-        if matches!(kind, DialogKind::NewManager { .. } | DialogKind::EditManager { .. }) && role.is_empty() {
+        if matches!(kind, DialogKind::NewManager | DialogKind::EditManager { .. }) && role.is_empty() {
             self.notify_user("Give the employee a role. It can be anything.", true, cx);
             return;
         }
@@ -6071,11 +6028,10 @@ impl AppView {
                 self.remember_mode(employee_id, run.mode);
                 backend::Request::CreateTask { project_id: project, employee_id, title: name, goal, criteria, run, files }
             }
-            DialogKind::NewManager { .. } => {
+            DialogKind::NewManager => {
                 self.open_new_manager = true;
                 let title = self.title_input.read(cx).value().trim().to_string();
                 backend::Request::CreateEmployee {
-                    department_id: self.pending_department.take(),
                     name,
                     role,
                     title: (!title.is_empty()).then_some(title),
@@ -6083,14 +6039,6 @@ impl AppView {
                     instructions,
                     folder: self.dialog_folder.clone(),
                 }
-            }
-            DialogKind::NewDepartment => {
-                let description = self.description_input.read(cx).value().trim().to_string();
-                backend::Request::CreateDepartment { name, description: (!description.is_empty()).then_some(description), head_id: self.pending_head.take() }
-            }
-            DialogKind::EditDepartment { id, version } => {
-                let description = self.description_input.read(cx).value().trim().to_string();
-                backend::Request::UpdateDepartment { department_id: id, name, description: (!description.is_empty()).then_some(description), head_id: self.pending_head.take(), expected_version: version }
             }
             DialogKind::EditManager { id, version } => {
                 self.save_manager_defaults(id);
@@ -6102,10 +6050,6 @@ impl AppView {
                 let before = self.managers.iter().find(|m| m.id == id).and_then(|m| m.reports_to);
                 if self.pending_reports_to != before {
                     follow_up.push(backend::Request::SetReportsTo { employee_id: id, reports_to: self.pending_reports_to });
-                }
-                let department = self.managers.iter().find(|m| m.id == id).and_then(|m| m.department_id);
-                if self.pending_department != department {
-                    follow_up.push(backend::Request::SetEmployeeDepartment { employee_id: id, department_id: self.pending_department });
                 }
                 backend::Request::UpdateEmployee { employee_id: id, name, role, title: Some(title), instructions, sequential_tasks, expected_version: version }
             }
@@ -6153,7 +6097,7 @@ impl AppView {
                 focus[(current + 1) % focus.len()](window, cx);
                 return;
             }
-            Overlay::Dialog(DialogKind::NewManager { .. } | DialogKind::EditManager { .. }) => {
+            Overlay::Dialog(DialogKind::NewManager | DialogKind::EditManager { .. }) => {
                 vec![self.name_input.clone(), self.role_input.clone(), self.title_input.clone(), self.instructions_input.clone()]
             }
             _ => return,
@@ -6177,7 +6121,6 @@ impl AppView {
                 let request = match kind {
                     ConfirmKind::ArchiveManager(employee_id) => backend::Request::SetEmployeeStatus { employee_id, status: LifecycleStatus::Archived },
                     ConfirmKind::ArchiveProject(project_id) => backend::Request::SetProjectStatus { project_id, status: LifecycleStatus::Archived },
-                    ConfirmKind::ArchiveDepartment(department_id) => backend::Request::ArchiveDepartment(department_id),
                     ConfirmKind::DeleteConversation(conversation_id) => {
                         let _ = self.requests.send(backend::Request::DeleteConversation(conversation_id));
                         self.overlay = Overlay::None;
@@ -6281,10 +6224,6 @@ impl AppView {
                 self.back_stack.clear();
                 self.screen = match (kind, self.screen) {
                     (ConfirmKind::ArchiveManager(_), _) => Page::Employees,
-                    (ConfirmKind::ArchiveDepartment(_), _) => {
-                        self.employees_tab = EmployeesTab::Departments;
-                        Page::Employees
-                    }
                     _ => Page::Projects,
                 };
                 self.focus.focus(window, cx);
@@ -6308,7 +6247,15 @@ impl AppView {
         self.overlay = Overlay::None;
     }
 
+    pub fn close_overlay_now(&mut self) {
+        self.close_overlay();
+    }
+
     fn on_back(&mut self, _: &Back, window: &mut Window, cx: &mut Context<Self>) {
+        let gated = self.member_gate() != crate::screens::board_members::Gate::Open;
+        if self.overlay == Overlay::None && self.member_step().is_some() && !(gated && self.screen == Page::Settings) && self.members_back(window, cx) {
+            return;
+        }
         if self.mcp_manage.add.is_some() {
             self.close_add_mcp(cx);
             return;
@@ -6328,6 +6275,17 @@ impl AppView {
         }
         if self.overlay == Overlay::Menu {
             self.close_menu(window, cx);
+            return;
+        }
+        if self.board.dialog.is_some() {
+            self.board_close_dialog(window, cx);
+            return;
+        }
+        if self.board_cancel_hold(cx) {
+            return;
+        }
+        if self.board.editing.is_some() && matches!(self.panel, Panel::Ticket(_)) {
+            self.ticket_cancel_edit(cx);
             return;
         }
         if self.overlay == Overlay::None && self.preview_shown()
@@ -6626,9 +6584,8 @@ impl AppView {
             }
         }
         for m in self.managers.iter().filter(|m| m.status != LifecycleStatus::Archived) {
-            let department = self.department_name(m.department_id);
             entries.push(PaletteEntry {
-                label: if department.is_empty() { format!("{} · {}", m.name, m.role) } else { format!("{} · {} ({department})", m.name, m.role) }.into(),
+                label: format!("{} · {}", m.name, m.role).into(),
                 hint: "Employee".into(),
                 keys: None,
                 target: PaletteTarget::Employee(m.id),
@@ -6717,10 +6674,17 @@ impl Render for AppView {
             self.on_open_servers(&OpenServers, window, cx);
         }
         let fonts = Fonts::get(cx).clone();
-        let page: AnyElement = self.render_company(window, cx);
+        // The board member gate (MU1-20/21): only Settings → Servers stays reachable.
+        self.members_hold();
+        let gated = self.member_gate() != crate::screens::board_members::Gate::Open;
+        let member_step = self.member_step().filter(|_| !(gated && self.screen == Page::Settings));
+        let page: AnyElement = match member_step {
+            Some(step) => self.render_members(step, window, cx),
+            None => self.render_company(window, cx),
+        };
         // The right panel: a task or conversation opened from the page (not over an employee
         // page, which shows its own conversation).
-        let panel = self.panel_shown().then(|| {
+        let panel = (member_step.is_none() && self.panel_shown()).then(|| {
             let panel = self.render_panel(window, cx);
             self.resizable("right_panel", 460., crate::resize::Edge::Left, panel, cx)
         });
@@ -6729,7 +6693,7 @@ impl Render for AppView {
             .min_h_0()
             .items_stretch()
             .relative()
-            .when(self.window_project.is_none() && !self.sidebar_collapsed, |el| el.child(self.render_sidebar(false, window, cx)))
+            .when(self.window_project.is_none() && !self.sidebar_collapsed && !gated, |el| el.child(self.render_sidebar(false, window, cx)))
             .child(
                 v().flex_1()
                     .min_w_0()
@@ -6738,7 +6702,7 @@ impl Render for AppView {
                     // Beside the panel the page keeps room for its forms; the panel gives way down to the 900 px window.
                     .child(h().flex_1().min_h_0().items_stretch().child(v().flex_1().min_w_0().when(panel.is_some(), |el| el.min_w(px(360.))).h_full().child(page)).children(panel)),
             )
-            .when(self.window_project.is_none() && self.sidebar_collapsed && self.sidebar_peek, |el| {
+            .when(self.window_project.is_none() && self.sidebar_collapsed && self.sidebar_peek && !gated, |el| {
                 el.child(div().absolute().left_0().top_0().bottom_0().child(self.render_sidebar(true, window, cx)))
             })
             .into_any_element();
@@ -6798,9 +6762,9 @@ impl Render for AppView {
             .on_action(cx.listener(Self::on_open_memory))
             .on_action(cx.listener(|this, _: &GoDashboard, w, cx| this.go_nav(NavItem::Dashboard, w, cx)))
             .on_action(cx.listener(|this, _: &GoTeamChat, w, cx| this.go_nav(NavItem::Chat, w, cx)))
+            .on_action(cx.listener(|this, _: &GoBoard, w, cx| this.go_nav(NavItem::Board, w, cx)))
             .on_action(cx.listener(|this, _: &GoEmployees, w, cx| this.go_nav(NavItem::Employees, w, cx)))
             .on_action(cx.listener(|this, _: &GoOrgChart, w, cx| this.go_employees_tab(EmployeesTab::OrgChart, w, cx)))
-            .on_action(cx.listener(|this, _: &GoDepartments, w, cx| this.go_employees_tab(EmployeesTab::Departments, w, cx)))
             .on_action(cx.listener(|this, _: &GoProjects, w, cx| this.go_nav(NavItem::Projects, w, cx)))
             .on_action(cx.listener(|this, _: &GoTasks, w, cx| this.go_nav(NavItem::Tasks, w, cx)))
             .on_action(cx.listener(|this, _: &GoIdeas, w, cx| this.go_projects_tab(ProjectsTab::Ideas, w, cx)))
@@ -6820,6 +6784,14 @@ impl Render for AppView {
             .on_action(cx.listener(Self::on_toggle_manager_sequential))
             .on_action(cx.listener(|this, _: &CycleSubagentModel, w, cx| this.open_delegation_model(DelegationRow::Subagents, w, cx)))
             .on_action(cx.listener(Self::on_attach))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardLeft, _, cx| this.board_step(crate::screens::board::Step::Left, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardRight, _, cx| this.board_step(crate::screens::board::Step::Right, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardUp, _, cx| this.board_step(crate::screens::board::Step::Up, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardDown, _, cx| this.board_step(crate::screens::board::Step::Down, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardOpen, w, cx| this.board_key_open(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardStart, _, cx| this.board_key_start(cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardMoveTo, w, cx| this.board_key_move(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardPickUp, _, cx| this.board_key_pick(cx)))
             .on_action(cx.listener(|this, _: &OpenUpdates, w, cx| {
                 this.open_settings(&OpenSettings, w, cx);
                 // Straight to the server's page when only the server has an update.
@@ -7080,8 +7052,6 @@ impl Render for AppView {
                 None => this.notify_user("Open a project first.", true, cx),
             }))
             .on_action(cx.listener(Self::on_cycle_reports_to))
-            .on_action(cx.listener(Self::on_cycle_department))
-            .on_action(cx.listener(Self::on_cycle_department_head))
             .on_action(cx.listener(Self::on_toggle_pause))
             .on_action(cx.listener(Self::on_archive))
             .on_action(cx.listener(Self::on_back))
@@ -7136,7 +7106,7 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &DialogCancel, w, cx| this.on_back(&Back, w, cx)))
             .child(body)
             .child(self.render_status_bar(cx))
-            .when(self.overlay != Overlay::None || self.project_settings.is_some(), |el| el.child(self.render_overlay(window, cx)))
+            .when(self.overlay != Overlay::None || self.project_settings.is_some() || self.board.dialog.is_some(), |el| el.child(self.render_overlay(window, cx)))
             .when_some(self.hovered_link.clone(), |el, url| {
                 el.child(
                     div().absolute().left_0().bottom_0().max_w(relative(0.6)).h(px(26.)).flex().items_center().px(px(10.))
@@ -7472,7 +7442,7 @@ mod tests {
     fn the_sidebar_lists_six_pages_and_settings_keeps_its_shortcut() {
         use super::{EmployeesTab, NavItem, Page, ProjectRef, ProjectsTab, Tab};
         let labels: Vec<&str> = NavItem::ALL.iter().map(|n| n.label()).collect();
-        assert_eq!(labels, ["Dashboard", "Team chat", "Inbox", "Tasks", "Employees", "Projects", "Settings"]);
+        assert_eq!(labels, ["Dashboard", "Board", "Team chat", "Inbox", "Tasks", "Employees", "Projects", "Settings"]);
         // Every entry's shortcut is bound in the shortcut table; Settings keeps Ctrl+9.
         for nav in NavItem::ALL {
             assert!(crate::keymap::SHORTCUTS.iter().any(|s| s.keys.contains(&nav.keys())), "{} has its shortcut", nav.label());
@@ -7480,15 +7450,17 @@ mod tests {
         assert_eq!(NavItem::Settings.keys(), "secondary-9");
         assert_eq!(NavItem::Chat.keys(), "secondary-8", "Team chat took the free Ctrl+8");
         assert_eq!(NavItem::of(Page::GroupChat), NavItem::Chat);
-        // Go Org chart / Departments / Ideas keep working: each opens a tab of Employees / Projects.
-        for key in ["secondary-4", "secondary-5", "secondary-0"] {
+        // Go Org chart / Ideas keep working: each opens a tab of Employees / Projects.
+        for key in ["secondary-4", "secondary-0"] {
             assert!(crate::keymap::SHORTCUTS.iter().any(|s| s.keys.contains(&key)), "{key} is bound");
         }
+        assert_eq!(NavItem::Board.keys(), "secondary-5", "D-02: the board took the freed Ctrl+5");
+        assert_eq!(crate::keymap::SHORTCUTS.iter().filter(|s| s.keys.contains(&"secondary-5")).count(), 1, "only the board");
+        assert_eq!(NavItem::of(Page::Board), NavItem::Board);
         assert_eq!(NavItem::of(Page::Project(ProjectRef::Sample(0), Tab::Tasks)), NavItem::Projects);
-        assert_eq!(NavItem::of(Page::Department(aurelius_domain::DepartmentId::new())), NavItem::Employees);
         assert_eq!(NavItem::of(Page::Inbox), NavItem::Inbox, "the inbox is a page, not a dialog");
         assert_eq!(NavItem::of(Page::Settings), NavItem::Settings);
-        assert_eq!(EmployeesTab::ALL.map(|t| t.label()), ["List", "Org chart", "Departments"]);
+        assert_eq!(EmployeesTab::ALL.map(|t| t.label()), ["List", "Org chart"]);
         assert_eq!(ProjectsTab::ALL.map(|t| t.label()), ["Projects", "Ideas"]);
         assert_eq!(Tab::ALL.map(|t| t.title()), ["Overview", "Tasks", "Ideas"], "memory is not a tab of the bar");
     }
@@ -7641,7 +7613,7 @@ mod tests {
         let (project, alex) = (ProjectId::new(), EmployeeId::new());
         let item = |scope: &str, manager: Option<EmployeeId>| aurelius_protocol::MemoryView {
             id: MemoryId::new(), scope: scope.into(), employee_id: manager, employee_name: None, kind: MemoryKind::Decision, status: MemoryStatus::Active,
-            content: "x".into(), pinned: false, importance: 0.5, confidence: 0.5, created_at_ms: 0, supersedes_id: None, conflicts_with_id: None, decided_by: None, sources: vec![], lesson: None, department_id: None, department_name: None,
+            content: "x".into(), pinned: false, importance: 0.5, confidence: 0.5, created_at_ms: 0, supersedes_id: None, conflicts_with_id: None, decided_by: None, sources: vec![], lesson: None,
         };
         let items = [item("project", None), item("employee", Some(alex)), item("employee", Some(alex)), item("global", None)];
         assert_eq!(super::consolidation_scopes(project, &items), vec![MemoryScope::Project(project), MemoryScope::Employee(alex)]);
@@ -7791,6 +7763,19 @@ mod tests {
             "conversation_id": conversation,
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_tickets_main_task_is_given_and_cancelled_on_the_board() {
+        use super::{is_ticket_main_task, use_the_board};
+        let mut t = task(ConversationId::new(), "queued", None);
+        assert!(!is_ticket_main_task(&t) && use_the_board(&t).is_none(), "a plain task: Cancel task and Give to… stay");
+        t.ticket_id = Some(aurelius_domain::TicketId::new());
+        t.ticket_number = Some(7);
+        assert!(is_ticket_main_task(&t), "F-m1: the server refuses task.assign/task.cancel here");
+        assert_eq!(use_the_board(&t).as_deref(), Some("This is the main task of ticket #7: assign or cancel it on the Board."));
+        t.parent_task_id = Some(TaskId::new());
+        assert!(!is_ticket_main_task(&t) && use_the_board(&t).is_none(), "a delegation below it carries the ticket but is a task like any other");
     }
 
     #[test]
@@ -8260,6 +8245,40 @@ fn is_image_file(path: &std::path::Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
+/// Add files on this computer to `list` (path, size) for a task, idea or ticket: no
+/// duplicates, no folders, each at most `UPLOAD_MAX_BYTES`, at most `UPLOADS_MAX`
+/// with the `kept` ones. Returns what went wrong, in words; the server checks again.
+pub fn take_files(list: &mut Vec<(std::path::PathBuf, u64)>, paths: Vec<std::path::PathBuf>, kept: usize) -> Vec<String> {
+    let mut problems = Vec::new();
+    for path in paths {
+        if list.iter().any(|(p, _)| *p == path) {
+            continue;
+        }
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string());
+        let size = match std::fs::metadata(&path) {
+            Ok(m) if m.is_file() => m.len(),
+            Ok(_) => {
+                problems.push(format!("{name} is a folder; add files only."));
+                continue;
+            }
+            Err(e) => {
+                problems.push(format!("Could not read {name}: {e}"));
+                continue;
+            }
+        };
+        if size > aurelius_domain::conversation::UPLOAD_MAX_BYTES {
+            problems.push(format!("{name} is {}; files can be at most {} MB.", file_size(size), aurelius_domain::conversation::UPLOAD_MAX_BYTES / 1_048_576));
+            continue;
+        }
+        if list.len() + kept >= aurelius_domain::conversation::UPLOADS_MAX {
+            problems.push(format!("At most {} files.", aurelius_domain::conversation::UPLOADS_MAX));
+            break;
+        }
+        list.push((path, size));
+    }
+    problems
+}
+
 /// "12 KB", "3.4 MB".
 pub fn file_size(bytes: u64) -> String {
     if bytes >= 1_048_576 { format!("{:.1} MB", bytes as f64 / 1_048_576.0) } else { format!("{} KB", bytes.div_ceil(1024).max(1)) }
@@ -8286,6 +8305,33 @@ fn save_pasted_image(image: &Image) -> Result<std::path::PathBuf, String> {
     let path = dir.join(format!("Pasted image.{}", image.format.extension()));
     std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, &image.bytes)).map_err(|e| format!("Could not keep the pasted image: {e}"))?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod file_tests {
+    use super::take_files;
+
+    /// The limits a task's files have, also for a ticket's (MU1-07): no folders,
+    /// no duplicates, at most `UPLOADS_MAX` with the kept ones.
+    #[test]
+    fn files_are_taken_once_without_folders_and_within_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"notes").unwrap();
+            path
+        };
+        let mut list = Vec::new();
+        let problems = take_files(&mut list, vec![file("spec.md"), file("spec.md"), dir.path().to_path_buf(), dir.path().join("gone.md")], 0);
+        assert_eq!(list.iter().map(|(p, size)| (p.file_name().unwrap().to_string_lossy().into_owned(), *size)).collect::<Vec<_>>(), [("spec.md".to_string(), 5)]);
+        assert_eq!(problems.len(), 2, "a folder and a missing file: {problems:?}");
+        assert!(problems[0].ends_with("is a folder; add files only."));
+        let max = aurelius_domain::conversation::UPLOADS_MAX;
+        let more: Vec<_> = (0..max).map(|i| file(&format!("f{i}.txt"))).collect();
+        let problems = take_files(&mut list, more, 1);
+        assert_eq!(list.len() + 1, max, "with the kept one");
+        assert_eq!(problems, [format!("At most {max} files.")]);
+    }
 }
 
 #[cfg(test)]

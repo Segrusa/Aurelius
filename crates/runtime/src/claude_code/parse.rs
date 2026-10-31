@@ -51,8 +51,12 @@ impl StreamState {
         let (tools, servers): (&[&str], &[&str]) = match profile {
             ToolProfile::TextOnly => (&[], &[]),
             ToolProfile::Work { .. } => (super::WORK_TOOLS, &["aurelius"]),
+            ToolProfile::Triage { .. } => (&[], &["aurelius"]),
         };
         let mut allowed_tools: Vec<String> = tools.iter().map(|t| t.to_string()).collect();
+        if let ToolProfile::Triage { tools, .. } = profile {
+            allowed_tools.extend(tools.iter().cloned());
+        }
         if matches!(profile, ToolProfile::Work { .. }) {
             allowed_tools.push(super::APPROVAL_TOOL.into());
             allowed_tools.push(super::TOOL_SEARCH_TOOL.into());

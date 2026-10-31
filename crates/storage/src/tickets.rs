@@ -1,0 +1,359 @@
+//! Tickets (migration 18): the cards of the board. A ticket is numbered per
+//! company, sits in one column at a position (smallest on top), and links to
+//! its tasks through `tasks.ticket_id`; `root_task_id` is the current main task.
+//!
+//! Versions: the application gives every event of a ticket the next version and
+//! stores the last with `touch`; the other writes here leave `version` alone.
+
+use crate::tasks::TaskAttachments;
+use crate::{StorageError, now_ms};
+use aurelius_domain::{
+    BoardColumnId, EmployeeId, ProjectId, TaskId, TicketId, UserId,
+    task::{RunSettings, TaskStatus},
+    ticket::{BoardColumnCards, ColumnKind, TicketPriority, TicketView},
+};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+
+/// `move_to`: the card to put it above is not in that column.
+pub const NOT_IN_COLUMN: &str = "not_in_column";
+
+fn parse<T, E: std::error::Error + Send + Sync + 'static>(r: Result<T, E>) -> rusqlite::Result<T> {
+    r.map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e)))
+}
+
+pub struct NewTicket<'a> {
+    pub id: TicketId,
+    pub project_id: ProjectId,
+    pub title: &'a str,
+    pub description_blob: Option<&'a str>,
+    pub column_id: BoardColumnId,
+    pub priority: TicketPriority,
+    pub created_by_user: UserId,
+    pub owner: Option<EmployeeId>,
+    pub run: &'a RunSettings,
+    pub labels: &'a [String],
+    pub deadline_ms: Option<i64>,
+}
+
+fn json_or_null<T: serde::Serialize>(value: &T, empty: bool) -> Result<Option<String>, StorageError> {
+    if empty { Ok(None) } else { Ok(Some(serde_json::to_string(value)?)) }
+}
+
+/// Insert a ticket at the bottom of its column with the next number of the
+/// company; returns the number. Version 1.
+pub fn insert(tx: &Transaction<'_>, ticket: &NewTicket<'_>) -> Result<u32, StorageError> {
+    let number: i64 = tx.query_row("SELECT COALESCE(MAX(number), 0) + 1 FROM tickets", [], |r| r.get(0))?;
+    let position = next_position(tx, ticket.column_id)?;
+    let now = now_ms();
+    tx.execute(
+        "INSERT INTO tickets(id, company_id, project_id, number, title, description_blob_id, column_id, position, priority, created_by_user,
+                             owner_employee_id, run_json, labels_json, deadline_ms, version, created_at_ms, updated_at_ms)
+         VALUES (?1, (SELECT id FROM company), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14)",
+        params![
+            ticket.id.to_string(),
+            ticket.project_id.to_string(),
+            number,
+            ticket.title,
+            ticket.description_blob,
+            ticket.column_id.to_string(),
+            position,
+            ticket.priority.as_str(),
+            ticket.created_by_user.to_string(),
+            ticket.owner.map(|o| o.to_string()),
+            json_or_null(ticket.run, ticket.run.is_empty())?,
+            json_or_null(&ticket.labels, ticket.labels.is_empty())?,
+            ticket.deadline_ms,
+            now,
+        ],
+    )?;
+    Ok(number as u32)
+}
+
+fn next_position(conn: &Connection, column: BoardColumnId) -> Result<f64, StorageError> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM tickets WHERE column_id = ?1 AND archived_at_ms IS NULL",
+        [column.to_string()],
+        |r| r.get(0),
+    )?)
+}
+
+/// What a write needs to decide about a ticket.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TicketState {
+    pub id: TicketId,
+    pub project_id: ProjectId,
+    pub column_id: BoardColumnId,
+    pub column: ColumnKind,
+    pub version: u64,
+    pub owner: Option<EmployeeId>,
+    pub root_task_id: Option<TaskId>,
+    pub root_status: Option<TaskStatus>,
+    pub archived: bool,
+}
+
+pub fn state(conn: &Connection, id: TicketId) -> Result<Option<TicketState>, StorageError> {
+    Ok(conn
+        .query_row(
+            "SELECT k.project_id, k.column_id, c.kind, k.version, k.owner_employee_id, k.root_task_id, t.status, k.archived_at_ms IS NOT NULL
+             FROM tickets k JOIN board_columns c ON c.id = k.column_id LEFT JOIN tasks t ON t.id = k.root_task_id
+             WHERE k.id = ?1",
+            [id.to_string()],
+            |r| {
+                Ok(TicketState {
+                    id,
+                    project_id: parse(ProjectId::parse(&r.get::<_, String>(0)?))?,
+                    column_id: parse(BoardColumnId::parse(&r.get::<_, String>(1)?))?,
+                    column: ColumnKind::parse(&r.get::<_, String>(2)?).unwrap_or(ColumnKind::Backlog),
+                    version: r.get::<_, i64>(3)? as u64,
+                    owner: r.get::<_, Option<String>>(4)?.and_then(|o| EmployeeId::parse(&o).ok()),
+                    root_task_id: r.get::<_, Option<String>>(5)?.and_then(|t| TaskId::parse(&t).ok()),
+                    root_status: r.get::<_, Option<String>>(6)?.and_then(|s| TaskStatus::parse(&s)),
+                    archived: r.get(7)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+/// Put a ticket in `column` right above `before` (none: at the bottom). The
+/// cards of that column are numbered again 1..n, so the order stays exact.
+/// `Rejected(NOT_IN_COLUMN)` when `before` is not a card of that column.
+pub fn move_to(tx: &Transaction<'_>, id: TicketId, column: BoardColumnId, before: Option<TicketId>) -> Result<(), StorageError> {
+    let mut stmt = tx.prepare(
+        "SELECT id FROM tickets WHERE column_id = ?1 AND id <> ?2 AND archived_at_ms IS NULL ORDER BY position, number",
+    )?;
+    let mut ids: Vec<String> = stmt.query_map(params![column.to_string(), id.to_string()], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    drop(stmt);
+    let at = match before {
+        None => ids.len(),
+        Some(before) => ids.iter().position(|t| *t == before.to_string()).ok_or_else(|| StorageError::Rejected(NOT_IN_COLUMN.into()))?,
+    };
+    ids.insert(at, id.to_string());
+    tx.execute("UPDATE tickets SET column_id = ?2 WHERE id = ?1", params![id.to_string(), column.to_string()])?;
+    for (i, ticket) in ids.iter().enumerate() {
+        tx.execute("UPDATE tickets SET position = ?2 WHERE id = ?1", params![ticket, (i + 1) as f64])?;
+    }
+    Ok(())
+}
+
+/// Store the ticket's version after its events, and when it changed.
+pub fn touch(tx: &Transaction<'_>, id: TicketId, version: u64) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET version = ?2, updated_at_ms = ?3 WHERE id = ?1", params![id.to_string(), version as i64, now_ms()])?;
+    Ok(())
+}
+
+/// The fields of `ticket.update` that are given.
+#[derive(Debug, Default)]
+pub struct TicketFields<'a> {
+    pub title: Option<&'a str>,
+    /// `Some(None)`: cleared.
+    pub description_blob: Option<Option<&'a str>>,
+    pub priority: Option<TicketPriority>,
+    pub labels: Option<&'a [String]>,
+    pub deadline_ms: Option<Option<i64>>,
+    pub owner: Option<Option<EmployeeId>>,
+    pub run: Option<&'a RunSettings>,
+}
+
+pub fn update_fields(tx: &Transaction<'_>, id: TicketId, fields: &TicketFields<'_>) -> Result<(), StorageError> {
+    let id = id.to_string();
+    if let Some(title) = fields.title {
+        tx.execute("UPDATE tickets SET title = ?2 WHERE id = ?1", params![id, title])?;
+    }
+    if let Some(blob) = fields.description_blob {
+        tx.execute("UPDATE tickets SET description_blob_id = ?2 WHERE id = ?1", params![id, blob])?;
+    }
+    if let Some(priority) = fields.priority {
+        tx.execute("UPDATE tickets SET priority = ?2 WHERE id = ?1", params![id, priority.as_str()])?;
+    }
+    if let Some(labels) = fields.labels {
+        tx.execute("UPDATE tickets SET labels_json = ?2 WHERE id = ?1", params![id, json_or_null(&labels, labels.is_empty())?])?;
+    }
+    if let Some(deadline) = fields.deadline_ms {
+        tx.execute("UPDATE tickets SET deadline_ms = ?2 WHERE id = ?1", params![id, deadline])?;
+    }
+    if let Some(owner) = fields.owner {
+        tx.execute("UPDATE tickets SET owner_employee_id = ?2 WHERE id = ?1", params![id, owner.map(|o| o.to_string())])?;
+    }
+    if let Some(run) = fields.run {
+        tx.execute("UPDATE tickets SET run_json = ?2 WHERE id = ?1", params![id, json_or_null(run, run.is_empty())?])?;
+    }
+    Ok(())
+}
+
+pub fn set_owner(tx: &Transaction<'_>, id: TicketId, owner: Option<EmployeeId>) -> Result<(), StorageError> {
+    update_fields(tx, id, &TicketFields { owner: Some(owner), ..Default::default() })
+}
+
+pub fn set_feedback(tx: &Transaction<'_>, id: TicketId, feedback: Option<&str>) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET review_feedback = ?2 WHERE id = ?1", params![id.to_string(), feedback])?;
+    Ok(())
+}
+
+/// The first start is kept; a start again does not change it.
+pub fn mark_started(tx: &Transaction<'_>, id: TicketId) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET started_at_ms = COALESCE(started_at_ms, ?2) WHERE id = ?1", params![id.to_string(), now_ms()])?;
+    Ok(())
+}
+
+pub fn mark_done(tx: &Transaction<'_>, id: TicketId) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET done_at_ms = ?2 WHERE id = ?1", params![id.to_string(), now_ms()])?;
+    Ok(())
+}
+
+pub fn mark_archived(tx: &Transaction<'_>, id: TicketId) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET archived_at_ms = ?2 WHERE id = ?1", params![id.to_string(), now_ms()])?;
+    Ok(())
+}
+
+/// The current main task (the engine sets it when it makes one).
+pub fn set_root_task(tx: &Transaction<'_>, id: TicketId, task: Option<TaskId>) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET root_task_id = ?2 WHERE id = ?1", params![id.to_string(), task.map(|t| t.to_string())])?;
+    Ok(())
+}
+
+pub fn attachments_of(conn: &Connection, id: TicketId) -> Result<Option<TaskAttachments>, StorageError> {
+    let json: Option<String> = conn.query_row("SELECT attachments_json FROM tickets WHERE id = ?1", [id.to_string()], |r| r.get(0)).optional()?.flatten();
+    Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
+}
+
+pub fn set_attachments(tx: &Transaction<'_>, id: TicketId, attachments: Option<&TaskAttachments>) -> Result<(), StorageError> {
+    let json = attachments.filter(|a| !a.files.is_empty()).map(serde_json::to_string).transpose()?;
+    tx.execute("UPDATE tickets SET attachments_json = ?2 WHERE id = ?1", params![id.to_string(), json])?;
+    Ok(())
+}
+
+/// The ticket a task belongs to (its own, inherited from the main task).
+pub fn ticket_of_task(conn: &Connection, task: TaskId) -> Result<Option<TicketId>, StorageError> {
+    let id: Option<String> = conn.query_row("SELECT ticket_id FROM tasks WHERE id = ?1", [task.to_string()], |r| r.get(0)).optional()?.flatten();
+    Ok(id.and_then(|i| TicketId::parse(&i).ok()))
+}
+
+/// Every task linked to a ticket, oldest first.
+pub fn tasks_of_ticket(conn: &Connection, ticket: TicketId) -> Result<Vec<TaskId>, StorageError> {
+    let mut stmt = conn.prepare("SELECT id FROM tasks WHERE ticket_id = ?1 ORDER BY created_at_ms, id")?;
+    let ids = stmt.query_map([ticket.to_string()], |r| Ok(parse(TaskId::parse(&r.get::<_, String>(0)?))?))?.collect::<Result<_, _>>()?;
+    Ok(ids)
+}
+
+/// Linked tasks that still work (not ended and not in review), other than `except`.
+pub fn working_tasks(conn: &Connection, ticket: TicketId, except: Option<TaskId>) -> Result<u32, StorageError> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM tasks WHERE ticket_id = ?1 AND (?2 IS NULL OR id <> ?2)
+           AND status IN ('queued','running','waiting')",
+        params![ticket.to_string(), except.map(|t| t.to_string())],
+        |r| r.get::<_, i64>(0),
+    )? as u32)
+}
+
+/// What `list` filters on; every given filter applies.
+#[derive(Debug, Default, Clone)]
+pub struct TicketFilter {
+    pub project: Option<ProjectId>,
+    pub column: Option<ColumnKind>,
+    /// Title, description or `#number`, case-insensitive.
+    pub query: Option<String>,
+    pub ticket: Option<TicketId>,
+    pub include_archived: bool,
+}
+
+const SELECT: &str = "SELECT k.id, k.number, k.project_id, p.name, k.title, db.storage_key, k.column_id, c.kind, k.position, k.priority,
+        k.created_by_user, u.username, k.owner_employee_id, e.name, k.run_json, k.labels_json, k.deadline_ms, k.root_task_id, t.status,
+        k.review_feedback, k.version, k.created_at_ms, k.updated_at_ms, k.started_at_ms, k.done_at_ms, k.archived_at_ms, k.attachments_json
+     FROM tickets k
+     JOIN projects p ON p.id = k.project_id
+     JOIN board_columns c ON c.id = k.column_id
+     JOIN users u ON u.id = k.created_by_user
+     LEFT JOIN employees e ON e.id = k.owner_employee_id
+     LEFT JOIN tasks t ON t.id = k.root_task_id
+     LEFT JOIN blobs db ON db.id = k.description_blob_id
+     WHERE (?1 IS NULL OR k.project_id = ?1) AND (?2 IS NULL OR c.kind = ?2) AND (?3 IS NULL OR k.id = ?3)
+       AND (?4 OR k.archived_at_ms IS NULL)";
+
+/// Tickets in board order (column, then position).
+pub fn list(conn: &Connection, filter: &TicketFilter, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<TicketView>, StorageError> {
+    let mut stmt = conn.prepare(&format!("{SELECT} ORDER BY c.position, k.position, k.number"))?;
+    let rows = stmt.query_map(
+        params![filter.project.map(|p| p.to_string()), filter.column.map(|c| c.as_str()), filter.ticket.map(|t| t.to_string()), filter.include_archived],
+        |r| {
+            let id = parse(TicketId::parse(&r.get::<_, String>(0)?))?;
+            let description: Option<String> = r.get(5)?;
+            let run: Option<String> = r.get(14)?;
+            let labels: Option<String> = r.get(15)?;
+            let attachments: Option<String> = r.get(26)?;
+            Ok((
+                TicketView {
+                    id,
+                    number: r.get::<_, i64>(1)? as u32,
+                    project_id: parse(ProjectId::parse(&r.get::<_, String>(2)?))?,
+                    project_name: r.get(3)?,
+                    title: r.get(4)?,
+                    description: None,
+                    column_id: parse(BoardColumnId::parse(&r.get::<_, String>(6)?))?,
+                    column: ColumnKind::parse(&r.get::<_, String>(7)?).unwrap_or(ColumnKind::Backlog),
+                    position: r.get(8)?,
+                    priority: TicketPriority::parse(&r.get::<_, String>(9)?).unwrap_or_default(),
+                    created_by_user: parse(UserId::parse(&r.get::<_, String>(10)?))?,
+                    created_by_username: r.get(11)?,
+                    owner_employee_id: r.get::<_, Option<String>>(12)?.and_then(|o| EmployeeId::parse(&o).ok()),
+                    owner_name: r.get(13)?,
+                    run: run.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default(),
+                    labels: labels.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default(),
+                    attachments: attachments
+                        .and_then(|j| serde_json::from_str::<TaskAttachments>(&j).ok())
+                        .map(|mut a| {
+                            aurelius_domain::conversation::with_upload_ids(aurelius_domain::conversation::UploadOwner::Ticket(id), &mut a.files);
+                            a.files
+                        })
+                        .unwrap_or_default(),
+                    deadline_ms: r.get(16)?,
+                    root_task_id: r.get::<_, Option<String>>(17)?.and_then(|t| TaskId::parse(&t).ok()),
+                    root_task_status: r.get::<_, Option<String>>(18)?.and_then(|s| TaskStatus::parse(&s)),
+                    review_feedback: r.get(19)?,
+                    version: r.get::<_, i64>(20)? as u64,
+                    created_at_ms: r.get(21)?,
+                    updated_at_ms: r.get(22)?,
+                    started_at_ms: r.get(23)?,
+                    done_at_ms: r.get(24)?,
+                    archived_at_ms: r.get(25)?,
+                },
+                description,
+            ))
+        },
+    )?;
+    let needle = filter.query.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_lowercase);
+    let mut out = Vec::new();
+    for row in rows {
+        let (mut ticket, key) = row?;
+        ticket.description = key.as_deref().and_then(read_blob).filter(|d| !d.is_empty());
+        if let Some(needle) = &needle {
+            let number = needle.strip_prefix('#').and_then(|n| n.parse::<u32>().ok());
+            let hit = number == Some(ticket.number)
+                || ticket.title.to_lowercase().contains(needle.as_str())
+                || ticket.description.as_deref().is_some_and(|d| d.to_lowercase().contains(needle.as_str()));
+            if !hit {
+                continue;
+            }
+        }
+        out.push(ticket);
+    }
+    Ok(out)
+}
+
+pub fn view(conn: &Connection, id: TicketId, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Option<TicketView>, StorageError> {
+    Ok(list(conn, &TicketFilter { ticket: Some(id), include_archived: true, ..Default::default() }, read_blob)?.pop())
+}
+
+/// The board: every column left to right with its cards (not archived), for
+/// one project or all (B4).
+pub fn board(conn: &Connection, project: Option<ProjectId>, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<BoardColumnCards>, StorageError> {
+    let mut tickets = list(conn, &TicketFilter { project, ..Default::default() }, read_blob)?;
+    Ok(crate::company::columns(conn)?
+        .into_iter()
+        .map(|column| {
+            let (mine, rest): (Vec<TicketView>, Vec<TicketView>) = std::mem::take(&mut tickets).into_iter().partition(|t| t.column_id == column.id);
+            tickets = rest;
+            BoardColumnCards { column, tickets: mine }
+        })
+        .collect())
+}

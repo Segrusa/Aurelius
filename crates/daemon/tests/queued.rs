@@ -118,7 +118,7 @@ async fn project_with_employee(client: &Client) -> (ProjectId, EmployeeId) {
     else {
         panic!()
     };
-    let create = CreateEmployee { name: "Alex".into(), role: "Backend developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+    let create = CreateEmployee { name: "Alex".into(), role: "Backend developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     (project_id, employee_id)
 }

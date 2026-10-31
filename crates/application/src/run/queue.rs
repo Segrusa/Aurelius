@@ -75,13 +75,14 @@ fn job_payload(run: RunId, conversation: ConversationId, message: MessageId, rep
 }
 
 /// Queue a run for `reply_to`: runs row + `run.queued` + durable job (job id = run id).
+/// The notices: `run.queued`, after those of a task that goes on with it (`link_run`).
 pub(crate) fn queue_run(
     tx: &Tx<'_>,
     ctx_meta: &serde_json::Value,
     correlation: &str,
     conversation: ConversationId,
     reply_to: MessageId,
-) -> Result<(RunId, EventNotice), StorageError> {
+) -> Result<(RunId, Vec<EventNotice>), StorageError> {
     queue_run_marked(tx, ctx_meta, correlation, conversation, reply_to, None)
 }
 
@@ -93,14 +94,14 @@ pub(crate) fn queue_run_marked(
     conversation: ConversationId,
     reply_to: MessageId,
     group: Option<conv::GroupRun>,
-) -> Result<(RunId, EventNotice), StorageError> {
+) -> Result<(RunId, Vec<EventNotice>), StorageError> {
     let run_id = RunId::new();
     let message_id = MessageId::new();
     // Every conversation runs like an employee at work: the employee defaults apply.
     let resolved = crate::run::connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee)?;
     conv::insert_run(tx, run_id, conversation, &resolved)?;
     // A run in a live task's conversation counts for the task.
-    crate::task::task_runs::link_run(tx, run_id, conversation)?;
+    let mut notices = crate::task::task_runs::link_run(tx, run_id, conversation)?;
     let (event_id, notice) = emit(
         tx,
         Ev {
@@ -117,7 +118,8 @@ pub(crate) fn queue_run_marked(
     )?;
     let payload = job_payload(run_id, conversation, message_id, reply_to, group);
     events::insert_job(tx, &run_id.to_string(), CHAT_RUN_KIND, event_id, &format!("run:{run_id}"), &payload)?;
-    Ok((run_id, notice))
+    notices.push(notice);
+    Ok((run_id, notices))
 }
 
 /// Stop one run that has status `status`; `None` when it had already finished.

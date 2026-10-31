@@ -175,7 +175,7 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     }
     let marking = GroupRun { conversation_id: group_id, message_id: MessageId::new(), hop, mode: None };
     let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
-    Ok(Some((run, vec![posted, queued])))
+    Ok(Some((run, std::iter::once(posted).chain(queued).collect())))
 }
 
 /// The answer of a run the group chat woke, copied to the group as the

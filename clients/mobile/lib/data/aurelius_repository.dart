@@ -55,6 +55,31 @@ class AureliusRepository {
     return (receipt.result as WriteResultHost).value;
   }
 
+  /// The board members, oldest first ("Who's working here?").
+  Future<List<UserView>> boardMembers() async => (await _ask<ResponseBodyUsers>(userList())).value.users;
+
+  /// A board member was added (here or on another client).
+  Stream<Event> get boardMemberChanges => events.where((e) => e.kind == EventKind.userCreated);
+
+  /// Choose [userId] on this phone after the one password check (B8).
+  Future<UserView> useBoardMember(String userId, String password) => connection.useBoardMember(userId, password);
+
+  /// A new board member; returns its id. Without an active one, it becomes this phone's.
+  Future<String> createBoardMember(String username, String password) => connection.createBoardMember(username, password);
+
+  /// The Board: its six columns with their cards, for one project or all (B4).
+  Future<BoardView> board({String? projectId}) async => (await _ask<ResponseBodyBoard>(boardGet(projectId: projectId))).value;
+
+  /// One ticket with its main task and every task linked to it.
+  Future<TicketDetail> ticket(String ticketId) async => (await _ask<ResponseBodyTicket>(ticketGet(ticketId: ticketId))).value;
+
+  /// What changes a card or the columns: tickets, the columns, the tasks under
+  /// tickets, projects and employees (dispatcher, names).
+  Stream<Event> get boardChanges => changes.where((e) {
+        final kind = e.kind.wire;
+        return kind.startsWith('ticket.') || kind.startsWith('board.') || kind.startsWith('task.') || kind.startsWith('project.') || kind.startsWith('employee.') || kind.startsWith('company.') || kind.startsWith('approval.');
+      });
+
   Future<List<ProjectSummary>> projects() async => (await _ask<ResponseBodyProjects>(projectList())).value.projects;
 
   /// A project's conversations, most recent first.
@@ -72,20 +97,14 @@ class AureliusRepository {
   Future<ActivityView> activity(String messageId, String callId) async =>
       (await _ask<ResponseBodyActivity>(activityGet(messageId: messageId, callId: callId))).value;
 
-  /// The company's employees (archived ones left out by the server); all or one department's.
-  Future<List<EmployeeSummary>> employees({String? departmentId}) async =>
-      (await _ask<ResponseBodyEmployees>(employeeList(departmentId: departmentId))).value.employees;
+  /// The company's employees (archived ones left out by the server).
+  Future<List<EmployeeSummary>> employees() async => (await _ask<ResponseBodyEmployees>(employeeList())).value.employees;
 
-  /// Departments by name; archived ones too with [archived].
-  Future<List<DepartmentSummary>> departments({bool archived = false}) async =>
-      (await _ask<ResponseBodyDepartments>(departmentList(archived: archived))).value.departments;
-
-  /// The company in one read: departments, employees, Follow the org chart and the management team.
+  /// The company in one read: employees, Follow the org chart and the management team.
   Future<CompanySnapshot> company() async => (await _ask<ResponseBodyCompany>(companyGet())).value;
 
   /// Colleague and instruction proposals of the whole company, pending first.
-  Future<List<ProposalView>> proposals({String? departmentId}) async =>
-      (await _ask<ResponseBodyProposals>(proposalList(departmentId: departmentId))).value.proposals;
+  Future<List<ProposalView>> proposals() async => (await _ask<ResponseBodyProposals>(proposalList())).value.proposals;
 
   /// A task's variants and the judge's comparison (feature `task_variants`).
   Future<TaskVariantsView> variantsOf(String taskId) async => (await _ask<ResponseBodyTaskVariants>(taskVariants(taskId: taskId))).value;
@@ -112,11 +131,14 @@ class AureliusRepository {
     }
   }
 
+  /// The server's jobs: the queue and what runs now.
+  Future<List<JobSummary>> jobs() async => (await _ask<ResponseBodyJobs>(jobList())).value.jobs;
+
   Future<List<ApprovalView>> approvals() async => (await _ask<ResponseBodyApprovals>(approvalList())).value.approvals;
 
   /// Tasks, newest first, company-wide unless filtered.
-  Future<List<TaskView>> tasks({String? projectId, String? employeeId, String? departmentId}) async =>
-      (await _ask<ResponseBodyTasks>(taskList(projectId: projectId, employeeId: employeeId, departmentId: departmentId))).value.tasks;
+  Future<List<TaskView>> tasks({String? projectId, String? employeeId}) async =>
+      (await _ask<ResponseBodyTasks>(taskList(projectId: projectId, employeeId: employeeId))).value.tasks;
 
   Future<TimelinePage> timeline({String? projectId, String? correlationId, int? beforeSeq, int limit = 40, bool activity = false}) async =>
       (await _ask<ResponseBodyTimeline>(timelineList(TimelineQuery(
@@ -128,9 +150,9 @@ class AureliusRepository {
       ))))
           .value;
 
-  /// Global memory plus the scopes asked for (a project, an employee and its department, a department).
-  Future<List<MemoryView>> memory({String? projectId, String? employeeId, String? departmentId}) async =>
-      (await _ask<ResponseBodyMemory>(memoryList(projectId: projectId, employeeId: employeeId, departmentId: departmentId))).value.items;
+  /// Global memory plus the scopes asked for (a project, an employee).
+  Future<List<MemoryView>> memory({String? projectId, String? employeeId}) async =>
+      (await _ask<ResponseBodyMemory>(memoryList(projectId: projectId, employeeId: employeeId))).value.items;
 
   Future<List<ShareView>> shares(String projectId) async => (await _ask<ResponseBodyShares>(shareList(projectId: projectId))).value;
 

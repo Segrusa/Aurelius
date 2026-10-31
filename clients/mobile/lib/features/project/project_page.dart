@@ -14,6 +14,7 @@ import '../../data/views.dart';
 import '../connection/connection_banner.dart';
 import '../ideas/ideas_bloc.dart';
 import '../ideas/ideas_tab.dart';
+import '../board/dispatcher_row.dart';
 import '../company/company_bloc.dart';
 import '../company_org/employee_widgets.dart';
 import 'project_bloc.dart';
@@ -236,6 +237,8 @@ class _Overview extends StatelessWidget {
                   ),
                 ),
               ),
+            const GroupHeader('Board'),
+            ProjectDispatcherRow(project: project),
             if (waiting.isNotEmpty) ...[
               const GroupHeader('Needs Your Attention'),
               InsetGroup(

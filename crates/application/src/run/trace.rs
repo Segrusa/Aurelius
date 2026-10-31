@@ -90,6 +90,7 @@ pub fn from_request(plan: &crate::run::ChatRunPlan, request: &RunRequest, now_ms
     let (profile, mode, mcp_servers) = match &request.profile {
         ToolProfile::TextOnly => ("text", None, Vec::new()),
         ToolProfile::Work { permission_mode, mcp_servers, .. } => ("work", Some(permission_mode.clone()), mcp_servers.keys().cloned().collect()),
+        ToolProfile::Triage { .. } => ("triage", None, Vec::new()),
     };
     let system = request.system.clone().unwrap_or_default();
     let mut parts = system_parts(&system);

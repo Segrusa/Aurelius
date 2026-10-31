@@ -19,7 +19,6 @@ ProjectSummary projectOf({String id = 'p1', String name = 'Atlas', ProjectStatus
 
 EmployeeSummary employeeOf({
   String id = 'm1',
-  String? departmentId,
   List<String> projectsActive = const [],
   String name = 'Iris',
   String role = 'Writer',
@@ -44,7 +43,6 @@ EmployeeSummary employeeOf({
       browserAllowed: browserAllowed,
       conversationId: conversationId,
       conversations: conversations,
-      departmentId: departmentId,
       heartbeat: heartbeat,
       id: id,
       instructions: instructions,
@@ -58,19 +56,6 @@ EmployeeSummary employeeOf({
       title: title,
       version: version,
       working: working,
-    );
-
-DepartmentSummary departmentOf({String id = 'd1', String name = 'Engineering', String? description, String? headId, int memberCount = 0, int openTasks = 0, DepartmentStatus status = DepartmentStatus.active}) =>
-    DepartmentSummary(
-      createdAtMs: 0,
-      description: description,
-      headId: headId,
-      id: id,
-      memberCount: memberCount,
-      name: name,
-      openTasks: openTasks,
-      status: status,
-      version: 1,
     );
 
 TaskView taskOf({
@@ -95,9 +80,13 @@ TaskView taskOf({
   String? createdByApp,
   VariantPhase? variantPhase,
   LiveRun? liveRun,
+  String? ticketId,
+  int? ticketNumber,
 }) =>
     TaskView(
       liveRun: liveRun,
+      ticketId: ticketId,
+      ticketNumber: ticketNumber,
       attachments: const [],
       createdByApp: createdByApp,
       children: children,
@@ -225,10 +214,9 @@ IdeaView ideaOf(String id, String title, {String projectId = 'p1', String author
 ConversationSummary conversationOf(String id, {String title = '', int messageCount = 0, int updatedAtMs = 0}) =>
     ConversationSummary(createdAtMs: 0, id: id, messageCount: messageCount, title: title, updatedAtMs: updatedAtMs);
 
-ProposalView proposalOf(String id, {String name = 'Sam', String role = 'Designer', String? title, String proposedByName = 'Iris', String? reportsTo, String? reportsToName, String? departmentId, ProposalStatus status = ProposalStatus.pending, String reason = 'We need design help'}) =>
+ProposalView proposalOf(String id, {String name = 'Sam', String role = 'Designer', String? title, String proposedByName = 'Iris', String? reportsTo, String? reportsToName, ProposalStatus status = ProposalStatus.pending, String reason = 'We need design help'}) =>
     ProposalView(
       createdAtMs: 0,
-      departmentId: departmentId,
       id: id,
       instructions: 'Design things',
       name: name,
@@ -323,9 +311,9 @@ Future<S> stateWhere<S>(BlocBase<S> bloc, bool Function(S) test) async =>
     test(bloc.state) ? bloc.state : bloc.stream.firstWhere(test);
 
 /// What `company.get` answers: [employees] with the roots derived as the server does.
-CompanySnapshot companyOf({List<EmployeeSummary> employees = const [], List<DepartmentSummary> departments = const [], bool followOrgChart = true}) => CompanySnapshot(
+CompanySnapshot companyOf({List<EmployeeSummary> employees = const [], bool followOrgChart = true}) => CompanySnapshot(
       asOfSeq: 1,
-      departments: departments,
+      company: const CompanyView(id: 'company', name: 'Aurelius', version: 1),
       employees: employees,
       followOrgChart: followOrgChart,
       roots: [for (final e in employees) if (e.reportsTo == null) e.id],

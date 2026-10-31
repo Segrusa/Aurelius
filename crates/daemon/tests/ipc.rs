@@ -56,7 +56,7 @@ fn error_code(outcome: Outcome) -> ErrorCode {
 }
 
 fn hello(request_id: u64, protocol: u16) -> Request {
-    let mut request = Request::read(request_id, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts: Vec::new() }));
+    let mut request = Request::read(request_id, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), user_id: None }));
     request.protocol = protocol;
     request
 }
@@ -282,7 +282,7 @@ async fn a_host_write_replays_from_its_receipt_and_hides_the_api_key_secret() {
     let client = connect(&root).await;
 
     let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(create("Atlas"), None)).await.unwrap().result else { panic!() };
-    let create_employee = CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+    let create_employee = CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create_employee), None)).await.unwrap().result else { panic!() };
     let function = client.create_agent_function(function_for(project_id, employee_id)).await.unwrap();
 
@@ -324,13 +324,13 @@ fn function_for(project_id: ProjectId, employee_id: EmployeeId) -> CreateAgentFu
 // ---- the handshake ----
 
 #[tokio::test(flavor = "multi_thread")]
-async fn another_protocol_major_is_refused_with_update_needed_but_protocol_3_works() {
+async fn another_protocol_major_is_refused_with_update_needed_but_protocol_4_works() {
     let (_dir, root) = tempdir();
     let daemon = start(&root).await;
     let mut stream = raw(&root).await;
 
-    // An old (2.x) client and a newer one are told to update.
-    for (id, protocol, update) in [(1, 2, "Update the app"), (2, 4, "Update the server")] {
+    // An old (3.x) client and a newer one are told to update.
+    for (id, protocol, update) in [(1, 3, "Update the app"), (2, 5, "Update the server")] {
         match ask(&mut stream, &hello(id, protocol)).await {
             Outcome::Error(err) => {
                 assert_eq!(err.code, ErrorCode::IncompatibleProtocol, "hello with protocol {protocol}");
@@ -347,8 +347,8 @@ async fn another_protocol_major_is_refused_with_update_needed_but_protocol_3_wor
     }
 
     // The same connection works with the right major.
-    match ask(&mut stream, &hello(9, 3)).await {
-        Outcome::Ok(ResponseBody::Hello(h)) => assert_eq!(h.protocol, 3),
+    match ask(&mut stream, &hello(9, 4)).await {
+        Outcome::Ok(ResponseBody::Hello(h)) => assert_eq!(h.protocol, 4),
         other => panic!("{other:?}"),
     }
     let client = connect(&root).await;

@@ -49,7 +49,7 @@ async fn task_run_config(root: &Path, title: &str) -> serde_json::Value {
 }
 
 async fn employee(client: &Client, project_id: aurelius_domain::ProjectId, name: &str) -> aurelius_domain::EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+    let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     match exec(client, Command::CreateEmployee(create)).await {
         CommandResult::EmployeeCreated { employee_id, .. } => employee_id,
         other => panic!("{other:?}"),

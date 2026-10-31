@@ -37,6 +37,10 @@ class FakeSocket implements LinkSocket {
   final _incoming = StreamController<dynamic>();
   int? _closeCode;
 
+  /// This connection's active board member (the daemon's `Peer.user`).
+  String? user;
+  int tries = 0;
+
   @override
   Stream<dynamic> get stream => _incoming.stream;
 
@@ -44,7 +48,10 @@ class FakeSocket implements LinkSocket {
   int? get closeCode => _closeCode;
 
   @override
-  void send(String text) => daemon._handle(this, jsonDecode(text) as Map<String, dynamic>);
+  void send(String text) {
+    daemon.frames.add(text);
+    daemon._handle(this, jsonDecode(text) as Map<String, dynamic>);
+  }
 
   void push(Map<String, dynamic> message) {
     if (!_incoming.isClosed) _incoming.add(jsonEncode(message));
@@ -60,7 +67,7 @@ class FakeSocket implements LinkSocket {
   Future<void> close() => drop();
 }
 
-/// Just enough of the daemon: hello, health, subscribe, idempotent writes (protocol 3.0).
+/// Just enough of the daemon: hello, health, subscribe, idempotent writes (protocol 4.0).
 class FakeDaemon {
   final List<FakeSocket> sockets = [];
   final Map<String, Map<String, dynamic>> receipts = {};
@@ -72,13 +79,28 @@ class FakeDaemon {
   String environment = 'production';
 
   /// The protocol major the fake server answers hello with.
-  int helloProtocol = 3;
+  int helloProtocol = 4;
 
   /// The major the fake server accepts in requests (a newer server refuses ours).
-  int serverProtocol = 3;
+  int serverProtocol = 4;
 
   /// The params of the last hello.
   Map<String, dynamic>? hello;
+
+  /// Board members (`UserView` json) and their passwords, as the server knows them.
+  final List<Map<String, dynamic>> users = [];
+  final Map<String, String> passwords = {};
+
+  /// Every request as sent, to check what leaves the phone.
+  final List<String> frames = [];
+
+  void addUser(String id, String username, String password) {
+    users.add({'id': id, 'username': username, 'created_at_ms': users.length});
+    passwords[id] = password;
+  }
+
+  Map<String, dynamic>? _user(String? id) => users.where((u) => u['id'] == id).firstOrNull;
+  Map<String, dynamic> _whoami(FakeSocket socket) => {'board_members_exist': users.isNotEmpty, 'user': ?_user(socket.user)};
 
   FakeSocket? get current => sockets.isEmpty ? null : sockets.last;
 
@@ -91,6 +113,12 @@ class FakeDaemon {
 
   void _handle(FakeSocket socket, Map<String, dynamic> request) {
     final id = request['request_id'] as int;
+    void fail(String code, String message) => scheduleMicrotask(() => socket.push({
+          'type': 'response',
+          'request_id': id,
+          'error': {'code': code, 'message': message},
+        }));
+    final params = request['params'] as Map<String, dynamic>?;
     void reply(String type, Object? value) => scheduleMicrotask(() => socket.push({
           'type': 'response',
           'request_id': id,
@@ -107,7 +135,9 @@ class FakeDaemon {
     switch (request['method']) {
       case 'session.hello':
         hello = request['params'] as Map<String, dynamic>?;
+        socket.user = _user(hello?['user_id'] as String?)?['id'] as String?;
         reply('hello', {
+          ..._whoami(socket),
           'host_id': 'host-1',
           'host_name': 'my-pc',
           'daemon_version': '0.7.0',
@@ -121,6 +151,41 @@ class FakeDaemon {
         reply('health', {'host_id': 'host-1', 'daemon_version': '0.7.0', 'pid': 1, 'started_at_ms': 0, 'last_seq': 10, 'active_jobs': 0});
       case 'event.subscribe':
         reply('subscribed', {'replayed_through_seq': 10});
+      case 'user.list':
+        reply('users', {'users': users});
+      case 'user.whoami':
+        reply('who_am_i', _whoami(socket));
+      case 'user.use':
+        if (++socket.tries > 5) return fail('too_many_attempts', 'Too many tries. Wait a minute and try again.');
+        final userId = params!['user_id'] as String;
+        if (passwords[userId] == null || passwords[userId] != params['password']) return fail('wrong_password', 'That board member or password is wrong.');
+        socket.user = userId;
+        reply('who_am_i', _whoami(socket));
+      case 'user.create':
+        final username = params!['username'] as String;
+        if (users.any((u) => (u['username'] as String).toLowerCase() == username.toLowerCase())) return fail('username_taken', 'This username is taken.');
+        if ((params['password'] as String).length < 12) return fail('weak_password', 'At least 12 characters.');
+        final userId = 'u-${users.length + 1}';
+        addUser(userId, username, params['password'] as String);
+        socket.user ??= userId;
+        if (dropNextCommand) {
+          dropNextCommand = false;
+          // Made on the PC, but the answer never arrives.
+          scheduleMicrotask(() => socket.drop());
+          return;
+        }
+        reply('receipt', {
+          'idempotency_key': request['idempotency_key'],
+          'committed_seq': 11,
+          'replayed': false,
+          'result': {
+            'kind': 'command',
+            'value': {'type': 'user_created', 'user_id': userId},
+          },
+        });
+      case 'ticket.create':
+        if (socket.user == null) return fail('board_member_required', 'A board member is needed for this.');
+        reply('receipt', _receipt(request['idempotency_key'] as String, false));
       case 'employee.send_message' || 'task.cancel' || 'approval.decide':
         final key = request['idempotency_key'] as String;
         if (dropNextCommand) {

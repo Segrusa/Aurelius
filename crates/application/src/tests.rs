@@ -3,7 +3,7 @@ use aurelius_domain::project::{CreateProject, RenameProject, SetProjectDescripti
 use aurelius_storage::queries;
 
 fn ctx() -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
 }
 
 fn create(name: &str) -> CommandEnvelope {

@@ -85,8 +85,6 @@ pub struct Colleague {
     /// The position on the org chart, if one is set.
     pub title: Option<String>,
     pub reports_to: Option<EmployeeId>,
-    /// The name of its department, if it is in one.
-    pub department: Option<String>,
 }
 
 impl TaskContext {
@@ -117,10 +115,10 @@ pub(crate) fn brief_text(ctx: &TaskContext) -> String {
     out
 }
 
-type Identity = (String, LifecycleStatus, String, TaskPolicy);
+pub(crate) type Identity = (String, LifecycleStatus, String, TaskPolicy);
 
 /// An employee's name, status, identity text and policy.
-fn employee_identity(conn: &rusqlite::Connection, m: EmployeeId, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<Identity>, StorageError> {
+pub(crate) fn employee_identity(conn: &rusqlite::Connection, m: EmployeeId, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<Identity>, StorageError> {
     use rusqlite::OptionalExtension;
     let row = conn
         .query_row(
@@ -145,8 +143,7 @@ fn employee_identity(conn: &rusqlite::Connection, m: EmployeeId, read: &dyn Fn(&
 /// may work in any project), oldest first.
 pub(crate) fn colleagues(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>) -> Result<Vec<Colleague>, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT m.id, m.name, m.role, b.storage_key, m.title, m.reports_to, d.name FROM employees m LEFT JOIN blobs b ON b.id = m.instructions_blob_id
-         LEFT JOIN departments d ON d.id = m.department_id AND d.status = 'active'
+        "SELECT m.id, m.name, m.role, b.storage_key, m.title, m.reports_to FROM employees m LEFT JOIN blobs b ON b.id = m.instructions_blob_id
          WHERE m.status = 'active' ORDER BY m.created_at_ms, m.id",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -157,55 +154,28 @@ pub(crate) fn colleagues(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Opt
             r.get::<_, Option<String>>(3)?,
             r.get::<_, Option<String>>(4)?,
             r.get::<_, Option<String>>(5)?,
-            r.get::<_, Option<String>>(6)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, name, role, key, title, reports_to, department) = row?;
+        let (id, name, role, key, title, reports_to) = row?;
         let Ok(id) = EmployeeId::parse(&id) else { continue };
         let focus = key.as_deref().and_then(read).and_then(|t| t.lines().map(str::trim).find(|l| !l.is_empty()).map(|l| l.chars().take(160).collect())).unwrap_or_default();
-        out.push(Colleague { id, name, role, focus, title, reports_to: reports_to.and_then(|m| EmployeeId::parse(&m).ok()), department });
+        out.push(Colleague { id, name, role, focus, title, reports_to: reports_to.and_then(|m| EmployeeId::parse(&m).ok()) });
     }
     Ok(out)
 }
 
-/// The colleagues as lines for a system text, grouped by department (those
-/// without one last); the management team (no boss) is marked once there is a
-/// chart (someone has a boss): in a flat company everyone would be.
+/// The colleagues as lines for a system text, in the order given; the
+/// management team (no boss) is marked once there is a chart (someone has a
+/// boss): in a flat company everyone would be.
 pub(crate) fn colleague_lines(colleagues: &[&Colleague]) -> String {
     let charted = colleagues.iter().any(|c| c.reports_to.is_some());
-    let mut departments: Vec<Option<&str>> = Vec::new();
-    for c in colleagues {
-        let d = c.department.as_deref();
-        if !departments.contains(&d) {
-            departments.push(d);
-        }
-    }
-    departments.sort_by_key(|d| (d.is_none(), d.map(str::to_lowercase)));
     let line = |c: &Colleague| {
         let team = if charted && c.reports_to.is_none() { ", management team" } else { "" };
         if c.focus.is_empty() { format!("- {} ({}{team})", c.name, c.role) } else { format!("- {} ({}{team}): {}", c.name, c.role, c.focus) }
     };
-    let mut out = Vec::new();
-    for d in departments {
-        let members: Vec<String> = colleagues.iter().filter(|c| c.department.as_deref() == d).map(|c| line(c)).collect();
-        if members.is_empty() {
-            continue;
-        }
-        if departments_named(colleagues) {
-            out.push(match d {
-                Some(d) => format!("{d}:"),
-                None => "No department:".to_string(),
-            });
-        }
-        out.extend(members);
-    }
-    out.join("\n")
-}
-
-fn departments_named(colleagues: &[&Colleague]) -> bool {
-    colleagues.iter().any(|c| c.department.is_some())
+    colleagues.iter().map(|c| line(c)).collect::<Vec<_>>().join("\n")
 }
 
 /// The parent's job continues when a sub-task ended (it waits for its sub-tasks).
@@ -218,6 +188,9 @@ pub(crate) fn wake_parent(tx: &Tx<'_>, task: TaskId) -> Result<(), StorageError>
     Ok(())
 }
 
+/// Why `task.assign` and `task.cancel` refuse the main task of a ticket.
+const USE_THE_BOARD: &str = "This is the main task of a ticket: use the board (assign or cancel the ticket).";
+
 /// Cancel the sub-tasks of a cancelled task (and theirs).
 pub(crate) fn cancel_children(tx: &Tx<'_>, st: &Store, task: TaskId, notices: &mut Vec<EventNotice>) -> Result<(), StorageError> {
     for child in store::children_of(tx, task)? {
@@ -225,13 +198,30 @@ pub(crate) fn cancel_children(tx: &Tx<'_>, st: &Store, task: TaskId, notices: &m
             continue;
         }
         let Some(row) = store::load_task(tx, child.id)? else { continue };
-        crate::task::task_line::set_status(tx, child.id, TaskStatus::Cancelled, None)?;
+        notices.extend(crate::task::task_line::set_status(tx, child.id, TaskStatus::Cancelled, None)?);
         tx.execute("UPDATE jobs SET state = 'cancelled' WHERE id = ?1 AND state = 'ready'", [child.id.to_string()])?;
         notices.push(task_event(tx, child.id, row.project_id, "task.cancelled", serde_json::json!({ "reason": "parent_cancelled" }))?);
         notices.extend(crate::run::queue::stop_parked_runs_of_task(tx, st, child.id, &child.id.to_string())?);
         cancel_children(tx, st, child.id, notices)?;
     }
     Ok(())
+}
+
+/// Cancel a task that has not ended, with everything that hangs on it (its
+/// variants, parked runs, sub-tasks), and let whoever waits on it go on.
+pub(crate) fn cancel_in(tx: &Tx<'_>, st: &Store, task_id: TaskId, correlation: &str, meta: serde_json::Value) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(row) = store::load_task(tx, task_id)? else { return Ok(vec![]) };
+    let mut notices = crate::task::task_line::set_status(tx, task_id, TaskStatus::Cancelled, None)?.into_vec();
+    tx.execute("UPDATE jobs SET state = 'cancelled' WHERE id = ?1 AND state = 'ready'", [task_id.to_string()])?;
+    notices.push(task_event(tx, task_id, row.project_id, "task.cancelled", meta)?);
+    // Its variants stop too (their runs are stopped with the task's, their worktrees go).
+    notices.extend(crate::task::variants::stop(tx, task_id, "cancelled")?);
+    // Its runs parked for a usage limit end now; they must not start again at the reset.
+    notices.extend(crate::run::queue::stop_parked_runs_of_task(tx, st, task_id, correlation)?);
+    cancel_children(tx, st, task_id, &mut notices)?;
+    wake_parent(tx, task_id)?;
+    notices.extend(crate::task::task_runs::origin_released(tx, task_id)?);
+    Ok(notices)
 }
 
 /// Whether an app may make this task now: its key still works, its limits
@@ -390,6 +380,8 @@ impl CommandService {
         }
     }
 
+    /// The main task of a ticket is the board's: its owner and its end go through
+    /// the ticket (`ticket.assign`, `ticket.cancel`), so card and task stay one.
     pub(crate) fn cancel_task(&self, envelope: &CommandEnvelope, hash: String, cmd: &task::CancelTask) -> Result<Committed, AppError> {
         let task_id = cmd.task_id;
         let command_id = envelope.command_id;
@@ -398,19 +390,13 @@ impl CommandService {
             let Some(row) = store::load_task(tx, task_id)? else {
                 return Ok(Err(domain_error(DomainError::TaskNotFound(task_id))));
             };
+            if crate::task::ticket_line::is_root(tx, task_id)? {
+                return Ok(Err(domain_error(DomainError::Ticket(USE_THE_BOARD.into()))));
+            }
             if row.status.is_terminal() {
                 return Ok(Ok((CommandResult::TaskCancelled { task_id }, vec![])));
             }
-            crate::task::task_line::set_status(tx, task_id, TaskStatus::Cancelled, None)?;
-            tx.execute("UPDATE jobs SET state = 'cancelled' WHERE id = ?1 AND state = 'ready'", [task_id.to_string()])?;
-            let mut notices = vec![task_event(tx, task_id, row.project_id, "task.cancelled", serde_json::json!({}))?];
-            // Its variants stop too (their runs are stopped with the task's, their worktrees go).
-            notices.extend(crate::task::variants::stop(tx, task_id, "cancelled")?);
-            // Its runs parked for a usage limit end now; they must not start again at the reset.
-            notices.extend(crate::run::queue::stop_parked_runs_of_task(tx, &st, task_id, &command_id.to_string())?);
-            cancel_children(tx, &st, task_id, &mut notices)?;
-            wake_parent(tx, task_id)?;
-            notices.extend(crate::task::task_runs::origin_released(tx, task_id)?);
+            let notices = cancel_in(tx, &st, task_id, &command_id.to_string(), serde_json::json!({}))?;
             Ok(Ok((CommandResult::TaskCancelled { task_id }, notices)))
         })
     }
@@ -423,6 +409,9 @@ impl CommandService {
         self.commit(command_id, hash, move |tx| {
             let task_id = cmd.task_id;
             let Some(row) = store::load_task(tx, task_id)? else { return Ok(Err(domain_error(DomainError::TaskNotFound(task_id)))) };
+            if crate::task::ticket_line::is_root(tx, task_id)? {
+                return Ok(Err(domain_error(DomainError::Ticket(USE_THE_BOARD.into()))));
+            }
             if !matches!(row.status, TaskStatus::Draft | TaskStatus::Queued | TaskStatus::Waiting) {
                 return Ok(Err(domain_error(DomainError::Memory("A task can only be given to another employee while it is not running.".into()))));
             }
@@ -437,7 +426,7 @@ impl CommandService {
                 },
                 None => None,
             };
-            crate::task::task_line::set_employee(tx, task_id, cmd.employee_id)?;
+            let owner = crate::task::task_line::set_employee(tx, task_id, cmd.employee_id)?;
             let mut created = emit(tx, Ev {
                 aggregate_type: "task",
                 aggregate_id: task_id.to_string(),
@@ -451,10 +440,11 @@ impl CommandService {
             })?;
             created.1.project_id = Some(row.project_id);
             let mut notices = vec![created.1];
+            notices.extend(owner);
             match cmd.employee_id {
                 Some(_) => {
                     if row.status != TaskStatus::Queued {
-                        crate::task::task_line::set_status(tx, task_id, TaskStatus::Queued, None)?;
+                        notices.extend(crate::task::task_line::set_status(tx, task_id, TaskStatus::Queued, None)?);
                         notices.push(task_event(tx, task_id, row.project_id, "task.queued", serde_json::json!({ "reason": "assigned" }))?);
                     }
                     let woken = tx.execute(
@@ -467,7 +457,7 @@ impl CommandService {
                 }
                 None => {
                     // Back to a draft: nothing runs until it has an employee again.
-                    tx.execute("UPDATE tasks SET status = 'draft', waiting_reason = NULL WHERE id = ?1", [task_id.to_string()])?;
+                    notices.extend(crate::task::task_line::set_status(tx, task_id, TaskStatus::Draft, None)?);
                     tx.execute("UPDATE jobs SET state = 'cancelled' WHERE id = ?1 AND state = 'ready'", [task_id.to_string()])?;
                 }
             }
@@ -567,8 +557,9 @@ impl CommandService {
                 if row.status == to || !task::can_transition(row.status, to) {
                     return Ok(vec![]);
                 }
-                crate::task::task_line::set_status(tx, task, to, reason)?;
-                let mut notices = vec![task_event(tx, task, project, event_type, serde_json::json!({ "reason": reason }))?];
+                // The card of a main task moves with it (Queued → Failed or Waiting: Todo → Doing).
+                let mut notices = crate::task::task_line::set_status(tx, task, to, reason)?.into_vec();
+                notices.push(task_event(tx, task, project, event_type, serde_json::json!({ "reason": reason }))?);
                 if to == TaskStatus::Failed {
                     let why = reason.map(|r| format!(" ({r})")).unwrap_or_default();
                     notices.extend(thread::post(tx, &st, task, Speaker::Update { kind: "status", from: "Aurelius" }, &format!("The task failed{why}."))?);

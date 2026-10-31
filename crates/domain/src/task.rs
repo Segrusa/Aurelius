@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 pub const TITLE_MAX: usize = 160;
 pub const GOAL_MAX: usize = 20_000;
 pub const MAX_CRITERIA: usize = 12;
+/// `waiting_reason` of a ticket's main task whose plan waits for a board member.
+pub const WAITING_PLAN_REVIEW: &str = "plan_review";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -55,7 +57,8 @@ impl TaskStatus {
 }
 
 /// Allowed task transitions. Terminal tasks never change;
-/// reopening creates a new linked task.
+/// reopening creates a new linked task. Why it waits (`waiting_reason`, such
+/// as `plan_review`) is the engine's business, not the matrix's.
 pub fn can_transition(from: TaskStatus, to: TaskStatus) -> bool {
     use TaskStatus::*;
     if from.is_terminal() {
@@ -66,10 +69,16 @@ pub fn can_transition(from: TaskStatus, to: TaskStatus) -> bool {
         (Draft, Queued)
             | (Queued, Running)
             | (Running, Review)
+            // The report after waiting for colleagues.
+            | (Waiting, Review)
             | (Review, Succeeded)
             | (Review, Queued)
+            // Handed over during its run: queued for the new employee.
+            | (Running, Queued)
             | (Queued | Running | Review, Waiting)
             | (Waiting, Queued)
+            // No employee any more (a draft again): nothing runs.
+            | (Queued | Waiting, Draft)
             | (_, Failed)
             | (_, Cancelled)
     )
@@ -260,6 +269,36 @@ mod tests {
         assert!(can_transition(Review, Queued), "revision goes back to queued");
         assert!(!can_transition(Succeeded, Queued));
         assert!(!can_transition(Failed, Cancelled));
+    }
+
+    #[test]
+    fn the_matrix_covers_the_engine_and_nothing_more() {
+        use TaskStatus::*;
+        let all = [Draft, Queued, Running, Waiting, Review, Succeeded, Failed, Cancelled];
+        let allowed = [
+            (Draft, Queued),
+            (Queued, Running),
+            (Running, Review),
+            (Waiting, Review),
+            (Review, Succeeded),
+            (Review, Queued),
+            (Running, Queued),
+            (Queued, Waiting),
+            (Running, Waiting),
+            (Review, Waiting),
+            (Waiting, Queued),
+            (Queued, Draft),
+            (Waiting, Draft),
+        ];
+        for from in all {
+            for to in all {
+                let expected = !from.is_terminal() && (matches!(to, Failed | Cancelled) || allowed.contains(&(from, to)));
+                assert_eq!(can_transition(from, to), expected, "{from:?} → {to:?}");
+            }
+        }
+        // The review gate: success only through Review, a draft never runs or reports directly.
+        assert!(!can_transition(Waiting, Succeeded) && !can_transition(Draft, Running) && !can_transition(Draft, Review));
+        assert!(!can_transition(Running, Draft) && !can_transition(Review, Draft), "a working or reported task is not a draft again");
     }
 
     #[test]

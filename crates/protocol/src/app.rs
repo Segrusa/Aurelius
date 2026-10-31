@@ -26,15 +26,20 @@ use aurelius_domain::autonomy::AgentMode;
 /// Why an app may not make a call.
 pub const NOT_FOR_APPS: &str = "Apps cannot use this.";
 
+/// Why an app may not accept a ticket or send it back.
+pub const REVIEW_GATE: &str = "Only a board member accepts a ticket or sends it back; apps cannot.";
+
 /// The scopes an app needs for `call` (all of them), or why it may not make it.
 pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
     use AppScope::*;
     match call {
         Call::Read(method) => match method {
-            Method::SessionHello(_) | Method::ServerGetHealth => Ok(vec![]),
+            Method::SessionHello(_) | Method::ServerGetHealth | Method::UserWhoami => Ok(vec![]),
+            // An app has no board member: it may see who they are, never create or become one.
+            Method::UserList => Ok(vec![Read]),
+            Method::UserUse(_) => Err(NOT_FOR_APPS),
             Method::ProjectList
-            | Method::EmployeeList { .. }
-            | Method::DepartmentList { .. }
+            | Method::EmployeeList
             | Method::CompanyGet
             | Method::TaskList { .. }
             | Method::ConversationGet { .. }
@@ -43,7 +48,10 @@ pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
             | Method::NotificationList
             | Method::MemoryList { .. }
             | Method::MemoryGetContext { .. }
-            | Method::IdeaList { .. } | Method::IdeaListAll {} => Ok(vec![Read]),
+            | Method::IdeaList { .. } | Method::IdeaListAll {}
+            | Method::BoardGet { .. }
+            | Method::TicketGet { .. }
+            | Method::TicketList { .. } => Ok(vec![Read]),
             // The group chat is the user's own conversation with the team, like an employee's chat.
             Method::GroupChatGet => Err(NOT_FOR_APPS),
             _ => Err(NOT_FOR_APPS),
@@ -85,6 +93,19 @@ fn command_needs(command: &Command) -> Result<Vec<AppScope>, &'static str> {
         Command::DecideApproval(d) if d.always_allow => Err("Apps cannot choose 'always allow'; the user decides that in Aurelius."),
         Command::DecideApproval(_) | Command::AnswerQuestion(_) | Command::DecidePlan(_) => Ok(vec![Approve]),
         Command::SendGroupMessage(_) => Err(NOT_FOR_APPS),
+        // The review gate is a board member's, never an app's (any audience).
+        Command::AcceptTicket(_) | Command::SendBackTicket(_) => Err(REVIEW_GATE),
+        Command::CreateTicket(t) if !t.files.is_empty() => Err(NO_FILES),
+        // An app has no board member: the server answers `board_member_required`.
+        Command::CreateTicket(_)
+        | Command::UpdateTicket(_)
+        | Command::MoveTicket(_)
+        | Command::StartTicket(_)
+        | Command::AssignTicket(_)
+        | Command::ApprovePlan(_)
+        | Command::RevisePlan(_)
+        | Command::CancelTicket(_)
+        | Command::ArchiveTicket(_) => Ok(vec![Run]),
         _ => Err(NOT_FOR_APPS),
     }
 }
@@ -112,7 +133,7 @@ pub fn allowed_for(held: &[AppScope], audience: AppAudience, call: &Call) -> Res
         None => Ok(()),
     };
     match call {
-        Call::Read(Method::DepartmentList { .. } | Method::CompanyGet) => Err("This app key reaches the management only; it cannot read the org chart.".into()),
+        Call::Read(Method::CompanyGet) => Err("This app key reaches the management only; it cannot read the org chart.".into()),
         Call::Write(WriteMethod::Domain(Command::StartProjectConversation(_) | Command::SendProjectMessage(_))) => Err(aurelius_domain::app_key::NO_PROJECT_ASSISTANT.into()),
         Call::Write(WriteMethod::Domain(Command::AnswerQuestion(_))) => missing(&[AppScope::Run]),
         _ => allowed(held, call),
@@ -167,7 +188,7 @@ mod tests {
     #[test]
     fn read_covers_the_reads_the_tools_use_and_nothing_else() {
         let r = [AppScope::Read];
-        for method in [Method::ProjectList, Method::TaskList { project_id: None, employee_id: None, department_id: None, state: None }, Method::EmployeeList { department_id: None }, Method::CompanyGet, Method::NotificationList, Method::ApprovalList, Method::MemoryList { project_id: None, employee_id: None, department_id: None }] {
+        for method in [Method::ProjectList, Method::TaskList { project_id: None, employee_id: None, state: None }, Method::EmployeeList, Method::CompanyGet, Method::NotificationList, Method::ApprovalList, Method::MemoryList { project_id: None, employee_id: None }] {
             assert!(may(&r, &Call::Read(method.clone())), "{method:?}");
             assert!(!may(&[AppScope::Run, AppScope::Approve], &Call::Read(method.clone())), "{method:?} needs read");
         }
@@ -255,7 +276,7 @@ mod tests {
         assert!(refused.contains("management"), "{refused}");
         assert!(allowed_for(&AppScope::ALL, AppAudience::Management, &Call::Read(Method::CompanyGet)).is_err());
         assert!(allowed_for(&AppScope::ALL, AppAudience::All, &Call::Read(Method::CompanyGet)).is_ok());
-        assert!(allowed_for(&[AppScope::Read], AppAudience::Management, &Call::Read(Method::EmployeeList { department_id: None })).is_ok());
+        assert!(allowed_for(&[AppScope::Read], AppAudience::Management, &Call::Read(Method::EmployeeList)).is_ok());
     }
 
     #[test]

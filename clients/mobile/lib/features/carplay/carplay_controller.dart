@@ -153,7 +153,7 @@ class CarPlayController {
     final team = managementTeam(_employees);
     final teamIds = {for (final m in team) m.id};
     final recent = recentEmployees(_employees).where((m) => !teamIds.contains(m.id)).toList();
-    final groups = pickerGroups(_employees, const []).where((g) => g.title != 'Management team').toList();
+    final groups = pickerGroups(_employees).where((g) => g.title != 'Management team').toList();
     await screen.lists([
       CarSection(items: [
         talk,

@@ -155,6 +155,8 @@ fn empty_hello() -> HelloResult {
         capabilities: vec![],
         features: vec![],
         app: None,
+        board_members_exist: false,
+        user: None,
     }
 }
 
@@ -372,7 +374,7 @@ impl Client {
 
         let mut client = Self { outgoing, pending, next_id: AtomicU64::new(1), hello: empty_hello(), remote, revoked, terminals, loads, powers };
         let hello = client
-            .call(Method::SessionHello(HelloParams { client_name: client_name.into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key, accepts: vec![aurelius_protocol::client_feature::ACTIVITY_CHANGES.into()] }))
+            .call(Method::SessionHello(HelloParams { client_name: client_name.into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key, accepts: vec![aurelius_protocol::client_feature::ACTIVITY_CHANGES.into()], user_id: None }))
             .await;
         match hello {
             Ok(ResponseBody::Hello(result)) => {
@@ -652,9 +654,9 @@ impl Client {
         self.read(Method::ProviderList, body!(Connections)).await
     }
 
-    /// The company's employees (not archived); `department_id`: only that department's.
-    pub async fn employees(&self, department_id: Option<aurelius_domain::DepartmentId>) -> Result<aurelius_protocol::EmployeesSnapshot, ClientError> {
-        self.read(Method::EmployeeList { department_id }, body!(Employees)).await
+    /// The company's employees (not archived).
+    pub async fn employees(&self) -> Result<aurelius_protocol::EmployeesSnapshot, ClientError> {
+        self.read(Method::EmployeeList, body!(Employees)).await
     }
 
     /// An employee's persistent chat with the user (no project).
@@ -667,12 +669,7 @@ impl Client {
         self.read(Method::GroupChatGet, body!(Messages)).await
     }
 
-    /// The departments by name (archived ones too with `archived`).
-    pub async fn departments(&self, archived: bool) -> Result<aurelius_protocol::DepartmentsSnapshot, ClientError> {
-        self.read(Method::DepartmentList { archived }, body!(Departments)).await
-    }
-
-    /// The company in one read: departments, employees, the org chart setting and the roots.
+    /// The company in one read: employees, the org chart setting and the roots.
     pub async fn company(&self) -> Result<aurelius_protocol::CompanySnapshot, ClientError> {
         self.read(Method::CompanyGet, body!(Company)).await
     }
@@ -683,7 +680,7 @@ impl Client {
 
     /// Tasks of one project, or of the whole company (`None`).
     pub async fn tasks(&self, project_id: Option<aurelius_domain::ProjectId>) -> Result<aurelius_protocol::TasksSnapshot, ClientError> {
-        self.read(Method::TaskList { project_id, employee_id: None, department_id: None, state: None }, body!(Tasks)).await
+        self.read(Method::TaskList { project_id, employee_id: None, state: None }, body!(Tasks)).await
     }
 
     /// Tasks company-wide with every filter of `task.list`.
@@ -691,10 +688,9 @@ impl Client {
         &self,
         project_id: Option<aurelius_domain::ProjectId>,
         employee_id: Option<aurelius_domain::EmployeeId>,
-        department_id: Option<aurelius_domain::DepartmentId>,
         state: Option<aurelius_protocol::method::TaskListState>,
     ) -> Result<aurelius_protocol::TasksSnapshot, ClientError> {
-        self.read(Method::TaskList { project_id, employee_id, department_id, state }, body!(Tasks)).await
+        self.read(Method::TaskList { project_id, employee_id, state }, body!(Tasks)).await
     }
 
     pub async fn timeline(&self, query: aurelius_protocol::TimelineQuery) -> Result<aurelius_protocol::TimelinePage, ClientError> {
@@ -703,23 +699,22 @@ impl Client {
 
     /// Global memory plus a project's (none: the whole company's).
     pub async fn memory(&self, project_id: Option<aurelius_domain::ProjectId>) -> Result<aurelius_protocol::MemorySnapshot, ClientError> {
-        self.read(Method::MemoryList { project_id, employee_id: None, department_id: None }, body!(Memory)).await
+        self.read(Method::MemoryList { project_id, employee_id: None }, body!(Memory)).await
     }
 
-    /// Memory with every `memory.list` filter: a project's, an employee's (own and
-    /// department) and a department's scopes, global always.
+    /// Memory with every `memory.list` filter: a project's and an employee's
+    /// scopes, global always.
     pub async fn memory_of(
         &self,
         project_id: Option<aurelius_domain::ProjectId>,
         employee_id: Option<aurelius_domain::EmployeeId>,
-        department_id: Option<aurelius_domain::DepartmentId>,
     ) -> Result<aurelius_protocol::MemorySnapshot, ClientError> {
-        self.read(Method::MemoryList { project_id, employee_id, department_id }, body!(Memory)).await
+        self.read(Method::MemoryList { project_id, employee_id }, body!(Memory)).await
     }
 
     /// What goes into an employee's context (in a project's task when given; else its chat).
     pub async fn memory_context(&self, project_id: Option<aurelius_domain::ProjectId>, employee_id: Option<aurelius_domain::EmployeeId>) -> Result<aurelius_protocol::MemoryContextView, ClientError> {
-        self.read(Method::MemoryGetContext { project_id, employee_id, department_id: None }, body!(MemoryContext)).await
+        self.read(Method::MemoryGetContext { project_id, employee_id }, body!(MemoryContext)).await
     }
 
     /// The conversations of a project.
@@ -784,9 +779,9 @@ impl Client {
         self.read(Method::IdeaList { project_id }, body!(Ideas)).await
     }
 
-    /// What employees proposed (`None`: every department).
-    pub async fn proposals(&self, department_id: Option<aurelius_domain::DepartmentId>) -> Result<aurelius_protocol::ProposalsSnapshot, ClientError> {
-        self.read(Method::ProposalList { department_id }, body!(Proposals)).await
+    /// What employees proposed, company-wide.
+    pub async fn proposals(&self) -> Result<aurelius_protocol::ProposalsSnapshot, ClientError> {
+        self.read(Method::ProposalList, body!(Proposals)).await
     }
 
     /// The versions of an employee's instructions, newest first (feature `instruction_proposals`).
@@ -870,6 +865,78 @@ impl Client {
             _ => None,
         })
         .await
+    }
+
+    // ---- board members (protocol 4; Fase 1: identification) ----
+
+    /// The board members, oldest first.
+    pub async fn user_list(&self) -> Result<aurelius_domain::user::UsersSnapshot, ClientError> {
+        self.read(Method::UserList, body!(Users)).await
+    }
+
+    /// Whether the server has board members, and this connection's active one.
+    pub async fn user_whoami(&self) -> Result<aurelius_domain::user::WhoAmI, ClientError> {
+        self.read(Method::UserWhoami, body!(WhoAmI)).await
+    }
+
+    /// A new board member; this connection becomes it when it had none.
+    /// Errors: `invalid_username`, `weak_password`, `username_taken`,
+    /// `too_many_attempts` (more than five a minute on one connection).
+    pub async fn user_create(&self, username: &str, password: &str) -> Result<CommandReceipt, ClientError> {
+        let params = aurelius_protocol::UserCreateParams { username: username.into(), password: password.into() };
+        let receipt = self.write(CommandId::new(), None, WriteMethod::Host(HostWrite::UserCreate(params))).await?;
+        match receipt.result {
+            WriteResult::Command(result) => Ok(CommandReceipt { command_id: receipt.idempotency_key, committed_seq: receipt.committed_seq, replayed: receipt.replayed, result }),
+            WriteResult::Host(_) => Err(ClientError::UnexpectedResponse),
+        }
+    }
+
+    /// The one password check: the board member becomes active on this connection.
+    /// Errors: `wrong_password`, `too_many_attempts`.
+    pub async fn user_use(&self, user_id: aurelius_domain::UserId, password: &str) -> Result<aurelius_domain::user::WhoAmI, ClientError> {
+        self.read(Method::UserUse(aurelius_protocol::UserUseParams { user_id, password: password.into() }), body!(WhoAmI)).await
+    }
+
+    /// Say hello again with the board member this client remembers for the server;
+    /// it is active when it still exists (`HelloResult::user`).
+    pub async fn identify(&self, user_id: aurelius_domain::UserId) -> Result<HelloResult, ClientError> {
+        let params = HelloParams { client_name: "aurelius".into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key: None, accepts: vec![aurelius_protocol::client_feature::ACTIVITY_CHANGES.into()], user_id: Some(user_id) };
+        self.read(Method::SessionHello(params), body!(Hello)).await
+    }
+
+    // ---- the board and its tickets (protocol 4) ----
+
+    /// The board's columns with their cards, for one project or all.
+    pub async fn board(&self, project_id: Option<aurelius_domain::ProjectId>) -> Result<aurelius_domain::ticket::BoardView, ClientError> {
+        self.read(Method::BoardGet { project_id }, body!(Board)).await
+    }
+
+    /// One ticket with its main task and linked tasks.
+    pub async fn ticket(&self, ticket_id: aurelius_domain::TicketId) -> Result<aurelius_domain::ticket::TicketDetail, ClientError> {
+        self.read(Method::TicketGet { ticket_id }, body!(Ticket)).await
+    }
+
+    /// Tickets in board order; every given filter applies.
+    pub async fn tickets(
+        &self,
+        project_id: Option<aurelius_domain::ProjectId>,
+        column: Option<aurelius_domain::ticket::ColumnKind>,
+        query: Option<String>,
+    ) -> Result<aurelius_domain::ticket::TicketsSnapshot, ClientError> {
+        self.read(Method::TicketList { project_id, column, query }, body!(Tickets)).await
+    }
+
+    /// Create a ticket, with files from this computer (staged like `stage_file`).
+    pub async fn create_ticket(&self, mut ticket: aurelius_domain::ticket::CreateTicket) -> Result<CommandReceipt, ClientError> {
+        for path in ticket.files.iter_mut() {
+            *path = self.stage_file(Path::new(path.as_str())).await?;
+        }
+        self.execute(envelope(Command::CreateTicket(ticket), None)).await
+    }
+
+    /// Any other ticket, board or company write (`Command::MoveTicket`, …) under a fresh key.
+    pub async fn ticket_command(&self, command: Command, expected_version: Option<u64>) -> Result<CommandReceipt, ClientError> {
+        self.execute(envelope(command, expected_version)).await
     }
 
     // ---- tasks, schedules, messages (domain commands, with files staged) ----

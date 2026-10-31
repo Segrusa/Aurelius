@@ -1,9 +1,11 @@
 import 'package:aurelius_mobile/app/shell.dart';
+import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/core/widgets/ios.dart';
 import 'package:aurelius_mobile/data/company.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
+import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/more/more_page.dart';
 import 'package:aurelius_mobile/features/project/new_task_page.dart';
 import 'package:aurelius_mobile/features/tasks/tasks_page.dart';
@@ -17,14 +19,15 @@ import 'support/builders.dart';
 
 class MockCompanyBloc extends MockBloc<CompanyEvent, CompanyState> implements CompanyBloc {}
 
+class MockConnectionBloc extends MockBloc<ConnectionEvent, LinkState> implements ConnectionBloc {}
+
 void main() {
   final ceo = employeeOf(id: 'ceo', name: 'Ada', role: 'CEO');
-  final cto = employeeOf(id: 'cto', name: 'Bo', role: 'CTO', reportsTo: 'ceo', departmentId: 'eng');
-  final dev = employeeOf(id: 'dev', name: 'Cy', role: 'Developer', reportsTo: 'cto', departmentId: 'eng');
-  final designer = employeeOf(id: 'des', name: 'Di', role: 'Designer', reportsTo: 'ceo', departmentId: 'design');
+  final cto = employeeOf(id: 'cto', name: 'Bo', role: 'CTO', reportsTo: 'ceo');
+  final dev = employeeOf(id: 'dev', name: 'Cy', role: 'Developer', reportsTo: 'cto');
+  final designer = employeeOf(id: 'des', name: 'Di', role: 'Designer', reportsTo: 'ceo');
   final loose = employeeOf(id: 'loose', name: 'Ed', role: 'Writer', reportsTo: 'ceo');
   final gone = employeeOf(id: 'gone', name: 'Old', reportsTo: null, status: LifecycleStatus.archived);
-  final departments = [departmentOf(id: 'eng', name: 'Engineering'), departmentOf(id: 'design', name: 'Design')];
   final everyone = [dev, loose, designer, cto, ceo, gone];
 
   group('company helpers', () {
@@ -47,12 +50,13 @@ void main() {
       expect(isManagement(everyone, 'gone'), isFalse);
     });
 
-    test('pickers list the management team first, then departments by name, then no department', () {
-      final groups = pickerGroups(everyone, departments);
-      expect(groups.map((g) => g.title), ['Management team', 'Design', 'Engineering', 'No department']);
-      expect(groups[2].employees.map((e) => e.id), ['cto', 'dev']);
-      expect(groups.last.employees.map((e) => e.id), ['loose']);
+    test('pickers list the management team first, then the others by name', () {
+      final groups = pickerGroups(everyone);
+      expect(groups.map((g) => g.title), ['Management team', 'Employees']);
+      expect(groups.first.employees.map((e) => e.id), ['ceo']);
+      expect(groups.last.employees.map((e) => e.id), ['cto', 'dev', 'des', 'loose']);
       expect(groups.expand((g) => g.employees).map((e) => e.id), isNot(contains('gone')));
+      expect(pickerGroups([employeeOf(id: 'a', name: 'A'), employeeOf(id: 'b', name: 'B')]).map((g) => g.title), ['Management team'], reason: 'no others, no empty group');
     });
 
     test('who works in a project: open tasks there, the busiest first', () {
@@ -75,7 +79,7 @@ void main() {
         theme: aureliusTheme(),
         home: Builder(
           builder: (context) => TextButton(
-            onPressed: () async => result = await NewTaskPage.open(context, employees ?? everyone, departments: departments, projects: projects),
+            onPressed: () async => result = await NewTaskPage.open(context, employees ?? everyone, projects: projects),
             child: const Text('open'),
           ),
         ),
@@ -93,9 +97,7 @@ void main() {
       await open(tester);
       expect(find.text('WHO LEADS THIS TASK?'), findsOneWidget);
       double top(String text) => tester.getTopLeft(find.text(text)).dy;
-      expect(top('Management team'), lessThan(top('Design')));
-      expect(top('Design'), lessThan(top('Engineering')));
-      expect(top('Engineering'), lessThan(top('No department')));
+      expect(top('Management team'), lessThan(top('Employees')));
       expect(chip(tester, 'lead-ceo').selected, isTrue);
       expect(chip(tester, 'lead-cto').selected, isFalse);
       expect(find.byKey(const ValueKey('lead-gone')), findsNothing, reason: 'archived employees cannot lead');
@@ -113,7 +115,6 @@ void main() {
             onPressed: () async => result = await NewTaskPage.open(
               context,
               everyone,
-              departments: departments,
               projects: [projectOf(id: 'p', name: 'Atlas'), projectOf(id: 'q', name: 'Borealis'), projectOf(id: 'x', name: 'Old', status: ProjectStatus.archived)],
             ),
             child: const Text('open'),
@@ -144,9 +145,9 @@ void main() {
     });
   });
 
-  test('the bottom tabs: Home, Team, Inbox, Tasks, More; Projects, Ideas, Company and Settings are under More', () {
-    expect(shellTabs.map((t) => t.label), ['Home', 'Team', 'Inbox', 'Tasks', 'More']);
-    expect(inboxTab, 2, reason: 'the inbox badge follows the Inbox tab');
+  test('the bottom tabs: Home, Board, Team, Inbox, More (the Board took the place of Tasks, D-03)', () {
+    expect(shellTabs.map((t) => t.label), ['Home', 'Board', 'Team', 'Inbox', 'More']);
+    expect(inboxTab, 3, reason: 'the inbox badge follows the Inbox tab');
   });
 
   group('company-wide pages', () {
@@ -160,8 +161,13 @@ void main() {
     Future<void> show(WidgetTester tester, CompanyState state, Widget page) async {
       final bloc = MockCompanyBloc();
       whenListen(bloc, const Stream<CompanyState>.empty(), initialState: state);
+      final link = MockConnectionBloc();
+      whenListen(link, const Stream<LinkState>.empty(), initialState: const LinkState(status: LinkStatus.online));
       final router = GoRouter(routes: [
-        GoRoute(path: '/', builder: (_, _) => BlocProvider<CompanyBloc>.value(value: bloc, child: page)),
+        GoRoute(
+          path: '/',
+          builder: (_, _) => MultiBlocProvider(providers: [BlocProvider<CompanyBloc>.value(value: bloc), BlocProvider<ConnectionBloc>.value(value: link)], child: page),
+        ),
         GoRoute(path: '/company', builder: (_, _) => Scaffold(appBar: AppBar(), body: const Text('company page'))),
         GoRoute(path: '/projects', builder: (_, _) => Scaffold(appBar: AppBar(), body: const Text('projects page'))),
         GoRoute(path: '/ideas', builder: (_, _) => Scaffold(appBar: AppBar(), body: const Text('ideas page'))),
@@ -176,7 +182,6 @@ void main() {
       loading: false,
       projects: [projectOf(id: 'p', name: 'Atlas'), projectOf(id: 'q', name: 'Borealis')],
       employees: everyone,
-      departments: departments,
       tasks: [
         taskOf(id: 'a', projectId: 'p', employeeId: 'dev', employeeName: 'Cy', title: 'Build it', goal: '', status: TaskStatus.running, updatedAtMs: 3),
         taskOf(id: 'b', projectId: 'q', employeeId: 'des', employeeName: 'Di', title: 'Draw it', goal: '', status: TaskStatus.running, updatedAtMs: 2),
@@ -185,9 +190,10 @@ void main() {
       ],
     );
 
-    testWidgets('More lists Projects, Ideas, Company and Settings', (tester) async {
+    testWidgets('More lists Projects, Tasks, Ideas, Company and Settings', (tester) async {
       await show(tester, state, const MorePage());
-      expect(find.byType(GroupRow), findsNWidgets(4));
+      expect(find.byType(GroupRow), findsNWidgets(5));
+      expect(find.byKey(const ValueKey('more-tasks')), findsOneWidget, reason: 'tasks without a ticket stay reachable (B7)');
       expect(find.text('Activity'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('more-projects')));
       await tester.pumpAndSettle();
@@ -230,14 +236,14 @@ void main() {
       expect(find.text('Draw it'), findsOneWidget);
     });
 
-    testWidgets('Tasks: a department shows its members\' tasks', (tester) async {
+    testWidgets('Tasks: filtered by project', (tester) async {
       await show(tester, state, const TasksPage());
-      await tester.tap(find.byKey(const ValueKey('tasks-filter-department')));
+      await tester.tap(find.byKey(const ValueKey('tasks-filter-project')));
       await settle(tester);
-      await tester.tap(find.text('Engineering').last);
+      await tester.tap(find.text('Borealis').last);
       await settle(tester);
-      expect(find.text('Build it'), findsOneWidget);
-      expect(find.text('Draw it'), findsNothing);
+      expect(find.text('Build it'), findsNothing);
+      expect(find.text('Draw it'), findsOneWidget);
     });
   });
 }

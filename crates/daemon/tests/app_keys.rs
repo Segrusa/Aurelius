@@ -45,7 +45,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId, ConversationId) {
     else {
         panic!()
     };
-    let employee = CreateEmployee { name: "Simon".into(), role: "Server".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+    let employee = CreateEmployee { name: "Simon".into(), role: "Server".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(employee), None)).await.unwrap().result else { panic!() };
     (project_id, employee_id, conversation_id)
 }
@@ -118,7 +118,7 @@ async fn scopes_decide_what_an_app_may_do() {
     assert_eq!((session.name.as_str(), session.scopes.clone()), ("Reader", vec![AppScope::Read]));
     assert!(reader.hello.capabilities.is_empty(), "an app has scopes, no device rights");
     assert_eq!(reader.projects().await.unwrap().projects.len(), 1);
-    assert_eq!(reader.employees(None).await.unwrap().employees.len(), 1);
+    assert_eq!(reader.employees().await.unwrap().employees.len(), 1);
     assert_eq!(code(reader.messages(main).await), ErrorCode::Forbidden, "an employee's chat is outside projects");
     assert_eq!(code(reader.execute(envelope(task(project, None, None), None)).await), ErrorCode::Forbidden, "read cannot write");
 

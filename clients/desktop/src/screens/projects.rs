@@ -100,11 +100,11 @@ impl AppView {
                 self.with_preview(dashboard, wide, cx)
             }
             Page::GroupChat => self.render_group_chat(cx),
+            Page::Board => self.render_board(window, cx),
             Page::Projects => self.render_projects_page(cx),
             Page::Project(project, tab) => self.render_project(project, tab, window, cx).into_any_element(),
             Page::Employee(manager) => self.render_manager(manager, window, cx).into_any_element(),
             Page::Employees => self.render_employees_page(cx),
-            Page::Department(key) => self.render_department(key, cx),
             Page::Tasks => self.render_all_tasks(cx),
             Page::Inbox => self.render_inbox_page(cx),
             Page::Settings => self.render_settings_page(window, cx),
@@ -144,7 +144,7 @@ impl AppView {
             }))
     }
 
-    /// Employees: the list, the org chart and the departments as tabs (Ctrl+Tab and h / l switch).
+    /// Employees: the list and the org chart as tabs (Ctrl+Tab and h / l switch).
     fn render_employees_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let labels = EmployeesTab::ALL.map(EmployeesTab::label);
         let active = EmployeesTab::ALL.iter().position(|t| *t == self.employees_tab).unwrap_or(0);
@@ -152,7 +152,6 @@ impl AppView {
         let content = match self.employees_tab {
             EmployeesTab::List => self.render_employees(cx),
             EmployeesTab::OrgChart => self.render_company_org(cx),
-            EmployeesTab::Departments => self.render_departments(cx),
         };
         v().flex_1().min_h_0().w_full().child(bar).child(content).into_any_element()
     }
@@ -1071,6 +1070,7 @@ impl AppView {
             Some(t) => {
                 let (label, color) = status_label(t);
                 let mark = self.task_mark(t);
+                let main_task = crate::app::is_ticket_main_task(t);
                 v().size_full().border_l_1().border_color(c(theme::BORDER)).bg(c(theme::PANEL))
                     .child(
                         div().id("task-detail").size_full().overflow_y_scrollbar().px(px(26.)).py(px(24.)).flex().flex_col().gap(px(18.))
@@ -1119,7 +1119,7 @@ impl AppView {
                                                     .on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(OpenTaskConversation), cx))),
                                             ))
                                     })
-                                    .when(matches!(t.status, TaskStatus::Draft | TaskStatus::Queued | TaskStatus::Waiting), |el| {
+                                    .when(!main_task && matches!(t.status, TaskStatus::Draft | TaskStatus::Queued | TaskStatus::Waiting), |el| {
                                         el.child(h().mt(px(4.)).child(
                                             ui::button("assign-task", if t.employee_id.is_some() { "Give to another employee" } else { "Give to an employee" }, ButtonKind::Outline, Some(ui::kbd("alt-a", cx)))
                                                 .h(px(28.))
@@ -1186,10 +1186,19 @@ impl AppView {
                                         )),
                                 )
                             })
-                            .when(!t.status.is_terminal(), |el| {
+                            .when(!main_task && !t.status.is_terminal(), |el| {
                                 el.child(
                                     h().gap(px(8.)).pt(px(12.)).border_t_1().border_color(c(theme::BORDER)).flex_none().flex_wrap()
                                         .child(ui::button("cancel-task", "Cancel", ButtonKind::Outline, Some(ui::kbd("x", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(CancelSelectedTask), cx)))),
+                                )
+                            })
+                            // A ticket's main task is given and stopped on the Board (F-m1).
+                            .when_some(t.ticket_id.filter(|_| main_task), |el, ticket| {
+                                let why = crate::app::use_the_board(t).unwrap_or_default();
+                                el.child(
+                                    h().gap(px(8.)).pt(px(12.)).border_t_1().border_color(c(theme::BORDER)).flex_none().flex_wrap().items_center()
+                                        .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(why))
+                                        .child(ui::button("task-open-ticket", "Open ticket", ButtonKind::Outline, None).h(px(28.)).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket(ticket, w, cx)))),
                                 )
                             }),
                     )

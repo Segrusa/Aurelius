@@ -84,7 +84,7 @@ impl CommandService {
                 notices.extend(interrupt_conversation(tx, &store, &meta, &correlation, conversation_id)?);
             }
             let (run_id, n) = queue_run(tx, &meta, &correlation, conversation_id, message_id)?;
-            notices.push(n);
+            notices.extend(n);
             // A finished task whose conversation gets a run: its live run changed.
             notices.extend(crate::task::task_runs::live_run_notice(tx, conversation_id)?);
             Ok(Ok((CommandResult::ChatMessageSent { conversation_id, message_id, run_id }, notices)))
@@ -108,8 +108,7 @@ impl CommandService {
             if !conv::user_message_in(tx, cmd.conversation_id, cmd.user_message_id)? {
                 return Ok(Err(domain_error(DomainError::MessageNotFound(cmd.user_message_id))));
             }
-            let (run_id, n) = queue_run(tx, &meta, &command_id.to_string(), cmd.conversation_id, cmd.user_message_id)?;
-            let mut notices = vec![n];
+            let (run_id, mut notices) = queue_run(tx, &meta, &command_id.to_string(), cmd.conversation_id, cmd.user_message_id)?;
             notices.extend(crate::task::task_runs::live_run_notice(tx, cmd.conversation_id)?);
             Ok(Ok((CommandResult::ReplyRetried { run_id }, notices)))
         })

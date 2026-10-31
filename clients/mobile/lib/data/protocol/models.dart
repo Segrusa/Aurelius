@@ -698,47 +698,6 @@ final class ApprovalsSnapshot {
   };
 }
 
-final class ArchiveDepartment {
-  const ArchiveDepartment({
-    required this.departmentId,
-  });
-
-  final String departmentId;
-
-  factory ArchiveDepartment.fromJson(Map<String, dynamic> json) => ArchiveDepartment(
-    departmentId: (json['department_id'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'department_id': departmentId,
-  };
-}
-
-final class ArchivedEmployee {
-  const ArchivedEmployee({
-    required this.employeeId,
-    required this.name,
-    required this.project,
-  });
-
-  final String employeeId;
-  final String name;
-  /// The archived project it came from.
-  final String project;
-
-  factory ArchivedEmployee.fromJson(Map<String, dynamic> json) => ArchivedEmployee(
-    employeeId: (json['employee_id'] as String),
-    name: (json['name'] as String),
-    project: (json['project'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'employee_id': employeeId,
-    'name': name,
-    'project': project,
-  };
-}
-
 /// `artifact.get_content`: an artifact and the kept file of one version.
 final class ArtifactContent {
   const ArtifactContent({
@@ -1085,6 +1044,106 @@ final class BackupsSnapshot {
   };
 }
 
+/// One column with its cards, in order.
+final class BoardColumnCards {
+  const BoardColumnCards({
+    required this.column,
+    required this.tickets,
+  });
+
+  final BoardColumnView column;
+  final List<TicketView> tickets;
+
+  factory BoardColumnCards.fromJson(Map<String, dynamic> json) => BoardColumnCards(
+    column: BoardColumnView.fromJson(json['column'] as Map<String, dynamic>),
+    tickets: (json['tickets'] as List<dynamic>).map((x0) => TicketView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'column': column.toJson(),
+    'tickets': tickets.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+final class BoardColumnEdit {
+  const BoardColumnEdit({
+    required this.columnId,
+    required this.name,
+  });
+
+  final String columnId;
+  final String name;
+
+  factory BoardColumnEdit.fromJson(Map<String, dynamic> json) => BoardColumnEdit(
+    columnId: (json['column_id'] as String),
+    name: (json['name'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'column_id': columnId,
+    'name': name,
+  };
+}
+
+final class BoardColumnView {
+  const BoardColumnView({
+    required this.id,
+    required this.kind,
+    required this.name,
+    required this.position,
+    required this.version,
+  });
+
+  final String id;
+  final ColumnKind kind;
+  final String name;
+  /// 0 is the leftmost column.
+  final int position;
+  final int version;
+
+  factory BoardColumnView.fromJson(Map<String, dynamic> json) => BoardColumnView(
+    id: (json['id'] as String),
+    kind: ColumnKind.fromJson(json['kind'] as String),
+    name: (json['name'] as String),
+    position: (json['position'] as num).toInt(),
+    version: (json['version'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'id': id,
+    'kind': kind.toJson(),
+    'name': name,
+    'position': position,
+    'version': version,
+  };
+}
+
+/// `board.get`: the six columns left to right, each with its cards (not archived).
+final class BoardView {
+  const BoardView({
+    required this.asOfSeq,
+    required this.columns,
+    this.projectId,
+  });
+
+  final int asOfSeq;
+  final List<BoardColumnCards> columns;
+  /// The project filter it was read with; none: every project (B4).
+  final String? projectId;
+
+  factory BoardView.fromJson(Map<String, dynamic> json) => BoardView(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    columns: (json['columns'] as List<dynamic>).map((x0) => BoardColumnCards.fromJson(x0 as Map<String, dynamic>)).toList(),
+    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'columns': columns.map((x0) => x0.toJson()).toList(),
+    if (projectId != null) 'project_id': projectId,
+  };
+}
+
 /// How a run drives the browser when the user allowed it for an employee.
 enum BrowserBackend {
   /// The Claude in Chrome extension in the user's own browser profile.
@@ -1237,29 +1296,31 @@ final class ChooseTaskVariant {
   };
 }
 
-final class ClearedBoss {
-  const ClearedBoss({
-    required this.employeeId,
-    required this.name,
-    required this.was,
-  });
+/// What a column does. The six kinds always exist, once each.
+enum ColumnKind {
+  /// New tickets; nothing starts from here by itself.
+  backlog('backlog'),
+  /// The main task runs or waits (for a colleague, an approval, input).
+  doing('doing'),
+  /// Accepted by a board member; read-only.
+  done('done'),
+  /// A plan waits for a board member (Plan mode only).
+  planReview('plan_review'),
+  /// The main task reported; a board member accepts it or sends it back.
+  review('review'),
+  /// Started: waiting for the dispatcher or for the owner's turn.
+  todo('todo');
 
-  final String employeeId;
-  final String name;
-  /// The boss it had.
-  final String was;
+  const ColumnKind(this.wire);
 
-  factory ClearedBoss.fromJson(Map<String, dynamic> json) => ClearedBoss(
-    employeeId: (json['employee_id'] as String),
-    name: (json['name'] as String),
-    was: (json['was'] as String),
-  );
+  final String wire;
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'employee_id': employeeId,
-    'name': name,
-    'was': was,
-  };
+  static ColumnKind fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown ColumnKind value: $value'),
+      );
+
+  String toJson() => wire;
 }
 
 /// Every business mutation of the domain enters the system as one of these
@@ -1270,26 +1331,47 @@ sealed class Command {
   factory Command.fromJson(Map<String, dynamic> json) {
     final tag = json['type'] as String;
     switch (tag) {
+      case 'accept_ticket':
+        return CommandAcceptTicket(
+          note: (json['note'] == null ? null : (json['note'] as String)),
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'add_connection':
         return CommandAddConnection(value: AddConnection.fromJson(json as Map<String, dynamic>));
       case 'add_idea':
         return CommandAddIdea(value: AddIdea.fromJson(json as Map<String, dynamic>));
       case 'answer_question':
         return CommandAnswerQuestion(value: AnswerQuestion.fromJson(json as Map<String, dynamic>));
-      case 'archive_department':
-        return CommandArchiveDepartment(value: ArchiveDepartment.fromJson(json as Map<String, dynamic>));
+      case 'approve_plan':
+        return CommandApprovePlan(
+          decision: PlanApproval.fromJson(json['decision'] as String),
+          feedback: (json['feedback'] == null ? null : (json['feedback'] as String)),
+          ticketId: (json['ticket_id'] as String),
+        );
+      case 'archive_ticket':
+        return CommandArchiveTicket(
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'assign_task':
         return CommandAssignTask(value: AssignTask.fromJson(json as Map<String, dynamic>));
+      case 'assign_ticket':
+        return CommandAssignTicket(
+          employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+          reason: (json['reason'] == null ? null : (json['reason'] as String)),
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'attach_file':
         return CommandAttachFile(value: AttachFile.fromJson(json as Map<String, dynamic>));
       case 'cancel_task':
         return CommandCancelTask(value: CancelTask.fromJson(json as Map<String, dynamic>));
+      case 'cancel_ticket':
+        return CommandCancelTicket(
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'choose_task_variant':
         return CommandChooseTaskVariant(value: ChooseTaskVariant.fromJson(json as Map<String, dynamic>));
       case 'consolidate_memory':
         return CommandConsolidateMemory(value: ConsolidateMemory.fromJson(json as Map<String, dynamic>));
-      case 'create_department':
-        return CommandCreateDepartment(value: CreateDepartment.fromJson(json as Map<String, dynamic>));
       case 'create_employee':
         return CommandCreateEmployee(value: CreateEmployee.fromJson(json as Map<String, dynamic>));
       case 'create_project':
@@ -1298,6 +1380,19 @@ sealed class Command {
         return CommandCreateTask(value: CreateTask.fromJson(json as Map<String, dynamic>));
       case 'create_task_schedule':
         return CommandCreateTaskSchedule(value: CreateTaskSchedule.fromJson(json as Map<String, dynamic>));
+      case 'create_ticket':
+        return CommandCreateTicket(
+          deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
+          description: (json['description'] == null ? null : (json['description'] as String)),
+          files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+          labels: (json['labels'] == null ? const [] : (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+          ownerEmployeeId: (json['owner_employee_id'] == null ? null : (json['owner_employee_id'] as String)),
+          priority: (json['priority'] == null ? null : TicketPriority.fromJson(json['priority'] as String)),
+          projectId: (json['project_id'] as String),
+          run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
+          start: (json['start'] == null ? null : (json['start'] as bool)),
+          title: (json['title'] as String),
+        );
       case 'decide_approval':
         return CommandDecideApproval(value: DecideApproval.fromJson(json as Map<String, dynamic>));
       case 'decide_memory':
@@ -1318,6 +1413,12 @@ sealed class Command {
         return CommandDiscussTask(value: DiscussTask.fromJson(json as Map<String, dynamic>));
       case 'forget_memory':
         return CommandForgetMemory(value: ForgetMemory.fromJson(json as Map<String, dynamic>));
+      case 'move_ticket':
+        return CommandMoveTicket(
+          beforeTicketId: (json['before_ticket_id'] == null ? null : (json['before_ticket_id'] as String)),
+          columnId: (json['column_id'] as String),
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'pin_memory':
         return CommandPinMemory(value: PinMemory.fromJson(json as Map<String, dynamic>));
       case 'remember':
@@ -1334,10 +1435,20 @@ sealed class Command {
         return CommandRetryReply(value: RetryReply.fromJson(json as Map<String, dynamic>));
       case 'revise_memory':
         return CommandReviseMemory(value: ReviseMemory.fromJson(json as Map<String, dynamic>));
+      case 'revise_plan':
+        return CommandRevisePlan(
+          feedback: (json['feedback'] as String),
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'revoke_share':
         return CommandRevokeShare(value: RevokeShare.fromJson(json as Map<String, dynamic>));
       case 'run_task_schedule_now':
         return CommandRunTaskScheduleNow(value: RunTaskScheduleNow.fromJson(json as Map<String, dynamic>));
+      case 'send_back_ticket':
+        return CommandSendBackTicket(
+          feedback: (json['feedback'] as String),
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'send_chat_message':
         return CommandSendChatMessage(value: SendChatMessage.fromJson(json as Map<String, dynamic>));
       case 'send_employee_message':
@@ -1354,8 +1465,6 @@ sealed class Command {
         return CommandSetBrowserAllowed(value: SetBrowserAllowed.fromJson(json as Map<String, dynamic>));
       case 'set_conversation_run':
         return CommandSetConversationRun(value: SetConversationRun.fromJson(json as Map<String, dynamic>));
-      case 'set_employee_department':
-        return CommandSetEmployeeDepartment(value: SetEmployeeDepartment.fromJson(json as Map<String, dynamic>));
       case 'set_employee_folder':
         return CommandSetEmployeeFolder(value: SetEmployeeFolder.fromJson(json as Map<String, dynamic>));
       case 'set_employee_reports_to':
@@ -1386,16 +1495,38 @@ sealed class Command {
         return CommandStartIdea(value: StartIdea.fromJson(json as Map<String, dynamic>));
       case 'start_project_conversation':
         return CommandStartProjectConversation(value: StartProjectConversation.fromJson(json as Map<String, dynamic>));
+      case 'start_ticket':
+        return CommandStartTicket(
+          employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'stop_run':
         return CommandStopRun(value: StopRun.fromJson(json as Map<String, dynamic>));
-      case 'update_department':
-        return CommandUpdateDepartment(value: UpdateDepartment.fromJson(json as Map<String, dynamic>));
+      case 'update_board_columns':
+        return CommandUpdateBoardColumns(
+          columns: (json['columns'] as List<dynamic>).map((x0) => BoardColumnEdit.fromJson(x0 as Map<String, dynamic>)).toList(),
+        );
+      case 'update_company':
+        return CommandUpdateCompany(value: UpdateCompany.fromJson(json as Map<String, dynamic>));
       case 'update_employee':
         return CommandUpdateEmployee(value: UpdateEmployee.fromJson(json as Map<String, dynamic>));
       case 'update_idea':
         return CommandUpdateIdea(value: UpdateIdea.fromJson(json as Map<String, dynamic>));
+      case 'update_project':
+        return CommandUpdateProject(value: UpdateProject.fromJson(json as Map<String, dynamic>));
       case 'update_task_schedule':
         return CommandUpdateTaskSchedule(value: UpdateTaskSchedule.fromJson(json as Map<String, dynamic>));
+      case 'update_ticket':
+        return CommandUpdateTicket(
+          clearDeadline: (json['clear_deadline'] == null ? null : (json['clear_deadline'] as bool)),
+          deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
+          description: (json['description'] == null ? null : (json['description'] as String)),
+          labels: (json['labels'] == null ? null : (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+          priority: (json['priority'] == null ? null : TicketPriority.fromJson(json['priority'] as String)),
+          run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
+          ticketId: (json['ticket_id'] as String),
+          title: (json['title'] == null ? null : (json['title'] as String)),
+        );
       case 'verify_connection':
         return CommandVerifyConnection(value: VerifyConnection.fromJson(json as Map<String, dynamic>));
       default:
@@ -1404,6 +1535,24 @@ sealed class Command {
   }
 
   Map<String, dynamic> toJson();
+}
+
+/// Review → Done. Only a board member; only when no linked task still works (B6).
+final class CommandAcceptTicket extends Command {
+  const CommandAcceptTicket({
+    this.note,
+    required this.ticketId,
+  });
+
+  final String? note;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'accept_ticket',
+      if (note != null) 'note': note,
+      'ticket_id': ticketId,
+    };
 }
 
 final class CommandAddConnection extends Command {
@@ -1448,17 +1597,39 @@ final class CommandAnswerQuestion extends Command {
     };
 }
 
-final class CommandArchiveDepartment extends Command {
-  const CommandArchiveDepartment({
-    required this.value,
+/// Plan review → Doing: the owner carries the plan out.
+final class CommandApprovePlan extends Command {
+  const CommandApprovePlan({
+    required this.decision,
+    this.feedback,
+    required this.ticketId,
   });
 
-  final ArchiveDepartment value;
+  final PlanApproval decision;
+  final String? feedback;
+  final String ticketId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'archive_department',
-      ...value.toJson(),
+      'type': 'approve_plan',
+      'decision': decision.toJson(),
+      if (feedback != null) 'feedback': feedback,
+      'ticket_id': ticketId,
+    };
+}
+
+/// Take a ticket off the board (from Done or Backlog); it stays readable.
+final class CommandArchiveTicket extends Command {
+  const CommandArchiveTicket({
+    required this.ticketId,
+  });
+
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'archive_ticket',
+      'ticket_id': ticketId,
     };
 }
 
@@ -1473,6 +1644,32 @@ final class CommandAssignTask extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'assign_task',
       ...value.toJson(),
+    };
+}
+
+/// Choose the owner of a ticket before its main task exists: a board member
+/// (instead of the dispatcher) or the dispatcher itself. Gives `ticket.dispatched`.
+///
+/// `employee_id` none: no owner again, so the dispatcher chooses when it
+/// starts. Only in Backlog (before the start); gives `ticket.updated` with
+/// `changed: ["owner"]`, not `ticket.dispatched` (nobody was chosen).
+final class CommandAssignTicket extends Command {
+  const CommandAssignTicket({
+    this.employeeId,
+    this.reason,
+    required this.ticketId,
+  });
+
+  final String? employeeId;
+  final String? reason;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'assign_ticket',
+      if (employeeId != null) 'employee_id': employeeId,
+      if (reason != null) 'reason': reason,
+      'ticket_id': ticketId,
     };
 }
 
@@ -1504,6 +1701,21 @@ final class CommandCancelTask extends Command {
     };
 }
 
+/// Stop the work on a ticket: its main task is cancelled and it goes back to Backlog.
+final class CommandCancelTicket extends Command {
+  const CommandCancelTicket({
+    required this.ticketId,
+  });
+
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'cancel_ticket',
+      'ticket_id': ticketId,
+    };
+}
+
 final class CommandChooseTaskVariant extends Command {
   const CommandChooseTaskVariant({
     required this.value,
@@ -1528,20 +1740,6 @@ final class CommandConsolidateMemory extends Command {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'consolidate_memory',
-      ...value.toJson(),
-    };
-}
-
-final class CommandCreateDepartment extends Command {
-  const CommandCreateDepartment({
-    required this.value,
-  });
-
-  final CreateDepartment value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'create_department',
       ...value.toJson(),
     };
 }
@@ -1599,6 +1797,51 @@ final class CommandCreateTaskSchedule extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'create_task_schedule',
       ...value.toJson(),
+    };
+}
+
+/// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
+final class CommandCreateTicket extends Command {
+  const CommandCreateTicket({
+    this.deadlineMs,
+    this.description,
+    this.files = const [],
+    this.labels = const [],
+    this.ownerEmployeeId,
+    this.priority,
+    required this.projectId,
+    this.run,
+    this.start,
+    required this.title,
+  });
+
+  final int? deadlineMs;
+  final String? description;
+  /// Files to copy into the project's uploads area, as for a task.
+  final List<String> files;
+  final List<String> labels;
+  /// Chosen now: the dispatcher is skipped when it starts.
+  final String? ownerEmployeeId;
+  final TicketPriority? priority;
+  final String projectId;
+  /// Mode and model of the main task; unset fields follow the owner.
+  final TaskRun? run;
+  final bool? start;
+  final String title;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'create_ticket',
+      if (deadlineMs != null) 'deadline_ms': deadlineMs,
+      if (description != null) 'description': description,
+      'files': files,
+      'labels': labels,
+      if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
+      if (priority != null) 'priority': priority?.toJson(),
+      'project_id': projectId,
+      if (run != null) 'run': run?.toJson(),
+      if (start != null) 'start': start,
+      'title': title,
     };
 }
 
@@ -1742,6 +1985,35 @@ final class CommandForgetMemory extends Command {
     };
 }
 
+/// Drag a card. Within its column: only the order. To Todo: start it. To
+/// Backlog: cancel it. Done only through `ticket.accept`, and Review back to
+/// Doing only through `ticket.send_back`; other moves follow the work and are refused.
+/// The place is relative to a neighbour, so it means the same on a board
+/// filtered by project as on the whole board. A move within the same column
+/// also gives `ticket.moved` (with `from` = `to`). A card put above itself in
+/// its own column stays where it is: no event, the version is unchanged.
+/// Unknown fields (such as the old `position`) are refused.
+final class CommandMoveTicket extends Command {
+  const CommandMoveTicket({
+    this.beforeTicketId,
+    required this.columnId,
+    required this.ticketId,
+  });
+
+  /// The card it goes right above, in the target column; none: at the bottom.
+  final String? beforeTicketId;
+  final String columnId;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'move_ticket',
+      if (beforeTicketId != null) 'before_ticket_id': beforeTicketId,
+      'column_id': columnId,
+      'ticket_id': ticketId,
+    };
+}
+
 final class CommandPinMemory extends Command {
   const CommandPinMemory({
     required this.value,
@@ -1854,6 +2126,24 @@ final class CommandReviseMemory extends Command {
     };
 }
 
+/// Plan review → Doing in Plan mode: the owner makes a new plan with the feedback.
+final class CommandRevisePlan extends Command {
+  const CommandRevisePlan({
+    required this.feedback,
+    required this.ticketId,
+  });
+
+  final String feedback;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'revise_plan',
+      'feedback': feedback,
+      'ticket_id': ticketId,
+    };
+}
+
 final class CommandRevokeShare extends Command {
   const CommandRevokeShare({
     required this.value,
@@ -1879,6 +2169,24 @@ final class CommandRunTaskScheduleNow extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'run_task_schedule_now',
       ...value.toJson(),
+    };
+}
+
+/// Review → Doing with feedback (required) for the owner.
+final class CommandSendBackTicket extends Command {
+  const CommandSendBackTicket({
+    required this.feedback,
+    required this.ticketId,
+  });
+
+  final String feedback;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'send_back_ticket',
+      'feedback': feedback,
+      'ticket_id': ticketId,
     };
 }
 
@@ -1990,20 +2298,6 @@ final class CommandSetConversationRun extends Command {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'set_conversation_run',
-      ...value.toJson(),
-    };
-}
-
-final class CommandSetEmployeeDepartment extends Command {
-  const CommandSetEmployeeDepartment({
-    required this.value,
-  });
-
-  final SetEmployeeDepartment value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'set_employee_department',
       ...value.toJson(),
     };
 }
@@ -2218,6 +2512,25 @@ final class CommandStartProjectConversation extends Command {
     };
 }
 
+/// The Start button: Backlog to Todo. With an employee the dispatcher is skipped.
+/// Also starts again a ticket whose main task failed.
+final class CommandStartTicket extends Command {
+  const CommandStartTicket({
+    this.employeeId,
+    required this.ticketId,
+  });
+
+  final String? employeeId;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'start_ticket',
+      if (employeeId != null) 'employee_id': employeeId,
+      'ticket_id': ticketId,
+    };
+}
+
 final class CommandStopRun extends Command {
   const CommandStopRun({
     required this.value,
@@ -2232,16 +2545,33 @@ final class CommandStopRun extends Command {
     };
 }
 
-final class CommandUpdateDepartment extends Command {
-  const CommandUpdateDepartment({
-    required this.value,
+/// Rename the columns and set their order (B3): all six, left to right.
+/// `expected_version` is the board's (`board_version`: the columns change
+/// together); the answer gives the new one.
+final class CommandUpdateBoardColumns extends Command {
+  const CommandUpdateBoardColumns({
+    required this.columns,
   });
 
-  final UpdateDepartment value;
+  final List<BoardColumnEdit> columns;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'update_department',
+      'type': 'update_board_columns',
+      'columns': columns.map((x0) => x0.toJson()).toList(),
+    };
+}
+
+final class CommandUpdateCompany extends Command {
+  const CommandUpdateCompany({
+    required this.value,
+  });
+
+  final UpdateCompany value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'update_company',
       ...value.toJson(),
     };
 }
@@ -2274,6 +2604,20 @@ final class CommandUpdateIdea extends Command {
     };
 }
 
+final class CommandUpdateProject extends Command {
+  const CommandUpdateProject({
+    required this.value,
+  });
+
+  final UpdateProject value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'update_project',
+      ...value.toJson(),
+    };
+}
+
 final class CommandUpdateTaskSchedule extends Command {
   const CommandUpdateTaskSchedule({
     required this.value,
@@ -2285,6 +2629,46 @@ final class CommandUpdateTaskSchedule extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'update_task_schedule',
       ...value.toJson(),
+    };
+}
+
+/// Change the fields of a ticket. Left out: unchanged. The creator never
+/// changes; the owner only through `ticket.assign`; mode and model only while
+/// the main task does not run.
+final class CommandUpdateTicket extends Command {
+  const CommandUpdateTicket({
+    this.clearDeadline,
+    this.deadlineMs,
+    this.description,
+    this.labels,
+    this.priority,
+    this.run,
+    required this.ticketId,
+    this.title,
+  });
+
+  final bool? clearDeadline;
+  final int? deadlineMs;
+  /// An empty text clears it.
+  final String? description;
+  /// The whole new list.
+  final List<String>? labels;
+  final TicketPriority? priority;
+  final TaskRun? run;
+  final String ticketId;
+  final String? title;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'update_ticket',
+      if (clearDeadline != null) 'clear_deadline': clearDeadline,
+      if (deadlineMs != null) 'deadline_ms': deadlineMs,
+      if (description != null) 'description': description,
+      if (labels != null) 'labels': labels,
+      if (priority != null) 'priority': priority?.toJson(),
+      if (run != null) 'run': run?.toJson(),
+      'ticket_id': ticketId,
+      if (title != null) 'title': title,
     };
 }
 
@@ -2329,6 +2713,10 @@ sealed class CommandResult {
         return CommandResultAttachmentRemoved(
           attachmentId: (json['attachment_id'] as String),
         );
+      case 'board_columns_updated':
+        return CommandResultBoardColumnsUpdated(
+          version: (json['version'] as num).toInt(),
+        );
       case 'browser_allowed_set':
         return CommandResultBrowserAllowedSet(
           allowed: (json['allowed'] as bool),
@@ -2339,6 +2727,10 @@ sealed class CommandResult {
           conversationId: (json['conversation_id'] as String),
           messageId: (json['message_id'] as String),
           runId: (json['run_id'] as String),
+        );
+      case 'company_updated':
+        return CommandResultCompanyUpdated(
+          version: (json['version'] as num).toInt(),
         );
       case 'connection_added':
         return CommandResultConnectionAdded(
@@ -2356,27 +2748,9 @@ sealed class CommandResult {
         return CommandResultConversationRunSet(
           conversationId: (json['conversation_id'] as String),
         );
-      case 'department_archived':
-        return CommandResultDepartmentArchived(
-          departmentId: (json['department_id'] as String),
-        );
-      case 'department_created':
-        return CommandResultDepartmentCreated(
-          departmentId: (json['department_id'] as String),
-        );
-      case 'department_updated':
-        return CommandResultDepartmentUpdated(
-          departmentId: (json['department_id'] as String),
-          version: (json['version'] as num).toInt(),
-        );
       case 'employee_created':
         return CommandResultEmployeeCreated(
           conversationId: (json['conversation_id'] as String),
-          employeeId: (json['employee_id'] as String),
-        );
-      case 'employee_department_set':
-        return CommandResultEmployeeDepartmentSet(
-          departmentId: (json['department_id'] == null ? null : (json['department_id'] as String)),
           employeeId: (json['employee_id'] as String),
         );
       case 'employee_folder_set':
@@ -2497,6 +2871,11 @@ sealed class CommandResult {
           projectId: (json['project_id'] as String),
           status: LifecycleStatus.fromJson(json['status'] as String),
         );
+      case 'project_updated':
+        return CommandResultProjectUpdated(
+          projectId: (json['project_id'] as String),
+          version: (json['version'] as num).toInt(),
+        );
       case 'proposal_decided':
         return CommandResultProposalDecided(
           employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
@@ -2578,6 +2957,21 @@ sealed class CommandResult {
         return CommandResultTaskVariantChosen(
           taskId: (json['task_id'] as String),
           variant: (json['variant'] as num).toInt(),
+        );
+      case 'ticket_changed':
+        return CommandResultTicketChanged(
+          column: ColumnKind.fromJson(json['column'] as String),
+          ticketId: (json['ticket_id'] as String),
+          version: (json['version'] as num).toInt(),
+        );
+      case 'ticket_created':
+        return CommandResultTicketCreated(
+          number: (json['number'] as num).toInt(),
+          ticketId: (json['ticket_id'] as String),
+        );
+      case 'user_created':
+        return CommandResultUserCreated(
+          userId: (json['user_id'] as String),
         );
       case 'verification_started':
         return CommandResultVerificationStarted(
@@ -2662,6 +3056,21 @@ final class CommandResultAttachmentRemoved extends CommandResult {
     };
 }
 
+/// The board's new version (`ticket::board_version`).
+final class CommandResultBoardColumnsUpdated extends CommandResult {
+  const CommandResultBoardColumnsUpdated({
+    required this.version,
+  });
+
+  final int version;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'board_columns_updated',
+      'version': version,
+    };
+}
+
 final class CommandResultBrowserAllowedSet extends CommandResult {
   const CommandResultBrowserAllowedSet({
     required this.allowed,
@@ -2696,6 +3105,20 @@ final class CommandResultChatMessageSent extends CommandResult {
       'conversation_id': conversationId,
       'message_id': messageId,
       'run_id': runId,
+    };
+}
+
+final class CommandResultCompanyUpdated extends CommandResult {
+  const CommandResultCompanyUpdated({
+    required this.version,
+  });
+
+  final int version;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'company_updated',
+      'version': version,
     };
 }
 
@@ -2755,51 +3178,6 @@ final class CommandResultConversationRunSet extends CommandResult {
     };
 }
 
-final class CommandResultDepartmentArchived extends CommandResult {
-  const CommandResultDepartmentArchived({
-    required this.departmentId,
-  });
-
-  final String departmentId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'department_archived',
-      'department_id': departmentId,
-    };
-}
-
-final class CommandResultDepartmentCreated extends CommandResult {
-  const CommandResultDepartmentCreated({
-    required this.departmentId,
-  });
-
-  final String departmentId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'department_created',
-      'department_id': departmentId,
-    };
-}
-
-final class CommandResultDepartmentUpdated extends CommandResult {
-  const CommandResultDepartmentUpdated({
-    required this.departmentId,
-    required this.version,
-  });
-
-  final String departmentId;
-  final int version;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'department_updated',
-      'department_id': departmentId,
-      'version': version,
-    };
-}
-
 final class CommandResultEmployeeCreated extends CommandResult {
   const CommandResultEmployeeCreated({
     required this.conversationId,
@@ -2813,23 +3191,6 @@ final class CommandResultEmployeeCreated extends CommandResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'employee_created',
       'conversation_id': conversationId,
-      'employee_id': employeeId,
-    };
-}
-
-final class CommandResultEmployeeDepartmentSet extends CommandResult {
-  const CommandResultEmployeeDepartmentSet({
-    this.departmentId,
-    required this.employeeId,
-  });
-
-  final String? departmentId;
-  final String employeeId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'employee_department_set',
-      if (departmentId != null) 'department_id': departmentId,
       'employee_id': employeeId,
     };
 }
@@ -3241,6 +3602,23 @@ final class CommandResultProjectStatusChanged extends CommandResult {
     };
 }
 
+final class CommandResultProjectUpdated extends CommandResult {
+  const CommandResultProjectUpdated({
+    required this.projectId,
+    required this.version,
+  });
+
+  final String projectId;
+  final int version;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'project_updated',
+      'project_id': projectId,
+      'version': version,
+    };
+}
+
 /// `employee_id` is the employee that was created when the proposal was approved.
 final class CommandResultProposalDecided extends CommandResult {
   const CommandResultProposalDecided({
@@ -3530,6 +3908,59 @@ final class CommandResultTaskVariantChosen extends CommandResult {
     };
 }
 
+/// The answer to every other ticket write: where the ticket is now.
+final class CommandResultTicketChanged extends CommandResult {
+  const CommandResultTicketChanged({
+    required this.column,
+    required this.ticketId,
+    required this.version,
+  });
+
+  final ColumnKind column;
+  final String ticketId;
+  final int version;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'ticket_changed',
+      'column': column.toJson(),
+      'ticket_id': ticketId,
+      'version': version,
+    };
+}
+
+final class CommandResultTicketCreated extends CommandResult {
+  const CommandResultTicketCreated({
+    required this.number,
+    required this.ticketId,
+  });
+
+  final int number;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'ticket_created',
+      'number': number,
+      'ticket_id': ticketId,
+    };
+}
+
+/// A new board member (`user.create`).
+final class CommandResultUserCreated extends CommandResult {
+  const CommandResultUserCreated({
+    required this.userId,
+  });
+
+  final String userId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'user_created',
+      'user_id': userId,
+    };
+}
+
 final class CommandResultVerificationStarted extends CommandResult {
   const CommandResultVerificationStarted({
     required this.connectionId,
@@ -3544,23 +3975,20 @@ final class CommandResultVerificationStarted extends CommandResult {
     };
 }
 
-/// The company in one read (`company.get`): departments, employees, the org
-/// chart setting and its roots (the management team).
+/// The company in one read (`company.get`): employees, the org chart setting
+/// and its roots (the management team).
 final class CompanySnapshot {
   const CompanySnapshot({
     required this.asOfSeq,
-    this.conversion,
-    required this.departments,
+    required this.company,
     required this.employees,
     required this.followOrgChart,
     required this.roots,
   });
 
   final int asOfSeq;
-  /// What the conversion to protocol 3 did, when this server converted 2.x data.
-  final ConversionReport? conversion;
-  /// Active departments by name.
-  final List<DepartmentSummary> departments;
+  /// The company itself: its name and default dispatcher.
+  final CompanyView company;
   /// Employees that are not archived, oldest first.
   final List<EmployeeSummary> employees;
   /// "Follow the org chart" (server setting, on by default).
@@ -3570,8 +3998,7 @@ final class CompanySnapshot {
 
   factory CompanySnapshot.fromJson(Map<String, dynamic> json) => CompanySnapshot(
     asOfSeq: (json['as_of_seq'] as num).toInt(),
-    conversion: (json['conversion'] == null ? null : ConversionReport.fromJson(json['conversion'] as Map<String, dynamic>)),
-    departments: (json['departments'] as List<dynamic>).map((x0) => DepartmentSummary.fromJson(x0 as Map<String, dynamic>)).toList(),
+    company: CompanyView.fromJson(json['company'] as Map<String, dynamic>),
     employees: (json['employees'] as List<dynamic>).map((x0) => EmployeeSummary.fromJson(x0 as Map<String, dynamic>)).toList(),
     followOrgChart: (json['follow_org_chart'] as bool),
     roots: (json['roots'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
@@ -3579,11 +4006,40 @@ final class CompanySnapshot {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'as_of_seq': asOfSeq,
-    if (conversion != null) 'conversion': conversion?.toJson(),
-    'departments': departments.map((x0) => x0.toJson()).toList(),
+    'company': company.toJson(),
     'employees': employees.map((x0) => x0.toJson()).toList(),
     'follow_org_chart': followOrgChart,
     'roots': roots,
+  };
+}
+
+final class CompanyView {
+  const CompanyView({
+    this.dispatcherEmployeeId,
+    required this.id,
+    required this.name,
+    required this.version,
+  });
+
+  /// Chooses the owner of a started ticket without one, unless its project
+  /// names its own. None: such tickets wait in Todo for a board member.
+  final String? dispatcherEmployeeId;
+  final String id;
+  final String name;
+  final int version;
+
+  factory CompanyView.fromJson(Map<String, dynamic> json) => CompanyView(
+    dispatcherEmployeeId: (json['dispatcher_employee_id'] == null ? null : (json['dispatcher_employee_id'] as String)),
+    id: (json['id'] as String),
+    name: (json['name'] as String),
+    version: (json['version'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (dispatcherEmployeeId != null) 'dispatcher_employee_id': dispatcherEmployeeId,
+    'id': id,
+    'name': name,
+    'version': version,
   };
 }
 
@@ -3866,79 +4322,6 @@ final class ConversationSummary {
   };
 }
 
-/// What the one-time conversion of 2.x data did (event `company.converted`).
-final class ConversionReport {
-  const ConversionReport({
-    this.archived = const [],
-    required this.clearedBosses,
-    required this.departments,
-    required this.merged,
-    this.roots = 0,
-    required this.suffixed,
-  });
-
-  /// Managers found only in archived projects, now archived employees.
-  final List<ArchivedEmployee> archived;
-  /// Bosses that were cleared (gone in the merge, or a loop).
-  final List<ClearedBoss> clearedBosses;
-  /// One per old project.
-  final List<ConvertedDepartment> departments;
-  /// Employees with the same name in several projects, now one.
-  final List<MergedEmployee> merged;
-  /// Active employees without a boss after the conversion (the management team).
-  final int roots;
-  /// Only from conversions before 3.0 merged by name alone (renamed
-  /// "Name (Project)"); empty now.
-  final List<SuffixedEmployee> suffixed;
-
-  factory ConversionReport.fromJson(Map<String, dynamic> json) => ConversionReport(
-    archived: (json['archived'] == null ? const [] : (json['archived'] as List<dynamic>).map((x0) => ArchivedEmployee.fromJson(x0 as Map<String, dynamic>)).toList()),
-    clearedBosses: (json['cleared_bosses'] as List<dynamic>).map((x0) => ClearedBoss.fromJson(x0 as Map<String, dynamic>)).toList(),
-    departments: (json['departments'] as List<dynamic>).map((x0) => ConvertedDepartment.fromJson(x0 as Map<String, dynamic>)).toList(),
-    merged: (json['merged'] as List<dynamic>).map((x0) => MergedEmployee.fromJson(x0 as Map<String, dynamic>)).toList(),
-    roots: (json['roots'] == null ? 0 : (json['roots'] as num).toInt()),
-    suffixed: (json['suffixed'] as List<dynamic>).map((x0) => SuffixedEmployee.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'archived': archived.map((x0) => x0.toJson()).toList(),
-    'cleared_bosses': clearedBosses.map((x0) => x0.toJson()).toList(),
-    'departments': departments.map((x0) => x0.toJson()).toList(),
-    'merged': merged.map((x0) => x0.toJson()).toList(),
-    'roots': roots,
-    'suffixed': suffixed.map((x0) => x0.toJson()).toList(),
-  };
-}
-
-final class ConvertedDepartment {
-  const ConvertedDepartment({
-    required this.departmentId,
-    this.headId,
-    required this.members,
-    required this.name,
-  });
-
-  final String departmentId;
-  final String? headId;
-  final int members;
-  /// The old project's name.
-  final String name;
-
-  factory ConvertedDepartment.fromJson(Map<String, dynamic> json) => ConvertedDepartment(
-    departmentId: (json['department_id'] as String),
-    headId: (json['head_id'] == null ? null : (json['head_id'] as String)),
-    members: (json['members'] as num).toInt(),
-    name: (json['name'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'department_id': departmentId,
-    if (headId != null) 'head_id': headId,
-    'members': members,
-    'name': name,
-  };
-}
-
 final class CreateAgentFunction {
   const CreateAgentFunction({
     this.enabled = true,
@@ -4008,35 +4391,8 @@ final class CreateAppKey {
   };
 }
 
-final class CreateDepartment {
-  const CreateDepartment({
-    this.description,
-    this.headId,
-    required this.name,
-  });
-
-  final String? description;
-  /// The employee who leads it (not archived); it also joins the department.
-  final String? headId;
-  /// Unique among the active departments (case-insensitive).
-  final String name;
-
-  factory CreateDepartment.fromJson(Map<String, dynamic> json) => CreateDepartment(
-    description: (json['description'] == null ? null : (json['description'] as String)),
-    headId: (json['head_id'] == null ? null : (json['head_id'] as String)),
-    name: (json['name'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (description != null) 'description': description,
-    if (headId != null) 'head_id': headId,
-    'name': name,
-  };
-}
-
 final class CreateEmployee {
   const CreateEmployee({
-    this.departmentId,
     this.folder,
     this.instructions,
     required this.name,
@@ -4045,8 +4401,6 @@ final class CreateEmployee {
     this.title,
   });
 
-  /// The department it joins (active); none: no department.
-  final String? departmentId;
   /// Optional own workspace folder: the work folder of its chat.
   final String? folder;
   final String? instructions;
@@ -4058,7 +4412,6 @@ final class CreateEmployee {
   final String? title;
 
   factory CreateEmployee.fromJson(Map<String, dynamic> json) => CreateEmployee(
-    departmentId: (json['department_id'] == null ? null : (json['department_id'] as String)),
     folder: (json['folder'] == null ? null : (json['folder'] as String)),
     instructions: (json['instructions'] == null ? null : (json['instructions'] as String)),
     name: (json['name'] as String),
@@ -4068,7 +4421,6 @@ final class CreateEmployee {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    if (departmentId != null) 'department_id': departmentId,
     if (folder != null) 'folder': folder,
     if (instructions != null) 'instructions': instructions,
     'name': name,
@@ -4421,95 +4773,6 @@ final class DeleteTaskSchedule {
   };
 }
 
-enum DepartmentStatus {
-  active('active'),
-  archived('archived');
-
-  const DepartmentStatus(this.wire);
-
-  final String wire;
-
-  static DepartmentStatus fromJson(String value) => values.firstWhere(
-        (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown DepartmentStatus value: $value'),
-      );
-
-  String toJson() => wire;
-}
-
-/// A department: a group of employees with a head and its own memory scope.
-final class DepartmentSummary {
-  const DepartmentSummary({
-    required this.createdAtMs,
-    this.description,
-    this.headId,
-    required this.id,
-    required this.memberCount,
-    required this.name,
-    required this.openTasks,
-    required this.status,
-    required this.version,
-  });
-
-  final int createdAtMs;
-  final String? description;
-  /// The employee who leads it; none when not set.
-  final String? headId;
-  final String id;
-  /// Employees (not archived) in it.
-  final int memberCount;
-  final String name;
-  /// Open tasks of its members, over all projects.
-  final int openTasks;
-  final DepartmentStatus status;
-  final int version;
-
-  factory DepartmentSummary.fromJson(Map<String, dynamic> json) => DepartmentSummary(
-    createdAtMs: (json['created_at_ms'] as num).toInt(),
-    description: (json['description'] == null ? null : (json['description'] as String)),
-    headId: (json['head_id'] == null ? null : (json['head_id'] as String)),
-    id: (json['id'] as String),
-    memberCount: (json['member_count'] as num).toInt(),
-    name: (json['name'] as String),
-    openTasks: (json['open_tasks'] as num).toInt(),
-    status: DepartmentStatus.fromJson(json['status'] as String),
-    version: (json['version'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'created_at_ms': createdAtMs,
-    if (description != null) 'description': description,
-    if (headId != null) 'head_id': headId,
-    'id': id,
-    'member_count': memberCount,
-    'name': name,
-    'open_tasks': openTasks,
-    'status': status.toJson(),
-    'version': version,
-  };
-}
-
-final class DepartmentsSnapshot {
-  const DepartmentsSnapshot({
-    required this.asOfSeq,
-    required this.departments,
-  });
-
-  final int asOfSeq;
-  /// By name; archived ones only with `department.list { archived: true }`.
-  final List<DepartmentSummary> departments;
-
-  factory DepartmentsSnapshot.fromJson(Map<String, dynamic> json) => DepartmentsSnapshot(
-    asOfSeq: (json['as_of_seq'] as num).toInt(),
-    departments: (json['departments'] as List<dynamic>).map((x0) => DepartmentSummary.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'as_of_seq': asOfSeq,
-    'departments': departments.map((x0) => x0.toJson()).toList(),
-  };
-}
-
 final class DirEntryView {
   const DirEntryView({
     required this.name,
@@ -4687,7 +4950,6 @@ final class EmployeeSummary {
     required this.browserAllowed,
     required this.conversationId,
     required this.conversations,
-    this.departmentId,
     this.folder,
     this.heartbeat,
     required this.id,
@@ -4716,8 +4978,6 @@ final class EmployeeSummary {
   /// carries mode, heartbeat and memory summaries) and older ones from before
   /// protocol 3 (history). Task conversations are not listed.
   final List<ConversationSummary> conversations;
-  /// The department it belongs to; none: no department.
-  final String? departmentId;
   /// Own workspace folder, if any: the work folder of its chat (in a task the project folder applies).
   final String? folder;
   /// Opt-in heartbeat; `None` = off.
@@ -4746,7 +5006,6 @@ final class EmployeeSummary {
     browserAllowed: (json['browser_allowed'] as bool),
     conversationId: (json['conversation_id'] as String),
     conversations: (json['conversations'] as List<dynamic>).map((x0) => ConversationSummary.fromJson(x0 as Map<String, dynamic>)).toList(),
-    departmentId: (json['department_id'] == null ? null : (json['department_id'] as String)),
     folder: (json['folder'] == null ? null : (json['folder'] as String)),
     heartbeat: (json['heartbeat'] == null ? null : HeartbeatView.fromJson(json['heartbeat'] as Map<String, dynamic>)),
     id: (json['id'] as String),
@@ -4769,7 +5028,6 @@ final class EmployeeSummary {
     'browser_allowed': browserAllowed,
     'conversation_id': conversationId,
     'conversations': conversations.map((x0) => x0.toJson()).toList(),
-    if (departmentId != null) 'department_id': departmentId,
     if (folder != null) 'folder': folder,
     if (heartbeat != null) 'heartbeat': heartbeat?.toJson(),
     'id': id,
@@ -4808,6 +5066,9 @@ final class EmployeesSnapshot {
 }
 
 enum ErrorCode {
+  /// A ticket, board or company write needs an active board member on the connection
+  /// (`user.use`, `user.create` or `HelloParams::user_id`).
+  boardMemberRequired('board_member_required'),
   /// The caller lacks the right for this method.
   forbidden('forbidden'),
   frameTooLarge('frame_too_large'),
@@ -4815,13 +5076,23 @@ enum ErrorCode {
   incompatibleProtocol('incompatible_protocol'),
   internal('internal'),
   invalidRequest('invalid_request'),
+  /// `user.create`: 3 to 32 letters, digits, `.`, `_` or `-`.
+  invalidUsername('invalid_username'),
   notFound('not_found'),
   shuttingDown('shutting_down'),
   storageUnavailable('storage_unavailable'),
+  /// `user.use`: too many tries on this connection; wait a minute.
+  tooManyAttempts('too_many_attempts'),
   /// The server does not know this method (an older server); the connection stays open.
   unknownMethod('unknown_method'),
+  /// `user.create`: another board member has this name (case does not count).
+  usernameTaken('username_taken'),
   validation('validation'),
-  versionConflict('version_conflict');
+  versionConflict('version_conflict'),
+  /// `user.create`: the password is shorter than 12 characters.
+  weakPassword('weak_password'),
+  /// `user.use`: the board member or the password is wrong (one answer for both).
+  wrongPassword('wrong_password');
 
   const ErrorCode(this.wire);
 
@@ -4887,20 +5158,18 @@ enum EventKind {
   artifactPublished('artifact.published'),
   attachmentAdded('attachment.added'),
   attachmentRemoved('attachment.removed'),
+  boardColumnsUpdated('board.columns_updated'),
   companyConverted('company.converted'),
+  companyUpdated('company.updated'),
   configChanged('config.changed'),
   connectionChanged('connection.changed'),
   conversationCreated('conversation.created'),
   conversationDeleted('conversation.deleted'),
   conversationSettingsChanged('conversation.settings_changed'),
   conversationStarted('conversation.started'),
-  departmentArchived('department.archived'),
-  departmentCreated('department.created'),
-  departmentUpdated('department.updated'),
   employeeArchived('employee.archived'),
   employeeConfigChanged('employee.config_changed'),
   employeeCreated('employee.created'),
-  employeeDepartmentSet('employee.department_set'),
   employeeFolderSet('employee.folder_set'),
   employeeInstructionsProposed('employee.instructions_proposed'),
   employeePaused('employee.paused'),
@@ -4981,6 +5250,20 @@ enum EventKind {
   taskVariantsStarted('task.variants_started'),
   taskVariantsStopped('task.variants_stopped'),
   taskWaiting('task.waiting'),
+  ticketAccepted('ticket.accepted'),
+  ticketArchived('ticket.archived'),
+  ticketCancelled('ticket.cancelled'),
+  ticketCreated('ticket.created'),
+  ticketDispatched('ticket.dispatched'),
+  ticketMoved('ticket.moved'),
+  ticketPlanApproved('ticket.plan_approved'),
+  ticketPlanReview('ticket.plan_review'),
+  ticketPlanRevised('ticket.plan_revised'),
+  ticketReview('ticket.review'),
+  ticketSentBack('ticket.sent_back'),
+  ticketStarted('ticket.started'),
+  ticketUpdated('ticket.updated'),
+  userCreated('user.created'),
   wakeRequested('wake.requested');
 
   const EventKind(this.wire);
@@ -5454,6 +5737,7 @@ final class HelloParams {
     this.appKey,
     required this.clientName,
     required this.clientVersion,
+    this.userId,
   });
 
   /// What this client can take that older clients cannot (`client_feature`).
@@ -5466,12 +5750,19 @@ final class HelloParams {
   final String? appKey;
   final String clientName;
   final String clientVersion;
+  /// The board member this client remembers for the server (from `user.use`
+  /// or `user.create`): active again without a password when it exists
+  /// (`HelloResult::user`). Ignored for apps. A value that is no id (a
+  /// damaged stored one) counts as none, so the hello still works and the
+  /// client asks again who is there.
+  final String? userId;
 
   factory HelloParams.fromJson(Map<String, dynamic> json) => HelloParams(
     accepts: (json['accepts'] == null ? const [] : (json['accepts'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     appKey: (json['app_key'] == null ? null : (json['app_key'] as String)),
     clientName: (json['client_name'] as String),
     clientVersion: (json['client_version'] as String),
+    userId: (json['user_id'] == null ? null : (json['user_id'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -5479,12 +5770,14 @@ final class HelloParams {
     if (appKey != null) 'app_key': appKey,
     'client_name': clientName,
     'client_version': clientVersion,
+    if (userId != null) 'user_id': userId,
   };
 }
 
 final class HelloResult {
   const HelloResult({
     this.app,
+    this.boardMembersExist = false,
     required this.capabilities,
     this.clientId,
     required this.daemonVersion,
@@ -5495,11 +5788,15 @@ final class HelloResult {
     required this.os,
     required this.protocol,
     required this.remote,
+    this.user,
   });
 
   /// The app this session acts for when it authenticated with an app key
   /// (`HelloParams::app_key`, or the key on the gateway); feature `app_keys`.
   final AppSession? app;
+  /// The server has at least one board member; false: the onboarding
+  /// ("Create the first board member") is all a client shows.
+  final bool boardMembersExist;
   final List<Capability> capabilities;
   /// The paired device behind a remote connection.
   final String? clientId;
@@ -5517,9 +5814,13 @@ final class HelloResult {
   final int protocol;
   /// This connection came in over the network.
   final bool remote;
+  /// This connection's active board member (`HelloParams::user_id` when it
+  /// exists); none: the client asks "Who's working here?".
+  final UserView? user;
 
   factory HelloResult.fromJson(Map<String, dynamic> json) => HelloResult(
     app: (json['app'] == null ? null : AppSession.fromJson(json['app'] as Map<String, dynamic>)),
+    boardMembersExist: (json['board_members_exist'] == null ? false : (json['board_members_exist'] as bool)),
     capabilities: (json['capabilities'] as List<dynamic>).map((x0) => Capability.fromJson(x0 as String)).toList(),
     clientId: (json['client_id'] == null ? null : (json['client_id'] as String)),
     daemonVersion: (json['daemon_version'] as String),
@@ -5530,10 +5831,12 @@ final class HelloResult {
     os: (json['os'] as String),
     protocol: (json['protocol'] as num).toInt(),
     remote: (json['remote'] as bool),
+    user: (json['user'] == null ? null : UserView.fromJson(json['user'] as Map<String, dynamic>)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (app != null) 'app': app?.toJson(),
+    'board_members_exist': boardMembersExist,
     'capabilities': capabilities.map((x0) => x0.toJson()).toList(),
     if (clientId != null) 'client_id': clientId,
     'daemon_version': daemonVersion,
@@ -5544,6 +5847,7 @@ final class HelloResult {
     'os': os,
     'protocol': protocol,
     'remote': remote,
+    if (user != null) 'user': user?.toJson(),
   };
 }
 
@@ -6357,6 +6661,8 @@ sealed class HostWrite {
         return const HostWriteUpdatePrepare();
       case 'update.prepare_app':
         return const HostWriteUpdatePrepareApp();
+      case 'user.create':
+        return HostWriteUserCreate(params: UserCreateParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'variants.set_enabled':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -7259,6 +7565,26 @@ final class HostWriteUpdatePrepareApp extends HostWrite {
     };
 }
 
+/// A new board member (OV-12: `invalid_username`, `weak_password` (also a
+/// password of only spaces), `username_taken`; `too_many_attempts` after five
+/// a minute on one connection); answers `CommandResult::UserCreated` as a command
+/// receipt. A connection without an active board member becomes the new one.
+/// The server hashes the password before anything is recorded: the receipt,
+/// its request hash and the event `user.created` hold the name only. Not for apps.
+final class HostWriteUserCreate extends HostWrite {
+  const HostWriteUserCreate({
+    required this.params,
+  });
+
+  final UserCreateParams params;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.create',
+      'params': params.toJson(),
+    };
+}
+
 /// Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
 final class HostWriteVariantsSetEnabled extends HostWrite {
   const HostWriteVariantsSetEnabled({
@@ -8143,7 +8469,6 @@ enum McpTransport {
 final class MemoryContextItem {
   const MemoryContextItem({
     required this.content,
-    this.departmentName,
     this.employeeName,
     required this.kind,
     required this.label,
@@ -8155,7 +8480,6 @@ final class MemoryContextItem {
   });
 
   final String content;
-  final String? departmentName;
   final String? employeeName;
   final MemoryKind kind;
   /// The label the context builder writes, e.g. "Decision · project".
@@ -8164,14 +8488,13 @@ final class MemoryContextItem {
   final bool pinned;
   /// always | when_relevant | over_budget | duplicate
   final String placement;
-  /// global | project | department | employee
+  /// global | project | employee
   final String scope;
   /// Tokens of the line as it goes into the system text.
   final int tokens;
 
   factory MemoryContextItem.fromJson(Map<String, dynamic> json) => MemoryContextItem(
     content: (json['content'] as String),
-    departmentName: (json['department_name'] == null ? null : (json['department_name'] as String)),
     employeeName: (json['employee_name'] == null ? null : (json['employee_name'] as String)),
     kind: MemoryKind.fromJson(json['kind'] as String),
     label: (json['label'] as String),
@@ -8184,7 +8507,6 @@ final class MemoryContextItem {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'content': content,
-    if (departmentName != null) 'department_name': departmentName,
     if (employeeName != null) 'employee_name': employeeName,
     'kind': kind.toJson(),
     'label': label,
@@ -8200,7 +8522,6 @@ final class MemoryContextItem {
 final class MemoryContextView {
   const MemoryContextView({
     required this.alwaysTokens,
-    this.departmentId,
     this.employeeId,
     required this.items,
     required this.memoryBudgetTokens,
@@ -8209,18 +8530,16 @@ final class MemoryContextView {
   });
 
   final int alwaysTokens;
-  final String? departmentId;
   final String? employeeId;
   final List<MemoryContextItem> items;
   final int memoryBudgetTokens;
-  /// None: an employee's chat outside projects, or a department alone.
+  /// None: an employee's chat outside projects.
   final String? projectId;
   /// Estimate of the fixed system text without memory; 0 when not known.
   final int systemTokens;
 
   factory MemoryContextView.fromJson(Map<String, dynamic> json) => MemoryContextView(
     alwaysTokens: (json['always_tokens'] as num).toInt(),
-    departmentId: (json['department_id'] == null ? null : (json['department_id'] as String)),
     employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
     items: (json['items'] as List<dynamic>).map((x0) => MemoryContextItem.fromJson(x0 as Map<String, dynamic>)).toList(),
     memoryBudgetTokens: (json['memory_budget_tokens'] as num).toInt(),
@@ -8230,7 +8549,6 @@ final class MemoryContextView {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'always_tokens': alwaysTokens,
-    if (departmentId != null) 'department_id': departmentId,
     if (employeeId != null) 'employee_id': employeeId,
     'items': items.map((x0) => x0.toJson()).toList(),
     'memory_budget_tokens': memoryBudgetTokens,
@@ -8265,10 +8583,6 @@ sealed class MemoryScope {
   factory MemoryScope.fromJson(Map<String, dynamic> json) {
     final tag = json['kind'] as String;
     switch (tag) {
-      case 'department':
-        return MemoryScopeDepartment(
-          id: (json['id'] as String),
-        );
       case 'employee':
         return MemoryScopeEmployee(
           id: (json['id'] as String),
@@ -8285,21 +8599,6 @@ sealed class MemoryScope {
   }
 
   Map<String, dynamic> toJson();
-}
-
-/// Shared by the employees of one department.
-final class MemoryScopeDepartment extends MemoryScope {
-  const MemoryScopeDepartment({
-    required this.id,
-  });
-
-  final String id;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'kind': 'department',
-      'id': id,
-    };
 }
 
 final class MemoryScopeEmployee extends MemoryScope {
@@ -8405,8 +8704,6 @@ final class MemoryView {
     required this.content,
     required this.createdAtMs,
     this.decidedBy,
-    this.departmentId,
-    this.departmentName,
     this.employeeId,
     this.employeeName,
     required this.id,
@@ -8427,9 +8724,6 @@ final class MemoryView {
   final int createdAtMs;
   /// user | policy | None (still proposed)
   final String? decidedBy;
-  /// A department-scope memory: its department.
-  final String? departmentId;
-  final String? departmentName;
   final String? employeeId;
   final String? employeeName;
   final String id;
@@ -8440,7 +8734,7 @@ final class MemoryView {
   /// confirmed. The kind is then `episodic`; show it as "Lesson".
   final LessonLocator? lesson;
   final bool pinned;
-  /// global | project | department | employee
+  /// global | project | employee
   final String scope;
   final List<MemorySourceView> sources;
   final MemoryStatus status;
@@ -8452,8 +8746,6 @@ final class MemoryView {
     content: (json['content'] as String),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     decidedBy: (json['decided_by'] == null ? null : (json['decided_by'] as String)),
-    departmentId: (json['department_id'] == null ? null : (json['department_id'] as String)),
-    departmentName: (json['department_name'] == null ? null : (json['department_name'] as String)),
     employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
     employeeName: (json['employee_name'] == null ? null : (json['employee_name'] as String)),
     id: (json['id'] as String),
@@ -8473,8 +8765,6 @@ final class MemoryView {
     'content': content,
     'created_at_ms': createdAtMs,
     if (decidedBy != null) 'decided_by': decidedBy,
-    if (departmentId != null) 'department_id': departmentId,
-    if (departmentName != null) 'department_name': departmentName,
     if (employeeId != null) 'employee_id': employeeId,
     if (employeeName != null) 'employee_name': employeeName,
     'id': id,
@@ -8486,37 +8776,6 @@ final class MemoryView {
     'sources': sources.map((x0) => x0.toJson()).toList(),
     'status': status.toJson(),
     if (supersedesId != null) 'supersedes_id': supersedesId,
-  };
-}
-
-final class MergedEmployee {
-  const MergedEmployee({
-    required this.employeeId,
-    required this.mergedIds,
-    required this.name,
-    required this.projects,
-  });
-
-  /// The one that stays (of an active project, the most tasks).
-  final String employeeId;
-  /// The others, now archived; their work belongs to `employee_id`.
-  final List<String> mergedIds;
-  final String name;
-  /// The projects they came from, the survivor's first.
-  final List<String> projects;
-
-  factory MergedEmployee.fromJson(Map<String, dynamic> json) => MergedEmployee(
-    employeeId: (json['employee_id'] as String),
-    mergedIds: (json['merged_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    name: (json['name'] as String),
-    projects: (json['projects'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'employee_id': employeeId,
-    'merged_ids': mergedIds,
-    'name': name,
-    'projects': projects,
   };
 }
 
@@ -8809,6 +9068,13 @@ sealed class Method {
         return const MethodAutoAllowGetSetting();
       case 'backup.list':
         return const MethodBackupList();
+      case 'board.get':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodBoardGet(
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
       case 'browser.get':
         return const MethodBrowserGet();
       case 'company.get':
@@ -8822,13 +9088,6 @@ sealed class Method {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodConversationGet(
           conversationId: (src['conversation_id'] as String),
-        );
-        }
-      case 'department.list':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodDepartmentList(
-          archived: (src['archived'] == null ? null : (src['archived'] as bool)),
         );
         }
       case 'employee.chat':
@@ -8846,12 +9105,7 @@ sealed class Method {
         );
         }
       case 'employee.list':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodEmployeeList(
-          departmentId: (src['department_id'] == null ? null : (src['department_id'] as String)),
-        );
-        }
+        return const MethodEmployeeList();
       case 'event.subscribe':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -8942,7 +9196,6 @@ sealed class Method {
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodMemoryGetContext(
-          departmentId: (src['department_id'] == null ? null : (src['department_id'] as String)),
           employeeId: (src['employee_id'] == null ? null : (src['employee_id'] as String)),
           projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
         );
@@ -8951,7 +9204,6 @@ sealed class Method {
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodMemoryList(
-          departmentId: (src['department_id'] == null ? null : (src['department_id'] as String)),
           employeeId: (src['employee_id'] == null ? null : (src['employee_id'] as String)),
           projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
         );
@@ -9003,12 +9255,7 @@ sealed class Method {
         );
         }
       case 'proposal.list':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodProposalList(
-          departmentId: (src['department_id'] == null ? null : (src['department_id'] as String)),
-        );
-        }
+        return const MethodProposalList();
       case 'recurring_task.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -9068,7 +9315,6 @@ sealed class Method {
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodTaskList(
-          departmentId: (src['department_id'] == null ? null : (src['department_id'] as String)),
           employeeId: (src['employee_id'] == null ? null : (src['employee_id'] as String)),
           projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
           state: (src['state'] == null ? null : TaskListState.fromJson(src['state'] as String)),
@@ -9131,6 +9377,22 @@ sealed class Method {
           terminalId: (src['terminal_id'] as String),
         );
         }
+      case 'ticket.get':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodTicketGet(
+          ticketId: (src['ticket_id'] as String),
+        );
+        }
+      case 'ticket.list':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodTicketList(
+          column: (src['column'] == null ? null : ColumnKind.fromJson(src['column'] as String)),
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+          query: (src['query'] == null ? null : (src['query'] as String)),
+        );
+        }
       case 'timeline.list':
         return MethodTimelineList(params: TimelineQuery.fromJson(json['params'] as Map<String, dynamic>));
       case 'trace.get_setting':
@@ -9168,6 +9430,12 @@ sealed class Method {
           taskId: (src['task_id'] == null ? null : (src['task_id'] as String)),
         );
         }
+      case 'user.list':
+        return const MethodUserList();
+      case 'user.use':
+        return MethodUserUse(params: UserUseParams.fromJson(json['params'] as Map<String, dynamic>));
+      case 'user.whoami':
+        return const MethodUserWhoami();
       case 'variants.get_setting':
         return const MethodVariantsGetSetting();
       default:
@@ -9317,6 +9585,24 @@ final class MethodBackupList extends Method {
     };
 }
 
+/// The board: its six columns left to right, each with its cards (not
+/// archived), for one project or every project.
+final class MethodBoardGet extends Method {
+  const MethodBoardGet({
+    this.projectId,
+  });
+
+  final String? projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'board.get',
+      'params': <String, dynamic>{
+      if (projectId != null) 'project_id': projectId,
+    },
+    };
+}
+
 final class MethodBrowserGet extends Method {
   const MethodBrowserGet();
 
@@ -9326,8 +9612,8 @@ final class MethodBrowserGet extends Method {
     };
 }
 
-/// The company in one read: departments, employees, the org chart setting
-/// and the management team (roots), plus the conversion report if any.
+/// The company in one read: employees, the org chart setting and the
+/// management team (roots).
 final class MethodCompanyGet extends Method {
   const MethodCompanyGet();
 
@@ -9373,23 +9659,6 @@ final class MethodConversationGet extends Method {
     };
 }
 
-/// The departments by name; archived ones too with `archived`.
-final class MethodDepartmentList extends Method {
-  const MethodDepartmentList({
-    this.archived,
-  });
-
-  final bool? archived;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'department.list',
-      'params': <String, dynamic>{
-      if (archived != null) 'archived': archived,
-    },
-    };
-}
-
 /// An employee's persistent chat with the user (company scope, no project):
 /// its messages and settings, as `conversation.get` answers them.
 final class MethodEmployeeChat extends Method {
@@ -9425,20 +9694,13 @@ final class MethodEmployeeInstructionVersions extends Method {
     };
 }
 
-/// The company's employees (not archived), oldest first; optionally of one department.
+/// The company's employees (not archived), oldest first.
 final class MethodEmployeeList extends Method {
-  const MethodEmployeeList({
-    this.departmentId,
-  });
-
-  final String? departmentId;
+  const MethodEmployeeList();
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'employee.list',
-      'params': <String, dynamic>{
-      if (departmentId != null) 'department_id': departmentId,
-    },
     };
 }
 
@@ -9686,17 +9948,15 @@ final class MethodMcpAlwaysAllowList extends Method {
     };
 }
 
-/// What goes into a context: an employee's (own, its department, the
-/// project if given, global), a project conversation's (project, global; no
-/// employee) or a department's alone. At least one of the three.
+/// What goes into a context: an employee's (own, the project if given,
+/// global) or a project conversation's (project, global; no employee). At
+/// least one of the two.
 final class MethodMemoryGetContext extends Method {
   const MethodMemoryGetContext({
-    this.departmentId,
     this.employeeId,
     this.projectId,
   });
 
-  final String? departmentId;
   final String? employeeId;
   final String? projectId;
 
@@ -9704,7 +9964,6 @@ final class MethodMemoryGetContext extends Method {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'memory.get_context',
       'params': <String, dynamic>{
-      if (departmentId != null) 'department_id': departmentId,
       if (employeeId != null) 'employee_id': employeeId,
       if (projectId != null) 'project_id': projectId,
     },
@@ -9712,16 +9971,13 @@ final class MethodMemoryGetContext extends Method {
 }
 
 /// Memories, newest first: global always, plus the scopes asked for (a
-/// project, an employee, a department). An employee also brings its
-/// department's. Nothing asked: global and every department and employee.
+/// project, an employee). Nothing asked: global and every employee.
 final class MethodMemoryList extends Method {
   const MethodMemoryList({
-    this.departmentId,
     this.employeeId,
     this.projectId,
   });
 
-  final String? departmentId;
   final String? employeeId;
   final String? projectId;
 
@@ -9729,7 +9985,6 @@ final class MethodMemoryList extends Method {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'memory.list',
       'params': <String, dynamic>{
-      if (departmentId != null) 'department_id': departmentId,
       if (employeeId != null) 'employee_id': employeeId,
       if (projectId != null) 'project_id': projectId,
     },
@@ -9872,20 +10127,13 @@ final class MethodProjectConversationList extends Method {
 }
 
 /// Proposals of the whole company (colleagues and instructions): pending
-/// first, then the latest decisions; optionally of one department.
+/// first, then the latest decisions.
 final class MethodProposalList extends Method {
-  const MethodProposalList({
-    this.departmentId,
-  });
-
-  final String? departmentId;
+  const MethodProposalList();
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'proposal.list',
-      'params': <String, dynamic>{
-      if (departmentId != null) 'department_id': departmentId,
-    },
     };
 }
 
@@ -10043,14 +10291,11 @@ final class MethodSubscriptionGet extends Method {
 /// Tasks, newest first, company-wide; every given filter applies.
 final class MethodTaskList extends Method {
   const MethodTaskList({
-    this.departmentId,
     this.employeeId,
     this.projectId,
     this.state,
   });
 
-  /// Tasks of the department's employees.
-  final String? departmentId;
   final String? employeeId;
   final String? projectId;
   final TaskListState? state;
@@ -10059,7 +10304,6 @@ final class MethodTaskList extends Method {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'task.list',
       'params': <String, dynamic>{
-      if (departmentId != null) 'department_id': departmentId,
       if (employeeId != null) 'employee_id': employeeId,
       if (projectId != null) 'project_id': projectId,
       if (state != null) 'state': state?.toJson(),
@@ -10212,6 +10456,47 @@ final class MethodTerminalResize extends Method {
     };
 }
 
+/// One ticket with its main task and every task linked to it.
+final class MethodTicketGet extends Method {
+  const MethodTicketGet({
+    required this.ticketId,
+  });
+
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'ticket.get',
+      'params': <String, dynamic>{
+      'ticket_id': ticketId,
+    },
+    };
+}
+
+/// Tickets in board order (not archived); every given filter applies. `query`
+/// searches title, description and `#number`.
+final class MethodTicketList extends Method {
+  const MethodTicketList({
+    this.column,
+    this.projectId,
+    this.query,
+  });
+
+  final ColumnKind? column;
+  final String? projectId;
+  final String? query;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'ticket.list',
+      'params': <String, dynamic>{
+      if (column != null) 'column': column?.toJson(),
+      if (projectId != null) 'project_id': projectId,
+      if (query != null) 'query': query,
+    },
+    };
+}
+
 /// Human-readable timeline cards, newest first (keyset on `seq`).
 final class MethodTimelineList extends Method {
   const MethodTimelineList({
@@ -10324,6 +10609,47 @@ final class MethodUsageGetTotals extends Method {
       if (conversationId != null) 'conversation_id': conversationId,
       if (taskId != null) 'task_id': taskId,
     },
+    };
+}
+
+/// The board members, oldest first (never a password's hash): the choice
+/// "Who's working here?". Apps may read it too.
+final class MethodUserList extends Method {
+  const MethodUserList();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.list',
+    };
+}
+
+/// The one password check (Fase 1): a right password makes the board member
+/// active on this connection and answers `WhoAmI`. A wrong password and an
+/// unknown board member are both `wrong_password` (after a short delay); more
+/// than 5 tries a minute on one connection are `too_many_attempts`. A session
+/// method: it changes only the connection, so it has no receipt to replay.
+/// Not for apps.
+final class MethodUserUse extends Method {
+  const MethodUserUse({
+    required this.params,
+  });
+
+  final UserUseParams params;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.use',
+      'params': params.toJson(),
+    };
+}
+
+/// Whether the server has board members, and this connection's active one.
+final class MethodUserWhoami extends Method {
+  const MethodUserWhoami();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.whoami',
     };
 }
 
@@ -10670,6 +10996,23 @@ final class PinMemory {
     'memory_id': memoryId,
     'pinned': pinned,
   };
+}
+
+/// How a plan is approved: carried out in Auto, or with edits accepted one by one.
+enum PlanApproval {
+  approve('approve'),
+  approveEdits('approve_edits');
+
+  const PlanApproval(this.wire);
+
+  final String wire;
+
+  static PlanApproval fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown PlanApproval value: $value'),
+      );
+
+  String toJson() => wire;
 }
 
 /// What the user decided about a plan Claude Code proposed (ExitPlanMode).
@@ -11063,6 +11406,7 @@ final class ProjectSummary {
   const ProjectSummary({
     required this.createdAtMs,
     this.description,
+    this.dispatcherEmployeeId,
     required this.employeesActive,
     this.folder,
     required this.id,
@@ -11073,6 +11417,8 @@ final class ProjectSummary {
 
   final int createdAtMs;
   final String? description;
+  /// The project's own dispatcher for tickets; none: the company's (B5).
+  final String? dispatcherEmployeeId;
   /// Employees with an open task in this project (derived; employees are company-wide).
   final int employeesActive;
   /// The project's own folder on disk.
@@ -11085,6 +11431,7 @@ final class ProjectSummary {
   factory ProjectSummary.fromJson(Map<String, dynamic> json) => ProjectSummary(
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     description: (json['description'] == null ? null : (json['description'] as String)),
+    dispatcherEmployeeId: (json['dispatcher_employee_id'] == null ? null : (json['dispatcher_employee_id'] as String)),
     employeesActive: (json['employees_active'] as num).toInt(),
     folder: (json['folder'] == null ? null : (json['folder'] as String)),
     id: (json['id'] as String),
@@ -11096,6 +11443,7 @@ final class ProjectSummary {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'created_at_ms': createdAtMs,
     if (description != null) 'description': description,
+    if (dispatcherEmployeeId != null) 'dispatcher_employee_id': dispatcherEmployeeId,
     'employees_active': employeesActive,
     if (folder != null) 'folder': folder,
     'id': id,
@@ -11157,7 +11505,6 @@ final class ProposalEvidence {
 /// The employee that would be created.
 final class ProposalFields {
   const ProposalFields({
-    this.departmentId,
     required this.instructions,
     required this.name,
     this.reportsTo,
@@ -11165,8 +11512,6 @@ final class ProposalFields {
     this.title,
   });
 
-  /// The department it joins; the proposer's unless said otherwise.
-  final String? departmentId;
   final String instructions;
   final String name;
   /// Who the new employee reports to; the proposer unless said otherwise.
@@ -11175,7 +11520,6 @@ final class ProposalFields {
   final String? title;
 
   factory ProposalFields.fromJson(Map<String, dynamic> json) => ProposalFields(
-    departmentId: (json['department_id'] == null ? null : (json['department_id'] as String)),
     instructions: (json['instructions'] as String),
     name: (json['name'] as String),
     reportsTo: (json['reports_to'] == null ? null : (json['reports_to'] as String)),
@@ -11184,7 +11528,6 @@ final class ProposalFields {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    if (departmentId != null) 'department_id': departmentId,
     'instructions': instructions,
     'name': name,
     if (reportsTo != null) 'reports_to': reportsTo,
@@ -11241,7 +11584,6 @@ final class ProposalView {
     this.currentVersion,
     this.decidedAtMs,
     this.decisionNote,
-    this.departmentId,
     this.evidence = const [],
     required this.id,
     required this.instructions,
@@ -11272,8 +11614,6 @@ final class ProposalView {
   final int? decidedAtMs;
   /// The user's note on the decision (it goes back to the proposer).
   final String? decisionNote;
-  /// A colleague: the department it would join.
-  final String? departmentId;
   /// The tasks and memories (lessons) the proposal rests on.
   final List<ProposalEvidence> evidence;
   final String id;
@@ -11304,7 +11644,6 @@ final class ProposalView {
     currentVersion: (json['current_version'] == null ? null : (json['current_version'] as num).toInt()),
     decidedAtMs: (json['decided_at_ms'] == null ? null : (json['decided_at_ms'] as num).toInt()),
     decisionNote: (json['decision_note'] == null ? null : (json['decision_note'] as String)),
-    departmentId: (json['department_id'] == null ? null : (json['department_id'] as String)),
     evidence: (json['evidence'] == null ? const [] : (json['evidence'] as List<dynamic>).map((x0) => ProposalEvidence.fromJson(x0 as Map<String, dynamic>)).toList()),
     id: (json['id'] as String),
     instructions: (json['instructions'] as String),
@@ -11330,7 +11669,6 @@ final class ProposalView {
     if (currentVersion != null) 'current_version': currentVersion,
     if (decidedAtMs != null) 'decided_at_ms': decidedAtMs,
     if (decisionNote != null) 'decision_note': decisionNote,
-    if (departmentId != null) 'department_id': departmentId,
     'evidence': evidence.map((x0) => x0.toJson()).toList(),
     'id': id,
     'instructions': instructions,
@@ -11780,6 +12118,8 @@ sealed class ResponseBody {
         return ResponseBodyAutoAllowSetting(value: AutoAllowSetting.fromJson(json['value'] as Map<String, dynamic>));
       case 'backups':
         return ResponseBodyBackups(value: BackupsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'board':
+        return ResponseBodyBoard(value: BoardView.fromJson(json['value'] as Map<String, dynamic>));
       case 'browser':
         return ResponseBodyBrowser(value: BrowserSetting.fromJson(json['value'] as Map<String, dynamic>));
       case 'company':
@@ -11788,8 +12128,6 @@ sealed class ResponseBody {
         return ResponseBodyConnections(value: ConnectionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'context':
         return ResponseBodyContext(value: ContextView.fromJson(json['value'] as Map<String, dynamic>));
-      case 'departments':
-        return ResponseBodyDepartments(value: DepartmentsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'dir_listing':
         return ResponseBodyDirListing(value: DirListing.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_instruction_versions':
@@ -11908,6 +12246,10 @@ sealed class ResponseBody {
         return const ResponseBodyTerminalDone();
       case 'terminals':
         return ResponseBodyTerminals(value: (json['value'] as List<dynamic>).map((x0) => TerminalSummary.fromJson(x0 as Map<String, dynamic>)).toList());
+      case 'ticket':
+        return ResponseBodyTicket(value: TicketDetail.fromJson(json['value'] as Map<String, dynamic>));
+      case 'tickets':
+        return ResponseBodyTickets(value: TicketsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'timeline':
         return ResponseBodyTimeline(value: TimelinePage.fromJson(json['value'] as Map<String, dynamic>));
       case 'trace_setting':
@@ -11922,8 +12264,12 @@ sealed class ResponseBody {
         return ResponseBodyUsageHours(value: UsageHours.fromJson(json['value'] as Map<String, dynamic>));
       case 'usage_totals':
         return ResponseBodyUsageTotals(value: UsageTotals.fromJson(json['value'] as Map<String, dynamic>));
+      case 'users':
+        return ResponseBodyUsers(value: UsersSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'variants_setting':
         return ResponseBodyVariantsSetting(value: VariantsSetting.fromJson(json['value'] as Map<String, dynamic>));
+      case 'who_am_i':
+        return ResponseBodyWhoAmI(value: WhoAmI.fromJson(json['value'] as Map<String, dynamic>));
       default:
         throw FormatException('Unknown ResponseBody type: $tag');
     }
@@ -12087,6 +12433,20 @@ final class ResponseBodyBackups extends ResponseBody {
     };
 }
 
+final class ResponseBodyBoard extends ResponseBody {
+  const ResponseBodyBoard({
+    required this.value,
+  });
+
+  final BoardView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'board',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodyBrowser extends ResponseBody {
   const ResponseBodyBrowser({
     required this.value,
@@ -12139,20 +12499,6 @@ final class ResponseBodyContext extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'context',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyDepartments extends ResponseBody {
-  const ResponseBodyDepartments({
-    required this.value,
-  });
-
-  final DepartmentsSnapshot value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'departments',
       'value': value.toJson(),
     };
 }
@@ -12835,6 +13181,34 @@ final class ResponseBodyTerminals extends ResponseBody {
     };
 }
 
+final class ResponseBodyTicket extends ResponseBody {
+  const ResponseBodyTicket({
+    required this.value,
+  });
+
+  final TicketDetail value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'ticket',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyTickets extends ResponseBody {
+  const ResponseBodyTickets({
+    required this.value,
+  });
+
+  final TicketsSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'tickets',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodyTimeline extends ResponseBody {
   const ResponseBodyTimeline({
     required this.value,
@@ -12934,6 +13308,20 @@ final class ResponseBodyUsageTotals extends ResponseBody {
     };
 }
 
+final class ResponseBodyUsers extends ResponseBody {
+  const ResponseBodyUsers({
+    required this.value,
+  });
+
+  final UsersSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'users',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodyVariantsSetting extends ResponseBody {
   const ResponseBodyVariantsSetting({
     required this.value,
@@ -12944,6 +13332,20 @@ final class ResponseBodyVariantsSetting extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'variants_setting',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyWhoAmI extends ResponseBody {
+  const ResponseBodyWhoAmI({
+    required this.value,
+  });
+
+  final WhoAmI value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'who_am_i',
       'value': value.toJson(),
     };
 }
@@ -13608,24 +14010,22 @@ final class SetConversationRun {
   };
 }
 
-/// Move an employee to another department, or out of any (`None`).
-final class SetEmployeeDepartment {
-  const SetEmployeeDepartment({
-    this.departmentId,
-    required this.employeeId,
+/// Who chooses the owner of a started ticket. `employee_id` none: for a project,
+/// the company's dispatcher; for the company, no dispatcher (tickets wait in
+/// Todo for a board member, B5).
+final class SetDispatcher {
+  const SetDispatcher({
+    this.employeeId,
   });
 
-  final String? departmentId;
-  final String employeeId;
+  final String? employeeId;
 
-  factory SetEmployeeDepartment.fromJson(Map<String, dynamic> json) => SetEmployeeDepartment(
-    departmentId: (json['department_id'] == null ? null : (json['department_id'] as String)),
-    employeeId: (json['employee_id'] as String),
+  factory SetDispatcher.fromJson(Map<String, dynamic> json) => SetDispatcher(
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    if (departmentId != null) 'department_id': departmentId,
-    'employee_id': employeeId,
+    if (employeeId != null) 'employee_id': employeeId,
   };
 }
 
@@ -14113,7 +14513,7 @@ final class ShareView {
   });
 
   final int createdAtMs;
-  /// project · <name> | department · <name> | employee · <name> | conversation
+  /// project · <name> | employee · <name> | conversation
   final String destination;
   final String excerpt;
   final String id;
@@ -14438,30 +14838,6 @@ final class SubtaskUsage {
     'task_id': taskId,
     'title': title,
     'usage': usage.toJson(),
-  };
-}
-
-final class SuffixedEmployee {
-  const SuffixedEmployee({
-    required this.employeeId,
-    required this.newName,
-    required this.oldName,
-  });
-
-  final String employeeId;
-  final String newName;
-  final String oldName;
-
-  factory SuffixedEmployee.fromJson(Map<String, dynamic> json) => SuffixedEmployee(
-    employeeId: (json['employee_id'] as String),
-    newName: (json['new_name'] as String),
-    oldName: (json['old_name'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'employee_id': employeeId,
-    'new_name': newName,
-    'old_name': oldName,
   };
 }
 
@@ -14886,6 +15262,8 @@ final class TaskView {
     this.scheduleId,
     this.startsAtMs,
     required this.status,
+    this.ticketId,
+    this.ticketNumber,
     required this.title,
     required this.updatedAtMs,
     this.variantPhase,
@@ -14938,6 +15316,9 @@ final class TaskView {
   /// A `scheduled` queued task: when it may start (none when not known).
   final int? startsAtMs;
   final TaskStatus status;
+  /// The ticket this task works for (a main task or a delegation below it), and its number.
+  final String? ticketId;
+  final int? ticketNumber;
   final String title;
   final int updatedAtMs;
   /// Where the task's variants are, when it has some (feature `task_variants`).
@@ -14976,6 +15357,8 @@ final class TaskView {
     scheduleId: (json['schedule_id'] == null ? null : (json['schedule_id'] as String)),
     startsAtMs: (json['starts_at_ms'] == null ? null : (json['starts_at_ms'] as num).toInt()),
     status: TaskStatus.fromJson(json['status'] as String),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+    ticketNumber: (json['ticket_number'] == null ? null : (json['ticket_number'] as num).toInt()),
     title: (json['title'] as String),
     updatedAtMs: (json['updated_at_ms'] as num).toInt(),
     variantPhase: (json['variant_phase'] == null ? null : VariantPhase.fromJson(json['variant_phase'] as String)),
@@ -15008,6 +15391,8 @@ final class TaskView {
     if (scheduleId != null) 'schedule_id': scheduleId,
     if (startsAtMs != null) 'starts_at_ms': startsAtMs,
     'status': status.toJson(),
+    if (ticketId != null) 'ticket_id': ticketId,
+    if (ticketNumber != null) 'ticket_number': ticketNumber,
     'title': title,
     'updated_at_ms': updatedAtMs,
     if (variantPhase != null) 'variant_phase': variantPhase?.toJson(),
@@ -15159,6 +15544,207 @@ final class TerminalView {
     'reattached': reattached,
     'shell': shell,
     'terminal_id': terminalId,
+  };
+}
+
+/// `ticket.get`: the ticket, its main task and every task linked to it.
+final class TicketDetail {
+  const TicketDetail({
+    required this.asOfSeq,
+    this.rootTask,
+    required this.tasks,
+    required this.ticket,
+  });
+
+  final int asOfSeq;
+  final TaskView? rootTask;
+  /// Every task with this ticket's id (main tasks and delegations), oldest first.
+  final List<TaskView> tasks;
+  final TicketView ticket;
+
+  factory TicketDetail.fromJson(Map<String, dynamic> json) => TicketDetail(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    rootTask: (json['root_task'] == null ? null : TaskView.fromJson(json['root_task'] as Map<String, dynamic>)),
+    tasks: (json['tasks'] as List<dynamic>).map((x0) => TaskView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    ticket: TicketView.fromJson(json['ticket'] as Map<String, dynamic>),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    if (rootTask != null) 'root_task': rootTask?.toJson(),
+    'tasks': tasks.map((x0) => x0.toJson()).toList(),
+    'ticket': ticket.toJson(),
+  };
+}
+
+/// A ticket's priority (B9). Normal unless chosen.
+enum TicketPriority {
+  high('high'),
+  low('low'),
+  normal('normal'),
+  urgent('urgent');
+
+  const TicketPriority(this.wire);
+
+  final String wire;
+
+  static TicketPriority fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown TicketPriority value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
+/// A card on the board, and the fields of the ticket view.
+final class TicketView {
+  const TicketView({
+    this.archivedAtMs,
+    required this.attachments,
+    required this.column,
+    required this.columnId,
+    required this.createdAtMs,
+    required this.createdByUser,
+    required this.createdByUsername,
+    this.deadlineMs,
+    this.description,
+    this.doneAtMs,
+    required this.id,
+    required this.labels,
+    required this.number,
+    this.ownerEmployeeId,
+    this.ownerName,
+    required this.position,
+    required this.priority,
+    required this.projectId,
+    required this.projectName,
+    this.reviewFeedback,
+    this.rootTaskId,
+    this.rootTaskStatus,
+    required this.run,
+    this.startedAtMs,
+    required this.title,
+    required this.updatedAtMs,
+    required this.version,
+  });
+
+  final int? archivedAtMs;
+  /// Files attached to the ticket (fetched with `upload.get`).
+  final List<MessageFileView> attachments;
+  final ColumnKind column;
+  final String columnId;
+  final int createdAtMs;
+  /// The board member who made it; never changes.
+  final String createdByUser;
+  final String createdByUsername;
+  final int? deadlineMs;
+  /// Markdown; none when empty.
+  final String? description;
+  final int? doneAtMs;
+  final String id;
+  final List<String> labels;
+  /// Per company, from 1: what people call it (`#12`).
+  final int number;
+  /// The employee whose main task carries the ticket; none until chosen (by
+  /// a board member or the dispatcher).
+  final String? ownerEmployeeId;
+  final String? ownerName;
+  /// The order within its column, smallest first.
+  final double position;
+  final TicketPriority priority;
+  final String projectId;
+  final String projectName;
+  /// The last feedback of a board member (send back, revise plan).
+  final String? reviewFeedback;
+  /// The current main task; earlier ones stay linked through their `ticket_id`.
+  final String? rootTaskId;
+  final TaskStatus? rootTaskStatus;
+  /// Mode and model of the main task (unset: the owner's own).
+  final TaskRun run;
+  final int? startedAtMs;
+  final String title;
+  final int updatedAtMs;
+  final int version;
+
+  factory TicketView.fromJson(Map<String, dynamic> json) => TicketView(
+    archivedAtMs: (json['archived_at_ms'] == null ? null : (json['archived_at_ms'] as num).toInt()),
+    attachments: (json['attachments'] as List<dynamic>).map((x0) => MessageFileView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    column: ColumnKind.fromJson(json['column'] as String),
+    columnId: (json['column_id'] as String),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    createdByUser: (json['created_by_user'] as String),
+    createdByUsername: (json['created_by_username'] as String),
+    deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
+    description: (json['description'] == null ? null : (json['description'] as String)),
+    doneAtMs: (json['done_at_ms'] == null ? null : (json['done_at_ms'] as num).toInt()),
+    id: (json['id'] as String),
+    labels: (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    number: (json['number'] as num).toInt(),
+    ownerEmployeeId: (json['owner_employee_id'] == null ? null : (json['owner_employee_id'] as String)),
+    ownerName: (json['owner_name'] == null ? null : (json['owner_name'] as String)),
+    position: (json['position'] as num).toDouble(),
+    priority: TicketPriority.fromJson(json['priority'] as String),
+    projectId: (json['project_id'] as String),
+    projectName: (json['project_name'] as String),
+    reviewFeedback: (json['review_feedback'] == null ? null : (json['review_feedback'] as String)),
+    rootTaskId: (json['root_task_id'] == null ? null : (json['root_task_id'] as String)),
+    rootTaskStatus: (json['root_task_status'] == null ? null : TaskStatus.fromJson(json['root_task_status'] as String)),
+    run: TaskRun.fromJson(json['run'] as Map<String, dynamic>),
+    startedAtMs: (json['started_at_ms'] == null ? null : (json['started_at_ms'] as num).toInt()),
+    title: (json['title'] as String),
+    updatedAtMs: (json['updated_at_ms'] as num).toInt(),
+    version: (json['version'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (archivedAtMs != null) 'archived_at_ms': archivedAtMs,
+    'attachments': attachments.map((x0) => x0.toJson()).toList(),
+    'column': column.toJson(),
+    'column_id': columnId,
+    'created_at_ms': createdAtMs,
+    'created_by_user': createdByUser,
+    'created_by_username': createdByUsername,
+    if (deadlineMs != null) 'deadline_ms': deadlineMs,
+    if (description != null) 'description': description,
+    if (doneAtMs != null) 'done_at_ms': doneAtMs,
+    'id': id,
+    'labels': labels,
+    'number': number,
+    if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
+    if (ownerName != null) 'owner_name': ownerName,
+    'position': position,
+    'priority': priority.toJson(),
+    'project_id': projectId,
+    'project_name': projectName,
+    if (reviewFeedback != null) 'review_feedback': reviewFeedback,
+    if (rootTaskId != null) 'root_task_id': rootTaskId,
+    if (rootTaskStatus != null) 'root_task_status': rootTaskStatus?.toJson(),
+    'run': run.toJson(),
+    if (startedAtMs != null) 'started_at_ms': startedAtMs,
+    'title': title,
+    'updated_at_ms': updatedAtMs,
+    'version': version,
+  };
+}
+
+/// `ticket.list`.
+final class TicketsSnapshot {
+  const TicketsSnapshot({
+    required this.asOfSeq,
+    required this.tickets,
+  });
+
+  final int asOfSeq;
+  final List<TicketView> tickets;
+
+  factory TicketsSnapshot.fromJson(Map<String, dynamic> json) => TicketsSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    tickets: (json['tickets'] as List<dynamic>).map((x0) => TicketView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'tickets': tickets.map((x0) => x0.toJson()).toList(),
   };
 }
 
@@ -15453,33 +16039,24 @@ final class UpdateAgentFunction {
   };
 }
 
-/// Name, description and head as given: `None` or an empty description clears it,
-/// `None` as head leaves the department without one.
-final class UpdateDepartment {
-  const UpdateDepartment({
-    required this.departmentId,
-    this.description,
-    this.headId,
-    required this.name,
+/// Change the company's name or its dispatcher; left out: unchanged.
+final class UpdateCompany {
+  const UpdateCompany({
+    this.dispatcher,
+    this.name,
   });
 
-  final String departmentId;
-  final String? description;
-  final String? headId;
-  final String name;
+  final SetDispatcher? dispatcher;
+  final String? name;
 
-  factory UpdateDepartment.fromJson(Map<String, dynamic> json) => UpdateDepartment(
-    departmentId: (json['department_id'] as String),
-    description: (json['description'] == null ? null : (json['description'] as String)),
-    headId: (json['head_id'] == null ? null : (json['head_id'] as String)),
-    name: (json['name'] as String),
+  factory UpdateCompany.fromJson(Map<String, dynamic> json) => UpdateCompany(
+    dispatcher: (json['dispatcher'] == null ? null : SetDispatcher.fromJson(json['dispatcher'] as Map<String, dynamic>)),
+    name: (json['name'] == null ? null : (json['name'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'department_id': departmentId,
-    if (description != null) 'description': description,
-    if (headId != null) 'head_id': headId,
-    'name': name,
+    if (dispatcher != null) 'dispatcher': dispatcher?.toJson(),
+    if (name != null) 'name': name,
   };
 }
 
@@ -15557,6 +16134,28 @@ final class UpdateIdea {
     if (note != null) 'note': note,
     'remove_files': removeFiles,
     'title': title,
+  };
+}
+
+/// Change a project's settings; left out: unchanged. `dispatcher` with no
+/// employee: the company's dispatcher again.
+final class UpdateProject {
+  const UpdateProject({
+    this.dispatcher,
+    required this.projectId,
+  });
+
+  final SetDispatcher? dispatcher;
+  final String projectId;
+
+  factory UpdateProject.fromJson(Map<String, dynamic> json) => UpdateProject(
+    dispatcher: (json['dispatcher'] == null ? null : SetDispatcher.fromJson(json['dispatcher'] as Map<String, dynamic>)),
+    projectId: (json['project_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (dispatcher != null) 'dispatcher': dispatcher?.toJson(),
+    'project_id': projectId,
   };
 }
 
@@ -15959,6 +16558,95 @@ final class UsageWindow {
   };
 }
 
+/// `user.create`. The password is never printed.
+final class UserCreateParams {
+  const UserCreateParams({
+    required this.password,
+    required this.username,
+  });
+
+  final String password;
+  final String username;
+
+  factory UserCreateParams.fromJson(Map<String, dynamic> json) => UserCreateParams(
+    password: (json['password'] as String),
+    username: (json['username'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'password': password,
+    'username': username,
+  };
+}
+
+/// `user.use`. The password is never printed.
+final class UserUseParams {
+  const UserUseParams({
+    required this.password,
+    required this.userId,
+  });
+
+  final String password;
+  final String userId;
+
+  factory UserUseParams.fromJson(Map<String, dynamic> json) => UserUseParams(
+    password: (json['password'] as String),
+    userId: (json['user_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'password': password,
+    'user_id': userId,
+  };
+}
+
+/// A board member as every client sees it; never the password's hash.
+final class UserView {
+  const UserView({
+    required this.createdAtMs,
+    this.createdByUser,
+    required this.id,
+    required this.username,
+  });
+
+  final int createdAtMs;
+  /// None: made in the onboarding, without an active board member.
+  final String? createdByUser;
+  final String id;
+  final String username;
+
+  factory UserView.fromJson(Map<String, dynamic> json) => UserView(
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    createdByUser: (json['created_by_user'] == null ? null : (json['created_by_user'] as String)),
+    id: (json['id'] as String),
+    username: (json['username'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'created_at_ms': createdAtMs,
+    if (createdByUser != null) 'created_by_user': createdByUser,
+    'id': id,
+    'username': username,
+  };
+}
+
+/// `user.list`, oldest first.
+final class UsersSnapshot {
+  const UsersSnapshot({
+    required this.users,
+  });
+
+  final List<UserView> users;
+
+  factory UsersSnapshot.fromJson(Map<String, dynamic> json) => UsersSnapshot(
+    users: (json['users'] as List<dynamic>).map((x0) => UserView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'users': users.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 /// Where a task's variants are.
 enum VariantPhase {
   /// The chosen diff goes into the work folder.
@@ -16050,6 +16738,28 @@ final class VerifyConnection {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'connection_id': connectionId,
+  };
+}
+
+/// `user.whoami`: what the onboarding gate needs (also in the hello).
+final class WhoAmI {
+  const WhoAmI({
+    required this.boardMembersExist,
+    this.user,
+  });
+
+  final bool boardMembersExist;
+  /// The active board member of this connection.
+  final UserView? user;
+
+  factory WhoAmI.fromJson(Map<String, dynamic> json) => WhoAmI(
+    boardMembersExist: (json['board_members_exist'] as bool),
+    user: (json['user'] == null ? null : UserView.fromJson(json['user'] as Map<String, dynamic>)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'board_members_exist': boardMembersExist,
+    if (user != null) 'user': user?.toJson(),
   };
 }
 

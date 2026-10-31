@@ -7,7 +7,7 @@ use crate::run::events::{Ev, emit};
 use crate::run::queue::queue_run;
 use crate::{CommandContext, CommandService, Committed, TxResult, domain_error, storage_error};
 use aurelius_domain::{
-    ActorKind, ConversationId, DepartmentId, DomainError, EventKind, EventNotice, EmployeeId, MessageId,
+    ActorKind, ConversationId, DomainError, EventKind, EventNotice, EmployeeId, MessageId,
     conversation::{MessageRole, MessageStatus},
     employee::{self, LifecycleStatus, EmployeeConfig},
 };
@@ -29,7 +29,6 @@ pub(crate) struct NewEmployee {
     pub role: String,
     pub title: Option<String>,
     pub reports_to: Option<EmployeeId>,
-    pub department_id: Option<DepartmentId>,
     pub instructions_blob: Option<PreparedBlob>,
     pub payload: PreparedBlob,
     pub config: EmployeeConfig,
@@ -45,7 +44,6 @@ impl NewEmployee {
         role: &str,
         title: Option<String>,
         reports_to: Option<EmployeeId>,
-        department_id: Option<DepartmentId>,
         instructions: Option<&str>,
         workspace: Option<String>,
     ) -> Result<Self, AppError> {
@@ -57,7 +55,7 @@ impl NewEmployee {
         let config = EmployeeConfig { identity: format!("{name}, {role}"), ..Default::default() };
         let payload = store
             .blobs()
-            .put_json(&serde_json::json!({ "employee_id": employee_id, "name": name, "role": role, "title": title, "reports_to": reports_to, "department_id": department_id, "config": config }))
+            .put_json(&serde_json::json!({ "employee_id": employee_id, "name": name, "role": role, "title": title, "reports_to": reports_to, "config": config }))
             .map_err(storage_error)?;
         Ok(Self {
             employee_id,
@@ -66,7 +64,6 @@ impl NewEmployee {
             role: role.to_owned(),
             title,
             reports_to,
-            department_id,
             instructions_blob,
             payload,
             config,
@@ -96,15 +93,10 @@ pub(crate) fn insert_new_employee(
             Some(_) => return Ok(Err(domain_error(DomainError::Org("An employee reports to a colleague who is not archived.".into())))),
             None => return Ok(Err(domain_error(DomainError::EmployeeNotFound(boss)))),
         }
-        let mut entries: Vec<(EmployeeId, Option<EmployeeId>)> = employees::org_entries(tx)?.into_iter().map(|(e, b, _)| (e, b)).collect();
+        let mut entries: Vec<(EmployeeId, Option<EmployeeId>)> = employees::org_entries(tx)?;
         entries.push((m.employee_id, Some(boss)));
         if aurelius_domain::org::Org::new(entries).height() > aurelius_domain::org::MAX_CHART_DEPTH {
             return Ok(Err(domain_error(DomainError::Org(format!("The org chart may be at most {} levels deep.", aurelius_domain::org::MAX_CHART_DEPTH)))));
-        }
-    }
-    if let Some(department) = m.department_id {
-        if let Err(refused) = active_department(tx, department)? {
-            return Ok(Err(refused));
         }
     }
     blobs::register(tx, &m.payload)?;
@@ -118,7 +110,6 @@ pub(crate) fn insert_new_employee(
         &m.role,
         m.title.as_deref(),
         m.reports_to,
-        m.department_id,
         m.instructions_blob.as_ref().map(|b| b.id.to_string()).as_deref(),
         &serde_json::to_value(&m.config)?,
         m.conversation_id,
@@ -151,15 +142,6 @@ pub(crate) fn name_taken(name: &str) -> AppError {
     domain_error(DomainError::OutOfRange { field: "name".into(), detail: format!("An employee named {name} already exists; names are unique in the company") })
 }
 
-/// `department` exists and is not archived.
-pub(crate) fn active_department(tx: &Tx<'_>, department: DepartmentId) -> Result<Result<(), AppError>, aurelius_storage::StorageError> {
-    Ok(match aurelius_storage::departments::load(tx, department)? {
-        None => Err(domain_error(DomainError::DepartmentNotFound(department))),
-        Some(d) if d.status == aurelius_domain::views::DepartmentStatus::Archived => Err(domain_error(DomainError::Org(format!("The department {} is archived.", d.name)))),
-        Some(_) => Ok(()),
-    })
-}
-
 impl CommandService {
     pub(crate) fn create_employee(
         &self,
@@ -174,7 +156,7 @@ impl CommandService {
             Some(p) => Some(self.chosen_folder(p)?),
             None => None,
         };
-        let new = NewEmployee::prepare(&self.store, &name, &role, title, cmd.reports_to, cmd.department_id, instructions.as_deref(), workspace)?;
+        let new = NewEmployee::prepare(&self.store, &name, &role, title, cmd.reports_to, instructions.as_deref(), workspace)?;
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
         let actor = ctx.principal_id.to_string();
@@ -362,41 +344,6 @@ impl CommandService {
         })
     }
 
-    /// Move an employee to another department, or out of any.
-    pub(crate) fn set_employee_department(
-        &self,
-        ctx: &CommandContext,
-        envelope: &CommandEnvelope,
-        hash: String,
-        cmd: &employee::SetEmployeeDepartment,
-    ) -> Result<Committed, AppError> {
-        let (employee_id, department) = (cmd.employee_id, cmd.department_id);
-        let expected = envelope.expected_version;
-        let command_id = envelope.command_id;
-        let meta = ctx.metadata();
-        self.commit(command_id, hash, move |tx| {
-            let Some(current) = employees::load_employee(tx, employee_id)? else {
-                return Ok(Err(domain_error(DomainError::EmployeeNotFound(employee_id))));
-            };
-            if current.status == LifecycleStatus::Archived {
-                return Ok(Err(domain_error(DomainError::EmployeeArchived)));
-            }
-            if let Some(expected) = expected.filter(|e| *e != current.version) {
-                return Ok(Err(domain_error(DomainError::VersionConflict { expected, actual: current.version })));
-            }
-            if let Some(d) = department {
-                if let Err(refused) = active_department(tx, d)? {
-                    return Ok(Err(refused));
-                }
-            }
-            let result = CommandResult::EmployeeDepartmentSet { employee_id, department_id: department };
-            if current.department_id == department {
-                return Ok(Ok((result, vec![])));
-            }
-            Ok(Ok((result, set_department(tx, employee_id, current.department_id, department, command_id, &meta)?)))
-        })
-    }
-
     /// A user message to an employee starts an employee run, unless the employee is paused.
     pub(crate) fn send_employee_message(
         &self,
@@ -514,39 +461,10 @@ impl CommandService {
                 notices.extend(crate::run::queue::interrupt_conversation(tx, &store, &meta, &command_id.to_string(), conversation_id)?);
             }
             let (run_id, run_notice) = queue_run(tx, &meta, &command_id.to_string(), conversation_id, message_id)?;
-            notices.push(run_notice);
+            notices.extend(run_notice);
             // A finished task whose conversation gets a run: its live run changed.
             notices.extend(crate::task::task_runs::live_run_notice(tx, conversation_id)?);
             Ok(Ok((CommandResult::EmployeeMessageSent { conversation_id, message_id, run_id }, notices)))
         })
     }
-}
-
-/// Put `employee` into `department` (none: out of any), with its
-/// `employee.department_set` event.
-pub(crate) fn set_department(
-    tx: &Tx<'_>,
-    employee: EmployeeId,
-    from: Option<DepartmentId>,
-    department: Option<DepartmentId>,
-    command_id: aurelius_domain::CommandId,
-    meta: &serde_json::Value,
-) -> Result<Vec<EventNotice>, aurelius_storage::StorageError> {
-    employees::set_department(tx, employee, department)?;
-    let (_, n) = crate::org::append_event(
-        tx,
-        crate::org::OrgEvent {
-            aggregate_type: "employee",
-            aggregate_id: employee.to_string(),
-            kind: EventKind::EmployeeDepartmentSet,
-            project: None,
-            actor: ActorKind::User,
-            actor_id: None,
-            correlation: command_id.to_string(),
-            payload: None,
-            metadata: serde_json::json!({ "from": from, "department_id": department, "ctx": meta }),
-            dedupe: format!("cmd:{command_id}:department:{employee}"),
-        },
-    )?;
-    Ok(vec![n])
 }

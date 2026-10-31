@@ -26,7 +26,7 @@ async fn project(client: &Client, name: &str) -> (ProjectId, PathBuf) {
 }
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str) -> (EmployeeId, ConversationId) {
-    let create = CreateEmployee { name: name.into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+    let create = CreateEmployee { name: name.into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else {
         panic!()
     };
@@ -127,18 +127,18 @@ async fn chosen_project_folder_and_employee_workspaces() {
     // Alex gets an own workspace; Sam works in the project folder only.
     let workspace = dir.path().join("alex-space");
     std::fs::create_dir_all(&workspace).unwrap();
-    let create = CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: Some(workspace.display().to_string()), department_id: None };
+    let create = CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: Some(workspace.display().to_string()) };
     let CommandResult::EmployeeCreated { employee_id: alex, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let (sam, _) = employee(&client, project_id, "Sam").await;
     let folder_of = |employees: Vec<aurelius_protocol::EmployeeSummary>, id: EmployeeId| employees.into_iter().find(|m| m.id == id).unwrap().folder;
-    let employees = client.employees(None).await.unwrap().employees;
+    let employees = client.employees().await.unwrap().employees;
     let alex_folder = folder_of(employees.clone(), alex).expect("Alex has a workspace");
     assert_eq!(PathBuf::from(alex_folder).canonicalize().unwrap(), workspace.canonicalize().unwrap());
     assert_eq!(folder_of(employees, sam), None, "Sam has none of his own");
 
     // Clearing the workspace removes it.
     client.execute(envelope(Command::SetEmployeeFolder(aurelius_domain::employee::SetEmployeeFolder { employee_id: alex, path: None }), None)).await.unwrap();
-    assert_eq!(folder_of(client.employees(None).await.unwrap().employees, alex), None);
+    assert_eq!(folder_of(client.employees().await.unwrap().employees, alex), None);
 
     stop(dir.path(), daemon).await;
 }

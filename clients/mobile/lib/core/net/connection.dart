@@ -16,6 +16,10 @@ import 'protocol.dart';
 
 enum LinkStatus { connecting, online, offline, revoked, incompatible }
 
+/// What the onboarding gate shows (impactanalyse §4b.4): nothing before the
+/// first hello, then the first board member, the choice, or the app.
+enum BoardMemberStep { unknown, createFirst, choose, ready }
+
 /// What the app shows about the PC connection (honest status,
 /// which host, and how fresh the data is).
 class LinkState extends Equatable {
@@ -27,6 +31,8 @@ class LinkState extends Equatable {
     this.capabilities = const [],
     this.daemonVersion,
     this.features = const [],
+    this.boardMembersExist,
+    this.user,
   });
 
   final LinkStatus status;
@@ -40,6 +46,19 @@ class LinkState extends Equatable {
 
   /// Additions to the protocol the server has (`HelloResult.features`); older servers send none.
   final List<String> features;
+
+  /// The server has board members; null until the first hello.
+  final bool? boardMembersExist;
+
+  /// This connection's active board member.
+  final UserView? user;
+
+  BoardMemberStep get boardMemberStep => switch ((boardMembersExist, user)) {
+        (_, UserView()) => BoardMemberStep.ready,
+        (null, _) => BoardMemberStep.unknown,
+        (false, _) => BoardMemberStep.createFirst,
+        (true, _) => BoardMemberStep.choose,
+      };
 
   bool get isOnline => status == LinkStatus.online;
   bool can(String capability) => capabilities.contains(capability);
@@ -62,21 +81,40 @@ class LinkState extends Equatable {
         capabilities: capabilities ?? this.capabilities,
         daemonVersion: daemonVersion ?? this.daemonVersion,
         features: features ?? this.features,
+        boardMembersExist: boardMembersExist,
+        user: user,
+      );
+
+  /// The same link with what the server said about board members.
+  LinkState withBoardMember({required bool exists, UserView? user}) => LinkState(
+        status: status,
+        message: message,
+        lastOnlineMs: lastOnlineMs,
+        retryAtMs: retryAtMs,
+        capabilities: capabilities,
+        daemonVersion: daemonVersion,
+        features: features,
+        boardMembersExist: exists || user != null,
+        user: user,
       );
 
   @override
-  List<Object?> get props => [status, message, lastOnlineMs, retryAtMs, capabilities, daemonVersion, features];
+  List<Object?> get props => [status, message, lastOnlineMs, retryAtMs, capabilities, daemonVersion, features, boardMembersExist, user?.id, user?.username];
 }
 
 /// The write was not delivered and will not be retried automatically.
 /// Resend with the same [idempotencyKey] to apply it at most once.
 class NotSentException implements Exception {
-  const NotSentException(this.idempotencyKey);
+  const NotSentException(this.idempotencyKey, {this.sent = false});
 
   final String idempotencyKey;
 
+  /// It went out before the connection dropped: the PC may have applied it,
+  /// only its answer never came.
+  final bool sent;
+
   @override
-  String toString() => 'Not sent. The PC was not reachable.';
+  String toString() => sent ? 'The connection dropped before the PC answered.' : 'Not sent. The PC was not reachable.';
 }
 
 /// A minimal socket so tests can replace the network.
@@ -304,8 +342,11 @@ class AureliusConnection {
     try {
       _calls.clear(); // a new session starts with whole lists
       compactingConversations.value = const {};
-      final body = await call(sessionHello(HelloParams(clientName: clientName, clientVersion: clientVersion, accepts: const ['activity_changes'])));
+      final remembered = await _store.boardMember(host.hostId);
+      final body = await call(sessionHello(HelloParams(clientName: clientName, clientVersion: clientVersion, accepts: const ['activity_changes'], userId: remembered)));
       hello = (body as ResponseBodyHello).value;
+      // A board member the server no longer knows (a restore): choose again.
+      if (remembered != null && hello.user == null) await _store.setBoardMember(host.hostId, null);
     } on ProtocolException catch (e) {
       if (e.code != ErrorCode.incompatibleProtocol) rethrow;
       throw const _Incompatible(differentVersions);
@@ -327,6 +368,8 @@ class AureliusConnection {
       capabilities: [for (final c in hello.capabilities) c.wire],
       daemonVersion: hello.daemonVersion,
       features: hello.features,
+      boardMembersExist: hello.boardMembersExist || hello.user != null,
+      user: hello.user,
     ));
     _flushOutbox();
   }
@@ -354,6 +397,8 @@ class AureliusConnection {
         final ok = message.ok;
         final waiting = _waiting.remove(message.requestId);
         if (error != null) {
+          // The server has no board member for this connection: back to the choice.
+          if (error.code == ErrorCode.boardMemberRequired && _state.user != null) _emit(_state.withBoardMember(exists: true));
           waiting?.completeError(ProtocolException(error.code, error.message));
         } else if (ok != null) {
           waiting?.complete(ok);
@@ -475,12 +520,39 @@ class AureliusConnection {
       pending.inFlight = false;
       if (!pending.retry) {
         _outbox.remove(pending);
-        pending.completer.completeError(NotSentException(pending.idempotencyKey));
+        pending.completer.completeError(NotSentException(pending.idempotencyKey, sent: true));
       }
     } catch (e) {
       _outbox.remove(pending);
       pending.completer.completeError(e);
     }
+  }
+
+  /// The one password check (`user.use`): [userId] becomes this connection's
+  /// board member and is remembered for the next hello. The password is only
+  /// sent, never kept.
+  Future<UserView> useBoardMember(String userId, String password) async {
+    final body = await call(userUse(UserUseParams(userId: userId, password: password)));
+    return _applyWhoAmI((body as ResponseBodyWhoAmI).value);
+  }
+
+  /// A new board member (`user.create`). Without an active one, this connection
+  /// becomes the new board member. Never resent after a reconnect, so the
+  /// password does not wait in the outbox.
+  Future<String> createBoardMember(String username, String password) async {
+    final receipt = await write(userCreate(UserCreateParams(username: username, password: password)), retry: false);
+    final created = ((receipt.result as WriteResultCommand).value as CommandResultUserCreated).userId;
+    final body = await call(userWhoami());
+    await _applyWhoAmI((body as ResponseBodyWhoAmI).value);
+    return created;
+  }
+
+  Future<UserView> _applyWhoAmI(WhoAmI who) async {
+    final user = who.user;
+    if (user == null) throw const ProtocolException(ErrorCode.boardMemberRequired, 'The server did not make you a board member. Try again.');
+    await _store.setBoardMember(host.hostId, user.id);
+    _emit(_state.withBoardMember(exists: who.boardMembersExist, user: user));
+    return user;
   }
 
   /// Take back a command that never left this phone: it fails with

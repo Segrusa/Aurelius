@@ -15,34 +15,30 @@ pub fn scope_id(tx: &Connection, scope: MemoryScope) -> Result<Option<String>, S
         MemoryScope::Global => tx.query_row("SELECT id FROM scopes WHERE kind = 'global'", [], |r| r.get(0)).optional()?,
         MemoryScope::Project(p) => tx.query_row("SELECT scope_id FROM projects WHERE id = ?1", [p.to_string()], |r| r.get(0)).optional()?,
         MemoryScope::Employee(m) => tx.query_row("SELECT scope_id FROM employees WHERE id = ?1", [m.to_string()], |r| r.get(0)).optional()?,
-        MemoryScope::Department(d) => tx.query_row("SELECT scope_id FROM departments WHERE id = ?1", [d.to_string()], |r| r.get(0)).optional()?,
     })
 }
 
 /// The scopes a run may read, each a scope id: an employee's own,
-/// its department's, the project of its task (none in its chat) and global.
+/// the project of its task (none in its chat) and global.
 /// Never another employee's private scope.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReadScopes {
     pub own: Option<String>,
-    pub department: Option<String>,
     pub project: Option<String>,
     pub global: Option<String>,
 }
 
 impl ReadScopes {
-    /// Own, department, project, global: the order the context lists them in.
+    /// Own, project, global: the order the context lists them in.
     pub fn all(&self) -> Vec<String> {
-        [&self.own, &self.department, &self.project, &self.global].into_iter().flatten().cloned().collect()
+        [&self.own, &self.project, &self.global].into_iter().flatten().cloned().collect()
     }
 
-    /// `employee | department | project | global` for one of these scope ids.
+    /// `employee | project | global` for one of these scope ids.
     pub fn label(&self, scope: &str) -> &'static str {
         let is = |s: &Option<String>| s.as_deref() == Some(scope);
         if is(&self.own) {
             "employee"
-        } else if is(&self.department) {
-            "department"
         } else if is(&self.project) {
             "project"
         } else {
@@ -51,20 +47,12 @@ impl ReadScopes {
     }
 }
 
-/// What an employee reads: own, department, the project (of the task or
-/// conversation; none in its chat) and global.
+/// What an employee reads: own, the project (of the task or conversation;
+/// none in its chat) and global.
 pub fn employee_read_scopes(conn: &Connection, employee: EmployeeId, project: Option<aurelius_domain::ProjectId>) -> Result<ReadScopes, StorageError> {
-    let row: Option<(String, Option<String>)> = conn
-        .query_row(
-            "SELECT m.scope_id, d.scope_id FROM employees m LEFT JOIN departments d ON d.id = m.department_id AND d.status = 'active' WHERE m.id = ?1",
-            [employee.to_string()],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()?;
-    let Some((own, department)) = row else { return Ok(ReadScopes::default()) };
+    let Some(own) = scope_id(conn, MemoryScope::Employee(employee))? else { return Ok(ReadScopes::default()) };
     Ok(ReadScopes {
         own: Some(own),
-        department,
         project: match project {
             Some(p) => scope_id(conn, MemoryScope::Project(p))?,
             None => None,
@@ -77,11 +65,6 @@ pub fn employee_read_scopes(conn: &Connection, employee: EmployeeId, project: Op
 /// global, never an employee's private one.
 pub fn project_read_scopes(conn: &Connection, project: aurelius_domain::ProjectId) -> Result<ReadScopes, StorageError> {
     Ok(ReadScopes { project: scope_id(conn, MemoryScope::Project(project))?, global: scope_id(conn, MemoryScope::Global)?, ..ReadScopes::default() })
-}
-
-/// A department's own scope and global.
-pub fn department_read_scopes(conn: &Connection, department: aurelius_domain::DepartmentId) -> Result<ReadScopes, StorageError> {
-    Ok(ReadScopes { department: scope_id(conn, MemoryScope::Department(department))?, global: scope_id(conn, MemoryScope::Global)?, ..ReadScopes::default() })
 }
 
 pub fn hash(text: &str) -> String {
@@ -277,9 +260,11 @@ pub fn reinforce(tx: &Transaction<'_>, id: MemoryId, locator: &serde_json::Value
 
 /// Memories a consolidation may merge: active, not pinned, not decided by
 /// the user, and no identity or conversation summary. Lessons keep their
-/// evidence and count, so they are never merged either.
+/// evidence and count, so they are never merged either; nor a ticket's summary
+/// (MU1-18), which keeps naming its ticket.
 const MERGEABLE: &str = "m.status = 'active' AND m.pinned = 0 AND COALESCE(m.decided_by, '') <> 'user'
-     AND m.kind IN ('decision','project_knowledge','episodic') AND json_extract(m.locator_json, '$.lesson') IS NULL";
+     AND m.kind IN ('decision','project_knowledge','episodic') AND json_extract(m.locator_json, '$.lesson') IS NULL
+     AND json_extract(m.locator_json, '$.ticket_id') IS NULL";
 
 /// How many mergeable memories a scope holds and their size in tokens.
 pub fn mergeable_stats(conn: &Connection, scope: &str) -> Result<(u32, u32), StorageError> {
@@ -413,68 +398,42 @@ fn source_label(event_type: &str, title: Option<String>) -> String {
 pub struct Wanted {
     pub project: Option<aurelius_domain::ProjectId>,
     pub employee: Option<EmployeeId>,
-    pub department: Option<aurelius_domain::DepartmentId>,
 }
 
-/// One scope in the Memory view: its id, kind and owner (an employee or a department).
+/// One scope in the Memory view: its id, kind and owner (an employee).
 struct Listed {
     scope: String,
     label: &'static str,
     employee: Option<(EmployeeId, String)>,
-    department: Option<(aurelius_domain::DepartmentId, String)>,
 }
 
 /// Memories for the Memory view, newest first: global, plus the project's
-/// scope, the employee's own and its department's, the department's; nothing
-/// asked: every department and employee scope too. Forgotten items keep no content.
+/// scope and the employee's own; nothing asked: every employee scope too. Forgotten items keep no content.
 pub fn list(conn: &Connection, wanted: Wanted, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<MemoryView>, StorageError> {
     let mut scopes: Vec<Listed> = Vec::new();
     if let Some(global) = scope_id(conn, MemoryScope::Global)? {
-        scopes.push(Listed { scope: global, label: "global", employee: None, department: None });
+        scopes.push(Listed { scope: global, label: "global", employee: None });
     }
     if let Some(p) = wanted.project {
         if let Some(ps) = scope_id(conn, MemoryScope::Project(p))? {
-            scopes.push(Listed { scope: ps, label: "project", employee: None, department: None });
+            scopes.push(Listed { scope: ps, label: "project", employee: None });
         }
     }
     let everything = wanted == Wanted::default();
-    let mut departments: Vec<aurelius_domain::DepartmentId> = wanted.department.into_iter().collect();
     {
-        let mut stmt = conn.prepare("SELECT id, name, scope_id, department_id FROM employees WHERE (?1 IS NULL AND ?2) OR id = ?1 ORDER BY created_at_ms, id")?;
+        let mut stmt = conn.prepare("SELECT id, name, scope_id FROM employees WHERE (?1 IS NULL AND ?2) OR id = ?1 ORDER BY created_at_ms, id")?;
         let rows = stmt.query_map(params![wanted.employee.map(|e| e.to_string()), everything], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
         })?;
         for row in rows {
-            let (id, name, scope, department) = row?;
+            let (id, name, scope) = row?;
             if let Ok(id) = EmployeeId::parse(&id) {
-                scopes.push(Listed { scope, label: "employee", employee: Some((id, name)), department: None });
+                scopes.push(Listed { scope, label: "employee", employee: Some((id, name)) });
             }
-            if let Some(d) = department.and_then(|d| aurelius_domain::DepartmentId::parse(&d).ok()) {
-                if wanted.employee.is_some() && !departments.contains(&d) {
-                    departments.push(d);
-                }
-            }
-        }
-    }
-    {
-        let mut stmt = conn.prepare("SELECT id, name, scope_id FROM departments WHERE ?1 ORDER BY lower(name), id")?;
-        let rows = stmt.query_map([everything], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
-        for row in rows {
-            let (id, _, _) = row?;
-            if let Ok(id) = aurelius_domain::DepartmentId::parse(&id) {
-                departments.push(id);
-            }
-        }
-    }
-    for d in departments {
-        let found: Option<(String, String)> =
-            conn.query_row("SELECT scope_id, name FROM departments WHERE id = ?1", [d.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-        if let Some((scope, name)) = found {
-            scopes.push(Listed { scope, label: "department", employee: None, department: Some((d, name)) });
         }
     }
     let mut out = Vec::new();
-    for Listed { scope, label, employee, department } in scopes {
+    for Listed { scope, label, employee } in scopes {
         let sql = format!(
             "SELECT m.id, m.kind, m.status, b.storage_key, m.pinned, m.importance, m.confidence, m.created_at_ms, m.supersedes_id, m.conflicts_with_id, m.decided_by, m.locator_json
              FROM memory_items m JOIN blobs b ON b.id = m.content_blob_id
@@ -522,8 +481,6 @@ pub fn list(conn: &Connection, wanted: Wanted, read_blob: &dyn Fn(&str) -> Optio
                 scope: label.to_owned(),
                 employee_id: employee.as_ref().map(|(m, _)| *m),
                 employee_name: employee.as_ref().map(|(_, n)| n.clone()),
-                department_id: department.as_ref().map(|(d, _)| *d),
-                department_name: department.as_ref().map(|(_, n)| n.clone()),
                 kind: MemoryKind::parse(&kind).unwrap_or(MemoryKind::Episodic),
                 status,
                 content: if status == MemoryStatus::Forgotten { String::new() } else { read_blob(&key).unwrap_or_default() },

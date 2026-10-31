@@ -8,7 +8,7 @@ use aurelius_domain::{
 use aurelius_storage::Store;
 
 fn ctx() -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
 }
 
 /// A service with a running chat run, the state in which Claude Code can ask.

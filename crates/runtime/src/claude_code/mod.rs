@@ -189,6 +189,20 @@ pub fn profile_arguments(profile: &ToolProfile, model: Option<&str>, system_file
             "--tools", "", "--disallowedTools", "mcp__*", "--strict-mcp-config", "--mcp-config", r#"{"mcpServers":{}}"#,
             "--safe-mode", "--permission-prompts", "none",
         ]),
+        ToolProfile::Triage { approval_bridge, tools, max_turns } => {
+            // Only the bridge, and of it only `tools`: no built-in tool, nothing is asked.
+            // No --safe-mode: it leaves MCP servers out, the bridge too (CLI 2.1.312).
+            let mcp = serde_json::json!({ "mcpServers": { "aurelius": {
+                "type": "stdio",
+                "command": approval_bridge.program.to_string_lossy(),
+                "args": approval_bridge.args,
+            } } })
+            .to_string();
+            push(&mut args, &[
+                "--tools", "", "--strict-mcp-config", "--mcp-config", &mcp, "--allowedTools", &tools.join(","),
+                "--permission-prompts", "none", "--max-turns", &max_turns.to_string(),
+            ]);
+        }
         ToolProfile::Work { folders, permission_mode, approval_bridge, browser, browser_session, playwright, mcp_servers, plugins, artifacts } => {
             let mut tools = WORK_TOOLS.join(",");
             tools.push(',');
@@ -944,6 +958,24 @@ Look"));
             assert_eq!(args[args.iter().position(|a| a == "--session-id").unwrap() + 1], employee);
             assert!(args.contains(&"--no-session-persistence".to_string()) && !args.contains(&run.to_string()), "{args:?}");
         }
+    }
+
+    #[test]
+    fn a_dispatcher_run_has_only_its_bridge_tools_and_a_short_budget() {
+        let bridge = crate::ApprovalBridge { program: "/x/aurelius-bridge".into(), args: vec!["--run".into(), "r".into(), "--triage".into()] };
+        let profile = ToolProfile::Triage { approval_bridge: bridge, tools: vec!["mcp__aurelius__assign_ticket".into(), "mcp__aurelius__recall".into()], max_turns: 3 };
+        let args = profile_arguments(&profile, Some("haiku"), None, None);
+        let after = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
+        assert_eq!(after("--tools"), "", "no built-in tool");
+        assert_eq!(after("--allowedTools"), "mcp__aurelius__assign_ticket,mcp__aurelius__recall");
+        assert_eq!(after("--max-turns"), "3");
+        assert_eq!(after("--permission-prompts"), "none");
+        assert_eq!(after("--input-format"), "text");
+        let mcp: serde_json::Value = serde_json::from_str(&after("--mcp-config")).unwrap();
+        assert_eq!(mcp["mcpServers"].as_object().unwrap().keys().collect::<Vec<_>>(), ["aurelius"], "only the bridge");
+        assert_eq!(mcp["mcpServers"]["aurelius"]["args"][2], "--triage");
+        assert!(args.contains(&"--strict-mcp-config".to_string()) && !args.contains(&"--permission-prompt-tool".to_string()));
+        assert!(!args.contains(&"--safe-mode".to_string()), "safe mode would leave the bridge out");
     }
 
     #[test]

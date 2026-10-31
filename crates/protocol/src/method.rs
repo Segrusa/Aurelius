@@ -3,7 +3,7 @@
 //! pipeline (idempotency key, receipt, audit event, required right).
 
 use crate::views::{FileScope, TimelineQuery};
-use aurelius_domain::{ConversationId, DepartmentId, EmployeeId, MessageId, ProjectId, RunId};
+use aurelius_domain::{ConversationId, EmployeeId, MessageId, ProjectId, RunId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -24,12 +24,9 @@ pub enum Method {
     /// A conversation's messages and settings.
     #[serde(rename = "conversation.get")]
     ConversationGet { conversation_id: ConversationId },
-    /// The company's employees (not archived), oldest first; optionally of one department.
+    /// The company's employees (not archived), oldest first.
     #[serde(rename = "employee.list")]
-    EmployeeList {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        department_id: Option<DepartmentId>,
-    },
+    EmployeeList,
     /// An employee's persistent chat with the user (company scope, no project):
     /// its messages and settings, as `conversation.get` answers them.
     #[serde(rename = "employee.chat")]
@@ -39,16 +36,46 @@ pub enum Method {
     /// messages carry its name as `author`. Write with `group_chat.send`.
     #[serde(rename = "group_chat.get")]
     GroupChatGet,
-    /// The departments by name; archived ones too with `archived`.
-    #[serde(rename = "department.list")]
-    DepartmentList {
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        archived: bool,
-    },
-    /// The company in one read: departments, employees, the org chart setting
-    /// and the management team (roots), plus the conversion report if any.
+    /// The company in one read: employees, the org chart setting and the
+    /// management team (roots).
     #[serde(rename = "company.get")]
     CompanyGet,
+    /// The board: its six columns left to right, each with its cards (not
+    /// archived), for one project or every project.
+    #[serde(rename = "board.get")]
+    BoardGet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+    },
+    /// One ticket with its main task and every task linked to it.
+    #[serde(rename = "ticket.get")]
+    TicketGet { ticket_id: aurelius_domain::TicketId },
+    /// Tickets in board order (not archived); every given filter applies. `query`
+    /// searches title, description and `#number`.
+    #[serde(rename = "ticket.list")]
+    TicketList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        column: Option<aurelius_domain::ticket::ColumnKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+    },
+    /// The board members, oldest first (never a password's hash): the choice
+    /// "Who's working here?". Apps may read it too.
+    #[serde(rename = "user.list")]
+    UserList,
+    /// Whether the server has board members, and this connection's active one.
+    #[serde(rename = "user.whoami")]
+    UserWhoami,
+    /// The one password check (Fase 1): a right password makes the board member
+    /// active on this connection and answers `WhoAmI`. A wrong password and an
+    /// unknown board member are both `wrong_password` (after a short delay); more
+    /// than 5 tries a minute on one connection are `too_many_attempts`. A session
+    /// method: it changes only the connection, so it has no receipt to replay.
+    /// Not for apps.
+    #[serde(rename = "user.use")]
+    UserUse(UserUseParams),
     /// The conversations of a project, most recently active first.
     #[serde(rename = "project_conversation.list")]
     ProjectConversationList { project_id: ProjectId },
@@ -63,9 +90,6 @@ pub enum Method {
         project_id: Option<ProjectId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         employee_id: Option<EmployeeId>,
-        /// Tasks of the department's employees.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        department_id: Option<DepartmentId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         state: Option<TaskListState>,
     },
@@ -73,28 +97,23 @@ pub enum Method {
     #[serde(rename = "timeline.list")]
     TimelineList(TimelineQuery),
     /// Memories, newest first: global always, plus the scopes asked for (a
-    /// project, an employee, a department). An employee also brings its
-    /// department's. Nothing asked: global and every department and employee.
+    /// project, an employee). Nothing asked: global and every employee.
     #[serde(rename = "memory.list")]
     MemoryList {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project_id: Option<ProjectId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         employee_id: Option<EmployeeId>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        department_id: Option<DepartmentId>,
     },
-    /// What goes into a context: an employee's (own, its department, the
-    /// project if given, global), a project conversation's (project, global; no
-    /// employee) or a department's alone. At least one of the three.
+    /// What goes into a context: an employee's (own, the project if given,
+    /// global) or a project conversation's (project, global; no employee). At
+    /// least one of the two.
     #[serde(rename = "memory.get_context")]
     MemoryGetContext {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project_id: Option<ProjectId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         employee_id: Option<EmployeeId>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        department_id: Option<DepartmentId>,
     },
     #[serde(rename = "recurring_task.list")]
     RecurringTaskList { project_id: Option<ProjectId> },
@@ -142,12 +161,9 @@ pub enum Method {
     #[serde(rename = "share.list")]
     ShareList { project_id: ProjectId },
     /// Proposals of the whole company (colleagues and instructions): pending
-    /// first, then the latest decisions; optionally of one department.
+    /// first, then the latest decisions.
     #[serde(rename = "proposal.list")]
-    ProposalList {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        department_id: Option<DepartmentId>,
-    },
+    ProposalList,
     /// The versions of an employee's instructions, newest first (feature `instruction_proposals`).
     #[serde(rename = "employee.instruction_versions")]
     EmployeeInstructionVersions { employee_id: aurelius_domain::EmployeeId },
@@ -345,6 +361,31 @@ pub struct HelloParams {
     /// Servers without such a feature ignore the name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub accepts: Vec<String>,
+    /// The board member this client remembers for the server (from `user.use`
+    /// or `user.create`): active again without a password when it exists
+    /// (`HelloResult::user`). Ignored for apps. A value that is no id (a
+    /// damaged stored one) counts as none, so the hello still works and the
+    /// client asks again who is there.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "remembered_user")]
+    pub user_id: Option<aurelius_domain::UserId>,
+}
+
+fn remembered_user<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<aurelius_domain::UserId>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
+}
+
+/// `user.use`. The password is never printed.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UserUseParams {
+    pub user_id: aurelius_domain::UserId,
+    pub password: String,
+}
+
+impl std::fmt::Debug for UserUseParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserUseParams").field("user_id", &self.user_id).field("password", &"<redacted>").finish()
+    }
 }
 
 /// What `HelloParams::accepts` names.
@@ -361,6 +402,7 @@ impl std::fmt::Debug for HelloParams {
             .field("client_version", &self.client_version)
             .field("app_key", &self.app_key.as_ref().map(|_| "<hidden>"))
             .field("accepts", &self.accepts)
+            .field("user_id", &self.user_id)
             .finish()
     }
 }

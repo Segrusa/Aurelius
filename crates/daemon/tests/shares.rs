@@ -27,7 +27,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 async fn employee(client: &Client, project_id: ProjectId, name: &str) -> EmployeeId {
     match client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: name.into(), role: "Researcher".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }),
+            Command::CreateEmployee(CreateEmployee { name: name.into(), role: "Researcher".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -141,7 +141,7 @@ async fn sharing_moves_only_the_snapshot_and_revoking_stops_it() {
     else {
         panic!()
     };
-    let items = client.memory_of(Some(atlas), Some(sam), None).await.unwrap().items;
+    let items = client.memory_of(Some(atlas), Some(sam)).await.unwrap().items;
     let proposal = items.iter().find(|m| m.id == memory).unwrap();
     assert_eq!((proposal.status, proposal.kind, proposal.employee_id), (MemoryStatus::Proposed, MemoryKind::ProjectKnowledge, Some(sam)));
 
@@ -157,7 +157,7 @@ async fn sharing_moves_only_the_snapshot_and_revoking_stops_it() {
         .unwrap();
     let ctx = context_of_answer(&client, sam_conv, 2).await;
     assert!(shared_in(&ctx).is_empty(), "{ctx:#?}");
-    let items = client.memory_of(Some(atlas), Some(sam), None).await.unwrap().items;
+    let items = client.memory_of(Some(atlas), Some(sam)).await.unwrap().items;
     assert_eq!(items.iter().find(|m| m.id == memory).unwrap().status, MemoryStatus::Rejected);
     assert!(client.shares(atlas).await.unwrap().iter().all(|s| s.revoked));
 
@@ -198,7 +198,7 @@ async fn discussing_a_task_gives_its_result_to_the_lead_employees_chat() {
     let CommandResult::TaskDiscussed { conversation_id, employee_id } = client.execute(envelope(Command::DiscussTask(DiscussTask { task_id }), None)).await.unwrap().result else { panic!() };
     // The lead employee's own chat, not a new conversation.
     assert_eq!(employee_id, alex);
-    let main = client.employees(None).await.unwrap().employees.into_iter().find(|e| e.id == alex).unwrap().conversation_id;
+    let main = client.employees().await.unwrap().employees.into_iter().find(|e| e.id == alex).unwrap().conversation_id;
     assert_eq!(conversation_id, main);
     let snapshot = client.messages(conversation_id).await.unwrap();
     assert_eq!(snapshot.shares.len(), 1);

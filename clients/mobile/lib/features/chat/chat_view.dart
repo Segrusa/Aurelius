@@ -887,7 +887,7 @@ void showShareSheet(BuildContext context, ChatBloc bloc, String messageId) {
                             Navigator.pop(sheet);
                           },
                         ),
-                      for (final g in pickerGroups(company.activeEmployees, company.activeDepartments)) ...[
+                      for (final g in pickerGroups(company.activeEmployees)) ...[
                         Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 4), child: Eyebrow(g.title)),
                         for (final m in g.employees)
                           ListTile(

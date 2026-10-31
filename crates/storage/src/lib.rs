@@ -15,7 +15,6 @@ pub mod heartbeats;
 pub mod conversations;
 pub mod conversation_sessions;
 pub mod employees;
-pub mod departments;
 pub mod company_convert;
 pub mod approvals;
 pub mod proposals;
@@ -36,11 +35,15 @@ pub mod variants;
 pub mod shares;
 pub mod events;
 pub mod import;
+pub mod fresh_start;
 pub mod migrate;
 pub mod queries;
 pub mod remote;
 pub mod settings;
 pub mod traces;
+pub mod users;
+pub mod company;
+pub mod tickets;
 
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use std::path::{Path, PathBuf};
@@ -202,3 +205,11 @@ impl Store {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod schema18_tests;
+#[cfg(test)]
+mod users_tests;
+#[cfg(test)]
+mod tickets_tests;
+#[cfg(test)]
+mod fresh_start_tests;

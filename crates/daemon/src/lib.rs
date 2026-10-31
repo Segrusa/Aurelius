@@ -10,6 +10,7 @@ mod uploads;
 mod dispatcher;
 mod runtimes;
 mod tasks;
+mod triage;
 mod memory;
 mod variants;
 mod updates;
@@ -261,6 +262,11 @@ async fn run_inner(
             if let Some(r) = aurelius_storage::import::upgrade_legacy(&root)? {
                 tracing::info!(projects = r.projects, managers = r.managers, "imported the v0.6 data; the old data is in v0.6-backup");
             }
+            // A protocol 3 workspace gets a fresh v0.11 database; the old one is set aside in pre-v0.11
+            // (its pre-update backup was made above).
+            if let Some(r) = aurelius_storage::fresh_start::upgrade(&root, None)? {
+                tracing::info!(report = r.lines(false).join("; "), "fresh start: imported the old workspace; it is kept in pre-v0.11");
+            }
             Ok(Store::open(&root)?)
         })
         .await??
@@ -272,6 +278,13 @@ async fn run_inner(
     {
         let store = store.clone();
         tokio::task::spawn_blocking(move || store.write(|tx| queries::release_leases(tx, aurelius_application::task::tasks::TASK_JOB_KIND, i64::MAX))).await??;
+    }
+    // So is the board's dispatcher job: its run of the dead daemon ends when it is claimed again
+    // (`triage_claimed`). This assumes one daemon per data folder (the instance lock): with
+    // several, it would free the leases of workers that are still alive.
+    {
+        let store = store.clone();
+        tokio::task::spawn_blocking(move || store.write(|tx| queries::release_leases(tx, aurelius_application::task::triage::TRIAGE_JOB_KIND, i64::MAX))).await??;
     }
     // This host's own data folder, not a copy or a test instance (also with AURELIUS_DATA_DIR).
     let own_root = aurelius_host::default_data_dir().ok().is_some_and(|d| d == root);

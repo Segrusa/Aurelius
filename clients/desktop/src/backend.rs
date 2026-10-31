@@ -207,14 +207,7 @@ pub enum Request {
     OpenConversation(Option<ConversationId>),
     /// Show the group chat (Team chat), kept up to date like `OpenConversation`.
     OpenGroupChat,
-    CreateEmployee { department_id: Option<aurelius_domain::DepartmentId>, name: String, role: String, title: Option<String>, reports_to: Option<EmployeeId>, instructions: Option<String>, folder: Option<String> },
-    /// Move an employee to a department (or out of any).
-    SetEmployeeDepartment { employee_id: EmployeeId, department_id: Option<aurelius_domain::DepartmentId> },
-    CreateDepartment { name: String, description: Option<String>, head_id: Option<EmployeeId> },
-    UpdateDepartment { department_id: aurelius_domain::DepartmentId, name: String, description: Option<String>, head_id: Option<EmployeeId>, expected_version: u64 },
-    ArchiveDepartment(aurelius_domain::DepartmentId),
-    /// A department's memories (`memory.list {department_id}`).
-    LoadDepartmentMemory(aurelius_domain::DepartmentId),
+    CreateEmployee { name: String, role: String, title: Option<String>, reports_to: Option<EmployeeId>, instructions: Option<String>, folder: Option<String> },
     /// `title`: `None` leaves it, an empty text clears it.
     UpdateEmployee { employee_id: EmployeeId, name: String, role: String, title: Option<String>, instructions: Option<String>, sequential_tasks: Option<bool>, expected_version: u64 },
     /// Who a manager reports to (`None`: a root of the org chart); a cycle is refused by the server.
@@ -381,6 +374,193 @@ pub enum Request {
     CreateDir { parent: String, name: String },
     /// Add the Claude Code installed on the server as a connection.
     AddClaudeCode,
+    /// Board members (protocol 4): list, create, choose who works here.
+    BoardMembers(UserCall),
+    /// The board, a ticket and their writes (protocol 4; see [`BoardCall`]).
+    Board(BoardCall),
+}
+
+/// The board's reads and writes. Writes are not kept for a reconnect: the
+/// board disables its actions while offline, and a write the connection lost
+/// says so (the board reloads and shows what the server has).
+#[derive(Debug, Clone)]
+pub enum BoardCall {
+    /// `board.get` for one project or every project (B4).
+    Load(Option<ProjectId>),
+    /// `ticket.get`.
+    Ticket(aurelius_domain::TicketId),
+    /// The latest plan in the main task's conversation (Plan review).
+    Plan(ConversationId),
+    /// What happened to a ticket, newest first (`timeline.list` on its id, Activity).
+    Activity(aurelius_domain::TicketId),
+    /// Whether the dispatcher gave up on a Todo ticket at this version (B5, from its timeline).
+    GaveUp { ticket: aurelius_domain::TicketId, version: u64 },
+    /// A ticket write, `board.columns_update` (with the board's version) or
+    /// `project.update`. `done`: what the board says when it worked.
+    Write { command: Command, expected_version: Option<u64>, done: Option<String> },
+}
+
+impl BoardCall {
+    pub fn is_write(&self) -> bool {
+        matches!(self, BoardCall::Write { .. })
+    }
+
+    /// The ticket a write is about (its card springs back when it fails).
+    pub fn ticket(&self) -> Option<aurelius_domain::TicketId> {
+        match self {
+            BoardCall::Write { command, .. } => ticket_of(command),
+            BoardCall::Ticket(id) => Some(*id),
+            _ => None,
+        }
+    }
+}
+
+/// The ticket of a ticket command.
+pub fn ticket_of(command: &Command) -> Option<aurelius_domain::TicketId> {
+    Some(match command {
+        Command::UpdateTicket(c) => c.ticket_id,
+        Command::MoveTicket(c) => c.ticket_id,
+        Command::StartTicket(c) => c.ticket_id,
+        Command::AssignTicket(c) => c.ticket_id,
+        Command::ApprovePlan(c) => c.ticket_id,
+        Command::RevisePlan(c) => c.ticket_id,
+        Command::AcceptTicket(c) => c.ticket_id,
+        Command::SendBackTicket(c) => c.ticket_id,
+        Command::CancelTicket(c) => c.ticket_id,
+        Command::ArchiveTicket(c) => c.ticket_id,
+        _ => return None,
+    })
+}
+
+/// What the board hears back.
+#[derive(Debug, Clone)]
+pub enum BoardUpdate {
+    Loaded(Option<ProjectId>, Result<aurelius_domain::ticket::BoardView, String>),
+    Ticket(aurelius_domain::TicketId, Result<aurelius_domain::ticket::TicketDetail, String>),
+    /// The text of the latest plan in that conversation (none: no plan there).
+    /// A conversation's newest plan and its agent mode (none when it did not load).
+    Plan(ConversationId, Option<String>, Option<aurelius_domain::autonomy::AgentMode>),
+    /// A ticket's activity, newest first.
+    Activity(aurelius_domain::TicketId, Result<Vec<aurelius_protocol::TimelineCard>, String>),
+    /// `gave_up`: none when the timeline did not load.
+    GaveUp { ticket: aurelius_domain::TicketId, version: u64, gave_up: Option<bool> },
+    /// A write worked; `text` is what to say.
+    Done { ticket: Option<aurelius_domain::TicketId>, text: Option<String> },
+    /// `ticket.create` worked.
+    Created { number: u32, text: Option<String> },
+    /// A write failed: the server's reason, or a lost connection.
+    Failed { ticket: Option<aurelius_domain::TicketId>, message: String },
+    /// An event changed the board, a ticket, the company, a project or a task:
+    /// read again what shows. `tickets`: a ticket or the columns changed (the
+    /// sidebar's "Needs you" counts them even while the board does not show);
+    /// `settings`: the company or a project (the dispatcher); `tasks`: the ids of
+    /// changed tasks, which matter only when they work for a ticket.
+    Changed { tickets: bool, settings: bool, tasks: Vec<String> },
+}
+
+/// How much of a ticket's activity one read brings (the newest).
+pub const ACTIVITY_LIMIT: u32 = 60;
+
+/// What a lost connection during a board write tells the user.
+pub const BOARD_CONNECTION_DROPPED: &str = "The connection dropped before the server answered. The board reloads with what the server has.";
+
+/// Why the board did not load, for its page (ui-ontwerp §3.3).
+pub fn board_failure(e: &ClientError) -> String {
+    match e {
+        ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::UnknownMethod => "This server does not have the Board yet. Update the server.".into(),
+        ClientError::TimedOut(_) => "The server did not answer in time.".into(),
+        e => e.to_string(),
+    }
+}
+
+/// A write refused for a stale version (§7.2): the window shows the latest.
+pub const BOARD_CONFLICT: &str = "Changed on another device. Showing the latest.";
+
+/// A refused board write in the user's words: a version conflict means another
+/// device changed it first (§7.2).
+pub fn board_write_failure(e: &ClientError) -> String {
+    match e {
+        e if e.is_disconnect() || e.is_final() => BOARD_CONNECTION_DROPPED.into(),
+        ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::VersionConflict => BOARD_CONFLICT.into(),
+        ClientError::Protocol(p) => p.message.clone(),
+        e => e.to_string(),
+    }
+}
+
+/// A password on its way to the server: never printed, never kept after the call.
+pub struct Password(String);
+
+impl Password {
+    pub fn new(text: String) -> Self {
+        Self(text)
+    }
+}
+
+impl std::fmt::Debug for Password {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+#[derive(Debug)]
+pub enum UserCall {
+    List,
+    /// A new board member; the connection becomes it when it had none (onboarding).
+    Create { username: String, password: Password },
+    /// The one password check of this device (B8): the board member works here from now on.
+    Use { user_id: aurelius_domain::UserId, password: Password },
+}
+
+/// Which field of the board member forms a refusal belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberField {
+    Username,
+    Password,
+}
+
+/// Why `user.create` or `user.use` was refused, for the form that asked.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemberFailure {
+    pub field: Option<MemberField>,
+    pub message: String,
+}
+
+/// The server's refusal as the forms show it: by the field it is about, in the
+/// words of the design (§11.1). Never repeats what was typed.
+pub fn member_failure(err: &ClientError) -> MemberFailure {
+    use aurelius_domain::error::ErrorCode;
+    let (field, message) = match err {
+        ClientError::Protocol(p) => match p.code {
+            ErrorCode::UsernameTaken => (Some(MemberField::Username), "This username is taken.".to_string()),
+            ErrorCode::InvalidUsername => (Some(MemberField::Username), p.message.clone()),
+            ErrorCode::WeakPassword => (Some(MemberField::Password), p.message.clone()),
+            ErrorCode::WrongPassword => (Some(MemberField::Password), "That password is wrong.".to_string()),
+            ErrorCode::TooManyAttempts => (Some(MemberField::Password), "Too many tries. Wait a minute and try again.".to_string()),
+            _ => (None, p.message.clone()),
+        },
+        other => (None, other.to_string()),
+    };
+    MemberFailure { field, message }
+}
+
+/// What a lost connection during `user.create` / `user.use` tells the form.
+pub const MEMBER_CONNECTION_DROPPED: &str = "The connection dropped. Check the list of board members and try again.";
+
+/// A failed `user.create` / `user.use` as its form shows it: a refusal by its
+/// field, a lost connection as such (the server may have made it anyway).
+pub fn member_call_failure(err: &ClientError) -> MemberFailure {
+    if err.is_disconnect() || err.is_final() {
+        return MemberFailure { field: None, message: MEMBER_CONNECTION_DROPPED.into() };
+    }
+    member_failure(err)
+}
+
+/// The gate's notice when a write needs a board member and this window has none.
+pub const BOARD_MEMBER_REQUIRED: &str = "Choose who you are first: this needs an active board member.";
+
+/// A write refused because this connection has no active board member.
+pub fn needs_board_member(err: &ClientError) -> bool {
+    matches!(err, ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::BoardMemberRequired)
 }
 
 /// Which folder browser request failed, so its error shows in the right place.
@@ -568,9 +748,8 @@ pub enum Update {
     Connections(ProvidersSnapshot),
     Approvals(Vec<ApprovalView>),
     Managers(Vec<EmployeeSummary>),
-    /// The company (`company.get`): departments, employees, roots and the org chart setting.
+    /// The company (`company.get`): employees, roots and the org chart setting.
     Company(aurelius_protocol::CompanySnapshot),
-    DepartmentMemory(aurelius_domain::DepartmentId, Vec<aurelius_protocol::MemoryView>),
     /// Colleagues managers proposed: pending first, then the latest decisions.
     Proposals(Vec<ProposalView>),
     Messages(MessagesSnapshot),
@@ -581,6 +760,8 @@ pub enum Update {
     Stream(StreamDelta),
     EmployeeCreated(EmployeeId),
     Info(String),
+    /// The server gave this task to the employee chosen in Give to….
+    TaskAssigned(aurelius_domain::TaskId),
     Connection(Connection),
     Projects(Vec<ProjectSummary>),
     Jobs(Vec<JobSummary>),
@@ -592,6 +773,17 @@ pub enum Update {
     QueuedDeleteFailed(MessageId),
     /// `project.set_description` answered: `Err` holds the reason, shown under the field.
     DescriptionSaved(ProjectId, Result<(), String>),
+    /// Whether the server has board members, and who works in this window (after
+    /// each hello, `user.use` and `user.create`).
+    Who(aurelius_domain::user::WhoAmI),
+    /// The server's board members, oldest first.
+    BoardMembers(Vec<aurelius_domain::user::UserView>),
+    /// Another board member was made by this window (its name).
+    BoardMemberCreated(String),
+    BoardMemberFailed(MemberFailure),
+    /// A write was refused for want of an active board member.
+    BoardMemberRequired,
+    Board(BoardUpdate),
 }
 
 pub struct Handle {
@@ -599,16 +791,17 @@ pub struct Handle {
     pub updates: mpsc::UnboundedReceiver<Update>,
 }
 
-/// Connect to `target` (`None`: no server yet). Dropping the handle's
-/// request sender ends the thread, also while offline.
-pub fn start(target: Option<Target>) -> Handle {
+/// Connect to `target` (`None`: no server yet), as the board member this
+/// window remembers for it. Dropping the handle's request sender ends the
+/// thread, also while offline.
+pub fn start(target: Option<Target>, remembered: Option<aurelius_domain::UserId>) -> Handle {
     let (req_tx, req_rx) = mpsc::unbounded_channel();
     let (upd_tx, upd_rx) = mpsc::unbounded_channel();
     std::thread::Builder::new()
         .name("aurelius-backend".into())
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
-            runtime.block_on(run(target, req_rx, upd_tx));
+            runtime.block_on(run(target, remembered, req_rx, upd_tx));
         })
         .expect("backend thread");
     Handle { requests: req_tx, updates: upd_rx }
@@ -618,12 +811,18 @@ pub fn start(target: Option<Target>) -> Handle {
 /// picks a server (which starts a new backend).
 async fn idle(requests: &mut mpsc::UnboundedReceiver<Request>, updates: &mpsc::UnboundedSender<Update>, connection: Connection) {
     let _ = updates.send(Update::Connection(connection));
-    while requests.recv().await.is_some() {
-        let _ = updates.send(Update::Error("Not connected to a server. Choose one in Settings → Servers (Ctrl Alt S).".into()));
+    while let Some(request) = requests.recv().await {
+        let text = "Not connected to a server. Choose one in Settings → Servers (Ctrl Alt S).";
+        // A form that waits for its answer gets it, so it does not stay busy (Trace M3a m1).
+        let _ = updates.send(match request {
+            Request::BoardMembers(UserCall::Create { .. } | UserCall::Use { .. }) => Update::BoardMemberFailed(MemberFailure { field: None, message: text.into() }),
+            Request::Board(call) if call.is_write() => Update::Board(BoardUpdate::Failed { ticket: call.ticket(), message: text.into() }),
+            _ => Update::Error(text.into()),
+        });
     }
 }
 
-async fn run(target: Option<Target>, mut requests: mpsc::UnboundedReceiver<Request>, updates: mpsc::UnboundedSender<Update>) {
+async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>, mut requests: mpsc::UnboundedReceiver<Request>, updates: mpsc::UnboundedSender<Update>) {
     let Some(target) = target else {
         idle(&mut requests, &updates, Connection::NoServer).await;
         return;
@@ -635,6 +834,8 @@ async fn run(target: Option<Target>, mut requests: mpsc::UnboundedReceiver<Reque
     let mut open_memory: Option<ProjectId> = None;
     let mut open_ideas: Option<Option<ProjectId>> = None;
     let mut backoff = Duration::from_millis(250);
+    // Who works in this window: said again in every hello, so a reconnect keeps it (Trace m9).
+    let mut me = remembered;
 
     loop {
         let _ = updates.send(Update::Connection(Connection::Connecting));
@@ -686,6 +887,14 @@ async fn run(target: Option<Target>, mut requests: mpsc::UnboundedReceiver<Reque
                             Some(Request::AddIdea { ref files, .. } | Request::UpdateIdea { add_files: ref files, .. }) if !files.is_empty() => {
                                 let _ = updates.send(Update::Error("Not connected to the server; save the idea with its files again when it is back.".into()));
                             }
+                            // A password is not kept for later: ask again once connected.
+                            Some(Request::BoardMembers(UserCall::Create { .. } | UserCall::Use { .. })) => {
+                                let _ = updates.send(Update::BoardMemberFailed(MemberFailure { field: None, message: "Not connected to the server. Try again when it is back.".into() }));
+                            }
+                            // The board's writes are not kept for later; its reads come again once online.
+                            Some(Request::Board(call)) => if call.is_write() {
+                                let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket: call.ticket(), message: "Not connected to the server. Try again when it is back.".into() }));
+                            },
                             Some(other) => if let Some(env) = to_envelope(other) { outbox.push_back(env) },
                         },
                     }
@@ -695,6 +904,12 @@ async fn run(target: Option<Target>, mut requests: mpsc::UnboundedReceiver<Reque
             }
         };
         backoff = Duration::from_millis(250);
+        let who = match identify(&client, me).await {
+            Ok(who) => who,
+            Err(_) => continue, // lost again: reconnect
+        };
+        me = who.user.as_ref().map(|u| u.id);
+        let _ = updates.send(Update::Who(who));
         // The server and this app are released apart: their version numbers
         // differ and that is fine. The handshake checked the protocol major.
         let has = |c: aurelius_domain::remote::Capability| client.hello.capabilities.contains(&c);
@@ -723,7 +938,7 @@ async fn run(target: Option<Target>, mut requests: mpsc::UnboundedReceiver<Reque
             },
         }));
 
-        match session(&client, &mut requests, &mut events, &mut streams, &updates, &mut outbox, &mut open_conversation, &mut open_memory, &mut open_ideas).await {
+        match session(&client, &mut requests, &mut events, &mut streams, &updates, &mut outbox, &mut open_conversation, &mut open_memory, &mut open_ideas, &mut me).await {
             Ok(()) => return, // UI dropped the request channel: window closed
             Err(Disconnected(Some(reason), _)) => {
                 idle(&mut requests, &updates, Connection::Unpaired(reason)).await;
@@ -761,20 +976,14 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
             envelope(Command::SendQueuedNow(conversation::SendQueuedNow { conversation_id, message_id }), None)
         }
         Request::OpenConversation(_) | Request::OpenGroupChat => return None,
-        Request::CreateEmployee { department_id, name, role, title, reports_to, instructions, folder } => {
-            envelope(Command::CreateEmployee(employee::CreateEmployee { department_id, name, role, title, reports_to, instructions, folder }), None)
+        Request::CreateEmployee { name, role, title, reports_to, instructions, folder } => {
+            envelope(Command::CreateEmployee(employee::CreateEmployee { name, role, title, reports_to, instructions, folder }), None)
         }
         Request::UpdateEmployee { employee_id, name, role, title, instructions, sequential_tasks, expected_version } => envelope(
             Command::UpdateEmployee(employee::UpdateEmployee { employee_id, name, role, title, instructions, sequential_tasks }),
             Some(expected_version),
         ),
         Request::SetReportsTo { employee_id, reports_to } => envelope(Command::SetEmployeeReportsTo(employee::SetEmployeeReportsTo { employee_id, reports_to }), None),
-        Request::SetEmployeeDepartment { employee_id, department_id } => envelope(Command::SetEmployeeDepartment(employee::SetEmployeeDepartment { employee_id, department_id }), None),
-        Request::CreateDepartment { name, description, head_id } => envelope(Command::CreateDepartment(aurelius_domain::department::CreateDepartment { name, description, head_id }), None),
-        Request::UpdateDepartment { department_id, name, description, head_id, expected_version } => {
-            envelope(Command::UpdateDepartment(aurelius_domain::department::UpdateDepartment { department_id, name, description, head_id }), Some(expected_version))
-        }
-        Request::ArchiveDepartment(department_id) => envelope(Command::ArchiveDepartment(aurelius_domain::department::ArchiveDepartment { department_id }), None),
         Request::DecideProposal { proposal_id, approve, edits, note, instructions } => {
             envelope(Command::DecideProposal(aurelius_domain::proposal::DecideProposal { proposal_id, approve, edits, note, instructions }), None)
         }
@@ -818,7 +1027,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         // Expanded into two commands by `session`.
         Request::UseConnection { .. } | Request::SetSecret { .. } => return None,
         // Queries, not commands.
-        Request::MarkNotificationsRead | Request::ClearResults(_) | Request::LoadMemory(_) | Request::LoadDepartmentMemory(_) | Request::LoadMemoryContext { .. } | Request::LoadContext(_) | Request::LoadScreenshot(_) | Request::LoadFullActivity(..) | Request::LoadFile(_) | Request::LoadUpload(_) | Request::LoadUploadThumb(_) | Request::LoadIdeas(_) | Request::LoadSubagents(_) | Request::LoadMarkdownFile(..) | Request::LoadArtifactContent { .. } | Request::LoadPreviewMessages(_) => return None,
+        Request::MarkNotificationsRead | Request::ClearResults(_) | Request::LoadMemory(_) | Request::LoadMemoryContext { .. } | Request::LoadContext(_) | Request::LoadScreenshot(_) | Request::LoadFullActivity(..) | Request::LoadFile(_) | Request::LoadUpload(_) | Request::LoadUploadThumb(_) | Request::LoadIdeas(_) | Request::LoadSubagents(_) | Request::LoadMarkdownFile(..) | Request::LoadArtifactContent { .. } | Request::LoadPreviewMessages(_) => return None,
         Request::AddIdea { project_id, title, note, kind, files } => envelope(Command::AddIdea(aurelius_domain::idea::AddIdea { project_id, title, note, kind, files }), None),
         Request::UpdateIdea { idea_id, title, note, kind, add_files, remove_files } => envelope(Command::UpdateIdea(aurelius_domain::idea::UpdateIdea { idea_id, title, note, kind, add_files, remove_files }), None),
         Request::DeleteIdea(idea_id) => envelope(Command::DeleteIdea(aurelius_domain::idea::DeleteIdea { idea_id }), None),
@@ -852,7 +1061,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SetEmployeeFolder { employee_id, path } => envelope(Command::SetEmployeeFolder(employee::SetEmployeeFolder { employee_id, path }), None),
         Request::SetProjectFolder { project_id, path } => envelope(Command::SetProjectFolder(project::SetProjectFolder { project_id, path }), None),
         Request::LoadUsage | Request::LoadUsageHours(_) | Request::LoadSubscription(_) | Request::CheckUpdate(_) | Request::InstallUpdate | Request::InstallAppUpdate | Request::RestartServer | Request::Power(_) | Request::AppKeys(_) | Request::Plugins(_) | Request::LoadServerLoad | Request::SetLoadLimits(_) | Request::LoadBrowser | Request::SetBrowser(_) | Request::SetBrowserBackend(_) | Request::LoadArtifactSetting | Request::SetArtifactsEnabled(_) | Request::LoadUsageTotals { .. } | Request::LoadTraceSetting | Request::SetTraceEnabled(_) | Request::LoadTrace(_) | Request::LoadInstructionVersions(_) | Request::LoadAutoAllow | Request::SetAutoAllow(_) | Request::LoadManagementMode | Request::SetManagementMode(_) | Request::LoadMcp | Request::SetMcp(_) | Request::McpAdd(_) | Request::McpRemove(_) | Request::McpAuth(_) | Request::LoadMcpAlwaysAllow | Request::McpAlwaysAllowRemove(_) | Request::Backups(_) | Request::ExportProject(_) | Request::Remote(_) => return None,
-        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode => return None,
+        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode | Request::BoardMembers(_) | Request::Board(_) => return None,
     })
 }
 
@@ -906,9 +1115,11 @@ async fn session(
     open_conversation: &mut Option<ConversationId>,
     open_memory: &mut Option<ProjectId>,
     open_ideas: &mut Option<Option<ProjectId>>,
+    me: &mut Option<aurelius_domain::UserId>,
 ) -> Result<(), Disconnected> {
     // Snapshot first, then subscribe from its cursor.
     let (as_of, mut jobs_running) = refresh(client, updates).await?;
+    refresh_board_members(client, updates).await?;
     refresh_messages(client, updates, *open_conversation).await?;
     refresh_memory(client, updates, *open_memory).await?;
     refresh_ideas(client, updates, *open_ideas).await?;
@@ -973,16 +1184,8 @@ async fn session(
                     refresh_memory(client, updates, Some(project_id)).await?;
                     continue;
                 }
-                if let Request::LoadDepartmentMemory(department_id) = request {
-                    if let Some(snapshot) = shown(read(client, Method::MemoryList { project_id: None, employee_id: None, department_id: Some(department_id) }, |b| match b { ResponseBody::Memory(m) => Some(m), _ => None }).await, updates)? {
-                        // Only the department's own memories (the list brings global too).
-                        let items = snapshot.items.into_iter().filter(|m| m.department_id == Some(department_id)).collect();
-                        let _ = updates.send(Update::DepartmentMemory(department_id, items));
-                    }
-                    continue;
-                }
                 if let Request::LoadMemoryContext { project, manager } = request {
-                    let method = Method::MemoryGetContext { project_id: Some(project), employee_id: manager, department_id: None };
+                    let method = Method::MemoryGetContext { project_id: Some(project), employee_id: manager };
                     match read(client, method, |b| match b { ResponseBody::MemoryContext(v) => Some(v), _ => None }).await {
                         Ok(view) => { let _ = updates.send(Update::MemoryContext { project, manager, result: Ok(view) }); }
                         Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
@@ -1490,6 +1693,14 @@ async fn session(
                     let _ = updates.send(Update::Notifications(notifications));
                     continue;
                 }
+                if let Request::BoardMembers(call) = request {
+                    board_members(client, call, me, updates).await?;
+                    continue;
+                }
+                if let Request::Board(call) = request {
+                    board(client, call, updates).await?;
+                    continue;
+                }
                 if let Request::SetSecret { connection_id, secret } = request {
                     match client.set_secret(connection_id, secret).await {
                         Ok(_) => { let _ = updates.send(Update::Info("API key saved in the OS credential store. Checking the connection…".into())); }
@@ -1616,7 +1827,8 @@ async fn session(
                 let (mut chat, mut other, mut mcp, mut approval, mut artifact, mut logins) = (false, false, false, false, false, Vec::new());
                 // These areas change only their own list, not the dozen of `refresh`;
                 // ideas and recurring tasks also show their task's status.
-                let (mut memory, mut ideas, mut schedules, mut task) = (false, false, false, false);
+                let (mut memory, mut ideas, mut schedules, mut task, mut users, mut settings, mut tickets) = (false, false, false, false, false, false, false);
+                let mut board_tasks: Vec<String> = Vec::new();
                 for e in std::iter::once(first).chain(std::iter::from_fn(|| events.try_recv().ok())) {
                     // 'Always allow' on an approval adds its tool to the always-allowed list.
                     approval |= e.kind.area() == "approval";
@@ -1627,7 +1839,7 @@ async fn session(
                     // So do the tasks: a task keeps no deleted conversation (its employee's page lists it by them).
                     other |= e.kind == aurelius_protocol::EventKind::ConversationDeleted;
                     if e.kind == aurelius_domain::EventKind::McpLoginFinished {
-                        logins.push(e.aggregate_id);
+                        logins.push(e.aggregate_id.clone());
                         mcp = true;
                     } else if e.kind.area() == "mcp" {
                         mcp = true;
@@ -1639,6 +1851,21 @@ async fn session(
                         schedules = true;
                     } else if is_artifact(&e) { artifact = true } else if is_chat(&e) { chat = true } else { other = true }
                     task |= e.kind.area() == "task";
+                    users |= e.kind.area() == "user";
+                    // A card follows its main task (the app keeps those of tickets); the dispatcher follows the company and its projects.
+                    settings |= matches!(e.kind.area(), "company" | "project");
+                    tickets |= matches!(e.kind.area(), "ticket" | "board");
+                    if e.kind.area() == "task" && !board_tasks.contains(&e.aggregate_id) {
+                        board_tasks.push(e.aggregate_id.clone());
+                    }
+                }
+                if tickets || settings || !board_tasks.is_empty() {
+                    let _ = updates.send(Update::Board(BoardUpdate::Changed { tickets, settings, tasks: board_tasks }));
+                }
+                if users {
+                    // Another window made a board member: the onboarding may be over (MU1-20 AC4).
+                    send_who(client, updates).await?;
+                    refresh_board_members(client, updates).await?;
                 }
                 if artifact {
                     refresh_artifacts(client, updates).await?;
@@ -1719,6 +1946,172 @@ impl Coalesce {
     }
 }
 
+/// The hello's answer for this window: with the board member it remembers,
+/// active again when the server still has it (none: "Who's working here?").
+async fn identify(client: &Client, me: Option<aurelius_domain::UserId>) -> Result<aurelius_domain::user::WhoAmI, ClientError> {
+    let hello = match me {
+        Some(user_id) => client.identify(user_id).await?,
+        None => client.hello.clone(),
+    };
+    Ok(aurelius_domain::user::WhoAmI { board_members_exist: hello.board_members_exist, user: hello.user })
+}
+
+async fn send_who(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
+    if let Some(who) = shown(client.user_whoami().await, updates)? {
+        let _ = updates.send(Update::Who(who));
+    }
+    Ok(())
+}
+
+async fn refresh_board_members(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
+    if let Some(list) = shown(client.user_list().await, updates)? {
+        let _ = updates.send(Update::BoardMembers(list.users));
+    }
+    Ok(())
+}
+
+/// `user.*` for the board member screens. The password goes to the server and
+/// is dropped with the call; a refusal goes back to the form that asked.
+async fn board_members(client: &Client, call: UserCall, me: &mut Option<aurelius_domain::UserId>, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
+    // The form always hears back, also when the connection drops (Trace M3a m1):
+    // else it stays on "Creating…" / "Checking…". No retry: after the reconnect the
+    // list shows a board member the server made anyway.
+    let refused = |err: ClientError| -> Result<(), Disconnected> {
+        let _ = updates.send(Update::BoardMemberFailed(member_call_failure(&err)));
+        if err.is_disconnect() || err.is_final() {
+            return Err(err.into());
+        }
+        Ok(())
+    };
+    match call {
+        UserCall::List => refresh_board_members(client, updates).await,
+        UserCall::Create { username, password } => {
+            let created = match client.user_create(&username, &password.0).await {
+                Ok(receipt) => receipt,
+                Err(err) => return refused(err),
+            };
+            drop(password);
+            let who = client.user_whoami().await.map_err(Disconnected::from)?;
+            let new_id = match created.result {
+                CommandResult::UserCreated { user_id } => Some(user_id),
+                _ => None,
+            };
+            if new_id.is_some() && who.user.as_ref().map(|u| u.id) == new_id {
+                // The onboarding: this window works as the new board member.
+                *me = new_id;
+            } else {
+                let _ = updates.send(Update::BoardMemberCreated(username.trim().to_string()));
+            }
+            let _ = updates.send(Update::Who(who));
+            refresh_board_members(client, updates).await
+        }
+        UserCall::Use { user_id, password } => {
+            let result = client.user_use(user_id, &password.0).await;
+            drop(password);
+            match result {
+                Ok(who) => {
+                    *me = who.user.as_ref().map(|u| u.id);
+                    let _ = updates.send(Update::Who(who));
+                    Ok(())
+                }
+                Err(err) => refused(err),
+            }
+        }
+    }
+}
+
+/// One board call. A read that fails goes to the page; a write that fails
+/// goes back to the board, also when the connection drops on the way (the
+/// session then reconnects as usual). Writes are never sent twice.
+async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
+    let lost = |e: &ClientError| e.is_disconnect() || e.is_final();
+    match call {
+        BoardCall::Load(project_id) => {
+            let result = read(client, Method::BoardGet { project_id }, |b| match b { ResponseBody::Board(v) => Some(v), _ => None }).await;
+            if let Err(e) = &result && lost(e) {
+                return Err(result.unwrap_err().into());
+            }
+            let _ = updates.send(Update::Board(BoardUpdate::Loaded(project_id, result.map_err(|e| board_failure(&e)))));
+        }
+        BoardCall::Ticket(ticket_id) => {
+            let result = read(client, Method::TicketGet { ticket_id }, |b| match b { ResponseBody::Ticket(v) => Some(v), _ => None }).await;
+            if let Err(e) = &result && lost(e) {
+                return Err(result.unwrap_err().into());
+            }
+            let _ = updates.send(Update::Board(BoardUpdate::Ticket(ticket_id, result.map_err(|e| board_failure(&e)))));
+        }
+        BoardCall::Plan(conversation) => match client.messages(conversation).await {
+            Ok(messages) => {
+                let _ = updates.send(Update::Board(BoardUpdate::Plan(conversation, latest_plan(&messages.messages), Some(messages.agent_mode))));
+            }
+            Err(e) if lost(&e) => return Err(e.into()),
+            Err(_) => {
+                let _ = updates.send(Update::Board(BoardUpdate::Plan(conversation, None, None)));
+            }
+        },
+        BoardCall::Activity(ticket_id) => {
+            let query = aurelius_protocol::TimelineQuery { correlation_id: Some(ticket_id.to_string()), limit: ACTIVITY_LIMIT, activity: true, ..Default::default() };
+            let result = client.timeline(query).await;
+            if let Err(e) = &result && lost(e) {
+                return Err(result.unwrap_err().into());
+            }
+            let _ = updates.send(Update::Board(BoardUpdate::Activity(ticket_id, result.map(|p| p.cards).map_err(|e| board_failure(&e)))));
+        }
+        BoardCall::GaveUp { ticket, version } => {
+            let query = aurelius_protocol::TimelineQuery { correlation_id: Some(ticket.to_string()), limit: crate::screens::board::GAVE_UP_LIMIT, activity: true, ..Default::default() };
+            let result = client.timeline(query).await;
+            if let Err(e) = &result && lost(e) {
+                return Err(result.unwrap_err().into());
+            }
+            let gave_up = result.ok().map(|p| crate::screens::board::dispatcher_gave_up(&p.cards));
+            let _ = updates.send(Update::Board(BoardUpdate::GaveUp { ticket, version, gave_up }));
+        }
+        BoardCall::Write { mut command, expected_version, done } => {
+            let ticket = ticket_of(&command);
+            // A new ticket's files: as they are for the local service, uploaded for a remote one.
+            if let Command::CreateTicket(create) = &mut command {
+                let mut staged = Vec::new();
+                for path in &create.files {
+                    match client.stage_file(std::path::Path::new(path)).await {
+                        Ok(path) => staged.push(path),
+                        Err(e) => {
+                            let name = std::path::Path::new(path).file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+                            let message = if lost(&e) { BOARD_CONNECTION_DROPPED.to_string() } else { format!("Could not send the file {name}: {e}") };
+                            let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket: None, message }));
+                            return if lost(&e) { Err(e.into()) } else { Ok(()) };
+                        }
+                    }
+                }
+                create.files = staged;
+            }
+            match client.execute(envelope(command, expected_version)).await {
+                Ok(receipt) => {
+                    let _ = updates.send(Update::Board(match receipt.result {
+                        CommandResult::TicketCreated { number, .. } => BoardUpdate::Created { number, text: done },
+                        _ => BoardUpdate::Done { ticket, text: done },
+                    }));
+                }
+                Err(e) if needs_board_member(&e) => {
+                    let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket, message: BOARD_MEMBER_REQUIRED.into() }));
+                    let _ = updates.send(Update::BoardMemberRequired);
+                }
+                Err(e) => {
+                    let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket, message: board_write_failure(&e) }));
+                    if lost(&e) {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The newest plan posted in a conversation (a ticket's plan review posts it there).
+pub fn latest_plan(messages: &[aurelius_protocol::MessageView]) -> Option<String> {
+    messages.iter().rev().find(|m| m.update.as_deref() == Some("plan")).map(|m| m.text.clone())
+}
+
 fn any_running(jobs: &[JobSummary]) -> bool {
     use aurelius_domain::job::JobState;
     jobs.iter().any(|j| matches!(j.state, JobState::Ready | JobState::Leased))
@@ -1729,7 +2122,7 @@ async fn read<T>(client: &Client, method: Method, pick: impl FnOnce(ResponseBody
     pick(client.call(method).await?).ok_or(ClientError::UnexpectedResponse)
 }
 
-/// The company in one read: departments, employees, roots and the org chart setting.
+/// The company in one read: employees, roots and the org chart setting.
 async fn company(client: &Client) -> Result<aurelius_protocol::CompanySnapshot, ClientError> {
     read(client, Method::CompanyGet, |b| match b { ResponseBody::Company(c) => Some(c), _ => None }).await
 }
@@ -1748,7 +2141,7 @@ async fn refresh(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Re
         company(client),
         client.approvals(),
         client.connections(),
-        read(client, Method::TaskList { project_id: None, employee_id: None, department_id: None, state: None }, |b| match b { ResponseBody::Tasks(t) => Some(t), _ => None }),
+        read(client, Method::TaskList { project_id: None, employee_id: None, state: None }, |b| match b { ResponseBody::Tasks(t) => Some(t), _ => None }),
         client.notifications(),
         client.usage(),
         client.update_status(false),
@@ -1756,7 +2149,7 @@ async fn refresh(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Re
         // Subscription limits: answered from the daemon's cache (refreshed there in the background).
         client.subscription(false),
         client.jobs(),
-        read(client, Method::ProposalList { department_id: None }, |b| match b { ResponseBody::Proposals(p) => Some(p), _ => None }),
+        read(client, Method::ProposalList, |b| match b { ResponseBody::Proposals(p) => Some(p), _ => None }),
     );
     let projects = projects?;
     send_company(updates, company?);
@@ -1942,7 +2335,7 @@ async fn refresh_schedules(client: &Client, updates: &mpsc::UnboundedSender<Upda
 
 async fn refresh_memory(client: &Client, updates: &mpsc::UnboundedSender<Update>, open: Option<ProjectId>) -> Result<(), Disconnected> {
     let Some(project_id) = open else { return Ok(()) };
-    let method = Method::MemoryList { project_id: Some(project_id), employee_id: None, department_id: None };
+    let method = Method::MemoryList { project_id: Some(project_id), employee_id: None };
     let Some(snapshot) = shown(read(client, method, |b| match b { ResponseBody::Memory(m) => Some(m), _ => None }).await, updates)? else { return Ok(()) };
     let _ = updates.send(Update::Memory(project_id, snapshot.items));
     Ok(())
@@ -1996,6 +2389,12 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
                 CommandResult::AgentModeSet { mode, .. } => {
                     let _ = updates.send(Update::Info(format!("Mode: {} — {}", mode.label(), mode.description())));
                 }
+                CommandResult::TaskCancelled { .. } => {
+                    let _ = updates.send(Update::Info("Task cancelled.".into()));
+                }
+                CommandResult::TaskAssigned { task_id } => {
+                    let _ = updates.send(Update::TaskAssigned(task_id));
+                }
                 CommandResult::ConversationDeleted { .. } => {
                     let _ = updates.send(Update::Info("Conversation deleted; its messages and attachments are erased.".into()));
                 }
@@ -2031,18 +2430,6 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
                         "Not following the org chart: employees work with anyone in the company."
                     }.into()));
                 }
-                CommandResult::EmployeeDepartmentSet { department_id, .. } => {
-                    let _ = updates.send(Update::Info(if department_id.is_some() { "Department changed." } else { "This employee is in no department now." }.into()));
-                }
-                CommandResult::DepartmentCreated { .. } => {
-                    let _ = updates.send(Update::Info("Department created.".into()));
-                }
-                CommandResult::DepartmentUpdated { .. } => {
-                    let _ = updates.send(Update::Info("Department saved.".into()));
-                }
-                CommandResult::DepartmentArchived { .. } => {
-                    let _ = updates.send(Update::Info("Department archived. Its employees keep working.".into()));
-                }
                 CommandResult::ProposalDecided { status, employee_id, .. } => {
                     use aurelius_domain::proposal::ProposalStatus;
                     // Only an approved colleague creates a manager; approved instructions don't.
@@ -2064,6 +2451,10 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
             Ok(())
         }
         Err(err) if retryable(&err) || err.is_final() => Err(err.into()),
+        Err(err) if needs_board_member(&err) => {
+            let _ = updates.send(Update::BoardMemberRequired);
+            Ok(())
+        }
         Err(err) => {
             // Rejected (validation, conflict): tell the user; do not retry.
             if let Some(message_id) = deleting {
@@ -2114,6 +2505,430 @@ mod tests {
                 }
                 _ = stale.due(), if stale.marked => out.push(start.elapsed().as_millis() as u64),
             }
+        }
+    }
+
+    #[test]
+    fn a_password_is_never_printed() {
+        let call = Request::BoardMembers(UserCall::Use { user_id: aurelius_domain::UserId::new(), password: Password::new("Tr0ub4dor&3-zebra".into()) });
+        let create = Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new("Tr0ub4dor&3-zebra".into()) });
+        for printed in [format!("{call:?}"), format!("{create:?}")] {
+            assert!(!printed.contains("Tr0ub4dor"), "{printed}");
+            assert!(printed.contains("<redacted>"), "{printed}");
+        }
+    }
+
+    #[test]
+    fn a_refusal_goes_to_its_field() {
+        use aurelius_domain::error::{AppError, ErrorCode};
+        let refusal = |code, text: &str| member_failure(&ClientError::Protocol(AppError::new(code, text)));
+        assert_eq!(refusal(ErrorCode::UsernameTaken, "another board member already has this name"), MemberFailure { field: Some(MemberField::Username), message: "This username is taken.".into() });
+        assert_eq!(refusal(ErrorCode::WeakPassword, "A password has at least 12 characters.").field, Some(MemberField::Password));
+        assert_eq!(refusal(ErrorCode::InvalidUsername, "Use only letters, digits, '.', '_' and '-'.").field, Some(MemberField::Username));
+        assert_eq!(refusal(ErrorCode::TooManyAttempts, "Too many tries.").message, "Too many tries. Wait a minute and try again.");
+        assert_eq!(refusal(ErrorCode::Internal, "storage is busy").field, None);
+        assert!(needs_board_member(&ClientError::Protocol(AppError::new(ErrorCode::BoardMemberRequired, "choose who you are first"))));
+        assert!(!needs_board_member(&ClientError::Disconnected));
+    }
+
+    mod against_a_daemon {
+        use super::super::*;
+        use aurelius_domain::UserId;
+        use aurelius_domain::user::WhoAmI;
+
+        const ADA: &str = "Tr0ub4dor&3-zebra-ada";
+        const MARIE: &str = "correct-horse-battery-marie";
+
+        async fn daemon(root: &std::path::Path) -> tokio::task::JoinHandle<anyhow::Result<()>> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let handle = tokio::spawn(aurelius_daemon::run(root.to_path_buf(), Some(tx)));
+            tokio::time::timeout(Duration::from_secs(20), rx).await.expect("daemon ready").expect("ready signal");
+            handle
+        }
+
+        async fn stop(root: &std::path::Path, handle: tokio::task::JoinHandle<anyhow::Result<()>>) {
+            aurelius_client::bridge::shutdown_daemon(root).await.expect("shutdown");
+            tokio::time::timeout(Duration::from_secs(20), handle).await.expect("daemon stops").expect("join").expect("clean stop");
+        }
+
+        /// The first update `pick` takes; the others pass by.
+        async fn next<T>(handle: &mut Handle, mut pick: impl FnMut(Update) -> Option<T>) -> T {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    let update = handle.updates.recv().await.expect("the backend runs");
+                    if let Some(found) = pick(update) {
+                        return found;
+                    }
+                }
+            })
+            .await
+            .expect("the update came")
+        }
+
+        async fn who(handle: &mut Handle) -> WhoAmI {
+            next(handle, |u| match u {
+                Update::Who(who) => Some(who),
+                _ => None,
+            })
+            .await
+        }
+
+        async fn failure(handle: &mut Handle) -> MemberFailure {
+            next(handle, |u| match u {
+                Update::BoardMemberFailed(f) => Some(f),
+                _ => None,
+            })
+            .await
+        }
+
+        fn ask(handle: &Handle, call: UserCall) {
+            handle.requests.send(Request::BoardMembers(call)).unwrap();
+        }
+
+        fn create(username: &str, password: &str) -> UserCall {
+            UserCall::Create { username: username.into(), password: Password::new(password.into()) }
+        }
+
+        fn use_(user_id: UserId, password: &str) -> UserCall {
+            UserCall::Use { user_id, password: Password::new(password.into()) }
+        }
+
+        /// MU1-20, MU1-21, MU1-22 and B8 through this app's backend: the onboarding,
+        /// a second board member, the choice with its one password check, the
+        /// remembered one in every hello (also after a reconnect, Trace m9), an
+        /// unknown one forgotten, switching, and `board_member_required` on a write.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn board_members_from_onboarding_to_switching() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let mut server = daemon(&root).await;
+            let target = || Some(Target::Local { root: root.clone(), spawn: false });
+
+            // A server without board members: only the onboarding (MU1-20 AC1).
+            let mut first = start(target(), None);
+            let empty = who(&mut first).await;
+            assert!(!empty.board_members_exist && empty.user.is_none(), "{empty:?}");
+
+            // Refused, nothing made (AC3): a short password, by its field.
+            ask(&first, create("ada", "short"));
+            assert_eq!(failure(&mut first).await.field, Some(MemberField::Password));
+
+            // Made, and this window works as it (AC2, MU1-21 AC1).
+            ask(&first, create("ada", ADA));
+            let onboarded = who(&mut first).await;
+            let ada = onboarded.user.clone().expect("the new board member works here");
+            assert!(onboarded.board_members_exist);
+            assert_eq!(ada.username, "ada");
+
+            // A second board member (MU1-22 AC1); this window stays ada.
+            ask(&first, create("ada", MARIE));
+            assert_eq!(failure(&mut first).await, MemberFailure { field: Some(MemberField::Username), message: "This username is taken.".into() }, "MU1-22 AC2");
+            ask(&first, create("marie", MARIE));
+            let made = next(&mut first, |u| match u {
+                Update::BoardMemberCreated(name) => Some(name),
+                _ => None,
+            })
+            .await;
+            assert_eq!(made, "marie");
+            assert_eq!(who(&mut first).await.user.map(|u| u.id), Some(ada.id), "still ada");
+            let list = next(&mut first, |u| match u {
+                Update::BoardMembers(list) => Some(list),
+                _ => None,
+            })
+            .await;
+            assert_eq!(list.iter().map(|u| u.username.as_str()).collect::<Vec<_>>(), ["ada", "marie"]);
+            let marie = list[1].id;
+
+            // A new device: board members exist, none works here (MU1-20 AC5, MU1-21 AC2).
+            let mut device = start(target(), None);
+            let fresh = who(&mut device).await;
+            assert!(fresh.board_members_exist && fresh.user.is_none(), "{fresh:?}");
+
+            // Writes wait for the choice: the S5 gate as the window hears it.
+            let (events, _events) = mpsc::unbounded_channel();
+            let bare = Client::open(target().as_ref().unwrap(), "test", events, None).await.unwrap();
+            let (gate_tx, mut gate_rx) = mpsc::unbounded_channel();
+            let ticket = aurelius_domain::ticket::CreateTicket {
+                project_id: ProjectId::new(),
+                title: "Login per board member".into(),
+                description: None,
+                priority: Default::default(),
+                labels: vec![],
+                deadline_ms: None,
+                owner_employee_id: None,
+                run: Default::default(),
+                files: vec![],
+                start: false,
+            };
+            assert!(send(&bare, envelope(Command::CreateTicket(ticket), None), &gate_tx).await.is_ok(), "the session goes on");
+            assert!(matches!(gate_rx.try_recv(), Ok(Update::BoardMemberRequired)));
+
+            // The one password check of this device (B8).
+            ask(&device, use_(marie, "not her password"));
+            assert_eq!(failure(&mut device).await, MemberFailure { field: Some(MemberField::Password), message: "That password is wrong.".into() });
+            ask(&device, use_(marie, MARIE));
+            assert_eq!(who(&mut device).await.user.map(|u| u.id), Some(marie));
+
+            // The server restarts: the device says marie again in its hello, no password (Trace m9).
+            stop(&root, server).await;
+            server = daemon(&root).await;
+            let back = who(&mut device).await;
+            assert_eq!(back.user.map(|u| u.id), Some(marie), "not forgotten on a reconnect");
+
+            // A window that remembers ada starts as that board member; an unknown one is not taken.
+            let mut remembered = start(target(), Some(ada.id));
+            assert_eq!(who(&mut remembered).await.user.map(|u| u.id), Some(ada.id));
+            let mut unknown = start(target(), Some(UserId::new()));
+            let gone = who(&mut unknown).await;
+            assert!(gone.board_members_exist && gone.user.is_none(), "the choice shows again: {gone:?}");
+
+            // Switch board member.
+            ask(&device, use_(ada.id, ADA));
+            assert_eq!(who(&mut device).await.user.map(|u| u.id), Some(ada.id));
+
+            drop((first, device, remembered, unknown));
+            stop(&root, server).await;
+        }
+    }
+
+    mod the_board_against_a_daemon {
+        use super::super::*;
+        use aurelius_domain::ticket::{self, BoardView, ColumnKind};
+
+        async fn daemon(root: &std::path::Path) -> tokio::task::JoinHandle<anyhow::Result<()>> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let handle = tokio::spawn(aurelius_daemon::run(root.to_path_buf(), Some(tx)));
+            tokio::time::timeout(Duration::from_secs(20), rx).await.expect("daemon ready").expect("ready signal");
+            handle
+        }
+
+        async fn next<T>(handle: &mut Handle, mut pick: impl FnMut(Update) -> Option<T>) -> T {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    if let Some(found) = pick(handle.updates.recv().await.expect("the backend runs")) {
+                        return found;
+                    }
+                }
+            })
+            .await
+            .expect("the update came")
+        }
+
+        async fn load(handle: &mut Handle, project: Option<ProjectId>) -> BoardView {
+            handle.requests.send(Request::Board(BoardCall::Load(project))).unwrap();
+            next(handle, |u| match u {
+                Update::Board(BoardUpdate::Loaded(p, result)) if p == project => Some(result.expect("the board loads")),
+                _ => None,
+            })
+            .await
+        }
+
+        /// A write's answer, and whether its event already said the board changed.
+        async fn write(handle: &mut Handle, command: Command, expected_version: Option<u64>) -> (BoardUpdate, bool) {
+            handle.requests.send(Request::Board(BoardCall::Write { command, expected_version, done: Some("ok".into()) })).unwrap();
+            let mut changed = false;
+            let answer = next(handle, |u| match u {
+                Update::Board(BoardUpdate::Changed { .. }) => {
+                    changed = true;
+                    None
+                }
+                Update::Board(b @ (BoardUpdate::Done { .. } | BoardUpdate::Created { .. } | BoardUpdate::Failed { .. })) => Some(b),
+                _ => None,
+            })
+            .await;
+            (answer, changed)
+        }
+
+        async fn done(handle: &mut Handle, command: Command, expected_version: Option<u64>) {
+            match write(handle, command, expected_version).await.0 {
+                BoardUpdate::Done { .. } | BoardUpdate::Created { .. } => {}
+                other => panic!("refused: {other:?}"),
+            }
+        }
+
+        async fn refused(handle: &mut Handle, command: Command, expected_version: Option<u64>) -> String {
+            match write(handle, command, expected_version).await.0 {
+                BoardUpdate::Failed { message, .. } => message,
+                other => panic!("not refused: {other:?}"),
+            }
+        }
+
+        fn tickets(view: &BoardView, kind: ColumnKind) -> Vec<ticket::TicketView> {
+            view.columns.iter().find(|c| c.column.kind == kind).map(|c| c.tickets.clone()).unwrap_or_default()
+        }
+
+        fn new_ticket(project_id: ProjectId, title: &str) -> Command {
+            Command::CreateTicket(ticket::CreateTicket {
+                project_id,
+                title: title.into(),
+                description: Some("What and why.".into()),
+                priority: ticket::TicketPriority::High,
+                labels: vec!["ui".into()],
+                deadline_ms: None,
+                owner_employee_id: None,
+                run: Default::default(),
+                files: vec![],
+                start: false,
+            })
+        }
+
+        /// MU1-05..MU1-12 and B3/B4/B5 through this app's backend: the empty board,
+        /// new tickets in Backlog, reordering with `before_ticket_id`, a refused move
+        /// with its reason, the owner and back to the dispatcher, the columns with the
+        /// board's version (and a stale one refused), the project's dispatcher, Start
+        /// with nobody to choose, Back to Backlog, Delete, live changes, and a write
+        /// while offline that says so instead of waiting.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn the_board_from_a_new_ticket_to_its_columns() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let server = daemon(&root).await;
+            let mut app = start(Some(Target::Local { root: root.clone(), spawn: false }), None);
+            app.requests.send(Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new("Tr0ub4dor&3-zebra-ada".into()) })).unwrap();
+            next(&mut app, |u| match u {
+                Update::Who(w) if w.user.is_some() => Some(()),
+                _ => None,
+            })
+            .await;
+            app.requests.send(Request::CreateProject { name: "Atlas".into(), description: None, folder: None }).unwrap();
+            let project = next(&mut app, |u| match u {
+                Update::Created(p) => Some(p),
+                _ => None,
+            })
+            .await;
+
+            // The empty board: the six columns in order (MU1-05 AC1, MU1-19 AC4).
+            let empty = load(&mut app, None).await;
+            assert_eq!(empty.columns.iter().map(|c| c.column.kind).collect::<Vec<_>>(), ColumnKind::ALL);
+            assert!(empty.columns.iter().all(|c| c.tickets.is_empty()));
+
+            // New tickets land in Backlog, made by the active board member (MU1-07 AC1).
+            let (created, _) = write(&mut app, new_ticket(project, "Columns"), None).await;
+            assert!(matches!(created, BoardUpdate::Created { number: 1, .. }), "{created:?}");
+            done(&mut app, new_ticket(project, "Filters"), None).await;
+            let view = load(&mut app, Some(project)).await;
+            let backlog = tickets(&view, ColumnKind::Backlog);
+            assert_eq!(backlog.iter().map(|t| t.number).collect::<Vec<_>>(), [1, 2]);
+            assert_eq!(backlog[0].created_by_username, "ada");
+            assert_eq!(backlog[0].priority, ticket::TicketPriority::High, "B9");
+            let (one, two) = (backlog[0].id, backlog[1].id);
+            let column = |view: &BoardView, kind: ColumnKind| view.columns.iter().find(|c| c.column.kind == kind).unwrap().column.clone();
+
+            // #2 right above #1 (ticket.move with before_ticket_id); the event says the board changed.
+            let (moved, changed) = write(&mut app, Command::MoveTicket(ticket::MoveTicket { ticket_id: two, column_id: column(&view, ColumnKind::Backlog).id, before_ticket_id: Some(one) }), None).await;
+            assert!(matches!(moved, BoardUpdate::Done { ticket: Some(t), .. } if t == two), "{moved:?}");
+            if !changed {
+                next(&mut app, |u| matches!(u, Update::Board(BoardUpdate::Changed { tickets: true, .. })).then_some(())).await;
+            }
+            assert_eq!(tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog).iter().map(|t| t.number).collect::<Vec<_>>(), [2, 1], "MU1-05 AC3");
+
+            // A move the rules refuse comes back with its reason (§6: Backlog → Doing).
+            assert!(!refused(&mut app, Command::MoveTicket(ticket::MoveTicket { ticket_id: one, column_id: column(&view, ColumnKind::Doing).id, before_ticket_id: None }), None).await.is_empty());
+
+            // The owner, then back to the dispatcher in Backlog (ticket.assign).
+            app.requests.send(Request::CreateEmployee { name: "Builder".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }).unwrap();
+            let builder = next(&mut app, |u| match u {
+                Update::EmployeeCreated(e) => Some(e),
+                _ => None,
+            })
+            .await;
+            done(&mut app, Command::AssignTicket(ticket::AssignTicket { ticket_id: one, employee_id: Some(builder), reason: None }), None).await;
+            let owned = tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog);
+            assert_eq!(owned.iter().find(|t| t.id == one).unwrap().owner_employee_id, Some(builder));
+            done(&mut app, Command::AssignTicket(ticket::AssignTicket { ticket_id: one, employee_id: None, reason: None }), None).await;
+            assert_eq!(tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog).iter().find(|t| t.id == one).unwrap().owner_employee_id, None, "the dispatcher chooses again");
+
+            // A ticket write carries the version the window knows (D-m1): a stale one is refused with §7.2's words.
+            let card = tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog).into_iter().find(|t| t.id == one).unwrap();
+            let rename = |title: &str| Command::UpdateTicket(ticket::UpdateTicket { title: Some(title.into()), ..crate::screens::board::empty_update(one) });
+            let version = crate::screens::board::expected_version_for(&rename("x"), Some(card.version));
+            assert_eq!(version, Some(card.version));
+            done(&mut app, rename("Renamed here"), version).await;
+            assert_eq!(refused(&mut app, rename("Renamed elsewhere"), version).await, BOARD_CONFLICT);
+            assert_eq!(tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog).iter().find(|t| t.id == one).unwrap().title, "Renamed here", "the first write stays");
+
+            // The columns: renamed and reordered with the board's version; a stale version is refused (B3, MU1-06).
+            let all = load(&mut app, None).await;
+            let mut columns: Vec<ticket::BoardColumnView> = all.columns.iter().map(|c| c.column.clone()).collect();
+            let version = ticket::board_version(&columns);
+            columns.iter_mut().find(|c| c.kind == ColumnKind::Doing).unwrap().name = "Building".into();
+            let edit = crate::screens::board::columns_edit(&columns);
+            done(&mut app, Command::UpdateBoardColumns(edit.clone()), Some(version)).await;
+            let renamed = load(&mut app, None).await;
+            assert_eq!(renamed.columns.iter().find(|c| c.column.kind == ColumnKind::Doing).unwrap().column.name, "Building");
+            assert_eq!(refused(&mut app, Command::UpdateBoardColumns(edit), Some(version)).await, BOARD_CONFLICT);
+
+            // A project's own dispatcher, then the company's again (MU1-11 AC1/AC2).
+            let set = |employee_id| Command::UpdateProject(aurelius_domain::company::UpdateProject { project_id: project, dispatcher: Some(ticket::SetDispatcher { employee_id }) });
+            done(&mut app, set(Some(builder)), None).await;
+            done(&mut app, set(None), None).await;
+
+            // Start with nobody to choose: Todo, no owner, no triage job: "choose an owner" (B5).
+            done(&mut app, Command::StartTicket(ticket::StartTicket { ticket_id: two, employee_id: None }), None).await;
+            let todo = tickets(&load(&mut app, Some(project)).await, ColumnKind::Todo);
+            let started = todo.iter().find(|t| t.id == two).expect("#2 is in Todo (MU1-09 AC1)");
+            assert_eq!(started.owner_employee_id, None);
+            assert!(!crate::screens::board::choosing(started, false, false), "no dispatcher");
+            assert_eq!(crate::screens::board::needs_you(started, false, 0), Some(crate::screens::board::Needs::ChooseOwner));
+
+            // Its Activity (timeline.list on the ticket): nobody chose, said by the server (MU1-15 AC4, B5).
+            let activity = tokio::time::timeout(Duration::from_secs(20), async {
+                loop {
+                    app.requests.send(Request::Board(BoardCall::Activity(two))).unwrap();
+                    let cards = next(&mut app, |u| match u {
+                        Update::Board(BoardUpdate::Activity(t, r)) if t == two => Some(r.expect("the activity loads")),
+                        _ => None,
+                    })
+                    .await;
+                    if cards.iter().any(|c| c.title == "ticket.updated") {
+                        return cards;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            })
+            .await
+            .expect("the dispatcher's answer shows");
+            let lines: Vec<String> = activity.iter().map(crate::screens::board::activity_text).collect();
+            assert_eq!(lines.first().map(String::as_str), Some("Nobody chose an owner; a board member must"), "newest first: {lines:?}");
+            assert!(activity.windows(2).all(|w| w[0].at_ms >= w[1].at_ms), "newest first");
+            // The same read the board does per card: the dispatcher gave up, as mobile shows it.
+            app.requests.send(Request::Board(BoardCall::GaveUp { ticket: two, version: started.version })).unwrap();
+            let gave_up = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::GaveUp { ticket, gave_up, .. }) if ticket == two => Some(gave_up),
+                _ => None,
+            })
+            .await;
+            assert_eq!(gave_up, Some(true), "B5");
+
+            // Back to Backlog stops it (ticket.cancel); Delete takes it off the board.
+            done(&mut app, Command::CancelTicket(ticket::CancelTicket { ticket_id: two }), None).await;
+            assert!(tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog).iter().any(|t| t.id == two));
+            done(&mut app, Command::ArchiveTicket(ticket::ArchiveTicket { ticket_id: one }), None).await;
+            assert!(!tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog).iter().any(|t| t.id == one));
+
+            // A ticket with a file: copied into the project's work folder, shown on the ticket (MU1-07).
+            let folder = root.join("work");
+            std::fs::create_dir_all(&folder).unwrap();
+            let spec = root.join("spec.md");
+            std::fs::write(&spec, b"# What and why").unwrap();
+            app.requests.send(Request::CreateProject { name: "Hermes".into(), description: None, folder: Some(folder.display().to_string()) }).unwrap();
+            let with_folder = next(&mut app, |u| match u {
+                Update::Created(p) => Some(p),
+                _ => None,
+            })
+            .await;
+            let Command::CreateTicket(mut create) = new_ticket(with_folder, "With a file") else { unreachable!() };
+            create.files = vec![spec.display().to_string()];
+            done(&mut app, Command::CreateTicket(create), None).await;
+            let attached = tickets(&load(&mut app, Some(with_folder)).await, ColumnKind::Backlog);
+            assert_eq!(attached[0].attachments.iter().map(|f| (f.name.as_str(), f.byte_length)).collect::<Vec<_>>(), [("spec.md", 14)]);
+
+            // Offline a write says so at once and is not kept for later.
+            aurelius_client::bridge::shutdown_daemon(&root).await.expect("shutdown");
+            tokio::time::timeout(Duration::from_secs(20), server).await.expect("daemon stops").expect("join").expect("clean stop");
+            next(&mut app, |u| matches!(u, Update::Connection(Connection::Offline(_))).then_some(())).await;
+            let message = refused(&mut app, Command::StartTicket(ticket::StartTicket { ticket_id: two, employee_id: None }), None).await;
+            assert!(message.starts_with("Not connected"), "{message}");
         }
     }
 

@@ -24,11 +24,42 @@ pub fn insert_task(
     status: TaskStatus,
     parent: Option<TaskId>,
 ) -> Result<(), StorageError> {
+    insert_ticket_task(tx, id, project, employee, title, brief_blob, acceptance_blob, status, parent, None)
+}
+
+/// `insert_task` for the main task of a ticket. A task with a parent always takes
+/// its parent's ticket (a delegation stays on the ticket); `ticket` applies
+/// to a task without one.
+#[allow(clippy::too_many_arguments)]
+pub fn insert_ticket_task(
+    tx: &Transaction<'_>,
+    id: TaskId,
+    project: ProjectId,
+    employee: Option<EmployeeId>,
+    title: &str,
+    brief_blob: &str,
+    acceptance_blob: &str,
+    status: TaskStatus,
+    parent: Option<TaskId>,
+    ticket: Option<aurelius_domain::TicketId>,
+) -> Result<(), StorageError> {
     let now = now_ms();
     tx.execute(
-        "INSERT INTO tasks(id, project_id, parent_task_id, employee_id, title, brief_blob_id, acceptance_blob_id, status, priority, version, created_at_ms, updated_at_ms)
-         VALUES (?1, ?2, ?9, ?3, ?4, ?5, ?6, ?7, 0, 1, ?8, ?8)",
-        params![id.to_string(), project.to_string(), employee.map(|m| m.to_string()), title, brief_blob, acceptance_blob, status.as_str(), now, parent.map(|p| p.to_string())],
+        "INSERT INTO tasks(id, project_id, parent_task_id, employee_id, title, brief_blob_id, acceptance_blob_id, status, priority, version, created_at_ms, updated_at_ms, ticket_id)
+         VALUES (?1, ?2, ?9, ?3, ?4, ?5, ?6, ?7, 0, 1, ?8, ?8,
+                 CASE WHEN ?9 IS NULL THEN ?10 ELSE (SELECT p.ticket_id FROM tasks p WHERE p.id = ?9) END)",
+        params![
+            id.to_string(),
+            project.to_string(),
+            employee.map(|m| m.to_string()),
+            title,
+            brief_blob,
+            acceptance_blob,
+            status.as_str(),
+            now,
+            parent.map(|p| p.to_string()),
+            ticket.map(|t| t.to_string())
+        ],
     )?;
     Ok(())
 }
@@ -192,7 +223,8 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
                         WHEN SUM(r.status IN ('starting','running','waiting','cancelling') OR (r.status = 'created' AND rj.state = 'leased')) > 0 THEN 'running'
                         WHEN SUM(r.status = 'created') > 0 THEN 'queued' END
                      FROM runs r LEFT JOIN jobs rj ON rj.id = r.id
-                     WHERE r.conversation_id = t.conversation_id AND r.status IN ('created','starting','running','waiting','cancelling')) END
+                     WHERE r.conversation_id = t.conversation_id AND r.status IN ('created','starting','running','waiting','cancelling')) END,
+                t.ticket_id, (SELECT k.number FROM tickets k WHERE k.id = t.ticket_id)
          FROM tasks t JOIN blobs gb ON gb.id = t.brief_blob_id LEFT JOIN blobs cb ON cb.id = t.acceptance_blob_id
          LEFT JOIN blobs rb ON rb.id = t.result_blob_id LEFT JOIN employees m ON m.id = t.employee_id
          LEFT JOIN jobs j ON j.id = t.id AND j.kind = 'task.run'
@@ -223,13 +255,15 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
             r.get::<_, Option<String>>(19)?,
             r.get::<_, Option<String>>(20)?,
             r.get::<_, Option<String>>(21)?,
+            r.get::<_, Option<String>>(22)?,
+            r.get::<_, Option<i64>>(23)?,
         ))
     })?;
     let edges = dependency_edges(conn)?;
     let now = now_ms();
     let mut out = Vec::new();
     for row in rows {
-        let (id, project_id, employee, employee_name, title, goal_key, criteria_key, status, waiting, created, updated, result_key, pending, parent, delegated_by, conversation, waiting_until, job_state, not_before, app_key, app_name, live_run) = row?;
+        let (id, project_id, employee, employee_name, title, goal_key, criteria_key, status, waiting, created, updated, result_key, pending, parent, delegated_by, conversation, waiting_until, job_state, not_before, app_key, app_name, live_run, ticket, ticket_number) = row?;
         let status = TaskStatus::parse(&status).unwrap_or(TaskStatus::Failed);
         let employee = employee.and_then(|m| EmployeeId::parse(&m).ok());
         let (waiting, starts_at_ms) = match status {
@@ -280,6 +314,8 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
                 Some("queued") => Some(LiveRun::Queued),
                 _ => None,
             },
+            ticket_id: ticket.and_then(|k| aurelius_domain::TicketId::parse(&k).ok()),
+            ticket_number: ticket_number.map(|n| n as u32),
         });
     }
     Ok(out)

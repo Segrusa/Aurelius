@@ -22,8 +22,8 @@ bool inTaskState(TaskView t, TaskState state) => switch (state) {
       TaskState.done => t.isDone && !t.hasLiveRun,
     };
 
-/// Every task of every project, filtered by state, employee, department and
-/// project; the newest first.
+/// Every task of every project, filtered by state, employee and project;
+/// the newest first.
 class TasksPage extends StatefulWidget {
   const TasksPage({super.key, this.employeeId});
 
@@ -37,15 +37,12 @@ class TasksPage extends StatefulWidget {
 class _TasksPageState extends State<TasksPage> {
   TaskState _state = TaskState.active;
   late String? _employee = widget.employeeId;
-  String? _department;
   String? _project;
 
   List<TaskView> _filtered(CompanyState company, {TaskState? state}) {
-    final members = _department == null ? null : {for (final e in company.employees) if (e.departmentId == _department) e.id};
     return company.tasks.where((t) {
       if (!inTaskState(t, state ?? _state)) return false;
       if (_employee != null && t.employeeId != _employee) return false;
-      if (members != null && !members.contains(t.employeeId)) return false;
       if (_project != null && t.projectId != _project) return false;
       return true;
     }).toList()
@@ -83,7 +80,6 @@ class _TasksPageState extends State<TasksPage> {
     final tasks = _filtered(company);
     final employees = [...company.activeEmployees]..sort(byName);
     final employee = company.employee(_employee ?? '');
-    final department = company.department(_department);
     final project = company.project(_project ?? '');
     final bloc = context.read<CompanyBloc>();
     return Scaffold(
@@ -116,13 +112,6 @@ class _TasksPageState extends State<TasksPage> {
                   active: employee != null,
                   onTap: () => _pick('Employee', {null: 'Everyone', for (final e in employees) e.id: e.name}, _employee, (v) => _employee = v),
                 ),
-                if (company.activeDepartments.isNotEmpty)
-                  _FilterChip(
-                    key: const ValueKey('tasks-filter-department'),
-                    label: department?.name ?? 'All departments',
-                    active: department != null,
-                    onTap: () => _pick('Department', {null: 'All departments', for (final d in company.activeDepartments) d.id: d.name}, _department, (v) => _department = v),
-                  ),
                 _FilterChip(
                   key: const ValueKey('tasks-filter-project'),
                   label: project?.name ?? 'All projects',

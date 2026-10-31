@@ -527,7 +527,8 @@ pub fn upgrade_legacy(root: &Path) -> Result<Option<ImportReport>, ImportError> 
         return Ok(None);
     }
     let version: Option<i64> = {
-        let conn = Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        // Leaves no empty -wal/-shm behind: they would move along with data/.
+        let conn = crate::fresh_start::open_read_only(&db)?;
         let has: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations')", [], |r| r.get(0))?;
         if has { conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))? } else { None }
     };
@@ -664,24 +665,33 @@ mod tests {
         assert_eq!(report, dry);
         assert!(report.skipped.iter().any(|s| s.contains("forgotten")));
 
-        // Opening it converts the imported managers into the company (protocol 3).
+        // Opening it converts the imported managers into the company (protocol 3):
+        // up to schema 17 the project seeded a department, which 0018 drops.
+        let store = Store::open_until(&to, 17).unwrap();
+        let department: Option<String> = store
+            .read(|c| Ok(c.query_row("SELECT d.name FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?1", [M], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(department.as_deref(), Some("Alpha"), "the project seeded a department");
+        drop(store);
+
         let store = Store::open(&to).unwrap();
         store
             .read(|c| {
                 let (name, status, folder): (String, String, String) =
                     c.query_row("SELECT name, status, folder FROM projects WHERE id = ?1", [P], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
                 assert_eq!((name.as_str(), status.as_str(), folder.as_str()), ("Alpha", "paused", "C:/work/alpha"));
-                let (mname, config, title, reports, department): (String, String, Option<String>, Option<String>, Option<String>) = c.query_row(
-                    "SELECT e.name, e.config_json, e.title, e.reports_to, d.name FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?1",
+                let (mname, config, title, reports): (String, String, Option<String>, Option<String>) = c.query_row(
+                    "SELECT name, config_json, title, reports_to FROM employees WHERE id = ?1",
                     [M],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
                 )?;
                 let config: Value = serde_json::from_str(&config).unwrap();
                 assert_eq!(mname, "Ada");
                 assert_eq!(config["task_policy"]["max_depth"], 4);
                 assert_eq!(config["task_policy"]["sequential_tasks"], true);
                 assert!(title.is_none() && reports.is_none());
-                assert_eq!(department.as_deref(), Some("Alpha"), "the project seeded a department");
+                let departments: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'departments')", [], |r| r.get(0))?;
+                assert!(!departments);
                 let convs: i64 = c.query_row("SELECT COUNT(*) FROM conversations WHERE employee_id = ?1 AND kind = 'employee' AND project_id IS NULL", [M], |r| r.get(0))?;
                 assert_eq!(convs, 1);
                 let kinds: Vec<String> = c.prepare("SELECT kind FROM ideas ORDER BY kind")?.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;

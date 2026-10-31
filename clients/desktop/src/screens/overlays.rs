@@ -12,6 +12,12 @@ use gpui_kit::component::scroll::ScrollableElement as _;
 
 impl AppView {
     pub fn render_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        // A board dialog, with its dropdown menus on top of it.
+        if self.board.dialog.is_some() {
+            let dialog = self.render_board_dialog(window, cx);
+            let menu = (self.overlay == Overlay::Menu).then(|| self.render_menu(window, cx));
+            return div().absolute().top_0().left_0().size_full().child(dialog).children(menu).into_any_element();
+        }
         let under = if self.overlay == Overlay::None { div().into_any_element() } else { self.render_overlay_layer(window, cx) };
         if self.mcp_manage.add.is_some() {
             let add = self.render_add_mcp(window, cx);
@@ -395,13 +401,11 @@ impl AppView {
     fn render_dialog(&mut self, kind: DialogKind, max_h: f32, scroll: &ScrollHandle, cx: &mut Context<Self>) -> impl IntoElement {
         let (title, confirm) = match kind {
             DialogKind::NewProject => ("New project", "Create project"),
-            DialogKind::NewManager { .. } => ("Add employee", "Add"),
+            DialogKind::NewManager => ("Add employee", "Add"),
             DialogKind::NewTask { .. } => ("New task", "Start task"),
             DialogKind::TaskSchedule { schedule: None, .. } => ("New recurring task", "Save recurring task"),
             DialogKind::TaskSchedule { schedule: Some(_), .. } => ("Edit recurring task", "Save"),
             DialogKind::EditManager { .. } => ("Edit employee", "Save"),
-            DialogKind::NewDepartment => ("New department", "Create"),
-            DialogKind::EditDepartment { .. } => ("Edit department", "Save"),
             DialogKind::NewMemory { .. } => ("Remember for this project", "Remember"),
             DialogKind::NewIdea { .. } => ("New idea", "Add idea"),
             DialogKind::EditIdea { .. } => ("Edit idea", "Save"),
@@ -423,11 +427,10 @@ impl AppView {
             _ => None,
         };
         let is_memory = matches!(kind, DialogKind::NewMemory { .. } | DialogKind::ReviseMemory { .. });
-        let is_manager = matches!(kind, DialogKind::NewManager { .. } | DialogKind::EditManager { .. });
+        let is_manager = matches!(kind, DialogKind::NewManager | DialogKind::EditManager { .. });
         let is_task = matches!(kind, DialogKind::NewTask { .. } | DialogKind::TaskSchedule { .. });
         let is_idea = matches!(kind, DialogKind::NewIdea { .. } | DialogKind::EditIdea { .. });
-        let is_department = matches!(kind, DialogKind::NewDepartment | DialogKind::EditDepartment { .. });
-        let multi_field = is_manager || is_task || is_idea || is_department || kind == DialogKind::NewProject;
+        let multi_field = is_manager || is_task || is_idea || kind == DialogKind::NewProject;
         // What the dialog is for and how it saves: behind an info icon next to the title.
         let about: Option<&str> = if is_proposal {
             Some("This text replaces the employee's instructions as a new version; the proposer is told it was edited. Enter adds a line; Ctrl+Enter approves.")
@@ -439,8 +442,6 @@ impl AppView {
             Some("You are the source. Employees of this project use this as context; you can revise or forget it later.")
         } else if matches!(kind, DialogKind::ReviseMemory { .. }) {
             Some("The old version stays visible in the history (filter 3) but is no longer used.")
-        } else if is_department {
-            Some("The head joins the department. A department has its own memory its employees read.")
         } else if matches!(kind, DialogKind::TaskSchedule { .. }) {
             Some("Each time it is due, a normal task is made from this for the employee. If the previous one is still open, that time is skipped. Enter adds a line; Ctrl+Enter saves. Newlines are kept as typed.")
         } else if is_task {
@@ -526,13 +527,7 @@ impl AppView {
                         })).into_any_element()))
                     })
                     .when(kind == DialogKind::NewProject, |el| el.child(field("Description", ui::input(&self.description_input).into_any_element())))
-                    .when(is_department, |el| {
-                        let head = self.pending_head.and_then(|id| self.managers.iter().find(|m| m.id == id)).map(|m| m.name.clone());
-                        let head_set = head.is_some();
-                        el.child(field("Description", ui::input(&self.description_input).into_any_element()))
-                            .child(self.dropdown("department-head", "Head", head.unwrap_or_else(|| "No head".into()), head_set, "alt-h", || Box::new(CycleDepartmentHead), cx))
-                    })
-                    .when(matches!(kind, DialogKind::NewProject | DialogKind::NewManager { .. }), |el| {
+                    .when(matches!(kind, DialogKind::NewProject | DialogKind::NewManager), |el| {
                         let required = kind == DialogKind::NewProject;
                         let chosen = self.dialog_folder.clone();
                         el.child(
@@ -584,13 +579,10 @@ impl AppView {
                             .when(schedule, |el| el.child(self.recurrence_editor(editing, cx)))
                     })
                     .when(is_manager, |el| {
-                        let department = self.pending_department.and_then(|id| self.company.iter().flat_map(|c| c.departments.iter()).find(|d| d.id == id)).map(|d| d.name.clone());
-                        let department_set = department.is_some();
                         let boss = self.pending_reports_to.and_then(|id| self.managers.iter().find(|m| m.id == id)).map(|m| m.name.clone());
                         let boss_set = boss.is_some();
                         el.child(field("Role (free text)", ui::input(&self.role_input).into_any_element()))
                             .child(field("Title on the org chart", ui::input(&self.title_input).into_any_element()))
-                            .child(self.dropdown("department", "Department", department.unwrap_or_else(|| "No department".into()), department_set, "alt-d", || Box::new(CycleDepartment), cx))
                             .child(self.dropdown("reports-to", "Reports to", boss.unwrap_or_else(|| "Nobody (management team)".into()), boss_set, "alt-p", || Box::new(CycleReportsTo), cx))
                             .child(field("Instructions", ui::input(&self.instructions_input).into_any_element()))
                             .when_some(match kind { DialogKind::EditManager { id, .. } => Some(id), _ => None }, |el, id| {
@@ -1430,10 +1422,6 @@ impl AppView {
             ConfirmKind::ArchiveManager(id) => (
                 format!("Archive {}?", self.managers.iter().find(|m| m.id == id).map_or("Manager", |m| m.name.as_str())),
                 "The employee stops starting work and disappears from the lists. Conversations and history are kept.",
-            ),
-            ConfirmKind::ArchiveDepartment(id) => (
-                format!("Archive {}?", self.company.iter().flat_map(|c| c.departments.iter()).find(|d| d.id == id).map_or("the department", |d| d.name.as_str())),
-                "Its employees keep working without a department and its memory stays readable. An archived department cannot be changed again.",
             ),
             ConfirmKind::ArchiveProject(id) => (
                 format!("Archive {}?", self.projects.iter().find(|p| p.id == id).map_or("Project", |p| p.name.as_str())),

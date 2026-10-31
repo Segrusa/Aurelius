@@ -4,9 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/widgets/ios.dart';
 import '../company/company_bloc.dart';
+import '../onboarding/onboarding.dart' show ActiveBoardMemberRow;
 
-/// The More tab: Projects, Ideas, the company (employees, org chart,
-/// departments) and Settings.
+/// The More tab: Projects, Tasks (B7: also those without a ticket), Ideas,
+/// the company (employees, org chart) and Settings.
 class MorePage extends StatelessWidget {
   const MorePage({super.key});
 
@@ -16,6 +17,7 @@ class MorePage extends StatelessWidget {
     return LargeTitleScaffold(
       title: 'More',
       children: [
+        const ActiveBoardMemberRow(),
         const SizedBox(height: 20),
         InsetGroup(
           dividerIndent: 60,
@@ -26,6 +28,14 @@ class MorePage extends StatelessWidget {
               title: 'Projects',
               chevron: true,
               onTap: () => context.push('/projects'),
+            ),
+            GroupRow(
+              key: const ValueKey('more-tasks'),
+              leading: const IconTile(CupertinoIcons.checkmark_square_fill),
+              title: 'Tasks',
+              subtitle: 'Also work without a ticket',
+              chevron: true,
+              onTap: () => context.push('/tasks'),
             ),
             GroupRow(
               key: const ValueKey('more-ideas'),

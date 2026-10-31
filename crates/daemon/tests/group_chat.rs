@@ -24,7 +24,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 async fn hire(client: &Client, name: &str, role: &str, reports_to: Option<EmployeeId>) -> (EmployeeId, ConversationId) {
-    let create = CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to, instructions: None, folder: None, department_id: None };
+    let create = CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!("not hired") };
     (employee_id, conversation_id)
 }
@@ -155,7 +155,7 @@ async fn the_ceo_answers_named_employees_answer_and_posts_stop_at_the_hop_limit(
     assert!(client.execute(envelope(wrong, None)).await.is_err());
     assert!(client.execute(envelope(Command::DeleteConversation(DeleteConversation { conversation_id: group_id }), None)).await.is_err());
     assert_eq!(client.group_chat().await.unwrap().conversation_id, group_id);
-    let employees = client.employees(None).await.unwrap().employees;
+    let employees = client.employees().await.unwrap().employees;
     assert_eq!(employees.len(), 3);
     assert!(employees.iter().any(|e| e.id == atlas && e.conversation_id == atlas_chat));
 

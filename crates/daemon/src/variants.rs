@@ -50,7 +50,12 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 async fn state(shared: &Arc<Shared>, ctx: &TaskContext, epoch: i64) -> Option<VariantsState> {
     let (s, c) = (shared.clone(), ctx.clone());
     match blocking(move || s.service.variants_state(&c, epoch)).await {
-        Some(Ok(state)) => state,
+        Some(Ok(mut state)) => {
+            if let Some(state) = state.as_mut() {
+                shared.publish(std::mem::take(&mut state.notices));
+            }
+            state
+        }
         Some(Err(e)) => {
             tracing::warn!(task = %ctx.task_id, error = %e.message, "could not read the task's variants");
             None

@@ -11,7 +11,6 @@ import '../../data/commands.dart';
 import '../../data/org_chart.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
-import '../connection/connection_bloc.dart';
 import '../inbox/instruction_proposal_card.dart';
 
 /// Paused / Working / Available, as on the desktop cards.
@@ -32,27 +31,25 @@ String heartbeatLine(HeartbeatView? h) {
   return 'Heartbeat $every$budget$waiting';
 }
 
-/// One employee in a list: monogram, name, what it does now (or its role and
-/// department) and its presence. Opens the employee page.
+/// One employee in a list: monogram, name, what it does now (or its role) and
+/// its presence. Opens the employee page.
 class EmployeeRow extends StatelessWidget {
-  const EmployeeRow({super.key, required this.employee, required this.state, this.showDepartment = true});
+  const EmployeeRow({super.key, required this.employee, required this.state});
 
   final EmployeeSummary employee;
   final CompanyState state;
-  final bool showDepartment;
 
   @override
   Widget build(BuildContext context) {
     final m = employee;
     final current = state.currentTask(m.id);
-    final department = showDepartment ? state.department(m.departmentId)?.name : null;
     return GroupRow(
       onTap: () => context.push('/employee/${m.id}'),
       leading: Monogram(m.monogram, size: 40, active: m.working),
       title: m.name,
       subtitle: current != null
           ? [current.title, state.project(current.projectId)?.name ?? ''].where((s) => s.isNotEmpty).join(' · ')
-          : [m.roleLine, ?department].where((s) => s.isNotEmpty).join(' · '),
+          : m.roleLine,
       trailing: employeePresence(m),
     );
   }
@@ -64,15 +61,8 @@ Map<String, String> reportsToOptions(List<EmployeeSummary> employees) => {
       for (final m in employees) m.id: m.roleLine.isEmpty ? m.name : '${m.name} · ${m.roleLine}',
     };
 
-/// "No department" plus the departments (value: department id, '' for none).
-Map<String, String> departmentOptions(List<DepartmentSummary> departments) => {
-      '': 'No department',
-      for (final d in departments) d.id: d.name,
-    };
-
-/// "New employee": name, role, title, department, boss and instructions.
-/// [departmentId] preselects a department (from its page).
-Future<void> createEmployee(BuildContext context, {String? departmentId}) async {
+/// "New employee": name, role, title, boss and instructions.
+Future<void> createEmployee(BuildContext context) async {
   final bloc = context.read<CompanyBloc>();
   final state = bloc.state;
   final values = await promptForm(
@@ -83,7 +73,6 @@ Future<void> createEmployee(BuildContext context, {String? departmentId}) async 
       const FieldSpec('Name', hint: 'For example Atlas'),
       const FieldSpec('Role', hint: 'For example Marketing lead'),
       const FieldSpec('Title', hint: 'For example Head of marketing', required: false),
-      FieldSpec('Department', initial: departmentId ?? '', required: false, options: departmentOptions(state.activeDepartments), dropdown: true),
       FieldSpec('Reports to', required: false, options: reportsToOptions(state.activeEmployees), dropdown: true),
       const FieldSpec('Instructions', required: false, lines: 3),
     ],
@@ -91,7 +80,7 @@ Future<void> createEmployee(BuildContext context, {String? departmentId}) async 
   if (values == null) return;
   String? opt(String v) => v.isEmpty ? null : v;
   bloc.send(
-    Commands.createEmployee(values[0], values[1], title: opt(values[2]), departmentId: opt(values[3]), reportsTo: opt(values[4]), instructions: opt(values[5])),
+    Commands.createEmployee(values[0], values[1], title: opt(values[2]), reportsTo: opt(values[3]), instructions: opt(values[4])),
     done: '${values[0]} joined the company.',
   );
 }
@@ -152,8 +141,8 @@ class EmployeeMenu extends StatelessWidget {
   }
 }
 
-/// Name, role, title, department, boss and instructions of [m]. The org chart
-/// position and the department are separate writes after the edit.
+/// Name, role, title, boss and instructions of [m]. The org chart position is
+/// a separate write after the edit.
 Future<void> editEmployee(BuildContext context, EmployeeSummary m) async {
   final bloc = context.read<CompanyBloc>();
   final state = bloc.state;
@@ -162,19 +151,17 @@ Future<void> editEmployee(BuildContext context, EmployeeSummary m) async {
     FieldSpec('Name', initial: m.name),
     FieldSpec('Role', initial: m.role),
     FieldSpec('Title', initial: m.title ?? '', required: false, hint: 'For example Head of marketing'),
-    FieldSpec('Department', initial: m.departmentId ?? '', required: false, options: departmentOptions(state.activeDepartments), dropdown: true),
     FieldSpec('Reports to', initial: m.reportsTo ?? '', required: false, options: reportsToOptions(others), dropdown: true),
     FieldSpec('Instructions', initial: m.instructions ?? '', required: false, lines: 3),
   ]);
   if (values == null) return;
   // An empty title clears it.
   bloc.send(
-    Commands.updateEmployee(m.id, values[0], values[1], title: values[2], instructions: values[5].isEmpty ? null : values[5]),
+    Commands.updateEmployee(m.id, values[0], values[1], title: values[2], instructions: values[4].isEmpty ? null : values[4]),
     expectedVersion: m.version,
     done: 'Saved.',
     then: [
-      if (values[3] != (m.departmentId ?? '')) Commands.setEmployeeDepartment(m.id, values[3].isEmpty ? null : values[3]),
-      if (values[4] != (m.reportsTo ?? '')) Commands.setReportsTo(m.id, values[4].isEmpty ? null : values[4]),
+      if (values[3] != (m.reportsTo ?? '')) Commands.setReportsTo(m.id, values[3].isEmpty ? null : values[3]),
     ],
   );
 }
@@ -182,14 +169,12 @@ Future<void> editEmployee(BuildContext context, EmployeeSummary m) async {
 /// The whole company as a tree: each employee under the one it reports to,
 /// the management team at the top.
 class OrgChartCard extends StatelessWidget {
-  const OrgChartCard({super.key, required this.employees, this.departments = const []});
+  const OrgChartCard({super.key, required this.employees});
 
   final List<EmployeeSummary> employees;
-  final List<DepartmentSummary> departments;
 
   @override
   Widget build(BuildContext context) {
-    final names = {for (final d in departments) d.id: d.name};
     return SurfaceCard(
       key: const ValueKey('org-chart'),
       child: Column(
@@ -211,8 +196,8 @@ class OrgChartCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(node.employee.name, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                          if ([node.employee.roleLine, names[node.employee.departmentId] ?? ''].where((s) => s.isNotEmpty).join(' · ') case final line when line.isNotEmpty)
-                            Text(line, style: TextStyle(color: Tokens.text2, fontSize: 12.5)),
+                          if (node.employee.roleLine.isNotEmpty)
+                            Text(node.employee.roleLine, style: TextStyle(color: Tokens.text2, fontSize: 12.5)),
                         ],
                       ),
                     ),
@@ -244,7 +229,6 @@ class ProposalList extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 10),
             child: ProposalCard(
               proposal: p,
-              departmentName: context.read<CompanyBloc>().state.department(p.departmentId)?.name,
               onDecide: (approve, note, instructions) => bloc.send(
                 Commands.decideProposal(p.id, approve, note: note, instructions: instructions),
                 done: switch ((p.isInstructions, approve)) {
@@ -264,12 +248,9 @@ class ProposalList extends StatelessWidget {
 
 /// A colleague an employee proposes: approve (it joins the company) or decline with a note.
 class ProposalCard extends StatelessWidget {
-  const ProposalCard({super.key, required this.proposal, required this.onDecide, this.departmentName});
+  const ProposalCard({super.key, required this.proposal, required this.onDecide});
 
   final ProposalView proposal;
-
-  /// The department the colleague would join, when it names one.
-  final String? departmentName;
 
   /// The user's choice; a decline may carry a note for the proposing employee,
   /// approved instructions the user's edited text.
@@ -282,7 +263,6 @@ class ProposalCard extends StatelessWidget {
     final meta = [
       if ((p.title ?? '').isNotEmpty) p.title!,
       p.role,
-      if (departmentName != null) 'in $departmentName',
       if (p.reportsToName != null) 'reports to ${p.reportsToName}',
     ].join(' · ');
     return SurfaceCard(

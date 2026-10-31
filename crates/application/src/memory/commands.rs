@@ -3,11 +3,12 @@
 use crate::run::events::{Ev, emit};
 use crate::{CommandContext, CommandService, Committed, domain_error, storage_error};
 use aurelius_domain::{
-    ActorKind, ConversationId, DomainError, EventId, EmployeeId, MemoryId, TaskId,
+    ActorKind, ConversationId, DomainError, EventId, EmployeeId, MemoryId, TaskId, TicketId,
     memory::{self, Accepted, ConsolidateMemory, DecideMemory, ForgetMemory, MemoryKind, MemoryScope, MemoryStatus, PinMemory, Remember, ReviseMemory, Verdict},
 };
 use aurelius_domain::{CommandEnvelope, CommandResult, EventNotice, AppError};
 use aurelius_storage::{StorageError, Tx, blobs, memory as store, queries};
+use rusqlite::OptionalExtension;
 
 pub const EXTRACT_JOB_KIND: &str = "memory.extract";
 pub const SUMMARY_JOB_KIND: &str = "memory.summarize";
@@ -41,6 +42,16 @@ pub struct ExtractionInput {
     pub lessons: Vec<memory::ExistingLesson>,
     pub config: crate::run::connections::ResolvedRunConfig,
     pub employee_system: String,
+    /// The ticket whose Done this extraction follows (MU1-18): it also writes the ticket's one summary.
+    pub ticket: Option<TicketRef>,
+}
+
+/// A ticket in Done, as its summary names it.
+#[derive(Debug, Clone)]
+pub struct TicketRef {
+    pub id: TicketId,
+    pub number: u32,
+    pub title: String,
 }
 
 /// A conversation to summarize: the turns not yet covered.
@@ -225,7 +236,8 @@ impl CommandService {
 
     /// Inputs for extracting memories from a finished task; `None` when the
     /// task has no employee (nothing to remember for).
-    pub fn extraction_input(&self, task_id: TaskId) -> Result<Option<ExtractionInput>, AppError> {
+    /// With `ticket`: its summary too, if the ticket is in Done and has none yet.
+    pub fn extraction_input(&self, task_id: TaskId, ticket: Option<TicketId>) -> Result<Option<ExtractionInput>, AppError> {
         let ctx = self.task_context(task_id)?;
         let Some(ctx) = ctx else { return Ok(None) };
         let Some(employee_id) = ctx.employee_id else { return Ok(None) };
@@ -277,14 +289,27 @@ impl CommandService {
                     .into_iter()
                     .map(|(row, content)| memory::ExistingLesson { id: row.id, content, employee_scope: row.scope_id == employee_scope })
                     .collect();
-                Ok(Some(ExtractionInput { task_id, employee_id, project_scope, employee_scope, sources, existing, signals, lessons, config, employee_system: ctx.employee_system.clone() }))
+                let ticket = match ticket {
+                    Some(id) => ticket_to_summarize(conn, id, &project_scope)?,
+                    None => None,
+                };
+                Ok(Some(ExtractionInput { task_id, employee_id, project_scope, employee_scope, sources, existing, signals, lessons, config, employee_system: ctx.employee_system.clone(), ticket }))
             })
             .map_err(storage_error)
     }
 
     /// Store validated candidates and close the job, atomically and fenced.
-    pub fn record_extraction(&self, job_id: &str, epoch: i64, input: &ExtractionInput, verdicts: Vec<Verdict>, lessons: Vec<memory::LessonVerdict>) -> Result<Vec<EventNotice>, AppError> {
+    /// `ticket_summary`: the model's summary of the ticket, if it gave one (only with `input.ticket`).
+    pub fn record_extraction(&self, job_id: &str, epoch: i64, input: &ExtractionInput, verdicts: Vec<Verdict>, lessons: Vec<memory::LessonVerdict>, ticket_summary: Option<&str>) -> Result<Vec<EventNotice>, AppError> {
         let kept: Vec<Accepted> = verdicts.iter().filter_map(|v| if let Verdict::Keep(a) = v { Some(a.clone()) } else { None }).collect();
+        let ticket_text = input.ticket.as_ref().map(|t| {
+            let for_project: Vec<&str> = kept.iter().filter(|a| !a.employee_scope).map(|a| a.content.as_str()).collect();
+            memory::ticket_summary(t.number, &t.title, ticket_summary, &for_project)
+        });
+        let ticket_blob = match &ticket_text {
+            Some(text) => Some(self.store.blobs().put(text.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?),
+            None => None,
+        };
         let dropped = verdicts.len() - kept.len();
         let mut prepared = Vec::new();
         for a in &kept {
@@ -431,6 +456,44 @@ impl CommandService {
                     notices.push(n);
                     last_event.push((scope.clone(), event_id));
                 }
+                // The ticket's one summary, in its project's memory (MU1-18); not twice,
+                // also not when the job runs again or the ticket left Done meanwhile.
+                if let (Some(ticket), Some(blob)) = (&input.ticket, &ticket_blob) {
+                    let completed = input.sources.iter().rev().find(|s| s.2.starts_with("Task completed")).or(input.sources.last());
+                    if let Some((label, source, _)) = completed {
+                        if ticket_to_summarize(tx, ticket.id, &input.project_scope)?.is_some() {
+                            blobs::register(tx, blob)?;
+                            let id = MemoryId::new();
+                            let (_, n) = mem_event(
+                                tx,
+                                id,
+                                "memory.extracted",
+                                ActorKind::Employee,
+                                input.task_id.to_string(),
+                                serde_json::json!({ "kind": MemoryKind::ProjectKnowledge.as_str(), "task_id": input.task_id, "ticket_id": ticket.id, "ticket_number": ticket.number }),
+                                format!("memory:{}:ticket:{}", input.task_id, ticket.id),
+                            )?;
+                            store::insert(tx, store::NewMemory {
+                                id,
+                                scope_id: &input.project_scope,
+                                kind: MemoryKind::ProjectKnowledge,
+                                blob_id: &blob.id.to_string(),
+                                text: ticket_text.as_deref().unwrap_or_default(),
+                                status: MemoryStatus::Active,
+                                confidence: 0.8,
+                                importance: 0.7,
+                                pinned: false,
+                                supersedes: None,
+                                conflicts_with: None,
+                                decided_by: Some("policy"),
+                                locator: serde_json::json!({ "task_id": input.task_id, "ticket_id": ticket.id, "ticket_number": ticket.number }),
+                                sources: vec![(*source, serde_json::json!({ "label": label, "ticket_id": ticket.id }))],
+                                extraction_version: memory::EXTRACTION_VERSION,
+                            })?;
+                            notices.push(n);
+                        }
+                    }
+                }
                 for (scope, event) in last_event {
                     schedule_consolidation(tx, &scope, event, false)?;
                 }
@@ -534,8 +597,7 @@ impl CommandService {
     pub fn employee_memory(&self, run: aurelius_domain::RunId, op: aurelius_domain::memory::EmployeeMemoryOp) -> Result<(bool, String, Vec<EventNotice>), AppError> {
         use aurelius_domain::memory::EmployeeMemoryOp as Op;
         let owner = self.store.read(|c| crate::task::task_runs::run_owner(c, run)).map_err(storage_error)?;
-        // An employee has its own memory, its department's and (in a task) its
-        // project's; the assistant of a project conversation reads and writes the
+        // An employee has its own memory and (in a task) its project's; the assistant of a project conversation reads and writes the
         // project's (never an employee's private one).
         let (employee, project): (Option<EmployeeId>, Option<aurelius_domain::ProjectId>) = match owner {
             Some(o) if o.employee.is_some() || o.project.is_some() => (o.employee, o.project),
@@ -603,15 +665,11 @@ impl CommandService {
                                 "employee" => own,
                                 "project" => match scopes.project.clone() {
                                     Some(project) => project,
-                                    None => return Ok((false, "You are not in a project here; remember with scope employee or department.".to_string(), vec![])),
+                                    None => return Ok((false, "You are not in a project here; remember with scope employee.".to_string(), vec![])),
                                 },
-                                "department" => match scopes.department.clone() {
-                                    Some(department) => department,
-                                    None => return Ok((false, "You are not in a department; remember with scope employee or project.".to_string(), vec![])),
-                                },
-                                // Decisions and knowledge help colleagues too (the project's, else the
-                                // department's); episodes are one's own.
-                                _ if kind != MemoryKind::Episodic => scopes.project.clone().or(scopes.department.clone()).unwrap_or(own),
+                                // Decisions and knowledge help colleagues too (the project's);
+                                // episodes are one's own.
+                                _ if kind != MemoryKind::Episodic => scopes.project.clone().unwrap_or(own),
                                 _ => own,
                             }
                         } else {
@@ -734,23 +792,10 @@ impl CommandService {
         let employee = self
             .store
             .read(|c| {
-                use rusqlite::OptionalExtension;
-                // An employee's own scope; a department's: its head, else a member; a
-                // project's: who worked there most recently; else the oldest employee.
+                // An employee's own scope; a project's: who worked there most
+                // recently; else the oldest employee.
                 let own: Option<String> = c.query_row("SELECT id FROM employees WHERE scope_id = ?1", [&scope], |r| r.get(0)).optional()?;
                 let any = || -> rusqlite::Result<Option<String>> {
-                    let department: Option<String> = c
-                        .query_row(
-                            "SELECT COALESCE(d.head_id, (SELECT e.id FROM employees e WHERE e.department_id = d.id ORDER BY e.status <> 'active', e.created_at_ms LIMIT 1))
-                             FROM departments d WHERE d.scope_id = ?1",
-                            [&scope],
-                            |r| r.get(0),
-                        )
-                        .optional()?
-                        .flatten();
-                    if department.is_some() {
-                        return Ok(department);
-                    }
                     let worked: Option<String> = c
                         .query_row(
                             "SELECT t.employee_id FROM tasks t JOIN projects p ON p.id = t.project_id WHERE p.scope_id = ?1 AND t.employee_id IS NOT NULL
@@ -911,14 +956,34 @@ pub(crate) fn schedule_consolidation(tx: &Tx<'_>, scope_id: &str, source: EventI
     Ok(true)
 }
 
+/// The ticket to summarize: in Done and without a summary in `project_scope` yet.
+fn ticket_to_summarize(conn: &rusqlite::Connection, ticket: TicketId, project_scope: &str) -> Result<Option<TicketRef>, StorageError> {
+    let row: Option<(u32, String)> = conn
+        .query_row(
+            "SELECT k.number, k.title FROM tickets k JOIN board_columns c ON c.id = k.column_id
+             WHERE k.id = ?1 AND c.kind = 'done' AND k.done_at_ms IS NOT NULL
+             AND NOT EXISTS(SELECT 1 FROM memory_items m WHERE m.scope_id = ?2 AND json_extract(m.locator_json, '$.ticket_id') = ?1)",
+            [ticket.to_string(), project_scope.to_owned()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(row.map(|(number, title)| TicketRef { id: ticket, number, title }))
+}
+
 /// Schedule extraction after a task succeeded or failed (called inside the task
 /// transaction). A task retried after it failed is extracted again when it ends:
 /// a lesson never confirms itself (`LessonLocator::tasks`), doubles are dropped.
-pub(crate) fn schedule_extraction(tx: &Tx<'_>, task: TaskId, source: EventId) -> Result<(), StorageError> {
+/// With `ticket` (the main task of a ticket that went to Done) the same
+/// extraction also writes the ticket's summary (MU1-18).
+pub(crate) fn schedule_extraction(tx: &Tx<'_>, task: TaskId, ticket: Option<TicketId>, source: EventId) -> Result<(), StorageError> {
     let first = format!("extract-{task}");
     let taken: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM jobs WHERE id = ?1)", [&first], |r| r.get(0))?;
     let (id, dedupe) = if taken { (format!("extract-{task}-{source}"), format!("memory-extract:{task}:{source}")) } else { (first, format!("memory-extract:{task}")) };
-    aurelius_storage::events::insert_job(tx, &id, EXTRACT_JOB_KIND, source, &dedupe, &serde_json::json!({ "task_id": task }))
+    let payload = match ticket {
+        Some(ticket) => serde_json::json!({ "task_id": task, "ticket_id": ticket }),
+        None => serde_json::json!({ "task_id": task }),
+    };
+    aurelius_storage::events::insert_job(tx, &id, EXTRACT_JOB_KIND, source, &dedupe, &payload)
 }
 
 /// Schedule a summary when enough uncovered messages accumulated in an employee conversation.

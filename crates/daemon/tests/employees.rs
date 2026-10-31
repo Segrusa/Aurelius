@@ -25,7 +25,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 
 /// Employees are company-wide; the project only says where the test works.
 fn new_employee(_project_id: ProjectId, name: &str, role: &str) -> CreateEmployee {
-    CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, department_id: None, instructions: Some("Wees kort.".into()), folder: None }
+    CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: Some("Wees kort.".into()), folder: None }
 }
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str) -> EmployeeId {
@@ -63,7 +63,7 @@ async fn zero_one_and_many_free_form_employees() {
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let atlas = project(&client, "Atlas").await;
-    assert!(client.employees(None).await.unwrap().employees.is_empty(), "a new project has no employees");
+    assert!(client.employees().await.unwrap().employees.is_empty(), "a new project has no employees");
 
     employee(&client, atlas, "Alex", "Productpartner").await;
     employee(&client, atlas, "Maya", "Iets heel eigens").await;
@@ -71,7 +71,7 @@ async fn zero_one_and_many_free_form_employees() {
     employee(&client, other, "Theo", "Onderzoek").await;
 
     // One company: everyone, oldest first, whatever project they will work in.
-    let employees = client.employees(None).await.unwrap().employees;
+    let employees = client.employees().await.unwrap().employees;
     let roles: Vec<_> = employees.iter().map(|m| m.role.as_str()).collect();
     assert_eq!(roles, ["Productpartner", "Iets heel eigens", "Onderzoek"]);
     assert_eq!(employees[0].instructions.as_deref(), Some("Wees kort."));
@@ -97,7 +97,7 @@ async fn paused_employee_starts_no_run_and_config_applies_to_new_runs() {
     assert!(err.to_string().contains("paused"));
 
     client.execute(envelope(status(alex, LifecycleStatus::Active), None)).await.unwrap();
-    let version = client.employees(None).await.unwrap().employees[0].version;
+    let version = client.employees().await.unwrap().employees[0].version;
     let update = Command::UpdateEmployee(UpdateEmployee { employee_id: alex, name: "Alexandra".into(), role: "Strateeg".into(), title: None, instructions: None, sequential_tasks: None });
     client.execute(envelope(update, Some(version))).await.unwrap();
 
@@ -150,7 +150,7 @@ async fn archive_keeps_history_and_blocks_changes() {
     let atlas = project(&client, "Atlas").await;
     let alex = employee(&client, atlas, "Alex", "Productpartner").await;
     client.execute(envelope(status(alex, LifecycleStatus::Archived), None)).await.unwrap();
-    assert!(client.employees(None).await.unwrap().employees.is_empty());
+    assert!(client.employees().await.unwrap().employees.is_empty());
     let update = Command::UpdateEmployee(UpdateEmployee { employee_id: alex, name: "X".into(), role: "Y".into(), title: None, instructions: None, sequential_tasks: None });
     let err = client.execute(envelope(update, None)).await.unwrap_err();
     assert!(err.to_string().contains("archived"));
@@ -175,13 +175,13 @@ async fn a_task_conversation_has_its_own_mode_model_and_effort() {
     let atlas = project(&client, "Atlas").await;
     let alex = employee(&client, atlas, "Alex", "Writer").await;
     let task = task_conversation(&client, atlas, alex, "Launch plan").await;
-    let main = client.employees(None).await.unwrap().employees[0].conversation_id;
+    let main = client.employees().await.unwrap().employees[0].conversation_id;
 
     // The task's conversation takes its own mode, model and effort; the employee's main one keeps its own.
     client.execute(envelope(Command::SetAgentMode(SetAgentMode { conversation_id: task, mode: AgentMode::Plan }), None)).await.unwrap();
     let run = Command::SetConversationRun(SetConversationRun { conversation_id: task, model: Some("claude-haiku-4-5".into()), effort: Some("low".into()) });
     client.execute(envelope(run, None)).await.unwrap();
-    let m = client.employees(None).await.unwrap().employees.into_iter().find(|m| m.id == alex).unwrap();
+    let m = client.employees().await.unwrap().employees.into_iter().find(|m| m.id == alex).unwrap();
     assert_eq!(m.agent_mode, AgentMode::Ask, "the main conversation keeps its mode");
     let in_task = client.messages(task).await.unwrap();
     assert_eq!(in_task.agent_mode, AgentMode::Plan);

@@ -42,11 +42,6 @@ event_kinds! {
     SettingsFollowOrgChart => "settings.follow_org_chart",
     // The one-time conversion of 2.x data into the company; `metadata.report` is a `ConversionReport`.
     CompanyConverted => "company.converted",
-    DepartmentCreated => "department.created",
-    DepartmentUpdated => "department.updated",
-    DepartmentArchived => "department.archived",
-    // An employee moved to another department (or out of any); the aggregate is the employee.
-    EmployeeDepartmentSet => "employee.department_set",
     EmployeeCreated => "employee.created",
     EmployeeConfigChanged => "employee.config_changed",
     EmployeePaused => "employee.paused",
@@ -159,6 +154,34 @@ event_kinds! {
     NoteDeleted => "note.deleted",
     // A write of the host (MCP, plugins, load, backups, …): the audit record of the write pipeline.
     HostWrite => "host.write",
+    // The board (protocol 4); the aggregate is the ticket. `metadata.by` is an `Actor`.
+    TicketCreated => "ticket.created",
+    TicketUpdated => "ticket.updated",
+    // `metadata.from` / `metadata.to` (column kinds) and `metadata.by`.
+    TicketMoved => "ticket.moved",
+    TicketStarted => "ticket.started",
+    // An owner was chosen (create with an owner, Start with an employee, Assign;
+    // the only ways): `metadata.employee_id`, `metadata.by`, `metadata.reason`.
+    TicketDispatched => "ticket.dispatched",
+    // The main task handed in a plan (Plan mode); waits for a board member.
+    TicketPlanReview => "ticket.plan_review",
+    // A board member approved the plan (`metadata.decision`) or asked for a new one.
+    TicketPlanApproved => "ticket.plan_approved",
+    TicketPlanRevised => "ticket.plan_revised",
+    // The main task reported; waits for a board member.
+    TicketReview => "ticket.review",
+    TicketAccepted => "ticket.accepted",
+    TicketSentBack => "ticket.sent_back",
+    TicketCancelled => "ticket.cancelled",
+    TicketArchived => "ticket.archived",
+    // Names or order of the columns; the aggregate is the company.
+    BoardColumnsUpdated => "board.columns_updated",
+    // Name or dispatcher of the company.
+    CompanyUpdated => "company.updated",
+    // A new board member: `metadata.created_user_id`, `metadata.username`. As in every
+    // event, `metadata.user_id` is the board member who made it (none in the
+    // onboarding), also as `metadata.by`. Never a password or hash.
+    UserCreated => "user.created",
 }
 
 impl EventKind {

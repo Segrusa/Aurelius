@@ -29,6 +29,8 @@ fn nav_icon(nav: NavItem, color: u32) -> Div {
             v().gap(px(2.)).child(h().gap(px(2.)).child(fill(5., 5., 1.)).child(fill(5., 5., 1.))).child(h().gap(px(2.)).child(fill(5., 5., 1.)).child(fill(5., 5., 1.))),
         ),
         // A speech bubble: a box with two lines of text.
+        // Three columns (D-02).
+        NavItem::Board => boxed.child(h().gap(px(2.)).items_start().child(fill(3., 12., 1.)).child(fill(3., 8., 1.)).child(fill(3., 10., 1.))),
         NavItem::Chat => boxed.child(frame(14., 11., 3.).flex_col().justify_center().items_start().gap(px(2.)).pl(px(2.5)).child(fill(7., 1.5, 1.)).child(fill(5., 1.5, 1.))),
         // A tray: a box with a slot line.
         NavItem::Inbox => boxed.child(frame(14., 10., 2.).items_end().justify_center().pb(px(2.)).child(fill(6., 1.5, 1.))),
@@ -64,6 +66,8 @@ impl AppView {
             _ => None,
         };
         let inbox = self.inbox_count();
+        // The board's "Needs you": Review, Plan review and tickets without an owner (B5).
+        let board = self.board_needs_count();
         let item = |nav: NavItem, cx: &mut Context<Self>| {
             let active = current == nav;
             let icon_color = if active { theme::ACCENT_TEXT } else { theme::MUTED };
@@ -85,6 +89,9 @@ impl AppView {
                 .child(div().w(px(3.)).h(px(14.)).flex_none().rounded(px(2.)).when(active, |el| el.bg(c(theme::ACCENT))))
                 .child(nav_icon(nav, icon_color))
                 .child(div().flex_1().min_w_0().truncate().child(nav.label()))
+                .when(nav == NavItem::Board && board > 0, |el| {
+                    el.child(div().px(px(6.)).rounded(px(8.)).bg(c(theme::ACCENT)).text_color(c(theme::BG)).text_size(px(11.)).font_weight(FontWeight::BOLD).child(board.to_string()))
+                })
                 .when(nav == NavItem::Inbox && inbox > 0, |el| {
                     el.child(div().px(px(6.)).rounded(px(8.)).bg(c(theme::ACCENT)).text_color(c(theme::BG)).text_size(px(11.)).font_weight(FontWeight::BOLD).child(inbox.to_string()))
                 })
@@ -233,13 +240,15 @@ impl AppView {
         let host = self.remote_name().map_or("This computer".to_string(), str::to_owned);
         let (dot, state): (u32, String) = match &self.connection {
             Connection::Connecting => (theme::MUTED, "Connecting…".into()),
-            Connection::Online { .. } => (theme::ACCENT, String::new()),
+            // MU1-21 AC4: who works in this window.
+            Connection::Online { .. } => (theme::ACCENT, self.active_member().map_or_else(String::new, |u| format!("as {}", u.username))),
             Connection::Offline(_) => (theme::NEGATIVE, "Offline · reconnecting".into()),
             Connection::Unpaired(_) => (theme::NEGATIVE, "Not paired".into()),
             Connection::NoServer => (theme::MUTED, "No server chosen".into()),
             Connection::UpdateNeeded(_) => (theme::NEGATIVE, "Update needed".into()),
         };
         let update_needed = matches!(self.connection, Connection::UpdateNeeded(_));
+        let member = self.active_member().is_some();
         h().id("server-picker")
             .role(Role::Button)
             .aria_label("Choose a server")
@@ -254,9 +263,16 @@ impl AppView {
             .cursor_pointer()
             .hover(|s| s.bg(c(theme::SURFACE_2)))
             .tooltip(ui::tip(if update_needed { "Updates" } else { "Servers" }, Some(if update_needed { "secondary-shift-u" } else { "secondary-alt-s" })))
-            .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+            .on_click(cx.listener(move |this, e: &ClickEvent, w, cx| {
                 if update_needed {
                     w.dispatch_action(Box::new(OpenUpdates), cx);
+                } else if member {
+                    // §11.2: Switch board member… next to the choice of server.
+                    let items = vec![
+                        Some(crate::app::MenuEntry { label: "Switch board member…".into(), keys: None, run: crate::app::MenuDo::Call(|v, w, cx| v.members_switch(w, cx)), danger: false, checked: false, detail: None }),
+                        crate::app::entry("Servers…", "secondary-alt-s", || Box::new(OpenServers)),
+                    ];
+                    this.open_menu(e.position(), items, w, cx);
                 } else {
                     this.on_open_servers(&OpenServers, w, cx);
                 }
@@ -279,7 +295,7 @@ mod tests {
     #[test]
     fn team_chat_sits_right_under_dashboard() {
         let rows: Vec<NavItem> = sidebar_items().collect();
-        assert_eq!(rows, [NavItem::Dashboard, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects]);
+        assert_eq!(rows, [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects]);
         assert_eq!(NavItem::Chat.label(), "Team chat");
         assert_eq!(NavItem::of(Page::GroupChat), NavItem::Chat, "the group chat page lights up its row");
     }

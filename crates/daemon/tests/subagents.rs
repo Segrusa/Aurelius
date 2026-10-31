@@ -58,7 +58,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId) {
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }),
+            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -88,7 +88,7 @@ async fn task_conversation(client: &Client, task: TaskId) -> ConversationId {
 }
 
 async fn subagents(client: &Client, project: ProjectId, employee: EmployeeId) -> Vec<AgentView> {
-    let m = client.employees(None).await.unwrap().employees.into_iter().find(|m| m.id == employee).unwrap();
+    let m = client.employees().await.unwrap().employees.into_iter().find(|m| m.id == employee).unwrap();
     m.agents.into_iter().filter(|a| a.kind == "subagent").collect()
 }
 

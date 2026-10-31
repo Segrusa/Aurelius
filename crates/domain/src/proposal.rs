@@ -132,9 +132,6 @@ pub struct ProposalFields {
     /// Who the new employee reports to; the proposer unless said otherwise.
     #[serde(default)]
     pub reports_to: Option<EmployeeId>,
-    /// The department it joins; the proposer's unless said otherwise.
-    #[serde(default)]
-    pub department_id: Option<crate::DepartmentId>,
 }
 
 impl ProposalFields {
@@ -142,7 +139,7 @@ impl ProposalFields {
     pub fn validated(&self) -> Result<ProposalFields, DomainError> {
         let (name, role, instructions) = employee::validate_fields(&self.name, &self.role, Some(&self.instructions))?;
         let instructions = instructions.ok_or_else(|| DomainError::Required { field: "instructions".into() })?;
-        Ok(ProposalFields { name, role, title: employee::validate_title(self.title.as_deref())?, instructions, reports_to: self.reports_to, department_id: self.department_id })
+        Ok(ProposalFields { name, role, title: employee::validate_title(self.title.as_deref())?, instructions, reports_to: self.reports_to })
     }
 }
 
@@ -177,7 +174,7 @@ mod tests {
     use super::*;
 
     fn fields() -> ProposalFields {
-        ProposalFields { name: " Eva ".into(), role: "Designer".into(), title: Some(" UI lead ".into()), instructions: "Design the screens.".into(), reports_to: None, department_id: None }
+        ProposalFields { name: " Eva ".into(), role: "Designer".into(), title: Some(" UI lead ".into()), instructions: "Design the screens.".into(), reports_to: None }
     }
 
     #[test]

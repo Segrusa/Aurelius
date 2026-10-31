@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 pub(super) async fn execute(
     shared: &Arc<Shared>,
-    peer: &Peer,
+    peer: &mut Peer,
     request_id: u64,
     key: Option<CommandId>,
     expected_version: Option<u64>,
@@ -28,8 +28,12 @@ pub(super) async fn execute(
         return Err(ProtocolError::new(ErrorCode::InvalidRequest, "writes need an idempotency_key"));
     };
     let app = peer.app.as_ref().map(|a| aurelius_application::AppActor { key_id: a.key_id, name: a.name.clone() });
-    let ctx = CommandContext { principal_id: shared.principal_id, client_id: peer.client_id, origin: peer.origin, request_id, app };
+    // Never a board member for an app, even if one stuck to the session (S5-1).
+    let user_id = peer.user.filter(|_| app.is_none());
+    let ctx = CommandContext { principal_id: shared.principal_id, client_id: peer.client_id, origin: peer.origin, request_id, app, user_id };
     let receipt = match write {
+        // Before the host pipeline: that one would hash (and keep) the request with the password.
+        WriteMethod::Host(HostWrite::UserCreate(params)) => super::users::create(shared, peer, ctx, key, expected_version, params).await?,
         WriteMethod::Domain(command) => domain(shared, ctx, key, expected_version, command).await?,
         WriteMethod::Host(write) => host_write(shared, ctx, key, expected_version, write).await?,
     };
@@ -94,6 +98,19 @@ async fn stop_runs(shared: &Arc<Shared>, result: &CommandResult, interrupt: bool
                 .unwrap_or_default(),
         );
     }
+    // A ticket put back in Backlog (cancelled): its main task and delegations ended, so do their runs.
+    let ticket_cancelled = matches!(result, CommandResult::TicketChanged { column: aurelius_domain::ticket::ColumnKind::Backlog, .. });
+    if let CommandResult::TicketChanged { ticket_id, column: aurelius_domain::ticket::ColumnKind::Backlog, .. } = result {
+        let (store, ticket) = (shared.store().clone(), *ticket_id);
+        let active = move |c: &rusqlite::Connection| -> Result<Vec<aurelius_domain::RunId>, aurelius_storage::StorageError> {
+            let mut runs = Vec::new();
+            for task in aurelius_storage::tickets::tasks_of_ticket(c, ticket)? {
+                runs.extend(aurelius_storage::tasks::active_runs(c, task)?);
+            }
+            Ok(runs)
+        };
+        runs.extend(tokio::task::spawn_blocking(move || store.read(active)).await.ok().and_then(Result::ok).unwrap_or_default());
+    }
     for run in runs {
         if let Some(canceller) = shared.cancellers.lock().ok().and_then(|m| m.get(&run).cloned()) {
             canceller.cancel();
@@ -116,6 +133,7 @@ async fn stop_runs(shared: &Arc<Shared>, result: &CommandResult, interrupt: bool
     }
     // A run stopped while it waited for a usage limit never resumes: its kept session goes.
     let stopped = conversation.is_some()
+        || ticket_cancelled
         || matches!(result, CommandResult::StopRequested { already_finished: false, .. } | CommandResult::TaskCancelled { .. } | CommandResult::ConversationDeleted { .. });
     if stopped {
         crate::sessions::sweep(shared);

@@ -17,8 +17,8 @@ import 'support/builders.dart';
 
 class MockCompanyBloc extends MockBloc<CompanyEvent, CompanyState> implements CompanyBloc {}
 
-EmployeeSummary employee(String id, String name, {bool working = false, String? reportsTo, String? departmentId}) =>
-    employeeOf(id: id, name: name, role: 'Lead', conversationId: 'c-$id', working: working, reportsTo: reportsTo, departmentId: departmentId);
+EmployeeSummary employee(String id, String name, {bool working = false, String? reportsTo}) =>
+    employeeOf(id: id, name: name, role: 'Lead', conversationId: 'c-$id', working: working, reportsTo: reportsTo);
 
 TaskView task(String id, String employeeId, TaskStatus status, {String projectId = 'p'}) =>
     taskOf(id: id, projectId: projectId, employeeId: employeeId, title: 'Task $id', goal: '', status: status);
@@ -29,7 +29,6 @@ Future<MockCompanyBloc> show(WidgetTester tester, CompanyState state, Widget pag
   final router = GoRouter(routes: [
     GoRoute(path: '/', builder: (_, _) => BlocProvider<CompanyBloc>.value(value: bloc, child: page)),
     GoRoute(path: '/employee/:eid', builder: (_, s) => Scaffold(body: Text('employee ${s.pathParameters['eid']}'))),
-    GoRoute(path: '/department/:did', builder: (_, s) => Scaffold(body: Text('department ${s.pathParameters['did']}'))),
     GoRoute(path: '/project/:pid', builder: (_, s) => Scaffold(body: Text('project ${s.pathParameters['pid']}'))),
     GoRoute(path: '/project/:pid/task/:tid', builder: (_, s) => Scaffold(body: Text('task ${s.pathParameters['tid']}'))),
   ]);
@@ -168,25 +167,24 @@ void main() {
     final state = CompanyState(
       loading: false,
       projects: [project],
-      departments: [departmentOf(id: 'd1', name: 'Engineering', headId: 'b', memberCount: 2, openTasks: 1), departmentOf(id: 'd2', name: 'Design', memberCount: 0)],
       employees: [
         employee('ceo', 'Ada'),
-        employee('b', 'Bo', reportsTo: 'ceo', departmentId: 'd1'),
-        employee('c', 'Cy', reportsTo: 'b', departmentId: 'd1'),
+        employee('b', 'Bo', reportsTo: 'ceo'),
+        employee('c', 'Cy', reportsTo: 'b'),
         employee('e', 'Eve', reportsTo: 'ceo'),
       ],
-      proposals: [proposalOf('pr1', name: 'Sam', departmentId: 'd2')],
+      proposals: [proposalOf('pr1', name: 'Sam', reportsTo: 'ceo', reportsToName: 'Ada')],
     );
 
-    testWidgets('Employees: proposals, then the management team, then each department and the rest', (tester) async {
+    testWidgets('Employees: proposals, then the management team, then the others', (tester) async {
       tester.view.physicalSize = const Size(1200, 2400);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await show(tester, state, const CompanyOrgPage());
       expect(find.byKey(const ValueKey('proposal-pr1')), findsOneWidget);
-      expect(find.textContaining('in Design'), findsOneWidget);
-      final headers = ['Management team', 'Engineering', 'No department'].map((t) => tester.getTopLeft(find.textContaining(t)).dy).toList();
-      expect(headers, orderedEquals([...headers]..sort()), reason: 'management team first, no department last');
+      expect(find.textContaining('reports to Ada'), findsOneWidget);
+      final headers = ['Proposals', 'Management team', 'Employees'].map((t) => tester.getTopLeft(find.textContaining(RegExp('^$t  \\d'))).dy).toList();
+      expect(headers, orderedEquals([...headers]..sort()), reason: 'proposals, then the management team, then the others');
       expect(find.byKey(const ValueKey('employee-e')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('employee-c')));
       await tester.pumpAndSettle();
@@ -205,13 +203,15 @@ void main() {
       expect(y('ceo') < y('b') && y('b') < y('c') && y('c') < y('e'), isTrue, reason: 'reports follow their boss, by name');
     });
 
-    testWidgets('Departments: head, members and open tasks, and open on tap', (tester) async {
-      await show(tester, state, const CompanyOrgPage(initial: 'departments'));
-      expect(find.text('Head: Bo · 2 members · 1 open task'), findsOneWidget);
-      expect(find.text('0 members'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('department-d1')));
-      await tester.pumpAndSettle();
-      expect(find.text('department d1'), findsOneWidget);
+    testWidgets('only Employees and Org chart; an unknown view opens Employees', (tester) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await show(tester, state, const CompanyOrgPage(initial: 'board'));
+      expect(find.byType(PillSegments<CompanyOrgView>), findsOneWidget);
+      expect(tester.widget<PillSegments<CompanyOrgView>>(find.byType(PillSegments<CompanyOrgView>)).segments.map((s) => s.$2), ['Employees', 'Org chart']);
+      expect(find.byKey(const ValueKey('employee-e')), findsOneWidget);
+      expect(find.byKey(const ValueKey('org-chart')), findsNothing);
     });
   });
 }

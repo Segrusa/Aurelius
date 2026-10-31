@@ -27,7 +27,7 @@ async fn ideas_are_noted_started_as_tasks_or_dropped() {
         panic!()
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result
@@ -117,7 +117,7 @@ async fn ideas_keep_files_that_go_with_them_into_the_task() {
     let folder = std::path::PathBuf::from(client.projects().await.unwrap().projects.into_iter().find(|p| p.id == project_id).unwrap().folder.expect("folder"));
     let uploads = folder.join(".aurelius").join("uploads");
     let CommandResult::EmployeeCreated { employee_id, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result

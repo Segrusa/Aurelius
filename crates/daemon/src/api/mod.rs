@@ -21,6 +21,7 @@ mod management;
 mod reads;
 mod sql;
 mod subscription;
+mod users;
 mod writes;
 
 pub(crate) use bridge::serve as serve_bridge;
@@ -52,6 +53,8 @@ pub struct Peer {
     pub remote: Option<RemotePeer>,
     /// An outside app: its scopes decide, not the device rights.
     pub app: Option<AppPeer>,
+    /// The active board member of this connection (never for an app).
+    pub user: Option<aurelius_domain::UserId>,
 }
 
 /// The app key a session acts for; its scopes as of the last request.
@@ -78,16 +81,16 @@ pub struct RemotePeer {
 
 impl Peer {
     pub fn local() -> Self {
-        Self { client_id: ClientId::new(), origin: Origin::LocalIpc, remote: None, app: None }
+        Self { client_id: ClientId::new(), origin: Origin::LocalIpc, remote: None, app: None, user: None }
     }
 
     pub fn remote(client_id: ClientId, capabilities: Vec<Capability>, inbox: PathBuf) -> Self {
-        Self { client_id, origin: Origin::Remote, remote: Some(RemotePeer { capabilities, inbox }), app: None }
+        Self { client_id, origin: Origin::Remote, remote: Some(RemotePeer { capabilities, inbox }), app: None, user: None }
     }
 
     /// An app that came in over the gateway with its key (WebSocket or `/v1/mcp`).
     pub fn remote_app(key: &aurelius_storage::app_keys::AppKeyRow) -> Self {
-        Self { client_id: ClientId::new(), origin: Origin::Remote, remote: None, app: Some(AppPeer::of(key)) }
+        Self { client_id: ClientId::new(), origin: Origin::Remote, remote: None, app: Some(AppPeer::of(key)), user: None }
     }
 
     fn is_owner(&self) -> bool {
@@ -132,6 +135,7 @@ impl Peer {
                 Command::UpdateTaskSchedule(schedule) => schedule.add_files.iter().collect(),
                 Command::AddIdea(idea) => idea.files.iter().collect(),
                 Command::UpdateIdea(idea) => idea.add_files.iter().collect(),
+                Command::CreateTicket(ticket) => ticket.files.iter().collect(),
                 _ => Vec::new(),
             };
             if !files.iter().all(|path| inside(path)) {
@@ -258,6 +262,9 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
     let mut terminals: HashMap<String, aurelius_host::terminal::Attachment> = HashMap::new();
     // The hello said this client merges tool-use changes in live updates.
     let mut activity_changes = false;
+    // The tries of `user.use` on this connection, and its new board members (S5-3).
+    let mut attempts = users::Attempts::default();
+    let mut creates = users::Attempts::default();
     while let Some(request) = requests.recv().await {
         let request_id = request.request_id;
         if let Err(err) = gate(&shared, &mut peer, &request).await {
@@ -268,14 +275,20 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
         }
 
         let outcome = match request.call {
-            Call::Write(write) => writes::execute(&shared, &peer, request_id, request.idempotency_key, request.expected_version, write).await,
+            Call::Write(write) => match users::count_create(&mut creates, &write) {
+                Ok(()) => writes::execute(&shared, &mut peer, request_id, request.idempotency_key, request.expected_version, write).await,
+                Err(err) => Err(err),
+            },
             Call::Read(Method::SessionHello(params)) => {
                 activity_changes = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::ACTIVITY_CHANGES);
+                let remembered = params.user_id;
                 match authenticate(&shared, &mut peer, params.app_key).await {
-                    Ok(()) => Ok(ResponseBody::Hello(hello(&shared, &peer))),
+                    Ok(()) => users::remembered(&shared, &mut peer, remembered).await.map(|who| ResponseBody::Hello(hello(&shared, &peer, who))),
                     Err(err) => Err(err),
                 }
             }
+            Call::Read(Method::UserUse(params)) => users::use_user(&shared, &mut peer, &mut attempts, params).await.map(ResponseBody::WhoAmI),
+            Call::Read(Method::UserWhoami) => users::whoami(&shared, peer.user).await.map(ResponseBody::WhoAmI),
             Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, activity_changes, out_tx.clone()).await {
                 Ok((body, task)) => {
                     if let Some(old) = forwarder.replace(task) {
@@ -338,6 +351,7 @@ async fn respond(out_tx: &mpsc::Sender<ServerMessage>, request_id: u64, outcome:
 
 /// A hello with an app key: from now on this session acts for that app. A
 /// session that already acts for an app keeps it (a hello never widens it).
+/// An app has no board member, so one named before on this session is dropped.
 async fn authenticate(shared: &Arc<Shared>, peer: &mut Peer, key: Option<String>) -> Result<(), ProtocolError> {
     let Some(secret) = key else { return Ok(()) };
     let s = shared.clone();
@@ -346,6 +360,7 @@ async fn authenticate(shared: &Arc<Shared>, peer: &mut Peer, key: Option<String>
         Some(app) if app.key_id != key.id => Err(ProtocolError::new(ErrorCode::Forbidden, "This session already acts for another app.")),
         _ => {
             peer.app = Some(AppPeer::of(&key));
+            peer.user = None;
             Ok(())
         }
     }
@@ -399,7 +414,7 @@ async fn gate(shared: &Arc<Shared>, peer: &mut Peer, request: &Request) -> Resul
     Ok(())
 }
 
-fn hello(shared: &Arc<Shared>, peer: &Peer) -> HelloResult {
+fn hello(shared: &Arc<Shared>, peer: &Peer, who: aurelius_domain::user::WhoAmI) -> HelloResult {
     HelloResult {
         host_id: shared.host_id,
         daemon_version: VERSION.into(),
@@ -417,6 +432,8 @@ fn hello(shared: &Arc<Shared>, peer: &Peer) -> HelloResult {
         },
         features: aurelius_protocol::FEATURES.iter().map(|f| (*f).to_owned()).collect(),
         app: peer.app.as_ref().map(|a| aurelius_domain::app_key::AppSession { key_id: a.key_id, name: a.name.clone(), scopes: a.scopes.clone(), audience: a.audience }),
+        board_members_exist: who.board_members_exist,
+        user: who.user,
     }
 }
 
@@ -439,6 +456,11 @@ async fn remote_run_defaults_denied(shared: &Arc<Shared>, call: &Call) -> Option
         return Some(ProtocolError::new(ErrorCode::Forbidden, "Choose the connection in Aurelius on the PC; the phone changes only model and effort."));
     }
     None
+}
+
+/// Work to do once when the daemon starts, before the first connection needs it.
+pub fn warm_up() {
+    users::warm_up();
 }
 
 pub(crate) fn internal(err: impl ToString) -> ProtocolError {

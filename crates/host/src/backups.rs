@@ -148,7 +148,7 @@ fn export_blocking(store: &aurelius_storage::Store, project_id: ProjectId, fallb
             let project = queries::list_projects(c, &read)?.into_iter().find(|p| p.id == project_id);
             let tasks = aurelius_storage::tasks::list_tasks(c, Some(project_id), &read)?;
             // Employees are company-wide: the project's export names who worked in it.
-            let employees: Vec<_> = aurelius_storage::employees::list_employees(c, None, &read)?
+            let employees: Vec<_> = aurelius_storage::employees::list_employees(c, &read)?
                 .into_iter()
                 .filter(|m| tasks.iter().any(|t| t.employee_id == Some(m.id)))
                 .collect();
@@ -242,4 +242,88 @@ fn civil(days: i64) -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aurelius_storage::Store;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct Fake {
+        store: Arc<Store>,
+        root: PathBuf,
+        power: crate::power::Power,
+        terminals: crate::terminal::Terminals,
+        shutdown: tokio::sync::watch::Sender<bool>,
+        restarted: AtomicBool,
+    }
+
+    impl Service for Fake {
+        fn store(&self) -> &Arc<Store> {
+            &self.store
+        }
+        fn root(&self) -> &Path {
+            &self.root
+        }
+        fn version(&self) -> &'static str {
+            "0.11.0"
+        }
+        fn shutdown_signal(&self) -> tokio::sync::watch::Receiver<bool> {
+            self.shutdown.subscribe()
+        }
+        fn power(&self) -> &crate::power::Power {
+            &self.power
+        }
+        fn terminals(&self) -> &crate::terminal::Terminals {
+            &self.terminals
+        }
+        fn resume_work(&self) {}
+        fn stop_for_restart(&self) {
+            self.restarted.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn files(dir: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut out: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| !e.file_name().to_string_lossy().ends_with("-shm"))
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), std::fs::read(e.path()).unwrap_or_default()))
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_backup_from_before_v011_is_refused_without_a_restart() {
+        // A schema 17 backup (protocol 3), next to a v0.11 workspace.
+        let old = tempfile::tempdir().unwrap();
+        drop(Store::open_until(old.path(), 17).unwrap());
+        let made = backup::before_migration(old.path(), "0.10.0", environment()).unwrap().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        let store = Arc::new(Store::open(&root).unwrap());
+        let id = made.file_name().unwrap().to_string_lossy().into_owned();
+        std::fs::create_dir_all(backup::backups_dir(&root)).unwrap();
+        std::fs::rename(&made, backup::backups_dir(&root).join(&id)).unwrap();
+        let shared = Arc::new(Fake {
+            store,
+            root: root.clone(),
+            power: Default::default(),
+            terminals: Default::default(),
+            shutdown: tokio::sync::watch::channel(false).0,
+            restarted: AtomicBool::new(false),
+        });
+        let before = files(&root.join("data"));
+
+        let snap = restore(&shared, &id).await;
+
+        let error = snap.error.expect("the client sees why");
+        assert!(error.contains("This backup is from before v0.11") && error.contains("previous build"), "{error}");
+        assert_eq!(snap.restore_pending, None);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!shared.restarted.load(Ordering::SeqCst), "no restart");
+        assert_eq!(files(&root.join("data")), before, "data/ is unchanged");
+    }
 }

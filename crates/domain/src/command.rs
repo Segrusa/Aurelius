@@ -92,12 +92,17 @@ pub enum CommandResult {
     QueuedMessageSentNow { conversation_id: ConversationId, message_id: MessageId, run_id: RunId },
     EmployeeReportsToSet { employee_id: EmployeeId, reports_to: Option<EmployeeId> },
     FollowOrgChartSet { follow: bool },
-    EmployeeDepartmentSet { employee_id: EmployeeId, department_id: Option<crate::DepartmentId> },
-    DepartmentCreated { department_id: crate::DepartmentId },
-    DepartmentUpdated { department_id: crate::DepartmentId, version: u64 },
-    DepartmentArchived { department_id: crate::DepartmentId },
     /// `employee_id` is the employee that was created when the proposal was approved.
     ProposalDecided { proposal_id: crate::ProposalId, status: crate::proposal::ProposalStatus, employee_id: Option<EmployeeId> },
     /// An earlier version of an employee's instructions was put back as `version` (the new current one).
     EmployeeInstructionsRestored { employee_id: EmployeeId, version: u32 },
+    TicketCreated { ticket_id: crate::TicketId, number: u32 },
+    /// The answer to every other ticket write: where the ticket is now.
+    TicketChanged { ticket_id: crate::TicketId, column: crate::ticket::ColumnKind, version: u64 },
+    /// The board's new version (`ticket::board_version`).
+    BoardColumnsUpdated { version: u64 },
+    CompanyUpdated { version: u64 },
+    ProjectUpdated { project_id: ProjectId, version: u64 },
+    /// A new board member (`user.create`).
+    UserCreated { user_id: crate::UserId },
 }

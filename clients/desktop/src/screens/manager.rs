@@ -147,6 +147,9 @@ impl AppView {
     /// The right panel: a task (or conversation) opened from a page, with its conversation
     /// and composer; ↗ opens it on its employee's page, × closes it (Esc too).
     pub fn render_panel(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if let Panel::Ticket(id) = self.panel {
+            return self.render_ticket_panel(id, cx);
+        }
         let task = self.panel_task().cloned();
         let manager = self.panel_manager().cloned();
         let conversation = self.current_manager_thread();
@@ -154,7 +157,11 @@ impl AppView {
         let project = task.as_ref().map(|t| self.project_name(ProjectRef::Real(t.project_id)).to_string()).unwrap_or_default();
         let who = manager.as_ref().map_or_else(|| "Nobody yet".to_string(), |m| m.name.clone());
         let author: SharedString = manager.as_ref().map_or_else(|| "Aurelius".to_string(), |m| m.name.clone()).into();
+        // A task opened from a ticket goes back to it (MU1-08 AC4).
+        let back = self.board.back_to.and_then(|t| self.board.ticket(t).map(|x| (t, x.number))).filter(|_| matches!(self.panel, Panel::Task(_)));
         let header = h().h(px(56.)).flex_none().px(px(16.)).gap(px(10.)).border_b_1().border_color(c(theme::BORDER))
+            .children(back.map(|(ticket, number)| ui::button("panel-back-ticket", format!("‹ #{number}"), ui::ButtonKind::Outline, None).h(px(26.)).px(px(8.))
+                .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket(ticket, w, cx)))))
             .children(manager.as_ref().map(|m| ui::monogram(&m.name, 28., cx)))
             .child(
                 v().flex_1().min_w_0()

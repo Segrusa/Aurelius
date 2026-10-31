@@ -18,7 +18,7 @@ use aurelius_storage::{Store, employees, tasks as store};
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 fn ctx() -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
 }
 
 fn setup() -> (tempfile::TempDir, CommandService) {
@@ -51,7 +51,6 @@ fn try_hire(s: &CommandService, _project: ProjectId, name: &str, title: Option<&
         reports_to: boss,
         instructions: Some(format!("Focus of {name}.")),
         folder: None,
-        department_id: None,
     };
     match run(s, Command::CreateEmployee(create))?.receipt.result {
         CommandResult::EmployeeCreated { employee_id, conversation_id } => Ok((employee_id, conversation_id)),
@@ -107,7 +106,7 @@ fn start_task(s: &CommandService, task: TaskId, employee: EmployeeId) -> RunId {
     s.store()
         .write(move |tx| {
             let (conversation, brief, _) = crate::task::task_threads::open_returning(tx, &st, task, employee, "brief")?;
-            crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?;
+            let _ = crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?;
             Ok(crate::run::queue::queue_run(tx, &serde_json::json!({}), &task.to_string(), conversation.unwrap(), brief.unwrap())?.0)
         })
         .unwrap()
@@ -247,9 +246,9 @@ fn archiving_moves_reports_up_and_withdraws_proposals() {
     assert_eq!(moved, 2, "one event per moved report");
     assert_eq!(boss_of(&s, t.dean.0), Some(t.jean.0));
     assert_eq!(boss_of(&s, t.max.0), Some(t.jean.0));
-    assert_eq!(s.proposals(None).unwrap().proposals[0].status, ProposalStatus::Withdrawn);
+    assert_eq!(s.proposals().unwrap().proposals[0].status, ProposalStatus::Withdrawn);
     let chart = s.store().read(employees::org_entries).unwrap();
-    assert!(chart.iter().all(|(m, _, _)| *m != t.simon.0), "archived employees leave the chart");
+    assert!(chart.iter().all(|(m, _)| *m != t.simon.0), "archived employees leave the chart");
 }
 
 #[test]
@@ -470,7 +469,6 @@ fn propose(s: &CommandService, run: RunId, name: &str, boss: Option<&str>) -> (b
         instructions: "Design the screens.".into(),
         reports_to: boss.map(Into::into),
         reason: "We need design.".into(),
-        department: None,
     };
     let (ok, text, _) = s.employee_action(run, action).unwrap();
     (ok, text)
@@ -478,7 +476,7 @@ fn propose(s: &CommandService, run: RunId, name: &str, boss: Option<&str>) -> (b
 
 /// Proposals are company-wide.
 fn proposals(s: &CommandService, _project: ProjectId) -> Vec<ProposalView> {
-    s.proposals(None).unwrap().proposals
+    s.proposals().unwrap().proposals
 }
 
 fn decide(s: &CommandService, proposal: &ProposalView, approve: bool, edits: Option<ProposalFields>, note: Option<&str>) -> Result<Committed, AppError> {
@@ -542,7 +540,7 @@ fn the_user_can_adjust_a_proposal_while_approving_it() {
     let (_d, s) = setup();
     let t = team(&s);
     assert!(propose(&s, chat_run(&s, t.simon.1), "Eva", None).0);
-    let edits = ProposalFields { name: "Eve".into(), role: "Lead designer".into(), title: Some("Head of design".into()), instructions: "New text".into(), reports_to: Some(t.jean.0), department_id: None };
+    let edits = ProposalFields { name: "Eve".into(), role: "Lead designer".into(), title: Some("Head of design".into()), instructions: "New text".into(), reports_to: Some(t.jean.0) };
     decide(&s, &proposals(&s, t.project)[0], true, Some(edits), None).unwrap();
     let (_, title, boss) = employee_row(&s, "Eve").expect("the edited employee exists");
     assert_eq!((title, boss), (Some("Head of design".to_string()), Some(t.jean.0.to_string())));

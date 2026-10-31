@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -96,13 +97,17 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
   late final AureliusConnection _connection;
   late final AureliusRepository _repository;
   late final AppRouter _router;
+  late final ValueNotifier<BoardMemberStep> _boardMember;
+  late final StreamSubscription<LinkState> _link;
 
   @override
   void initState() {
     super.initState();
     _connection = AureliusConnection(host: widget.host, store: context.read<HostStore>(), api: context.read<GatewayApi>())..start();
     _repository = AureliusRepository(_connection);
-    _router = AppRouter(widget.host);
+    _boardMember = ValueNotifier(_connection.state.boardMemberStep);
+    _link = _connection.states.listen((s) => _boardMember.value = s.boardMemberStep);
+    _router = AppRouter(widget.host, boardMember: _boardMember);
     context.read<PushService>().attach(_repository, _router);
     WidgetsBinding.instance.addObserver(this);
   }
@@ -117,7 +122,9 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     context.read<PushService>().detach(_repository);
+    _link.cancel();
     _router.dispose();
+    _boardMember.dispose();
     _connection.dispose();
     super.dispose();
   }

@@ -8,8 +8,6 @@ import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/chat/answer_body.dart';
-import 'package:aurelius_mobile/features/chat/chat_bloc.dart';
-import 'package:aurelius_mobile/features/chat/chat_view.dart';
 import 'package:aurelius_mobile/features/chat/git_chip.dart';
 import 'package:aurelius_mobile/features/chat/subagent_chip.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
@@ -40,7 +38,7 @@ class MockInboxBloc extends MockBloc<InboxEvent, InboxState> implements InboxBlo
 const online = LinkState(status: LinkStatus.online, capabilities: ['chat']);
 
 EmployeeSummary iris({List<ConversationSummary> conversations = const [], List<AgentView> agents = const [], String? title, String? reportsTo}) =>
-    employeeOf(id: 'mgr', departmentId: 'd', name: 'Iris', role: 'Marketing', title: title, reportsTo: reportsTo, conversationId: 'own', conversations: conversations, agents: agents);
+    employeeOf(id: 'mgr', name: 'Iris', role: 'Marketing', title: title, reportsTo: reportsTo, conversationId: 'own', conversations: conversations, agents: agents);
 
 AgentView subagent(String name, String conversationId, int sinceMs, {String detail = '', String? prompt, String? doing, int steps = 0}) =>
     AgentView(kind: 'subagent', name: name, detail: detail, conversationId: conversationId, sinceMs: sinceMs, prompt: prompt, doing: doing, steps: steps);
@@ -198,7 +196,6 @@ void main() {
         initialState: CompanyState(
           loading: false,
           projects: [projectOf(id: 'p', name: 'Atlas')],
-          departments: [departmentOf(id: 'd', name: 'Marketing dept')],
           employees: [employee, ...team],
           tasks: tasks,
         ),
@@ -259,10 +256,10 @@ void main() {
       expect(find.byKey(const ValueKey('employee-give-work')), findsOneWidget);
       expect(find.text('Not Iris'), findsNothing);
       expect(tester.getTopLeft(find.text('Open task')).dy, lessThan(tester.getTopLeft(find.text('Old task')).dy));
-      expect(find.text('Head of marketing · Marketing · Marketing dept'), findsOneWidget, reason: 'title, role and department in the header');
+      expect(find.text('Head of marketing · Marketing'), findsOneWidget, reason: 'title and role in the header');
       expect(find.text('Working in'), findsOneWidget);
       expect(find.text('Atlas'), findsOneWidget, reason: 'the project of its open task');
-      for (final key in ['employee-model', 'employee-advanced', 'employee-edit', 'employee-department', 'employee-boss']) {
+      for (final key in ['employee-model', 'employee-advanced', 'employee-edit', 'employee-boss']) {
         expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
       }
       expect(find.byIcon(Icons.call_outlined), findsNothing, reason: 'the Call button is gone');
@@ -293,7 +290,7 @@ void main() {
       });
 
       testWidgets('the browser is allowed on its own chat', (tester) async {
-        await open(tester, employeeOf(id: 'mgr', name: 'Iris', conversationId: 'own', departmentId: 'd'));
+        await open(tester, employeeOf(id: 'mgr', name: 'Iris', conversationId: 'own'));
         await tester.tap(find.byKey(const ValueKey('employee-browser')));
         await tester.pump();
         final command = sent().single;
@@ -314,7 +311,7 @@ void main() {
       });
 
       testWidgets('turning the screen off asks nothing', (tester) async {
-        await open(tester, employeeOf(id: 'mgr', name: 'Iris', conversationId: 'own', departmentId: 'd', screenAllowed: true));
+        await open(tester, employeeOf(id: 'mgr', name: 'Iris', conversationId: 'own', screenAllowed: true));
         await tester.tap(find.byKey(const ValueKey('employee-screen')));
         await tester.pumpAndSettle();
         expect(find.text('Let Iris see your screen?'), findsNothing);
@@ -322,11 +319,10 @@ void main() {
       });
     });
 
-    testWidgets('the page tells the department, who the employee reports to and who reports to it', (tester) async {
+    testWidgets('the page tells who the employee reports to and who reports to it', (tester) async {
       final boss = employeeOf(id: 'boss', name: 'Jean');
       final report = employeeOf(id: 'rep', name: 'Dean', reportsTo: 'mgr');
       await pump(tester, iris(reportsTo: 'boss'), team: [boss, report]);
-      expect(find.descendant(of: find.byKey(const ValueKey('employee-department')), matching: find.text('Marketing dept')), findsOneWidget);
       expect(find.descendant(of: find.byKey(const ValueKey('employee-boss')), matching: find.text('Jean')), findsOneWidget);
       expect(find.text('Team'), findsOneWidget);
       expect(find.text('Dean'), findsOneWidget);

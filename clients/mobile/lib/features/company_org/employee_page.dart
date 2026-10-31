@@ -23,7 +23,7 @@ import '../plugins/employee_plugins_sheet.dart';
 import '../project/tasks_tab.dart';
 import 'employee_widgets.dart';
 
-/// An employee: give it work, where it sits (department, boss, team), where it
+/// An employee: give it work, where it sits (boss, team), where it
 /// works now, its model, plugins and status, and its tasks across projects.
 class EmployeePage extends StatelessWidget {
   const EmployeePage({super.key, required this.employeeId});
@@ -46,7 +46,6 @@ class EmployeePage extends StatelessWidget {
             body: company.loading ? const Center(child: CircularProgressIndicator()) : const EmptyState('This employee no longer exists'),
           );
         }
-        final department = company.department(m.departmentId);
         final boss = company.employee(m.reportsTo ?? '');
         final reports = company.activeEmployees.where((x) => x.reportsTo == m.id).toList()..sort(byName);
         final projects = [for (final id in projectsOf(m.id, company.tasks)) ?company.project(id)];
@@ -69,7 +68,7 @@ class EmployeePage extends StatelessWidget {
                     children: [
                       Text(m.name, style: Tokens.title(size: 18)),
                       Text(
-                        [m.roleLine, department?.name ?? ''].where((s) => s.isNotEmpty).join(' · '),
+                        m.roleLine,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 12, color: Tokens.muted),
@@ -114,12 +113,6 @@ class EmployeePage extends StatelessWidget {
                     const GroupHeader('In the Company'),
                     InsetGroup(
                       children: [
-                        GroupRow(
-                          key: const ValueKey('employee-department'),
-                          title: 'Department',
-                          value: department?.name ?? 'None',
-                          onTap: department == null ? () => editEmployee(context, m) : () => context.push('/department/${department.id}'),
-                        ),
                         GroupRow(
                           key: const ValueKey('employee-boss'),
                           title: 'Reports to',

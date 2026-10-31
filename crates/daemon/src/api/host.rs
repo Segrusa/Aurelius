@@ -10,6 +10,8 @@ use std::sync::Arc;
 pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite) -> Result<HostResult, ProtocolError> {
     let s = shared.clone();
     Ok(match write {
+        // Answered by `users::create` before the host pipeline (which would keep the request).
+        HostWrite::UserCreate(_) => return Err(super::internal("user.create reached the host pipeline")),
         HostWrite::SecretSet { connection_id, secret } => {
             crate::runtimes::store_secret(shared, connection_id, secret).await?;
             HostResult::Done

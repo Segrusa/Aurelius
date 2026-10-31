@@ -88,7 +88,7 @@ pub enum EmployeeTaskOp {
     ReadConversation { conversation: String },
     /// Propose a new colleague. Always waits for the user, also in Auto; at most two
     /// proposals of one employee are open at a time. `reports_to` is an employee's name
-    /// (default: the proposer), `department` a department's name (default: the proposer's).
+    /// (default: the proposer).
     ProposeColleague {
         name: String,
         role: String,
@@ -98,8 +98,6 @@ pub enum EmployeeTaskOp {
         #[serde(default)]
         reports_to: Option<String>,
         reason: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        department: Option<String>,
     },
     /// Propose new instructions for oneself or a direct report (`employee`: a name;
     /// default the proposer). Always waits for the user, also in Auto; `evidence`
@@ -113,6 +111,8 @@ pub enum EmployeeTaskOp {
     /// Post in the group chat under the employee's name; `@Name` wakes that colleague
     /// (never the poster, at most `group_chat::MAX_HOPS` hops after the user's message).
     PostToGroupChat { message: String },
+    /// The dispatcher of a ticket chooses its owner (the bridge's `assign_ticket`, `--triage` only).
+    AssignTicket { employee: String, #[serde(default)] reason: String },
 }
 
 fn yes() -> bool {
@@ -147,7 +147,7 @@ mod tests {
     fn bridge_messages_use_their_own_method_names() {
         let request = BridgeRequest { protocol: crate::PROTOCOL_MAJOR, request_id: 1, call: BridgeCall::DaemonShutdown };
         let json = serde_json::to_value(&request).unwrap();
-        assert_eq!((json["method"].as_str(), json["protocol"].as_u64()), (Some("daemon.shutdown"), Some(3)));
+        assert_eq!((json["method"].as_str(), json["protocol"].as_u64()), (Some("daemon.shutdown"), Some(4)));
         assert_eq!(serde_json::from_value::<BridgeRequest>(json).unwrap(), request);
         // A client method is not a bridge method, and the other way round.
         let client = serde_json::json!({ "protocol": 3, "request_id": 1, "method": "project.list" });
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn a_proposal_op_parses_with_its_defaults() {
         let op: EmployeeTaskOp = serde_json::from_value(serde_json::json!({ "op": "propose_colleague", "name": "Eva", "role": "Designer", "instructions": "Design.", "reason": "UI work" })).unwrap();
-        assert!(matches!(op, EmployeeTaskOp::ProposeColleague { title: None, reports_to: None, department: None, .. }));
+        assert!(matches!(op, EmployeeTaskOp::ProposeColleague { title: None, reports_to: None, .. }));
         let op: EmployeeTaskOp = serde_json::from_value(serde_json::json!({ "op": "delegate", "employee": "Dean", "title": "Port", "project": "Atlas" })).unwrap();
         assert!(matches!(&op, EmployeeTaskOp::Delegate { project: Some(p), .. } if p == "Atlas"));
         let op: EmployeeTaskOp = serde_json::from_value(serde_json::json!({ "op": "propose_instructions", "instructions": "Work test-first.", "reason": "Two failed tasks", "evidence": ["Migration"] })).unwrap();

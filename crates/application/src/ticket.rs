@@ -1,0 +1,571 @@
+//! Ticket, board and company writes (protocol 4). Every one needs an active
+//! board member on the connection (`require_board_member`): it is the author of
+//! a new ticket (`created_by_user`) and the `by` of every column change.
+//!
+//! These writes change the ticket and its column, then hand over to the
+//! engine (`task::ticket_line`) in the same transaction: a start makes the main
+//! task, a chosen owner gets it, accept and send back act on it, a cancel ends
+//! it. The engine finds the card already where the board member put it.
+
+use crate::{CommandContext, Committed, CommandService, TxResult, domain_error, notice, storage_error};
+use aurelius_domain::{
+    ActorKind, AppError, Command, CommandEnvelope, CommandResult, DomainError, EmployeeId, EventKind, EventNotice, ProjectId, TicketId, UserId,
+    company::{UpdateCompany, UpdateProject},
+    employee::LifecycleStatus,
+    project::ProjectStatus,
+    ticket::{self, Actor, ColumnKind, MoveEffect},
+};
+use aurelius_storage::{
+    Tx as Transaction, StorageError, blobs, company as company_store,
+    events::{self, NewEvent},
+    queries, tickets as store,
+};
+use crate::task::{plan_review, ticket_line};
+use serde_json::{Value, json};
+
+/// The board member of the connection, or `board_member_required`.
+pub(crate) fn require_board_member(ctx: &CommandContext) -> Result<UserId, AppError> {
+    ctx.user_id.ok_or_else(|| domain_error(DomainError::BoardMemberRequired))
+}
+
+/// Who and what wrote, owned so it can go into the transaction.
+#[derive(Clone)]
+struct Base {
+    command_id: String,
+    meta: Value,
+    actor: String,
+}
+
+impl Base {
+    fn of(ctx: &CommandContext, envelope: &CommandEnvelope) -> Self {
+        Self { command_id: envelope.command_id.to_string(), meta: ctx.metadata(), actor: ctx.principal_id.to_string() }
+    }
+}
+
+/// The events of one write about one aggregate: each gets the next version.
+struct Events {
+    aggregate_type: &'static str,
+    aggregate_id: String,
+    project: Option<ProjectId>,
+    version: u64,
+    command_id: String,
+    meta: Value,
+    actor: String,
+    notices: Vec<EventNotice>,
+}
+
+impl Events {
+    fn new(base: &Base, aggregate_type: &'static str, aggregate_id: String, project: Option<ProjectId>, version: u64) -> Self {
+        Self {
+            aggregate_type,
+            aggregate_id,
+            project,
+            version,
+            command_id: base.command_id.clone(),
+            meta: base.meta.clone(),
+            actor: base.actor.clone(),
+            notices: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, tx: &Transaction<'_>, kind: EventKind, extra: Value) -> Result<(), StorageError> {
+        self.version += 1;
+        let mut metadata = self.meta.clone();
+        if let (Some(meta), Value::Object(extra)) = (metadata.as_object_mut(), extra) {
+            meta.extend(extra);
+        }
+        let appended = events::append(
+            tx,
+            NewEvent {
+                aggregate_type: self.aggregate_type,
+                aggregate_id: self.aggregate_id.clone(),
+                aggregate_version: self.version,
+                event_type: kind.as_str(),
+                project_id: self.project,
+                actor_kind: ActorKind::User,
+                actor_id: Some(self.actor.clone()),
+                correlation_id: self.command_id.clone(),
+                causation_id: None,
+                payload_blob_id: None,
+                metadata,
+                dedupe_key: format!("cmd:{}:{}", self.command_id, self.notices.len()),
+            },
+        )?;
+        self.notices.push(notice(appended.seq, kind.as_str(), self.aggregate_id.clone(), self.project));
+        Ok(())
+    }
+
+    /// `ticket.moved` from → to by `by`.
+    fn moved(&mut self, tx: &Transaction<'_>, from: ColumnKind, to: ColumnKind, by: Actor) -> Result<(), StorageError> {
+        self.push(tx, EventKind::TicketMoved, json!({ "from": from, "to": to, "by": by }))
+    }
+}
+
+fn rejected<T>(err: DomainError) -> TxResult<T> {
+    Ok(Err(domain_error(err)))
+}
+
+/// An employee that can own or dispatch tickets: exists and is not archived.
+fn check_employee(tx: &Transaction<'_>, id: EmployeeId) -> Result<Result<(), AppError>, StorageError> {
+    Ok(match company_store::employee_status(tx, id)?.as_deref().and_then(LifecycleStatus::parse) {
+        None => Err(domain_error(DomainError::EmployeeNotFound(id))),
+        Some(LifecycleStatus::Archived) => Err(domain_error(DomainError::EmployeeArchived)),
+        Some(_) => Ok(()),
+    })
+}
+
+/// The ticket as it is now, checked against the expected version; archived tickets do not change.
+fn load(tx: &Transaction<'_>, id: TicketId, expected: Option<u64>) -> Result<Result<store::TicketState, AppError>, StorageError> {
+    let Some(state) = store::state(tx, id)? else { return Ok(Err(domain_error(DomainError::TicketNotFound(id)))) };
+    if let Some(expected) = expected {
+        if expected != state.version {
+            return Ok(Err(domain_error(DomainError::VersionConflict { expected, actual: state.version })));
+        }
+    }
+    if state.archived {
+        return Ok(Err(domain_error(DomainError::Ticket("This ticket is archived; it can no longer change.".into()))));
+    }
+    Ok(Ok(state))
+}
+
+macro_rules! check {
+    ($e:expr) => {
+        match $e {
+            Ok(value) => value,
+            Err(err) => return Ok(Err(err)),
+        }
+    };
+}
+
+macro_rules! rule {
+    ($e:expr) => {
+        match $e {
+            Ok(value) => value,
+            Err(err) => return rejected(err),
+        }
+    };
+}
+
+impl CommandService {
+    /// Every ticket, board and company write.
+    pub(crate) fn ticket_command(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String) -> Result<Committed, AppError> {
+        let user = require_board_member(ctx)?;
+        let by = Actor::BoardMember { user_id: user };
+        let expected = envelope.expected_version;
+        let command_id = envelope.command_id;
+        let base = Base::of(ctx, envelope);
+        let st = self.store().clone();
+        match envelope.command.clone() {
+            Command::CreateTicket(cmd) => self.create_ticket(base, envelope, hash, cmd, user),
+            Command::UpdateTicket(cmd) => self.update_ticket(base, envelope, hash, cmd, by),
+            Command::MoveTicket(cmd) => {
+                self.commit(command_id, hash, move |tx| {
+                    let state = check!(load(tx, cmd.ticket_id, expected)?);
+                    let Some(target) = company_store::column(tx, cmd.column_id)? else { return rejected(DomainError::BoardColumnNotFound(cmd.column_id)) };
+                    let effect = rule!(ticket::decide_move(state.column, target.kind));
+                    if cmd.before_ticket_id == Some(state.id) {
+                        // Dropped on its own place: nothing moves.
+                        if target.id != state.column_id {
+                            return rejected(DomainError::Ticket("A card cannot be put above itself in another column.".into()));
+                        }
+                        return Ok(Ok((CommandResult::TicketChanged { ticket_id: state.id, column: state.column, version: state.version }, Vec::new())));
+                    }
+                    let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                    match store::move_to(tx, state.id, target.id, cmd.before_ticket_id) {
+                        Err(StorageError::Rejected(why)) if why == store::NOT_IN_COLUMN => {
+                            return rejected(DomainError::Ticket("The card to put it above is not in that column; refresh the board.".into()));
+                        }
+                        other => other?,
+                    }
+                    e.moved(tx, state.column, target.kind, by)?;
+                    match effect {
+                        MoveEffect::Reorder => {}
+                        MoveEffect::Start => {
+                            store::mark_started(tx, state.id)?;
+                            e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
+                        }
+                        MoveEffect::Cancel => e.push(tx, EventKind::TicketCancelled, json!({ "by": by }))?,
+                    }
+                    finish_then(tx, state.id, e, |tx| match effect {
+                        MoveEffect::Reorder => Ok(vec![]),
+                        MoveEffect::Start => ticket_line::started(tx, &st, state.id, user),
+                        MoveEffect::Cancel => ticket_line::cancel(tx, &st, state.id, &command_id.to_string()),
+                    })
+                })
+            }
+            Command::StartTicket(cmd) => self.commit(command_id, hash, move |tx| {
+                let state = check!(load(tx, cmd.ticket_id, expected)?);
+                rule!(ticket::check_start(state.column, state.root_status));
+                if let Some(employee) = cmd.employee_id {
+                    check!(check_employee(tx, employee)?);
+                }
+                let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                let todo = company_store::column_of_kind(tx, ColumnKind::Todo)?;
+                store::move_to(tx, state.id, todo.id, None)?;
+                store::mark_started(tx, state.id)?;
+                e.moved(tx, state.column, ColumnKind::Todo, by)?;
+                e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
+                if let Some(employee) = cmd.employee_id {
+                    store::set_owner(tx, state.id, Some(employee))?;
+                    e.push(tx, EventKind::TicketDispatched, json!({ "employee_id": employee, "by": by, "reason": Value::Null }))?;
+                }
+                // A new main task (also after a failed one, B6), for the owner if there is one.
+                finish_then(tx, state.id, e, |tx| ticket_line::started(tx, &st, state.id, user))
+            }),
+            Command::AssignTicket(cmd) => {
+                let reason = ticket::valid_note("reason", cmd.reason.as_deref(), ticket::REASON_MAX).map_err(domain_error)?;
+                self.commit(command_id, hash, move |tx| {
+                    let state = check!(load(tx, cmd.ticket_id, expected)?);
+                    rule!(ticket::check_assign(state.column, state.root_status));
+                    let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                    match cmd.employee_id {
+                        Some(employee) => {
+                            check!(check_employee(tx, employee)?);
+                            store::set_owner(tx, state.id, Some(employee))?;
+                            e.push(tx, EventKind::TicketDispatched, json!({ "employee_id": employee, "by": by, "reason": reason }))?;
+                            // In Todo the draft main task goes to that employee now.
+                            return finish_then(tx, state.id, e, |tx| ticket_line::dispatched(tx, state.id, employee));
+                        }
+                        // Back to "the dispatcher chooses": nobody was chosen, so no `ticket.dispatched`.
+                        None => {
+                            rule!(ticket::check_unassign(state.column));
+                            store::set_owner(tx, state.id, None)?;
+                            e.push(tx, EventKind::TicketUpdated, json!({ "changed": ["owner"], "by": by, "reason": reason }))?;
+                        }
+                    }
+                    finish(tx, state.id, state.column, e)
+                })
+            }
+            Command::ApprovePlan(cmd) => {
+                let feedback = ticket::valid_note("feedback", cmd.feedback.as_deref(), ticket::FEEDBACK_MAX).map_err(domain_error)?;
+                self.commit(command_id, hash, move |tx| {
+                    let state = check!(load(tx, cmd.ticket_id, expected)?);
+                    rule!(ticket::check_in(state.column, ColumnKind::PlanReview, "Approving a plan"));
+                    if !plan_review::waits_for_review(tx, state.id)? {
+                        return rejected(DomainError::Ticket("The plan is not waiting for a decision (any more).".into()));
+                    }
+                    let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                    to_column(tx, state.id, ColumnKind::Doing)?;
+                    store::set_feedback(tx, state.id, feedback.as_deref())?;
+                    e.moved(tx, state.column, ColumnKind::Doing, by)?;
+                    e.push(tx, EventKind::TicketPlanApproved, json!({ "decision": cmd.decision, "feedback": feedback.is_some(), "by": by }))?;
+                    finish_then(tx, state.id, e, |tx| plan_review::approve(tx, &st, state.id, user, cmd.decision, feedback.as_deref()))
+                })
+            }
+            Command::RevisePlan(cmd) => {
+                let feedback = ticket::valid_feedback(&cmd.feedback).map_err(domain_error)?;
+                self.commit(command_id, hash, move |tx| {
+                    let state = check!(load(tx, cmd.ticket_id, expected)?);
+                    rule!(ticket::check_in(state.column, ColumnKind::PlanReview, "Asking for a new plan"));
+                    if !plan_review::waits_for_review(tx, state.id)? {
+                        return rejected(DomainError::Ticket("The plan is not waiting for a decision (any more).".into()));
+                    }
+                    let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                    to_column(tx, state.id, ColumnKind::Doing)?;
+                    store::set_feedback(tx, state.id, Some(&feedback))?;
+                    e.moved(tx, state.column, ColumnKind::Doing, by)?;
+                    e.push(tx, EventKind::TicketPlanRevised, json!({ "by": by }))?;
+                    // B2: the feedback goes to the main task's conversation; Plan mode stays.
+                    finish_then(tx, state.id, e, |tx| plan_review::revise(tx, &st, state.id, user, &feedback))
+                })
+            }
+            Command::AcceptTicket(cmd) => {
+                let note = ticket::valid_note("note", cmd.note.as_deref(), ticket::FEEDBACK_MAX).map_err(domain_error)?;
+                self.commit(command_id, hash, move |tx| {
+                    let state = check!(load(tx, cmd.ticket_id, expected)?);
+                    rule!(ticket::check_in(state.column, ColumnKind::Review, "Accept"));
+                    if state.root_status != Some(aurelius_domain::task::TaskStatus::Review) {
+                        return rejected(DomainError::Ticket("The main task is working again; accept once it reported.".into()));
+                    }
+                    // B6: Done only when nothing linked to the ticket still works.
+                    let working = store::working_tasks(tx, state.id, state.root_task_id)?;
+                    if working > 0 {
+                        return rejected(DomainError::Ticket(format!("{working} linked task(s) still work; wait for them or cancel them first.")));
+                    }
+                    // Nor while a run in the main task's conversation goes (a question in Review, §3.3).
+                    if let Some(root) = state.root_task_id {
+                        if crate::task::task_runs::live_run(tx, root, None)? {
+                            return rejected(DomainError::Ticket("The main task's conversation is still running; accept once it answered.".into()));
+                        }
+                    }
+                    let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                    to_column(tx, state.id, ColumnKind::Done)?;
+                    store::mark_done(tx, state.id)?;
+                    e.moved(tx, state.column, ColumnKind::Done, by)?;
+                    e.push(tx, EventKind::TicketAccepted, json!({ "note": note, "by": by }))?;
+                    finish_then(tx, state.id, e, |tx| ticket_line::accept(tx, &st, state.id, user))
+                })
+            }
+            Command::SendBackTicket(cmd) => {
+                let feedback = ticket::valid_feedback(&cmd.feedback).map_err(domain_error)?;
+                self.commit(command_id, hash, move |tx| {
+                    let state = check!(load(tx, cmd.ticket_id, expected)?);
+                    rule!(ticket::check_in(state.column, ColumnKind::Review, "Sending back"));
+                    if state.root_status != Some(aurelius_domain::task::TaskStatus::Review) {
+                        return rejected(DomainError::Ticket("The main task is working again; send it back once it reported.".into()));
+                    }
+                    let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                    to_column(tx, state.id, ColumnKind::Doing)?;
+                    store::set_feedback(tx, state.id, Some(&feedback))?;
+                    e.moved(tx, state.column, ColumnKind::Doing, by)?;
+                    e.push(tx, EventKind::TicketSentBack, json!({ "by": by }))?;
+                    // B2: the feedback goes to the main task's conversation.
+                    finish_then(tx, state.id, e, |tx| ticket_line::send_back(tx, &st, state.id, user, &feedback))
+                })
+            }
+            Command::CancelTicket(cmd) => self.commit(command_id, hash, move |tx| {
+                let state = check!(load(tx, cmd.ticket_id, expected)?);
+                rule!(ticket::check_cancel(state.column));
+                let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                to_column(tx, state.id, ColumnKind::Backlog)?;
+                e.moved(tx, state.column, ColumnKind::Backlog, by)?;
+                e.push(tx, EventKind::TicketCancelled, json!({ "by": by }))?;
+                finish_then(tx, state.id, e, |tx| ticket_line::cancel(tx, &st, state.id, &command_id.to_string()))
+            }),
+            Command::ArchiveTicket(cmd) => self.commit(command_id, hash, move |tx| {
+                let state = check!(load(tx, cmd.ticket_id, expected)?);
+                rule!(ticket::check_archive(state.column));
+                let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                store::mark_archived(tx, state.id)?;
+                e.push(tx, EventKind::TicketArchived, json!({ "by": by }))?;
+                finish(tx, state.id, state.column, e)
+            }),
+            Command::UpdateBoardColumns(cmd) => self.commit(command_id, hash, move |tx| {
+                let current = company_store::columns(tx)?;
+                let actual = ticket::board_version(&current);
+                if let Some(expected) = expected {
+                    if expected != actual {
+                        return rejected(DomainError::VersionConflict { expected, actual });
+                    }
+                }
+                let columns = rule!(cmd.decide(&current));
+                let company = company_store::get(tx)?;
+                let version = aurelius_storage::conversations::next_version(tx, "board", &company.id)? - 1;
+                let mut e = Events::new(&base, "board", company.id, None, version);
+                company_store::update_columns(tx, &columns)?;
+                let after = company_store::columns(tx)?;
+                // Names and order left to right, so the audit shows what changed.
+                let listed: Vec<Value> = after.iter().map(|c| json!({ "column_id": c.id, "kind": c.kind, "name": c.name, "position": c.position })).collect();
+                e.push(tx, EventKind::BoardColumnsUpdated, json!({ "columns": listed, "by": by }))?;
+                Ok(Ok((CommandResult::BoardColumnsUpdated { version: ticket::board_version(&after) }, e.notices)))
+            }),
+            Command::UpdateCompany(cmd) => self.update_company(base, envelope, hash, cmd, by),
+            _ => Err(AppError::new(aurelius_domain::ErrorCode::Internal, "not a ticket command")),
+        }
+    }
+
+    fn create_ticket(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: ticket::CreateTicket, user: UserId) -> Result<Committed, AppError> {
+        let title = ticket::valid_title(&cmd.title).map_err(domain_error)?;
+        let description = ticket::valid_description(cmd.description.as_deref()).map_err(domain_error)?;
+        let labels = ticket::valid_labels(&cmd.labels).map_err(domain_error)?;
+        ticket::valid_deadline(cmd.deadline_ms).map_err(domain_error)?;
+        let blobs = self.store().blobs();
+        let description_blob = match &description {
+            Some(text) => Some(blobs.put(text.as_bytes(), "text/markdown; charset=utf-8").map_err(storage_error)?),
+            None => None,
+        };
+        let attachments = self.attach_files(cmd.project_id, None, &cmd.files, None)?;
+        let stored = attachments.clone();
+        let by = Actor::BoardMember { user_id: user };
+        let st = self.store().clone();
+        let committed = self.commit(envelope.command_id, hash, move |tx| {
+            match queries::load_project(tx, cmd.project_id)? {
+                None => return rejected(DomainError::ProjectNotFound(cmd.project_id)),
+                Some(project) if project.status == ProjectStatus::Archived => return rejected(DomainError::ProjectArchived),
+                Some(_) => {}
+            }
+            if let Some(owner) = cmd.owner_employee_id {
+                check!(check_employee(tx, owner)?);
+            }
+            if let Some(blob) = &description_blob {
+                blobs::register(tx, blob)?;
+            }
+            let id = TicketId::new();
+            let backlog = company_store::column_of_kind(tx, ColumnKind::Backlog)?;
+            let number = store::insert(
+                tx,
+                &store::NewTicket {
+                    id,
+                    project_id: cmd.project_id,
+                    title: &title,
+                    description_blob: description_blob.as_ref().map(|b| b.id.to_string()).as_deref(),
+                    column_id: backlog.id,
+                    priority: cmd.priority,
+                    created_by_user: user,
+                    owner: cmd.owner_employee_id,
+                    run: &cmd.run,
+                    labels: &labels,
+                    deadline_ms: cmd.deadline_ms,
+                },
+            )?;
+            store::set_attachments(tx, id, stored.as_ref())?;
+            let mut e = Events::new(&base, "ticket", id.to_string(), Some(cmd.project_id), 0);
+            e.push(tx, EventKind::TicketCreated, json!({ "number": number, "created_by_user": user, "by": by }))?;
+            if cmd.start {
+                let todo = company_store::column_of_kind(tx, ColumnKind::Todo)?;
+                store::move_to(tx, id, todo.id, None)?;
+                store::mark_started(tx, id)?;
+                e.moved(tx, ColumnKind::Backlog, ColumnKind::Todo, by)?;
+                e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
+            }
+            // Every choice of an owner is `ticket.dispatched`, as with Start and Assign.
+            if let Some(employee) = cmd.owner_employee_id {
+                e.push(tx, EventKind::TicketDispatched, json!({ "employee_id": employee, "by": by, "reason": Value::Null }))?;
+            }
+            store::touch(tx, id, e.version)?;
+            let mut notices = e.notices;
+            if cmd.start {
+                notices.extend(ticket_line::started(tx, &st, id, user)?);
+            }
+            Ok(Ok((CommandResult::TicketCreated { ticket_id: id, number }, notices)))
+        });
+        self.discard_unused(&attachments, committed.as_ref().map_or(true, |c| c.receipt.replayed));
+        committed
+    }
+
+    fn update_ticket(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: ticket::UpdateTicket, by: Actor) -> Result<Committed, AppError> {
+        let title = cmd.title.as_deref().map(ticket::valid_title).transpose().map_err(domain_error)?;
+        let description = match cmd.description.as_deref() {
+            None => None,
+            Some(text) => Some(ticket::valid_description(Some(text)).map_err(domain_error)?),
+        };
+        let labels = cmd.labels.as_deref().map(ticket::valid_labels).transpose().map_err(domain_error)?;
+        let deadline = if cmd.clear_deadline { Some(None) } else { ticket::valid_deadline(cmd.deadline_ms).map_err(domain_error)?.map(Some) };
+        if title.is_none() && description.is_none() && cmd.priority.is_none() && labels.is_none() && deadline.is_none() && cmd.run.is_none() {
+            return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
+        }
+        let description_blob = match description.as_ref().and_then(|d| d.as_deref()) {
+            Some(text) => Some(self.store().blobs().put(text.as_bytes(), "text/markdown; charset=utf-8").map_err(storage_error)?),
+            None => None,
+        };
+        let expected = envelope.expected_version;
+        self.commit(envelope.command_id, hash, move |tx| {
+            let state = check!(load(tx, cmd.ticket_id, expected)?);
+            if state.column == ColumnKind::Done {
+                return rejected(DomainError::Ticket("A ticket in Done is closed; it can no longer change.".into()));
+            }
+            if cmd.run.is_some() && state.root_status == Some(aurelius_domain::task::TaskStatus::Running) {
+                return rejected(DomainError::Ticket("Mode and model change only while the main task does not run.".into()));
+            }
+            if let Some(blob) = &description_blob {
+                blobs::register(tx, blob)?;
+            }
+            let blob_id = description_blob.as_ref().map(|b| b.id.to_string());
+            store::update_fields(
+                tx,
+                state.id,
+                &store::TicketFields {
+                    title: title.as_deref(),
+                    description_blob: description.as_ref().map(|_| blob_id.as_deref()),
+                    priority: cmd.priority,
+                    labels: labels.as_deref(),
+                    deadline_ms: deadline,
+                    owner: None,
+                    run: cmd.run.as_ref(),
+                },
+            )?;
+            let changed: Vec<&str> = [
+                ("title", title.is_some()),
+                ("description", description.is_some()),
+                ("priority", cmd.priority.is_some()),
+                ("labels", labels.is_some()),
+                ("deadline", deadline.is_some()),
+                ("run", cmd.run.is_some()),
+            ]
+            .into_iter()
+            .filter_map(|(name, given)| given.then_some(name))
+            .collect();
+            let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+            e.push(tx, EventKind::TicketUpdated, json!({ "changed": changed, "by": by }))?;
+            finish(tx, state.id, state.column, e)
+        })
+    }
+
+    fn update_company(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: UpdateCompany, by: Actor) -> Result<Committed, AppError> {
+        let name = cmd.valid_name().map_err(domain_error)?;
+        let dispatcher = cmd.dispatcher.map(|d| d.employee_id);
+        if name.is_none() && dispatcher.is_none() {
+            return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
+        }
+        let expected = envelope.expected_version;
+        self.commit(envelope.command_id, hash, move |tx| {
+            if let Some(Some(employee)) = dispatcher {
+                check!(check_employee(tx, employee)?);
+            }
+            let company = company_store::get(tx)?;
+            if let Some(expected) = expected {
+                if expected != company.version {
+                    return rejected(DomainError::VersionConflict { expected, actual: company.version });
+                }
+            }
+            let version = company_store::update(tx, name.as_deref(), dispatcher)?;
+            let previous = aurelius_storage::conversations::next_version(tx, "company", &company.id)? - 1;
+            let mut e = Events::new(&base, "company", company.id, None, previous);
+            let mut extra = json!({ "by": by });
+            if let Some(name) = &name {
+                extra["name"] = json!(name);
+            }
+            if let Some(choice) = dispatcher {
+                extra["dispatcher_employee_id"] = json!(choice);
+            }
+            e.push(tx, EventKind::CompanyUpdated, extra)?;
+            Ok(Ok((CommandResult::CompanyUpdated { version }, e.notices)))
+        })
+    }
+
+    /// `project.update`: a project's own dispatcher (B5). A board member, as for the company's.
+    pub(crate) fn update_project(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &UpdateProject) -> Result<Committed, AppError> {
+        let by = Actor::BoardMember { user_id: require_board_member(ctx)? };
+        let cmd = cmd.clone();
+        let Some(dispatcher) = cmd.dispatcher.map(|d| d.employee_id) else {
+            return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
+        };
+        let expected = envelope.expected_version;
+        let base = Base::of(ctx, envelope);
+        self.commit(envelope.command_id, hash, move |tx| {
+            let Some(project) = queries::load_project(tx, cmd.project_id)? else { return rejected(DomainError::ProjectNotFound(cmd.project_id)) };
+            if let Some(expected) = expected {
+                if expected != project.version {
+                    return rejected(DomainError::VersionConflict { expected, actual: project.version });
+                }
+            }
+            if project.status == ProjectStatus::Archived {
+                return rejected(DomainError::ProjectArchived);
+            }
+            if let Some(employee) = dispatcher {
+                check!(check_employee(tx, employee)?);
+            }
+            let version = company_store::set_project_dispatcher(tx, cmd.project_id, dispatcher)?;
+            let mut e = Events::new(&base, "project", cmd.project_id.to_string(), Some(cmd.project_id), version - 1);
+            e.push(tx, EventKind::ProjectUpdated, json!({ "dispatcher_employee_id": dispatcher, "by": by }))?;
+            Ok(Ok((CommandResult::ProjectUpdated { project_id: cmd.project_id, version }, e.notices)))
+        })
+    }
+}
+
+/// Put a ticket last in the column of `kind`.
+fn to_column(tx: &Transaction<'_>, id: TicketId, kind: ColumnKind) -> Result<(), StorageError> {
+    let column = company_store::column_of_kind(tx, kind)?;
+    store::move_to(tx, id, column.id, None)
+}
+
+/// As `finish`, then the engine's part, which may add events (each the next
+/// version) and move the card; the answer is where the card is after it.
+fn finish_then(
+    tx: &Transaction<'_>,
+    id: TicketId,
+    e: Events,
+    engine: impl FnOnce(&Transaction<'_>) -> Result<Vec<EventNotice>, StorageError>,
+) -> TxResult<(CommandResult, Vec<EventNotice>)> {
+    store::touch(tx, id, e.version)?;
+    let mut notices = e.notices;
+    notices.extend(engine(tx)?);
+    let Some(state) = store::state(tx, id)? else { return rejected(DomainError::TicketNotFound(id)) };
+    Ok(Ok((CommandResult::TicketChanged { ticket_id: id, column: state.column, version: state.version }, notices)))
+}
+
+/// Store the ticket's version after its events and answer where it is now.
+fn finish(tx: &Transaction<'_>, id: TicketId, column: ColumnKind, e: Events) -> TxResult<(CommandResult, Vec<EventNotice>)> {
+    store::touch(tx, id, e.version)?;
+    Ok(Ok((CommandResult::TicketChanged { ticket_id: id, column, version: e.version }, e.notices)))
+}

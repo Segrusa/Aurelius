@@ -16,6 +16,8 @@ fn main() -> anyhow::Result<()> {
         .with_ansi(false)
         .init();
 
+    // The decoy hash of `user.use` (S5-4), beside the start instead of on the first unknown board member.
+    std::thread::spawn(aurelius_daemon::api::warm_up);
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     let stopped = runtime.block_on(aurelius_daemon::run_service(root.clone()))?;
     drop(runtime);

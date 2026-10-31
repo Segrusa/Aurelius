@@ -51,10 +51,6 @@ extension on EmployeePlugins {
   PluginsMine get mine => (enabled: enabled, missing: missing, inherited: const []);
 }
 
-extension on ProjectPlugins {
-  PluginsMine get mine => (enabled: enabled, missing: missing, inherited: const []);
-}
-
 /// A switch per installed plugin for one list, with the hooks warning, missing
 /// ones flagged and Add plugin…. Ids in `inherited` come from elsewhere (the
 /// project) and cannot be switched off here.

@@ -66,15 +66,14 @@ List<String> splitCriteria(String text) => text.split(RegExp(r'[\n;]')).map((c) 
 
 /// A new task on a full screen: title, goal, criteria and the employee who
 /// leads it in one place. Only the title is required; the goal defaults to it
-/// on the PC. The lead picker lists the management team first, then the rest
-/// by department; the single root is preselected. With [projects] (opened from
+/// on the PC. The lead picker lists the management team first, then the rest;
+/// the single root is preselected. With [projects] (opened from
 /// Home) the project is a field of the form too. With [recurring] it is the
 /// form of a recurring task: a recurrence editor; [schedule] fills it to edit that one.
 class NewTaskPage extends StatefulWidget {
   const NewTaskPage({
     super.key,
     required this.employees,
-    this.departments = const [],
     this.projects,
     this.projectId,
     this.employeeId,
@@ -84,7 +83,6 @@ class NewTaskPage extends StatefulWidget {
   });
 
   final List<EmployeeSummary> employees;
-  final List<DepartmentSummary> departments;
 
   /// The projects to choose from; null when the project is already known.
   final List<ProjectSummary>? projects;
@@ -99,7 +97,6 @@ class NewTaskPage extends StatefulWidget {
   static Future<NewTask?> open(
     BuildContext context,
     List<EmployeeSummary> employees, {
-    List<DepartmentSummary> departments = const [],
     List<ProjectSummary>? projects,
     String? projectId,
     String? employeeId,
@@ -112,7 +109,6 @@ class NewTaskPage extends StatefulWidget {
           fullscreenDialog: true,
           builder: (_) => NewTaskPage(
             employees: employees,
-            departments: departments,
             projects: projects,
             projectId: projectId,
             employeeId: employeeId,
@@ -134,7 +130,7 @@ class _NewTaskPageState extends State<NewTaskPage> {
   late String? _employee = widget.schedule?.employeeId ?? widget.employeeId ?? defaultAssignee(widget.employees);
   late String? _project = widget.projectId ?? _onlyProject;
 
-  late final List<EmployeeGroup> _groups = pickerGroups(widget.employees, widget.departments);
+  late final List<EmployeeGroup> _groups = pickerGroups(widget.employees);
 
   /// The only open project, preselected when there is just one.
   String? get _onlyProject {

@@ -1,4 +1,4 @@
-//! `aurelius-bridge --data-dir <dir> --run <run_id> [--project]`: the MCP server
+//! `aurelius-bridge --data-dir <dir> --run <run_id> [--project | --triage]`: the MCP server
 //! Claude Code starts for one run (the daemon passes it as the run's MCP config
 //! and as `--permission-prompt-tool mcp__aurelius__approve`). A minimal MCP
 //! server over stdio. Every question goes to the running Aurelius service
@@ -13,6 +13,8 @@
 //! `hand_over_task`, `add_idea`, `propose_colleague` and `propose_instructions`; `read_group_chat`
 //! and `post_to_group_chat` (the company's group chat). `--project` (the
 //! assistant of a project conversation) leaves out `hand_over_task`.
+//! `--triage` (the dispatcher of a ticket choosing its owner) has only
+//! `assign_ticket` and `recall`.
 //!
 //! It also gives the agent eyes: `screenshot` and `list_windows`. Claude Code
 //! never asks for these; the bridge asks the service itself, which allows them
@@ -33,6 +35,8 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
     let project = args.iter().any(|a| a == "--project");
     // Management that chooses the mode of its task offers set_mode (the daemon decides per run).
     let set_mode = args.iter().any(|a| a == "--set-mode");
+    // The dispatcher of a ticket: only assign_ticket and recall.
+    let triage = args.iter().any(|a| a == "--triage");
     let mut client: Option<BridgeClient> = None;
     let mut screen_granted = false;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
@@ -47,11 +51,12 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
                 "serverInfo": { "name": "aurelius", "version": env!("CARGO_PKG_VERSION") },
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": tool_definitions(project, set_mode) })),
+            "tools/list" => Ok(json!({ "tools": if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode) } })),
             "tools/call" => {
                 let name = msg["params"]["name"].as_str().unwrap_or("").to_owned();
                 let args = msg["params"]["arguments"].clone();
-                match call_tool(&mut client, &root, run_id, project, set_mode, &mut screen_granted, &name, args).await {
+                let call = if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, project, set_mode, &mut screen_granted, &name, args).await };
+                match call {
                     Some(result) => Ok(result),
                     None => Err(json!({ "code": -32601, "message": "Method not found" })),
                 }
@@ -128,7 +133,6 @@ fn tool_definitions(project: bool, set_mode: bool) -> Vec<Value> {
                 "title": { "type": "string", "description": "Optional job title." },
                 "instructions": { "type": "string", "description": "What they do and how they work." },
                 "reports_to": { "type": "string", "description": "A colleague's name; default yourself." },
-                "department": { "type": "string", "description": "The department they join (its name); default your own." },
                 "reason": { "type": "string", "description": "Why the team needs them." }
             },
             "required": ["name", "role", "instructions", "reason"]
@@ -198,7 +202,6 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
             instructions: text("instructions"),
             reports_to: optional("reports_to"),
             reason: text("reason"),
-            department: optional("department"),
         },
         "propose_instructions" => EmployeeTaskOp::ProposeInstructions {
             employee: optional("employee"),
@@ -209,6 +212,33 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         _ => return None,
     };
     Some(act_call(client, root, run_id, op).await)
+}
+
+/// The tools of the dispatcher of a ticket.
+fn triage_tool_definitions() -> Vec<Value> {
+    let mut tools = vec![json!({
+        "name": "assign_ticket",
+        "description": "Choose the employee who owns this ticket: its main task goes to them and starts. Call it once, with a short reason.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "employee": { "type": "string", "description": "The colleague's name, as in the list." },
+                "reason": { "type": "string", "description": "Why this colleague, in one sentence (the board sees it)." }
+            },
+            "required": ["employee", "reason"]
+        }
+    })];
+    tools.extend(memory_tool_definitions().into_iter().filter(|t| t["name"] == "recall"));
+    tools
+}
+
+async fn triage_call(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId, name: &str, args: Value) -> Option<Value> {
+    let text = |k: &str| args[k].as_str().unwrap_or("").to_owned();
+    match name {
+        "assign_ticket" => Some(act_call(client, root, run_id, EmployeeTaskOp::AssignTicket { employee: text("employee"), reason: text("reason") }).await),
+        "recall" => Some(memory_call(client, root, run_id, EmployeeMemoryOp::Recall { query: text("query") }).await),
+        _ => None,
+    }
 }
 
 /// The connection to the service, made on first use and again after it dropped.
@@ -292,14 +322,14 @@ fn memory_tool_definitions() -> Vec<Value> {
                 "properties": {
                     "content": { "type": "string", "description": "One self-contained statement (at most 2000 characters)." },
                     "kind": { "type": "string", "enum": ["decision", "project_knowledge", "episodic"] },
-                    "scope": { "type": "string", "enum": ["employee", "department", "project"], "description": "employee: only you; department: everyone in your department; project: everyone working in this project (only in a task or project conversation). Default: decisions and knowledge to the project (else your department), episodes to you." }
+                    "scope": { "type": "string", "enum": ["employee", "project"], "description": "employee: only you; project: everyone working in this project (only in a task or project conversation). Default: decisions and knowledge to the project (else you), episodes to you." }
                 },
                 "required": ["content", "kind"]
             }
         }),
         json!({
             "name": "recall",
-            "description": "Search the memories you may read (yours, your department's, the project's when you work in one, and global ones) for earlier decisions and knowledge before you decide something.",
+            "description": "Search the memories you may read (yours, the project's when you work in one, and global ones) for earlier decisions and knowledge before you decide something.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "query": { "type": "string", "description": "What you are looking for, in a few words." } },
@@ -485,6 +515,13 @@ mod tests {
         for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat"] {
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
         }
+    }
+
+    #[test]
+    fn the_dispatcher_has_only_assign_ticket_and_recall() {
+        let names: Vec<String> = triage_tool_definitions().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(names, ["assign_ticket", "recall"]);
+        assert!(!tool_definitions(false, false).iter().any(|t| t["name"] == "assign_ticket"), "no other run can assign a ticket");
     }
 
     #[test]

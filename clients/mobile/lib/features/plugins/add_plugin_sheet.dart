@@ -18,8 +18,8 @@ Future<bool?> showAddPluginSheet(BuildContext context, {String? employeeId}) {
   final repository = context.read<AureliusRepository>();
   final company = context.read<CompanyBloc>().state;
   final employees = company.employees.where((m) => m.status != LifecycleStatus.archived).toList();
-  // Shown under each name: its department.
-  String? project(EmployeeSummary m) => company.department(m.departmentId)?.name;
+  // Shown under each name: its title and role.
+  String? project(EmployeeSummary m) => m.roleLine.isEmpty ? null : m.roleLine;
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,

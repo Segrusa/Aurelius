@@ -19,7 +19,7 @@ Future<void> createTask(BuildContext context) async {
   final project = context.read<ProjectBloc>().state.project;
   if (project == null) return;
   final company = context.read<CompanyBloc>().state;
-  final task = await NewTaskPage.open(context, company.activeEmployees, departments: company.activeDepartments);
+  final task = await NewTaskPage.open(context, company.activeEmployees);
   if (task == null || !context.mounted) return;
   final bloc = context.read<ProjectBloc>();
   bloc.send(Commands.createTask(project.id, task.title, task.goal, task.criteria, employeeId: task.employeeId, run: task.run, files: task.files, variants: task.variants), done: task.variants > 1 ? 'Task created; it is tried ${task.variants} ways first.' : 'Task created.');
@@ -94,7 +94,8 @@ class TaskRow extends StatelessWidget {
       taskMarkDetail(task) ?? '',
     ].where((s) => s.isNotEmpty).join(' · ');
     return ListTile(
-      title: Text(task.title),
+      // A task under a ticket says which (§2); one without a ticket stays as it was (B7).
+      title: Text(task.ticketNumber == null ? task.title : '#${task.ticketNumber} · ${task.title}'),
       subtitle: Row(
         children: [
           TaskStatusMark(task),

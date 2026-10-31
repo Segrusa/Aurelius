@@ -170,9 +170,27 @@ pub fn verify(dir: &Path) -> Result<Manifest, StorageError> {
     Ok(manifest)
 }
 
+/// The first schema of v0.11 (protocol 4, the board). An older backup is a
+/// protocol 3 workspace: this build does not restore it (going back is the
+/// `pre-v0.11/` folder with the previous build).
+pub const FRESH_START_SCHEMA: i64 = 18;
+
+/// Why this build does not restore this backup, if it does not.
+pub fn restore_refusal(manifest: &Manifest) -> Option<String> {
+    (manifest.schema_version < FRESH_START_SCHEMA).then(|| {
+        format!(
+            "This backup is from before v0.11. To go back, restore {} with the previous build.",
+            crate::fresh_start::BACKUP_DIR
+        )
+    })
+}
+
 /// Pending restore, performed by the daemon at its next start (before opening the store).
 pub fn request_restore(root: &Path, backup: &Path) -> Result<(), StorageError> {
-    verify(backup)?;
+    let manifest = verify(backup)?;
+    if let Some(refusal) = restore_refusal(&manifest) {
+        return Err(StorageError::Rejected(refusal));
+    }
     std::fs::write(root.join("data").join("restore-pending"), backup.to_string_lossy().as_bytes())?;
     Ok(())
 }
@@ -184,6 +202,10 @@ pub fn perform_pending_restore(root: &Path) -> Result<Option<Manifest>, StorageE
     let Ok(source) = std::fs::read_to_string(&marker) else { return Ok(None) };
     let source = PathBuf::from(source.trim());
     let manifest = verify(&source)?;
+    // A marker left by an older build: refused before anything moves.
+    if let Some(refusal) = restore_refusal(&manifest) {
+        return Err(StorageError::Rejected(refusal));
+    }
     let stamp = now_ms();
     let aside = root.join(format!("before-restore-{stamp}"));
     std::fs::create_dir_all(&aside)?;
@@ -198,8 +220,9 @@ pub fn perform_pending_restore(root: &Path) -> Result<Option<Manifest>, StorageE
     if source.join("blobs").is_dir() {
         copy_tree(&source.join("blobs"), &root.join("blobs"), &mut count, &mut bytes)?;
     }
-    // Identity files stay those of this installation.
-    for name in ["host_id", "local_principal_id", "environment"] {
+    // Identity and configuration files stay those of this installation (a
+    // backup holds only the database).
+    for name in crate::fresh_start::IDENTITY_FILES.into_iter().chain(crate::fresh_start::CONFIG_FILES) {
         let old = aside.join("data").join(name);
         if old.exists() {
             let _ = std::fs::copy(&old, root.join("data").join(name));

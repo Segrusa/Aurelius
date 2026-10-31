@@ -7,6 +7,8 @@
 //! always come here, also in auto mode. Screenshots (the bridge's own screen
 //! tools) are allowed at once when the employee's Screen is on, else asked.
 //! Aurelius' own memory and task tools are never asked, in any mode.
+//! The plan of a ticket's main task is no inbox approval: it waits for the
+//! board (`plan_review`) and Claude is told to stop.
 //! An MCP tool the user answered with 'Always allow' (`mcp_always_allow`) is
 //! let through in Ask, Accept edits and Auto, never in Plan; Aurelius' own
 //! `mcp__aurelius__*` tools never qualify.
@@ -62,6 +64,15 @@ pub async fn ask(shared: &Arc<Shared>, run_id: RunId, call_id: Option<String>, t
     }
     let question = tool == QUESTION_TOOL;
     let plan = tool == PLAN_TOOL;
+    // The plan of a ticket's main task waits for the board, not in the inbox: Claude is told to stop (plan_review).
+    if plan {
+        let (s, plan_input) = (shared.clone(), input.clone());
+        let handed_in = tokio::task::spawn_blocking(move || s.service.ticket_plan_handed_in(run_id, &plan_input)).await.map_err(|e| ProtocolError::new(ErrorCode::Internal, e.to_string()))??;
+        if let Some((message, notices)) = handed_in {
+            shared.publish(notices);
+            return Ok(deny(message));
+        }
+    }
     // Files, commands and the web follow a mode the user switched to during this answer.
     // The browser follows the mode too: turning it on for the employee is the consent, Auto then does not ask again.
     let work = !question && !plan && !SCREEN_TOOLS.contains(&tool.as_str());

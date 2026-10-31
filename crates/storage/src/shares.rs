@@ -71,7 +71,6 @@ fn view(conn: &Connection, where_clause: &str, arg: &str, read_blob: &dyn Fn(&st
         "SELECT s.id, s.title, s.source_label, s.mode, s.created_at_ms, s.revoked_at_ms, b.storage_key,
                 CASE WHEN s.destination_conversation_id IS NOT NULL THEN 'conversation'
                      WHEN sc.kind = 'project' THEN 'project · ' || (SELECT name FROM projects WHERE scope_id = sc.id)
-                     WHEN sc.kind = 'department' THEN 'department · ' || (SELECT name FROM departments WHERE scope_id = sc.id)
                      ELSE 'employee · ' || (SELECT name FROM employees WHERE scope_id = sc.id) END
          FROM shares s JOIN blobs b ON b.id = s.snapshot_blob_id LEFT JOIN scopes sc ON sc.id = s.destination_scope_id
          WHERE {where_clause} ORDER BY s.created_at_ms DESC"

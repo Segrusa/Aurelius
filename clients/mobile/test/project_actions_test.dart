@@ -7,7 +7,6 @@ import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/company_org/company_org_page.dart';
 import 'package:aurelius_mobile/features/company_org/employee_page.dart';
-import 'package:aurelius_mobile/features/company_org/employee_widgets.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/project/project_page.dart';
 import 'package:bloc_test/bloc_test.dart';
@@ -218,10 +217,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('employee-edit')));
       await tester.pumpAndSettle();
       expect(find.text('Reports to'), findsWidgets);
-      expect(find.text('Department'), findsWidgets);
       await tester.enterText(find.widgetWithText(TextField, 'Title (optional)'), 'Head of server');
-      // Department, then Reports to.
-      await tester.tap(find.byType(DropdownButtonFormField<String>).last);
+      expect(find.byType(DropdownButtonFormField<String>), findsOneWidget, reason: 'Reports to is the only choice');
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Nobody (management team)').last);
       await tester.pumpAndSettle();

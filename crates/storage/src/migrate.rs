@@ -27,7 +27,9 @@ const fn plain(version: i64, sql: &'static str) -> Migration {
 /// 14 is v0.9's company (protocol 3.0): managers become employees; 15 deletes
 /// the plain chats (every conversation has a project, task or employee); 16 adds
 /// the audience, webhook and outbox of app keys; 17 the company's group chat
-/// (conversation kind 'group', made by the migration itself).
+/// (conversation kind 'group', made by the migration itself); 18 is v0.11's
+/// board (protocol 4): company, users, board columns, tickets, departments gone.
+/// A 14–17 database does not migrate into 18: `fresh_start` imports it.
 pub const MIGRATIONS: &[Migration] = &[
     plain(1, include_str!("../../../migrations/0001_schema.sql")),
     plain(2, include_str!("../../../migrations/0002_artifacts.sql")),
@@ -46,6 +48,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 15, sql: include_str!("../../../migrations/0015_no_plain_chats.sql"), rebuild: true, then: None },
     plain(16, include_str!("../../../migrations/0016_management_channel.sql")),
     Migration { version: 17, sql: include_str!("../../../migrations/0017_group_chat.sql"), rebuild: true, then: None },
+    Migration { version: 18, sql: include_str!("../../../migrations/0018_board.sql"), rebuild: true, then: None },
 ];
 
 /// The last schema of protocol 2 (managers per project). The v0.6 import writes

@@ -40,6 +40,9 @@ mod screens {
     pub mod mermaid;
     pub mod artifact;
     pub mod org;
+    pub mod board_members;
+    pub mod board;
+    pub mod ticket;
 }
 
 use gpui_kit::*;

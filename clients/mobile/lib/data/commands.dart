@@ -122,22 +122,8 @@ abstract final class Commands {
   static Map<String, dynamic> setFollowOrgChart(bool follow) => companySetFollowOrgChart(SetFollowOrgChart(follow: follow));
 
   /// A new employee of the company; the name must be unique company-wide.
-  static Map<String, dynamic> createEmployee(String name, String role, {String? instructions, String? title, String? reportsTo, String? departmentId}) =>
-      employeeCreate(CreateEmployee(departmentId: departmentId, instructions: instructions, name: name, reportsTo: reportsTo, role: role, title: title));
-
-  /// The department an employee belongs to; `null`: none.
-  static Map<String, dynamic> setEmployeeDepartment(String employeeId, String? departmentId) =>
-      employeeSetDepartment(SetEmployeeDepartment(departmentId: departmentId, employeeId: employeeId));
-
-  static Map<String, dynamic> createDepartment(String name, {String? description, String? headId}) =>
-      departmentCreate(CreateDepartment(description: description, headId: headId, name: name));
-
-  /// An empty description clears it; `headId` null leaves the department without a head.
-  static Map<String, dynamic> updateDepartment(String departmentId, String name, {String? description, String? headId}) =>
-      departmentUpdate(UpdateDepartment(departmentId: departmentId, description: description, headId: headId, name: name));
-
-  /// Its employees keep working, without a department.
-  static Map<String, dynamic> archiveDepartment(String departmentId) => departmentArchive(ArchiveDepartment(departmentId: departmentId));
+  static Map<String, dynamic> createEmployee(String name, String role, {String? instructions, String? title, String? reportsTo}) =>
+      employeeCreate(CreateEmployee(instructions: instructions, name: name, reportsTo: reportsTo, role: role, title: title));
 
   /// `sequentialTasks` only when it changes (omitted = unchanged). `title` is the
   /// employee's title in the org chart; empty clears it.
@@ -282,7 +268,7 @@ abstract final class Commands {
   static Map<String, dynamic> decidePlan(String approvalId, PlanDecision decision, {String? feedback}) =>
       approvalDecidePlan(DecidePlan(approvalId: approvalId, decision: decision, feedback: feedback));
 
-  /// `scopeKind`: global | project | department | employee.
+  /// `scopeKind`: global | project | employee.
   static Map<String, dynamic> remember(String scopeKind, String? scopeId, MemoryKind kind, String content, {bool pinned = false}) =>
       memoryRemember(Remember(
         content: content,
@@ -291,7 +277,6 @@ abstract final class Commands {
         scope: switch (scopeKind) {
           'project' => MemoryScopeProject(id: scopeId!),
           'employee' => MemoryScopeEmployee(id: scopeId!),
-          'department' => MemoryScopeDepartment(id: scopeId!),
           _ => const MemoryScopeGlobal(),
         },
       ));

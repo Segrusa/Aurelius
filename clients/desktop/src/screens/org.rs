@@ -1,11 +1,10 @@
-//! The org chart: who reports to whom (the company-wide Org chart page), the departments,
-//! and the colleagues employees propose, which the user approves or declines.
+//! The org chart: who reports to whom (the company-wide Org chart page), and the colleagues employees propose, which the user approves or declines.
 
-use crate::app::{AppView, DepartmentKey, ManagerRef, Page, ProjectRef};
+use crate::app::{AppView, ManagerRef};
 use crate::keymap::*;
 use crate::theme::{self, c};
 use crate::ui::{self, ButtonKind, h, v};
-use aurelius_domain::{DepartmentId, EmployeeId, ProposalId, employee::LifecycleStatus, proposal::{ProposalKind, ProposalStatus}};
+use aurelius_domain::{EmployeeId, ProposalId, employee::LifecycleStatus, proposal::{ProposalKind, ProposalStatus}};
 use aurelius_protocol::{ProposalView, EmployeeSummary};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -89,29 +88,6 @@ pub fn line_diff<'a>(old: &'a str, new: &'a str) -> Vec<(char, &'a str)> {
         }
     }
     out
-}
-
-/// One department with its head and members.
-pub struct Department {
-    pub key: DepartmentKey,
-    pub name: String,
-    pub description: String,
-    pub head: Option<EmployeeId>,
-    pub members: Vec<EmployeeId>,
-}
-
-/// The company's active departments (`company.get`) with their members, in the server's order (by name).
-pub fn departments(company: &[aurelius_protocol::DepartmentSummary], managers: &[EmployeeSummary]) -> Vec<Department> {
-    company
-        .iter()
-        .map(|d| Department {
-            key: d.id,
-            name: d.name.clone(),
-            description: d.description.clone().unwrap_or_default(),
-            head: d.head_id,
-            members: managers.iter().filter(|m| m.department_id == Some(d.id) && m.status != LifecycleStatus::Archived).map(|m| m.id).collect(),
-        })
-        .collect()
 }
 
 /// "Head of engineering · Development manager", or just the role.
@@ -235,11 +211,6 @@ impl AppView {
         }))
     }
 
-    /// The company's departments with their members.
-    pub fn department_list(&self) -> Vec<Department> {
-        departments(self.company.as_ref().map_or(&[][..], |c| &c.departments[..]), &self.managers)
-    }
-
     /// What a proposal says: who proposes whom, for which place, and why.
     pub fn proposal_body(&self, p: &ProposalView, i: usize, cx: &mut Context<Self>) -> Div {
         if p.kind == ProposalKind::Instructions {
@@ -297,13 +268,8 @@ impl AppView {
             .when(!paused && m.working, |el| el.child(ui::pulse_dot((key.0, key.1 + 10_000), 6., theme::ACCENT)))
     }
 
-    /// A department's name (empty for none or an unknown one).
-    pub(crate) fn department_name(&self, department: Option<DepartmentId>) -> String {
-        department.and_then(|id| self.company.iter().flat_map(|c| c.departments.iter()).find(|d| d.id == id)).map_or_else(String::new, |d| d.name.clone())
-    }
-
     /// The Org chart page: proposals waiting for the user, then the whole company as a tree,
-    /// the management team (roots) first, each root marked with its department.
+    /// the management team (roots) first.
     pub fn render_company_org(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let serif = ui::serif(cx);
         let proposals: Vec<ProposalView> = self.pending_proposals().into_iter().cloned().collect();
@@ -335,7 +301,6 @@ impl AppView {
         let m = &rows[i].1;
         let id = m.id;
         let paused = m.status == LifecycleStatus::Paused;
-        let department = self.department_name(m.department_id);
         let line = || c(theme::BORDER_STRONG);
         let card = v().id(("org-node", i))
             .w(px(184.))
@@ -359,7 +324,7 @@ impl AppView {
                     .when(!paused && m.working, |el| el.child(ui::pulse_dot(("org-node-working", i), 6., theme::ACCENT))),
             )
             .child(div().truncate().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(position(m)))
-            .child(div().truncate().text_size(px(11.)).text_color(c(theme::MUTED)).child(if paused { "Paused".to_string() } else if department.is_empty() { "No department".to_string() } else { department }));
+            .when(paused, |el| el.child(div().truncate().text_size(px(11.)).text_color(c(theme::MUTED)).child("Paused")));
         let children = org_children(rows, i);
         let n = children.len();
         v().items_center().flex_none()
@@ -381,13 +346,10 @@ impl AppView {
             .into_any_element()
     }
 
-    /// Settings → Company: management's mode, the management team and what the
-    /// conversion of 2.x data did (when this server converted any).
+    /// Settings → Company: management's mode, the management team and the default models.
     pub fn render_company_settings(&mut self, page: Div, cx: &mut Context<Self>) -> Div {
         let header = h().px(px(22.)).py(px(14.)).border_b_1().border_color(c(theme::BORDER)).child(self.settings_title(cx));
         let team: Vec<String> = crate::screens::dashboard::roots(&self.managers).iter().filter_map(|id| self.managers.iter().find(|m| m.id == *id)).map(|m| m.name.clone()).collect();
-        let name = |id: EmployeeId| self.managers.iter().find(|m| m.id == id).map_or_else(|| "(archived)".to_string(), |m| m.name.clone());
-        let conversion = self.company.as_ref().and_then(|c| c.conversion.clone());
         let line = |text: String| div().text_size(px(12.5)).line_height(px(18.)).text_color(c(theme::TEXT_2)).child(text);
         let body = v().id("company-settings-body").flex_1().min_h_0().overflow_y_scrollbar().p(px(22.)).gap(px(16.))
             .when(self.management_mode_supported() && self.may_approve(), |el| {
@@ -403,23 +365,13 @@ impl AppView {
                     .child(ui::eyebrow_with_info("management-team-about", format!("MANAGEMENT TEAM · {}", team.len()), "Employees without a boss. New work from the Dashboard goes to them first."))
                     .child(line(if team.is_empty() { "Nobody yet.".into() } else { team.join(", ") })),
             )
+            .child(self.render_members_section(cx))
             .child(self.employee_default_model_section(cx))
             .child(
                 v().gap(px(6.))
                     .child(ui::eyebrow_with_info("subagent-default-about", "SUBAGENT DEFAULT", "Model of Claude's subagents for every employee. A task one employee gives another runs on the assignee's own default model. Each employee can override the subagent model under Advanced in Edit employee."))
                     .child(self.delegation_rows(None, cx)),
-            )
-            .when_some(conversion, |el, r| {
-                el.child(
-                    v().gap(px(6.))
-                        .child(ui::eyebrow("CONVERTED FROM AURELIUS 0.8"))
-                        .child(line(r.summary()))
-                        .children(r.merged.iter().map(|m| line(format!("{} is now one employee (was {} in several projects).", m.name, m.merged_ids.len() + 1))))
-                        .children(r.suffixed.iter().map(|s| line(format!("{} was renamed {}.", s.old_name, s.new_name))))
-                        .children(r.archived.iter().map(|a| line(format!("{} is archived (only in the archived project {}).", a.name, a.project))))
-                        .children(r.cleared_bosses.iter().map(|b| line(format!("{} no longer reports to {} (that would have made a circle or the boss was merged).", b.name, name(b.was))))),
-                )
-            });
+            );
         page.child(header).child(body)
     }
 
@@ -453,88 +405,11 @@ impl AppView {
             })))
     }
 
-    /// New department: name, description and head.
-    pub fn new_department(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_dialog(crate::app::DialogKind::NewDepartment, window, cx);
-    }
-
-    /// The Departments page: each department with its head, members and open tasks.
-    pub fn render_departments(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let serif = ui::serif(cx);
-        let list = self.department_list();
-        let rows = list.iter().enumerate().map(|(i, d)| {
-            let key = d.key;
-            let head = d.head.and_then(|h| self.managers.iter().find(|m| m.id == h)).map(|m| m.name.clone());
-            let open = self.company.iter().flat_map(|c| c.departments.iter()).find(|x| x.id == key).map_or(0, |x| x.open_tasks as usize);
-            h().id(("department", i)).gap(px(14.)).px(px(16.)).py(px(12.)).rounded(px(9.)).cursor_pointer()
-                .bg(c(theme::PANEL)).border_1().border_color(c(theme::BORDER))
-                .hover(|s| s.bg(c(theme::SURFACE)).border_color(c(theme::BORDER_STRONG)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
-                    this.navigate(Page::Department(key));
-                    this.focus.focus(w, cx);
-                    cx.notify();
-                }))
-                .child(
-                    v().flex_1().min_w_0()
-                        .child(div().font_family(serif.clone()).text_size(px(17.)).truncate().child(d.name.clone()))
-                        .child(div().text_size(px(12.)).text_color(c(theme::MUTED)).truncate().child(if d.description.is_empty() { "No description".to_string() } else { d.description.clone() })),
-                )
-                .child(div().w(px(180.)).text_size(px(12.)).text_color(c(theme::TEXT_2)).truncate().child(head.map_or_else(|| "No head".to_string(), |h| format!("Head: {h}"))))
-                .child(div().w(px(110.)).text_size(px(12.)).text_color(c(theme::MUTED)).child(format!("{} {}", d.members.len(), if d.members.len() == 1 { "member" } else { "members" })))
-                .child(div().w(px(110.)).text_size(px(12.)).text_color(c(if open > 0 { theme::TEXT_2 } else { theme::MUTED })).child(format!("{open} open {}", if open == 1 { "task" } else { "tasks" })))
-        }).collect::<Vec<_>>();
-        let body = v().pt(px(40.)).pb(px(40.)).gap(px(8.))
-            .child(
-                h().mb(px(10.)).justify_between()
-                    .child(div().font_family(serif.clone()).text_size(px(30.)).child("Departments"))
-                    .child(ui::button("department-add", "New department", ButtonKind::Outline, None).h(px(30.)).on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.new_department(w, cx)))),
-            )
-            .when(rows.is_empty(), |el| el.child(div().text_color(c(theme::MUTED)).child("No departments yet.")))
-            .children(rows);
-        self.page(body).into_any_element()
-    }
-
-    /// One department: what it is for, its head, its members and its memory.
-    pub fn render_department(&mut self, key: DepartmentKey, cx: &mut Context<Self>) -> AnyElement {
-        let serif = ui::serif(cx);
-        let Some(d) = self.department_list().into_iter().find(|d| d.key == key) else {
-            return v().flex_1().items_center().justify_center().text_color(c(theme::MUTED)).child("This department no longer exists. Esc goes back.").into_any_element();
-        };
-        self.ensure_department_memory(key);
-        let members: Vec<EmployeeSummary> = d.members.iter().filter_map(|id| self.managers.iter().find(|m| m.id == *id)).cloned().collect();
-        let head = d.head.and_then(|h| self.managers.iter().find(|m| m.id == h)).cloned();
-        let memory: Vec<aurelius_protocol::MemoryView> = self.department_memory.as_ref().filter(|(k, _)| *k == key).map(|(_, l)| l.iter().take(20).cloned().collect()).unwrap_or_default();
-        let card = || v().gap(px(4.)).px(px(16.)).py(px(14.)).rounded(px(10.)).border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE));
-        let body = v().pt(px(40.)).pb(px(40.)).gap(px(16.))
-            .child(
-                h().justify_between().gap(px(16.))
-                    .child(div().flex_1().min_w_0().truncate().font_family(serif).text_size(px(30.)).child(d.name.clone()))
-                    .child(
-                        h().gap(px(6.))
-                            .child(ui::button("department-add-employee", "Add employee", ButtonKind::Outline, None).h(px(28.)).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(AddEmployee), cx))))
-                            .child(ui::button("department-edit", "Edit", ButtonKind::Outline, Some(ui::kbd("f2", cx))).h(px(28.)).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(EditItem), cx))))
-                            .child(ui::button("department-archive", "Archive", ButtonKind::Outline, None).h(px(28.)).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(ArchiveItem), cx)))),
-                    ),
-            )
-            .when(!d.description.is_empty(), |el| el.child(div().text_size(px(14.)).text_color(c(theme::TEXT_2)).child(d.description.clone())))
-            .child(card().child(ui::eyebrow("HEAD")).child(match &head {
-                Some(m) => self.employee_row(("department-head", 0), 0, m, None, cx).into_any_element(),
-                None => div().py(px(6.)).text_size(px(12.5)).text_color(c(theme::MUTED)).child("No head yet. Choose one with Edit (F2).").into_any_element(),
-            }))
-            .child(card().child(ui::eyebrow(format!("MEMBERS · {}", members.len())))
-                .when(members.is_empty(), |el| el.child(div().py(px(6.)).text_size(px(12.5)).text_color(c(theme::MUTED)).child("Nobody yet.")))
-                .children(members.iter().enumerate().map(|(i, m)| self.employee_row(("department-member", i), 0, m, None, cx))))
-            .child(card().child(ui::eyebrow("MEMORY"))
-                .when(memory.is_empty(), |el| el.child(div().py(px(6.)).text_size(px(12.5)).text_color(c(theme::MUTED)).child("Nothing remembered here yet.")))
-                .children(memory.iter().map(|m| div().py(px(5.)).text_size(px(13.)).line_height(px(19.)).line_clamp(2).child(m.content.clone()))));
-        self.page(body).into_any_element()
-    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::{departments, line_diff, org_rows, reports_candidates};
-    use aurelius_domain::DepartmentId;
+    use super::{line_diff, org_rows, reports_candidates};
 
     #[test]
     fn the_instruction_diff_keeps_common_lines_and_marks_the_rest() {
@@ -546,10 +421,9 @@ pub(crate) mod tests {
     use aurelius_domain::{ConversationId, EmployeeId, autonomy::AgentMode, employee::LifecycleStatus};
     use aurelius_protocol::EmployeeSummary;
 
-    pub(crate) fn manager(department: DepartmentId, name: &str, reports_to: Option<EmployeeId>) -> EmployeeSummary {
+    pub(crate) fn manager(name: &str, reports_to: Option<EmployeeId>) -> EmployeeSummary {
         EmployeeSummary {
             id: EmployeeId::new(),
-            department_id: Some(department),
             projects_active: vec![],
             name: name.into(),
             role: "Role".into(),
@@ -577,13 +451,11 @@ pub(crate) mod tests {
 
     #[test]
     fn the_chart_lists_roots_first_each_followed_by_its_reports() {
-        let (p, other) = (DepartmentId::new(), DepartmentId::new());
-        let jean = manager(p, "Jean", None);
-        let simon = manager(p, "Simon", Some(jean.id));
-        // The chart is the company's: departments do not cut reporting lines.
-        let dean = manager(other, "Dean", Some(simon.id));
-        let max = manager(p, "Max", Some(simon.id));
-        let tom = manager(other, "Tom", None);
+        let jean = manager("Jean", None);
+        let simon = manager("Simon", Some(jean.id));
+        let dean = manager("Dean", Some(simon.id));
+        let max = manager("Max", Some(simon.id));
+        let tom = manager("Tom", None);
         let all = vec![dean, tom, simon, max, jean];
         let rows = org_rows(&all);
         let expected: Vec<(usize, String)> = [(0, "Tom"), (0, "Jean"), (1, "Simon"), (2, "Dean"), (2, "Max")].into_iter().map(|(d, n)| (d, n.to_string())).collect();
@@ -605,39 +477,19 @@ pub(crate) mod tests {
 
     #[test]
     fn an_archived_boss_makes_its_reports_roots() {
-        let p = DepartmentId::new();
-        let mut boss = manager(p, "Boss", None);
-        let report = manager(p, "Report", Some(boss.id));
-        let elsewhere = manager(DepartmentId::new(), "Elsewhere", None);
+        let mut boss = manager("Boss", None);
+        let report = manager("Report", Some(boss.id));
+        let elsewhere = manager("Elsewhere", None);
         boss.status = LifecycleStatus::Archived;
         let all = vec![boss, report, elsewhere];
         assert_eq!(names(&org_rows(&all)), vec![(0, "Report".to_string()), (0, "Elsewhere".to_string())]);
     }
 
     #[test]
-    fn departments_list_their_active_members_and_head() {
-        let (eng, ops) = (DepartmentId::new(), DepartmentId::new());
-        let head = manager(eng, "Simon", None);
-        let dev = manager(eng, "Dean", Some(head.id));
-        let mut gone = manager(eng, "Old", None);
-        gone.status = LifecycleStatus::Archived;
-        let other = manager(ops, "Tom", None);
-        let summary: aurelius_protocol::DepartmentSummary = serde_json::from_value(serde_json::json!({
-            "id": eng, "name": "Engineering", "description": null, "head_id": head.id, "status": "active",
-            "version": 1, "created_at_ms": 0, "member_count": 2, "open_tasks": 0,
-        })).unwrap();
-        let list = departments(&[summary], &[head.clone(), dev.clone(), gone, other]);
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].head, Some(head.id));
-        assert_eq!(list[0].members, vec![head.id, dev.id]);
-    }
-
-    #[test]
     fn nobody_may_report_to_themselves_or_to_someone_below_them() {
-        let p = DepartmentId::new();
-        let jean = manager(p, "Jean", None);
-        let simon = manager(p, "Simon", Some(jean.id));
-        let dean = manager(DepartmentId::new(), "Dean", Some(simon.id));
+        let jean = manager("Jean", None);
+        let simon = manager("Simon", Some(jean.id));
+        let dean = manager("Dean", Some(simon.id));
         let all = vec![jean.clone(), simon.clone(), dean.clone()];
         let for_jean: Vec<_> = reports_candidates(&all, Some(jean.id)).iter().map(|m| m.name.clone()).collect();
         assert!(for_jean.is_empty(), "everyone is below the root");

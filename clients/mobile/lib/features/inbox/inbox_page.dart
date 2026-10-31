@@ -71,7 +71,7 @@ class _InboxPageState extends State<InboxPage> {
             for (final p in s.proposals)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: ProposalCard(proposal: p, departmentName: company.department(p.departmentId)?.name, onDecide: (approve, note, instructions) => bloc.add(ProposalDecided(p, approve: approve, note: note, instructions: instructions))),
+                child: ProposalCard(proposal: p, onDecide: (approve, note, instructions) => bloc.add(ProposalDecided(p, approve: approve, note: note, instructions: instructions))),
               ),
             for (final t in s.variantTasks)
               Padding(

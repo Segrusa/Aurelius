@@ -38,7 +38,7 @@ async fn ask(root: &Path, run: RunId, call: &str, tool: &str, input: serde_json:
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str) -> EmployeeId {
     match client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result
@@ -160,7 +160,7 @@ async fn a_employee_delegates_a_part_and_finishes_with_everything() {
 
     // While Alex works, he gives the UI to Iris.
     let run = running_run(dir.path(), parent).await;
-    let at_work = client.employees(None).await.unwrap().employees.into_iter().find(|m| m.id == alex).unwrap();
+    let at_work = client.employees().await.unwrap().employees.into_iter().find(|m| m.id == alex).unwrap();
     assert!(at_work.agents.iter().any(|a| a.kind == "conversation"), "{:?}", at_work.agents);
     let (ok, text) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "iris".into(), title: "Dark mode UI".into(), goal: "Maak het donkere thema".into(), criteria: vec![], project: None })
         .await
@@ -800,7 +800,7 @@ async fn a_sequential_employee_works_on_its_tasks_one_at_a_time_in_order() {
     let client = connect(dir.path()).await;
     let (project, alex, iris) = setup(&client).await;
     one_at_a_time(&client, alex, "Alex", "Backend developer", true).await;
-    let summaries = client.employees(None).await.unwrap().employees;
+    let summaries = client.employees().await.unwrap().employees;
     assert!(summaries.iter().find(|m| m.id == alex).unwrap().sequential_tasks);
     assert!(!summaries.iter().find(|m| m.id == iris).unwrap().sequential_tasks, "off by default");
 
@@ -896,7 +896,7 @@ async fn turning_one_at_a_time_off_starts_the_queued_tasks() {
 
     // Off again: the queued task starts beside the running one, as before.
     one_at_a_time(&client, alex, "Alex", "Backend developer", false).await;
-    assert!(!client.employees(None).await.unwrap().employees.iter().find(|m| m.id == alex).unwrap().sequential_tasks);
+    assert!(!client.employees().await.unwrap().employees.iter().find(|m| m.id == alex).unwrap().sequential_tasks);
     running_run(dir.path(), second).await;
     assert_eq!(running_tasks(dir.path(), alex), 2);
     release.notify_one();

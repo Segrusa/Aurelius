@@ -26,11 +26,12 @@ pub async fn get(shared: &Arc<Shared>, id: String, offset: Option<u64>, max_side
     let found = spawn(move || {
         store
             .read(|c| {
-                use aurelius_storage::{conversations, ideas, task_schedules, tasks};
+                use aurelius_storage::{conversations, ideas, task_schedules, tasks, tickets};
                 Ok(match owner {
                     UploadOwner::Task(task) => tasks::attachments_of(c, task)?.map(|a| (vec![a.folder], a.files)),
                     UploadOwner::Schedule(schedule) => task_schedules::load(c, schedule)?.and_then(|r| r.attachments).map(|a| (vec![a.folder], a.files)),
                     UploadOwner::Idea(idea) => ideas::load(c, idea)?.and_then(|r| r.attachments).map(|a| (vec![a.folder], a.files)),
+                    UploadOwner::Ticket(ticket) => tickets::attachments_of(c, ticket)?.map(|a| (vec![a.folder], a.files)),
                     UploadOwner::Message(message) => match conversations::message_uploads(c, message)? {
                         Some((conversation, files)) => Some((conversations::work_folders(c, conversation)?, files)),
                         None => None,

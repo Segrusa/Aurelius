@@ -35,7 +35,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 }
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Onderzoeker".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None };
+    let create = CreateEmployee { name: name.into(), role: "Onderzoeker".into(), title: None, reports_to: None, instructions: None, folder: None };
     match client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result {
         CommandResult::EmployeeCreated { employee_id, .. } => employee_id,
         other => panic!("{other:?}"),
@@ -65,9 +65,9 @@ async fn work(client: &Client, project_id: ProjectId, employee_id: EmployeeId, t
     panic!("the task did not finish");
 }
 
-/// What the project's and the employee's memory views show (project, own, department, global).
+/// What the project's and the employee's memory views show (project, own, global).
 async fn memory(client: &Client, project: ProjectId, employee: EmployeeId) -> Vec<MemoryView> {
-    client.memory_of(Some(project), Some(employee), None).await.unwrap().items
+    client.memory_of(Some(project), Some(employee)).await.unwrap().items
 }
 
 /// A message to the employee in a task conversation, and the answer to it.

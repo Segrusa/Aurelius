@@ -52,10 +52,9 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ProjectList
         | Method::JobList
         | Method::ConversationGet { .. }
-        | Method::EmployeeList { .. }
+        | Method::EmployeeList
         | Method::EmployeeChat { .. }
         | Method::GroupChatGet
-        | Method::DepartmentList { .. }
         | Method::CompanyGet
         | Method::ProjectConversationList { .. }
         | Method::ApprovalList
@@ -72,7 +71,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::IdeaListAll {}
         | Method::NoteList { .. }
         | Method::NoteGet { .. }
-        | Method::ProposalList { .. }
+        | Method::ProposalList
         | Method::EmployeeInstructionVersions { .. }
         | Method::RecurringTaskList { .. }
         | Method::ShareList { .. }
@@ -106,7 +105,14 @@ fn method_needs(method: &Method) -> Needs {
         | Method::MarkdownGet { .. }
         | Method::SubagentList { .. }
         | Method::ActivityGet { .. }
-        | Method::UpdateGet { .. } => Needs::Cap(Read),
+        | Method::UpdateGet { .. }
+        | Method::BoardGet { .. }
+        | Method::TicketGet { .. }
+        | Method::TicketList { .. }
+        // Every own client must pass the onboarding (MU1-20/21): identification, not a right.
+        | Method::UserList
+        | Method::UserWhoami
+        | Method::UserUse(_) => Needs::Cap(Read),
         // Functions and API keys let outside apps start work on the server.
         Method::AgentFunctionList { .. }
         | Method::FunctionCallList { .. }
@@ -163,6 +169,8 @@ fn host_needs(host: &HostWrite) -> Needs {
         | HostWrite::PluginSetForProject { .. } => Needs::Cap(Approve),
         // Notes are project content, like ideas.
         HostWrite::NoteCreate { .. } | HostWrite::NoteUpdate { .. } | HostWrite::NoteSetPinned { .. } | HostWrite::NoteDelete { .. } => Needs::Cap(TaskControl),
+        // Every own client must be able to make the first board member (MU1-20).
+        HostWrite::UserCreate(_) => Needs::Cap(Read),
         // The inbox is the user's own: reading, dismissing.
         HostWrite::NotificationMarkAllRead | HostWrite::NotificationDismiss { .. } | HostWrite::NotificationDismissAll => Needs::Cap(Read),
         HostWrite::SecretSet { .. }
@@ -230,6 +238,9 @@ fn command_needs(command: &Command) -> Needs {
         // Screenshots can show anything on screen: same rule as the browser.
         Command::SetScreenAllowed(s) if s.allowed => Needs::Cap(Approve),
         Command::SetScreenAllowed(_) => Needs::Cap(Chat),
+        // A ticket whose main task runs in Auto needs what a task in Auto needs.
+        Command::CreateTicket(t) if t.run.mode == Some(AgentMode::Auto) => Needs::Cap(Approve),
+        Command::UpdateTicket(t) if t.run.as_ref().is_some_and(|r| r.mode == Some(AgentMode::Auto)) => Needs::Cap(Approve),
         // Only an owner picks a folder on the server.
         Command::CreateProject(p) if p.folder.is_some() => Needs::Owner,
         Command::CreateEmployee(m) if m.folder.is_some() => Needs::Owner,
@@ -243,10 +254,6 @@ fn command_needs(command: &Command) -> Needs {
         | Command::RestoreEmployeeInstructions(_)
         | Command::SetEmployeeStatus(_)
         | Command::SetEmployeeReportsTo(_)
-        | Command::SetEmployeeDepartment(_)
-        | Command::CreateDepartment(_)
-        | Command::UpdateDepartment(_)
-        | Command::ArchiveDepartment(_)
         | Command::SetHeartbeat(_)
         | Command::CreateTask(_)
         | Command::CreateTaskSchedule(_)
@@ -267,7 +274,23 @@ fn command_needs(command: &Command) -> Needs {
         | Command::ForgetMemory(_)
         | Command::PinMemory(_)
         | Command::ConsolidateMemory(_)
-        | Command::RevokeShare(_) => Needs::Cap(TaskControl),
+        | Command::RevokeShare(_)
+        // Tickets and the board: the same right as making tasks. The review gate
+        // (accept, send back) is a board member's on any of the user's own clients.
+        | Command::CreateTicket(_)
+        | Command::UpdateTicket(_)
+        | Command::MoveTicket(_)
+        | Command::StartTicket(_)
+        | Command::AssignTicket(_)
+        | Command::ApprovePlan(_)
+        | Command::RevisePlan(_)
+        | Command::AcceptTicket(_)
+        | Command::SendBackTicket(_)
+        | Command::CancelTicket(_)
+        | Command::ArchiveTicket(_)
+        | Command::UpdateBoardColumns(_)
+        | Command::UpdateCompany(_)
+        | Command::UpdateProject(_) => Needs::Cap(TaskControl),
         // Creates an employee that works on the host: like approving an action.
         Command::DecideApproval(_) | Command::AnswerQuestion(_) | Command::DecidePlan(_) | Command::DecideProposal(_) => Needs::Cap(Approve),
         // Puts the chosen diff into the work folder: like approving an action.
@@ -621,23 +644,16 @@ mod tests {
 
     #[test]
     fn org_chart_changes_need_task_control_and_proposals_need_approve() {
-        use aurelius_domain::{DepartmentId, EmployeeId, ProposalId, department::{ArchiveDepartment, CreateDepartment}, employee::{SetEmployeeDepartment, SetEmployeeReportsTo, SetFollowOrgChart}, proposal::DecideProposal};
+        use aurelius_domain::{EmployeeId, ProposalId, employee::{SetEmployeeReportsTo, SetFollowOrgChart}, proposal::DecideProposal};
         let set = exec(Command::SetEmployeeReportsTo(SetEmployeeReportsTo { employee_id: EmployeeId::new(), reports_to: None }));
         let follow = exec(Command::SetFollowOrgChart(SetFollowOrgChart { follow: true }));
         let decide = exec(Command::DecideProposal(DecideProposal { proposal_id: ProposalId::new(), approve: true, edits: None, note: None, instructions: None }));
         assert_eq!(required(&set), cap(Capability::TaskControl));
         assert_eq!(required(&follow), cap(Capability::TaskControl));
         assert_eq!(required(&decide), cap(Capability::Approve));
-        assert_eq!(required(&read(Method::ProposalList { department_id: None })), cap(Capability::Read));
-        // Departments and the company are org chart changes and reads too.
-        for command in [
-            Command::CreateDepartment(CreateDepartment { name: "Engineering".into(), description: None, head_id: None }),
-            Command::ArchiveDepartment(ArchiveDepartment { department_id: DepartmentId::new() }),
-            Command::SetEmployeeDepartment(SetEmployeeDepartment { employee_id: EmployeeId::new(), department_id: None }),
-        ] {
-            assert_eq!(required(&exec(command)), cap(Capability::TaskControl));
-        }
-        for method in [Method::CompanyGet, Method::DepartmentList { archived: true }, Method::EmployeeChat { employee_id: EmployeeId::new() }, Method::GroupChatGet] {
+        assert_eq!(required(&read(Method::ProposalList)), cap(Capability::Read));
+        // The company is an org chart read too.
+        for method in [Method::CompanyGet, Method::EmployeeChat { employee_id: EmployeeId::new() }, Method::GroupChatGet] {
             assert_eq!(required(&read(method)), cap(Capability::Read));
         }
         // Writing in the group chat is chatting.

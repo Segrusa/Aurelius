@@ -38,29 +38,15 @@ String? defaultAssignee(List<EmployeeSummary> employees) {
 typedef EmployeeGroup = ({String title, List<EmployeeSummary> employees});
 
 /// Employees for "Who leads this task?": the management team first, then the
-/// others by department (alphabetical, "No department" last), by name inside.
-List<EmployeeGroup> pickerGroups(List<EmployeeSummary> employees, List<DepartmentSummary> departments) {
+/// others, by name inside.
+List<EmployeeGroup> pickerGroups(List<EmployeeSummary> employees) {
   final team = managementTeam(employees);
   final teamIds = {for (final e in team) e.id};
   final rest = activeEmployees(employees).where((e) => !teamIds.contains(e.id)).toList()..sort(byName);
-  final names = {for (final d in departments) d.id: d.name};
-  final byDepartment = <String?, List<EmployeeSummary>>{};
-  for (final e in rest) {
-    byDepartment.putIfAbsent(names.containsKey(e.departmentId) ? e.departmentId : null, () => []).add(e);
-  }
-  final keys = byDepartment.keys.whereType<String>().toList()..sort((a, b) => names[a]!.toLowerCase().compareTo(names[b]!.toLowerCase()));
   return [
     if (team.isNotEmpty) (title: 'Management team', employees: team),
-    for (final k in keys) (title: names[k]!, employees: byDepartment[k]!),
-    if (byDepartment[null] case final none?) (title: keys.isEmpty && team.isEmpty ? 'Employees' : 'No department', employees: none),
+    if (rest.isNotEmpty) (title: 'Employees', employees: rest),
   ];
-}
-
-/// The employees of a department, its head first, then by name.
-List<EmployeeSummary> departmentMembers(List<EmployeeSummary> employees, DepartmentSummary department) {
-  final members = activeEmployees(employees).where((e) => e.departmentId == department.id).toList()..sort(byName);
-  final head = members.where((e) => e.id == department.headId).toList();
-  return [...head, ...members.where((e) => e.id != department.headId)];
 }
 
 /// Open tasks: not ended yet.

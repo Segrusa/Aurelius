@@ -58,7 +58,6 @@ extension EmployeeSummaryView on EmployeeSummary {
         id: id,
         instructions: instructions,
         name: name,
-        departmentId: departmentId,
         projectsActive: projectsActive,
         reportsTo: reportsTo,
         role: role,
@@ -88,10 +87,20 @@ extension AgentWorkView on AgentView {
 }
 
 extension TaskViewState on TaskView {
-  /// The user can give it to (another) employee while nothing runs.
-  bool get canAssign => status == TaskStatus.draft || status == TaskStatus.queued || status == TaskStatus.waiting;
+  /// The user can give it to (another) employee while nothing runs. Never the
+  /// main task of a ticket: the board assigns that ([isTicketMain]).
+  bool get canAssign => !isTicketMain && (status == TaskStatus.draft || status == TaskStatus.queued || status == TaskStatus.waiting);
+
+  /// The main task of a ticket (a delegation inherits the ticket, but has a
+  /// parent). The server refuses task.assign and task.cancel for it: Give to…
+  /// and Cancel task go through the board (owner, Back to Backlog).
+  bool get isTicketMain => ticketId != null && parentTaskId == null;
 
   bool get isDone => status == TaskStatus.succeeded || status == TaskStatus.failed || status == TaskStatus.cancelled;
+
+  /// Still works on a ticket, as the server counts it for Done (B6): queued,
+  /// running or waiting; a draft or a task in review does not.
+  bool get stillWorks => status == TaskStatus.queued || status == TaskStatus.running || status == TaskStatus.waiting;
 
   /// Ended, but a follow-up run is going (or waits in the queue). Older servers never send it.
   bool get hasLiveRun => isDone && liveRun != null;

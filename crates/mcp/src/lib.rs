@@ -336,7 +336,7 @@ impl Server {
 
     /// The company's employees: any of them may work in any project.
     async fn employees(&self) -> Result<Vec<EmployeeSummary>, String> {
-        Ok(self.client().await.employees(None).await.map_err(|e| self.fail(e))?.employees)
+        Ok(self.client().await.employees().await.map_err(|e| self.fail(e))?.employees)
     }
 
     async fn employee(&self, arg: &str) -> Result<EmployeeSummary, String> {

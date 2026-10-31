@@ -16,7 +16,7 @@ ResponseBody body(Map<String, dynamic> json) {
 
 void main() {
   test('every request names its method <area>.<verb> and carries the major', () {
-    expect(protocolMajor, 3);
+    expect(protocolMajor, 4);
     final request = Commands.sendProjectMessage('p', 'Hello');
     expect(request['method'], 'project_conversation.send');
     expect((request['params'] as Map)['text'], 'Hello');
@@ -29,39 +29,27 @@ void main() {
     });
   });
 
-  test('employees and departments are written company-wide', () {
-    expect(Commands.createEmployee('Ada', 'CTO', departmentId: 'd1'), {
+  test('employees are written company-wide', () {
+    expect(Commands.createEmployee('Ada', 'CTO', reportsTo: 'm0'), {
       'method': 'employee.create',
-      'params': {'department_id': 'd1', 'name': 'Ada', 'role': 'CTO'},
+      'params': {'name': 'Ada', 'reports_to': 'm0', 'role': 'CTO'},
     });
-    expect(Commands.setEmployeeDepartment('m', null), {
-      'method': 'employee.set_department',
-      'params': {'employee_id': 'm'},
-    });
-    expect(Commands.createDepartment('Engineering', headId: 'm'), {
-      'method': 'department.create',
-      'params': {'head_id': 'm', 'name': 'Engineering'},
-    });
-    expect(Commands.updateDepartment('d', 'Eng', description: '')['method'], 'department.update');
-    expect(Commands.archiveDepartment('d'), {'method': 'department.archive', 'params': {'department_id': 'd'}});
     expect(Commands.sendEmployeeMessage('m', 'Hi', conversationId: 'chat')['method'], 'employee.send_message');
     expect(paramsOf(Commands.assignTask('t', 'm')), {'employee_id': 'm', 'task_id': 't'});
-    expect(paramsOf(Commands.remember('department', 'd', MemoryKind.decision, 'x'))['scope'], {'kind': 'department', 'id': 'd'});
+    expect(paramsOf(Commands.remember('employee', 'm', MemoryKind.decision, 'x'))['scope'], {'kind': 'employee', 'id': 'm'});
   });
 
-  test('company.get: departments, employees, the setting and the management team', () {
+  test('company.get: employees, the setting and the management team', () {
     final company = (body({
       'type': 'company',
       'value': {
         'as_of_seq': 4,
-        'departments': [
-          {'id': 'd1', 'name': 'Engineering', 'head_id': 'm1', 'status': 'active', 'version': 1, 'created_at_ms': 1, 'member_count': 2, 'open_tasks': 3},
-        ],
+        'company': {'id': 'co', 'name': 'Segrusa', 'version': 2, 'dispatcher_employee_id': 'm1'},
         'employees': [
           {
             'id': 'm1', 'name': 'Ada', 'role': 'CTO', 'status': 'active', 'version': 1, 'conversation_id': 'c1', 'working': false,
             'agent_mode': 'ask', 'browser_allowed': false, 'screen_allowed': false, 'sequential_tasks': false,
-            'conversations': [], 'agents': [], 'department_id': 'd1', 'projects_active': ['p'],
+            'conversations': [], 'agents': [], 'projects_active': ['p'],
           },
         ],
         'follow_org_chart': true,
@@ -69,12 +57,10 @@ void main() {
       },
     }) as ResponseBodyCompany)
         .value;
+    expect(company.company.name, 'Segrusa');
+    expect(company.company.dispatcherEmployeeId, 'm1');
     expect(company.followOrgChart, isTrue);
     expect(company.roots, ['m1']);
-    expect(company.departments.single.headId, 'm1');
-    expect(company.departments.single.status, DepartmentStatus.active);
-    expect(company.departments.single.openTasks, 3);
-    expect(company.employees.single.departmentId, 'd1');
     expect(company.employees.single.projectsActive, ['p']);
   });
 
@@ -88,7 +74,7 @@ void main() {
         'host_id': 'h',
         'host_name': 'my-pc',
         'os': 'windows',
-        'protocol': 3,
+        'protocol': 4,
         'remote': true,
       },
     }) as ResponseBodyHello)
@@ -122,7 +108,6 @@ void main() {
         'employees': [
           {
             'id': 'm1',
-            'department_id': 'd',
             'projects_active': ['p'],
             'name': 'Iris',
             'role': 'Writer',
@@ -152,7 +137,6 @@ void main() {
         .value
         .employees
         .single;
-    expect(m.departmentId, 'd');
     expect(m.title, 'Head of content');
     expect(m.reportsTo, 'm0');
     expect(m.roleLine, 'Head of content · Writer');
@@ -396,7 +380,7 @@ void main() {
               ],
             },
             {
-              'id': 'pr1', 'department_id': 'd', 'proposed_by': 'm1', 'proposed_by_name': 'Iris', 'name': 'Sam', 'role': 'Designer',
+              'id': 'pr1', 'proposed_by': 'm1', 'proposed_by_name': 'Iris', 'name': 'Sam', 'role': 'Designer',
               'instructions': 'Design', 'reason': 'We need it', 'status': 'pending', 'created_at_ms': 1,
             },
           ],

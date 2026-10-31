@@ -44,7 +44,7 @@ class IdeasTab extends StatelessWidget {
     final bloc = context.read<IdeasBloc>();
     final company = context.read<CompanyBloc>().state;
     // The management team first, then everyone else.
-    final employees = [for (final g in pickerGroups(company.activeEmployees.where((m) => m.status == LifecycleStatus.active).toList(), company.activeDepartments)) ...g.employees];
+    final employees = [for (final g in pickerGroups(company.activeEmployees.where((m) => m.status == LifecycleStatus.active).toList())) ...g.employees];
     final choice = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,

@@ -1,11 +1,10 @@
-//! The Tasks page: every task of every project, filtered by employee, department, project
-//! and state; a task opens in the right panel (plan v0.9, phase 2).
+//! The Tasks page: every task of every project, filtered by employee, project and state; a task opens in the right panel (plan v0.9, phase 2).
 
-use crate::app::{AppView, Overlay, DepartmentKey, MenuDo, MenuEntry, MenuItems, Panel, TaskChoice};
+use crate::app::{AppView, Overlay, MenuDo, MenuEntry, MenuItems, Panel, TaskChoice};
 use crate::theme::{self, c};
 use crate::ui::{self, h, v};
 use aurelius_domain::{EmployeeId, ProjectId};
-use aurelius_protocol::{EmployeeSummary, TaskView};
+use aurelius_protocol::TaskView;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -50,21 +49,17 @@ impl TaskState {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct TaskFilter {
     pub employee: Option<EmployeeId>,
-    pub department: Option<DepartmentKey>,
     pub project: Option<ProjectId>,
     pub state: TaskState,
 }
 
-/// The tasks the filter lets through, newest change first. The department is the current
-/// employee's (as `task.list {department_id}` reads it).
-pub fn filter_tasks<'a>(tasks: &'a [TaskView], managers: &[EmployeeSummary], f: &TaskFilter) -> Vec<&'a TaskView> {
-    let department_of = |t: &TaskView| t.employee_id.and_then(|id| managers.iter().find(|m| m.id == id)).and_then(|m| m.department_id);
+/// The tasks the filter lets through, newest change first.
+pub fn filter_tasks<'a>(tasks: &'a [TaskView], f: &TaskFilter) -> Vec<&'a TaskView> {
     let mut out: Vec<&TaskView> = tasks
         .iter()
         .filter(|t| f.state.admits(t))
         .filter(|t| f.employee.is_none_or(|e| t.employee_id == Some(e)))
         .filter(|t| f.project.is_none_or(|p| t.project_id == p))
-        .filter(|t| f.department.is_none_or(|d| department_of(t) == Some(d)))
         .collect();
     out.sort_by_key(|t| std::cmp::Reverse(t.updated_at_ms));
     out
@@ -150,11 +145,6 @@ impl AppView {
                 items.push(None);
                 items.extend(crate::screens::dashboard::assignee_order(&self.managers).into_iter().map(|m| option(m.name.clone(), TaskChoice::FilterEmployee(Some(m.id)), f.employee == Some(m.id))));
             }
-            "tasks-department" => {
-                items.push(option("Any department".into(), TaskChoice::FilterDepartment(None), f.department.is_none()));
-                items.push(None);
-                items.extend(self.department_list().into_iter().map(|d| option(d.name, TaskChoice::FilterDepartment(Some(d.key)), f.department == Some(d.key))));
-            }
             _ => {
                 items.push(option("Any project".into(), TaskChoice::FilterProject(None), f.project.is_none()));
                 items.push(None);
@@ -167,7 +157,7 @@ impl AppView {
     pub fn render_all_tasks(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let serif = ui::serif(cx);
         let f = self.tasks_filter;
-        let all = fold_tree(&tree_order(&filter_tasks(&self.tasks, &self.managers, &f)), &self.tasks_folds);
+        let all = fold_tree(&tree_order(&filter_tasks(&self.tasks, &f)), &self.tasks_folds);
         let mut shown = if self.tasks_shown.0 == f { self.tasks_shown.1 } else { ROWS_STEP };
         let (offset, max) = (self.page_scroll.offset().y, self.page_scroll.max_offset().y);
         if shown < all.len() && max > px(0.) && -offset + px(800.) >= max {
@@ -178,7 +168,6 @@ impl AppView {
         let rows = &all[..all.len().min(shown)];
         let open_task = match self.panel { Panel::Task(id) => Some(id), _ => None };
         let employee = f.employee.and_then(|id| self.managers.iter().find(|m| m.id == id)).map_or_else(|| "Anyone".to_string(), |m| m.name.clone());
-        let department = f.department.map_or_else(|| "Any department".to_string(), |d| self.department_name(Some(d)));
         let project = f.project.and_then(|id| self.projects.iter().find(|p| p.id == id)).map_or_else(|| "Any project".to_string(), |p| p.name.clone());
         let picker = |id: &'static str, label: String, set: bool, cx: &mut Context<Self>| {
             let open = self.overlay == Overlay::Menu && self.menu.as_ref().is_some_and(|m| m.field == Some(id));
@@ -208,7 +197,6 @@ impl AppView {
             .child(states)
             .child(div().w(px(1.)).h(px(20.)).bg(c(theme::BORDER)))
             .child(picker("tasks-employee", employee, f.employee.is_some(), cx))
-            .child(picker("tasks-department", department, f.department.is_some(), cx))
             .child(picker("tasks-project", project, f.project.is_some(), cx));
         let list = v().rounded(px(9.)).border_1().border_color(c(theme::BORDER)).bg(c(theme::PANEL)).overflow_hidden()
             .children(rows.iter().enumerate().map(|(i, row)| {
@@ -217,6 +205,11 @@ impl AppView {
                 let mark = self.task_mark(t);
                 let project = self.projects.iter().find(|p| p.id == t.project_id).map_or_else(String::new, |p| p.name.clone());
                 let who = t.employee_name.clone().unwrap_or_else(|| "Nobody yet (draft)".into());
+                // A task of a ticket says so (§2): "#42".
+                let project = match t.ticket_number {
+                    Some(n) => format!("#{n} · {project}"),
+                    None => project,
+                };
                 h().id(("all-task", i)).gap(px(12.)).pr(px(14.)).pl(px(14. + 20. * depth as f32)).py(px(9.)).cursor_pointer()
                     .when(i > 0, |el| el.border_t_1().border_color(c(theme::BORDER)))
                     .when(open_task == Some(id), |el| el.bg(c(theme::SURFACE_2)))
@@ -259,7 +252,7 @@ pub(crate) mod tests {
     use super::{TaskFilter, TaskState, filter_tasks};
     use std::collections::HashMap;
     use crate::screens::org::tests::manager;
-    use aurelius_domain::{DepartmentId, ProjectId, task::TaskStatus};
+    use aurelius_domain::{ProjectId, task::TaskStatus};
 
     pub(crate) fn task(project: ProjectId, manager: Option<aurelius_domain::EmployeeId>, status: TaskStatus, updated: i64) -> aurelius_protocol::TaskView {
         let mut t: aurelius_protocol::TaskView = serde_json::from_value(serde_json::json!({
@@ -277,26 +270,21 @@ pub(crate) mod tests {
     #[test]
     fn filters_combine_and_the_newest_comes_first() {
         let (a, b) = (ProjectId::new(), ProjectId::new());
-        let (servers, mobile) = (DepartmentId::new(), DepartmentId::new());
-        let simon = manager(servers, "Simon", None);
-        let max = manager(mobile, "Max", None);
-        let managers = vec![simon.clone(), max.clone()];
+        let simon = manager("Simon", None);
+        let max = manager("Max", None);
         let tasks = vec![
             task(a, Some(simon.id), TaskStatus::Running, 1),
             task(a, Some(simon.id), TaskStatus::Succeeded, 2),
             task(b, Some(max.id), TaskStatus::Queued, 3),
             task(b, Some(simon.id), TaskStatus::Queued, 4),
         ];
-        let open = filter_tasks(&tasks, &managers, &TaskFilter::default());
+        let open = filter_tasks(&tasks, &TaskFilter::default());
         assert_eq!(open.iter().map(|t| t.updated_at_ms).collect::<Vec<_>>(), [4, 3, 1]);
-        let simons = filter_tasks(&tasks, &managers, &TaskFilter { employee: Some(simon.id), state: TaskState::All, ..Default::default() });
+        let simons = filter_tasks(&tasks, &TaskFilter { employee: Some(simon.id), state: TaskState::All, ..Default::default() });
         assert_eq!(simons.len(), 3);
-        let in_b = filter_tasks(&tasks, &managers, &TaskFilter { project: Some(b), ..Default::default() });
+        let in_b = filter_tasks(&tasks, &TaskFilter { project: Some(b), ..Default::default() });
         assert_eq!(in_b.len(), 2);
-        // Department: the employee's, wherever the task is.
-        let dept_a = filter_tasks(&tasks, &managers, &TaskFilter { department: Some(servers), ..Default::default() });
-        assert_eq!(dept_a.iter().map(|t| t.updated_at_ms).collect::<Vec<_>>(), [4, 1]);
-        let ended = filter_tasks(&tasks, &managers, &TaskFilter { state: TaskState::Done, ..Default::default() });
+        let ended = filter_tasks(&tasks, &TaskFilter { state: TaskState::Done, ..Default::default() });
         assert_eq!(ended.len(), 1);
     }
 
@@ -306,9 +294,9 @@ pub(crate) mod tests {
         let mut live = task(p, None, TaskStatus::Succeeded, 1);
         live.live_run = Some(aurelius_domain::views::LiveRun::Running);
         let tasks = vec![live, task(p, None, TaskStatus::Succeeded, 2)];
-        let open = filter_tasks(&tasks, &[], &TaskFilter::default());
+        let open = filter_tasks(&tasks, &TaskFilter::default());
         assert_eq!(open.iter().map(|t| t.updated_at_ms).collect::<Vec<_>>(), [1]);
-        let ended = filter_tasks(&tasks, &[], &TaskFilter { state: TaskState::Done, ..Default::default() });
+        let ended = filter_tasks(&tasks, &TaskFilter { state: TaskState::Done, ..Default::default() });
         assert_eq!(ended.iter().map(|t| t.updated_at_ms).collect::<Vec<_>>(), [2]);
     }
 

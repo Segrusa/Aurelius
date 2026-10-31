@@ -45,8 +45,8 @@ class EmployeeSequentialToggled extends CompanyEvent {
   final bool value;
 }
 
-/// Any employee, department or company command from the company pages
-/// (employee pages, org chart, departments, Home's Give work).
+/// Any employee or company command from the company pages
+/// (employee pages, org chart, Home's Give work).
 class CompanyCommandSent extends CompanyEvent {
   const CompanyCommandSent(this.command, {this.done, this.expectedVersion, this.retry = true, this.then = const []});
 
@@ -77,10 +77,10 @@ class CompanyState extends Equatable {
     this.loading = true,
     this.projects = const [],
     this.employees = const [],
-    this.departments = const [],
     this.proposals = const [],
     this.tasks = const [],
     this.followOrgChart = true,
+    this.company,
     this.notice,
     this.createdProjectId,
     this.lastResult,
@@ -95,7 +95,6 @@ class CompanyState extends Equatable {
 
   /// Everyone in the company, archived ones included.
   final List<EmployeeSummary> employees;
-  final List<DepartmentSummary> departments;
 
   /// Colleague and instruction proposals of employees, pending and decided.
   final List<ProposalView> proposals;
@@ -105,6 +104,9 @@ class CompanyState extends Equatable {
 
   /// The server setting "Follow the org chart".
   final bool followOrgChart;
+
+  /// The company itself: its name and default dispatcher (null until loaded).
+  final CompanyView? company;
   final String? notice;
 
   /// Set once after "New project" so the UI can open it.
@@ -143,20 +145,15 @@ class CompanyState extends Equatable {
   int waitingIn(String projectId) => tasks.where((t) => t.projectId == projectId && t.needsYou).length;
   ProjectSummary? project(String id) => projects.where((p) => p.id == id).firstOrNull;
   EmployeeSummary? employee(String id) => employees.where((m) => m.id == id).firstOrNull;
-  DepartmentSummary? department(String? id) => id == null ? null : departments.where((d) => d.id == id).firstOrNull;
-
-  /// Departments still in use, by name.
-  List<DepartmentSummary> get activeDepartments =>
-      departments.where((d) => d.status != DepartmentStatus.archived).toList()..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
   CompanyState copyWith({
     bool? loading,
     List<ProjectSummary>? projects,
     List<EmployeeSummary>? employees,
-    List<DepartmentSummary>? departments,
     List<ProposalView>? proposals,
     List<TaskView>? tasks,
     bool? followOrgChart,
+    CompanyView? company,
     String? notice,
     String? createdProjectId,
     CommandResult? lastResult,
@@ -166,10 +163,10 @@ class CompanyState extends Equatable {
         loading: loading ?? this.loading,
         projects: projects ?? this.projects,
         employees: employees ?? this.employees,
-        departments: departments ?? this.departments,
         proposals: proposals ?? this.proposals,
         tasks: tasks ?? this.tasks,
         followOrgChart: followOrgChart ?? this.followOrgChart,
+        company: company ?? this.company,
         notice: notice,
         createdProjectId: createdProjectId,
         lastResult: lastResult,
@@ -177,10 +174,10 @@ class CompanyState extends Equatable {
       );
 
   @override
-  List<Object?> get props => [loading, projects, employees, departments, proposals, tasks, followOrgChart, notice, createdProjectId, lastResult, order];
+  List<Object?> get props => [loading, projects, employees, proposals, tasks, followOrgChart, company?.dispatcherEmployeeId, company?.version, notice, createdProjectId, lastResult, order];
 }
 
-/// The company: employees, departments, projects and their tasks, what waits
+/// The company: employees, projects and their tasks, what waits
 /// for the user, and the commands of the company pages.
 class CompanyBloc extends Bloc<CompanyEvent, CompanyState> {
   CompanyBloc(this._repository, {ProjectOrderStore? order}) : _order = order, super(const CompanyState()) {
@@ -226,8 +223,8 @@ class CompanyBloc extends Bloc<CompanyEvent, CompanyState> {
         loading: false,
         projects: projects,
         employees: company.employees,
-        departments: company.departments,
         followOrgChart: company.followOrgChart,
+        company: company.company,
         // Proposed instructions only where the server has the feature.
         proposals: proposals.where((p) => !p.isInstructions || _repository.linkState.has(Harness2.instructionProposals)).toList(),
         tasks: tasks,

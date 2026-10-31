@@ -4,7 +4,7 @@
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::{
-    ConversationId, DepartmentId, EmployeeId, ProposalId,
+    ConversationId, EmployeeId, ProposalId,
     proposal::{ProposalEvidence, ProposalKind, ProposalStatus},
     views::ProposalView,
 };
@@ -16,8 +16,6 @@ fn parse<T, E: std::error::Error + Send + Sync + 'static>(r: Result<T, E>) -> ru
 
 pub struct NewProposal<'a> {
     pub id: ProposalId,
-    /// A colleague: the department it would join.
-    pub department_id: Option<DepartmentId>,
     pub proposed_by: EmployeeId,
     pub name: &'a str,
     pub role: &'a str,
@@ -38,12 +36,11 @@ pub struct NewProposal<'a> {
 pub fn insert(tx: &Transaction<'_>, p: NewProposal<'_>) -> Result<(), StorageError> {
     let evidence = if p.evidence.is_empty() { None } else { Some(serde_json::to_string(&p.evidence)?) };
     tx.execute(
-        "INSERT INTO proposals(id, department_id, proposed_by, status, name, role, title, instructions_blob_id, reports_to, reason, origin_conversation_id, created_at_ms,
+        "INSERT INTO proposals(id, proposed_by, status, name, role, title, instructions_blob_id, reports_to, reason, origin_conversation_id, created_at_ms,
                                        kind, target_employee_id, base_version, evidence_json)
-         VALUES (?1, ?2, ?3, 'pending', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+         VALUES (?1, ?2, 'pending', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             p.id.to_string(),
-            p.department_id.map(|d| d.to_string()),
             p.proposed_by.to_string(),
             p.name,
             p.role,
@@ -63,7 +60,6 @@ pub fn insert(tx: &Transaction<'_>, p: NewProposal<'_>) -> Result<(), StorageErr
 }
 
 pub struct ProposalRow {
-    pub department_id: Option<DepartmentId>,
     pub proposed_by: EmployeeId,
     pub status: ProposalStatus,
     pub name: String,
@@ -82,25 +78,24 @@ pub struct ProposalRow {
 pub fn load(conn: &Connection, id: ProposalId) -> Result<Option<ProposalRow>, StorageError> {
     Ok(conn
         .query_row(
-            "SELECT p.department_id, p.proposed_by, p.status, p.name, p.role, p.title, b.storage_key, p.reports_to, p.reason, p.origin_conversation_id,
+            "SELECT p.proposed_by, p.status, p.name, p.role, p.title, b.storage_key, p.reports_to, p.reason, p.origin_conversation_id,
                     p.kind, p.target_employee_id, p.base_version
              FROM proposals p JOIN blobs b ON b.id = p.instructions_blob_id WHERE p.id = ?1",
             [id.to_string()],
             |r| {
                 Ok(ProposalRow {
-                    department_id: r.get::<_, Option<String>>(0)?.and_then(|d| DepartmentId::parse(&d).ok()),
-                    proposed_by: parse(EmployeeId::parse(&r.get::<_, String>(1)?))?,
-                    status: ProposalStatus::parse(&r.get::<_, String>(2)?).unwrap_or(ProposalStatus::Withdrawn),
-                    name: r.get(3)?,
-                    role: r.get(4)?,
-                    title: r.get(5)?,
-                    instructions_key: r.get(6)?,
-                    reports_to: r.get::<_, Option<String>>(7)?.and_then(|m| EmployeeId::parse(&m).ok()),
-                    reason: r.get(8)?,
-                    origin_conversation_id: r.get::<_, Option<String>>(9)?.and_then(|c| ConversationId::parse(&c).ok()),
-                    kind: ProposalKind::parse(&r.get::<_, String>(10)?).unwrap_or_default(),
-                    target_employee_id: r.get::<_, Option<String>>(11)?.and_then(|m| EmployeeId::parse(&m).ok()),
-                    base_version: r.get::<_, Option<i64>>(12)?.map(|v| v.max(0) as u32),
+                    proposed_by: parse(EmployeeId::parse(&r.get::<_, String>(0)?))?,
+                    status: ProposalStatus::parse(&r.get::<_, String>(1)?).unwrap_or(ProposalStatus::Withdrawn),
+                    name: r.get(2)?,
+                    role: r.get(3)?,
+                    title: r.get(4)?,
+                    instructions_key: r.get(5)?,
+                    reports_to: r.get::<_, Option<String>>(6)?.and_then(|m| EmployeeId::parse(&m).ok()),
+                    reason: r.get(7)?,
+                    origin_conversation_id: r.get::<_, Option<String>>(8)?.and_then(|c| ConversationId::parse(&c).ok()),
+                    kind: ProposalKind::parse(&r.get::<_, String>(9)?).unwrap_or_default(),
+                    target_employee_id: r.get::<_, Option<String>>(10)?.and_then(|m| EmployeeId::parse(&m).ok()),
+                    base_version: r.get::<_, Option<i64>>(11)?.map(|v| v.max(0) as u32),
                 })
             },
         )
@@ -115,10 +110,10 @@ struct Listed {
     evidence: Option<String>,
 }
 
-/// Pending proposals first (oldest first), then the 20 latest decisions, for one department or all.
-pub fn list(conn: &Connection, department: Option<DepartmentId>, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<ProposalView>, StorageError> {
+/// Pending proposals first (oldest first), then the 20 latest decisions.
+pub fn list(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<ProposalView>, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT p.id, p.department_id, p.proposed_by, pm.name, p.status, p.name, p.role, p.title, b.storage_key, p.reports_to, rm.name,
+        "SELECT p.id, p.proposed_by, pm.name, p.status, p.name, p.role, p.title, b.storage_key, p.reports_to, rm.name,
                 p.reason, p.decision_note, p.created_at_ms, p.decided_at_ms, p.created_employee_id,
                 p.kind, p.target_employee_id, tm.name, p.base_version, p.evidence_json, tb.storage_key
          FROM proposals p
@@ -127,42 +122,40 @@ pub fn list(conn: &Connection, department: Option<DepartmentId>, read_blob: &dyn
          LEFT JOIN employees rm ON rm.id = p.reports_to
          LEFT JOIN employees tm ON tm.id = p.target_employee_id
          LEFT JOIN blobs tb ON tb.id = tm.instructions_blob_id
-         WHERE (?1 IS NULL OR p.department_id = ?1)
-           AND (p.status = 'pending'
-                OR p.id IN (SELECT id FROM proposals WHERE status <> 'pending' AND (?1 IS NULL OR department_id = ?1) ORDER BY decided_at_ms DESC LIMIT 20))
+         WHERE p.status = 'pending'
+                OR p.id IN (SELECT id FROM proposals WHERE status <> 'pending' ORDER BY decided_at_ms DESC LIMIT 20)
          ORDER BY p.status <> 'pending', CASE WHEN p.status = 'pending' THEN p.created_at_ms ELSE -COALESCE(p.decided_at_ms, 0) END",
     )?;
-    let rows = stmt.query_map([department.map(|d| d.to_string())], |r| {
-        let kind = ProposalKind::parse(&r.get::<_, String>(16)?).unwrap_or_default();
+    let rows = stmt.query_map([], |r| {
+        let kind = ProposalKind::parse(&r.get::<_, String>(15)?).unwrap_or_default();
         Ok(Listed {
             view: ProposalView {
                 id: parse(ProposalId::parse(&r.get::<_, String>(0)?))?,
-                department_id: r.get::<_, Option<String>>(1)?.and_then(|d| DepartmentId::parse(&d).ok()),
-                proposed_by: parse(EmployeeId::parse(&r.get::<_, String>(2)?))?,
-                proposed_by_name: r.get(3)?,
-                status: ProposalStatus::parse(&r.get::<_, String>(4)?).unwrap_or(ProposalStatus::Withdrawn),
-                name: r.get(5)?,
-                role: r.get(6)?,
-                title: r.get(7)?,
+                proposed_by: parse(EmployeeId::parse(&r.get::<_, String>(1)?))?,
+                proposed_by_name: r.get(2)?,
+                status: ProposalStatus::parse(&r.get::<_, String>(3)?).unwrap_or(ProposalStatus::Withdrawn),
+                name: r.get(4)?,
+                role: r.get(5)?,
+                title: r.get(6)?,
                 instructions: String::new(),
-                reports_to: r.get::<_, Option<String>>(9)?.and_then(|m| EmployeeId::parse(&m).ok()),
-                reports_to_name: r.get(10)?,
-                reason: r.get(11)?,
-                decision_note: r.get(12)?,
-                created_at_ms: r.get(13)?,
-                decided_at_ms: r.get(14)?,
-                created_employee_id: r.get::<_, Option<String>>(15)?.and_then(|m| EmployeeId::parse(&m).ok()),
+                reports_to: r.get::<_, Option<String>>(8)?.and_then(|m| EmployeeId::parse(&m).ok()),
+                reports_to_name: r.get(9)?,
+                reason: r.get(10)?,
+                decision_note: r.get(11)?,
+                created_at_ms: r.get(12)?,
+                decided_at_ms: r.get(13)?,
+                created_employee_id: r.get::<_, Option<String>>(14)?.and_then(|m| EmployeeId::parse(&m).ok()),
                 kind,
-                target_employee_id: r.get::<_, Option<String>>(17)?.and_then(|m| EmployeeId::parse(&m).ok()),
-                target_employee_name: r.get(18)?,
-                base_version: r.get::<_, Option<i64>>(19)?.map(|v| v.max(0) as u32),
+                target_employee_id: r.get::<_, Option<String>>(16)?.and_then(|m| EmployeeId::parse(&m).ok()),
+                target_employee_name: r.get(17)?,
+                base_version: r.get::<_, Option<i64>>(18)?.map(|v| v.max(0) as u32),
                 current_instructions: None,
                 current_version: None,
                 evidence: Vec::new(),
             },
-            instructions_key: r.get(8)?,
-            current_key: r.get(21)?,
-            evidence: r.get(20)?,
+            instructions_key: r.get(7)?,
+            current_key: r.get(20)?,
+            evidence: r.get(19)?,
         })
     })?;
     let listed: Vec<Listed> = rows.collect::<Result<_, _>>()?;

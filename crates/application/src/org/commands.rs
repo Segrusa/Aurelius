@@ -13,7 +13,7 @@ use crate::task::task_threads::{self as thread, Speaker};
 use crate::task::tasks::Colleague;
 use crate::{CommandContext, CommandService, Committed, domain_error, notice, storage_error};
 use aurelius_domain::{
-    ActorKind, AppError, CommandEnvelope, CommandId, CommandResult, ConversationId, DepartmentId, DomainError, EventId, EventKind, EventNotice, EmployeeId, ProposalId, ProjectId, RunId, TaskId,
+    ActorKind, AppError, CommandEnvelope, CommandId, CommandResult, ConversationId, DomainError, EventId, EventKind, EventNotice, EmployeeId, ProposalId, ProjectId, RunId, TaskId,
     employee::{LifecycleStatus, SetFollowOrgChart, SetEmployeeReportsTo},
     org::{MAX_CHART_DEPTH, Org},
     proposal::{self, DecideProposal, ProposalEvidence, ProposalFields, ProposalKind, ProposalStatus, RestoreEmployeeInstructions},
@@ -28,7 +28,7 @@ use aurelius_storage::{
 };
 use rusqlite::Connection;
 
-/// One event of the org chart, a department or a proposal; company-wide, so
+/// One event of the org chart or a proposal; company-wide, so
 /// mostly without a project.
 pub(crate) struct OrgEvent {
     pub aggregate_type: &'static str,
@@ -197,7 +197,7 @@ pub(crate) fn escalate(tx: &Tx<'_>, st: &Store, task: TaskId, row: &store::TaskR
         title = row.title,
         goal = goal.trim(),
     );
-    let colleague = Colleague { id: boss, name: boss_row.name.clone(), role: boss_row.role, focus: String::new(), title: boss_row.title, reports_to: boss_row.reports_to, department: None };
+    let colleague = Colleague { id: boss, name: boss_row.name.clone(), role: boss_row.role, focus: String::new(), title: boss_row.title, reports_to: boss_row.reports_to };
     let note = format!("(Escalated by {} because of the org chart.)", me_row.name);
     let Some((_, _, notices)) = insert_part(tx, st, row.project_id, Some(me), &colleague, &format!("Escalated: {}", row.title), &text, &[], &note, None, Some(conversation))? else {
         return Ok(None);
@@ -209,7 +209,7 @@ pub(crate) fn escalate(tx: &Tx<'_>, st: &Store, task: TaskId, row: &store::TaskR
 
 /// Called before `employee` is archived, while it is still on the chart: its direct
 /// reports move one level up (one `employee.reports_to_set` event each), its open
-/// proposals are withdrawn and a department it heads loses its head.
+/// proposals are withdrawn.
 pub(crate) fn on_employee_archived(tx: &Tx<'_>, employee: EmployeeId, command_id: CommandId, meta: &serde_json::Value) -> Result<Vec<EventNotice>, StorageError> {
     let moved = employees::org(tx)?.on_archive(employee);
     let mut notices = Vec::new();
@@ -233,25 +233,6 @@ pub(crate) fn on_employee_archived(tx: &Tx<'_>, employee: EmployeeId, command_id
         notices.push(n);
     }
     proposals::withdraw_for(tx, employee)?;
-    for department in aurelius_storage::departments::clear_head(tx, employee)? {
-        let name = aurelius_storage::departments::load(tx, department)?.map(|d| d.name).unwrap_or_default();
-        let (_, n) = append_event(
-            tx,
-            OrgEvent {
-                aggregate_type: "department",
-                aggregate_id: department.to_string(),
-                kind: EventKind::DepartmentUpdated,
-                project: None,
-                actor: ActorKind::User,
-                actor_id: None,
-                correlation: command_id.to_string(),
-                payload: None,
-                metadata: serde_json::json!({ "name": name, "head_id": null, "reason": "head_archived", "ctx": meta }),
-                dedupe: format!("cmd:{command_id}:head:{department}"),
-            },
-        )?;
-        notices.push(n);
-    }
     Ok(notices)
 }
 
@@ -268,10 +249,10 @@ pub(crate) fn check_boss(tx: &Tx<'_>, employee: EmployeeId, boss: EmployeeId) ->
         Some(_) => {}
     }
     let entries = employees::org_entries(tx)?;
-    if Org::new(entries.iter().map(|(e, b, _)| (*e, *b))).would_cycle(employee, boss) {
+    if Org::new(entries.iter().copied()).would_cycle(employee, boss) {
         return Ok(Err(DomainError::OrgCycle));
     }
-    let moved = Org::new(entries.iter().map(|(e, b, _)| if *e == employee { (*e, Some(boss)) } else { (*e, *b) }));
+    let moved = Org::new(entries.iter().map(|(e, b)| if *e == employee { (*e, Some(boss)) } else { (*e, *b) }));
     if moved.height() > MAX_CHART_DEPTH {
         return Ok(Err(DomainError::Org(format!("The org chart may be at most {MAX_CHART_DEPTH} levels deep."))));
     }
@@ -379,18 +360,12 @@ impl CommandService {
                     title: existing.title.clone(),
                     instructions: st.blobs().read(&existing.instructions_key).ok().and_then(|b| String::from_utf8(b).ok()).unwrap_or_default(),
                     reports_to: existing.reports_to,
-                    department_id: existing.department_id,
                 },
             }
             .validated()
             .map_err(domain_error)?;
             let boss = fields.reports_to.or(existing.reports_to).or(Some(existing.proposed_by));
-            // The department proposed, else the proposer's.
-            let department = match fields.department_id.or(existing.department_id) {
-                Some(d) => Some(d),
-                None => self.store.read(|c| employees::department_of(c, existing.proposed_by)).map_err(storage_error)?,
-            };
-            Some(NewEmployee::prepare(&st, &fields.name, &fields.role, fields.title.clone(), boss, department, Some(&fields.instructions), None)?)
+            Some(NewEmployee::prepare(&st, &fields.name, &fields.role, fields.title.clone(), boss, Some(&fields.instructions), None)?)
         } else {
             None
         };
@@ -574,13 +549,13 @@ impl CommandService {
             .map_err(storage_error)?
     }
 
-    /// Pending proposals first, then the latest decisions; for one department or all.
-    pub fn proposals(&self, department: Option<DepartmentId>) -> Result<ProposalsSnapshot, AppError> {
+    /// Pending proposals first, then the latest decisions.
+    pub fn proposals(&self) -> Result<ProposalsSnapshot, AppError> {
         let st = self.store.clone();
         self.store
             .read(|conn| {
                 let read = |key: &str| st.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
-                Ok(ProposalsSnapshot { as_of_seq: queries::last_seq(conn)?, proposals: proposals::list(conn, department, &read)? })
+                Ok(ProposalsSnapshot { as_of_seq: queries::last_seq(conn)?, proposals: proposals::list(conn, &read)? })
             })
             .map_err(storage_error)
     }
@@ -635,7 +610,7 @@ fn answer_proposer(tx: &Tx<'_>, st: &Store, p: &proposals::ProposalRow, id: Prop
         notices.push(posted);
         if !live_in(tx, conversation, None)? {
             let (_, queued) = crate::run::queue::queue_run(tx, &serde_json::json!({ "origin": "proposal", "proposal_id": id }), &id.to_string(), conversation, message)?;
-            notices.push(queued);
+            notices.extend(queued);
         }
     }
     Ok(notices)
@@ -656,8 +631,6 @@ pub(crate) struct ProposalInput {
     /// A colleague's name (or id); the proposer when left out.
     pub reports_to: Option<String>,
     pub reason: String,
-    /// A department's name; the proposer's when left out.
-    pub department: Option<String>,
 }
 
 /// An employee proposes a colleague during a run. The proposal waits for the user, in
@@ -667,9 +640,9 @@ pub(crate) fn propose_colleague(tx: &Tx<'_>, st: &Store, run: RunId, input: Prop
     let Some(RunOwner { employee: Some(me), conversation, .. }) = run_owner(tx, run)? else {
         return refuse("Only an employee can propose a colleague.".into());
     };
-    let Some(me_row) = employees::load_employee(tx, me)?.filter(|m| m.status == LifecycleStatus::Active) else {
+    if employees::load_employee(tx, me)?.filter(|m| m.status == LifecycleStatus::Active).is_none() {
         return refuse("Only an active employee can propose a colleague.".into());
-    };
+    }
     let open = proposals::open_count(tx, me)?;
     if open >= proposal::MAX_OPEN_PER_EMPLOYEE {
         return refuse(format!("You already have {open} proposals waiting for the user's decision; wait for the outcome before proposing another colleague."));
@@ -683,14 +656,7 @@ pub(crate) fn propose_colleague(tx: &Tx<'_>, st: &Store, run: RunId, input: Prop
             None => return refuse(format!("No active colleague called {name} in the company to report to; leave reports_to out to have the new colleague report to you.")),
         },
     };
-    let department = match input.department.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-        None => me_row.department_id,
-        Some(name) => match aurelius_storage::departments::by_name(tx, name)? {
-            Some(d) => Some(d),
-            None => return refuse(format!("No department called {name}; leave department out to propose a colleague for your own department.")),
-        },
-    };
-    let fields = ProposalFields { name: input.name, role: input.role, title: input.title, instructions: input.instructions, reports_to: Some(boss), department_id: department };
+    let fields = ProposalFields { name: input.name, role: input.role, title: input.title, instructions: input.instructions, reports_to: Some(boss) };
     let fields = match fields.validated() {
         Ok(fields) => fields,
         Err(e) => return refuse(e.to_string()),
@@ -709,7 +675,6 @@ pub(crate) fn propose_colleague(tx: &Tx<'_>, st: &Store, run: RunId, input: Prop
         tx,
         proposals::NewProposal {
             id,
-            department_id: department,
             proposed_by: me,
             name: &fields.name,
             role: &fields.role,
@@ -826,7 +791,6 @@ pub(crate) fn propose_instructions(tx: &Tx<'_>, st: &Store, run: RunId, input: I
         tx,
         proposals::NewProposal {
             id,
-            department_id: target_row.department_id,
             proposed_by: me,
             name: &target_row.name,
             role: &target_row.role,

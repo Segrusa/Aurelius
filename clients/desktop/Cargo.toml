@@ -30,6 +30,9 @@ tracing-subscriber.workspace = true
 wry = { version = "0.57", default-features = false }
 
 [dev-dependencies]
+# The board member flow against a real daemon on a temporary folder.
+aurelius-daemon = { path = "../../crates/daemon" }
+tempfile.workspace = true
 # Paused time for the refresh throttle's test.
 tokio = { workspace = true, features = ["test-util"] }
 

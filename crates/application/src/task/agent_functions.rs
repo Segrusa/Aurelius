@@ -351,7 +351,7 @@ mod tests {
     }
 
     fn ctx() -> CommandContext {
-        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None }
+        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
     }
 
     fn setup() -> Setup {
@@ -362,7 +362,7 @@ mod tests {
         let run = |c: Command| service.execute(&ctx(), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: c }).unwrap().receipt.result;
         let CommandResult::ProjectCreated { project_id, .. } = run(Command::CreateProject(CreateProject { name: "Demo".into(), description: None, folder: Some(folder.display().to_string()) })) else { panic!() };
         let CommandResult::EmployeeCreated { employee_id, .. } =
-            run(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Support".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }))
+            run(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Support".into(), title: None, reports_to: None, instructions: None, folder: None }))
         else {
             panic!()
         };

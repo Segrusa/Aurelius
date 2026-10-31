@@ -140,7 +140,7 @@ mod tests {
     }
 
     fn ctx(app: Option<AppActor>) -> CommandContext {
-        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app }
+        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app, user_id: None }
     }
 
     fn run(s: &Setup, app: Option<AppActor>, command: Command) -> Result<CommandResult, aurelius_domain::AppError> {
@@ -150,7 +150,7 @@ mod tests {
     fn project_and_employee(s: &Setup) -> (aurelius_domain::ProjectId, aurelius_domain::EmployeeId, aurelius_domain::ConversationId) {
         let folder = Some(s._dir.path().join("work").display().to_string());
         let CommandResult::ProjectCreated { project_id, .. } = run(s, None, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder })).unwrap() else { panic!() };
-        let employee = CreateEmployee { name: "Simon".into(), role: "Server".into(), instructions: None, folder: None, title: None, reports_to: None, department_id: None };
+        let employee = CreateEmployee { name: "Simon".into(), role: "Server".into(), instructions: None, folder: None, title: None, reports_to: None };
         let CommandResult::EmployeeCreated { employee_id, conversation_id } = run(s, None, Command::CreateEmployee(employee)).unwrap() else { panic!() };
         (project_id, employee_id, conversation_id)
     }

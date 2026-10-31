@@ -11,16 +11,14 @@ actions!(
         OpenPalette,
         GoDashboard,
         GoTeamChat,
+        GoBoard,
         GoEmployees,
         GoOrgChart,
-        GoDepartments,
         GoProjects,
         GoTasks,
         GoIdeas,
         CycleGiveProject,
         SubmitGiveWork,
-        CycleDepartment,
-        CycleDepartmentHead,
         NewItem,
         NewProject,
         Back,
@@ -154,6 +152,14 @@ actions!(
         LoadLeaveField,
         LoadSave,
         LoadToggleEnabled,
+        BoardLeft,
+        BoardRight,
+        BoardUp,
+        BoardDown,
+        BoardOpen,
+        BoardStart,
+        BoardMoveTo,
+        BoardPickUp,
     ]
 );
 
@@ -179,6 +185,10 @@ pub const MENU: &str = "ItemMenu";
 pub const INFO: &str = "InfoIcon";
 /// The folder browser (on this computer or the server's).
 pub const FOLDERS: &str = "ServerFolder";
+/// The Board page (inside `NAV`): its cards move with the keyboard (ui-ontwerp §15).
+pub const BOARD: &str = "Board";
+/// The Board's keys, never while a text field (Find) has focus.
+const BOARD_KEYS: &str = "Board && !Input";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -232,10 +242,10 @@ pub const SHORTCUTS: &[Shortcut] = &[
     // General: work everywhere, also while typing.
     sc!(&["secondary-k"], Some(APP), NONE, "Search and commands", General, false, OpenPalette),
     sc!(&["secondary-1"], Some(APP), NONE, "Go to Dashboard", General, true, GoDashboard),
+    sc!(&["secondary-5"], Some(APP), NONE, "Go to Board (tickets of every project)", General, true, GoBoard),
     sc!(&["secondary-8"], Some(APP), NONE, "Go to Team chat (you and every employee)", General, true, GoTeamChat),
     sc!(&["secondary-3"], Some(APP), NONE, "Go to Employees", General, true, GoEmployees),
     sc!(&["secondary-4"], Some(APP), NONE, "Go to Org chart (Employees tab)", General, true, GoOrgChart),
-    sc!(&["secondary-5"], Some(APP), NONE, "Go to Departments (Employees tab)", General, true, GoDepartments),
     sc!(&["secondary-6"], Some(APP), NONE, "Go to Projects", General, true, GoProjects),
     sc!(&["secondary-7"], Some(APP), NONE, "Go to Tasks (all projects)", General, true, GoTasks),
     sc!(&["secondary-0"], Some(APP), NONE, "Go to Ideas (Projects tab)", General, true, GoIdeas),
@@ -325,8 +335,6 @@ fn overlay_bindings() -> Vec<KeyBinding> {
         key("alt-e", CycleTaskEffort, Some(DIALOG)),
         key("alt-t", ToggleManagerSequential, Some(DIALOG)),
         key("alt-p", CycleReportsTo, Some(DIALOG)),
-        key("alt-d", CycleDepartment, Some(DIALOG)),
-        key("alt-h", CycleDepartmentHead, Some(DIALOG)),
         // The same dropdowns in the Dashboard's Give work box; Ctrl+Enter gives the work.
         key("alt-m", CycleTaskManager, Some(GIVE_WORK)),
         key("alt-o", CycleTaskMode, Some(GIVE_WORK)),
@@ -440,6 +448,16 @@ fn overlay_bindings() -> Vec<KeyBinding> {
         key("enter", LoadSave, Some("LoadLimits > Input")),
         key("escape", LoadLeaveField, Some("LoadLimits > Input")),
         key("escape", Back, Some(PLAN_REVIEW)),
+        // The Board (§15): arrows between cards and columns, Enter opens, S starts,
+        // M moves, Space picks a card up (then arrows, Enter drops, Esc cancels).
+        key("left", BoardLeft, Some(BOARD_KEYS)),
+        key("right", BoardRight, Some(BOARD_KEYS)),
+        key("up", BoardUp, Some(BOARD_KEYS)),
+        key("down", BoardDown, Some(BOARD_KEYS)),
+        key("enter", BoardOpen, Some(BOARD_KEYS)),
+        key("s", BoardStart, Some(BOARD_KEYS)),
+        key("m", BoardMoveTo, Some(BOARD_KEYS)),
+        key("space", BoardPickUp, Some(BOARD_KEYS)),
         key("secondary-1", GoDashboard, Some("Input")),
     ]
 }
@@ -538,5 +556,24 @@ mod tests {
         assert!(fires(&keymap, "i", &[APP, NAV]));
         assert!(fires(&keymap, "s", &[APP, SETTINGS]));
         assert!(fires(&keymap, "secondary-i", &typing));
+    }
+
+    /// §15: on the Board the arrows, Enter, S, M and Space are the Board's, and none
+    /// of them while its Find field has focus.
+    #[::core::prelude::v1::test]
+    fn the_board_keys_move_cards_but_never_while_typing() {
+        let keymap = Keymap::new(all_bindings());
+        let board = format!("{NAV} {BOARD}");
+        let action = |key: &str, stack: &[&str]| {
+            let stack: Vec<KeyContext> = stack.iter().map(|c| KeyContext::parse(c).unwrap()).collect();
+            keymap.bindings_for_input(&[Keystroke::parse(key).unwrap()], &stack).0.first().map(|b| b.action().name().to_string())
+        };
+        for (key, name) in [("left", "BoardLeft"), ("right", "BoardRight"), ("up", "BoardUp"), ("down", "BoardDown"), ("enter", "BoardOpen"), ("s", "BoardStart"), ("m", "BoardMoveTo"), ("space", "BoardPickUp")] {
+            assert_eq!(action(key, &[APP, &board]).as_deref(), Some(format!("aurelius::{name}").as_str()), "{key}");
+            assert!(!action(key, &[APP, &board, "Input"]).is_some_and(|a| a.starts_with("aurelius::Board")), "{key} fires while typing in Find");
+            assert!(!action(key, &[APP, NAV]).is_some_and(|a| a.starts_with("aurelius::Board")), "{key} is the Board's only");
+        }
+        // Esc stays "one level up": it puts a held card back, then closes the panel.
+        assert_eq!(action("escape", &[APP, &board]).as_deref(), Some("aurelius::Back"));
     }
 }

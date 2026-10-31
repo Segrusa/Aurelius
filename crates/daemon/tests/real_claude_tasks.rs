@@ -68,7 +68,7 @@ async fn project(client: &Client) -> ProjectId {
 async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str, mode: AgentMode) -> EmployeeId {
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }),
+            Command::CreateEmployee(CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await

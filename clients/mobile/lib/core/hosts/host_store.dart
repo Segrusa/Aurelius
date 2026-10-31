@@ -14,6 +14,12 @@ abstract class HostStore {
   Future<void> save(Host host, String deviceSecret);
   Future<String?> secret(String hostId);
   Future<void> remove(String hostId);
+
+  /// The board member this phone chose on [hostId] (only its id, never a password).
+  Future<String?> boardMember(String hostId);
+
+  /// Remember [userId] for [hostId]; null forgets it (the server no longer knows it).
+  Future<void> setBoardMember(String hostId, String? userId);
 }
 
 class DeviceHostStore implements HostStore {
@@ -24,6 +30,7 @@ class DeviceHostStore implements HostStore {
   static const _activeKey = 'hosts.active';
 
   String _secretKey(String hostId) => 'device_secret.$hostId';
+  String _boardMemberKey(String hostId) => 'board_member.$hostId';
 
   @override
   Future<List<Host>> hosts() async {
@@ -63,6 +70,7 @@ class DeviceHostStore implements HostStore {
   @override
   Future<void> remove(String hostId) async {
     await _secure.delete(key: _secretKey(hostId));
+    await _secure.delete(key: _boardMemberKey(hostId));
     final rest = (await hosts()).where((h) => h.hostId != hostId).toList();
     await _write(rest);
     final prefs = await SharedPreferences.getInstance();
@@ -74,12 +82,25 @@ class DeviceHostStore implements HostStore {
       }
     }
   }
+
+  @override
+  Future<String?> boardMember(String hostId) => _secure.read(key: _boardMemberKey(hostId));
+
+  @override
+  Future<void> setBoardMember(String hostId, String? userId) => userId == null
+      ? _secure.delete(key: _boardMemberKey(hostId))
+      : _secure.write(
+          key: _boardMemberKey(hostId),
+          value: userId,
+          iOptions: const IOSOptions(accessibility: KeychainAccessibility.first_unlock_this_device),
+        );
 }
 
 /// In-memory store for tests.
 class MemoryHostStore implements HostStore {
   final List<Host> _hosts = [];
   final Map<String, String> _secrets = {};
+  final Map<String, String> _boardMembers = {};
   String? _active;
 
   @override
@@ -106,6 +127,19 @@ class MemoryHostStore implements HostStore {
   Future<void> remove(String hostId) async {
     _hosts.removeWhere((h) => h.hostId == hostId);
     _secrets.remove(hostId);
+    _boardMembers.remove(hostId);
     if (_active == hostId) _active = _hosts.isEmpty ? null : _hosts.first.hostId;
+  }
+
+  @override
+  Future<String?> boardMember(String hostId) async => _boardMembers[hostId];
+
+  @override
+  Future<void> setBoardMember(String hostId, String? userId) async {
+    if (userId == null) {
+      _boardMembers.remove(hostId);
+    } else {
+      _boardMembers[hostId] = userId;
+    }
   }
 }

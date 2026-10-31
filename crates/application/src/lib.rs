@@ -39,6 +39,9 @@ pub struct CommandContext {
     /// none for the user's own clients. Its scopes were checked by the session;
     /// its limits and the Auto rule are checked where tasks are made.
     pub app: Option<AppActor>,
+    /// The active board member of the connection (`user.use`, `user.create`, or
+    /// the hello's remembered one); none for apps and before the onboarding.
+    pub user_id: Option<aurelius_domain::UserId>,
 }
 
 /// An app acting through its app key.
@@ -60,6 +63,9 @@ impl CommandContext {
             meta["app_key_id"] = serde_json::json!(app.key_id);
             meta["app"] = serde_json::json!(app.name);
         }
+        if let Some(user) = self.user_id {
+            meta["user_id"] = serde_json::json!(user);
+        }
         meta
     }
 }
@@ -71,6 +77,8 @@ pub mod memory;
 pub mod org;
 pub mod run;
 pub mod task;
+pub mod ticket;
+pub mod user;
 
 pub(crate) fn chat_next_version(tx: &Transaction<'_>, aggregate_type: &str, id: &str) -> Result<u64, StorageError> {
     aurelius_storage::conversations::next_version(tx, aggregate_type, id)
@@ -117,7 +125,6 @@ pub(crate) fn domain_error(err: DomainError) -> AppError {
     let code = match err {
         DomainError::ProjectNotFound(_)
         | DomainError::EmployeeNotFound(_)
-        | DomainError::DepartmentNotFound(_)
         | DomainError::ConversationNotFound(_)
         | DomainError::MessageNotFound(_)
         | DomainError::RunNotFound(_)
@@ -127,8 +134,14 @@ pub(crate) fn domain_error(err: DomainError) -> AppError {
         | DomainError::ApiKeyNotFound(_)
         | DomainError::AppKeyNotFound(_)
         | DomainError::ProposalNotFound(_)
-        | DomainError::TaskNotFound(_) => ErrorCode::NotFound,
+        | DomainError::TaskNotFound(_)
+        | DomainError::TicketNotFound(_)
+        | DomainError::BoardColumnNotFound(_) => ErrorCode::NotFound,
         DomainError::VersionConflict { .. } => ErrorCode::VersionConflict,
+        DomainError::BoardMemberRequired => ErrorCode::BoardMemberRequired,
+        DomainError::InvalidUsername(_) => ErrorCode::InvalidUsername,
+        DomainError::WeakPassword(_) => ErrorCode::WeakPassword,
+        DomainError::UsernameTaken => ErrorCode::UsernameTaken,
         _ => ErrorCode::Validation,
     };
     AppError::new(code, err.to_string())
@@ -250,12 +263,22 @@ impl CommandService {
             Command::SendQueuedNow(cmd) => self.send_queued_now(ctx, &envelope, hash, cmd),
             Command::SetFollowOrgChart(cmd) => self.set_follow_org_chart(ctx, &envelope, hash, cmd),
             Command::SetEmployeeReportsTo(cmd) => self.set_employee_reports_to(ctx, &envelope, hash, cmd),
-            Command::SetEmployeeDepartment(cmd) => self.set_employee_department(ctx, &envelope, hash, cmd),
-            Command::CreateDepartment(cmd) => self.create_department(ctx, &envelope, hash, cmd),
-            Command::UpdateDepartment(cmd) => self.update_department(ctx, &envelope, hash, cmd),
-            Command::ArchiveDepartment(cmd) => self.archive_department(ctx, &envelope, hash, cmd),
             Command::DecideProposal(cmd) => self.decide_proposal(ctx, &envelope, hash, cmd),
             Command::RestoreEmployeeInstructions(cmd) => self.restore_employee_instructions(ctx, &envelope, hash, cmd),
+            Command::CreateTicket(_)
+            | Command::UpdateTicket(_)
+            | Command::MoveTicket(_)
+            | Command::StartTicket(_)
+            | Command::AssignTicket(_)
+            | Command::ApprovePlan(_)
+            | Command::RevisePlan(_)
+            | Command::AcceptTicket(_)
+            | Command::SendBackTicket(_)
+            | Command::CancelTicket(_)
+            | Command::ArchiveTicket(_)
+            | Command::UpdateBoardColumns(_)
+            | Command::UpdateCompany(_) => self.ticket_command(ctx, &envelope, hash),
+            Command::UpdateProject(cmd) => self.update_project(ctx, &envelope, hash, cmd),
         };
         COMMAND_METHOD.set("");
         result
@@ -641,3 +664,6 @@ mod org_tests;
 
 #[cfg(test)]
 mod run_end_tests;
+
+#[cfg(test)]
+mod ticket_tests;

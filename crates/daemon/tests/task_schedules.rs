@@ -39,7 +39,7 @@ async fn world(client: &Client, root: &Path) -> World {
         panic!()
     };
     let CommandResult::EmployeeCreated { employee_id, .. } =
-        exec(client, Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Onderzoeker".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None })).await
+        exec(client, Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Onderzoeker".into(), title: None, reports_to: None, instructions: None, folder: None })).await
     else {
         panic!()
     };

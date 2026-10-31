@@ -17,10 +17,11 @@
 //!   including how many roots are left.
 
 use crate::{BlobStore, StorageError, events, now_ms};
-use aurelius_domain::views::{ArchivedEmployee, ClearedBoss, ConversionReport, ConvertedDepartment, MergedEmployee};
-use aurelius_domain::{ActorKind, DepartmentId, EmployeeId, ScopeId};
-use rusqlite::{OptionalExtension, Transaction, params};
+use aurelius_domain::{ActorKind, EmployeeId, ScopeId};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use uuid::Uuid;
 
 struct Old {
     id: String,
@@ -73,7 +74,7 @@ pub fn convert(tx: &Transaction<'_>, blobs: Option<&BlobStore>) -> Result<(), St
         let global = events::ensure_global_scope(tx)?;
         let now = now_ms();
         for p in &projects {
-            let id = DepartmentId::new();
+            let id = Uuid::now_v7();
             let scope = ScopeId::new().to_string();
             tx.execute("INSERT INTO scopes(id, kind, parent_id, owner_id) VALUES (?1, 'department', ?2, ?3)", params![scope, global, id.to_string()])?;
             let members: Vec<&Old> = olds.iter().filter(|m| m.project == p.id && !m.archived).collect();
@@ -339,4 +340,95 @@ fn clear_bad_bosses(tx: &Transaction<'_>, report: &mut ConversionReport) -> Resu
         }
     }
     Ok(())
+}
+
+/// What the one-time conversion of 2.x data did (event `company.converted`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ConversionReport {
+    /// One per old project.
+    pub departments: Vec<ConvertedDepartment>,
+    /// Employees with the same name in several projects, now one.
+    pub merged: Vec<MergedEmployee>,
+    /// Only from conversions before 3.0 merged by name alone (renamed
+    /// "Name (Project)"); empty now.
+    pub suffixed: Vec<SuffixedEmployee>,
+    /// Bosses that were cleared (gone in the merge, or a loop).
+    pub cleared_bosses: Vec<ClearedBoss>,
+    /// Managers found only in archived projects, now archived employees.
+    #[serde(default)]
+    pub archived: Vec<ArchivedEmployee>,
+    /// Active employees without a boss after the conversion (the management team).
+    #[serde(default)]
+    pub roots: u32,
+}
+
+impl ConversionReport {
+    /// One line for the timeline.
+    pub fn summary(&self) -> String {
+        let mut line = format!(
+            "{} department(s) from the projects, {} employee(s) merged, {} archived, {} boss(es) cleared, {} root(s) left",
+            self.departments.len(),
+            self.merged.iter().map(|m| m.merged_ids.len()).sum::<usize>(),
+            self.archived.len(),
+            self.cleared_bosses.len(),
+            self.roots
+        );
+        if !self.suffixed.is_empty() {
+            line.push_str(&format!(", {} renamed", self.suffixed.len()));
+        }
+        line
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArchivedEmployee {
+    pub employee_id: EmployeeId,
+    pub name: String,
+    /// The archived project it came from.
+    pub project: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConvertedDepartment {
+    pub department_id: Uuid,
+    /// The old project's name.
+    pub name: String,
+    pub head_id: Option<EmployeeId>,
+    pub members: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MergedEmployee {
+    /// The one that stays (of an active project, the most tasks).
+    pub employee_id: EmployeeId,
+    pub name: String,
+    /// The others, now archived; their work belongs to `employee_id`.
+    pub merged_ids: Vec<EmployeeId>,
+    /// The projects they came from, the survivor's first.
+    pub projects: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SuffixedEmployee {
+    pub employee_id: EmployeeId,
+    pub old_name: String,
+    pub new_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClearedBoss {
+    pub employee_id: EmployeeId,
+    pub name: String,
+    /// The boss it had.
+    pub was: EmployeeId,
+}
+
+/// The conversion report, when this server converted 2.x data.
+pub fn conversion_report(conn: &Connection) -> Result<Option<ConversionReport>, StorageError> {
+    let metadata: Option<String> = conn
+        .query_row("SELECT metadata_json FROM events WHERE type = 'company.converted' ORDER BY seq DESC LIMIT 1", [], |r| r.get(0))
+        .optional()?;
+    Ok(metadata
+        .and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok())
+        .and_then(|m| serde_json::from_value(m["report"].clone()).ok()))
 }

@@ -5,7 +5,7 @@
 import 'models.dart';
 
 /// The protocol major this app speaks. The server refuses another one.
-const int protocolMajor = 3;
+const int protocolMajor = 4;
 
 /// The wire name of every method.
 abstract final class Methods {
@@ -56,16 +56,24 @@ abstract final class Methods {
   /// Restore at the next start (the service stops now); work stays paused until resumed.
   static const String backupRestore = 'backup.restore';
   static const String backupResume = 'backup.resume';
+  /// Rename the columns and set their order (B3): all six, left to right.
+  /// `expected_version` is the board's (`board_version`: the columns change
+  /// together); the answer gives the new one.
+  static const String boardColumnsUpdate = 'board.columns_update';
+  /// The board: its six columns left to right, each with its cards (not
+  /// archived), for one project or every project.
+  static const String boardGet = 'board.get';
   static const String browserGet = 'browser.get';
   static const String browserSet = 'browser.set';
   /// Claude in Chrome or Playwright, for every run that starts afterwards.
   static const String browserSetBackend = 'browser.set_backend';
   static const String chatRetry = 'chat.retry';
   static const String chatSend = 'chat.send';
-  /// The company in one read: departments, employees, the org chart setting
-  /// and the management team (roots), plus the conversion report if any.
+  /// The company in one read: employees, the org chart setting and the
+  /// management team (roots).
   static const String companyGet = 'company.get';
   static const String companySetFollowOrgChart = 'company.set_follow_org_chart';
+  static const String companyUpdate = 'company.update';
   static const String connectionAdd = 'connection.add';
   /// Where Claude Code is installed on the server.
   static const String connectionDetectRuntime = 'connection.detect_runtime';
@@ -82,22 +90,16 @@ abstract final class Methods {
   static const String conversationSetBrowserAllowed = 'conversation.set_browser_allowed';
   static const String conversationSetRun = 'conversation.set_run';
   static const String conversationSetScreenAllowed = 'conversation.set_screen_allowed';
-  static const String departmentArchive = 'department.archive';
-  static const String departmentCreate = 'department.create';
-  /// The departments by name; archived ones too with `archived`.
-  static const String departmentList = 'department.list';
-  static const String departmentUpdate = 'department.update';
   /// An employee's persistent chat with the user (company scope, no project):
   /// its messages and settings, as `conversation.get` answers them.
   static const String employeeChat = 'employee.chat';
   static const String employeeCreate = 'employee.create';
   /// The versions of an employee's instructions, newest first (feature `instruction_proposals`).
   static const String employeeInstructionVersions = 'employee.instruction_versions';
-  /// The company's employees (not archived), oldest first; optionally of one department.
+  /// The company's employees (not archived), oldest first.
   static const String employeeList = 'employee.list';
   static const String employeeRestoreInstructions = 'employee.restore_instructions';
   static const String employeeSendMessage = 'employee.send_message';
-  static const String employeeSetDepartment = 'employee.set_department';
   static const String employeeSetFolder = 'employee.set_folder';
   static const String employeeSetReportsTo = 'employee.set_reports_to';
   static const String employeeSetStatus = 'employee.set_status';
@@ -161,13 +163,12 @@ abstract final class Methods {
   static const String memoryConsolidate = 'memory.consolidate';
   static const String memoryDecide = 'memory.decide';
   static const String memoryForget = 'memory.forget';
-  /// What goes into a context: an employee's (own, its department, the
-  /// project if given, global), a project conversation's (project, global; no
-  /// employee) or a department's alone. At least one of the three.
+  /// What goes into a context: an employee's (own, the project if given,
+  /// global) or a project conversation's (project, global; no employee). At
+  /// least one of the two.
   static const String memoryGetContext = 'memory.get_context';
   /// Memories, newest first: global always, plus the scopes asked for (a
-  /// project, an employee, a department). An employee also brings its
-  /// department's. Nothing asked: global and every department and employee.
+  /// project, an employee). Nothing asked: global and every employee.
   static const String memoryList = 'memory.list';
   static const String memoryPin = 'memory.pin';
   static const String memoryRemember = 'memory.remember';
@@ -216,13 +217,14 @@ abstract final class Methods {
   static const String projectSetDescription = 'project.set_description';
   static const String projectSetFolder = 'project.set_folder';
   static const String projectSetStatus = 'project.set_status';
+  static const String projectUpdate = 'project.update';
   /// The conversations of a project, most recently active first.
   static const String projectConversationList = 'project_conversation.list';
   static const String projectConversationSend = 'project_conversation.send';
   static const String projectConversationStart = 'project_conversation.start';
   static const String proposalDecide = 'proposal.decide';
   /// Proposals of the whole company (colleagues and instructions): pending
-  /// first, then the latest decisions; optionally of one department.
+  /// first, then the latest decisions.
   static const String proposalList = 'proposal.list';
   static const String pushConfigure = 'push.configure';
   static const String pushTest = 'push.test';
@@ -284,6 +286,48 @@ abstract final class Methods {
   /// (feature `terminal.multi`; at most 4 per conversation, 8 per server).
   static const String terminalOpen = 'terminal.open';
   static const String terminalResize = 'terminal.resize';
+  /// Review → Done. Only a board member; only when no linked task still works (B6).
+  static const String ticketAccept = 'ticket.accept';
+  /// Plan review → Doing: the owner carries the plan out.
+  static const String ticketApprovePlan = 'ticket.approve_plan';
+  /// Take a ticket off the board (from Done or Backlog); it stays readable.
+  static const String ticketArchive = 'ticket.archive';
+  /// Choose the owner of a ticket before its main task exists: a board member
+  /// (instead of the dispatcher) or the dispatcher itself. Gives `ticket.dispatched`.
+  ///
+  /// `employee_id` none: no owner again, so the dispatcher chooses when it
+  /// starts. Only in Backlog (before the start); gives `ticket.updated` with
+  /// `changed: ["owner"]`, not `ticket.dispatched` (nobody was chosen).
+  static const String ticketAssign = 'ticket.assign';
+  /// Stop the work on a ticket: its main task is cancelled and it goes back to Backlog.
+  static const String ticketCancel = 'ticket.cancel';
+  /// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
+  static const String ticketCreate = 'ticket.create';
+  /// One ticket with its main task and every task linked to it.
+  static const String ticketGet = 'ticket.get';
+  /// Tickets in board order (not archived); every given filter applies. `query`
+  /// searches title, description and `#number`.
+  static const String ticketList = 'ticket.list';
+  /// Drag a card. Within its column: only the order. To Todo: start it. To
+  /// Backlog: cancel it. Done only through `ticket.accept`, and Review back to
+  /// Doing only through `ticket.send_back`; other moves follow the work and are refused.
+  /// The place is relative to a neighbour, so it means the same on a board
+  /// filtered by project as on the whole board. A move within the same column
+  /// also gives `ticket.moved` (with `from` = `to`). A card put above itself in
+  /// its own column stays where it is: no event, the version is unchanged.
+  /// Unknown fields (such as the old `position`) are refused.
+  static const String ticketMove = 'ticket.move';
+  /// Plan review → Doing in Plan mode: the owner makes a new plan with the feedback.
+  static const String ticketRevisePlan = 'ticket.revise_plan';
+  /// Review → Doing with feedback (required) for the owner.
+  static const String ticketSendBack = 'ticket.send_back';
+  /// The Start button: Backlog to Todo. With an employee the dispatcher is skipped.
+  /// Also starts again a ticket whose main task failed.
+  static const String ticketStart = 'ticket.start';
+  /// Change the fields of a ticket. Left out: unchanged. The creator never
+  /// changes; the owner only through `ticket.assign`; mode and model only while
+  /// the main task does not run.
+  static const String ticketUpdate = 'ticket.update';
   /// Human-readable timeline cards, newest first (keyset on `seq`).
   static const String timelineList = 'timeline.list';
   /// Whether runs keep a trace (feature `run_trace`).
@@ -308,6 +352,25 @@ abstract final class Methods {
   /// What a conversation or a task used, with the tasks given away from it apart
   /// (feature `run_usage`). Give one of the two; a task wins.
   static const String usageGetTotals = 'usage.get_totals';
+  /// A new board member (OV-12: `invalid_username`, `weak_password` (also a
+  /// password of only spaces), `username_taken`; `too_many_attempts` after five
+  /// a minute on one connection); answers `CommandResult::UserCreated` as a command
+  /// receipt. A connection without an active board member becomes the new one.
+  /// The server hashes the password before anything is recorded: the receipt,
+  /// its request hash and the event `user.created` hold the name only. Not for apps.
+  static const String userCreate = 'user.create';
+  /// The board members, oldest first (never a password's hash): the choice
+  /// "Who's working here?". Apps may read it too.
+  static const String userList = 'user.list';
+  /// The one password check (Fase 1): a right password makes the board member
+  /// active on this connection and answers `WhoAmI`. A wrong password and an
+  /// unknown board member are both `wrong_password` (after a short delay); more
+  /// than 5 tries a minute on one connection are `too_many_attempts`. A session
+  /// method: it changes only the connection, so it has no receipt to replay.
+  /// Not for apps.
+  static const String userUse = 'user.use';
+  /// Whether the server has board members, and this connection's active one.
+  static const String userWhoami = 'user.whoami';
   /// Whether tasks may be tried in several ways first (feature `task_variants`).
   static const String variantsGetSetting = 'variants.get_setting';
   /// Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
@@ -381,12 +444,21 @@ Map<String, dynamic> backupList() => <String, dynamic>{
   'method': Methods.backupList,
 };
 
+/// The board: its six columns left to right, each with its cards (not
+/// archived), for one project or every project.
+Map<String, dynamic> boardGet({String? projectId}) => <String, dynamic>{
+  'method': Methods.boardGet,
+  'params': <String, dynamic>{
+    if (projectId != null) 'project_id': projectId,
+  },
+};
+
 Map<String, dynamic> browserGet() => <String, dynamic>{
   'method': Methods.browserGet,
 };
 
-/// The company in one read: departments, employees, the org chart setting
-/// and the management team (roots), plus the conversion report if any.
+/// The company in one read: employees, the org chart setting and the
+/// management team (roots).
 Map<String, dynamic> companyGet() => <String, dynamic>{
   'method': Methods.companyGet,
 };
@@ -408,14 +480,6 @@ Map<String, dynamic> conversationGet({required String conversationId}) => <Strin
   },
 };
 
-/// The departments by name; archived ones too with `archived`.
-Map<String, dynamic> departmentList({bool? archived}) => <String, dynamic>{
-  'method': Methods.departmentList,
-  'params': <String, dynamic>{
-    if (archived != null) 'archived': archived,
-  },
-};
-
 /// An employee's persistent chat with the user (company scope, no project):
 /// its messages and settings, as `conversation.get` answers them.
 Map<String, dynamic> employeeChat({required String employeeId}) => <String, dynamic>{
@@ -433,12 +497,9 @@ Map<String, dynamic> employeeInstructionVersions({required String employeeId}) =
   },
 };
 
-/// The company's employees (not archived), oldest first; optionally of one department.
-Map<String, dynamic> employeeList({String? departmentId}) => <String, dynamic>{
+/// The company's employees (not archived), oldest first.
+Map<String, dynamic> employeeList() => <String, dynamic>{
   'method': Methods.employeeList,
-  'params': <String, dynamic>{
-    if (departmentId != null) 'department_id': departmentId,
-  },
 };
 
 /// Replay events after `after_seq`, then stream live events (and load/power pushes).
@@ -556,25 +617,22 @@ Map<String, dynamic> mcpAlwaysAllowList() => <String, dynamic>{
   'method': Methods.mcpAlwaysAllowList,
 };
 
-/// What goes into a context: an employee's (own, its department, the
-/// project if given, global), a project conversation's (project, global; no
-/// employee) or a department's alone. At least one of the three.
-Map<String, dynamic> memoryGetContext({String? departmentId, String? employeeId, String? projectId}) => <String, dynamic>{
+/// What goes into a context: an employee's (own, the project if given,
+/// global) or a project conversation's (project, global; no employee). At
+/// least one of the two.
+Map<String, dynamic> memoryGetContext({String? employeeId, String? projectId}) => <String, dynamic>{
   'method': Methods.memoryGetContext,
   'params': <String, dynamic>{
-    if (departmentId != null) 'department_id': departmentId,
     if (employeeId != null) 'employee_id': employeeId,
     if (projectId != null) 'project_id': projectId,
   },
 };
 
 /// Memories, newest first: global always, plus the scopes asked for (a
-/// project, an employee, a department). An employee also brings its
-/// department's. Nothing asked: global and every department and employee.
-Map<String, dynamic> memoryList({String? departmentId, String? employeeId, String? projectId}) => <String, dynamic>{
+/// project, an employee). Nothing asked: global and every employee.
+Map<String, dynamic> memoryList({String? employeeId, String? projectId}) => <String, dynamic>{
   'method': Methods.memoryList,
   'params': <String, dynamic>{
-    if (departmentId != null) 'department_id': departmentId,
     if (employeeId != null) 'employee_id': employeeId,
     if (projectId != null) 'project_id': projectId,
   },
@@ -644,12 +702,9 @@ Map<String, dynamic> projectConversationList({required String projectId}) => <St
 };
 
 /// Proposals of the whole company (colleagues and instructions): pending
-/// first, then the latest decisions; optionally of one department.
-Map<String, dynamic> proposalList({String? departmentId}) => <String, dynamic>{
+/// first, then the latest decisions.
+Map<String, dynamic> proposalList() => <String, dynamic>{
   'method': Methods.proposalList,
-  'params': <String, dynamic>{
-    if (departmentId != null) 'department_id': departmentId,
-  },
 };
 
 Map<String, dynamic> recurringTaskList({String? projectId}) => <String, dynamic>{
@@ -722,13 +777,12 @@ Map<String, dynamic> subscriptionGet({required bool refresh}) => <String, dynami
 };
 
 /// Tasks, newest first, company-wide; every given filter applies.
-Map<String, dynamic> taskList({String? departmentId, String? employeeId, String? projectId, TaskListState? state}) => <String, dynamic>{
+Map<String, dynamic> taskList({String? employeeId, String? projectId, TaskListState? state}) => <String, dynamic>{
   'method': Methods.taskList,
   'params': <String, dynamic>{
-    if (departmentId != null) 'department_id': departmentId,
     if (employeeId != null) 'employee_id': employeeId,
     if (projectId != null) 'project_id': projectId,
-    if (state != null) 'state': state?.toJson(),
+    if (state != null) 'state': state.toJson(),
   },
 };
 
@@ -798,6 +852,25 @@ Map<String, dynamic> terminalResize({required int cols, required int rows, requi
   },
 };
 
+/// One ticket with its main task and every task linked to it.
+Map<String, dynamic> ticketGet({required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketGet,
+  'params': <String, dynamic>{
+    'ticket_id': ticketId,
+  },
+};
+
+/// Tickets in board order (not archived); every given filter applies. `query`
+/// searches title, description and `#number`.
+Map<String, dynamic> ticketList({ColumnKind? column, String? projectId, String? query}) => <String, dynamic>{
+  'method': Methods.ticketList,
+  'params': <String, dynamic>{
+    if (column != null) 'column': column.toJson(),
+    if (projectId != null) 'project_id': projectId,
+    if (query != null) 'query': query,
+  },
+};
+
 /// Human-readable timeline cards, newest first (keyset on `seq`).
 Map<String, dynamic> timelineList(TimelineQuery params) => <String, dynamic>{
   'method': Methods.timelineList,
@@ -850,6 +923,28 @@ Map<String, dynamic> usageGetTotals({String? conversationId, String? taskId}) =>
     if (conversationId != null) 'conversation_id': conversationId,
     if (taskId != null) 'task_id': taskId,
   },
+};
+
+/// The board members, oldest first (never a password's hash): the choice
+/// "Who's working here?". Apps may read it too.
+Map<String, dynamic> userList() => <String, dynamic>{
+  'method': Methods.userList,
+};
+
+/// The one password check (Fase 1): a right password makes the board member
+/// active on this connection and answers `WhoAmI`. A wrong password and an
+/// unknown board member are both `wrong_password` (after a short delay); more
+/// than 5 tries a minute on one connection are `too_many_attempts`. A session
+/// method: it changes only the connection, so it has no receipt to replay.
+/// Not for apps.
+Map<String, dynamic> userUse(UserUseParams params) => <String, dynamic>{
+  'method': Methods.userUse,
+  'params': params.toJson(),
+};
+
+/// Whether the server has board members, and this connection's active one.
+Map<String, dynamic> userWhoami() => <String, dynamic>{
+  'method': Methods.userWhoami,
 };
 
 /// Whether tasks may be tried in several ways first (feature `task_variants`).
@@ -1253,6 +1348,17 @@ Map<String, dynamic> updatePrepareApp() => <String, dynamic>{
   'method': Methods.updatePrepareApp,
 };
 
+/// A new board member (OV-12: `invalid_username`, `weak_password` (also a
+/// password of only spaces), `username_taken`; `too_many_attempts` after five
+/// a minute on one connection); answers `CommandResult::UserCreated` as a command
+/// receipt. A connection without an active board member becomes the new one.
+/// The server hashes the password before anything is recorded: the receipt,
+/// its request hash and the event `user.created` hold the name only. Not for apps.
+Map<String, dynamic> userCreate(UserCreateParams params) => <String, dynamic>{
+  'method': Methods.userCreate,
+  'params': params.toJson(),
+};
+
 /// Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
 Map<String, dynamic> variantsSetEnabled({required bool enabled}) => <String, dynamic>{
   'method': Methods.variantsSetEnabled,
@@ -1288,6 +1394,16 @@ Map<String, dynamic> attachmentRemove(RemoveAttachment params) => <String, dynam
   'params': params.toJson(),
 };
 
+/// Rename the columns and set their order (B3): all six, left to right.
+/// `expected_version` is the board's (`board_version`: the columns change
+/// together); the answer gives the new one.
+Map<String, dynamic> boardColumnsUpdate({required List<BoardColumnEdit> columns}) => <String, dynamic>{
+  'method': Methods.boardColumnsUpdate,
+  'params': <String, dynamic>{
+    'columns': columns.map((x0) => x0.toJson()).toList(),
+  },
+};
+
 Map<String, dynamic> chatRetry(RetryReply params) => <String, dynamic>{
   'method': Methods.chatRetry,
   'params': params.toJson(),
@@ -1300,6 +1416,11 @@ Map<String, dynamic> chatSend(SendChatMessage params) => <String, dynamic>{
 
 Map<String, dynamic> companySetFollowOrgChart(SetFollowOrgChart params) => <String, dynamic>{
   'method': Methods.companySetFollowOrgChart,
+  'params': params.toJson(),
+};
+
+Map<String, dynamic> companyUpdate(UpdateCompany params) => <String, dynamic>{
+  'method': Methods.companyUpdate,
   'params': params.toJson(),
 };
 
@@ -1358,21 +1479,6 @@ Map<String, dynamic> conversationSetScreenAllowed(SetScreenAllowed params) => <S
   'params': params.toJson(),
 };
 
-Map<String, dynamic> departmentArchive(ArchiveDepartment params) => <String, dynamic>{
-  'method': Methods.departmentArchive,
-  'params': params.toJson(),
-};
-
-Map<String, dynamic> departmentCreate(CreateDepartment params) => <String, dynamic>{
-  'method': Methods.departmentCreate,
-  'params': params.toJson(),
-};
-
-Map<String, dynamic> departmentUpdate(UpdateDepartment params) => <String, dynamic>{
-  'method': Methods.departmentUpdate,
-  'params': params.toJson(),
-};
-
 Map<String, dynamic> employeeCreate(CreateEmployee params) => <String, dynamic>{
   'method': Methods.employeeCreate,
   'params': params.toJson(),
@@ -1385,11 +1491,6 @@ Map<String, dynamic> employeeRestoreInstructions(RestoreEmployeeInstructions par
 
 Map<String, dynamic> employeeSendMessage(SendEmployeeMessage params) => <String, dynamic>{
   'method': Methods.employeeSendMessage,
-  'params': params.toJson(),
-};
-
-Map<String, dynamic> employeeSetDepartment(SetEmployeeDepartment params) => <String, dynamic>{
-  'method': Methods.employeeSetDepartment,
   'params': params.toJson(),
 };
 
@@ -1503,6 +1604,11 @@ Map<String, dynamic> projectSetStatus(SetProjectStatus params) => <String, dynam
   'params': params.toJson(),
 };
 
+Map<String, dynamic> projectUpdate(UpdateProject params) => <String, dynamic>{
+  'method': Methods.projectUpdate,
+  'params': params.toJson(),
+};
+
 Map<String, dynamic> projectConversationSend(SendProjectMessage params) => <String, dynamic>{
   'method': Methods.projectConversationSend,
   'params': params.toJson(),
@@ -1581,4 +1687,133 @@ Map<String, dynamic> taskCreate(CreateTask params) => <String, dynamic>{
 Map<String, dynamic> taskDiscuss(DiscussTask params) => <String, dynamic>{
   'method': Methods.taskDiscuss,
   'params': params.toJson(),
+};
+
+/// Review → Done. Only a board member; only when no linked task still works (B6).
+Map<String, dynamic> ticketAccept({String? note, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketAccept,
+  'params': <String, dynamic>{
+    if (note != null) 'note': note,
+    'ticket_id': ticketId,
+  },
+};
+
+/// Plan review → Doing: the owner carries the plan out.
+Map<String, dynamic> ticketApprovePlan({required PlanApproval decision, String? feedback, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketApprovePlan,
+  'params': <String, dynamic>{
+    'decision': decision.toJson(),
+    if (feedback != null) 'feedback': feedback,
+    'ticket_id': ticketId,
+  },
+};
+
+/// Take a ticket off the board (from Done or Backlog); it stays readable.
+Map<String, dynamic> ticketArchive({required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketArchive,
+  'params': <String, dynamic>{
+    'ticket_id': ticketId,
+  },
+};
+
+/// Choose the owner of a ticket before its main task exists: a board member
+/// (instead of the dispatcher) or the dispatcher itself. Gives `ticket.dispatched`.
+///
+/// `employee_id` none: no owner again, so the dispatcher chooses when it
+/// starts. Only in Backlog (before the start); gives `ticket.updated` with
+/// `changed: ["owner"]`, not `ticket.dispatched` (nobody was chosen).
+Map<String, dynamic> ticketAssign({String? employeeId, String? reason, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketAssign,
+  'params': <String, dynamic>{
+    if (employeeId != null) 'employee_id': employeeId,
+    if (reason != null) 'reason': reason,
+    'ticket_id': ticketId,
+  },
+};
+
+/// Stop the work on a ticket: its main task is cancelled and it goes back to Backlog.
+Map<String, dynamic> ticketCancel({required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketCancel,
+  'params': <String, dynamic>{
+    'ticket_id': ticketId,
+  },
+};
+
+/// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
+Map<String, dynamic> ticketCreate({int? deadlineMs, String? description, List<String> files = const [], List<String> labels = const [], String? ownerEmployeeId, TicketPriority? priority, required String projectId, TaskRun? run, bool? start, required String title}) => <String, dynamic>{
+  'method': Methods.ticketCreate,
+  'params': <String, dynamic>{
+    if (deadlineMs != null) 'deadline_ms': deadlineMs,
+    if (description != null) 'description': description,
+    'files': files,
+    'labels': labels,
+    if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
+    if (priority != null) 'priority': priority.toJson(),
+    'project_id': projectId,
+    if (run != null) 'run': run.toJson(),
+    if (start != null) 'start': start,
+    'title': title,
+  },
+};
+
+/// Drag a card. Within its column: only the order. To Todo: start it. To
+/// Backlog: cancel it. Done only through `ticket.accept`, and Review back to
+/// Doing only through `ticket.send_back`; other moves follow the work and are refused.
+/// The place is relative to a neighbour, so it means the same on a board
+/// filtered by project as on the whole board. A move within the same column
+/// also gives `ticket.moved` (with `from` = `to`). A card put above itself in
+/// its own column stays where it is: no event, the version is unchanged.
+/// Unknown fields (such as the old `position`) are refused.
+Map<String, dynamic> ticketMove({String? beforeTicketId, required String columnId, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketMove,
+  'params': <String, dynamic>{
+    if (beforeTicketId != null) 'before_ticket_id': beforeTicketId,
+    'column_id': columnId,
+    'ticket_id': ticketId,
+  },
+};
+
+/// Plan review → Doing in Plan mode: the owner makes a new plan with the feedback.
+Map<String, dynamic> ticketRevisePlan({required String feedback, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketRevisePlan,
+  'params': <String, dynamic>{
+    'feedback': feedback,
+    'ticket_id': ticketId,
+  },
+};
+
+/// Review → Doing with feedback (required) for the owner.
+Map<String, dynamic> ticketSendBack({required String feedback, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketSendBack,
+  'params': <String, dynamic>{
+    'feedback': feedback,
+    'ticket_id': ticketId,
+  },
+};
+
+/// The Start button: Backlog to Todo. With an employee the dispatcher is skipped.
+/// Also starts again a ticket whose main task failed.
+Map<String, dynamic> ticketStart({String? employeeId, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketStart,
+  'params': <String, dynamic>{
+    if (employeeId != null) 'employee_id': employeeId,
+    'ticket_id': ticketId,
+  },
+};
+
+/// Change the fields of a ticket. Left out: unchanged. The creator never
+/// changes; the owner only through `ticket.assign`; mode and model only while
+/// the main task does not run.
+Map<String, dynamic> ticketUpdate({bool? clearDeadline, int? deadlineMs, String? description, List<String>? labels, TicketPriority? priority, TaskRun? run, required String ticketId, String? title}) => <String, dynamic>{
+  'method': Methods.ticketUpdate,
+  'params': <String, dynamic>{
+    if (clearDeadline != null) 'clear_deadline': clearDeadline,
+    if (deadlineMs != null) 'deadline_ms': deadlineMs,
+    if (description != null) 'description': description,
+    if (labels != null) 'labels': labels,
+    if (priority != null) 'priority': priority.toJson(),
+    if (run != null) 'run': run.toJson(),
+    'ticket_id': ticketId,
+    if (title != null) 'title': title,
+  },
 };

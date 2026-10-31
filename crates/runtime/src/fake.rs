@@ -62,7 +62,13 @@ fn scripted(request: &RunRequest) -> Option<String> {
                 items.push(serde_json::json!({ "kind": "project_knowledge", "content": format!("Requested goal: {goal}"), "source": label, "scope": "project", "importance": 0.6, "confidence": 0.8 }));
             }
         }
-        return Some(serde_json::json!({ "items": items, "lessons": lessons }).to_string());
+        let mut answer = serde_json::json!({ "items": items, "lessons": lessons });
+        // After a ticket's Done the extraction also asks for the ticket's summary.
+        if system.contains("\"ticket_summary\"") {
+            let title = prompt.lines().find_map(|l| l.split_once("Task completed: ").map(|(_, t)| t)).unwrap_or("the ticket");
+            answer["ticket_summary"] = serde_json::json!(format!("The main task '{title}' was delivered and accepted."));
+        }
+        return Some(answer.to_string());
     }
     if system.contains(VARIANTS_MARKER) {
         // "Count: k" asks for k approaches.

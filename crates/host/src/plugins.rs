@@ -974,8 +974,8 @@ mod tests {
             .write(move |tx| {
                 events::insert_project_projection(tx, project, "Atlas", None)?;
                 events::insert_project_projection(tx, other, "Other", None)?;
-                employees::insert_employee(tx, lead, "Lead", "Dev", None, None, None, None, &serde_json::json!({}), lead_chat)?;
-                employees::insert_employee(tx, plain, "Plain", "Dev", None, None, None, None, &serde_json::json!({}), plain_chat)?;
+                employees::insert_employee(tx, lead, "Lead", "Dev", None, None, None, &serde_json::json!({}), lead_chat)?;
+                employees::insert_employee(tx, plain, "Plain", "Dev", None, None, None, &serde_json::json!({}), plain_chat)?;
                 employees::insert_thread(tx, lead, task, ConversationKind::Task, Some(project))?;
                 employees::insert_thread(tx, lead, other_task, ConversationKind::Task, Some(other))?;
                 conversations::insert_project_conversation(tx, assistant, project, "Assistant")?;

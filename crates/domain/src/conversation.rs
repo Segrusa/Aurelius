@@ -214,6 +214,7 @@ pub enum UploadOwner {
     Message(MessageId),
     Task(crate::TaskId),
     Schedule(crate::TaskScheduleId),
+    Ticket(crate::TicketId),
     Idea(crate::IdeaId),
 }
 
@@ -225,6 +226,7 @@ pub fn upload_id(owner: UploadOwner, index: usize) -> String {
         UploadOwner::Task(id) => format!("t:{id}:{index}"),
         UploadOwner::Schedule(id) => format!("s:{id}:{index}"),
         UploadOwner::Idea(id) => format!("i:{id}:{index}"),
+        UploadOwner::Ticket(id) => format!("k:{id}:{index}"),
     }
 }
 
@@ -236,6 +238,7 @@ pub fn parse_upload_id(id: &str) -> Option<(UploadOwner, usize)> {
         "t" => UploadOwner::Task(crate::TaskId::parse(owner).ok()?),
         "s" => UploadOwner::Schedule(crate::TaskScheduleId::parse(owner).ok()?),
         "i" => UploadOwner::Idea(crate::IdeaId::parse(owner).ok()?),
+        "k" => UploadOwner::Ticket(crate::TicketId::parse(owner).ok()?),
         _ => return None,
     };
     Some((owner, index))

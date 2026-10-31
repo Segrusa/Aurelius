@@ -157,9 +157,44 @@ impl AppView {
                         this.pick_folder(FolderPurpose::ProjectFolder(p.id), "Use as project folder", w, cx);
                     }))))));
 
+        // The project's dispatcher (MU1-11, ui-ontwerp §12.2).
+        let dispatcher = self.dispatcher_for(p.id);
+        let company = self.company.as_ref().and_then(|c| c.company.dispatcher_employee_id).and_then(|e| self.employee_name(e));
+        let own = p.dispatcher_employee_id;
+        let text = match own.and_then(|e| self.employee_name(e)) {
+            Some(name) => name,
+            None => company.clone().map_or_else(|| "Company default (none)".to_string(), |n| format!("Company default ({n})")),
+        };
+        let open = self.overlay == crate::app::Overlay::Menu && self.menu.as_ref().is_some_and(|m| m.field == Some("project-dispatcher"));
+        let project_id = p.id;
+        let picker = ui::dropdown_trigger("project-dispatcher", 28., own.is_some(), open).max_w(px(280.))
+            .child(div().min_w_0().truncate().child(text))
+            .child(ui::caret())
+            .child(ui::track_bounds(self.dropdown_bounds.clone(), "project-dispatcher"))
+            .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                let company = this.company.as_ref().and_then(|c| c.company.dispatcher_employee_id).and_then(|e| this.employee_name(e));
+                let mut items: crate::app::MenuItems = vec![
+                    crate::screens::board::menu_entry(company.map_or_else(|| "Company default (none)".to_string(), |n| format!("Company default ({n})")), crate::screens::board::BoardDo::ProjectDispatcher(project_id, None), own.is_none(), None),
+                    None,
+                ];
+                items.extend(this.employee_choices().into_iter().map(|(e, name)| crate::screens::board::menu_entry(name, crate::screens::board::BoardDo::ProjectDispatcher(project_id, Some(e)), own == Some(e), None)));
+                this.open_dropdown("project-dispatcher", items, w, cx);
+            }));
+        let note = match &dispatcher {
+            crate::screens::board::Dispatcher::Inactive { .. } | crate::screens::board::Dispatcher::None => Some(dispatcher.line()),
+            _ => None,
+        };
+        let board = v().gap(px(12.))
+            .child(section("BOARD"))
+            .child(row("Dispatcher", v().gap(px(6.))
+                .child(picker)
+                .child(muted("Chooses an owner when a ticket of this project starts without one.".into()))
+                .children(note.map(|n| div().text_size(px(12.5)).text_color(c(theme::ACCENT_TEXT)).child(format!("◆ {n}"))))));
+
         let body = v().gap(px(14.))
             .child(div().font_family(ui::serif(cx)).text_size(px(22.)).child(format!("Edit project · {}", p.name)))
-            .child(general);
+            .child(general)
+            .child(board);
 
         let card = crate::screens::overlays::card(720.)
             .child(ui::scroll_frame(&scroll, crate::screens::overlays::scroll_body("project-settings-body", &scroll, (max_h - 70.).max(120.)).p(px(22.)).child(body)))

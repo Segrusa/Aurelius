@@ -44,7 +44,7 @@ async fn company(owner: &Client) -> Company {
         panic!()
     };
     let hire = |name: &str, role: &str, title: Option<&str>, boss: Option<EmployeeId>| {
-        Command::CreateEmployee(CreateEmployee { name: name.into(), role: role.into(), title: title.map(str::to_owned), reports_to: boss, instructions: None, folder: None, department_id: None })
+        Command::CreateEmployee(CreateEmployee { name: name.into(), role: role.into(), title: title.map(str::to_owned), reports_to: boss, instructions: None, folder: None })
     };
     let mut made = Vec::new();
     let mut boss = None;
@@ -96,7 +96,7 @@ async fn a_management_key_reaches_the_ceo_and_the_ceos_reports_only() {
     assert_eq!(marcus.hello.app.as_ref().map(|a| a.audience), Some(AppAudience::Management));
 
     // The list: the CEO and the CEO's direct report, not the developer.
-    let mut names: Vec<String> = marcus.employees(None).await.unwrap().employees.into_iter().map(|e| e.name).collect();
+    let mut names: Vec<String> = marcus.employees().await.unwrap().employees.into_iter().map(|e| e.name).collect();
     names.sort();
     assert_eq!(names, vec!["Cora", "Jean"]);
 
@@ -132,7 +132,7 @@ async fn a_management_key_reaches_the_ceo_and_the_ceos_reports_only() {
     let (_, all_secret) = key(&owner, "Assistant", AppAudience::All, vec![AppScope::Read, AppScope::Run]).await;
     let all = app(dir.path(), &all_secret).await;
     assert_eq!(all.hello.app.as_ref().map(|a| a.audience), Some(AppAudience::All));
-    assert_eq!(all.employees(None).await.unwrap().employees.len(), 3);
+    assert_eq!(all.employees().await.unwrap().employees.len(), 3);
     all.execute(envelope(task(c.project, Some(c.dev.0), "From the assistant"), None)).await.expect("audience all is unchanged");
     refusal(all.execute(envelope(message(c.dev.0, c.dev.1), None)).await);
     assert_eq!(owner.app_keys().await.unwrap().iter().filter(|k| k.audience == AppAudience::All).count(), 1);

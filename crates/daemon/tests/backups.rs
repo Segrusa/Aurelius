@@ -60,7 +60,7 @@ async fn backup_restore_paused_scrub_and_export() {
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }),
+            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await

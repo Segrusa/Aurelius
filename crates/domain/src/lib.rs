@@ -11,9 +11,9 @@ pub mod app_key;
 pub mod approval;
 pub mod autonomy;
 pub mod command;
+pub mod company;
 pub mod connection;
 pub mod conversation;
-pub mod department;
 pub mod error;
 pub mod events;
 pub mod files;
@@ -32,6 +32,8 @@ pub mod schedule;
 pub mod scheduler;
 pub mod share;
 pub mod task;
+pub mod ticket;
+pub mod user;
 pub mod variants;
 pub mod views;
 pub mod webhook;
@@ -99,10 +101,6 @@ pub enum Command {
     SetEmployeeStatus(employee::SetEmployeeStatus),
     SetEmployeeFolder(employee::SetEmployeeFolder),
     SetEmployeeReportsTo(employee::SetEmployeeReportsTo),
-    SetEmployeeDepartment(employee::SetEmployeeDepartment),
-    CreateDepartment(department::CreateDepartment),
-    UpdateDepartment(department::UpdateDepartment),
-    ArchiveDepartment(department::ArchiveDepartment),
     SetFollowOrgChart(employee::SetFollowOrgChart),
     SetHeartbeat(employee::SetHeartbeat),
     SendEmployeeMessage(employee::SendEmployeeMessage),
@@ -142,6 +140,20 @@ pub enum Command {
     DeleteTaskSchedule(schedule::DeleteTaskSchedule),
     SetTaskSchedulePaused(schedule::SetTaskSchedulePaused),
     RunTaskScheduleNow(schedule::RunTaskScheduleNow),
+    CreateTicket(ticket::CreateTicket),
+    UpdateTicket(ticket::UpdateTicket),
+    MoveTicket(ticket::MoveTicket),
+    StartTicket(ticket::StartTicket),
+    AssignTicket(ticket::AssignTicket),
+    ApprovePlan(ticket::ApprovePlan),
+    RevisePlan(ticket::RevisePlan),
+    AcceptTicket(ticket::AcceptTicket),
+    SendBackTicket(ticket::SendBackTicket),
+    CancelTicket(ticket::CancelTicket),
+    ArchiveTicket(ticket::ArchiveTicket),
+    UpdateBoardColumns(ticket::UpdateBoardColumns),
+    UpdateCompany(company::UpdateCompany),
+    UpdateProject(company::UpdateProject),
 }
 
 /// `(type, method)` for every command: the tag in the JSON of a `Command` and
@@ -172,10 +184,6 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("set_employee_status", "employee.set_status"),
     ("set_employee_folder", "employee.set_folder"),
     ("set_employee_reports_to", "employee.set_reports_to"),
-    ("set_employee_department", "employee.set_department"),
-    ("create_department", "department.create"),
-    ("update_department", "department.update"),
-    ("archive_department", "department.archive"),
     ("set_follow_org_chart", "company.set_follow_org_chart"),
     ("set_heartbeat", "heartbeat.set"),
     ("send_employee_message", "employee.send_message"),
@@ -212,6 +220,20 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("delete_task_schedule", "recurring_task.delete"),
     ("set_task_schedule_paused", "recurring_task.set_paused"),
     ("run_task_schedule_now", "recurring_task.run_now"),
+    ("create_ticket", "ticket.create"),
+    ("update_ticket", "ticket.update"),
+    ("move_ticket", "ticket.move"),
+    ("start_ticket", "ticket.start"),
+    ("assign_ticket", "ticket.assign"),
+    ("approve_plan", "ticket.approve_plan"),
+    ("revise_plan", "ticket.revise_plan"),
+    ("accept_ticket", "ticket.accept"),
+    ("send_back_ticket", "ticket.send_back"),
+    ("cancel_ticket", "ticket.cancel"),
+    ("archive_ticket", "ticket.archive"),
+    ("update_board_columns", "board.columns_update"),
+    ("update_company", "company.update"),
+    ("update_project", "project.update"),
 ];
 
 impl Command {
@@ -251,8 +273,6 @@ pub enum DomainError {
     MessageAlreadyStarted,
     #[error("employee {0} does not exist")]
     EmployeeNotFound(EmployeeId),
-    #[error("department {0} does not exist")]
-    DepartmentNotFound(DepartmentId),
     #[error("this employee is paused; resume it first to start new work")]
     EmployeePaused,
     #[error("this employee is archived; its history is kept but it cannot act")]
@@ -299,6 +319,21 @@ pub enum DomainError {
     Org(String),
     #[error("expected version {expected}, but the current version is {actual}")]
     VersionConflict { expected: u64, actual: u64 },
+    #[error("ticket {0} does not exist")]
+    TicketNotFound(TicketId),
+    #[error("column {0} is not on the board")]
+    BoardColumnNotFound(BoardColumnId),
+    /// A workflow rule of the board refused it; the text says what to do instead.
+    #[error("{0}")]
+    Ticket(String),
+    #[error("choose who you are first: this needs an active board member")]
+    BoardMemberRequired,
+    #[error("{0}")]
+    InvalidUsername(String),
+    #[error("{0}")]
+    WeakPassword(String),
+    #[error("another board member already has this name")]
+    UsernameTaken,
 }
 
 pub(crate) fn require_text(field: &str, value: &str, max: usize) -> Result<String, DomainError> {

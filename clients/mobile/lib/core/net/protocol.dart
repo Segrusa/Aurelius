@@ -21,12 +21,23 @@ class ProtocolException implements Exception {
   /// The server's reply was too large to send (`frame_too_large`); asking again won't help.
   bool get isTooLarge => code == ErrorCode.frameTooLarge;
 
+  /// Only a board member may do this (`board_member_required`): the app goes
+  /// back to "Who's working here?".
+  bool get needsBoardMember => code == ErrorCode.boardMemberRequired;
+
   /// What to show the user.
-  String get shown => isTooLarge && message.isEmpty ? "The PC's reply is too large to send." : message;
+  String get shown => switch (this) {
+        _ when needsBoardMember => boardMemberRequiredMessage,
+        _ when isTooLarge && message.isEmpty => "The PC's reply is too large to send.",
+        _ => message,
+      };
 
   @override
   String toString() => shown;
 }
+
+/// `board_member_required`, with the step to take.
+const boardMemberRequiredMessage = 'Only a board member can do this. Choose who you are on this phone first.';
 
 /// The connection dropped before an answer arrived. The write may or may
 /// not have been applied; resend with the same idempotency key to find out.

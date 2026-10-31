@@ -218,6 +218,13 @@ pub(crate) fn post_plan(tx: &Tx<'_>, blobs_store: &Store, run: aurelius_domain::
     post_with(tx, blobs_store, conversation, task, Speaker::Update { kind: "plan", from: &who }, plan, plan, serde_json::json!({ "approval_id": approval, "of_run": run })).map(|(_, n)| Some(n))
 }
 
+/// The plan of a ticket's main task, handed in for the board (no inbox approval:
+/// `plan_review`); in full in the task's conversation, where the board reads it.
+pub(crate) fn post_ticket_plan(tx: &Tx<'_>, blobs_store: &Store, run: aurelius_domain::RunId, plan: &str) -> Result<Option<EventNotice>, StorageError> {
+    let Some((conversation, task, who)) = run_conversation(tx, run)? else { return Ok(None) };
+    post_with(tx, blobs_store, conversation, task, Speaker::Update { kind: "plan", from: &who }, plan, plan, serde_json::json!({ "of_run": run, "plan_review": true })).map(|(_, n)| Some(n))
+}
+
 /// Claude asks the user (AskUserQuestion): the questions and their options in full
 /// in the conversation the run answers in, chat or task, where they can be answered too.
 pub(crate) fn post_question(tx: &Tx<'_>, blobs_store: &Store, run: aurelius_domain::RunId, approval: aurelius_domain::ApprovalId, text: &str) -> Result<Option<EventNotice>, StorageError> {

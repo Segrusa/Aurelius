@@ -16,7 +16,7 @@ mod chat;
 mod session;
 mod tooling;
 
-pub(crate) use tooling::{permission_mode, started_in};
+pub(crate) use tooling::{approval_bridge, permission_mode, started_in, with_flag};
 
 const POLL: Duration = Duration::from_millis(200);
 const LEASE_MS: i64 = 45_000;
@@ -93,6 +93,9 @@ pub async fn run(shared: Arc<Shared>) {
             }
             Ok(Ok(Some(job))) if job.kind == aurelius_application::task::tasks::TASK_JOB_KIND => {
                 tokio::spawn(crate::tasks::run_task(shared.clone(), job));
+            }
+            Ok(Ok(Some(job))) if job.kind == aurelius_application::task::triage::TRIAGE_JOB_KIND => {
+                tokio::spawn(crate::triage::run_triage(shared.clone(), job));
             }
             Ok(Ok(Some(job))) if job.kind == aurelius_application::memory::EXTRACT_JOB_KIND => {
                 tokio::spawn(crate::memory::run_extraction(shared.clone(), job));

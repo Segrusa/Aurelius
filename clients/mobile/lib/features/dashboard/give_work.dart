@@ -80,7 +80,6 @@ Future<void> giveWork(BuildContext context, {String? title, String? employeeId, 
   final task = await NewTaskPage.open(
     context,
     company.activeEmployees,
-    departments: company.activeDepartments,
     projects: company.openProjects,
     projectId: projectId ?? lastProject,
     employeeId: employeeId ?? lastLead,

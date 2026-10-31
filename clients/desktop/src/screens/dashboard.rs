@@ -5,7 +5,7 @@ use crate::app::{AppView, ManagerRef, NavItem, Overlay, Panel};
 use crate::keymap::*;
 use crate::theme::{self, c};
 use crate::ui::{self, ButtonKind, h, v};
-use aurelius_domain::{DepartmentId, EmployeeId, employee::LifecycleStatus};
+use aurelius_domain::{EmployeeId, employee::LifecycleStatus};
 use aurelius_protocol::EmployeeSummary;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -39,22 +39,12 @@ pub fn default_assignee(managers: &[EmployeeSummary], last: Option<EmployeeId>) 
     }
 }
 
-/// The assignee picker: the management team first, then the other active employees grouped
-/// by department (those without one last), in the order they come.
+/// The assignee picker: the management team first, then the other active employees as the
+/// org chart orders them (each boss followed by its reports).
 pub fn assignee_order(managers: &[EmployeeSummary]) -> Vec<&EmployeeSummary> {
     let team = roots(managers);
-    let active: Vec<&EmployeeSummary> = managers.iter().filter(|m| m.status == LifecycleStatus::Active).collect();
-    let mut out: Vec<&EmployeeSummary> = active.iter().copied().filter(|m| team.contains(&m.id)).collect();
-    let mut departments: Vec<Option<DepartmentId>> = Vec::new();
-    for m in active.iter().filter(|m| !team.contains(&m.id)) {
-        if m.department_id.is_some() && !departments.contains(&m.department_id) {
-            departments.push(m.department_id);
-        }
-    }
-    departments.push(None);
-    for d in departments {
-        out.extend(active.iter().copied().filter(|m| m.department_id == d && !team.contains(&m.id)));
-    }
+    let mut out: Vec<&EmployeeSummary> = managers.iter().filter(|m| team.contains(&m.id)).collect();
+    out.extend(crate::screens::org::org_rows(managers).into_iter().map(|(_, m)| m).filter(|m| m.status == LifecycleStatus::Active && !team.contains(&m.id)));
     out
 }
 
@@ -190,14 +180,13 @@ mod tests {
     use super::{assignee_order, default_assignee, is_management, needs_you, roots};
     use crate::screens::org::tests::manager;
     use crate::screens::tasks::tests::task;
-    use aurelius_domain::{DepartmentId, ProjectId, employee::LifecycleStatus, task::TaskStatus};
+    use aurelius_domain::{ProjectId, employee::LifecycleStatus, task::TaskStatus};
 
     #[test]
     fn management_is_the_root_and_its_direct_reports() {
-        let p = DepartmentId::new();
-        let ceo = manager(p, "Jean", None);
-        let cto = manager(p, "Simon", Some(ceo.id));
-        let dev = manager(p, "Dean", Some(cto.id));
+        let ceo = manager("Jean", None);
+        let cto = manager("Simon", Some(ceo.id));
+        let dev = manager("Dean", Some(cto.id));
         let all = [dev.clone(), cto.clone(), ceo.clone()];
         assert!(is_management(&all, ceo.id));
         assert!(is_management(&all, cto.id));
@@ -216,10 +205,9 @@ mod tests {
 
     #[test]
     fn the_single_root_is_the_default_assignee() {
-        let p = DepartmentId::new();
-        let ceo = manager(p, "Jean", None);
-        let cto = manager(p, "Simon", Some(ceo.id));
-        let dev = manager(p, "Dean", Some(cto.id));
+        let ceo = manager("Jean", None);
+        let cto = manager("Simon", Some(ceo.id));
+        let dev = manager("Dean", Some(cto.id));
         let all = vec![dev.clone(), cto.clone(), ceo.clone()];
         assert_eq!(default_assignee(&all, None), Some(ceo.id));
         assert_eq!(default_assignee(&all, Some(dev.id)), Some(ceo.id), "one root wins over the last choice");
@@ -227,10 +215,9 @@ mod tests {
 
     #[test]
     fn several_roots_default_to_the_last_choice_else_the_first_root() {
-        let p = DepartmentId::new();
-        let ceo = manager(p, "Jean", None);
-        let other = manager(DepartmentId::new(), "Tom", None);
-        let dev = manager(p, "Dean", Some(ceo.id));
+        let ceo = manager("Jean", None);
+        let other = manager("Tom", None);
+        let dev = manager("Dean", Some(ceo.id));
         let all = [ceo.clone(), other.clone(), dev.clone()];
         assert_eq!(default_assignee(&all, None), Some(ceo.id));
         assert_eq!(default_assignee(&all, Some(other.id)), Some(other.id));
@@ -243,28 +230,28 @@ mod tests {
 
     #[test]
     fn a_paused_root_is_no_default_and_an_archived_boss_makes_a_root() {
-        let p = DepartmentId::new();
-        let mut paused = manager(p, "Jean", None);
+        let mut paused = manager("Jean", None);
         paused.status = LifecycleStatus::Paused;
         assert_eq!(default_assignee(&[paused], None), None);
-        let mut gone = manager(p, "Gone", None);
+        let mut gone = manager("Gone", None);
         gone.status = LifecycleStatus::Archived;
-        let left = manager(p, "Left", Some(gone.id));
+        let left = manager("Left", Some(gone.id));
         assert_eq!(default_assignee(&[gone, left.clone()], None), Some(left.id));
     }
 
     #[test]
-    fn the_picker_lists_the_management_team_first_then_by_department() {
-        let (a, b) = (DepartmentId::new(), DepartmentId::new());
-        let ceo = manager(a, "Jean", None);
-        let dev_b = manager(b, "Max", Some(ceo.id));
-        let dev_a = manager(a, "Dean", Some(ceo.id));
-        let lead_b = manager(b, "Tom", None);
-        let mut archived = manager(a, "Old", Some(ceo.id));
+    fn the_picker_lists_the_management_team_first_then_by_boss() {
+        let ceo = manager("Jean", None);
+        let dev_b = manager("Max", Some(ceo.id));
+        let dev_a = manager("Dean", Some(ceo.id));
+        let lead_b = manager("Tom", None);
+        let ana = manager("Ana", Some(lead_b.id));
+        let kim = manager("Kim", Some(dev_a.id));
+        let mut archived = manager("Old", Some(ceo.id));
         archived.status = LifecycleStatus::Archived;
-        let all = vec![dev_b.clone(), dev_a.clone(), ceo.clone(), archived, lead_b.clone()];
+        let all = vec![ana, dev_b.clone(), kim, dev_a.clone(), ceo.clone(), archived, lead_b.clone()];
         assert_eq!(roots(&all), vec![ceo.id, lead_b.id]);
         let order: Vec<String> = assignee_order(&all).iter().map(|m| m.name.clone()).collect();
-        assert_eq!(order, ["Jean", "Tom", "Max", "Dean"]);
+        assert_eq!(order, ["Jean", "Tom", "Max", "Dean", "Kim", "Ana"]);
     }
 }

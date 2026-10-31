@@ -6,7 +6,7 @@ use crate::Shared;
 use crate::tasks::complete_text;
 use aurelius_domain::memory::{ConsolidationOutput, Extraction, MAX_LESSONS, POINT_MAX_CHARS, validate_candidates, validate_consolidation, validate_lessons};
 use aurelius_domain::task::extract_json;
-use aurelius_domain::{ConversationId, RunId, TaskId};
+use aurelius_domain::{ConversationId, RunId, TaskId, TicketId};
 use markers::{CONSOLIDATE_MARKER, MEMORY_MARKER, SUMMARY_MARKER};
 use aurelius_storage::queries;
 use std::sync::Arc;
@@ -59,8 +59,10 @@ pub async fn run_extraction(shared: Arc<Shared>, job: queries::JobRow) {
         close(&shared, &job).await;
         return;
     };
+    // Set after a ticket's Done: the extraction also summarizes the ticket (MU1-18).
+    let ticket = job.payload["ticket_id"].as_str().and_then(|t| TicketId::parse(t).ok());
     let s = shared.clone();
-    let input = match blocking(move || s.service.extraction_input(task)).await {
+    let input = match blocking(move || s.service.extraction_input(task, ticket)).await {
         Some(Ok(Some(input))) => input,
         Some(Ok(None)) => {
             close(&shared, &job).await;
@@ -89,10 +91,22 @@ pub async fn run_extraction(shared: Arc<Shared>, job: queries::JobRow) {
         )
     };
     let lessons_json = if input.signals.is_empty() { String::new() } else { ",\"lessons\":[{\"applies_when\":\"...\",\"lesson\":\"one sentence\",\"evidence\":[\"S1\"],\"scope\":\"employee|project\"}]".to_string() };
+    // A ticket that went to Done: also its summary for the project (only then; otherwise the prompt is as it was).
+    let (ticket_rule, ticket_json) = match &input.ticket {
+        Some(ticket) => (
+            format!(
+                " This task was the main task of ticket #{} “{}”, which a board member just accepted as done. \
+                 In \"ticket_summary\" say in two to four sentences what the ticket delivered and decided, for every colleague on the project.",
+                ticket.number, ticket.title
+            ),
+            ",\"ticket_summary\":\"two to four sentences\"",
+        ),
+        None => (String::new(), ""),
+    };
     let system = format!(
         "{}\n{MEMORY_MARKER}\nYou record what is worth remembering from a finished task. Only facts from the sources; \
-         no secrets or personal data; no repetition of existing memory.{lessons_rule} \
-         Answer only with JSON: {{\"items\":[{{\"kind\":\"episodic|project_knowledge|decision\",\"content\":\"one sentence\",\"source\":\"E1\",\"scope\":\"employee|project\",\"importance\":0.5,\"confidence\":0.7}}]{lessons_json}}}. \
+         no secrets or personal data; no repetition of existing memory.{lessons_rule}{ticket_rule} \
+         Answer only with JSON: {{\"items\":[{{\"kind\":\"episodic|project_knowledge|decision\",\"content\":\"one sentence\",\"source\":\"E1\",\"scope\":\"employee|project\",\"importance\":0.5,\"confidence\":0.7}}]{lessons_json}{ticket_json}}}. \
          Empty list if there is nothing.",
         input.employee_system
     );
@@ -111,7 +125,8 @@ pub async fn run_extraction(shared: Arc<Shared>, job: queries::JobRow) {
     let signal_labels: Vec<&str> = input.signals.iter().map(|s| s.0.as_str()).collect();
     let lessons = validate_lessons(&extraction.lessons, &signal_labels, &input.lessons);
     let (s, id, epoch) = (shared.clone(), job.id.clone(), job.lease_epoch);
-    if let Some(Ok(notices)) = blocking(move || s.service.record_extraction(&id, epoch, &input, verdicts, lessons)).await {
+    let ticket_summary = extraction.ticket_summary.clone();
+    if let Some(Ok(notices)) = blocking(move || s.service.record_extraction(&id, epoch, &input, verdicts, lessons, ticket_summary.as_deref())).await {
         shared.publish(notices);
     }
 }

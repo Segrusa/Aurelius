@@ -54,6 +54,8 @@ pub struct VariantsState {
     pub variants: Vec<VariantRow>,
     /// The task works in Auto: the judge chooses.
     pub auto: bool,
+    /// What reading it changed for the clients (the task started running: its card moves).
+    pub notices: Vec<EventNotice>,
 }
 
 /// What the propose step needs.
@@ -179,7 +181,7 @@ fn wait_for_user(tx: &Tx<'_>, st: &Store, task: TaskId, note: &str) -> Result<Ve
         notices.push(thread::post_to(tx, st, conversation, task, Speaker::Update { kind: "status", from: "Aurelius" }, note)?);
     }
     if row.status != TaskStatus::Waiting {
-        crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?;
+        notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?);
         notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "stopped" }))?);
     }
     Ok(notices)
@@ -208,6 +210,7 @@ impl CommandService {
                     }
                 };
                 let auto = mode == Some(aurelius_domain::autonomy::AgentMode::Auto);
+                let mut notices = Vec::new();
                 if store::load_set(tx, task)?.is_none() {
                     if !aurelius_storage::queries::holds_lease(tx, &task.to_string(), epoch)? {
                         return Ok(None);
@@ -219,12 +222,12 @@ impl CommandService {
                         store::set_phase(tx, task, VariantPhase::Failed, Some("the work folder is not a git repository"))?;
                     } else if let Some(row) = tasks_store::load_task(tx, task)? {
                         if row.status == TaskStatus::Queued {
-                            crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?;
+                            notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
                         }
                     }
                 }
                 let Some(set) = store::load_set(tx, task)? else { return Ok(None) };
-                Ok(Some(VariantsState { variants: store::variants(tx, task)?, set, auto }))
+                Ok(Some(VariantsState { variants: store::variants(tx, task)?, set, auto, notices }))
             })
             .map_err(storage_error)
     }
@@ -301,7 +304,7 @@ impl CommandService {
                 store::set_variant_run(tx, task, n, run)?;
                 let project = ctx_project(tx, task)?;
                 let probed = task_event(tx, task, project, "task.variant_probed", serde_json::json!({ "n": n, "status": "running", "conversation_id": conversation, "run_id": run }))?;
-                Ok(vec![posted, queued, probed])
+                Ok(std::iter::once(posted).chain(queued).chain([probed]).collect())
             })
             .map_err(storage_error)
     }
@@ -377,7 +380,7 @@ impl CommandService {
                 if auto {
                     store::choose(tx, task, judgement.pick(), "judge")?;
                 } else if row.status == TaskStatus::Running {
-                    crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("approval"))?;
+                    notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("approval"))?);
                     notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "variants" }))?);
                 }
                 Ok(notices)
@@ -487,7 +490,7 @@ impl CommandService {
             let Some(row) = tasks_store::load_task(tx, task)? else { return Ok(Err(domain_error(DomainError::TaskNotFound(task)))) };
             let mut notices = Vec::new();
             if row.status == TaskStatus::Waiting {
-                crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?;
+                notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
                 notices.push(task_event(tx, task, row.project_id, "task.queued", serde_json::json!({ "reason": "variant_chosen", "n": n }))?);
             }
             crate::task::task_runs::wake_task_job(tx, task, false)?;

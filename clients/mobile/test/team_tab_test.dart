@@ -223,10 +223,12 @@ void main() {
     setUp(() => router = AppRouter(host));
     tearDown(() => router.dispose());
 
-    test('Team is the second tab, right after Home', () {
+    test('the Board is the second tab, Team the third; Tasks moved under More (D-03, B7)', () {
       final shell = router.config.configuration.routes.whereType<StatefulShellRoute>().single;
       final first = [for (final b in shell.branches) (b.routes.first as GoRoute).path];
-      expect(first, ['/home', '/team', '/inbox', '/tasks', '/more']);
+      expect(first, ['/home', '/board', '/team', '/inbox', '/more']);
+      final paths = pathsOf(router.config.configuration.routes);
+      expect(paths, containsAll(['/tasks', '/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board']));
       expect(first.length, shellTabs.length, reason: 'one tab per branch');
     });
 
@@ -252,7 +254,7 @@ void main() {
         StatefulShellRoute.indexedStack(
           builder: (context, state, shell) => HomeShell(shell: shell),
           branches: [
-            for (final name in ['home', 'team', 'inbox', 'tasks', 'more'])
+            for (final name in ['home', 'board', 'team', 'inbox', 'more'])
               StatefulShellBranch(routes: [GoRoute(path: '/$name', builder: (_, _) => Scaffold(body: Center(child: Text('page $name'))))]),
           ],
         ),
@@ -281,22 +283,25 @@ void main() {
       expect((x - tester.getCenter(find.text('Team')).dx).abs(), greaterThan(10));
     });
 
-    testWidgets('a tap on Team and ⌘2 open the group chat; ⌘3 the inbox', (tester) async {
+    testWidgets('a tap on Team and ⌘3 open the group chat; ⌘4 the inbox; the Board is a tab', (tester) async {
       await pump(tester, const InboxState(loading: false));
       expect(find.text('page home'), findsOneWidget);
       await tester.tap(find.text('Team'));
       await tester.pumpAndSettle();
       expect(find.text('page team'), findsOneWidget);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit4);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
       expect(find.text('page inbox'), findsOneWidget);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
       expect(find.text('page team'), findsOneWidget);
+      await tester.tap(find.text('Board'));
+      await tester.pumpAndSettle();
+      expect(find.text('page board'), findsOneWidget);
     });
   });
 
@@ -339,5 +344,51 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('conversation c-task'), findsOneWidget);
     expect(find.text('employee chat'), findsNothing);
+  });
+
+  group("a ticket's main task (task.assign/cancel are refused: use the board)", () {
+    Future<void> openTask(WidgetTester tester, TaskView task) async {
+      when(() => repo.projects()).thenAnswer((_) async => [projectOf(id: 'p', name: 'Atlas')]);
+      when(() => repo.tasks(projectId: 'p')).thenAnswer((_) async => [task]);
+      final company = MockCompanyBloc();
+      whenListen(company, const Stream<CompanyState>.empty(), initialState: CompanyState(loading: false, employees: [employeeOf(id: 'mgr', name: 'Iris')]));
+      final connection = MockConnectionBloc();
+      whenListen(connection, const Stream<LinkState>.empty(), initialState: online);
+      final router = GoRouter(initialLocation: '/task', routes: [
+        GoRoute(path: '/task', builder: (_, _) => TaskPage(projectId: 'p', taskId: task.id)),
+        GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']}'))),
+      ]);
+      addTearDown(router.dispose);
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(RepositoryProvider<AureliusRepository>.value(
+        value: repo,
+        child: MultiBlocProvider(
+          providers: [BlocProvider<CompanyBloc>.value(value: company), BlocProvider<ConnectionBloc>.value(value: connection)],
+          child: MaterialApp.router(theme: aureliusTheme(), routerConfig: router),
+        ),
+      ));
+      await tester.pump(const Duration(milliseconds: 200));
+    }
+
+    testWidgets('no Cancel task or Give to…, but a way to the ticket on the board', (tester) async {
+      await openTask(tester, taskOf(id: 't', projectId: 'p', title: 'Ship it', employeeId: 'mgr', status: TaskStatus.queued, ticketId: 'k1', ticketNumber: 7));
+      expect(find.text('Cancel task'), findsNothing);
+      expect(find.text('Give to someone else'), findsNothing);
+      final open = find.byKey(const Key('task-open-ticket'));
+      expect(find.text('Main task of ticket #7 · owner and cancel on the board'), findsOneWidget);
+      await tester.ensureVisible(open);
+      await tester.tap(open);
+      await tester.pumpAndSettle();
+      expect(find.text('ticket k1'), findsOneWidget);
+    });
+
+    testWidgets('a delegation under a ticket keeps Cancel task and Give to…', (tester) async {
+      await openTask(tester, taskOf(id: 't', projectId: 'p', title: 'Ship it', employeeId: 'mgr', status: TaskStatus.queued, ticketId: 'k1', ticketNumber: 7, parentTaskId: 'root'));
+      expect(find.text('Cancel task'), findsOneWidget);
+      expect(find.text('Give to someone else'), findsOneWidget);
+      expect(find.byKey(const Key('task-open-ticket')), findsNothing);
+    });
   });
 }

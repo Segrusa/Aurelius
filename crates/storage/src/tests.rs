@@ -124,7 +124,8 @@ fn failed_write_rolls_back_event_and_projection_together() {
             Ok((
                 queries::last_seq(c)?,
                 c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get::<_, i64>(0))?,
-                c.query_row("SELECT COUNT(*) FROM scopes", [], |r| r.get::<_, i64>(0))?,
+                // Migration 18 seeds the global scope (the company's).
+                c.query_row("SELECT COUNT(*) FROM scopes WHERE kind <> 'global'", [], |r| r.get::<_, i64>(0))?,
             ))
         })
         .unwrap();
@@ -268,7 +269,7 @@ fn project_with_employee(store: &Store, name: &str) -> (ProjectId, EmployeeId) {
     store
         .write(move |tx| {
             events::insert_project_projection(tx, project, "Atlas", None)?;
-            employees::insert_employee(tx, employee, &name, "Lead", Some("Head"), None, None, None, &serde_json::json!({}), ConversationId::new())
+            employees::insert_employee(tx, employee, &name, "Lead", Some("Head"), None, None, &serde_json::json!({}), ConversationId::new())
         })
         .unwrap();
     (project, employee)
@@ -280,32 +281,26 @@ fn blob(store: &Store, id: &str) {
 }
 
 #[test]
-fn the_org_chart_departments_plugins_and_the_follow_setting_are_stored() {
+fn the_org_chart_plugins_and_the_follow_setting_are_stored() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
     let (project, boss) = project_with_employee(&store, "Jean");
-    let (report, department) = (EmployeeId::new(), aurelius_domain::DepartmentId::new());
+    let report = EmployeeId::new();
     store
-        .write(move |tx| {
-            departments::insert(tx, department, "Engineering", Some("Builds it"), Some(boss))?;
-            employees::insert_employee(tx, report, "Simon", "Dev", None, Some(boss), Some(department), None, &serde_json::json!({}), ConversationId::new())
-        })
+        .write(move |tx| employees::insert_employee(tx, report, "Simon", "Dev", None, Some(boss), None, &serde_json::json!({}), ConversationId::new()))
         .unwrap();
     let read = |_: &str| -> Option<String> { None };
-    let listed = store.read(|c| employees::list_employees(c, None, &read)).unwrap();
+    let listed = store.read(|c| employees::list_employees(c, &read)).unwrap();
     let by_name = |name: &str| listed.iter().find(|m| m.name == name).unwrap();
     assert_eq!((by_name("Jean").title.as_deref(), by_name("Jean").reports_to), (Some("Head"), None));
-    assert_eq!((by_name("Simon").title.as_deref(), by_name("Simon").reports_to, by_name("Simon").department_id), (None, Some(boss), Some(department)));
-    assert_eq!(store.read(|c| employees::list_employees(c, Some(department), &read)).unwrap().len(), 1);
+    assert_eq!((by_name("Simon").title.as_deref(), by_name("Simon").reports_to), (None, Some(boss)));
     // Names are unique in the company (any case), and its persistent chat has no project.
     assert!(store.read(|c| employees::name_taken(c, " simon ", None)).unwrap());
     assert!(!store.read(|c| employees::name_taken(c, "Simon", Some(report))).unwrap());
     let chat = store.read(|c| employees::main_chat(c, report)).unwrap().unwrap();
     assert_eq!(store.read(|c| conversations::owner_of(c, chat)).unwrap(), (Some(report), None));
-    let departments_listed = store.read(|c| departments::list(c, false)).unwrap();
-    assert_eq!((departments_listed.len(), departments_listed[0].member_count, departments_listed[0].head_id), (1, 1, Some(boss)));
     let entries = |store: &Store| {
-        let mut e: Vec<(EmployeeId, Option<EmployeeId>)> = store.read(employees::org_entries).unwrap().into_iter().map(|(e, b, _)| (e, b)).collect();
+        let mut e: Vec<(EmployeeId, Option<EmployeeId>)> = store.read(employees::org_entries).unwrap();
         e.sort();
         e
     };
@@ -338,12 +333,6 @@ fn the_org_chart_departments_plugins_and_the_follow_setting_are_stored() {
     assert!(!store.read(employees::follow_org_chart).unwrap());
     store.write(move |tx| employees::set_follow_org_chart(tx, true)).unwrap();
     assert!(store.read(employees::follow_org_chart).unwrap());
-
-    // Archiving a department: its employees leave it, its head is cleared.
-    assert_eq!(store.write(move |tx| departments::archive(tx, department)).unwrap(), vec![report]);
-    assert_eq!(store.read(|c| employees::department_of(c, report)).unwrap(), None);
-    assert!(store.read(|c| departments::list(c, false)).unwrap().is_empty());
-    assert_eq!(store.read(|c| departments::list(c, true)).unwrap()[0].head_id, None);
 }
 
 #[test]
@@ -357,7 +346,7 @@ fn a_queued_task_whose_start_is_planned_is_scheduled_and_not_at_work() {
     let (parent, child) = (TaskId::new(), TaskId::new());
     store
         .write(move |tx| {
-            employees::insert_employee(tx, colleague, "Simon", "Dev", None, None, None, None, &serde_json::json!({}), ConversationId::new())?;
+            employees::insert_employee(tx, colleague, "Simon", "Dev", None, None, None, &serde_json::json!({}), ConversationId::new())?;
             tasks::insert_task(tx, parent, project, Some(lead), "Parent", "g", "g", TaskStatus::Running, None)?;
             tasks::insert_task(tx, child, project, Some(colleague), "Part", "g", "g", TaskStatus::Queued, Some(parent))?;
             let appended = append(tx, event(&child.to_string(), 1, "k-child"))?;
@@ -394,7 +383,7 @@ fn a_finished_task_with_a_run_in_its_conversation_is_live_running_or_queued() {
     store
         .write(move |tx| {
             // The conversation of the task is a chat of the employee (as in `project_with_employee`).
-            employees::insert_employee(tx, EmployeeId::new(), "Simon", "Dev", None, None, None, None, &serde_json::json!({}), conversation)?;
+            employees::insert_employee(tx, EmployeeId::new(), "Simon", "Dev", None, None, None, &serde_json::json!({}), conversation)?;
             tasks::insert_task(tx, task, project, Some(employee), "Done", "g", "g", TaskStatus::Succeeded, None)?;
             tasks::set_task_conversation(tx, task, conversation)?;
             let appended = append(tx, event(&run.to_string(), 1, "k-run"))?;
@@ -445,8 +434,6 @@ fn proposals_are_listed_pending_first_decided_once_and_withdrawn_with_their_prop
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
     let (_, boss) = project_with_employee(&store, "Jean");
-    let department = aurelius_domain::DepartmentId::new();
-    store.write(move |tx| departments::insert(tx, department, "Design", None, None)).unwrap();
     blob(&store, "instr");
     let propose = |name: &'static str| {
         let id = ProposalId::new();
@@ -456,7 +443,6 @@ fn proposals_are_listed_pending_first_decided_once_and_withdrawn_with_their_prop
                     tx,
                     proposals::NewProposal {
                         id,
-                        department_id: Some(department),
                         proposed_by: boss,
                         name,
                         role: "Designer",
@@ -483,13 +469,10 @@ fn proposals_are_listed_pending_first_decided_once_and_withdrawn_with_their_prop
     assert_eq!(store.read(|c| proposals::open_count(c, boss)).unwrap(), 1);
 
     let read = |key: &str| Some(format!("text of {key}"));
-    let listed = store.read(|c| proposals::list(c, None, &read)).unwrap();
+    let listed = store.read(|c| proposals::list(c, &read)).unwrap();
     assert_eq!(listed.iter().map(|p| (p.id, p.status)).collect::<Vec<_>>(), vec![(second, ProposalStatus::Pending), (first, ProposalStatus::Rejected)]);
     assert_eq!((listed[0].proposed_by_name.as_str(), listed[0].reports_to_name.as_deref(), listed[0].instructions.as_str()), ("Jean", Some("Jean"), "text of instr"));
     assert_eq!(listed[1].decision_note.as_deref(), Some("not now"));
-    assert_eq!(listed[0].department_id, Some(department));
-    assert_eq!(store.read(|c| proposals::list(c, Some(department), &read)).unwrap().len(), 2);
-    assert!(store.read(|c| proposals::list(c, Some(aurelius_domain::DepartmentId::new()), &read)).unwrap().is_empty());
 
     assert_eq!(store.write(move |tx| proposals::withdraw_for(tx, boss)).unwrap(), vec![second]);
     let row = store.read(|c| proposals::load(c, second)).unwrap().unwrap();
@@ -632,6 +615,44 @@ fn a_two_x_database_becomes_the_company() {
     let f = two_x_fixture(dir.path());
     // The update makes a backup of the old database first, then converts on open.
     assert!(crate::backup::before_migration(dir.path(), "test", "dev").unwrap().is_some());
+
+    // Up to schema 17 the conversion's departments are still there (18 drops them).
+    let store = Store::open_until(dir.path(), LAST_DEPARTMENT_SCHEMA).unwrap();
+    let department_name = |id: EmployeeId| -> Option<String> {
+        store
+            .read(|c| Ok(c.query_row("SELECT d.name FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?1", [id.to_string()], |r| r.get(0))?))
+            .unwrap()
+    };
+    // Each project seeded a department; a project's single root is its head (the survivor).
+    let departments = converted_departments(&store, false);
+    let head = |name: &str| departments.iter().find(|d| d.1 == name).unwrap().2;
+    assert_eq!(departments.len(), 2);
+    assert_eq!((head("Aurelius"), head("Demo")), (Some(f.simon_a), Some(f.jean_a)));
+    assert_eq!(department_name(f.jean_a).as_deref(), Some("Aurelius"));
+    assert_eq!(department_name(f.simon_a).as_deref(), Some("Aurelius"));
+    assert_eq!((department_name(f.tom_a).as_deref(), department_name(f.max_b).as_deref()), (Some("Aurelius"), Some("Demo")));
+    assert_eq!(department_name(f.simon_b), None);
+    let proposal_department: Option<String> =
+        store.read(|c| Ok(c.query_row("SELECT department_id FROM proposals WHERE id = ?1", [&f.proposal], |r| r.get(0))?)).unwrap();
+    assert_eq!(proposal_department, departments.iter().find(|d| d.1 == "Aurelius").map(|d| d.0.clone()));
+    // Memory a 3.0 server kept in the Aurelius department.
+    let department_memory = aurelius_domain::MemoryId::new().to_string();
+    let aurelius_department = departments.iter().find(|d| d.1 == "Aurelius").unwrap().0.clone();
+    let memory = department_memory.clone();
+    store
+        .write(move |tx| {
+            let scope: String = tx.query_row("SELECT scope_id FROM departments WHERE id = ?1", [&aurelius_department], |r| r.get(0))?;
+            tx.execute(
+                "INSERT INTO memory_items(id, scope_id, kind, content_blob_id, status, confidence, importance, valid_from_ms, extraction_version, created_at_ms)
+                 VALUES (?1, ?2, 'decision', 'm', 'active', 1.0, 0.5, 0, 'department', 0)",
+                rusqlite::params![memory, scope],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    drop(store);
+
+    // The rest is checked on the current schema.
     let store = Store::open(dir.path()).unwrap();
     let status = |id: EmployeeId| -> String { store.read(|c| Ok(c.query_row("SELECT status FROM employees WHERE id = ?1", [id.to_string()], |r| r.get(0))?)).unwrap() };
     let boss = |id: EmployeeId| -> Option<EmployeeId> {
@@ -640,11 +661,20 @@ fn a_two_x_database_becomes_the_company() {
             .unwrap()
             .and_then(|b| EmployeeId::parse(&b).ok())
     };
-    let department_name = |id: EmployeeId| -> Option<String> {
-        store
-            .read(|c| Ok(c.query_row("SELECT d.name FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?1", [id.to_string()], |r| r.get(0))?))
-            .unwrap()
-    };
+
+    // Departments are gone; their memory is the company's, saying where it came from.
+    assert!(!has_departments(&store));
+    let (scope_kind, locator): (String, String) = store
+        .read(move |c| {
+            Ok(c.query_row(
+                "SELECT s.kind, m.locator_json FROM memory_items m JOIN scopes s ON s.id = m.scope_id WHERE m.id = ?1",
+                [&department_memory],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?)
+        })
+        .unwrap();
+    let locator: serde_json::Value = serde_json::from_str(&locator).unwrap();
+    assert_eq!((scope_kind.as_str(), locator["from_department"].as_str()), ("global", Some("Aurelius")));
 
     // Every id is kept; the same name merged into the one with the most tasks
     // (Simon of Aurelius) or else the oldest, the others archived.
@@ -663,16 +693,6 @@ fn a_two_x_database_becomes_the_company() {
     assert_eq!((boss(f.jean_a), boss(f.simon_a)), (Some(f.simon_a), None));
     assert_eq!((boss(f.max_b), boss(f.tom_a)), (Some(f.simon_a), Some(f.simon_a)));
 
-    // Each project seeded a department; a project's single root is its head (the survivor).
-    let departments = store.read(|c| departments::list(c, false)).unwrap();
-    let head = |name: &str| departments.iter().find(|d| d.name == name).unwrap().head_id;
-    assert_eq!(departments.len(), 2);
-    assert_eq!((head("Aurelius"), head("Demo")), (Some(f.simon_a), Some(f.jean_a)));
-    assert_eq!(department_name(f.jean_a).as_deref(), Some("Aurelius"));
-    assert_eq!(department_name(f.simon_a).as_deref(), Some("Aurelius"));
-    assert_eq!((department_name(f.tom_a).as_deref(), department_name(f.max_b).as_deref()), (Some("Aurelius"), Some("Demo")));
-    assert_eq!(department_name(f.simon_b), None);
-
     // The merged one's work: its task, task conversation, memory, plugins, proposal and versions.
     let (task_employee, conv): (String, (String, String, Option<String>)) = store
         .read(|c| {
@@ -690,9 +710,8 @@ fn a_two_x_database_becomes_the_company() {
     plugins.sort();
     assert_eq!(plugins, vec!["x@m".to_string(), "y@m".to_string()]);
     let read = |key: &str| Some(key.to_string());
-    let proposal = store.read(|c| proposals::list(c, None, &read)).unwrap().into_iter().find(|p| p.id.to_string() == f.proposal).unwrap();
+    let proposal = store.read(|c| proposals::list(c, &read)).unwrap().into_iter().find(|p| p.id.to_string() == f.proposal).unwrap();
     assert_eq!(proposal.proposed_by, f.simon_a);
-    assert_eq!(proposal.department_id, departments.iter().find(|d| d.name == "Aurelius").map(|d| d.id));
     let versions: Vec<(i64, Option<String>, String)> = store
         .read(|c| {
             let mut stmt = c.prepare("SELECT version, instructions_blob_id, source FROM employee_instruction_versions WHERE employee_id = ?1 ORDER BY version")?;
@@ -725,7 +744,7 @@ fn a_two_x_database_becomes_the_company() {
     assert!(metadata.contains("\"employee_id\""), "{metadata}");
 
     // One report says what happened.
-    let report = store.read(departments::conversion_report).unwrap().unwrap();
+    let report = store.read(company_convert::conversion_report).unwrap().unwrap();
     assert_eq!(report.departments.len(), 2);
     let mut merged: Vec<(EmployeeId, Vec<EmployeeId>)> = report.merged.iter().map(|m| (m.employee_id, m.merged_ids.clone())).collect();
     merged.sort();
@@ -741,30 +760,67 @@ fn a_two_x_database_becomes_the_company() {
 
     // Opening again converts nothing more.
     let store = Store::open(dir.path()).unwrap();
-    assert_eq!(store.read(|c| departments::list(c, true)).unwrap().len(), 2);
+    let (all, events): (i64, i64) = store
+        .read(|c| {
+            let all = c.query_row("SELECT COUNT(*) FROM employees", [], |r| r.get(0))?;
+            Ok((all, c.query_row("SELECT COUNT(*) FROM events WHERE type = 'company.converted'", [], |r| r.get(0))?))
+        })
+        .unwrap();
+    assert_eq!((all, events), (7, 1));
+}
+
+/// The last schema with departments: 0018 drops them (protocol 4), so the
+/// conversion's departments are checked on a store opened up to here.
+const LAST_DEPARTMENT_SCHEMA: i64 = 17;
+
+/// Whether anything of departments is left: the table, a department scope or
+/// a `department_id` column.
+fn has_departments(store: &Store) -> bool {
+    store
+        .read(|c| {
+            Ok(c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'departments')
+                     OR EXISTS(SELECT 1 FROM scopes WHERE kind = 'department')
+                     OR EXISTS(SELECT 1 FROM pragma_table_info('employees') WHERE name = 'department_id')
+                     OR EXISTS(SELECT 1 FROM pragma_table_info('proposals') WHERE name = 'department_id')",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap()
+}
+
+/// The departments the conversion seeded, by name: (id, name, head); archived
+/// ones too with `archived`. Read from the old table on a store opened up to
+/// `LAST_DEPARTMENT_SCHEMA`: departments are no longer part of the model.
+fn converted_departments(store: &Store, archived: bool) -> Vec<(String, String, Option<EmployeeId>)> {
+    store
+        .read(|c| {
+            let mut stmt = c.prepare("SELECT id, name, head_id FROM departments WHERE ?1 OR status = 'active' ORDER BY lower(name), id")?;
+            let rows = stmt.query_map([archived], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?.into_iter().map(|(id, name, head)| (id, name, head.and_then(|h| EmployeeId::parse(&h).ok()))).collect())
+        })
+        .unwrap()
 }
 
 #[test]
-fn a_restored_two_x_backup_is_converted_again() {
+fn a_two_x_backup_is_not_restored_by_this_build() {
     let dir = tempfile::tempdir().unwrap();
     let f = two_x_fixture(dir.path());
     let backup = crate::backup::before_migration(dir.path(), "test", "dev").unwrap().unwrap();
-    // The 3.0 server converts and goes on working.
+    // The server converts and goes on working.
     let store = Store::open(dir.path()).unwrap();
-    store.write(|tx| Ok(tx.execute("UPDATE departments SET name = 'Renamed' WHERE name = 'Demo'", [])?)).unwrap();
+    let simon_a = f.simon_a.to_string();
+    store.write(move |tx| Ok(tx.execute("UPDATE employees SET name = 'Renamed' WHERE id = ?1", [&simon_a])?)).unwrap();
     drop(store);
 
-    // The user restores the 2.x backup: the next start converts it the same way.
-    crate::backup::request_restore(dir.path(), &backup).unwrap();
-    assert!(crate::backup::perform_pending_restore(dir.path()).unwrap().is_some());
+    // A 2.x backup is from before v0.11: refused, and the current data stays.
+    let err = crate::backup::request_restore(dir.path(), &backup).unwrap_err();
+    assert!(err.to_string().contains("before v0.11"), "{err}");
+    assert!(crate::backup::perform_pending_restore(dir.path()).unwrap().is_none(), "nothing pending");
     let store = Store::open(dir.path()).unwrap();
-    let mut names: Vec<String> = store.read(|c| departments::list(c, true)).unwrap().into_iter().map(|d| d.name).collect();
-    names.sort();
-    assert_eq!(names, vec!["Aurelius".to_string(), "Demo".to_string()]);
-    let status: String = store.read(|c| Ok(c.query_row("SELECT status FROM employees WHERE id = ?1", [f.simon_b.to_string()], |r| r.get(0))?)).unwrap();
-    assert_eq!(status, "archived", "merged into Simon of Aurelius again");
-    let events: i64 = store.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM events WHERE type = 'company.converted'", [], |r| r.get(0))?)).unwrap();
-    assert_eq!(events, 1);
+    let name: String = store.read(|c| Ok(c.query_row("SELECT name FROM employees WHERE id = ?1", [f.simon_a.to_string()], |r| r.get(0))?)).unwrap();
+    assert_eq!(name, "Renamed");
 }
 
 /// Tom's live data: Jean in six active projects with six roles and in an
@@ -826,27 +882,36 @@ fn one_name_in_six_projects_becomes_one_employee() {
         })
         .unwrap();
     drop(store);
-
-    let store = Store::open(dir.path()).unwrap();
-    let row = |id: EmployeeId| -> (String, String, Option<String>, Option<String>) {
-        store
-            .read(|c| {
-                Ok(c.query_row(
-                    "SELECT e.name, e.status, e.reports_to, d.name FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?1",
-                    [id.to_string()],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-                )?)
-            })
-            .unwrap()
-    };
     let kept = jeans[2];
 
-    // One Jean with the plain name, in the department where it had the most tasks.
-    let (name, status, _, department) = row(kept);
-    assert_eq!((name.as_str(), status.as_str(), department.as_deref()), ("Jean", "active", Some("Project C")));
+    // Up to schema 17: one Jean, in the department where it had the most tasks;
+    // the merged ones are in none.
+    let store = Store::open_until(dir.path(), LAST_DEPARTMENT_SCHEMA).unwrap();
+    let department = |id: EmployeeId| -> Option<String> {
+        store
+            .read(|c| Ok(c.query_row("SELECT d.name FROM employees e LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?1", [id.to_string()], |r| r.get(0))?))
+            .unwrap()
+    };
+    assert_eq!(department(kept).as_deref(), Some("Project C"));
     for other in jeans.iter().filter(|j| **j != kept).chain([&jean_test]) {
-        let (name, status, boss, department) = row(*other);
-        assert_eq!((name.as_str(), status.as_str(), boss, department), ("Jean", "archived", None, None));
+        assert_eq!(department(*other), None);
+    }
+    drop(store);
+
+    let store = Store::open(dir.path()).unwrap();
+    assert!(!has_departments(&store));
+    let row = |id: EmployeeId| -> (String, String, Option<String>) {
+        store
+            .read(|c| Ok(c.query_row("SELECT name, status, reports_to FROM employees WHERE id = ?1", [id.to_string()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?))
+            .unwrap()
+    };
+
+    // One Jean with the plain name, the others archived without a boss.
+    let (name, status, _) = row(kept);
+    assert_eq!((name.as_str(), status.as_str()), ("Jean", "active"));
+    for other in jeans.iter().filter(|j| **j != kept).chain([&jean_test]) {
+        let (name, status, boss) = row(*other);
+        assert_eq!((name.as_str(), status.as_str(), boss), ("Jean", "archived", None));
     }
     let active_jeans: i64 =
         store.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM employees WHERE lower(name) = 'jean' AND status <> 'archived'", [], |r| r.get(0))?)).unwrap();
@@ -865,7 +930,7 @@ fn one_name_in_six_projects_becomes_one_employee() {
     assert_eq!(row(kept).2, None);
 
     // The report: the merge, the archived name, the loop and one root left.
-    let report = store.read(departments::conversion_report).unwrap().unwrap();
+    let report = store.read(company_convert::conversion_report).unwrap().unwrap();
     let jean = report.merged.iter().find(|m| m.employee_id == kept).unwrap();
     assert_eq!(jean.merged_ids.len(), 6);
     assert_eq!(jean.projects[0], "Project C");
@@ -883,7 +948,7 @@ fn a_new_database_has_the_company_and_follows_its_chart() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
     assert!(store.read(employees::follow_org_chart).unwrap());
-    assert!(store.read(departments::conversion_report).unwrap().is_none());
+    assert!(store.read(company_convert::conversion_report).unwrap().is_none());
     let events: i64 = store.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM events", [], |r| r.get(0))?)).unwrap();
     assert_eq!(events, 0, "nothing to convert, no report");
 }
@@ -1010,7 +1075,7 @@ fn load_hang_measure() {
         let project = ProjectId::parse(&id).unwrap();
         let time = |read: &dyn Fn(&str) -> Option<String>| {
             let started = std::time::Instant::now();
-            let items = store.read(|c| crate::memory::list(c, crate::memory::Wanted { project: Some(project), employee: None, department: None }, read)).unwrap().len();
+            let items = store.read(|c| crate::memory::list(c, crate::memory::Wanted { project: Some(project), employee: None }, read)).unwrap().len();
             (items, started.elapsed())
         };
         let (items, before) = time(&from_disk);
@@ -1060,7 +1125,7 @@ fn migration_17_adds_one_group_chat_and_keeps_every_conversation_and_message() {
         .write(move |tx| {
             events::insert_project_projection(tx, project, "Atlas", None)?;
             conversations::insert_project_conversation(tx, plans, project, "Plans")?;
-            employees::insert_employee(tx, employee, "Simon", "Dev", None, None, None, None, &serde_json::json!({}), chat)?;
+            employees::insert_employee(tx, employee, "Simon", "Dev", None, None, None, &serde_json::json!({}), chat)?;
             // The employee's settings live on its main chat row: they must come through.
             tx.execute("UPDATE conversations SET agent_mode = 'auto', browser_allowed = 1, run_json = '{\"model\":\"m\"}' WHERE id = ?1", [chat.to_string()])?;
             tx.execute("UPDATE conversations SET archived_at_ms = 5 WHERE id = ?1", [plans.to_string()])?;

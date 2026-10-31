@@ -26,7 +26,7 @@ pub const TASK_GUIDANCE: &str = "This conversation is a task you took on. Start 
 const COLLEAGUES_DONE: &str = "Your colleagues finished their parts (their results are above). Bring everything together and finish with your report.";
 
 /// A run of the task's conversation still going (other than `except`).
-fn live_run(conn: &rusqlite::Connection, task: TaskId, except: Option<RunId>) -> Result<bool, StorageError> {
+pub(crate) fn live_run(conn: &rusqlite::Connection, task: TaskId, except: Option<RunId>) -> Result<bool, StorageError> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM runs WHERE task_id = ?1 AND conversation_id IS NOT NULL AND id <> COALESCE(?2, '')
            AND status IN ('created','starting','running','waiting','cancelling'))",
@@ -36,29 +36,30 @@ fn live_run(conn: &rusqlite::Connection, task: TaskId, except: Option<RunId>) ->
 }
 
 /// Queue a run of the task's conversation that answers `reply_to`, counted for the task.
-fn run_for(tx: &Tx<'_>, task: TaskId, conversation: ConversationId, reply_to: MessageId) -> Result<Vec<EventNotice>, StorageError> {
-    let (run, notice) = queue_run(tx, &serde_json::json!({ "task_id": task }), &task.to_string(), conversation, reply_to)?;
+pub(crate) fn run_for(tx: &Tx<'_>, task: TaskId, conversation: ConversationId, reply_to: MessageId) -> Result<Vec<EventNotice>, StorageError> {
+    let (run, notices) = queue_run(tx, &serde_json::json!({ "task_id": task }), &task.to_string(), conversation, reply_to)?;
     tx.execute("UPDATE runs SET task_id = ?2 WHERE id = ?1", [run.to_string(), task.to_string()])?;
-    Ok(vec![notice])
+    Ok(notices)
 }
 
 /// Called when a run is queued in a conversation: a run in a live task's
 /// conversation (of the task's own employee) counts for the task; a task that
-/// waited for the user goes on.
-pub(crate) fn link_run(tx: &Tx<'_>, run: RunId, conversation: ConversationId) -> Result<(), StorageError> {
-    let Some(task) = store::task_for_conversation(tx, conversation)? else { return Ok(()) };
-    let Some(row) = store::load_task(tx, task)? else { return Ok(()) };
+/// waited for the user goes on (its notices go with the run's).
+pub(crate) fn link_run(tx: &Tx<'_>, run: RunId, conversation: ConversationId) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(task) = store::task_for_conversation(tx, conversation)? else { return Ok(vec![]) };
+    let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
     let owner = store::task_conversation(tx, task)?.and_then(|(_, m)| m);
     if row.status.is_terminal() || owner.is_none() || owner != row.employee_id {
-        return Ok(());
+        return Ok(vec![]);
     }
     tx.execute("UPDATE runs SET task_id = ?2 WHERE id = ?1", [run.to_string(), task.to_string()])?;
+    let mut notices = Vec::new();
     if row.status == TaskStatus::Waiting && matches!(store::waiting_cause(tx, task)?.as_deref(), Some("stopped" | "not_started" | "escalated_to_boss")) {
-        crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?;
-        crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?;
-        task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": "conversation" }))?;
+        notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
+        notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
+        notices.push(task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": "conversation" }))?);
     }
-    Ok(())
+    Ok(notices)
 }
 
 /// A run was queued, started or ended in the conversation of a finished task
@@ -104,7 +105,7 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
     }
     let mut notices = Vec::new();
     if let Some(why) = failed {
-        crate::task::task_line::set_status(tx, task, TaskStatus::Failed, None)?;
+        notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Failed, None)?);
         // With the org chart on, the employee's boss gets it first; "Needs you" then shows it as handled.
         let up = crate::org::escalate(tx, st, task, &row, &format!("it failed ({why})"), answer)?;
         let mut failed_meta = serde_json::json!({ "reason": why });
@@ -115,7 +116,7 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
         // A failed task teaches too: the cheap extraction looks at what went wrong (lessons).
         let source: String = tx.query_row("SELECT id FROM events WHERE seq = ?1", [failed_notice.seq as i64], |r| r.get(0))?;
         if let Ok(source) = aurelius_domain::EventId::parse(&source) {
-            crate::memory::schedule_extraction(tx, task, source)?;
+            crate::memory::schedule_extraction(tx, task, None, source)?;
         }
         notices.push(failed_notice);
         notices.extend(up.map(|(_, n)| n).unwrap_or_default());
@@ -124,7 +125,7 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
     }
     if !completed {
         // Stopped by the user: the task waits until they continue in its conversation.
-        crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?;
+        notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?);
         let up = crate::org::escalate(tx, st, task, &row, "it was stopped and waits for input", answer)?;
         let waiting = match &up {
             Some((boss, _)) => serde_json::json!({ "reason": "escalated_to_boss", "boss": boss }),
@@ -136,7 +137,7 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
     }
     if store::children_of(tx, task)?.iter().any(|c| !c.status.is_terminal()) {
         // Colleagues still work on parts: it continues when they are done.
-        crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("dependency"))?;
+        notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("dependency"))?);
         notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "delegated" }))?);
         return Ok(notices);
     }
@@ -148,6 +149,11 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
             notices.extend(run_for(tx, task, conversation, message)?);
             return Ok(notices);
         }
+    }
+    // A ticket's plan (Plan mode) waits for the board before anything is reported.
+    if let Some(review) = crate::task::plan_review::on_finished(tx, run)? {
+        notices.extend(review);
+        return Ok(notices);
     }
     notices.extend(complete(tx, st, task, answer)?);
     Ok(notices)
@@ -165,13 +171,13 @@ pub(crate) fn on_run_not_started(tx: &Tx<'_>, st: &Store, run: RunId) -> Result<
     if row.status != TaskStatus::Running || handed_over || live_run(tx, task, Some(run))? {
         return Ok(vec![]);
     }
-    crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?;
+    let mut notices = crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?.into_vec();
     let up = crate::org::escalate(tx, st, task, &row, "its run could not be started", "")?;
     let waiting = match &up {
         Some((boss, _)) => serde_json::json!({ "reason": "escalated_to_boss", "boss": boss }),
         None => serde_json::json!({ "reason": "not_started" }),
     };
-    let mut notices = vec![task_event(tx, task, row.project_id, "task.waiting", waiting)?];
+    notices.push(task_event(tx, task, row.project_id, "task.waiting", waiting)?);
     notices.extend(up.map(|(_, n)| n).unwrap_or_default());
     Ok(notices)
 }
@@ -193,8 +199,9 @@ pub(crate) fn on_run_quota_wait(tx: &Tx<'_>, run: RunId, until_ms: i64) -> Resul
     if !matches!(row.status, TaskStatus::Running | TaskStatus::Queued) {
         return Ok(vec![]);
     }
-    crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("quota"))?;
-    Ok(vec![task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "quota", "until_ms": until_ms }))?])
+    let mut notices = crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("quota"))?.into_vec();
+    notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "quota", "until_ms": until_ms }))?);
+    Ok(notices)
 }
 
 /// A run that waited for the limit was stopped before it went again: its task
@@ -204,8 +211,9 @@ pub(crate) fn on_parked_run_stopped(tx: &Tx<'_>, run: RunId) -> Result<Vec<Event
     if row.status != TaskStatus::Waiting || store::waiting_cause(tx, task)?.as_deref() != Some("quota") || live_run(tx, task, Some(run))? {
         return Ok(vec![]);
     }
-    crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?;
-    Ok(vec![task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "stopped" }))?])
+    let mut notices = crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?.into_vec();
+    notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "stopped" }))?);
+    Ok(notices)
 }
 
 /// A run that waited for the limit starts again: so does its task.
@@ -214,12 +222,19 @@ pub(crate) fn on_run_quota_resumed(tx: &Tx<'_>, run: RunId) -> Result<Vec<EventN
     if row.status != TaskStatus::Waiting || store::waiting_cause(tx, task)?.as_deref() != Some("quota") {
         return Ok(vec![]);
     }
-    crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?;
-    crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?;
-    Ok(vec![task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": "quota" }))?])
+    let mut notices = crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?.into_vec();
+    notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
+    notices.push(task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": "quota" }))?);
+    Ok(notices)
 }
 
-/// The task succeeded with this report.
+/// The task reported (the impact analysis' `report()`): the report is kept and
+/// the task goes to Review. The main task of a ticket stops there, for a board
+/// member to accept or send back (`ticket_line::reported`); any other task (a
+/// delegation, a task without a ticket) is accepted at once, as before.
+///
+/// A message in the conversation of a main task in Review gives a run whose end
+/// reports again: the ticket stays in Review with the new report.
 pub(crate) fn complete(tx: &Tx<'_>, st: &Store, task: TaskId, report: &str) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
     // The report, under the task's title.
@@ -239,14 +254,38 @@ pub(crate) fn complete(tx: &Tx<'_>, st: &Store, task: TaskId, report: &str) -> R
     let mut notices = Vec::new();
     for (from, to) in [(TaskStatus::Queued, TaskStatus::Running), (TaskStatus::Running, TaskStatus::Review), (TaskStatus::Waiting, TaskStatus::Review)] {
         if store::load_task(tx, task)?.is_some_and(|r| r.status == from) {
-            crate::task::task_line::set_status(tx, task, to, None)?;
+            notices.extend(crate::task::task_line::set_status(tx, task, to, None)?);
         }
     }
-    crate::task::task_line::set_status(tx, task, TaskStatus::Succeeded, None)?;
-    let succeeded = task_event(tx, task, row.project_id, "task.succeeded", serde_json::json!({ "reason": "reported" }))?;
+    if crate::task::ticket_line::is_root(tx, task)? {
+        notices.extend(crate::task::ticket_line::reported(tx, task)?);
+        return Ok(notices);
+    }
+    notices.extend(accept(tx, st, task, &report, None)?);
+    Ok(notices)
+}
+
+/// A task in Review succeeds: automatically after its report (`by` none), or
+/// accepted by a board member (`ticket.accept`). Then what follows a success:
+/// the memory extraction (for a ticket: its summary after Done), the tasks
+/// waiting on it go, and its result goes to whoever gave it.
+pub(crate) fn accept(tx: &Tx<'_>, st: &Store, task: TaskId, report: &str, by: Option<aurelius_domain::UserId>) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
+    let mut notices = Vec::new();
+    notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Succeeded, None)?);
+    let meta = match by {
+        None => serde_json::json!({ "reason": "reported" }),
+        Some(user) => serde_json::json!({ "reason": "accepted", "by": aurelius_domain::ticket::Actor::BoardMember { user_id: user } }),
+    };
+    let succeeded = task_event(tx, task, row.project_id, "task.succeeded", meta)?;
     let source: String = tx.query_row("SELECT id FROM events WHERE seq = ?1", [succeeded.seq as i64], |r| r.get(0))?;
+    // Accepted on the board (Done): the main task's extraction also writes the ticket's summary (MU1-18).
+    let ticket = match by {
+        Some(_) => crate::task::ticket_line::root_of(tx, task)?.map(|(ticket, _, _)| ticket),
+        None => None,
+    };
     if let Ok(source) = aurelius_domain::EventId::parse(&source) {
-        crate::memory::schedule_extraction(tx, task, source)?;
+        crate::memory::schedule_extraction(tx, task, ticket, source)?;
     }
     notices.push(succeeded);
     // Tasks waiting on this one can go.
@@ -290,7 +329,7 @@ pub(crate) fn report_to_origin(tx: &Tx<'_>, st: &Store, task: TaskId, speaker: S
     let mut notices = vec![posted];
     if !open_from(tx, conversation, Some(task))? && !live_in(tx, conversation, None)? {
         let (_, queued) = queue_run(tx, &serde_json::json!({ "origin": "delegated", "task_id": task }), &task.to_string(), conversation, message)?;
-        notices.push(queued);
+        notices.extend(queued);
     }
     Ok(notices)
 }
@@ -308,7 +347,7 @@ pub(crate) fn origin_released(tx: &Tx<'_>, task: TaskId) -> Result<Vec<EventNoti
         return Ok(vec![]);
     }
     let (_, queued) = queue_run(tx, &serde_json::json!({ "origin": "delegated", "task_id": task }), &task.to_string(), conversation, latest)?;
-    Ok(vec![queued])
+    Ok(queued)
 }
 
 /// A run of a conversation ended: results of tasks given from there that came
@@ -335,7 +374,7 @@ pub(crate) fn answer_results(tx: &Tx<'_>, run: RunId, completed: bool) -> Result
         return Ok(vec![]);
     }
     let (_, queued) = queue_run(tx, &serde_json::json!({ "origin": "delegated", "task_id": task }), &task.to_string(), conversation, message)?;
-    Ok(vec![queued])
+    Ok(queued)
 }
 
 /// A task given from `conversation` (other than `except`) is still open.
@@ -402,8 +441,8 @@ pub(crate) fn continue_when_done(tx: &Tx<'_>, st: &Store, task: TaskId) -> Resul
         COLLEAGUES_DONE,
     )?;
     let mut notices = vec![posted];
-    crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?;
-    crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?;
+    notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
+    notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
     notices.push(task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": "colleagues_done" }))?);
     notices.extend(run_for(tx, task, conversation, message)?);
     Ok(notices)
@@ -413,8 +452,9 @@ pub(crate) fn continue_when_done(tx: &Tx<'_>, st: &Store, task: TaskId) -> Resul
 /// time: queued (said once), and the oldest one in line goes when nothing runs.
 fn in_line(tx: &Tx<'_>, task: TaskId) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
+    let mut notices = Vec::new();
     if row.status == TaskStatus::Waiting {
-        crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?;
+        notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
     }
     let said: Option<String> = tx
         .query_row(
@@ -426,7 +466,6 @@ fn in_line(tx: &Tx<'_>, task: TaskId) -> Result<Vec<EventNotice>, StorageError> 
         )
         .ok()
         .flatten();
-    let mut notices = Vec::new();
     if said.as_deref() != Some("sequential") {
         notices.push(task_event(tx, task, row.project_id, "task.queued", serde_json::json!({ "reason": "sequential" }))?);
     }
@@ -457,7 +496,7 @@ pub enum EmployeeAction {
     ListConversations { query: String },
     ReadConversation { conversation: String },
     /// Suggest a new colleague; only the user can approve it.
-    ProposeColleague { name: String, role: String, title: Option<String>, instructions: String, reports_to: Option<String>, reason: String, department: Option<String> },
+    ProposeColleague { name: String, role: String, title: Option<String>, instructions: String, reports_to: Option<String>, reason: String },
     /// Suggest new instructions for oneself or a direct report; only the user can approve them.
     ProposeInstructions { employee: Option<String>, instructions: String, reason: String, evidence: Vec<String> },
     /// Management chooses the mode (`auto` or `plan`) of its own task, with a reason.
@@ -466,6 +505,8 @@ pub enum EmployeeAction {
     ReadGroupChat { last: Option<u32> },
     /// A message in the group chat under the employee's name; wakes the colleagues it names.
     PostToGroupChat { message: String },
+    /// The dispatcher of a ticket chooses its owner (`triage`; only in a dispatcher's run).
+    AssignTicket { employee: String, reason: String },
 }
 
 impl CommandService {
@@ -506,9 +547,9 @@ impl CommandService {
                 if let Some(row) = store::load_task(tx, task)? {
                     if row.status != TaskStatus::Running {
                         if row.status == TaskStatus::Waiting {
-                            crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?;
+                            notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
                         }
-                        crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?;
+                        notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
                         notices.push(task_event(tx, task, project, "task.started", serde_json::json!({ "conversation_id": conversation }))?);
                     }
                 }
@@ -584,7 +625,7 @@ impl CommandService {
             let message = message.clone();
             return self.store.write(move |tx| crate::conversation::group_chat::post_from_run(tx, &st, run, &message)).map_err(storage_error);
         }
-        if let EmployeeAction::ProposeColleague { name, role, title, instructions, reports_to, reason, department } = &action {
+        if let EmployeeAction::ProposeColleague { name, role, title, instructions, reports_to, reason } = &action {
             let input = crate::org::ProposalInput {
                 name: name.clone(),
                 role: role.clone(),
@@ -592,7 +633,6 @@ impl CommandService {
                 instructions: instructions.clone(),
                 reports_to: reports_to.clone(),
                 reason: reason.clone(),
-                department: department.clone(),
             };
             return self.store.write(move |tx| crate::org::propose_colleague(tx, &st, run, input)).map_err(storage_error);
         }
@@ -603,6 +643,10 @@ impl CommandService {
         if let EmployeeAction::SetMode { mode, reason } = &action {
             let (mode, reason) = (mode.clone(), reason.clone());
             return self.store.write(move |tx| crate::task::mode_choice::set_mode(tx, &st, run, &mode, &reason)).map_err(storage_error);
+        }
+        if let EmployeeAction::AssignTicket { employee, reason } = &action {
+            let (employee, reason) = (employee.clone(), reason.clone());
+            return self.store.write(move |tx| crate::task::triage::assign(tx, &st, run, &employee, &reason)).map_err(storage_error);
         }
         if let EmployeeAction::MessageTask { task, message, interrupt } = action {
             return self.store.write(move |tx| message_task(tx, &st, run, &task, &message, interrupt)).map_err(storage_error);
@@ -687,7 +731,8 @@ impl CommandService {
                     | EmployeeAction::ProposeInstructions { .. }
                     | EmployeeAction::SetMode { .. }
                     | EmployeeAction::ReadGroupChat { .. }
-                    | EmployeeAction::PostToGroupChat { .. } => unreachable!("handled above"),
+                    | EmployeeAction::PostToGroupChat { .. }
+                    | EmployeeAction::AssignTicket { .. } => unreachable!("handled above"),
                     EmployeeAction::HandOver { employee, reason } => {
                         let Some(to) = find(&employee) else {
                             return Ok((false, format!("No active colleague called {employee} in the company."), vec![]));
@@ -702,7 +747,7 @@ impl CommandService {
                             return Ok((false, "This task was already handed over; finish it yourself.".to_string(), vec![]));
                         }
                         let me_name = employees::load_employee(tx, me)?.map(|m| m.name).unwrap_or_default();
-                        crate::task::task_line::set_employee(tx, task, Some(to.id))?;
+                        let owner = crate::task::task_line::set_employee(tx, task, Some(to.id))?;
                         inherit_mode(tx, run, task, to.id)?;
                         let mut notices = vec![task_event(
                             tx,
@@ -711,7 +756,8 @@ impl CommandService {
                             "task.handed_off",
                             serde_json::json!({ "from": me, "to": to.id, "from_name": me_name, "to_name": to.name, "reason": reason, "subject": to.name }),
                         )?];
-                        crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?;
+                        notices.extend(owner);
+                        notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
                         notices.push(task_event(tx, task, row.project_id, "task.queued", serde_json::json!({ "reason": "handed_off" }))?);
                         wake_task_job(tx, task, true)?;
                         Ok((true, format!("Handed the task over to {}. Tell the user in one sentence; stop working on it.", to.name), notices))

@@ -318,7 +318,7 @@ mod tests {
     const HOUR: i64 = 3_600_000;
 
     fn ctx() -> CommandContext {
-        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None }
+        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
     }
 
     fn envelope(command: Command) -> CommandEnvelope {
@@ -349,7 +349,7 @@ mod tests {
             panic!()
         };
         let (CommandResult::EmployeeCreated { employee_id, .. }, _) =
-            run(&service, Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }))
+            run(&service, Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }))
         else {
             panic!()
         };

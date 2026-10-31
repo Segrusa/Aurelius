@@ -154,7 +154,7 @@ impl CommandService {
                 let (run_id, run_notice) = queue_run(tx, &meta, &key, row.conversation_id, message_id)?;
                 hb::record_wake(tx, &schedule_id, run_id, &key, &reasons, missed)?;
                 hb::advance(tx, &schedule_id, next_due, Some(newest), None)?;
-                Ok(vec![n, run_notice])
+                Ok(std::iter::once(n).chain(run_notice).collect())
             })
             .map_err(storage_error)?;
         Ok(notices)
@@ -192,7 +192,7 @@ mod tests {
     use aurelius_domain::task::CreateTask;
 
     fn ctx() -> CommandContext {
-        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None }
+        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
     }
 
     fn run(service: &CommandService, command: Command) -> CommandResult {
@@ -213,7 +213,7 @@ mod tests {
         let service = CommandService::new(std::sync::Arc::new(Store::open(dir.path()).unwrap()));
         let CommandResult::ProjectCreated { project_id, .. } = run(&service, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })) else { panic!() };
         let CommandResult::EmployeeCreated { employee_id, .. } =
-            run(&service, Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }))
+            run(&service, Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }))
         else {
             panic!()
         };

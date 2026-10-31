@@ -1,10 +1,10 @@
 //! Employee projections. Employees are company-wide: each has its own scope
-//! (below the global one), an optional department and one persistent chat with
+//! (below the global one) and one persistent chat with
 //! the user (`kind = 'employee'`, no project; the oldest such conversation).
 //! Task conversations carry the task's project.
 
 use crate::{StorageError, now_ms};
-use aurelius_domain::{ConversationId, DepartmentId, EmployeeId, ProjectId, employee::LifecycleStatus, views::{AgentView, EmployeeSummary}};
+use aurelius_domain::{ConversationId, EmployeeId, ProjectId, employee::LifecycleStatus, views::{AgentView, EmployeeSummary}};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 pub struct EmployeeRow {
@@ -12,7 +12,6 @@ pub struct EmployeeRow {
     pub role: String,
     pub title: Option<String>,
     pub reports_to: Option<EmployeeId>,
-    pub department_id: Option<DepartmentId>,
     pub status: LifecycleStatus,
     pub version: u64,
     /// Its persistent chat.
@@ -53,7 +52,6 @@ pub fn insert_employee(
     role: &str,
     title: Option<&str>,
     reports_to: Option<EmployeeId>,
-    department: Option<DepartmentId>,
     instructions_blob: Option<&str>,
     config: &serde_json::Value,
     conversation: ConversationId,
@@ -66,8 +64,8 @@ pub fn insert_employee(
         params![scope, global, id.to_string()],
     )?;
     tx.execute(
-        "INSERT INTO employees(id, scope_id, name, role, title, reports_to, department_id, instructions_blob_id, config_json, status, version, created_at_ms, updated_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'active', 1, ?10, ?10)",
+        "INSERT INTO employees(id, scope_id, name, role, title, reports_to, instructions_blob_id, config_json, status, version, created_at_ms, updated_at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'active', 1, ?9, ?9)",
         params![
             id.to_string(),
             scope,
@@ -75,7 +73,6 @@ pub fn insert_employee(
             role,
             title,
             reports_to.map(|m| m.to_string()),
-            department.map(|d| d.to_string()),
             instructions_blob,
             serde_json::to_string(config)?,
             now
@@ -90,7 +87,7 @@ pub fn insert_employee(
 
 pub fn load_employee(tx: &Transaction<'_>, id: EmployeeId) -> Result<Option<EmployeeRow>, StorageError> {
     let sql = format!(
-        "SELECT m.name, m.role, m.status, m.version, c.id, m.title, m.reports_to, m.department_id
+        "SELECT m.name, m.role, m.status, m.version, c.id, m.title, m.reports_to
          FROM employees m JOIN conversations c ON c.id = {}
          WHERE m.id = ?1",
         main_chat_of("m.id")
@@ -105,7 +102,6 @@ pub fn load_employee(tx: &Transaction<'_>, id: EmployeeId) -> Result<Option<Empl
                 conversation_id: parse(ConversationId::parse(&r.get::<_, String>(4)?))?,
                 title: r.get(5)?,
                 reports_to: r.get::<_, Option<String>>(6)?.map(|m| parse(EmployeeId::parse(&m))).transpose()?,
-                department_id: r.get::<_, Option<String>>(7)?.map(|d| parse(DepartmentId::parse(&d))).transpose()?,
             })
         })
         .optional()?)
@@ -171,15 +167,6 @@ pub fn set_employee_status(tx: &Transaction<'_>, id: EmployeeId, status: Lifecyc
     Ok(())
 }
 
-/// Also bumps the employee's version, like the other employee changes.
-pub fn set_department(tx: &Transaction<'_>, employee: EmployeeId, department: Option<DepartmentId>) -> Result<(), StorageError> {
-    tx.execute(
-        "UPDATE employees SET department_id = ?2, version = version + 1, updated_at_ms = ?3 WHERE id = ?1",
-        params![employee.to_string(), department.map(|d| d.to_string()), now_ms()],
-    )?;
-    Ok(())
-}
-
 pub fn set_project_status(tx: &Transaction<'_>, id: ProjectId, status: LifecycleStatus) -> Result<u64, StorageError> {
     tx.execute(
         "UPDATE projects SET status = ?2, version = version + 1, updated_at_ms = ?3 WHERE id = ?1",
@@ -199,55 +186,49 @@ pub fn projects_active(conn: &Connection, employee: EmployeeId) -> Result<Vec<Pr
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// Employees (not archived), oldest first; optionally of one department.
-pub fn list_employees(
-    conn: &Connection,
-    department: Option<DepartmentId>,
-    read_blob: &dyn Fn(&str) -> Option<String>,
-) -> Result<Vec<EmployeeSummary>, StorageError> {
+/// Employees (not archived), oldest first.
+pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<EmployeeSummary>, StorageError> {
     let sql = format!(
-        "SELECT m.id, m.department_id, m.name, m.role, m.title, m.reports_to, b.storage_key, m.status, m.version, c.id,
+        "SELECT m.id, m.name, m.role, m.title, m.reports_to, b.storage_key, m.status, m.version, c.id,
                 EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id IN (SELECT id FROM conversations WHERE employee_id = m.id) AND r.status IN ('created','starting','running','cancelling')),
                 c.agent_mode, m.folder, c.browser_allowed, c.screen_allowed,
                 COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0)
          FROM employees m
          JOIN conversations c ON c.id = {}
          LEFT JOIN blobs b ON b.id = m.instructions_blob_id
-         WHERE m.status <> 'archived' AND (?1 IS NULL OR m.department_id = ?1)
+         WHERE m.status <> 'archived'
          ORDER BY m.created_at_ms, m.id",
         main_chat_of("m.id")
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([department.map(|d| d.to_string())], |r| {
+    let rows = stmt.query_map([], |r| {
         Ok((
             parse(EmployeeId::parse(&r.get::<_, String>(0)?))?,
-            r.get::<_, Option<String>>(1)?.map(|d| parse(DepartmentId::parse(&d))).transpose()?,
+            r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
-            r.get::<_, String>(3)?,
-            r.get::<_, Option<String>>(4)?,
-            r.get::<_, Option<String>>(5)?.map(|m| parse(EmployeeId::parse(&m))).transpose()?,
-            r.get::<_, Option<String>>(6)?,
-            status(r.get(7)?)?,
-            r.get::<_, i64>(8)? as u64,
-            parse(ConversationId::parse(&r.get::<_, String>(9)?))?,
-            r.get::<_, bool>(10)?,
-            r.get::<_, String>(11)?,
-            r.get::<_, Option<String>>(12)?,
+            r.get::<_, Option<String>>(3)?,
+            r.get::<_, Option<String>>(4)?.map(|m| parse(EmployeeId::parse(&m))).transpose()?,
+            r.get::<_, Option<String>>(5)?,
+            status(r.get(6)?)?,
+            r.get::<_, i64>(7)? as u64,
+            parse(ConversationId::parse(&r.get::<_, String>(8)?))?,
+            r.get::<_, bool>(9)?,
+            r.get::<_, String>(10)?,
+            r.get::<_, Option<String>>(11)?,
+            r.get::<_, bool>(12)?,
             r.get::<_, bool>(13)?,
             r.get::<_, bool>(14)?,
-            r.get::<_, bool>(15)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, department_id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks) = row?;
+        let (id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks) = row?;
         out.push(EmployeeSummary {
             id,
             name,
             role,
             title,
             reports_to,
-            department_id,
             projects_active: Vec::new(),
             instructions: key.as_deref().and_then(read_blob),
             status,
@@ -313,13 +294,6 @@ pub fn employee_project(conn: &Connection, conversation: ConversationId) -> Resu
         })
         .optional()?;
     Ok(row.and_then(|(m, p)| Some((EmployeeId::parse(&m).ok()?, p.and_then(|p| ProjectId::parse(&p).ok())))))
-}
-
-/// The department an employee is in.
-pub fn department_of(conn: &Connection, employee: EmployeeId) -> Result<Option<DepartmentId>, StorageError> {
-    let department: Option<Option<String>> =
-        conn.query_row("SELECT department_id FROM employees WHERE id = ?1", [employee.to_string()], |r| r.get(0)).optional()?;
-    Ok(department.flatten().and_then(|d| DepartmentId::parse(&d).ok()))
 }
 
 /// The subagents (unfinished `Task`/`Agent` calls) a run has started, oldest first.
@@ -465,15 +439,14 @@ fn step_line(tool: &str, input: &serde_json::Value) -> String {
     }
 }
 
-/// Every employee that is not archived with the one it reports to and its
-/// department: the company's org chart.
-pub fn org_entries(conn: &Connection) -> Result<Vec<(EmployeeId, Option<EmployeeId>, Option<DepartmentId>)>, StorageError> {
-    let mut stmt = conn.prepare("SELECT id, reports_to, department_id FROM employees WHERE status <> 'archived' ORDER BY created_at_ms, id")?;
+/// Every employee that is not archived with the one it reports to: the
+/// company's org chart.
+pub fn org_entries(conn: &Connection) -> Result<Vec<(EmployeeId, Option<EmployeeId>)>, StorageError> {
+    let mut stmt = conn.prepare("SELECT id, reports_to FROM employees WHERE status <> 'archived' ORDER BY created_at_ms, id")?;
     let rows = stmt.query_map([], |r| {
         Ok((
             parse(EmployeeId::parse(&r.get::<_, String>(0)?))?,
             r.get::<_, Option<String>>(1)?.map(|m| parse(EmployeeId::parse(&m))).transpose()?,
-            r.get::<_, Option<String>>(2)?.map(|d| parse(DepartmentId::parse(&d))).transpose()?,
         ))
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -481,7 +454,7 @@ pub fn org_entries(conn: &Connection) -> Result<Vec<(EmployeeId, Option<Employee
 
 /// The company's org chart (employees that are not archived).
 pub fn org(conn: &Connection) -> Result<aurelius_domain::org::Org, StorageError> {
-    Ok(aurelius_domain::org::Org::company(org_entries(conn)?))
+    Ok(aurelius_domain::org::Org::new(org_entries(conn)?))
 }
 
 /// Also bumps the employee's version, like the other employee changes.

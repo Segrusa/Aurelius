@@ -191,7 +191,7 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
   }
 
   Future<void> _pickLead() async {
-    final groups = pickerGroups(_company.employees, _company.activeDepartments);
+    final groups = pickerGroups(_company.employees);
     final picked = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,

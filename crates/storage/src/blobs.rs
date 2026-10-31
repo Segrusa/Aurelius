@@ -60,6 +60,11 @@ impl BlobStore {
         Ok(Self { root, cache: Mutex::default() })
     }
 
+    /// The folder the blob files live in.
+    pub fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     /// Write bytes to a temp file, fsync, then atomically rename into place.
     pub fn put(&self, bytes: &[u8], media_type: &str) -> Result<PreparedBlob, StorageError> {
         let id = BlobId::new();

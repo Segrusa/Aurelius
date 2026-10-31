@@ -221,7 +221,7 @@ async fn next(socket: &mut Socket) -> ServerMessage {
 }
 
 async fn hello(socket: &mut Socket) -> HelloResult {
-    let params = HelloParams { client_name: "phone".into(), client_version: "0".into(), app_key: None, accepts: Vec::new() };
+    let params = HelloParams { client_name: "phone".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), user_id: None };
     match call(socket, 1, Method::SessionHello(params)).await {
         Outcome::Ok(ResponseBody::Hello(h)) => {
             assert_eq!(h.protocol, PROTOCOL_MAJOR);
@@ -349,7 +349,7 @@ async fn paired_phone_uses_the_same_sessions_with_limits() {
     let atlas = projects.iter().find(|p| p.name == "Atlas").unwrap();
     let CommandResult::EmployeeCreated { employee_id, .. } = desktop
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }),
+            Command::CreateEmployee(CreateEmployee { name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -553,7 +553,7 @@ async fn phone_sets_an_employees_model_and_effort_but_not_its_connection() {
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = desktop
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None, department_id: None }),
+            Command::CreateEmployee(CreateEmployee { name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await

@@ -140,8 +140,7 @@ pub fn tokens_since(conn: &Connection, schedule: &str, since_ms: i64) -> Result<
 }
 
 /// What changed for this employee since the cursor: its own tasks and those it
-/// gave away that finished or got stuck, and context shared with it or its
-/// department. Returns (reasons, newest seq seen).
+/// gave away that finished or got stuck, and context shared with it. Returns (reasons, newest seq seen).
 pub fn reasons(conn: &Connection, s: &Schedule) -> Result<(Vec<String>, i64), StorageError> {
     let mut reasons = Vec::new();
     let mut newest = s.cursor_seq;
@@ -169,8 +168,7 @@ pub fn reasons(conn: &Connection, s: &Schedule) -> Result<(Vec<String>, i64), St
     let mut stmt = conn.prepare(
         "SELECT e.seq, sh.title FROM events e JOIN shares sh ON sh.id = e.aggregate_id
          WHERE e.aggregate_type = 'share' AND e.type = 'share.granted' AND e.seq > ?1 AND sh.revoked_at_ms IS NULL
-           AND sh.destination_scope_id IN (SELECT scope_id FROM employees WHERE id = ?2
-                                           UNION SELECT d.scope_id FROM departments d JOIN employees m ON m.department_id = d.id WHERE m.id = ?2)
+           AND sh.destination_scope_id IN (SELECT scope_id FROM employees WHERE id = ?2)
          ORDER BY e.seq",
     )?;
     let rows = stmt.query_map(params![s.cursor_seq, s.employee_id.to_string()], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;

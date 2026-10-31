@@ -325,10 +325,7 @@ impl AppView {
 
     fn manager_label(&self, id: EmployeeId) -> String {
         match self.managers.iter().find(|m| m.id == id) {
-            Some(m) => match self.department_name(m.department_id) {
-                d if d.is_empty() => m.name.clone(),
-                d => format!("{} · {d}", m.name),
-            },
+            Some(m) => m.name.clone(),
             None => "(deleted employee)".into(),
         }
     }

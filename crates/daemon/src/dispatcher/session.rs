@@ -54,6 +54,7 @@ pub(super) fn session_key(plan: &ChatRunPlan, profile: &ToolProfile) -> SessionK
             profile: serde_json::json!({ "folders": folders, "browser": browser, "playwright": playwright.is_some(), "plugins": plugins, "artifacts": artifacts }).to_string(),
         },
         ToolProfile::TextOnly => SessionKey { model, folder: String::new(), profile: "text".into() },
+        ToolProfile::Triage { .. } => SessionKey { model, folder: String::new(), profile: "triage".into() },
     }
 }
 

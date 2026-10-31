@@ -5,7 +5,7 @@
 use crate::{
     ProposalId, NoteId,
     proposal::ProposalStatus,
-    ApprovalId, AttachmentId, ProviderId, ConversationId, DepartmentId, EmployeeId, MemoryId, MessageId, ProjectId, RunId, TaskId,
+    ApprovalId, AttachmentId, ProviderId, ConversationId, EmployeeId, MemoryId, MessageId, ProjectId, RunId, TaskId,
     approval::ApprovalStatus,
     connection::{ConfigScope, Purpose, RunDefaults},
     conversation::{MessageRole, MessageStatus},
@@ -28,6 +28,9 @@ pub struct ProjectSummary {
     pub employees_active: u32,
     /// The project's own folder on disk.
     pub folder: Option<String>,
+    /// The project's own dispatcher for tickets; none: the company's (B5).
+    #[serde(default)]
+    pub dispatcher_employee_id: Option<EmployeeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -102,6 +105,11 @@ pub struct TaskView {
     /// servers leave it out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_run: Option<LiveRun>,
+    /// The ticket this task works for (a main task or a delegation below it), and its number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<crate::TicketId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_number: Option<u32>,
 }
 
 /// What a finished task's follow-up run does (`TaskView::live_run`).
@@ -361,8 +369,6 @@ pub struct EmployeeSummary {
     pub title: Option<String>,
     /// Who this employee reports to; none: a root of the org chart (the management team).
     pub reports_to: Option<EmployeeId>,
-    /// The department it belongs to; none: no department.
-    pub department_id: Option<DepartmentId>,
     /// Projects it has open tasks in (derived, never stored).
     pub projects_active: Vec<ProjectId>,
     pub instructions: Option<String>,
@@ -522,7 +528,7 @@ pub struct ShareView {
     pub title: String,
     /// Where it came from, e.g. "Chat · How do we …" or "Task · Onboarding".
     pub source: String,
-    /// project · <name> | department · <name> | employee · <name> | conversation
+    /// project · <name> | employee · <name> | conversation
     pub destination: String,
     pub mode: crate::share::ShareMode,
     pub excerpt: String,
@@ -536,151 +542,19 @@ pub struct EmployeesSnapshot {
     pub employees: Vec<EmployeeSummary>,
 }
 
-/// A department: a group of employees with a head and its own memory scope.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct DepartmentSummary {
-    pub id: DepartmentId,
-    pub name: String,
-    pub description: Option<String>,
-    /// The employee who leads it; none when not set.
-    pub head_id: Option<EmployeeId>,
-    pub status: DepartmentStatus,
-    pub version: u64,
-    pub created_at_ms: i64,
-    /// Employees (not archived) in it.
-    pub member_count: u32,
-    /// Open tasks of its members, over all projects.
-    pub open_tasks: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum DepartmentStatus {
-    Active,
-    Archived,
-}
-
-impl DepartmentStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DepartmentStatus::Active => "active",
-            DepartmentStatus::Archived => "archived",
-        }
-    }
-
-    pub fn parse(text: &str) -> Option<Self> {
-        match text {
-            "active" => Some(Self::Active),
-            "archived" => Some(Self::Archived),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct DepartmentsSnapshot {
-    pub as_of_seq: u64,
-    /// By name; archived ones only with `department.list { archived: true }`.
-    pub departments: Vec<DepartmentSummary>,
-}
-
-/// The company in one read (`company.get`): departments, employees, the org
-/// chart setting and its roots (the management team).
+/// The company in one read (`company.get`): employees, the org chart setting
+/// and its roots (the management team).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CompanySnapshot {
     pub as_of_seq: u64,
-    /// Active departments by name.
-    pub departments: Vec<DepartmentSummary>,
     /// Employees that are not archived, oldest first.
     pub employees: Vec<EmployeeSummary>,
     /// "Follow the org chart" (server setting, on by default).
     pub follow_org_chart: bool,
     /// Active employees without a boss, oldest first: the management team.
     pub roots: Vec<EmployeeId>,
-    /// What the conversion to protocol 3 did, when this server converted 2.x data.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub conversion: Option<ConversionReport>,
-}
-
-/// What the one-time conversion of 2.x data did (event `company.converted`).
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ConversionReport {
-    /// One per old project.
-    pub departments: Vec<ConvertedDepartment>,
-    /// Employees with the same name in several projects, now one.
-    pub merged: Vec<MergedEmployee>,
-    /// Only from conversions before 3.0 merged by name alone (renamed
-    /// "Name (Project)"); empty now.
-    pub suffixed: Vec<SuffixedEmployee>,
-    /// Bosses that were cleared (gone in the merge, or a loop).
-    pub cleared_bosses: Vec<ClearedBoss>,
-    /// Managers found only in archived projects, now archived employees.
-    #[serde(default)]
-    pub archived: Vec<ArchivedEmployee>,
-    /// Active employees without a boss after the conversion (the management team).
-    #[serde(default)]
-    pub roots: u32,
-}
-
-impl ConversionReport {
-    /// One line for the timeline.
-    pub fn summary(&self) -> String {
-        let mut line = format!(
-            "{} department(s) from the projects, {} employee(s) merged, {} archived, {} boss(es) cleared, {} root(s) left",
-            self.departments.len(),
-            self.merged.iter().map(|m| m.merged_ids.len()).sum::<usize>(),
-            self.archived.len(),
-            self.cleared_bosses.len(),
-            self.roots
-        );
-        if !self.suffixed.is_empty() {
-            line.push_str(&format!(", {} renamed", self.suffixed.len()));
-        }
-        line
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArchivedEmployee {
-    pub employee_id: EmployeeId,
-    pub name: String,
-    /// The archived project it came from.
-    pub project: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ConvertedDepartment {
-    pub department_id: DepartmentId,
-    /// The old project's name.
-    pub name: String,
-    pub head_id: Option<EmployeeId>,
-    pub members: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct MergedEmployee {
-    /// The one that stays (of an active project, the most tasks).
-    pub employee_id: EmployeeId,
-    pub name: String,
-    /// The others, now archived; their work belongs to `employee_id`.
-    pub merged_ids: Vec<EmployeeId>,
-    /// The projects they came from, the survivor's first.
-    pub projects: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SuffixedEmployee {
-    pub employee_id: EmployeeId,
-    pub old_name: String,
-    pub new_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ClearedBoss {
-    pub employee_id: EmployeeId,
-    pub name: String,
-    /// The boss it had.
-    pub was: EmployeeId,
+    /// The company itself: its name and default dispatcher.
+    pub company: crate::company::CompanyView,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -854,15 +728,10 @@ pub struct MemorySourceView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MemoryView {
     pub id: MemoryId,
-    /// global | project | department | employee
+    /// global | project | employee
     pub scope: String,
     pub employee_id: Option<EmployeeId>,
     pub employee_name: Option<String>,
-    /// A department-scope memory: its department.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub department_id: Option<DepartmentId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub department_name: Option<String>,
     pub kind: crate::memory::MemoryKind,
     pub status: crate::memory::MemoryStatus,
     /// Empty when forgotten (content erased).
@@ -887,11 +756,9 @@ pub struct MemoryView {
 pub struct MemoryContextItem {
     pub memory_id: MemoryId,
     pub kind: crate::memory::MemoryKind,
-    /// global | project | department | employee
+    /// global | project | employee
     pub scope: String,
     pub employee_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub department_name: Option<String>,
     pub pinned: bool,
     /// The label the context builder writes, e.g. "Decision · project".
     pub label: String,
@@ -905,10 +772,9 @@ pub struct MemoryContextItem {
 /// What goes into an employee's context without a specific question.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MemoryContextView {
-    /// None: an employee's chat outside projects, or a department alone.
+    /// None: an employee's chat outside projects.
     pub project_id: Option<ProjectId>,
     pub employee_id: Option<EmployeeId>,
-    pub department_id: Option<DepartmentId>,
     /// Estimate of the fixed system text without memory; 0 when not known.
     pub system_tokens: u32,
     pub memory_budget_tokens: u32,
@@ -1218,8 +1084,6 @@ pub struct NotificationView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProposalView {
     pub id: ProposalId,
-    /// A colleague: the department it would join.
-    pub department_id: Option<DepartmentId>,
     pub proposed_by: EmployeeId,
     pub proposed_by_name: String,
     pub status: ProposalStatus,

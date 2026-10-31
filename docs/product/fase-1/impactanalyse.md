@@ -140,16 +140,17 @@ In de import (niet in SQL, omdat het om een mapping gaat): voor elke `memory_ite
 | read | `ticket.get { ticket_id }` | ticket + hoofdtask + gekoppelde tasks (via `tasks.ticket_id`) + de laatste feedback |
 | read | `ticket.list { project_id?, column?, query? }` | lijst/zoeken (mobiel, Needs you) |
 | write | `ticket.create` | in Backlog (of meteen gestart met `start: true`) |
-| write | `ticket.update` | titel, beschrijving, prioriteit, labels, deadline, modus/model, eigenaar (alleen vóór de start) |
-| write | `ticket.move { ticket_id, column_id, position }` | slepen. Naar Todo = Start. Binnen een kolom = alleen de volgorde. Board members mogen Done **niet** via move bereiken (alleen via `ticket.accept`), en vanuit Review terug naar Doing alleen via `ticket.send_back` |
+| write | `ticket.update` | titel, beschrijving, prioriteit, labels, deadline (ms sinds 1970, vóór het jaar 10000), modus/model. De eigenaar **niet**: die alleen via `ticket.assign` |
+| write | `ticket.move { ticket_id, column_id, before_ticket_id? }` | slepen: boven de kaart `before_ticket_id` (geen: onderaan). Een kaart boven zichzelf in de eigen kolom blijft staan (geen event). Onbekende velden (het oude `position`) worden geweigerd, zoals bij alle ticket-/boardcommando's. Naar Todo = Start. Binnen een kolom = alleen de volgorde. Board members mogen Done **niet** via move bereiken (alleen via `ticket.accept`), en vanuit Review terug naar Doing alleen via `ticket.send_back` |
 | write | `ticket.start { ticket_id, employee_id? }` | de knop Start. Met een employee wordt de dispatcher overgeslagen |
+| write | `ticket.assign { ticket_id, employee_id?, reason? }` | eigenaar kiezen vóór de hoofdtask loopt (Backlog, of Todo zolang de hoofdtask Draft is) → `ticket.dispatched`. `employee_id: null` = terug naar "de dispatcher kiest", **alleen in Backlog** → `ticket.updated { changed: ["owner"] }` (geen `ticket.dispatched`: niemand werd gekozen) |
 | write | `ticket.approve_plan { ticket_id, decision: approve|approve_edits, feedback? }` | Plan review → Doing |
 | write | `ticket.revise_plan { ticket_id, feedback }` | het plan opnieuw maken (blijft in Doing tot het nieuwe plan er is) |
 | write | `ticket.accept { ticket_id, note? }` | Review → Done (alleen board members) |
 | write | `ticket.send_back { ticket_id, feedback }` (feedback verplicht) | Review → Doing |
 | write | `ticket.cancel { ticket_id }` | hoofdtask annuleren → Backlog |
 | write | `ticket.archive { ticket_id }` | uit het bord halen (Done of Backlog) |
-| write | `board.columns_update { columns[] }` | naam/volgorde |
+| write | `board.columns_update { columns[] }` + `expected_version` | naam/volgorde. De boardversie = de hoogste `version` van de kolommen (ze wijzigen samen); een oude versie geeft `version_conflict`. Antwoord `board_columns_updated { version }`; het event bevat de kolommen (id, soort, naam, positie) |
 | write | `company.update { name?, dispatcher_employee_id? }` | |
 | write | `project.update` + `dispatcher_employee_id` | per project |
 | events | `ticket.created`, `ticket.updated`, `ticket.moved {from,to,by}`, `ticket.started`, `ticket.dispatched {employee, by, reason}`, `ticket.plan_review`, `ticket.review`, `ticket.accepted`, `ticket.sent_back`, `ticket.cancelled`, `board.columns_updated` | `EventKind` + Dart |

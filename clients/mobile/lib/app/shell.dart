@@ -12,18 +12,19 @@ import '../features/inbox/inbox_bloc.dart';
 import '../features/power/power_widgets.dart';
 
 /// The bottom tabs, in this order (branch indices of the router's shell).
+/// The Board took the place of Tasks (D-03); Tasks is under More.
 const shellTabs = [
   GlassTab(CupertinoIcons.house, 'Home'),
+  GlassTab(CupertinoIcons.square_split_2x1, 'Board'),
   GlassTab(CupertinoIcons.chat_bubble_2, 'Team'),
   GlassTab(CupertinoIcons.tray, 'Inbox'),
-  GlassTab(CupertinoIcons.checkmark_square, 'Tasks'),
   GlassTab(CupertinoIcons.ellipsis_circle, 'More'),
 ];
 
 /// The inbox tab, with the badge of what waits for you (its index in [shellTabs]).
-const inboxTab = 2;
+const inboxTab = 3;
 
-/// Tabs: Home · Team · Inbox · Tasks · More in a floating glass tab bar,
+/// Tabs: Home · Board · Team · Inbox · More in a floating glass tab bar,
 /// with the connection banner on top. Hardware keyboards (iPad, Android with a
 /// keyboard): ⌘/Ctrl+1…5 switch tabs, ⌘/Ctrl+N gives work (a new task).
 class HomeShell extends StatelessWidget {

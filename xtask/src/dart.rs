@@ -263,9 +263,14 @@ impl Plan {
         }
     }
 
-    fn entry(&self) -> String {
+    /// The JSON entry; `local` when the value is a function parameter, which
+    /// Dart promotes to non-null inside `if (x != null)` (a public field is not).
+    fn entry(&self, local: bool) -> String {
         let key = dart_str(&self.json);
-        let value = to_expr(&self.ty, &self.name, matches!(self.mode, Mode::Optional), 0);
+        let value = match (&self.ty, local) {
+            (Ty::Nullable(inner), true) => to_expr(inner, &self.name, false, 0),
+            (ty, _) => to_expr(ty, &self.name, !local && matches!(self.mode, Mode::Optional), 0),
+        };
         match &self.mode {
             Mode::Required | Mode::Default(_) | Mode::Dynamic { required: true } => format!("{key}: {value}"),
             Mode::Optional | Mode::Dynamic { required: false } => format!("if ({} != null) {key}: {value}", self.name),
@@ -328,7 +333,7 @@ fn emit_struct(out: &mut String, k: &Kinds, s: &Struct) {
         w!(out, "  factory {}.fromJson(Map<String, dynamic> json) => {}({});", s.name, s.name, args(k, &plans, "json", "  "));
     }
     w!(out);
-    let entries: Vec<String> = plans.iter().map(Plan::entry).collect();
+    let entries: Vec<String> = plans.iter().map(|p| p.entry(false)).collect();
     w!(out, "  Map<String, dynamic> toJson() => {};", map_lit(&entries, "  "));
     w!(out, "}}");
 }
@@ -401,14 +406,14 @@ fn variant_to_json(k: &Kinds, u: &Union, v: &Variant, class: &str) -> String {
     match (&u.tagging, &v.body) {
         (Tagging::External, Body::Unit) => tag,
         (Tagging::External, Body::Fields(f)) => {
-            let entries: Vec<String> = plans(f, class).iter().map(Plan::entry).collect();
+            let entries: Vec<String> = plans(f, class).iter().map(|p| p.entry(false)).collect();
             map_lit(&[format!("{tag}: {}", map_lit(&entries, "    "))], "    ")
         }
         (Tagging::External, Body::Payload(ty)) => map_lit(&[format!("{tag}: {}", to_expr(ty, "value", matches!(ty, Ty::Nullable(_)), 0))], "    "),
         (Tagging::Internal { tag: key }, Body::Unit) => map_lit(&[format!("{}: {tag}", dart_str(key))], "    "),
         (Tagging::Internal { tag: key }, Body::Fields(f)) => {
             let mut entries = vec![format!("{}: {tag}", dart_str(key))];
-            entries.extend(plans(f, class).iter().map(Plan::entry));
+            entries.extend(plans(f, class).iter().map(|p| p.entry(false)));
             map_lit(&entries, "    ")
         }
         (Tagging::Internal { tag: key }, Body::Payload(ty)) => {
@@ -420,7 +425,7 @@ fn variant_to_json(k: &Kinds, u: &Union, v: &Variant, class: &str) -> String {
         }
         (Tagging::Adjacent { tag: key, .. }, Body::Unit) => map_lit(&[format!("{}: {tag}", dart_str(key))], "    "),
         (Tagging::Adjacent { tag: key, content }, Body::Fields(f)) => {
-            let entries: Vec<String> = plans(f, class).iter().map(Plan::entry).collect();
+            let entries: Vec<String> = plans(f, class).iter().map(|p| p.entry(false)).collect();
             map_lit(&[format!("{}: {tag}", dart_str(key)), format!("{}: {}", dart_str(content), map_lit(&entries, "    "))], "    ")
         }
         (Tagging::Adjacent { tag: key, content }, Body::Payload(ty)) => {
@@ -598,14 +603,14 @@ pub fn methods(entries: &[Entry], major: u16) -> String {
                 }
                 Body::Payload(ty) => {
                     let (param, entry) = match ty {
-                        Ty::Nullable(_) => (format!("{} params", dart_type(ty)), format!("if (params != null) 'params': {}", to_expr(ty, "params", true, 0))),
+                        Ty::Nullable(inner) => (format!("{} params", dart_type(ty)), format!("if (params != null) 'params': {}", to_expr(inner, "params", false, 0))),
                         _ => (format!("{} params", dart_type(ty)), format!("'params': {}", to_expr(ty, "params", false, 0))),
                     };
                     w!(out, "Map<String, dynamic> {name}({param}) => {};", map_lit(&[method_entry, entry], ""));
                 }
                 Body::Fields(f) => {
                     let plans = plans(f, &e.method);
-                    let entries: Vec<String> = plans.iter().map(Plan::entry).collect();
+                    let entries: Vec<String> = plans.iter().map(|p| p.entry(true)).collect();
                     let params = if plans.is_empty() {
                         String::new()
                     } else {
@@ -717,6 +722,34 @@ mod tests {
         assert!(methods.contains("'params': params.toJson(),"));
         assert!(methods.contains("Map<String, dynamic> xList({required int n, String? projectId}) => "));
         assert!(methods.contains("Map<String, dynamic> thingMake(Params params) => "));
+    }
+
+    #[test]
+    fn builders_need_no_null_aware_call_on_a_checked_parameter() {
+        let m = model(json!({
+            "Kind": { "type": "string", "enum": ["a", "b"] },
+            "Method": { "oneOf": [
+                { "type": "object", "properties": { "method": { "const": "x.list" }, "params": { "type": "object", "properties": { "kind": { "anyOf": [{ "$ref": "#/$defs/Kind" }, { "type": "null" }] } } } }, "required": ["method", "params"] },
+                { "type": "object", "properties": { "method": { "const": "x.find" }, "params": { "anyOf": [{ "$ref": "#/$defs/Kind" }, { "type": "null" }] } }, "required": ["method"] }
+            ] },
+            "HostWrite": { "oneOf": [
+                { "type": "object", "properties": { "method": { "const": "h.do" } }, "required": ["method"] },
+                { "type": "object", "properties": { "method": { "const": "h.set" }, "params": { "$ref": "#/$defs/Kind" } }, "required": ["method", "params"] }
+            ] },
+            "Command": { "oneOf": [
+                { "type": "object", "properties": { "type": { "const": "ping" } }, "required": ["type"] }
+            ] }
+        }));
+        let methods = methods(&crate::catalog::build_with(&m, &[("ping", "thing.ping")]), 2);
+        assert!(methods.contains("if (kind != null) 'kind': kind.toJson(),"), "{methods}");
+        assert!(methods.contains("if (params != null) 'params': params.toJson(),"), "{methods}");
+        assert!(!methods.contains("?."), "{methods}");
+        // A model's public field is not promoted, so it keeps `?.`.
+        let dart = models(&model(json!({
+            "Kind": { "type": "string", "enum": ["a"] },
+            "Bag": { "type": "object", "properties": { "kind": { "anyOf": [{ "$ref": "#/$defs/Kind" }, { "type": "null" }] } } }
+        })));
+        assert!(dart.contains("if (kind != null) 'kind': kind?.toJson(),"), "{dart}");
     }
 
     #[test]

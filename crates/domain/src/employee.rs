@@ -3,7 +3,7 @@
 //! not archived). Roles are free text, never an enum. Removing means archiving;
 //! history keeps the actor ID.
 
-use crate::{DepartmentId, DomainError, EmployeeId, ProjectId, optional_text, require_text};
+use crate::{DomainError, EmployeeId, ProjectId, optional_text, require_text};
 use serde::{Deserialize, Serialize};
 
 pub const NAME_MAX: usize = 80;
@@ -86,9 +86,6 @@ pub struct CreateEmployee {
     /// Who this employee reports to (not archived); none: a root (the management team).
     #[serde(default)]
     pub reports_to: Option<EmployeeId>,
-    /// The department it joins (active); none: no department.
-    #[serde(default)]
-    pub department_id: Option<DepartmentId>,
     #[serde(default)]
     pub instructions: Option<String>,
     /// Optional own workspace folder: the work folder of its chat.
@@ -228,14 +225,6 @@ pub struct SetEmployeeReportsTo {
     pub employee_id: EmployeeId,
     #[serde(default)]
     pub reports_to: Option<EmployeeId>,
-}
-
-/// Move an employee to another department, or out of any (`None`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SetEmployeeDepartment {
-    pub employee_id: EmployeeId,
-    #[serde(default)]
-    pub department_id: Option<DepartmentId>,
 }
 
 /// The server setting "Follow the org chart" (on by default): delegation stays

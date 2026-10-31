@@ -1,19 +1,24 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/hosts/host.dart';
+import '../core/net/connection.dart' show BoardMemberStep;
 import '../core/net/gateway_api.dart';
 import '../core/push/push_action.dart';
 import '../core/widgets/widgets.dart' show toast;
 import '../data/aurelius_repository.dart';
+import '../features/board/board_page.dart';
+import '../features/board/board_settings_page.dart';
+import '../features/board/new_ticket_page.dart';
+import '../features/board/ticket_page.dart';
 import '../features/ideas/ideas_page.dart';
 import '../features/company/projects_page.dart';
 import '../features/company_org/company_org_page.dart';
-import '../features/company_org/department_page.dart';
 import '../features/company_org/employee_page.dart';
 import '../features/dashboard/dashboard_page.dart';
 import '../features/more/more_page.dart';
@@ -24,6 +29,7 @@ import '../features/inbox/approval_page.dart';
 import '../features/inbox/inbox_page.dart';
 import '../features/more/hosts_page.dart';
 import '../features/more/settings_page.dart';
+import '../features/onboarding/onboarding.dart';
 import '../features/pairing/pair_page.dart';
 import '../features/pairing/pairing_bloc.dart';
 import '../features/project/project_page.dart';
@@ -35,21 +41,38 @@ import '../features/usage/usage_page.dart';
 import 'shell.dart';
 
 /// Routes for one host. Detail screens cover the tab bar (root navigator).
+/// [boardMember]: the onboarding gate; without an active board member only
+/// `/onboarding` and the server choice are reachable ([boardMemberRedirect]).
 class AppRouter {
-  AppRouter(this.host);
+  AppRouter(this.host, {this.boardMember});
 
   final Host host;
+  final ValueListenable<BoardMemberStep>? boardMember;
   final _root = GlobalKey<NavigatorState>(debugLabel: 'root');
 
   late final GoRouter config = GoRouter(
     navigatorKey: _root,
     initialLocation: '/home',
+    refreshListenable: boardMember,
+    redirect: (context, state) => boardMember == null ? null : boardMemberRedirect(boardMember!.value, state.matchedLocation),
     routes: [
+      GoRoute(
+        parentNavigatorKey: _root,
+        path: '/onboarding',
+        pageBuilder: (context, state) => routePage(state, const OnboardingPage()),
+        routes: [
+          GoRoute(parentNavigatorKey: _root, path: 'new', pageBuilder: (context, state) => routePage(state, const NewBoardMemberPage())),
+        ],
+      ),
+      GoRoute(parentNavigatorKey: _root, path: '/switch-board-member', pageBuilder: (context, state) => routePage(state, const ChooseBoardMemberPage(switching: true))),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => HomeShell(shell: shell),
         branches: [
           StatefulShellBranch(routes: [
             GoRoute(path: '/home', pageBuilder: (context, state) => routePage(state, const DashboardPage())),
+          ]),
+          StatefulShellBranch(routes: [
+            GoRoute(path: '/board', pageBuilder: (context, state) => routePage(state, const BoardTab())),
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/team', pageBuilder: (context, state) => routePage(state, const TeamPage())),
@@ -58,11 +81,23 @@ class AppRouter {
             GoRoute(path: '/inbox', pageBuilder: (context, state) => routePage(state, const InboxPage())),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/tasks', pageBuilder: (context, state) => routePage(state, const TasksPage())),
-          ]),
-          StatefulShellBranch(routes: [
             GoRoute(path: '/more', pageBuilder: (context, state) => routePage(state, const MorePage())),
           ]),
+        ],
+      ),
+      // Tasks without a ticket stay reachable (B7): More → Tasks.
+      GoRoute(parentNavigatorKey: _root, path: '/tasks', pageBuilder: (context, state) => routePage(state, const TasksPage())),
+      GoRoute(
+        parentNavigatorKey: _root,
+        path: '/board/new',
+        pageBuilder: (context, state) => routePage(state, NewTicketPage(projectId: state.uri.queryParameters['project'])),
+      ),
+      GoRoute(
+        parentNavigatorKey: _root,
+        path: '/ticket/:tid',
+        pageBuilder: (context, state) => routePage(state, TicketPage(ticketId: state.pathParameters['tid']!)),
+        routes: [
+          GoRoute(parentNavigatorKey: _root, path: 'plan', pageBuilder: (context, state) => routePage(state, TicketPlanPage(ticketId: state.pathParameters['tid']!))),
         ],
       ),
       GoRoute(
@@ -100,11 +135,6 @@ class AppRouter {
         path: '/company',
         pageBuilder: (context, state) => routePage(state, CompanyOrgPage(initial: state.uri.queryParameters['view'])),
       ),
-      GoRoute(
-        parentNavigatorKey: _root,
-        path: '/department/:did',
-        pageBuilder: (context, state) => routePage(state, DepartmentPage(departmentId: state.pathParameters['did']!)),
-      ),
       GoRoute(parentNavigatorKey: _root, path: '/projects', pageBuilder: (context, state) => routePage(state, const ProjectsPage())),
       GoRoute(parentNavigatorKey: _root, path: '/ideas', pageBuilder: (context, state) => routePage(state, const IdeasPage())),
       GoRoute(
@@ -114,6 +144,15 @@ class AppRouter {
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'advanced', pageBuilder: (context, state) => routePage(state, const AdvancedPage())),
           GoRoute(parentNavigatorKey: _root, path: 'recurring', pageBuilder: (context, state) => routePage(state, const RecurringPage())),
+          GoRoute(parentNavigatorKey: _root, path: 'board', pageBuilder: (context, state) => routePage(state, const BoardSettingsPage())),
+          GoRoute(
+            parentNavigatorKey: _root,
+            path: 'board-members',
+            pageBuilder: (context, state) => routePage(state, const BoardMembersPage()),
+            routes: [
+              GoRoute(parentNavigatorKey: _root, path: 'new', pageBuilder: (context, state) => routePage(state, const NewBoardMemberPage())),
+            ],
+          ),
         ],
       ),
       GoRoute(
@@ -156,7 +195,7 @@ class AppRouter {
       }
       _openApproval(aggregateId);
     } else if (taskId != null && projectId != null) {
-      config.go('/tasks');
+      config.go('/home');
       config.push('/project/$projectId/task/$taskId');
     } else {
       config.go('/inbox');

@@ -12,7 +12,6 @@ import '../../data/company.dart';
 import '../../data/views.dart';
 import '../../data/run_config.dart';
 import '../markdown/links.dart';
-import '../markdown/markdown_page.dart';
 import '../chat/upload_files.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_banner.dart';
@@ -134,11 +133,11 @@ class _TaskBody extends StatelessWidget {
   final List<TaskView> tasks;
 
   /// Give the task to an active employee (the management team first, then
-  /// by department), or make it a draft.
+  /// the others), or make it a draft.
   Future<void> _assign(BuildContext context) async {
     final bloc = context.read<ProjectBloc>();
     final company = context.read<CompanyBloc>().state;
-    final groups = pickerGroups(company.employees.where((m) => m.status == LifecycleStatus.active).toList(), company.activeDepartments);
+    final groups = pickerGroups(company.employees.where((m) => m.status == LifecycleStatus.active).toList());
     final choice = await showModalBottomSheet<(String?, String?)>(
       context: context,
       isScrollControlled: true,
@@ -269,6 +268,19 @@ class _TaskBody extends StatelessWidget {
               ),
             ),
           ),
+        if (task.isTicketMain)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: OutlinedButton.icon(
+                key: const Key('task-open-ticket'),
+                onPressed: () => context.push('/ticket/${task.ticketId}'),
+                icon: const Icon(Icons.view_kanban_outlined, size: 18),
+                label: Text('Main task of ticket${task.ticketNumber == null ? '' : ' #${task.ticketNumber}'} · owner and cancel on the board'),
+              ),
+            ),
+          ),
         if (task.canAssign)
           Align(
             alignment: Alignment.centerLeft,
@@ -358,7 +370,7 @@ class _TaskBody extends StatelessWidget {
             icon: const Icon(Icons.forum_outlined, size: 18),
             label: const Text('Discuss in Chat'),
           ),
-          if (!task.isDone)
+          if (!task.isDone && !task.isTicketMain)
             OutlinedButton(
               style: OutlinedButton.styleFrom(foregroundColor: Tokens.negative),
               onPressed: busy

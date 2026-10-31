@@ -16,9 +16,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// The protocol major. The handshake checks only this; a mismatch is a hard
 /// "update the app or the server" (`incompatible_protocol`, "Update needed").
 /// There are no minors: additions within a major are announced in
-/// `HelloResult::features` (see `FEATURES`). 3: the company (employees,
-/// departments, one org chart).
-pub const PROTOCOL_MAJOR: u16 = 3;
+/// `HelloResult::features` (see `FEATURES`). 3: the company (employees, one
+/// org chart). 4: departments are gone (methods, fields and commands).
+pub const PROTOCOL_MAJOR: u16 = 4;
 
 /// The message of `incompatible_protocol`: what the user must do.
 pub fn incompatible_message(client: u16) -> String {
@@ -106,17 +106,28 @@ impl<'de> Deserialize<'de> for Call {
 
 /// A `{ method, params }` object into a method enum. Params whose fields are
 /// all optional may be left out or `null` (section 4 of the protocol): a method
-/// that needs an object there is tried again with `{}`.
+/// that needs an object there is tried again with `{}`. The other way round, a
+/// method without params also takes `"params": {}`.
 pub(crate) fn from_method_value<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Result<T, serde_json::Error> {
-    if !value.get("params").is_none_or(serde_json::Value::is_null) {
-        return serde_json::from_value(value);
-    }
-    serde_json::from_value(value.clone()).or_else(|_| {
-        let mut value = value;
-        if let Some(object) = value.as_object_mut() {
-            object.insert("params".into(), serde_json::json!({}));
+    let fallback = match value.get("params") {
+        None | Some(serde_json::Value::Null) => Some(serde_json::json!({})),
+        Some(serde_json::Value::Object(o)) if o.is_empty() => None,
+        Some(_) => return serde_json::from_value(value),
+    };
+    serde_json::from_value(value.clone()).or_else(|err| {
+        let mut retry = value;
+        let Some(object) = retry.as_object_mut() else { return Err(err) };
+        match fallback {
+            Some(params) => {
+                object.insert("params".into(), params);
+                serde_json::from_value(retry)
+            }
+            // A method with params says best what is missing in them.
+            None => {
+                object.remove("params");
+                serde_json::from_value(retry).map_err(|_| err)
+            }
         }
-        serde_json::from_value(value)
     })
 }
 
@@ -144,6 +155,14 @@ pub struct HelloResult {
     /// (`HelloParams::app_key`, or the key on the gateway); feature `app_keys`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app: Option<aurelius_domain::app_key::AppSession>,
+    /// The server has at least one board member; false: the onboarding
+    /// ("Create the first board member") is all a client shows.
+    #[serde(default)]
+    pub board_members_exist: bool,
+    /// This connection's active board member (`HelloParams::user_id` when it
+    /// exists); none: the client asks "Who's working here?".
+    #[serde(default)]
+    pub user: Option<aurelius_domain::user::UserView>,
 }
 
 /// What `HelloResult::features` names.
@@ -295,8 +314,12 @@ pub enum ResponseBody {
     Jobs(JobsSnapshot),
     Messages(MessagesSnapshot),
     Employees(EmployeesSnapshot),
-    Departments(DepartmentsSnapshot),
     Company(CompanySnapshot),
+    Board(aurelius_domain::ticket::BoardView),
+    Ticket(aurelius_domain::ticket::TicketDetail),
+    Tickets(aurelius_domain::ticket::TicketsSnapshot),
+    Users(aurelius_domain::user::UsersSnapshot),
+    WhoAmI(aurelius_domain::user::WhoAmI),
     ProjectConversations(ProjectConversationsSnapshot),
     Approvals(ApprovalsSnapshot),
     Connections(ProvidersSnapshot),
@@ -381,7 +404,7 @@ mod tests {
         let key = CommandId::new();
         let request = write_request(key);
         let json = serde_json::to_value(&request).unwrap();
-        assert_eq!((json["protocol"].as_u64(), json["request_id"].as_u64()), (Some(3), Some(7)));
+        assert_eq!((json["protocol"].as_u64(), json["request_id"].as_u64()), (Some(4), Some(7)));
         assert_eq!(json["idempotency_key"], serde_json::json!(key));
         assert_eq!(json["method"], "project.create");
         assert_eq!(json["params"]["name"], "Atlas");
@@ -391,17 +414,26 @@ mod tests {
 
     #[test]
     fn reads_and_unit_methods_roundtrip() {
-        for method in [Method::ServerGetHealth, Method::ProjectList, Method::EmployeeList { department_id: None }, Method::CompanyGet, Method::DepartmentList { archived: false }, Method::LoadGet] {
+        for method in [Method::ServerGetHealth, Method::ProjectList, Method::EmployeeList, Method::CompanyGet, Method::LoadGet] {
             let request = Request::read(1, method);
             let text = serde_json::to_string(&request).unwrap();
             assert_eq!(serde_json::from_str::<Request>(&text).unwrap(), request, "{text}");
         }
-        let json = serde_json::to_value(Request::read(1, Method::TaskList { project_id: None, employee_id: None, department_id: None, state: None })).unwrap();
+        let json = serde_json::to_value(Request::read(1, Method::TaskList { project_id: None, employee_id: None, state: None })).unwrap();
         assert_eq!(json["method"], "task.list");
         assert_eq!(json["params"], serde_json::json!({}));
         // Every filter may be left out.
         let parsed: Request = serde_json::from_value(serde_json::json!({ "protocol": 3, "request_id": 2, "method": "task.list", "params": { "state": "needs_you" } })).unwrap();
-        assert_eq!(parsed.call, Call::Read(Method::TaskList { project_id: None, employee_id: None, department_id: None, state: Some(crate::method::TaskListState::NeedsYou) }));
+        assert_eq!(parsed.call, Call::Read(Method::TaskList { project_id: None, employee_id: None, state: Some(crate::method::TaskListState::NeedsYou) }));
+        // A unit method also takes an empty params object (or null).
+        for name in ["employee.list", "proposal.list", "company.get"] {
+            for params in [serde_json::json!({}), serde_json::Value::Null] {
+                let parsed: Request = serde_json::from_value(serde_json::json!({ "protocol": 4, "request_id": 4, "method": name, "params": params })).unwrap();
+                assert_eq!(serde_json::to_value(&parsed).unwrap()["method"], name);
+            }
+        }
+        let err = serde_json::from_value::<Request>(serde_json::json!({ "protocol": 4, "request_id": 5, "method": "employee.list", "params": { "x": 1 } }));
+        assert!(err.is_err(), "a unit method takes no params");
         let chat = serde_json::to_value(Request::read(3, Method::EmployeeChat { employee_id: aurelius_domain::EmployeeId::new() })).unwrap();
         assert_eq!(chat["method"], "employee.chat");
     }
@@ -457,10 +489,9 @@ mod tests {
             serde_json::from_value::<Request>(json).map(|r| r.call)
         };
         let all_optional = [
-            Method::EmployeeList { department_id: None },
-            Method::DepartmentList { archived: false },
-            Method::TaskList { project_id: None, employee_id: None, department_id: None, state: None },
-            Method::MemoryList { project_id: None, employee_id: None, department_id: None },
+            Method::EmployeeList,
+            Method::TaskList { project_id: None, employee_id: None, state: None },
+            Method::MemoryList { project_id: None, employee_id: None },
             Method::CompanyGet,
             Method::BackupList,
         ];

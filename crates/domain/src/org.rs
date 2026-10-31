@@ -6,7 +6,7 @@
 //! delegation goes to direct reports only, a task is handed over to the
 //! boss or a peer, and "Needs you" goes to the boss first.
 
-use crate::{DepartmentId, EmployeeId};
+use crate::EmployeeId;
 use std::collections::{HashMap, HashSet};
 
 /// Whether a role or title names the CEO ("CEO", "Chief Executive Officer").
@@ -32,25 +32,12 @@ pub const MAX_CHART_DEPTH: u32 = 6;
 #[derive(Debug, Clone, Default)]
 pub struct Org {
     parents: HashMap<EmployeeId, Option<EmployeeId>>,
-    departments: HashMap<EmployeeId, DepartmentId>,
 }
 
 impl Org {
     /// `(employee, reports_to)` for every employee on the chart (not archived).
     pub fn new(entries: impl IntoIterator<Item = (EmployeeId, Option<EmployeeId>)>) -> Self {
-        Self { parents: entries.into_iter().collect(), departments: HashMap::new() }
-    }
-
-    /// `(employee, reports_to, department)` for every employee on the chart.
-    pub fn company(entries: impl IntoIterator<Item = (EmployeeId, Option<EmployeeId>, Option<DepartmentId>)>) -> Self {
-        let mut org = Self::default();
-        for (employee, boss, department) in entries {
-            org.parents.insert(employee, boss);
-            if let Some(department) = department {
-                org.departments.insert(employee, department);
-            }
-        }
-        org
+        Self { parents: entries.into_iter().collect() }
     }
 
     /// Those without a boss on the chart (the management team), in id order.
@@ -58,17 +45,6 @@ impl Org {
         let mut out: Vec<EmployeeId> = self.parents.keys().copied().filter(|m| self.boss(*m).is_none()).collect();
         out.sort();
         out
-    }
-
-    /// The employees of one department, in id order.
-    pub fn department_members(&self, department: DepartmentId) -> Vec<EmployeeId> {
-        let mut out: Vec<EmployeeId> = self.departments.iter().filter(|(_, d)| **d == department).map(|(m, _)| *m).collect();
-        out.sort();
-        out
-    }
-
-    pub fn department_of(&self, employee: EmployeeId) -> Option<DepartmentId> {
-        self.departments.get(&employee).copied()
     }
 
     pub fn contains(&self, employee: EmployeeId) -> bool {
@@ -271,16 +247,11 @@ mod tests {
     }
 
     #[test]
-    fn the_company_chart_knows_its_roots_and_departments() {
+    fn the_company_chart_knows_its_roots() {
         let (ceo, cto, dev) = (EmployeeId::new(), EmployeeId::new(), EmployeeId::new());
-        let (eng, ops) = (DepartmentId::new(), DepartmentId::new());
-        let org = Org::company([(ceo, None, Some(ops)), (cto, Some(ceo), Some(eng)), (dev, Some(cto), Some(eng))]);
+        let org = Org::new([(ceo, None), (cto, Some(ceo)), (dev, Some(cto))]);
         assert_eq!(org.roots(), vec![ceo]);
-        let mut members = vec![cto, dev];
-        members.sort();
-        assert_eq!(org.department_members(eng), members);
-        assert_eq!(org.department_of(ceo), Some(ops));
-        assert!(org.may_delegate(ceo, cto) && !org.may_delegate(ceo, dev), "delegation crosses departments, one level down");
+        assert!(org.may_delegate(ceo, cto) && !org.may_delegate(ceo, dev), "delegation goes one level down");
         assert_eq!(org.depth_limit(), 3);
     }
 }
