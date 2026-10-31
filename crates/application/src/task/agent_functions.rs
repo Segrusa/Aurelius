@@ -192,6 +192,13 @@ impl CommandService {
         Ok(ApiKeyCreated { key, secret })
     }
 
+    /// The calls of an API key run on the Claude login of the board member who
+    /// made it or last set its functions (B5); never set by an app. A key from
+    /// before that has none: its calls wait with 'login' until a board member does.
+    pub fn set_api_key_login(&self, id: ApiKeyId, user: aurelius_domain::UserId) -> Result<(), AppError> {
+        self.store.write(move |tx| store::set_key_login_user(tx, id, Some(&user.to_string()))).map_err(storage_error)
+    }
+
     pub fn revoke_api_key(&self, id: ApiKeyId) -> Result<(), AppError> {
         self.store
             .write(move |tx| {
@@ -414,6 +421,25 @@ mod tests {
         let listed = serde_json::to_string(&s.service.api_keys().unwrap()).unwrap();
         assert!(!listed.contains(&secret) && !listed.contains(&stored));
         assert_ne!(key(&s, &[f]).1, secret, "every key has its own secret");
+    }
+
+    #[test]
+    fn a_calls_task_runs_on_the_api_keys_board_member_or_waits() {
+        // F3 point 9: an API key's calls run on its board member's login (B5); a key without one waits ('login').
+        let s = setup();
+        let f = function(&s, "tips", None, None);
+        let (key_id, secret) = key(&s, &[f]);
+        call(&s, NOW, &secret, "tips", serde_json::json!({ "course": "Lakes" })).unwrap();
+        let task: String = s.service.store().read(|c| Ok(c.query_row("SELECT task_id FROM function_calls", [], |r| r.get(0))?)).unwrap();
+        let task = TaskId::parse(&task).unwrap();
+        assert_eq!(s.service.store().read(|c| crate::run::login::of_task(c, task)).unwrap(), None, "no board member: it waits");
+        let alex = aurelius_domain::UserId::new();
+        s.service
+            .store()
+            .write(move |tx| aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &alex.to_string(), username: "alex", created_by_user: None, now_ms: 1 }, "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA"))
+            .unwrap();
+        s.service.set_api_key_login(key_id, alex).unwrap();
+        assert_eq!(s.service.store().read(|c| crate::run::login::of_task(c, task)).unwrap(), Some(alex));
     }
 
     #[test]

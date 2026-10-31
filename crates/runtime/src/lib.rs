@@ -271,6 +271,10 @@ pub enum RuntimeError {
     /// Invalid request or unsupported model; retrying cannot help.
     #[error("request rejected: {0}")]
     Permanent(String),
+    /// The board member's own Claude login is missing, expired or theirs is
+    /// disabled: the run waits for it ('login'), never on another login.
+    #[error("Claude login required: {0}")]
+    Login(String),
 }
 
 /// Input sent back into a running turn.

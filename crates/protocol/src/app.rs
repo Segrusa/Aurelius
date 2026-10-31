@@ -37,7 +37,7 @@ pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
             Method::SessionHello(_) | Method::ServerGetHealth | Method::UserWhoami => Ok(vec![]),
             // An app has no board member: it may see who they are, never create or become one.
             Method::UserList => Ok(vec![Read]),
-            Method::UserUse(_) => Err(NOT_FOR_APPS),
+            Method::UserLogin(_) | Method::UserLogout | Method::SessionList { .. } | Method::ClaudeLoginStatus | Method::ClaudeLoginInput(_) => Err(NOT_FOR_APPS),
             Method::ProjectList
             | Method::EmployeeList
             | Method::CompanyGet

@@ -13,6 +13,7 @@ import '../../data/aurelius_repository.dart';
 import '../../data/company.dart';
 import '../../data/mode_memory.dart';
 import '../../data/views.dart';
+import '../account/claude_login.dart' show ownSubscriptionNote;
 import '../../data/run_config.dart';
 import '../../core/widgets/ios.dart';
 import 'variants_picker.dart';
@@ -440,6 +441,11 @@ class _NewTaskPageState extends State<NewTaskPage> {
     final time = TimeOfDay(hour: at ~/ 60, minute: at % 60).format(context);
     return [
       const Eyebrow('Repeats', padding: EdgeInsets.fromLTRB(0, 22, 0, 10)),
+      // B1-2: a schedule runs on the login of whoever makes it or sets it again.
+      Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Text(ownSubscriptionNote, key: const ValueKey('schedule-subscription'), style: TextStyle(fontSize: 13, color: Tokens.label2)),
+      ),
       Wrap(
         spacing: 8,
         runSpacing: 8,

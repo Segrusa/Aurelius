@@ -9,21 +9,25 @@ import '../../core/net/connection.dart';
 import '../../core/net/protocol.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
+import '../../core/widgets/dialogs.dart' show confirm;
 import '../../core/widgets/widgets.dart' show Monogram, toast;
+import '../account/account.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/protocol/protocol.dart';
 import '../connection/connection_bloc.dart';
 
-/// Where the app goes for [step] while at [location] (impactanalyse §4b.4):
-/// without an active board member only the onboarding and the server choice
-/// are reachable (MU1-20 AC1, MU1-21 AC2); with one, the onboarding is left.
+/// Where the app goes for [step] while at [location] (MU3-02 AC1, MU3-06):
+/// without a session only the onboarding (the first board member or the
+/// sign-in screen) and the server choice are reachable; a temporary password
+/// keeps the phone on its change (B10); signed in, the onboarding is left.
 /// Null: stay. Before the first hello nothing is decided.
 String? boardMemberRedirect(BoardMemberStep step, String location) {
   final onboarding = location == '/onboarding' || location.startsWith('/onboarding/');
   final serverChoice = location == '/hosts' || location == '/pair';
   return switch (step) {
     BoardMemberStep.unknown => null,
-    BoardMemberStep.createFirst || BoardMemberStep.choose => onboarding || serverChoice ? null : '/onboarding',
+    BoardMemberStep.createFirst || BoardMemberStep.signIn => onboarding || serverChoice ? null : '/onboarding',
+    BoardMemberStep.changePassword => location == '/onboarding' ? null : '/onboarding',
     BoardMemberStep.ready => onboarding ? '/home' : null,
   };
 }
@@ -50,7 +54,8 @@ abstract final class BoardMemberRules {
 
 String _monogram(String name) => name.isEmpty ? '?' : String.fromCharCode(name.runes.first).toUpperCase();
 
-/// `/onboarding`: the first board member, or "Who's working here?".
+/// `/onboarding`: the first board member, the sign-in screen, or the change
+/// of a temporary password.
 class OnboardingPage extends StatelessWidget {
   const OnboardingPage({super.key});
 
@@ -59,7 +64,8 @@ class OnboardingPage extends StatelessWidget {
     final step = context.select<ConnectionBloc, BoardMemberStep>((b) => b.state.boardMemberStep);
     return switch (step) {
       BoardMemberStep.createFirst => const NewBoardMemberPage(first: true),
-      _ => const ChooseBoardMemberPage(),
+      BoardMemberStep.changePassword => const ChangePasswordPage(required: true),
+      _ => const SignInPage(),
     };
   }
 }
@@ -135,7 +141,7 @@ class _NewBoardMemberPageState extends State<NewBoardMemberPage> {
       await repository.createBoardMember(username, _password.text);
       _password.clear();
       _repeat.clear();
-      // Without a board member this phone became the new one; the gate opens the app.
+      // The first board member signs this phone in; the gate opens the app.
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(SnackBar(content: Text(hadMember ? '$username is a board member now.' : 'Welcome, $username.')));
@@ -159,7 +165,7 @@ class _NewBoardMemberPageState extends State<NewBoardMemberPage> {
       if (mounted) {
         toast(context, switch (e) {
           // Sent, but the answer never came: the PC may have made it (Trace M3a m2).
-          NotSentException(sent: true) => 'The connection dropped. If $username is in the list, choose it.',
+          NotSentException(sent: true) => 'The connection dropped. If $username was made, sign in as $username.',
           NotSentException() => 'Not sent. The PC was not reachable.',
           _ => '$e',
         });
@@ -288,15 +294,15 @@ class _NewBoardMemberPageState extends State<NewBoardMemberPage> {
             child: Text(_busy ? 'Creating…' : 'Create board member'),
           ),
         ),
-        if (widget.first) const _OtherServer(),
+        if (widget.first) const OtherServer(),
       ],
     );
   }
 }
 
 /// "Choose another server", so a phone on the wrong server is not stuck.
-class _OtherServer extends StatelessWidget {
-  const _OtherServer();
+class OtherServer extends StatelessWidget {
+  const OtherServer({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -312,223 +318,9 @@ class _OtherServer extends StatelessWidget {
   }
 }
 
-/// "Who's working here?" (MU1-21 AC2): the board members and "New board
-/// member"; a choice asks once for the password (B8). [switching]: opened
-/// from More with a board member already active.
-class ChooseBoardMemberPage extends StatefulWidget {
-  const ChooseBoardMemberPage({super.key, this.switching = false});
-
-  final bool switching;
-
-  @override
-  State<ChooseBoardMemberPage> createState() => _ChooseBoardMemberPageState();
-}
-
-class _ChooseBoardMemberPageState extends State<ChooseBoardMemberPage> {
-  List<UserView>? _members;
-  String? _error;
-  StreamSubscription<Object?>? _changes;
-
-  @override
-  void initState() {
-    super.initState();
-    final repository = context.read<AureliusRepository>();
-    _changes = repository.boardMemberChanges.listen((_) => _load());
-    _load();
-  }
-
-  @override
-  void dispose() {
-    _changes?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _load() async {
-    try {
-      final members = await context.read<AureliusRepository>().boardMembers();
-      if (mounted) {
-        setState(() {
-          _members = members;
-          _error = null;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    }
-  }
-
-  Future<void> _choose(UserView member) async {
-    final chosen = await showPasswordSheet(context, member, switching: widget.switching);
-    if (chosen == null || !mounted) return;
-    if (widget.switching && Navigator.of(context).canPop()) Navigator.of(context).pop();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final link = context.watch<ConnectionBloc>().state;
-    final members = _members;
-    return LargeTitleScaffold(
-      title: "Who's working here?",
-      onRefresh: _load,
-      fill: members == null
-          ? Center(
-              child: _error == null
-                  ? const CircularProgressIndicator()
-                  : Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
-                        Text(_error!, textAlign: TextAlign.center, style: TextStyle(color: Tokens.label2)),
-                        TextButton(onPressed: _load, child: const Text('Try again')),
-                      ]),
-                    ),
-            )
-          : null,
-      children: members == null
-          ? null
-          : [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                child: Text('Choose your board member on this server.', style: TextStyle(fontSize: 15, color: Tokens.label2)),
-              ),
-              InsetGroup(
-                dividerIndent: 66,
-                children: [
-                  for (final m in members)
-                    GroupRow(
-                      key: ValueKey('board-member-${m.id}'),
-                      leading: Monogram(_monogram(m.username), active: m.id == link.user?.id),
-                      title: m.username,
-                      value: m.id == link.user?.id ? 'you' : null,
-                      chevron: true,
-                      onTap: m.id == link.user?.id ? null : () => _choose(m),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              InsetGroup(children: [
-                GroupRow(
-                  key: const ValueKey('board-member-new'),
-                  leading: Icon(CupertinoIcons.add, color: Tokens.accent),
-                  title: 'New board member',
-                  titleStyle: TextStyle(fontSize: 17, color: Tokens.accent),
-                  onTap: () => context.push(widget.switching ? '/settings/board-members/new' : '/onboarding/new'),
-                ),
-              ]),
-              if (!widget.switching) const _OtherServer(),
-            ],
-    );
-  }
-}
-
-/// The one password check for [member] (B8). Returns the chosen username, or
-/// null when cancelled. The password lives only in the sheet's field.
-Future<String?> showPasswordSheet(BuildContext context, UserView member, {bool switching = false}) {
-  final repository = context.read<AureliusRepository>();
-  return showModalBottomSheet<String>(
-    context: context,
-    isScrollControlled: true,
-    builder: (sheet) => RepositoryProvider.value(value: repository, child: _PasswordSheet(member, switching: switching)),
-  );
-}
-
-class _PasswordSheet extends StatefulWidget {
-  const _PasswordSheet(this.member, {required this.switching});
-
-  final UserView member;
-  final bool switching;
-
-  @override
-  State<_PasswordSheet> createState() => _PasswordSheetState();
-}
-
-class _PasswordSheetState extends State<_PasswordSheet> {
-  final _password = TextEditingController();
-  String? _error;
-  bool _busy = false;
-
-  @override
-  void dispose() {
-    _password.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (_password.text.isEmpty || _busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      final user = await context.read<AureliusRepository>().useBoardMember(widget.member.id, _password.text);
-      _password.clear();
-      // The gate may close this sheet with the onboarding: say it here.
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(widget.switching ? 'You are ${user.username} now.' : 'Welcome, ${user.username}.')));
-      if (mounted) Navigator.of(context).pop(user.username);
-    } on ProtocolException catch (e) {
-      if (!mounted) return;
-      setState(() => _error = switch (e.code) {
-            ErrorCode.wrongPassword => 'Wrong password.',
-            ErrorCode.tooManyAttempts => 'Too many tries. Wait a minute and try again.',
-            _ => e.shown,
-          });
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(children: [
-                  Monogram(_monogram(widget.member.username)),
-                  const SizedBox(width: 12),
-                  Expanded(child: Text(widget.member.username, style: Tokens.title(size: 22))),
-                ]),
-                const SizedBox(height: 12),
-                AutofillGroup(
-                  child: TextField(
-                    key: const ValueKey('board-member-check-password'),
-                    controller: _password,
-                    autofocus: true,
-                    obscureText: true,
-                    enableSuggestions: false,
-                    autocorrect: false,
-                    autofillHints: const [AutofillHints.password],
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _submit(),
-                    decoration: InputDecoration(labelText: 'Password', errorText: _error),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text('This device remembers you. Full sign-in comes later.', style: TextStyle(fontSize: 13, color: Tokens.label2)),
-                const SizedBox(height: 16),
-                FilledButton(
-                  key: const ValueKey('board-member-check'),
-                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(50)),
-                  onPressed: _busy ? null : _submit,
-                  child: Text(_busy ? 'Checking…' : 'Continue'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-}
-
-/// More → Settings → Board members (MU1-22): who they are, "you", and New
-/// board member. No delete or password reset in Fase 1 (OV-14).
+/// More → Settings → Board members (MU1-22, MU3-04 AC4, MU3-05): who they
+/// are, "you", disabled ones, and per board member their sessions, a
+/// temporary password (B10) and Disable. One role: anyone may do this.
 class BoardMembersPage extends StatefulWidget {
   const BoardMembersPage({super.key});
 
@@ -578,7 +370,10 @@ class _BoardMembersPageState extends State<BoardMembersPage> {
                 key: ValueKey('board-members-${m.id}'),
                 leading: Monogram(_monogram(m.username), active: m.id == me),
                 title: m.username,
+                subtitle: m.disabledAtMs != null ? 'Disabled · cannot sign in' : null,
                 value: m.id == me ? 'you' : null,
+                chevron: true,
+                onTap: () => m.id == me ? context.push('/account') : showBoardMemberActions(context, m, _members),
               ),
           ],
         ),
@@ -597,7 +392,65 @@ class _BoardMembersPageState extends State<BoardMembersPage> {
   }
 }
 
-/// The active board member at the top of More (MU1-21 AC4); › switches.
+/// What a board member can do for another (one role): their sessions, a
+/// temporary password (B10, P-34) and Disable (MU3-05 AC3/AC4).
+Future<void> showBoardMemberActions(BuildContext context, UserView member, List<UserView> all) async {
+  final disabled = member.disabledAtMs != null;
+  final choice = await showModalBottomSheet<String>(
+    context: context,
+    builder: (sheet) => SafeArea(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        ListTile(title: Text(member.username, style: Tokens.title(size: 20)), subtitle: disabled ? const Text('Disabled') : null),
+        ListTile(key: const ValueKey('member-sessions'), leading: const Icon(CupertinoIcons.device_phone_portrait), title: const Text('Sessions'), onTap: () => Navigator.pop(sheet, 'sessions')),
+        if (!disabled) ...[
+          ListTile(key: const ValueKey('member-reset'), leading: const Icon(CupertinoIcons.lock_rotation), title: const Text('Set a temporary password'), onTap: () => Navigator.pop(sheet, 'reset')),
+          ListTile(
+            key: const ValueKey('member-disable'),
+            leading: Icon(CupertinoIcons.person_crop_circle_badge_xmark, color: Tokens.negative),
+            title: Text('Disable ${member.username}', style: TextStyle(color: Tokens.negative)),
+            onTap: () => Navigator.pop(sheet, 'disable'),
+          ),
+        ],
+      ]),
+    ),
+  );
+  if (choice == null || !context.mounted) return;
+  switch (choice) {
+    case 'sessions':
+      await context.push('/settings/board-members/${member.id}/sessions?name=${Uri.encodeQueryComponent(member.username)}');
+    case 'reset':
+      await context.push('/settings/board-members/${member.id}/password?name=${Uri.encodeQueryComponent(member.username)}');
+    case 'disable':
+      await disableBoardMember(context, member);
+  }
+}
+
+/// Disable [member] after a confirmation (MU3-05 AC3); the last active board
+/// member is refused by the server (AC4) and said so.
+Future<bool> disableBoardMember(BuildContext context, UserView member) async {
+  final repository = context.read<AureliusRepository>();
+  final ok = await confirm(
+    context,
+    title: 'Disable ${member.username}?',
+    body: '${member.username} is signed out on every device and cannot sign in. Their Claude login is disconnected. Their tickets keep them as creator.',
+    action: 'Disable',
+    danger: true,
+  );
+  if (!ok || !context.mounted) return false;
+  try {
+    await repository.disableBoardMember(member.id);
+    if (context.mounted) toast(context, '${member.username} is disabled.');
+    return true;
+  } on ProtocolException catch (e) {
+    if (context.mounted) toast(context, e.code == ErrorCode.lastBoardMember ? 'The last active board member cannot be disabled.' : e.shown);
+  } catch (e) {
+    if (context.mounted) toast(context, '$e');
+  }
+  return false;
+}
+
+/// The signed-in board member at the top of More (MU1-21 AC4); › Account
+/// (sessions, Claude login, password, Sign out).
 class ActiveBoardMemberRow extends StatelessWidget {
   const ActiveBoardMemberRow({super.key});
 
@@ -612,9 +465,9 @@ class ActiveBoardMemberRow extends StatelessWidget {
           key: const ValueKey('more-board-member'),
           leading: Monogram(_monogram(user.username), active: true),
           title: user.username,
-          subtitle: 'Switch board member',
+          subtitle: 'Account · Sessions · Claude login',
           chevron: true,
-          onTap: () => context.push('/switch-board-member'),
+          onTap: () => context.push('/account'),
         ),
       ]),
     );

@@ -32,9 +32,13 @@ fn tempdir() -> (tempfile::TempDir, PathBuf) {
     (dir, root)
 }
 
-/// One raw connection to the client endpoint.
+/// One raw connection to the client endpoint, signed in (protocol 5: the gate).
 async fn raw(root: &Path) -> BoxStream {
-    ipc::connect(&aurelius_host::endpoint(root)).await.unwrap()
+    let token = common::sign_in(root, &common::connect_anonymous(root).await, common::BOARD_MEMBER).await.session_token;
+    let mut stream = ipc::connect(&aurelius_host::endpoint(root)).await.unwrap();
+    let hello = Request::read(0, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), session_token: Some(token) }));
+    assert!(matches!(ask(&mut stream, &hello).await, Outcome::Ok(ResponseBody::Hello(h)) if h.user.is_some()), "signed in");
+    stream
 }
 
 /// Send one request and wait for its response (other messages are skipped).
@@ -56,7 +60,7 @@ fn error_code(outcome: Outcome) -> ErrorCode {
 }
 
 fn hello(request_id: u64, protocol: u16) -> Request {
-    let mut request = Request::read(request_id, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), user_id: None }));
+    let mut request = Request::read(request_id, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), session_token: None }));
     request.protocol = protocol;
     request
 }
@@ -324,13 +328,13 @@ fn function_for(project_id: ProjectId, employee_id: EmployeeId) -> CreateAgentFu
 // ---- the handshake ----
 
 #[tokio::test(flavor = "multi_thread")]
-async fn another_protocol_major_is_refused_with_update_needed_but_protocol_4_works() {
+async fn another_protocol_major_is_refused_with_update_needed_but_protocol_5_works() {
     let (_dir, root) = tempdir();
     let daemon = start(&root).await;
     let mut stream = raw(&root).await;
 
-    // An old (3.x) client and a newer one are told to update.
-    for (id, protocol, update) in [(1, 3, "Update the app"), (2, 5, "Update the server")] {
+    // An old client (3.x, and the Fase 1/2 client of protocol 4) and a newer one are told to update.
+    for (id, protocol, update) in [(1, 3, "Update the app"), (2, 4, "Update the app"), (3, 6, "Update the server")] {
         match ask(&mut stream, &hello(id, protocol)).await {
             Outcome::Error(err) => {
                 assert_eq!(err.code, ErrorCode::IncompatibleProtocol, "hello with protocol {protocol}");
@@ -347,8 +351,8 @@ async fn another_protocol_major_is_refused_with_update_needed_but_protocol_4_wor
     }
 
     // The same connection works with the right major.
-    match ask(&mut stream, &hello(9, 4)).await {
-        Outcome::Ok(ResponseBody::Hello(h)) => assert_eq!(h.protocol, 4),
+    match ask(&mut stream, &hello(9, 5)).await {
+        Outcome::Ok(ResponseBody::Hello(h)) => assert_eq!(h.protocol, 5),
         other => panic!("{other:?}"),
     }
     let client = connect(&root).await;

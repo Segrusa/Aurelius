@@ -8,6 +8,7 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/protocol/models.dart';
+import '../account/claude_login.dart' show apiKeyLoginNote, ownSubscriptionNote;
 
 const appKeysNeedApprove = 'Managing app keys needs the Approve right.';
 
@@ -238,6 +239,9 @@ class _CreateAppKeySheetState extends State<CreateAppKeySheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('New app key', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 4),
+            Text(ownSubscriptionNote, key: const ValueKey('app-key-subscription'), style: muted),
+            Text(apiKeyLoginNote, key: const ValueKey('app-key-login'), style: muted),
             const SizedBox(height: 12),
             TextField(key: const ValueKey('app-key-name'), controller: _name, decoration: const InputDecoration(labelText: 'Name')),
             const SizedBox(height: 12),

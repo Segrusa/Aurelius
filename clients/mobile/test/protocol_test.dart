@@ -16,7 +16,7 @@ ResponseBody body(Map<String, dynamic> json) {
 
 void main() {
   test('every request names its method <area>.<verb> and carries the major', () {
-    expect(protocolMajor, 4);
+    expect(protocolMajor, 5);
     final request = Commands.sendProjectMessage('p', 'Hello');
     expect(request['method'], 'project_conversation.send');
     expect((request['params'] as Map)['text'], 'Hello');
@@ -74,7 +74,7 @@ void main() {
         'host_id': 'h',
         'host_name': 'my-pc',
         'os': 'windows',
-        'protocol': 4,
+        'protocol': 5,
         'remote': true,
       },
     }) as ResponseBodyHello)

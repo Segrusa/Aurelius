@@ -27,17 +27,22 @@ pub(super) async fn execute(
     let Some(key) = key else {
         return Err(ProtocolError::new(ErrorCode::InvalidRequest, "writes need an idempotency_key"));
     };
-    let app = peer.app.as_ref().map(|a| aurelius_application::AppActor { key_id: a.key_id, name: a.name.clone() });
-    // Never a board member for an app, even if one stuck to the session (S5-1).
-    let user_id = peer.user.filter(|_| app.is_none());
-    let ctx = CommandContext { principal_id: shared.principal_id, client_id: peer.client_id, origin: peer.origin, request_id, app, user_id };
+    let ctx = context(shared, peer, request_id);
     let receipt = match write {
-        // Before the host pipeline: that one would hash (and keep) the request with the password.
-        WriteMethod::Host(HostWrite::UserCreate(params)) => super::users::create(shared, peer, ctx, key, expected_version, params).await?,
+        // Answered by `users::create` before this (the host pipeline would hash and keep the password).
+        WriteMethod::Host(HostWrite::UserCreate(_)) => return Err(internal("user.create reached the write pipeline")),
         WriteMethod::Domain(command) => domain(shared, ctx, key, expected_version, command).await?,
         WriteMethod::Host(write) => host_write(shared, ctx, key, expected_version, write).await?,
     };
     Ok(ResponseBody::Receipt(receipt))
+}
+
+/// Who makes a write: the board member always from the session, never from the request (MU3-08).
+pub(super) fn context(shared: &Arc<Shared>, peer: &Peer, request_id: u64) -> CommandContext {
+    let app = peer.app.as_ref().map(|a| aurelius_application::AppActor { key_id: a.key_id, name: a.name.clone() });
+    // Never a board member for an app, even if one stuck to the session (S5-1).
+    let user_id = peer.user.filter(|_| app.is_none());
+    CommandContext { principal_id: shared.principal_id, client_id: peer.client_id, origin: peer.origin, request_id, app, user_id }
 }
 
 async fn domain(shared: &Arc<Shared>, ctx: CommandContext, key: CommandId, expected_version: Option<u64>, command: Command) -> Result<Receipt, ProtocolError> {
@@ -153,7 +158,26 @@ async fn host_write(shared: &Arc<Shared>, ctx: CommandContext, key: CommandId, e
         return Ok(Receipt { idempotency_key: key, committed_seq, replayed: true, result: WriteResult::Host(result) });
     }
 
-    let result = host::perform(shared, write).await?;
+    let user = ctx.user_id.filter(|_| ctx.app.is_none());
+    let reconfigured = match &write {
+        aurelius_protocol::HostWrite::ApiKeySetFunctions { key_id, .. } => Some(*key_id),
+        _ => None,
+    };
+    let result = host::perform(shared, write, user).await?;
+    // An app key's tasks run on its maker's Claude login (B5).
+    if let (HostResult::AppKeyCreated(created), Some(user)) = (&result, user) {
+        let (s, id) = (shared.clone(), created.key.id);
+        app_task(move || s.service.set_app_key_login(id, user)).await?;
+    }
+    // So do an API key's calls: its maker's, or the board member who last set its functions (B5).
+    let api_key = match &result {
+        HostResult::ApiKeyCreated(created) => Some(created.key.id),
+        _ => reconfigured,
+    };
+    if let (Some(id), Some(user)) = (api_key, user) {
+        let s = shared.clone();
+        app_task(move || s.service.set_api_key_login(id, user)).await?;
+    }
     let stored = serde_json::to_value(result.redacted()).map_err(internal)?;
     let s = shared.clone();
     let (committed_seq, notice) = app_task(move || s.service.record_host_write(&ctx, key, hash, &method, &stored)).await?;

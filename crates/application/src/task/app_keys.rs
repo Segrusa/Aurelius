@@ -66,6 +66,12 @@ impl CommandService {
         Ok(AppKeyCreated { key: view, secret, webhook_secret })
     }
 
+    /// The tasks of an app key run on the Claude login of the board member who
+    /// made it (B5); never set by an app itself.
+    pub fn set_app_key_login(&self, id: AppKeyId, user: aurelius_domain::UserId) -> Result<(), AppError> {
+        self.store.write(move |tx| store::set_login_user(tx, id, Some(&user.to_string()))).map_err(storage_error)
+    }
+
     /// Revoked at once: the next request of any session with this key is refused.
     pub fn revoke_app_key(&self, id: AppKeyId) -> Result<AppKeyView, AppError> {
         self.store

@@ -17,14 +17,17 @@
 mod bridge;
 mod git;
 mod host;
+pub mod limits;
 mod management;
 mod reads;
+pub mod sessions;
 mod sql;
 mod subscription;
 mod users;
 mod writes;
 
 pub(crate) use bridge::serve as serve_bridge;
+pub use users::SESSION_CHECK_MS;
 
 use crate::{Shared, VERSION};
 use aurelius_application::Origin;
@@ -32,7 +35,7 @@ use aurelius_domain::{AppKeyId, ClientId, Command, app_key::{AppAudience, AppSco
 use aurelius_host::ipc::{BoxStream, IpcError, read_frame};
 use aurelius_protocol::remote::{Capability, Needs, grants, required};
 use aurelius_protocol::{
-    Call, ErrorCode, HelloResult, Method, Outcome, PROTOCOL_MAJOR, ProtocolError, Request, ResponseBody, ServerMessage, WriteMethod,
+    Call, ErrorCode, HelloResult, HostWrite, Method, Outcome, PROTOCOL_MAJOR, ProtocolError, Request, ResponseBody, ServerMessage, WriteMethod,
     reject_unparsed,
 };
 use aurelius_storage::StorageError;
@@ -53,8 +56,14 @@ pub struct Peer {
     pub remote: Option<RemotePeer>,
     /// An outside app: its scopes decide, not the device rights.
     pub app: Option<AppPeer>,
-    /// The active board member of this connection (never for an app).
+    /// The board member of this connection's session (never for an app); set
+    /// only by `hello { session_token }`, `user.login` and the first `user.create`.
     pub user: Option<aurelius_domain::UserId>,
+    /// The session behind `user` (protocol 5); none: the gate lets only the
+    /// sign-in through.
+    pub session: Option<users::PeerSession>,
+    /// This connection, for closing it when its session ends (`sessions::Hub`).
+    pub conn: u64,
 }
 
 /// The app key a session acts for; its scopes as of the last request.
@@ -81,16 +90,16 @@ pub struct RemotePeer {
 
 impl Peer {
     pub fn local() -> Self {
-        Self { client_id: ClientId::new(), origin: Origin::LocalIpc, remote: None, app: None, user: None }
+        Self { client_id: ClientId::new(), origin: Origin::LocalIpc, remote: None, app: None, user: None, session: None, conn: 0 }
     }
 
     pub fn remote(client_id: ClientId, capabilities: Vec<Capability>, inbox: PathBuf) -> Self {
-        Self { client_id, origin: Origin::Remote, remote: Some(RemotePeer { capabilities, inbox }), app: None, user: None }
+        Self { client_id, origin: Origin::Remote, remote: Some(RemotePeer { capabilities, inbox }), app: None, user: None, session: None, conn: 0 }
     }
 
     /// An app that came in over the gateway with its key (WebSocket or `/v1/mcp`).
     pub fn remote_app(key: &aurelius_storage::app_keys::AppKeyRow) -> Self {
-        Self { client_id: ClientId::new(), origin: Origin::Remote, remote: None, app: Some(AppPeer::of(key)), user: None }
+        Self { client_id: ClientId::new(), origin: Origin::Remote, remote: None, app: Some(AppPeer::of(key)), user: None, session: None, conn: 0 }
     }
 
     fn is_owner(&self) -> bool {
@@ -174,10 +183,19 @@ pub async fn serve(shared: Arc<Shared>, stream: BoxStream) {
             }
         }
     });
-    let session = tokio::spawn(run(shared, Peer::local(), req_rx, out_tx.clone()));
+    let mut session = tokio::spawn(run(shared, Peer::local(), req_rx, out_tx.clone()));
+    let mut ended = false;
 
     loop {
-        let value: serde_json::Value = match read_frame(&mut reader).await {
+        // The session may end on its own (signed out elsewhere): then the connection closes.
+        let frame = tokio::select! {
+            frame = read_frame(&mut reader) => frame,
+            _ = &mut session => {
+                ended = true;
+                break;
+            }
+        };
+        let value: serde_json::Value = match frame {
             Ok(Some(value)) => value,
             Ok(None) => break,
             Err(IpcError::Frame(err @ aurelius_host::frame::FrameError::TooLarge(_))) => {
@@ -214,7 +232,9 @@ pub async fn serve(shared: Arc<Shared>, stream: BoxStream) {
         }
     }
     drop(req_tx);
-    let _ = session.await;
+    if !ended {
+        let _ = session.await;
+    }
     drop(out_tx);
     let _ = writer_task.await;
 }
@@ -233,6 +253,8 @@ pub(crate) fn oversized(message: &ServerMessage, err: &aurelius_host::frame::Fra
         ServerMessage::TerminalExit(_) => "terminal exit",
         ServerMessage::LoadChanged(_) => "load update",
         ServerMessage::PowerChanged(_) => "power update",
+        ServerMessage::ClaudeLoginPrompt(_) => "claude login prompt",
+        ServerMessage::SignedOut { .. } => "sign-out",
     };
     match message {
         ServerMessage::Response { request_id, .. } => {
@@ -255,6 +277,11 @@ pub(crate) fn oversized(message: &ServerMessage, err: &aurelius_host::frame::Fra
 /// One client session over any transport: requests in order; responses,
 /// events and stream deltas out. Ends when `requests` closes.
 pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiver<Request>, out_tx: mpsc::Sender<ServerMessage>) {
+    peer.conn = shared.sessions.connection();
+    // Ending this connection's session elsewhere (revoke, a new password, disable) closes it.
+    // `users` puts the connection in the hub when it gets a board member (before the
+    // session is stored or checked, R1 M-2); losing one takes it out (below).
+    let (end_tx, mut end_rx) = mpsc::unbounded_channel::<aurelius_domain::user::SignOutReason>();
     // One event forwarder per session; a new subscribe replaces the old one
     // (two forwarders would deliver every event twice).
     let mut forwarder: Option<tokio::task::JoinHandle<()>> = None;
@@ -263,34 +290,83 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
     // The hello said this client merges tool-use changes in live updates.
     let mut activity_changes = false;
     let mut team_channels = false;
-    // The tries of `user.use` on this connection, and its new board members (S5-3).
+    // The tries of `user.login` on this connection, and its new board members (S5-3).
     let mut attempts = users::Attempts::default();
     let mut creates = users::Attempts::default();
-    while let Some(request) = requests.recv().await {
+    loop {
+        // An end of the session goes first: no request of an ended session is answered.
+        let request = tokio::select! {
+            biased;
+            Some(reason) = end_rx.recv() => {
+                let _ = out_tx.send(ServerMessage::SignedOut { reason }).await;
+                break;
+            }
+            request = requests.recv() => match request {
+                Some(request) => request,
+                None => break,
+            },
+        };
         let request_id = request.request_id;
+        if let Err(reason) = users::keep_session(&shared, &mut peer).await {
+            shared.sessions.forget(peer.conn);
+            let _ = out_tx.send(ServerMessage::SignedOut { reason }).await;
+            break;
+        }
         if let Err(err) = gate(&shared, &mut peer, &request).await {
             if respond(&out_tx, request_id, Err(err)).await.is_err() {
                 break;
             }
             continue;
         }
+        let before = peer.user;
 
         let outcome = match request.call {
-            Call::Write(write) => match users::count_create(&mut creates, &write) {
-                Ok(()) => writes::execute(&shared, &mut peer, request_id, request.idempotency_key, request.expected_version, write).await,
-                Err(err) => Err(err),
+            // Accounts and sessions: never into a request hash or a receipt of the host pipeline.
+            // Connecting the session's own Claude login: the prompt goes to this connection only (C4).
+            Call::Write(WriteMethod::Host(HostWrite::ClaudeLoginLink)) => match request.idempotency_key {
+                Some(key) => {
+                    let ctx = writes::context(&shared, &peer, request_id);
+                    users::claude_link(&shared, &peer, ctx, key, out_tx.clone()).await
+                }
+                None => Err(ProtocolError::new(ErrorCode::InvalidRequest, "writes need an idempotency_key")),
             },
+            Call::Write(WriteMethod::Host(
+                write @ (HostWrite::SessionRevoke { .. }
+                | HostWrite::UserSetPassword(_)
+                | HostWrite::UserDisable { .. }
+                | HostWrite::ClaudeLoginCancel { .. }
+                | HostWrite::ClaudeLoginUnlink),
+            )) => match request.idempotency_key {
+                Some(key) => {
+                    let ctx = writes::context(&shared, &peer, request_id);
+                    users::session_write(&shared, &mut peer, ctx, key, &mut attempts, write).await
+                }
+                None => Err(ProtocolError::new(ErrorCode::InvalidRequest, "writes need an idempotency_key")),
+            },
+            // Counted against the limits of `user.create` only once it is hashed (R5).
+            Call::Write(WriteMethod::Host(HostWrite::UserCreate(params))) => match request.idempotency_key {
+                Some(key) => {
+                    let ctx = writes::context(&shared, &peer, request_id);
+                    users::create(&shared, &mut peer, &mut creates, &end_tx, ctx, key, request.expected_version, params).await.map(ResponseBody::Receipt)
+                }
+                None => Err(ProtocolError::new(ErrorCode::InvalidRequest, "writes need an idempotency_key")),
+            },
+            Call::Write(write) => writes::execute(&shared, &mut peer, request_id, request.idempotency_key, request.expected_version, write).await,
             Call::Read(Method::SessionHello(params)) => {
                 activity_changes = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::ACTIVITY_CHANGES);
                 team_channels = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::TEAM_CHANNELS);
-                let remembered = params.user_id;
                 match authenticate(&shared, &mut peer, params.app_key).await {
-                    Ok(()) => users::remembered(&shared, &mut peer, remembered).await.map(|who| ResponseBody::Hello(hello(&shared, &peer, who))),
+                    Ok(()) => users::hello_session(&shared, &mut peer, &end_tx, params.session_token).await.map(|who| ResponseBody::Hello(hello(&shared, &peer, who))),
                     Err(err) => Err(err),
                 }
             }
-            Call::Read(Method::UserUse(params)) => users::use_user(&shared, &mut peer, &mut attempts, params).await.map(ResponseBody::WhoAmI),
-            Call::Read(Method::UserWhoami) => users::whoami(&shared, peer.user).await.map(ResponseBody::WhoAmI),
+            Call::Read(Method::UserLogin(params)) => users::login(&shared, &mut peer, &mut attempts, &end_tx, params).await.map(ResponseBody::Login),
+            // Without a session the board members are not named (Titan, SEC1 m9): the sign-in
+            // screen needs only `board_members_exist` from the hello or whoami. Apps keep the list.
+            Call::Read(Method::UserList) if peer.app.is_none() && peer.session.is_none() => Ok(ResponseBody::Users(aurelius_domain::user::UsersSnapshot { users: Vec::new() })),
+            Call::Read(Method::UserLogout) => users::logout(&shared, &mut peer).await.map(ResponseBody::WhoAmI),
+            Call::Read(Method::UserWhoami) => users::whoami_of(&shared, &peer).await.map(ResponseBody::WhoAmI),
+            Call::Read(method @ (Method::SessionList { .. } | Method::ClaudeLoginStatus | Method::ClaudeLoginInput(_))) => users::session_read(&shared, &peer, method).await,
             Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, activity_changes, team_channels, out_tx.clone()).await {
                 Ok((body, task)) => {
                     if let Some(old) = forwarder.replace(task) {
@@ -335,10 +411,28 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
                 (outcome, _) => outcome,
             },
         };
+        // The board member is gone (signed out, disabled themselves, a hello with a
+        // token that no longer works, an app key): out of the hub, and no more
+        // events or terminal output on this connection (MU3-06 AC2, R1 M-1).
+        // Another board member signed in instead keeps the hub, not the terminals
+        // or a sign-in to Claude of the earlier one (R4 m-2).
+        if before.is_some() && peer.user != before {
+            if peer.user.is_none() {
+                shared.sessions.forget(peer.conn);
+                if let Some(task) = forwarder.take() {
+                    task.abort();
+                }
+            }
+            terminals.clear();
+            shared.claude_links.cancel_conn(peer.conn);
+        }
         if respond(&out_tx, request_id, outcome).await.is_err() {
             break;
         }
     }
+    shared.sessions.forget(peer.conn);
+    // A sign-in to Claude of this connection ends with it (C13).
+    shared.claude_links.cancel_conn(peer.conn);
     if let Some(task) = forwarder {
         task.abort();
     }
@@ -364,6 +458,7 @@ async fn authenticate(shared: &Arc<Shared>, peer: &mut Peer, key: Option<String>
         _ => {
             peer.app = Some(AppPeer::of(&key));
             peer.user = None;
+            peer.session = None;
             Ok(())
         }
     }
@@ -409,6 +504,15 @@ async fn gate(shared: &Arc<Shared>, peer: &mut Peer, request: &Request) -> Resul
     if let Some(app) = peer.app.as_mut() {
         return app_gate(shared, app, &request.call).await;
     }
+    // The gate (MU3-06): nothing without a session but the sign-in; a temporary
+    // password only lets its change through.
+    match &peer.session {
+        None if !without_session(&request.call) => return Err(users::unauthenticated()),
+        Some(session) if session.must_change_password && !while_changing_password(&request.call, peer.user) => {
+            return Err(ProtocolError::new(ErrorCode::PasswordChangeRequired, "Choose a new password first."));
+        }
+        _ => {}
+    }
     if peer.remote.is_some() && !peer.is_owner() {
         if let Some(err) = remote_run_defaults_denied(shared, &request.call).await {
             return Err(err);
@@ -417,7 +521,27 @@ async fn gate(shared: &Arc<Shared>, peer: &mut Peer, request: &Request) -> Resul
     Ok(())
 }
 
-fn hello(shared: &Arc<Shared>, peer: &Peer, who: aurelius_domain::user::WhoAmI) -> HelloResult {
+/// What a connection without a session may call: the handshake, who is there,
+/// the sign-in and the first board member (MU3-06 AC1).
+pub fn without_session(call: &Call) -> bool {
+    matches!(
+        call,
+        Call::Read(Method::SessionHello(_) | Method::UserWhoami | Method::UserLogin(_) | Method::UserList) | Call::Write(WriteMethod::Host(HostWrite::UserCreate(_)))
+    )
+}
+
+/// What a session with a temporary password may call (S7, SEC1 M4): the
+/// handshake, who is there, signing out or in again, and its own new password.
+/// Nothing else, so not `user.create` or `user.list` either.
+fn while_changing_password(call: &Call, me: Option<aurelius_domain::UserId>) -> bool {
+    match call {
+        Call::Write(WriteMethod::Host(HostWrite::UserSetPassword(p))) => p.user_id.is_none() || p.user_id == me,
+        Call::Read(Method::SessionHello(_) | Method::UserWhoami | Method::UserLogout | Method::UserLogin(_)) => true,
+        _ => false,
+    }
+}
+
+fn hello(shared: &Arc<Shared>, peer: &Peer, who: users::HelloWho) -> HelloResult {
     HelloResult {
         host_id: shared.host_id,
         daemon_version: VERSION.into(),
@@ -435,8 +559,10 @@ fn hello(shared: &Arc<Shared>, peer: &Peer, who: aurelius_domain::user::WhoAmI) 
         },
         features: aurelius_protocol::FEATURES.iter().map(|f| (*f).to_owned()).collect(),
         app: peer.app.as_ref().map(|a| aurelius_domain::app_key::AppSession { key_id: a.key_id, name: a.name.clone(), scopes: a.scopes.clone(), audience: a.audience }),
-        board_members_exist: who.board_members_exist,
-        user: who.user,
+        board_members_exist: who.who.board_members_exist,
+        user: who.who.user,
+        must_change_password: who.who.must_change_password,
+        claude_login: who.claude_login,
     }
 }
 

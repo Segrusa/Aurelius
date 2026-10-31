@@ -61,7 +61,12 @@ fn listing(dir: &Path) -> Vec<(String, String)> {
             if path.is_dir() {
                 stack.push(path);
             } else {
-                out.push((path.strip_prefix(dir).unwrap().display().to_string(), sha256(&path)));
+                let name = path.strip_prefix(dir).unwrap().display().to_string();
+                // A `-shm` is SQLite's shared-memory WAL index, not data: every
+                // reader (also a read-only one) writes its read marks in it, so
+                // only whether it is there counts.
+                let hash = if name.ends_with("-shm") { "shm".to_owned() } else { sha256(&path) };
+                out.push((name, hash));
             }
         }
     }

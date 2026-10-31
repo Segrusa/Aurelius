@@ -383,8 +383,11 @@ pub enum Request {
     CreateDir { parent: String, name: String },
     /// Add the Claude Code installed on the server as a connection.
     AddClaudeCode,
-    /// Board members (protocol 4): list, create, choose who works here.
+    /// Board members and this device's session (protocol 5): sign in and out,
+    /// sessions, passwords, disabling.
     BoardMembers(UserCall),
+    /// The own Claude login (protocol 5).
+    Claude(ClaudeCall),
     /// The board, a ticket and their writes (protocol 4; see [`BoardCall`]).
     Board(BoardCall),
 }
@@ -450,6 +453,7 @@ pub fn ticket_of(command: &Command) -> Option<aurelius_domain::TicketId> {
         Command::SendBackTicket(c) => c.ticket_id,
         Command::CancelTicket(c) => c.ticket_id,
         Command::ArchiveTicket(c) => c.ticket_id,
+        Command::UseMyLogin(c) => c.ticket_id,
         _ => return None,
     })
 }
@@ -511,7 +515,8 @@ pub const BOARD_CONFLICT: &str = "Changed on another device. Showing the latest.
 /// device changed it first (§7.2).
 pub fn board_write_failure(e: &ClientError) -> String {
     match e {
-        e if e.is_disconnect() || e.is_final() => BOARD_CONNECTION_DROPPED.into(),
+        e if ends(e) => BOARD_CONNECTION_DROPPED.into(),
+        e if not_built(e) => NOT_BUILT.into(),
         ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::VersionConflict => BOARD_CONFLICT.into(),
         ClientError::Protocol(p) => p.message.clone(),
         e => e.to_string(),
@@ -533,13 +538,110 @@ impl std::fmt::Debug for Password {
     }
 }
 
+/// A one-time code Claude showed after the sign-in at Anthropic, on its way to
+/// `claude_login.input`: never printed, logged or kept after the call (Sentinel C5–C8).
+pub struct LoginCode(String);
+
+impl LoginCode {
+    pub fn new(text: String) -> Self {
+        Self(text)
+    }
+}
+
+impl std::fmt::Debug for LoginCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
+/// Board members and this device's session (protocol 5).
 #[derive(Debug)]
 pub enum UserCall {
     List,
-    /// A new board member; the connection becomes it when it had none (onboarding).
+    /// A new board member. Without a session only the first (the onboarding),
+    /// and this device then signs in as them at once.
     Create { username: String, password: Password },
-    /// The one password check of this device (B8): the board member works here from now on.
-    Use { user_id: aurelius_domain::UserId, password: Password },
+    /// Sign in on this device (MU3-02); its session token goes to the OS credential store.
+    Login { username: String, password: Password },
+    /// Sign out on this device (MU3-04 AC3): its session ends and its token is forgotten.
+    Logout,
+    /// The signed-in devices of a board member (none: the own, MU3-04 AC1/AC4).
+    Sessions(Option<aurelius_domain::UserId>),
+    /// End one session (any board member's); `of` is whose list to read again.
+    Revoke { session_id: aurelius_domain::SessionId, of: Option<aurelius_domain::UserId> },
+    /// End every own session but this device's ("Sign out all other devices").
+    RevokeOthers,
+    /// The own password (with the current one; the other sessions end), or a
+    /// temporary one for another board member (B10: all their sessions end).
+    SetPassword { user_id: Option<aurelius_domain::UserId>, old: Option<Password>, new: Password },
+    /// Disable a board member (MU3-05 AC3/AC4).
+    Disable(aurelius_domain::UserId),
+}
+
+impl UserCall {
+    /// A call whose form waits for its answer (it holds a password).
+    pub fn waits(&self) -> bool {
+        matches!(self, UserCall::Create { .. } | UserCall::Login { .. } | UserCall::SetPassword { .. })
+    }
+}
+
+/// The own Claude login (protocol 5, MU3-09).
+#[derive(Debug)]
+pub enum ClaudeCall {
+    Status,
+    /// Connect: the server starts `claude auth login`; its prompts come as `ClaudeUpdate::Prompt`.
+    Link,
+    /// The code Claude showed, for the running link.
+    Input { link_id: String, code: LoginCode },
+    Cancel(String),
+    /// Disconnect (`claude auth logout`, the folder removed).
+    Unlink,
+}
+
+/// What the server says about the own Claude login.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClaudeUpdate {
+    Status(aurelius_domain::user::ClaudeLoginView),
+    /// A link runs (its id): the prompt follows.
+    Linking(String),
+    Prompt(LoginPrompt),
+    /// A call failed: what to say (never the code).
+    Failed(String),
+}
+
+/// `ServerMessage::ClaudeLoginPrompt` as the window keeps it; its sign-in link
+/// (with its `state`) is not printed either (Sentinel C6).
+#[derive(Clone, PartialEq)]
+pub struct LoginPrompt {
+    pub link_id: String,
+    pub url: Option<String>,
+    pub asks_code: bool,
+    pub error: Option<String>,
+}
+
+impl From<aurelius_protocol::ClaudeLoginPrompt> for LoginPrompt {
+    fn from(p: aurelius_protocol::ClaudeLoginPrompt) -> Self {
+        Self { link_id: p.link_id, url: p.url, asks_code: p.asks_code, error: p.error }
+    }
+}
+
+impl std::fmt::Debug for LoginPrompt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginPrompt").field("link_id", &self.link_id).field("url", &self.url.as_ref().map(|_| "<hidden>")).field("asks_code", &self.asks_code).field("error", &self.error).finish()
+    }
+}
+
+/// What the account's actions answered (Settings → Account, Board members).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AccountUpdate {
+    /// The own password changed (`None`), or a temporary one was set for this board member.
+    PasswordSaved(Option<String>),
+    /// The password form's refusal, by its field.
+    PasswordFailed(MemberFailure),
+    /// A session ended (and how many, for "Sign out all other devices").
+    Revoked(usize),
+    Disabled(aurelius_domain::user::UserView),
+    Failed(String),
 }
 
 /// Which field of the board member forms a refusal belongs to.
@@ -547,47 +649,181 @@ pub enum UserCall {
 pub enum MemberField {
     Username,
     Password,
+    /// The current (or temporary) password of a password change.
+    Current,
 }
 
-/// Why `user.create` or `user.use` was refused, for the form that asked.
+/// Why a board member form was refused, for the form that asked.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemberFailure {
     pub field: Option<MemberField>,
     pub message: String,
+    /// `too_many_attempts`: when the next try is taken (the sign-in counts down).
+    pub retry_after_ms: Option<u64>,
+}
+
+impl MemberFailure {
+    pub fn general(message: impl Into<String>) -> Self {
+        Self { field: None, message: message.into(), retry_after_ms: None }
+    }
 }
 
 /// The server's refusal as the forms show it: by the field it is about, in the
 /// words of the design (§11.1). Never repeats what was typed.
 pub fn member_failure(err: &ClientError) -> MemberFailure {
     use aurelius_domain::error::ErrorCode;
+    if not_built(err) {
+        return MemberFailure::general(NOT_BUILT);
+    }
     let (field, message) = match err {
         ClientError::Protocol(p) => match p.code {
             ErrorCode::UsernameTaken => (Some(MemberField::Username), "This username is taken.".to_string()),
             ErrorCode::InvalidUsername => (Some(MemberField::Username), p.message.clone()),
             ErrorCode::WeakPassword => (Some(MemberField::Password), p.message.clone()),
-            ErrorCode::WrongPassword => (Some(MemberField::Password), "That password is wrong.".to_string()),
-            ErrorCode::TooManyAttempts => (Some(MemberField::Password), "Too many tries. Wait a minute and try again.".to_string()),
+            ErrorCode::WrongPassword => (Some(MemberField::Current), "That password is wrong.".to_string()),
+            ErrorCode::TooManyAttempts => (None, p.message.clone()),
             _ => (None, p.message.clone()),
         },
         other => (None, other.to_string()),
     };
-    MemberFailure { field, message }
+    let retry_after_ms = match err {
+        ClientError::Protocol(p) => p.retry_after_ms,
+        _ => None,
+    };
+    MemberFailure { field, message, retry_after_ms }
 }
 
-/// What a lost connection during `user.create` / `user.use` tells the form.
+/// The one refusal of the sign-in (ui-ontwerp §1): never which of the two was wrong.
+pub const SIGN_IN_WRONG: &str = "Username or password is wrong.";
+
+/// A refused `user.login`: one generic text for a wrong name, a wrong password or a
+/// disabled board member; too many tries with the wait ("Try again in 0:30").
+pub fn login_failure(err: &ClientError) -> MemberFailure {
+    use aurelius_domain::error::ErrorCode;
+    if ends(err) && !signed_out(err) {
+        return MemberFailure::general(MEMBER_CONNECTION_DROPPED);
+    }
+    match err {
+        ClientError::Protocol(p) if p.code == ErrorCode::TooManyAttempts => {
+            let wait = p.retry_after_ms.unwrap_or(60_000);
+            MemberFailure { field: None, message: aurelius_domain::AppError::too_many_attempts(wait).message, retry_after_ms: Some(wait) }
+        }
+        ClientError::Protocol(p) if matches!(p.code, ErrorCode::WrongPassword | ErrorCode::Unauthenticated | ErrorCode::NotFound) => MemberFailure::general(SIGN_IN_WRONG),
+        other => member_failure(other),
+    }
+}
+
+/// What a lost connection during a board member form tells it.
 pub const MEMBER_CONNECTION_DROPPED: &str = "The connection dropped. Check the list of board members and try again.";
 
-/// A failed `user.create` / `user.use` as its form shows it: a refusal by its
-/// field, a lost connection as such (the server may have made it anyway).
+/// A failed board member form as it shows it: a refusal by its field, a lost
+/// connection as such (the server may have done it anyway).
 pub fn member_call_failure(err: &ClientError) -> MemberFailure {
-    if err.is_disconnect() || err.is_final() {
-        return MemberFailure { field: None, message: MEMBER_CONNECTION_DROPPED.into() };
+    if ends(err) && !signed_out(err) {
+        return MemberFailure::general(MEMBER_CONNECTION_DROPPED);
     }
     member_failure(err)
 }
 
+/// The account's other refusals in the user's words.
+pub fn account_failure(err: &ClientError) -> String {
+    use aurelius_domain::error::ErrorCode;
+    match err {
+        e if not_built(e) => NOT_BUILT.into(),
+        ClientError::Protocol(p) if p.code == ErrorCode::LastBoardMember => LAST_BOARD_MEMBER.into(),
+        ClientError::Protocol(p) => p.message.clone(),
+        e if ends(e) => "The connection dropped before the server answered. Check again once it is back.".into(),
+        e => e.to_string(),
+    }
+}
+
+/// `last_board_member` (MU3-05 AC4).
+pub const LAST_BOARD_MEMBER: &str = "This is the last active board member. Someone must be able to sign in, so they can't be disabled.";
+
+/// How this device shows in `session.list` ("Desktop · dev-laptop (Linux)").
+pub fn device_name() -> String {
+    let os = match std::env::consts::OS {
+        "windows" => "Windows",
+        "macos" => "macOS",
+        "linux" => "Linux",
+        other => other,
+    };
+    format!("Desktop · {} ({os})", aurelius_host::host_name())
+}
+
+/// Where this device keeps its session token for a server (S8): the OS credential
+/// store, never ui.json, a log or a notice.
+pub trait TokenStore: Send + Sync {
+    fn get(&self, server: &str) -> Option<String>;
+    fn set(&self, server: &str, token: &str);
+    fn delete(&self, server: &str);
+}
+
+/// `aurelius_host::secrets` (Windows Credential Manager, the macOS Keychain, a 0600 file elsewhere).
+pub struct OsTokens;
+
+fn token_ref(server: &str) -> String {
+    format!("desktop-session-{server}")
+}
+
+impl TokenStore for OsTokens {
+    fn get(&self, server: &str) -> Option<String> {
+        aurelius_host::secrets::get(&token_ref(server)).ok().flatten().filter(|t| !t.is_empty())
+    }
+
+    fn set(&self, server: &str, token: &str) {
+        if let Err(e) = aurelius_host::secrets::set(&token_ref(server), token) {
+            // The error is the store's, never the token: this device signs in again next time.
+            tracing::warn!("could not keep this device's session: {e}");
+        }
+    }
+
+    fn delete(&self, server: &str) {
+        let _ = aurelius_host::secrets::delete(&token_ref(server));
+    }
+}
+
+/// The session token of one server on this device.
+#[derive(Clone)]
+pub struct Tokens {
+    server: String,
+    store: std::sync::Arc<dyn TokenStore>,
+}
+
+impl Tokens {
+    pub fn new(server: String, store: std::sync::Arc<dyn TokenStore>) -> Self {
+        Self { server, store }
+    }
+
+    /// In the OS credential store, under the server's key (`AppView::server_key`).
+    pub fn os(server: String) -> Self {
+        Self::new(server, std::sync::Arc::new(OsTokens))
+    }
+
+    fn get(&self) -> Option<String> {
+        self.store.get(&self.server)
+    }
+
+    /// Keep a token the server gave; an empty one (a server without sessions yet) is not kept.
+    fn keep(&self, token: &str) {
+        if !token.is_empty() {
+            self.store.set(&self.server, token);
+        }
+    }
+
+    pub fn forget(&self) {
+        self.store.delete(&self.server);
+    }
+}
+
+impl std::fmt::Debug for Tokens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tokens").field("server", &self.server).finish_non_exhaustive()
+    }
+}
+
 /// The gate's notice when a write needs a board member and this window has none.
-pub const BOARD_MEMBER_REQUIRED: &str = "Choose who you are first: this needs an active board member.";
+pub const BOARD_MEMBER_REQUIRED: &str = "Sign in first: this needs a board member.";
 
 /// A write refused because this connection has no active board member.
 pub fn needs_board_member(err: &ClientError) -> bool {
@@ -806,9 +1042,16 @@ pub enum Update {
     QueuedDeleteFailed(MessageId),
     /// `project.set_description` answered: `Err` holds the reason, shown under the field.
     DescriptionSaved(ProjectId, Result<(), String>),
-    /// Whether the server has board members, and who works in this window (after
-    /// each hello, `user.use` and `user.create`).
+    /// Whether the server has board members, and who is signed in in this window
+    /// (after each hello, `user.login`, `user.logout` and the first `user.create`).
     Who(aurelius_domain::user::WhoAmI),
+    /// This device's session ended on the server (revoked, a new password, disabled,
+    /// expired): the sign-in screen says so (MU3-04 AC2, MU3-06 AC3).
+    SignedOut(aurelius_domain::user::SignOutReason),
+    /// A board member's signed-in devices (none: the own), or why they did not load.
+    Sessions(Option<aurelius_domain::UserId>, Result<aurelius_domain::user::SessionsSnapshot, String>),
+    Account(AccountUpdate),
+    Claude(ClaudeUpdate),
     /// The server's board members, oldest first.
     BoardMembers(Vec<aurelius_domain::user::UserView>),
     /// Another board member was made by this window (its name).
@@ -824,17 +1067,17 @@ pub struct Handle {
     pub updates: mpsc::UnboundedReceiver<Update>,
 }
 
-/// Connect to `target` (`None`: no server yet), as the board member this
-/// window remembers for it. Dropping the handle's request sender ends the
+/// Connect to `target` (`None`: no server yet) with the session this device
+/// keeps for it in `tokens`. Dropping the handle's request sender ends the
 /// thread, also while offline.
-pub fn start(target: Option<Target>, remembered: Option<aurelius_domain::UserId>) -> Handle {
+pub fn start(target: Option<Target>, tokens: Tokens) -> Handle {
     let (req_tx, req_rx) = mpsc::unbounded_channel();
     let (upd_tx, upd_rx) = mpsc::unbounded_channel();
     std::thread::Builder::new()
         .name("aurelius-backend".into())
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
-            runtime.block_on(run(target, remembered, req_rx, upd_tx));
+            runtime.block_on(run(target, tokens, req_rx, upd_tx));
         })
         .expect("backend thread");
     Handle { requests: req_tx, updates: upd_rx }
@@ -848,21 +1091,24 @@ async fn idle(requests: &mut mpsc::UnboundedReceiver<Request>, updates: &mpsc::U
         let text = "Not connected to a server. Choose one in Settings → Servers (Ctrl Alt S).";
         // A form that waits for its answer gets it, so it does not stay busy (Trace M3a m1).
         let _ = updates.send(match request {
-            Request::BoardMembers(UserCall::Create { .. } | UserCall::Use { .. }) => Update::BoardMemberFailed(MemberFailure { field: None, message: text.into() }),
+            Request::BoardMembers(call) if call.waits() => Update::BoardMemberFailed(MemberFailure::general(text)),
             Request::Board(call) if call.is_write() => Update::Board(call.refused(text.into())),
             _ => Update::Error(text.into()),
         });
     }
 }
 
-async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>, mut requests: mpsc::UnboundedReceiver<Request>, updates: mpsc::UnboundedSender<Update>) {
+async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::UnboundedReceiver<Request>, updates: mpsc::UnboundedSender<Update>) {
     let Some(target) = target else {
         idle(&mut requests, &updates, Connection::NoServer).await;
         return;
     };
     let remote_target = matches!(target, Target::Remote(_));
-    // Commands not yet confirmed by a receipt; retried with the same ID after reconnect.
-    let mut outbox: VecDeque<CommandEnvelope> = VecDeque::new();
+    // Commands not yet confirmed by a receipt; retried with the same ID after reconnect,
+    // each with the board member who made it: only theirs go (R3 M2, MU3-08).
+    let mut outbox: VecDeque<(aurelius_domain::UserId, CommandEnvelope)> = VecDeque::new();
+    // Who was signed in last on this window: an offline write is theirs.
+    let mut me: Option<aurelius_domain::UserId> = None;
     let mut open_conversation: Option<ConversationId> = None;
     let mut open_memory: Option<ProjectId> = None;
     let mut open_ideas: Option<Option<ProjectId>> = None;
@@ -870,8 +1116,6 @@ async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>
     let mut open_discussion: Option<ConversationId> = None;
     let mut channels_shown = false;
     let mut backoff = Duration::from_millis(250);
-    // Who works in this window: said again in every hello, so a reconnect keeps it (Trace m9).
-    let mut me = remembered;
 
     loop {
         let _ = updates.send(Update::Connection(Connection::Connecting));
@@ -925,14 +1169,22 @@ async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>
                                 let _ = updates.send(Update::Error("Not connected to the server; save the idea with its files again when it is back.".into()));
                             }
                             // A password is not kept for later: ask again once connected.
-                            Some(Request::BoardMembers(UserCall::Create { .. } | UserCall::Use { .. })) => {
-                                let _ = updates.send(Update::BoardMemberFailed(MemberFailure { field: None, message: "Not connected to the server. Try again when it is back.".into() }));
+                            Some(Request::BoardMembers(call)) if call.waits() => {
+                                let _ = updates.send(Update::BoardMemberFailed(MemberFailure::general("Not connected to the server. Try again when it is back.")));
+                            }
+                            // Neither is a Claude login's code: the link it was for ends with the connection.
+                            Some(Request::Claude(_)) => {
+                                let _ = updates.send(Update::Claude(ClaudeUpdate::Failed("Not connected to the server. Try again when it is back.".into())));
                             }
                             // The board's writes are not kept for later; its reads come again once online.
                             Some(Request::Board(call)) => if call.is_write() {
                                 let _ = updates.send(Update::Board(call.refused("Not connected to the server. Try again when it is back.".into())));
                             },
-                            Some(other) => if let Some(env) = to_envelope(other) { outbox.push_back(env) },
+                            Some(other) => match me {
+                                Some(by) => if let Some(env) = to_envelope(other) { outbox.push_back((by, env)) },
+                                // Signed out: nobody's write to keep (the gate refuses it too).
+                                None => refuse_at_gate(other, &updates),
+                            },
                         },
                     }
                 }
@@ -941,12 +1193,20 @@ async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>
             }
         };
         backoff = Duration::from_millis(250);
-        let who = match identify(&client, me).await {
-            Ok(who) => who,
+        // One receiver for the connection: a sign-out pushed just before the server
+        // closes is still read after the close (MU3-04 AC2).
+        let mut pushes = client.session_pushes();
+        let mut who = match resume(&client, &tokens).await {
+            Ok((who, ended)) => {
+                if let Some(reason) = ended {
+                    let _ = updates.send(Update::SignedOut(reason));
+                }
+                who
+            }
             Err(_) => continue, // lost again: reconnect
         };
         me = who.user.as_ref().map(|u| u.id);
-        let _ = updates.send(Update::Who(who));
+        let _ = updates.send(Update::Who(who.clone()));
         // The server and this app are released apart: their version numbers
         // differ and that is fine. The handshake checked the protocol major.
         let has = |c: aurelius_domain::remote::Capability| client.hello.capabilities.contains(&c);
@@ -976,19 +1236,282 @@ async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>
             },
         }));
 
-        match session(&client, &mut requests, &mut events, &mut streams, &updates, &mut outbox, &mut open_conversation, &mut open_memory, &mut open_ideas, &mut me, &mut open_discussion, &mut channels_shown).await {
-            Ok(()) => return, // UI dropped the request channel: window closed
-            Err(Disconnected(Some(reason), _)) => {
+        // Signed in, or back at the gate after signing out on this connection.
+        let ended = loop {
+            let mut held = VecDeque::new();
+            if gated(&who) {
+                // Nothing loads without a session (the gate, MU3-06): only the sign-in,
+                // the onboarding or the temporary password's change.
+                // The gate tells the window each change itself (a temporary password's sign-in, QA3 D2).
+                match gate(&client, &mut requests, &updates, &tokens, &mut pushes, who.clone(), &mut held).await {
+                    Ok(Some(now)) => who = now,
+                    Ok(None) => return,
+                    Err(d) => break signed_out_before(d, &mut pushes, &tokens, &updates),
+                }
+            }
+            let Some(user) = who.user.as_ref().map(|u| u.id) else { continue };
+            me = Some(user);
+            match session(&client, &mut requests, &mut events, &mut streams, &updates, &mut outbox, &mut open_conversation, &mut open_memory, &mut open_ideas, &tokens, &mut open_discussion, &mut channels_shown, &mut pushes, held, user).await {
+                Ok(Ended::Closed) => return, // UI dropped the request channel: window closed
+                Ok(Ended::SignedOut) => {
+                    who = aurelius_domain::user::WhoAmI { board_members_exist: true, user: None, must_change_password: false };
+                    me = None;
+                }
+                Err(d) => break signed_out_before(d, &mut pushes, &tokens, &updates),
+            }
+        };
+        // Signed out before or by the drop: a write made offline now is nobody's.
+        if ended.2 || tokens.get().is_none() {
+            me = None;
+        }
+        match ended {
+            Disconnected(Some(reason), _, _) => {
                 idle(&mut requests, &updates, Connection::Unpaired(reason)).await;
                 return;
             }
-            Err(Disconnected(None, notice)) => {
+            Disconnected(None, notice, signed_out) => {
+                if signed_out {
+                    // The server no longer knows this session: sign in again after the reconnect.
+                    tokens.forget();
+                    let _ = updates.send(Update::SignedOut(aurelius_domain::user::SignOutReason::Expired));
+                }
                 if let Some(notice) = notice {
                     let _ = updates.send(Update::Error(notice));
                 }
                 continue; // reconnect
             }
         }
+    }
+}
+
+/// The connection dropped: when the server said why just before (its `signed_out`
+/// push, read only now), the window gets that reason, the token goes, and the
+/// reconnect does not report it again as expired.
+fn signed_out_before(d: Disconnected, pushes: &mut mpsc::UnboundedReceiver<aurelius_client::SessionPush>, tokens: &Tokens, updates: &mpsc::UnboundedSender<Update>) -> Disconnected {
+    while let Ok(push) = pushes.try_recv() {
+        if let aurelius_client::SessionPush::SignedOut(reason) = push {
+            tokens.forget();
+            let _ = updates.send(Update::SignedOut(reason));
+            let _ = updates.send(Update::Who(aurelius_domain::user::WhoAmI { board_members_exist: true, user: None, must_change_password: false }));
+            return Disconnected(d.0, d.1, false);
+        }
+    }
+    d
+}
+
+/// How a signed-in session ended without losing the connection.
+enum Ended {
+    /// The window closed (its request sender is gone).
+    Closed,
+    /// Signed out on this device, or the server ended its session: back to the gate.
+    SignedOut,
+}
+
+/// Only the gate's screens until there is a session without a temporary password.
+pub fn gated(who: &aurelius_domain::user::WhoAmI) -> bool {
+    who.user.is_none() || who.must_change_password
+}
+
+/// The hello with the session this device kept for the server (MU3-03 AC2): its
+/// board member is back, or the token is forgotten and, when the server knew it
+/// no longer, the sign-in screen says this device was signed out.
+async fn resume(client: &Client, tokens: &Tokens) -> Result<(aurelius_domain::user::WhoAmI, Option<aurelius_domain::user::SignOutReason>), ClientError> {
+    let who_of = |h: &aurelius_protocol::HelloResult| aurelius_domain::user::WhoAmI { board_members_exist: h.board_members_exist, user: h.user.clone(), must_change_password: h.must_change_password };
+    let Some(token) = tokens.get() else { return Ok((who_of(&client.hello), None)) };
+    match client.resume(&token).await {
+        Ok(hello) if hello.user.is_some() => Ok((who_of(&hello), None)),
+        Ok(hello) => {
+            tokens.forget();
+            Ok((who_of(&hello), Some(aurelius_domain::user::SignOutReason::Expired)))
+        }
+        Err(e) if e.is_disconnect() => Err(e),
+        // Refused (a damaged token): as unknown, sign in again.
+        Err(_) => {
+            tokens.forget();
+            Ok((who_of(&client.hello), Some(aurelius_domain::user::SignOutReason::Expired)))
+        }
+    }
+}
+
+/// Before a session (protocol 5): the sign-in, the onboarding's first board member
+/// and a temporary password's change; nothing else reaches the server. Reads the
+/// window asks meanwhile wait in `held` and go once signed in; writes are refused.
+/// Each change of who is signed in goes to the window as `Update::Who`.
+/// Answers who is signed in now, or none when the window closed.
+async fn gate(
+    client: &Client,
+    requests: &mut mpsc::UnboundedReceiver<Request>,
+    updates: &mpsc::UnboundedSender<Update>,
+    tokens: &Tokens,
+    pushes: &mut mpsc::UnboundedReceiver<aurelius_client::SessionPush>,
+    mut who: aurelius_domain::user::WhoAmI,
+    held: &mut VecDeque<Request>,
+) -> Result<Option<aurelius_domain::user::WhoAmI>, Disconnected> {
+    const HELD_MAX: usize = 400;
+    // Whether the connection still lives: nothing else asks the server meanwhile.
+    let mut alive = tokio::time::interval(Duration::from_secs(5));
+    alive.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    alive.tick().await;
+    while gated(&who) {
+        tokio::select! {
+            request = requests.recv() => {
+                let Some(request) = request else { return Ok(None) };
+                match request {
+                    Request::BoardMembers(call) => {
+                        if let Some(now) = gate_call(client, call, updates, tokens, &who).await? {
+                            who = now;
+                            // At once, also while still at the gate: a sign-in with a temporary
+                            // password goes on to "Choose a new password" (QA3 D2).
+                            let _ = updates.send(Update::Who(who.clone()));
+                        }
+                    }
+                    // The window shows only the gate, so what it asks are the reads of its
+                    // page; they wait. A write (one made just before a sign-out) is refused:
+                    // after the sign-in it would go as whoever signs in (R3 M2).
+                    other if held_read(&other) => {
+                        if held.len() >= HELD_MAX {
+                            held.pop_front();
+                        }
+                        held.push_back(other);
+                    }
+                    other => refuse_at_gate(other, updates),
+                }
+            }
+            push = pushes.recv() => {
+                // The server ends this connection right after a sign-out.
+                if let Some(aurelius_client::SessionPush::SignedOut(reason)) = push {
+                    tokens.forget();
+                    let _ = updates.send(Update::SignedOut(reason));
+                }
+            }
+            _ = alive.tick() => {
+                client.user_whoami().await.map_err(Disconnected::from)?;
+            }
+        }
+    }
+    Ok(Some(who))
+}
+
+/// One board member call at the gate. Answers who is signed in when it changed.
+async fn gate_call(client: &Client, call: UserCall, updates: &mpsc::UnboundedSender<Update>, tokens: &Tokens, who: &aurelius_domain::user::WhoAmI) -> Result<Option<aurelius_domain::user::WhoAmI>, Disconnected> {
+    let refused = |err: ClientError, failure: MemberFailure| -> Result<Option<aurelius_domain::user::WhoAmI>, Disconnected> {
+        let _ = updates.send(Update::BoardMemberFailed(failure));
+        if ends(&err) && !signed_out(&err) {
+            return Err(err.into());
+        }
+        Ok(None)
+    };
+    match call {
+        UserCall::List => {
+            refresh_board_members(client, updates).await?;
+            Ok(None)
+        }
+        UserCall::Login { username, password } => match client.user_login(username.trim(), &password.0, &device_name()).await {
+            Ok(login) => {
+                drop(password);
+                tokens.keep(&login.session_token);
+                Ok(Some(aurelius_domain::user::WhoAmI { board_members_exist: true, user: Some(login.user), must_change_password: login.must_change_password }))
+            }
+            Err(err) => {
+                let failure = login_failure(&err);
+                refused(err, failure)
+            }
+        },
+        // The onboarding (MU3-02 AC5, MU1-20): the first board member, then signed in at once
+        // with the same password, so this device keeps a session like after a sign-in.
+        UserCall::Create { username, password } => {
+            if let Err(err) = client.user_create(&username, &password.0).await {
+                let failure = member_call_failure(&err);
+                return refused(err, failure);
+            }
+            let login = client.user_login(username.trim(), &password.0, &device_name()).await;
+            drop(password);
+            match login {
+                Ok(login) => {
+                    tokens.keep(&login.session_token);
+                    let _ = refresh_board_members(client, updates).await;
+                    Ok(Some(aurelius_domain::user::WhoAmI { board_members_exist: true, user: Some(login.user), must_change_password: login.must_change_password }))
+                }
+                // Made, but no session: whatever the server says now (the sign-in screen).
+                Err(err) if !ends(&err) || signed_out(&err) => Ok(Some(client.user_whoami().await.map_err(Disconnected::from)?)),
+                Err(err) => Err(err.into()),
+            }
+        }
+        // A temporary password's change (B10, MU3-05): with the temporary one.
+        UserCall::SetPassword { user_id: None, old, new } => {
+            let result = client.set_password(None, old.as_ref().map(|p| p.0.as_str()), &new.0).await;
+            drop((old, new));
+            match result {
+                Ok(()) => {
+                    let _ = updates.send(Update::Account(AccountUpdate::PasswordSaved(None)));
+                    Ok(Some(aurelius_domain::user::WhoAmI { must_change_password: false, ..who.clone() }))
+                }
+                Err(err) => {
+                    let failure = member_call_failure(&err);
+                    let _ = updates.send(Update::Account(AccountUpdate::PasswordFailed(failure.clone())));
+                    refused(err, failure)
+                }
+            }
+        }
+        UserCall::Logout => {
+            tokens.forget();
+            let now = match client.user_logout().await {
+                Ok(now) => now,
+                Err(err) if ends(&err) && !signed_out(&err) => return Err(err.into()),
+                Err(_) => aurelius_domain::user::WhoAmI { board_members_exist: true, user: None, must_change_password: false },
+            };
+            Ok(Some(now))
+        }
+        // The rest needs a session.
+        other => {
+            if other.waits() {
+                let _ = updates.send(Update::BoardMemberFailed(MemberFailure::general(BOARD_MEMBER_REQUIRED)));
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// A read the gate keeps for after the sign-in (its page loads then); everything
+/// else changes something and must not go as the next board member (R3 M2).
+fn held_read(request: &Request) -> bool {
+    match request {
+        Request::Board(call) => !call.is_write(),
+        Request::AppKeys(call) => matches!(call, AppKeyCall::List),
+        Request::Plugins(call) => matches!(call, PluginsCall::List | PluginsCall::Available | PluginsCall::ManagerGet(_) | PluginsCall::ProjectGet(_)),
+        Request::Backups(call) => matches!(call, BackupsCall::List),
+        Request::Remote(call) => matches!(call, RemoteCall::Status),
+        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::FollowChannels(_) => true,
+        Request::LoadMemory(_) | Request::LoadMemoryContext { .. } | Request::LoadIdeas(_) | Request::LoadContext(_) | Request::LoadScreenshot(_) | Request::LoadFullActivity(..) => true,
+        Request::LoadFile(_) | Request::LoadUpload(_) | Request::LoadUploadThumb(_) | Request::LoadSubagents(_) | Request::LoadPreviewMessages(_) | Request::LoadMarkdownFile(..) | Request::LoadArtifactContent { .. } => true,
+        Request::LoadUsage | Request::LoadUsageHours(_) | Request::LoadSubscription(_) | Request::CheckUpdate(_) | Request::LoadServerLoad | Request::LoadBrowser | Request::LoadArtifactSetting => true,
+        Request::LoadUsageTotals { .. } | Request::LoadTraceSetting | Request::LoadTrace(_) | Request::LoadInstructionVersions(_) | Request::LoadAutoAllow | Request::LoadManagementMode => true,
+        Request::LoadMcp | Request::LoadMcpAlwaysAllow | Request::BrowseDir { .. } => true,
+        _ => false,
+    }
+}
+
+/// A write without a session, answered as its own kind so no form keeps waiting.
+fn refuse_at_gate(request: Request, updates: &mpsc::UnboundedSender<Update>) {
+    let _ = updates.send(match request {
+        Request::BoardMembers(call) if call.waits() => Update::BoardMemberFailed(MemberFailure::general(BOARD_MEMBER_REQUIRED)),
+        Request::Claude(_) => Update::Claude(ClaudeUpdate::Failed(BOARD_MEMBER_REQUIRED.into())),
+        Request::Board(call) => Update::Board(call.refused(BOARD_MEMBER_REQUIRED.into())),
+        Request::AppKeys(_) => Update::AppKeys(AppKeyUpdate::Failed(BOARD_MEMBER_REQUIRED.into())),
+        _ => Update::Error(BOARD_MEMBER_REQUIRED.into()),
+    });
+}
+
+/// Why writes from before a sign-out did not go once someone else signed in (R3 M2).
+pub const NOT_SENT_SIGNED_OUT: &str = "Not sent: you were signed out.";
+
+/// Drops the writes another board member made on this window (before a sign-out,
+/// an expired or revoked session, or a forgotten token): they never go as `me`.
+fn keep_own(outbox: &mut VecDeque<(aurelius_domain::UserId, CommandEnvelope)>, me: aurelius_domain::UserId, updates: &mpsc::UnboundedSender<Update>) {
+    let before = outbox.len();
+    outbox.retain(|(by, _)| *by == me);
+    if outbox.len() < before {
+        let _ = updates.send(Update::Error(NOT_SENT_SIGNED_OUT.into()));
     }
 }
 
@@ -1099,20 +1622,47 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SetEmployeeFolder { employee_id, path } => envelope(Command::SetEmployeeFolder(employee::SetEmployeeFolder { employee_id, path }), None),
         Request::SetProjectFolder { project_id, path } => envelope(Command::SetProjectFolder(project::SetProjectFolder { project_id, path }), None),
         Request::LoadUsage | Request::LoadUsageHours(_) | Request::LoadSubscription(_) | Request::CheckUpdate(_) | Request::InstallUpdate | Request::InstallAppUpdate | Request::RestartServer | Request::Power(_) | Request::AppKeys(_) | Request::Plugins(_) | Request::LoadServerLoad | Request::SetLoadLimits(_) | Request::LoadBrowser | Request::SetBrowser(_) | Request::SetBrowserBackend(_) | Request::LoadArtifactSetting | Request::SetArtifactsEnabled(_) | Request::LoadUsageTotals { .. } | Request::LoadTraceSetting | Request::SetTraceEnabled(_) | Request::LoadTrace(_) | Request::LoadInstructionVersions(_) | Request::LoadAutoAllow | Request::SetAutoAllow(_) | Request::LoadManagementMode | Request::SetManagementMode(_) | Request::LoadMcp | Request::SetMcp(_) | Request::McpAdd(_) | Request::McpRemove(_) | Request::McpAuth(_) | Request::LoadMcpAlwaysAllow | Request::McpAlwaysAllowRemove(_) | Request::Backups(_) | Request::ExportProject(_) | Request::Remote(_) => return None,
-        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode | Request::BoardMembers(_) | Request::Board(_) => return None,
+        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode | Request::BoardMembers(_) | Request::Claude(_) | Request::Board(_) => return None,
     })
 }
 
 /// The connection ended; `Some(reason)` when reconnecting can't help
 /// (this computer was removed on the server), and what to show before
-/// reconnecting when it was more than a dropped connection (a timeout).
-struct Disconnected(Option<String>, Option<String>);
+/// reconnecting when it was more than a dropped connection (a timeout). The
+/// third field: the server said this device's session is gone (protocol 5),
+/// so its token is forgotten and the sign-in screen shows after the reconnect.
+struct Disconnected(Option<String>, Option<String>, bool);
 
 impl From<ClientError> for Disconnected {
     fn from(err: ClientError) -> Self {
+        if signed_out(&err) {
+            return Disconnected(None, None, true);
+        }
         let shown = !err.is_final() && !matches!(err, ClientError::Disconnected);
-        Disconnected(err.is_final().then(|| err.to_string()), shown.then(|| err.to_string()))
+        Disconnected(err.is_final().then(|| err.to_string()), shown.then(|| err.to_string()), false)
     }
+}
+
+/// The session goes on no more: the connection dropped, reconnecting can't help,
+/// or the server no longer knows this device's session.
+fn ends(e: &ClientError) -> bool {
+    e.is_disconnect() || e.is_final() || signed_out(e)
+}
+
+/// The gate's refusals (protocol 5): no (valid) session, or a temporary password to change first.
+pub fn signed_out(e: &ClientError) -> bool {
+    use aurelius_domain::error::ErrorCode;
+    matches!(e, ClientError::Protocol(p) if matches!(p.code, ErrorCode::Unauthenticated | ErrorCode::PasswordChangeRequired))
+}
+
+/// What a server that does not have a protocol 5 method yet tells the window.
+pub const NOT_BUILT: &str = "This server can't do this yet. Update the server, then try again.";
+
+/// An older server (`unknown_method`), or one with the protocol 5 surface whose
+/// method is not built yet ("This server cannot … yet.").
+pub fn not_built(e: &ClientError) -> bool {
+    use aurelius_domain::error::ErrorCode;
+    matches!(e, ClientError::Protocol(p) if p.code == ErrorCode::UnknownMethod || (p.code == ErrorCode::Validation && p.message.starts_with("This server cannot")))
 }
 
 /// A view's answer, or `None` after showing why it failed. Only a lost
@@ -1121,7 +1671,7 @@ impl From<ClientError> for Disconnected {
 fn shown<T>(result: Result<T, ClientError>, updates: &mpsc::UnboundedSender<Update>) -> Result<Option<T>, Disconnected> {
     match result {
         Ok(value) => Ok(Some(value)),
-        Err(e) if e.is_disconnect() || e.is_final() => Err(e.into()),
+        Err(e) if ends(&e) => Err(e.into()),
         Err(e) => {
             let _ = updates.send(Update::Error(e.to_string()));
             Ok(None)
@@ -1149,17 +1699,21 @@ async fn session(
     events: &mut mpsc::UnboundedReceiver<Event>,
     streams: &mut mpsc::UnboundedReceiver<StreamDelta>,
     updates: &mpsc::UnboundedSender<Update>,
-    outbox: &mut VecDeque<CommandEnvelope>,
+    outbox: &mut VecDeque<(aurelius_domain::UserId, CommandEnvelope)>,
     open_conversation: &mut Option<ConversationId>,
     open_memory: &mut Option<ProjectId>,
     open_ideas: &mut Option<Option<ProjectId>>,
-    me: &mut Option<aurelius_domain::UserId>,
+    tokens: &Tokens,
     open_discussion: &mut Option<ConversationId>,
     channels_shown: &mut bool,
-) -> Result<(), Disconnected> {
+    pushes: &mut mpsc::UnboundedReceiver<aurelius_client::SessionPush>,
+    mut held: VecDeque<Request>,
+    me: aurelius_domain::UserId,
+) -> Result<Ended, Disconnected> {
     // Snapshot first, then subscribe from its cursor.
     let (as_of, mut jobs_running) = refresh(client, updates).await?;
     refresh_board_members(client, updates).await?;
+    claude_login(client, ClaudeCall::Status, updates).await?;
     refresh_messages(client, updates, *open_conversation).await?;
     refresh_memory(client, updates, *open_memory).await?;
     refresh_ideas(client, updates, *open_ideas).await?;
@@ -1172,12 +1726,13 @@ async fn session(
     let mut powers = client.power_changes();
     match client.query_power().await {
         Ok(state) => { let _ = updates.send(Update::Power(state)); }
-        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+        Err(e) if ends(&e) => return Err(e.into()),
         Err(_) => {}
     }
     client.subscribe(as_of).await.map_err(Disconnected::from)?;
 
-    while let Some(envelope) = outbox.front().cloned() {
+    keep_own(outbox, me, updates);
+    while let Some((_, envelope)) = outbox.front().cloned() {
         send(client, envelope, updates).await?;
         outbox.pop_front();
     }
@@ -1194,8 +1749,22 @@ async fn session(
     let mut stale = Coalesce::new(Duration::from_millis(500));
     loop {
         tokio::select! {
-            request = requests.recv() => {
-                let Some(request) = request else { return Ok(()) };
+            push = pushes.recv() => match push {
+                Some(aurelius_client::SessionPush::ClaudeLoginPrompt(prompt)) => {
+                    let _ = updates.send(Update::Claude(ClaudeUpdate::Prompt(prompt.into())));
+                }
+                // Revoked, a new password, disabled, expired (MU3-04 AC2, MU3-06 AC3): the
+                // server closes the connection next; the window shows the sign-in at once.
+                Some(aurelius_client::SessionPush::SignedOut(reason)) => {
+                    tokens.forget();
+                    let _ = updates.send(Update::SignedOut(reason));
+                    let _ = updates.send(Update::Who(aurelius_domain::user::WhoAmI { board_members_exist: true, user: None, must_change_password: false }));
+                    return Ok(Ended::SignedOut);
+                }
+                None => return Err(client.end_reason().into()),
+            },
+            request = next_request(&mut held, requests) => {
+                let Some(request) = request else { return Ok(Ended::Closed) };
                 if let Request::OpenConversation(id) = request {
                     *open_conversation = id;
                     refresh_messages(client, updates, id).await?;
@@ -1243,7 +1812,7 @@ async fn session(
                     let method = Method::MemoryGetContext { project_id: Some(project), employee_id: manager };
                     match read(client, method, |b| match b { ResponseBody::MemoryContext(v) => Some(v), _ => None }).await {
                         Ok(view) => { let _ = updates.send(Update::MemoryContext { project, manager, result: Ok(view) }); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::MemoryContext { project, manager, result: Err(e.to_string()) }); }
                     }
                     continue;
@@ -1276,7 +1845,7 @@ async fn session(
                                 let _ = updates.send(Update::RestartForUpdate);
                             }
                         }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => {
                             let _ = updates.send(Update::Error(e.to_string()));
                         }
@@ -1305,7 +1874,7 @@ async fn session(
                         Ok(update) => {
                             let _ = updates.send(update);
                         }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => {
                             let _ = updates.send(Update::Error(e.to_string()));
                         }
@@ -1319,7 +1888,7 @@ async fn session(
                             let on = if client.is_remote() { format!(" on {}", client.hello.host_name) } else { String::new() };
                             let _ = updates.send(Update::Info(format!("Exported (Markdown + JSON) to {folder}{on}")));
                         }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => {
                             let _ = updates.send(Update::Error(e.to_string()));
                         }
@@ -1330,7 +1899,7 @@ async fn session(
                     let ask = if typed { DirAsk::Typed } else { DirAsk::Browse };
                     match client.list_dir(path).await {
                         Ok(listing) => { let _ = updates.send(Update::DirListing(listing)); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::DirFailed(ask, e.to_string())); }
                     }
                     continue;
@@ -1338,7 +1907,7 @@ async fn session(
                 if let Request::CreateDir { parent, name } = request {
                     match client.create_dir(parent, name).await {
                         Ok(listing) => { let _ = updates.send(Update::DirListing(listing)); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::DirFailed(DirAsk::Create, e.to_string())); }
                     }
                     continue;
@@ -1354,7 +1923,7 @@ async fn session(
                         Command::AddProvider(connection::AddProvider { provider: ProviderKind::ClaudeCode, display_name: "Claude Code".into(), runtime_path: Some(runtime_path), default_model: None }),
                         None,
                     );
-                    outbox.push_back(env.clone());
+                    outbox.push_back((me, env.clone()));
                     send(client, env, updates).await?;
                     outbox.pop_front();
                     let _ = updates.send(Update::Info("Connection added; verifying…".into()));
@@ -1444,7 +2013,7 @@ async fn session(
                     };
                     match result {
                         Ok(state) => { let _ = updates.send(Update::Power(state)); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::Error(e.to_string())); }
                     }
                     continue;
@@ -1455,7 +2024,7 @@ async fn session(
                             let _ = updates.send(Update::Mcp(Ok(list)));
                             let _ = updates.send(Update::McpAdded);
                         }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::McpAddFailed(crate::screens::mcp_add::scrub(&mcp_manage_error(e), &params))); }
                     }
                     continue;
@@ -1463,7 +2032,7 @@ async fn session(
                 if let Request::McpRemove(name) = request {
                     match client.mcp_remove(&name).await {
                         Ok(list) => { let _ = updates.send(Update::Mcp(Ok(list))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::McpRemoveFailed(mcp_manage_error(e))); }
                     }
                     continue;
@@ -1492,7 +2061,7 @@ async fn session(
                 if let Request::McpAlwaysAllowRemove(tool) = request {
                     match client.mcp_always_allow_remove(&tool).await {
                         Ok(list) => { let _ = updates.send(Update::McpAlwaysAllow(Some(list.tools))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::McpAlwaysAllowRemoveFailed(always_allow_error(e))); }
                     }
                     continue;
@@ -1509,7 +2078,7 @@ async fn session(
                     };
                     match result {
                         Ok(list) => { let _ = updates.send(Update::Mcp(Ok(list))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) if saving => { let _ = updates.send(Update::McpSaveFailed(mcp_error(e, true))); }
                         Err(e) => { let _ = updates.send(Update::Mcp(Err(mcp_error(e, false)))); }
                     }
@@ -1523,7 +2092,7 @@ async fn session(
                     };
                     match result {
                         Ok(setting) => { let _ = updates.send(Update::Browser(Ok(setting))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::Browser(Err(browser_error(e)))); }
                     }
                     continue;
@@ -1536,7 +2105,7 @@ async fn session(
                     };
                     match result {
                         Ok(setting) => { let _ = updates.send(Update::ArtifactSetting(Some(setting.enabled))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(ClientError::Protocol(p)) if saving && p.code == aurelius_protocol::ErrorCode::Forbidden => { let _ = updates.send(Update::Error("You need the Approve right on this server to turn artifacts on or off.".into())); }
                         Err(e) if saving => { let _ = updates.send(Update::Error(e.to_string())); }
                         Err(_) => { let _ = updates.send(Update::ArtifactSetting(None)); }
@@ -1547,7 +2116,7 @@ async fn session(
                     let conversation = task_id.is_none().then_some(conversation_id);
                     match client.usage_totals(conversation, task_id).await {
                         Ok(totals) => { let _ = updates.send(Update::UsageTotals(conversation_id, totals)); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         // Shown nowhere: the header just has no total.
                         Err(_) => {}
                     }
@@ -1561,7 +2130,7 @@ async fn session(
                     };
                     match result {
                         Ok(setting) => { let _ = updates.send(Update::TraceSetting(Some(setting))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(ClientError::Protocol(p)) if saving && p.code == aurelius_protocol::ErrorCode::Forbidden => { let _ = updates.send(Update::Error("You need the Approve right on this server to turn trace mode on or off.".into())); }
                         Err(e) if saving => { let _ = updates.send(Update::Error(e.to_string())); }
                         Err(_) => { let _ = updates.send(Update::TraceSetting(None)); }
@@ -1571,7 +2140,7 @@ async fn session(
                 if let Request::LoadTrace(run_id) = request {
                     match client.run_trace(run_id).await {
                         Ok(trace) => { let _ = updates.send(Update::Trace(run_id, Ok(trace))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(ClientError::Protocol(p)) if p.code == aurelius_protocol::ErrorCode::NotFound => {
                             let _ = updates.send(Update::Trace(run_id, Err("No trace for this answer: trace mode was off when it ran, or it is older than the latest 200 runs / 7 days.".into())));
                         }
@@ -1582,7 +2151,7 @@ async fn session(
                 if let Request::LoadInstructionVersions(employee_id) = request {
                     match client.employee_instruction_versions(employee_id).await {
                         Ok(list) => { let _ = updates.send(Update::InstructionVersions(employee_id, Ok(list))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::InstructionVersions(employee_id, Err(e.to_string()))); }
                     }
                     continue;
@@ -1595,7 +2164,7 @@ async fn session(
                     };
                     match result {
                         Ok(setting) => { let _ = updates.send(Update::AutoAllow(Some(setting))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(ClientError::Protocol(p)) if saving && p.code == aurelius_protocol::ErrorCode::Forbidden => { let _ = updates.send(Update::Error("You need the Approve right on this server to change auto-allow.".into())); }
                         Err(e) if saving => { let _ = updates.send(Update::Error(e.to_string())); }
                         Err(_) => { let _ = updates.send(Update::AutoAllow(None)); }
@@ -1610,7 +2179,7 @@ async fn session(
                     };
                     match result {
                         Ok(setting) => { let _ = updates.send(Update::ManagementMode(Some(setting.enabled))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(ClientError::Protocol(p)) if saving && p.code == aurelius_protocol::ErrorCode::Forbidden => { let _ = updates.send(Update::Error("You need the Approve right on this server to change who chooses the mode.".into())); }
                         Err(e) if saving => { let _ = updates.send(Update::Error(e.to_string())); }
                         Err(_) => { let _ = updates.send(Update::ManagementMode(None)); }
@@ -1624,7 +2193,7 @@ async fn session(
                 if let Request::SetLoadLimits(update) = request {
                     match client.set_load_limits(update).await {
                         Ok(snapshot) => { let _ = updates.send(Update::LoadSaved(Ok(snapshot))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::LoadSaved(Err(load_error(e)))); }
                     }
                     continue;
@@ -1642,7 +2211,7 @@ async fn session(
                 if let Request::LoadUsageHours(day) = request {
                     match client.query_usage_hours(day).await {
                         Ok(hours) => { let _ = updates.send(Update::UsageHours(day, Ok(hours))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::UsageHours(day, Err(e.to_string()))); }
                     }
                     continue;
@@ -1650,7 +2219,7 @@ async fn session(
                 if let Request::LoadPreviewMessages(conversation) = request {
                     match client.messages(conversation).await {
                         Ok(messages) => { let _ = updates.send(Update::PreviewMessages(messages)); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(_) => {}
                     }
                     continue;
@@ -1658,7 +2227,7 @@ async fn session(
                 if let Request::LoadSubagents(conversation) = request {
                     match client.subagents(conversation).await {
                         Ok(agents) => { let _ = updates.send(Update::Subagents(conversation, agents)); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(_) => {}
                     }
                     continue;
@@ -1666,7 +2235,7 @@ async fn session(
                 if let Request::LoadMarkdownFile(scope, path) = request {
                     match client.markdown_file(scope.clone(), &path).await {
                         Ok(file) => { let _ = updates.send(Update::MarkdownFile(scope, path, Ok(file))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::MarkdownFile(scope, path, Err(MarkdownFailure::of(&e)))); }
                     }
                     continue;
@@ -1674,7 +2243,7 @@ async fn session(
                 if let Request::LoadArtifactContent { url, version } = request {
                     match client.artifact_content(url.clone(), version).await {
                         Ok(content) => { let _ = updates.send(Update::ArtifactContent(url, version, Ok(content))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(ClientError::Protocol(p)) if p.code == aurelius_protocol::ErrorCode::NotFound => {
                             let _ = updates.send(Update::ArtifactContent(url, version, Err("This artifact is no longer on the server (its conversation may have been deleted).".into())));
                         }
@@ -1685,7 +2254,7 @@ async fn session(
                 if let Request::LoadFile(id) = request {
                     match client.file(&id).await {
                         Ok(file) => { let _ = updates.send(Update::File(id, Ok(file))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::File(id, Err(e.to_string()))); }
                     }
                     continue;
@@ -1693,7 +2262,7 @@ async fn session(
                 if let Request::LoadUpload(id) = request {
                     match client.upload(&id).await {
                         Ok(file) => { let _ = updates.send(Update::File(id, Ok(file))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::File(id, Err(e.to_string()))); }
                     }
                     continue;
@@ -1701,7 +2270,7 @@ async fn session(
                 if let Request::LoadUploadThumb(id) = request {
                     match client.upload_thumbnail(&id, UPLOAD_THUMB_SIDE).await {
                         Ok(bytes) => { let _ = updates.send(Update::UploadThumb(id, Ok(bytes))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::UploadThumb(id, Err(e.to_string()))); }
                     }
                     continue;
@@ -1709,7 +2278,7 @@ async fn session(
                 if let Request::LoadScreenshot(id) = request {
                     match client.screenshot(&id).await {
                         Ok(bytes) => { let _ = updates.send(Update::Screenshot(id, Ok(bytes))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::Screenshot(id, Err(e.to_string()))); }
                     }
                     continue;
@@ -1717,7 +2286,7 @@ async fn session(
                 if let Request::LoadFullActivity(message_id, call_id) = request {
                     match client.activity(message_id, &call_id).await {
                         Ok(view) => { let _ = updates.send(Update::FullActivity(call_id, Ok(view))); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::FullActivity(call_id, Err(e.to_string()))); }
                     }
                     continue;
@@ -1725,7 +2294,7 @@ async fn session(
                 if let Request::LoadContext(run_id) = request {
                     match client.context(run_id).await {
                         Ok(view) => { let _ = updates.send(Update::Context(view)); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::Error(e.to_string())); }
                     }
                     continue;
@@ -1740,7 +2309,7 @@ async fn session(
                     let outcome = client.dismiss_all_notifications().await.map(|_| ());
                     match outcome {
                         Ok(()) => {}
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::Error(e.to_string())); }
                     }
                     // Show what the server really has (also puts back what failed).
@@ -1749,7 +2318,13 @@ async fn session(
                     continue;
                 }
                 if let Request::BoardMembers(call) = request {
-                    board_members(client, call, me, updates).await?;
+                    if board_members(client, call, tokens, updates).await? {
+                        return Ok(Ended::SignedOut);
+                    }
+                    continue;
+                }
+                if let Request::Claude(call) = request {
+                    claude_login(client, call, updates).await?;
                     continue;
                 }
                 if let Request::Board(call) = request {
@@ -1762,7 +2337,7 @@ async fn session(
                 if let Request::SetSecret { connection_id, secret } = request {
                     match client.set_secret(connection_id, secret).await {
                         Ok(_) => { let _ = updates.send(Update::Info("API key saved in the OS credential store. Checking the connection…".into())); }
-                        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                        Err(e) if ends(&e) => return Err(e.into()),
                         Err(e) => { let _ = updates.send(Update::Error(e.to_string())); }
                     }
                     continue;
@@ -1773,7 +2348,7 @@ async fn session(
                     for purpose in [Purpose::Employee, Purpose::Memory] {
                         let settings = RunDefaults { connection: aurelius_domain::employee::Setting::Value(connection_id), model: model.clone(), persona: aurelius_domain::employee::Setting::Inherit, effort: aurelius_domain::employee::Setting::Inherit };
                         let env = envelope(Command::SetRunDefaults(connection::SetRunDefaults { scope: ConfigScope::Global, purpose, settings }), None);
-                        outbox.push_back(env.clone());
+                        outbox.push_back((me, env.clone()));
                         send(client, env, updates).await?;
                         outbox.pop_front();
                     }
@@ -1787,7 +2362,7 @@ async fn session(
                     for path in images.iter() {
                         match client.stage_file(std::path::Path::new(path)).await {
                             Ok(path) => staged.push(path),
-                            Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                            Err(e) if ends(&e) => return Err(e.into()),
                             Err(e) => {
                                 let _ = updates.send(Update::Error(format!("Could not send the image {path}: {e}")));
                                 break;
@@ -1805,7 +2380,7 @@ async fn session(
                     for path in files.iter() {
                         match client.stage_file(std::path::Path::new(path)).await {
                             Ok(path) => staged.push(path),
-                            Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                            Err(e) if ends(&e) => return Err(e.into()),
                             Err(e) => {
                                 let _ = updates.send(Update::Error(format!("Could not send the file {path}: {e}")));
                                 break;
@@ -1831,7 +2406,7 @@ async fn session(
                     for path in files.iter() {
                         match client.stage_file(std::path::Path::new(path)).await {
                             Ok(path) => staged.push(path),
-                            Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+                            Err(e) if ends(&e) => return Err(e.into()),
                             Err(e) => {
                                 let _ = updates.send(Update::Error(format!("Could not send the file {path}: {e}")));
                                 break;
@@ -1844,7 +2419,7 @@ async fn session(
                     *files = staged;
                 }
                 let Some(envelope) = to_envelope(request) else { continue };
-                outbox.push_back(envelope.clone());
+                outbox.push_back((me, envelope.clone()));
                 send(client, envelope, updates).await?;
                 outbox.pop_front();
             }
@@ -1887,6 +2462,7 @@ async fn session(
                 // ideas and recurring tasks also show their task's status.
                 let (mut memory, mut ideas, mut schedules, mut task, mut users, mut settings, mut tickets) = (false, false, false, false, false, false, false);
                 let mut board_tasks: Vec<String> = Vec::new();
+                let mut claude = false;
                 for e in std::iter::once(first).chain(std::iter::from_fn(|| events.try_recv().ok())) {
                     // 'Always allow' on an approval adds its tool to the always-allowed list.
                     approval |= e.kind.area() == "approval";
@@ -1910,6 +2486,7 @@ async fn session(
                     } else if is_artifact(&e) { artifact = true } else if is_chat(&e) { chat = true } else { other = true }
                     task |= e.kind.area() == "task";
                     users |= e.kind.area() == "user";
+                    claude |= e.kind == aurelius_domain::EventKind::ClaudeLoginUpdated;
                     // A card follows its main task (the app keeps those of tickets); the dispatcher follows the company and its projects.
                     settings |= matches!(e.kind.area(), "company" | "project");
                     tickets |= matches!(e.kind.area(), "ticket" | "board");
@@ -1921,9 +2498,13 @@ async fn session(
                     let _ = updates.send(Update::Board(BoardUpdate::Changed { tickets, settings, tasks: board_tasks }));
                 }
                 if users {
-                    // Another window made a board member: the onboarding may be over (MU1-20 AC4).
+                    // Another window made or disabled a board member.
                     send_who(client, updates).await?;
                     refresh_board_members(client, updates).await?;
+                }
+                if claude {
+                    // Connected, expired or disconnected (also on another device), or the company's background login.
+                    claude_login(client, ClaudeCall::Status, updates).await?;
                 }
                 if artifact {
                     refresh_artifacts(client, updates).await?;
@@ -2011,14 +2592,12 @@ impl Coalesce {
     }
 }
 
-/// The hello's answer for this window: with the board member it remembers,
-/// active again when the server still has it (none: "Who's working here?").
-async fn identify(client: &Client, me: Option<aurelius_domain::UserId>) -> Result<aurelius_domain::user::WhoAmI, ClientError> {
-    let hello = match me {
-        Some(user_id) => client.identify(user_id).await?,
-        None => client.hello.clone(),
-    };
-    Ok(aurelius_domain::user::WhoAmI { board_members_exist: hello.board_members_exist, user: hello.user })
+/// The next request: the reads held at the gate first, then the window's.
+async fn next_request(held: &mut VecDeque<Request>, requests: &mut mpsc::UnboundedReceiver<Request>) -> Option<Request> {
+    if let Some(request) = held.pop_front() {
+        return Some(request);
+    }
+    requests.recv().await
 }
 
 async fn send_who(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
@@ -2035,61 +2614,188 @@ async fn refresh_board_members(client: &Client, updates: &mpsc::UnboundedSender<
     Ok(())
 }
 
-/// `user.*` for the board member screens. The password goes to the server and
-/// is dropped with the call; a refusal goes back to the form that asked.
-async fn board_members(client: &Client, call: UserCall, me: &mut Option<aurelius_domain::UserId>, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
-    // The form always hears back, also when the connection drops (Trace M3a m1):
-    // else it stays on "Creating…" / "Checking…". No retry: after the reconnect the
-    // list shows a board member the server made anyway.
-    let refused = |err: ClientError| -> Result<(), Disconnected> {
-        let _ = updates.send(Update::BoardMemberFailed(member_call_failure(&err)));
-        if err.is_disconnect() || err.is_final() {
-            return Err(err.into());
+async fn send_sessions(client: &Client, of: Option<aurelius_domain::UserId>, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
+    match client.sessions(of).await {
+        Ok(list) => {
+            let _ = updates.send(Update::Sessions(of, Ok(list)));
         }
-        Ok(())
-    };
-    match call {
-        UserCall::List => refresh_board_members(client, updates).await,
-        UserCall::Create { username, password } => {
-            let created = match client.user_create(&username, &password.0).await {
-                Ok(receipt) => receipt,
-                Err(err) => return refused(err),
-            };
-            drop(password);
-            let who = client.user_whoami().await.map_err(Disconnected::from)?;
-            let new_id = match created.result {
-                CommandResult::UserCreated { user_id } => Some(user_id),
-                _ => None,
-            };
-            if new_id.is_some() && who.user.as_ref().map(|u| u.id) == new_id {
-                // The onboarding: this window works as the new board member.
-                *me = new_id;
-            } else {
-                let _ = updates.send(Update::BoardMemberCreated(username.trim().to_string()));
-            }
-            let _ = updates.send(Update::Who(who));
-            refresh_board_members(client, updates).await
-        }
-        UserCall::Use { user_id, password } => {
-            let result = client.user_use(user_id, &password.0).await;
-            drop(password);
-            match result {
-                Ok(who) => {
-                    *me = who.user.as_ref().map(|u| u.id);
-                    let _ = updates.send(Update::Who(who));
-                    Ok(())
-                }
-                Err(err) => refused(err),
-            }
+        Err(e) if ends(&e) => return Err(e.into()),
+        Err(e) => {
+            let _ = updates.send(Update::Sessions(of, Err(account_failure(&e))));
         }
     }
+    Ok(())
+}
+
+/// `user.*` and `session.*` while signed in. A password goes to the server and is
+/// dropped with the call; a refusal goes back to the form that asked. True when
+/// this device signed out (back to the gate).
+async fn board_members(client: &Client, call: UserCall, tokens: &Tokens, updates: &mpsc::UnboundedSender<Update>) -> Result<bool, Disconnected> {
+    // The form always hears back, also when the connection drops (Trace M3a m1):
+    // else it stays on "Creating…" / "Saving…". No retry: after the reconnect the
+    // list shows what the server did anyway.
+    let refused = |err: ClientError| -> Result<bool, Disconnected> {
+        let _ = updates.send(Update::BoardMemberFailed(member_call_failure(&err)));
+        if ends(&err) {
+            return Err(err.into());
+        }
+        Ok(false)
+    };
+    let failed = |err: ClientError| -> Result<bool, Disconnected> {
+        let _ = updates.send(Update::Account(AccountUpdate::Failed(account_failure(&err))));
+        if ends(&err) {
+            return Err(err.into());
+        }
+        Ok(false)
+    };
+    match call {
+        UserCall::List => refresh_board_members(client, updates).await.map(|()| false),
+        // Another board member (MU1-22): this device stays signed in as it is.
+        UserCall::Create { username, password } => {
+            let created = client.user_create(&username, &password.0).await;
+            drop(password);
+            if let Err(err) = created {
+                return refused(err);
+            }
+            let _ = updates.send(Update::BoardMemberCreated(username.trim().to_string()));
+            refresh_board_members(client, updates).await.map(|()| false)
+        }
+        // Signed in already: a sign-in as someone else goes through Sign out first.
+        UserCall::Login { password, .. } => {
+            drop(password);
+            let _ = updates.send(Update::BoardMemberFailed(MemberFailure::general("Sign out first, then sign in as someone else.")));
+            Ok(false)
+        }
+        UserCall::Logout => {
+            tokens.forget();
+            match client.user_logout().await {
+                Ok(_) => {}
+                Err(err) if ends(&err) && !signed_out(&err) => return Err(err.into()),
+                Err(_) => {}
+            }
+            let _ = updates.send(Update::Who(aurelius_domain::user::WhoAmI { board_members_exist: true, user: None, must_change_password: false }));
+            Ok(true)
+        }
+        UserCall::Sessions(of) => send_sessions(client, of, updates).await.map(|()| false),
+        UserCall::Revoke { session_id, of } => {
+            match client.revoke_session(session_id).await {
+                Ok(()) => {
+                    let _ = updates.send(Update::Account(AccountUpdate::Revoked(1)));
+                }
+                Err(err) => {
+                    failed(err)?;
+                }
+            }
+            send_sessions(client, of, updates).await.map(|()| false)
+        }
+        UserCall::RevokeOthers => {
+            let list = match client.sessions(None).await {
+                Ok(list) => list,
+                Err(err) => return failed(err),
+            };
+            let mut ended = 0;
+            for s in list.sessions.iter().filter(|s| !s.current) {
+                match client.revoke_session(s.id).await {
+                    Ok(()) => ended += 1,
+                    Err(err) => {
+                        failed(err)?;
+                        break;
+                    }
+                }
+            }
+            if ended > 0 {
+                let _ = updates.send(Update::Account(AccountUpdate::Revoked(ended)));
+            }
+            send_sessions(client, None, updates).await.map(|()| false)
+        }
+        UserCall::SetPassword { user_id, old, new } => {
+            let result = client.set_password(user_id, old.as_ref().map(|p| p.0.as_str()), &new.0).await;
+            drop((old, new));
+            match result {
+                Ok(()) => {
+                    let name = match user_id {
+                        Some(id) => client.user_list().await.ok().and_then(|l| l.users.into_iter().find(|u| u.id == id)).map(|u| u.username),
+                        None => None,
+                    };
+                    let temporary = user_id.map(|_| name.unwrap_or_else(|| "this board member".into()));
+                    let _ = updates.send(Update::Account(AccountUpdate::PasswordSaved(temporary)));
+                    // The own change ended the other devices' sessions: the list shows that (QA3 D-m2).
+                    if user_id.is_none() {
+                        return send_sessions(client, None, updates).await.map(|()| false);
+                    }
+                    Ok(false)
+                }
+                Err(err) => {
+                    let failure = member_call_failure(&err);
+                    let _ = updates.send(Update::Account(AccountUpdate::PasswordFailed(failure)));
+                    if ends(&err) {
+                        return Err(err.into());
+                    }
+                    Ok(false)
+                }
+            }
+        }
+        UserCall::Disable(user_id) => {
+            match client.disable_user(user_id).await {
+                Ok(user) => {
+                    let _ = updates.send(Update::Account(AccountUpdate::Disabled(user)));
+                }
+                Err(err) => {
+                    failed(err)?;
+                }
+            }
+            refresh_board_members(client, updates).await.map(|()| false)
+        }
+    }
+}
+
+/// A code the server refused before it reached Claude (Sentinel C7).
+pub const CODE_REFUSED: &str = "That is not a code Claude shows. Copy the whole code and paste it again.";
+
+/// The own Claude login (MU3-09). The code goes to the server once and is
+/// dropped with the call; no text of an answer repeats it.
+async fn claude_login(client: &Client, call: ClaudeCall, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
+    let input = matches!(call, ClaudeCall::Input { .. });
+    let failure = |err: &ClientError| -> String {
+        use aurelius_domain::error::ErrorCode;
+        match err {
+            e if not_built(e) => NOT_BUILT.into(),
+            // C5: a link of another connection, a used one or an ended one: no difference.
+            ClientError::Protocol(p) if p.code == ErrorCode::NotFound => "This sign-in ended. Start again with Connect.".into(),
+            // C7: refused before it reached Claude; the server never repeats the text.
+            ClientError::Protocol(p) if input && p.code == ErrorCode::Validation => CODE_REFUSED.into(),
+            ClientError::Protocol(p) => p.message.clone(),
+            e => e.to_string(),
+        }
+    };
+    let result = match call {
+        ClaudeCall::Status => client.claude_login().await.map(ClaudeUpdate::Status),
+        ClaudeCall::Link => client.claude_login_link().await.map(ClaudeUpdate::Linking),
+        ClaudeCall::Input { link_id, code } => {
+            let answer = client.claude_login_input(&link_id, &code.0).await;
+            drop(code);
+            answer.map(ClaudeUpdate::Status)
+        }
+        ClaudeCall::Cancel(link_id) => client.claude_login_cancel(&link_id).await.map(ClaudeUpdate::Status),
+        ClaudeCall::Unlink => client.claude_login_unlink().await.map(ClaudeUpdate::Status),
+    };
+    match result {
+        Ok(update) => {
+            let _ = updates.send(Update::Claude(update));
+        }
+        Err(e) if ends(&e) => return Err(e.into()),
+        Err(e) => {
+            let _ = updates.send(Update::Claude(ClaudeUpdate::Failed(failure(&e))));
+        }
+    }
+    Ok(())
 }
 
 /// One board call. A read that fails goes to the page; a write that fails
 /// goes back to the board, also when the connection drops on the way (the
 /// session then reconnects as usual). Writes are never sent twice.
 async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
-    let lost = |e: &ClientError| e.is_disconnect() || e.is_final();
+    let lost = |e: &ClientError| ends(&e);
     match call {
         BoardCall::Load(project_id) => {
             let result = read(client, Method::BoardGet { project_id }, |b| match b { ResponseBody::Board(v) => Some(v), _ => None }).await;
@@ -2234,7 +2940,7 @@ async fn send_channels(client: &Client, updates: &mpsc::UnboundedSender<Update>)
         Ok(snapshot) => {
             let _ = updates.send(Update::Channels(Some(snapshot.channels)));
         }
-        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+        Err(e) if ends(&e) => return Err(e.into()),
         Err(_) => {
             let _ = updates.send(Update::Channels(None));
         }
@@ -2314,7 +3020,7 @@ async fn refresh(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Re
 async fn refresh_load(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
     match client.load_snapshot().await {
         Ok(snapshot) => { let _ = updates.send(Update::Load(Ok(snapshot))); }
-        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+        Err(e) if ends(&e) => return Err(e.into()),
         Err(e) => { let _ = updates.send(Update::Load(Err(load_error(e)))); }
     }
     Ok(())
@@ -2346,7 +3052,7 @@ fn always_allow_error(err: ClientError) -> String {
 async fn load_always_allow(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
     match client.mcp_always_allow().await {
         Ok(list) => { let _ = updates.send(Update::McpAlwaysAllow(Some(list.tools))); }
-        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+        Err(e) if ends(&e) => return Err(e.into()),
         Err(_) => { let _ = updates.send(Update::McpAlwaysAllow(None)); }
     }
     Ok(())
@@ -2389,7 +3095,7 @@ async fn handle_plugins(client: &Client, call: PluginsCall, updates: &mpsc::Unbo
     fn check<T>(r: Result<T, ClientError>) -> Result<Result<T, String>, Disconnected> {
         match r {
             Ok(v) => Ok(Ok(v)),
-            Err(e) if e.is_disconnect() || e.is_final() => Err(e.into()),
+            Err(e) if ends(&e) => Err(e.into()),
             Err(e) => Ok(Err(readable(&e))),
         }
     }
@@ -2441,7 +3147,7 @@ async fn handle_app_keys(client: &Client, call: AppKeyCall, updates: &mpsc::Unbo
     };
     match done.and(client.app_keys().await) {
         Ok(keys) => send(AppKeyUpdate::Keys(keys)),
-        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+        Err(e) if ends(&e) => return Err(e.into()),
         Err(e) => send(AppKeyUpdate::Failed(e.to_string())),
     }
     Ok(())
@@ -2452,7 +3158,7 @@ async fn handle_app_keys(client: &Client, call: AppKeyCall, updates: &mpsc::Unbo
 async fn refresh_artifacts(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
     match client.artifacts(None, None, None).await {
         Ok(artifacts) => { let _ = updates.send(Update::Artifacts(artifacts)); }
-        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+        Err(e) if ends(&e) => return Err(e.into()),
         Err(_) => {}
     }
     Ok(())
@@ -2462,7 +3168,7 @@ async fn refresh_artifacts(client: &Client, updates: &mpsc::UnboundedSender<Upda
 async fn refresh_schedules(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
     match client.task_schedules(None).await {
         Ok(snapshot) => { let _ = updates.send(Update::Schedules(snapshot.schedules)); }
-        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+        Err(e) if ends(&e) => return Err(e.into()),
         Err(_) => {}
     }
     Ok(())
@@ -2643,36 +3349,102 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_password_is_never_printed() {
-        let call = Request::BoardMembers(UserCall::Use { user_id: aurelius_domain::UserId::new(), password: Password::new("Tr0ub4dor&3-zebra".into()) });
-        let create = Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new("Tr0ub4dor&3-zebra".into()) });
-        for printed in [format!("{call:?}"), format!("{create:?}")] {
-            assert!(!printed.contains("Tr0ub4dor"), "{printed}");
-            assert!(printed.contains("<redacted>"), "{printed}");
+    /// This device's session tokens in memory, for the tests (the OS store is the user's).
+    #[derive(Default)]
+    pub(super) struct MemoryTokens(std::sync::Mutex<std::collections::HashMap<String, String>>);
+
+    impl TokenStore for MemoryTokens {
+        fn get(&self, server: &str) -> Option<String> {
+            self.0.lock().unwrap().get(server).cloned()
         }
+        fn set(&self, server: &str, token: &str) {
+            self.0.lock().unwrap().insert(server.into(), token.into());
+        }
+        fn delete(&self, server: &str) {
+            self.0.lock().unwrap().remove(server);
+        }
+    }
+
+    pub(super) fn memory_tokens() -> (Tokens, std::sync::Arc<MemoryTokens>) {
+        let store = std::sync::Arc::new(MemoryTokens::default());
+        (Tokens::new("local".into(), store.clone()), store)
+    }
+
+    /// Sentinel S4/C6/C8: no password, code or sign-in link is ever printed by this window.
+    #[test]
+    fn a_password_a_code_or_a_link_is_never_printed() {
+        let login = Request::BoardMembers(UserCall::Login { username: "alex".into(), password: Password::new("Tr0ub4dor&3-zebra".into()) });
+        let create = Request::BoardMembers(UserCall::Create { username: "alex".into(), password: Password::new("Tr0ub4dor&3-zebra".into()) });
+        let change = Request::BoardMembers(UserCall::SetPassword { user_id: None, old: Some(Password::new("Tr0ub4dor&3-zebra".into())), new: Password::new("Tr0ub4dor&3-zebra-2".into()) });
+        let code = Request::Claude(ClaudeCall::Input { link_id: "l1".into(), code: LoginCode::new("CODE-SECRET#STATE".into()) });
+        let prompt = Update::Claude(ClaudeUpdate::Prompt(LoginPrompt { link_id: "l1".into(), url: Some("https://claude.com/cai/oauth/authorize?state=STATE-SECRET".into()), asks_code: true, error: None }));
+        for printed in [format!("{login:?}"), format!("{create:?}"), format!("{change:?}"), format!("{code:?}"), format!("{prompt:?}")] {
+            assert!(!printed.contains("Tr0ub4dor") && !printed.contains("SECRET"), "{printed}");
+        }
+        let (tokens, _) = memory_tokens();
+        assert!(!format!("{tokens:?}").contains("aus_"), "the store prints only its server");
+    }
+
+    /// An empty token (a server without sessions yet) is never kept.
+    #[test]
+    fn only_a_real_token_is_kept() {
+        let (tokens, store) = memory_tokens();
+        tokens.keep("");
+        assert_eq!(store.get("local"), None);
+        tokens.keep("aus_token");
+        assert_eq!(tokens.get().as_deref(), Some("aus_token"));
+        tokens.forget();
+        assert_eq!(tokens.get(), None);
     }
 
     #[test]
     fn a_refusal_goes_to_its_field() {
         use aurelius_domain::error::{AppError, ErrorCode};
         let refusal = |code, text: &str| member_failure(&ClientError::Protocol(AppError::new(code, text)));
-        assert_eq!(refusal(ErrorCode::UsernameTaken, "another board member already has this name"), MemberFailure { field: Some(MemberField::Username), message: "This username is taken.".into() });
+        assert_eq!(refusal(ErrorCode::UsernameTaken, "another board member already has this name"), MemberFailure { field: Some(MemberField::Username), message: "This username is taken.".into(), retry_after_ms: None });
         assert_eq!(refusal(ErrorCode::WeakPassword, "A password has at least 12 characters.").field, Some(MemberField::Password));
         assert_eq!(refusal(ErrorCode::InvalidUsername, "Use only letters, digits, '.', '_' and '-'.").field, Some(MemberField::Username));
-        assert_eq!(refusal(ErrorCode::TooManyAttempts, "Too many tries.").message, "Too many tries. Wait a minute and try again.");
+        assert_eq!(refusal(ErrorCode::WrongPassword, "wrong").field, Some(MemberField::Current), "MU3-05 AC1: the current password");
         assert_eq!(refusal(ErrorCode::Internal, "storage is busy").field, None);
-        assert!(needs_board_member(&ClientError::Protocol(AppError::new(ErrorCode::BoardMemberRequired, "choose who you are first"))));
+        assert!(needs_board_member(&ClientError::Protocol(AppError::new(ErrorCode::BoardMemberRequired, "sign in first"))));
         assert!(!needs_board_member(&ClientError::Disconnected));
+    }
+
+    /// MU3-02 AC3/AC4: one generic refusal; too many tries with the server's wait.
+    #[test]
+    fn a_refused_sign_in_never_says_which_was_wrong() {
+        use aurelius_domain::error::{AppError, ErrorCode};
+        let login = |e: AppError| login_failure(&ClientError::Protocol(e));
+        assert_eq!(login(AppError::new(ErrorCode::WrongPassword, "Username or password is wrong.")), MemberFailure::general(SIGN_IN_WRONG));
+        assert_eq!(login(AppError::new(ErrorCode::Unauthenticated, "no")).message, SIGN_IN_WRONG);
+        let wait = login(AppError::too_many_attempts(29_400));
+        assert_eq!((wait.message.as_str(), wait.retry_after_ms), ("Too many attempts. Try again in 0:30.", Some(29_400)));
+        assert_eq!(login_failure(&ClientError::Disconnected).message, MEMBER_CONNECTION_DROPPED);
+    }
+
+    /// The gate's refusals end the session (sign in again); a missing method says "update the server".
+    #[test]
+    fn unauthenticated_and_not_built_are_told_apart() {
+        use aurelius_domain::error::{AppError, ErrorCode};
+        let e = |code, text: &str| ClientError::Protocol(AppError::new(code, text));
+        assert!(signed_out(&e(ErrorCode::Unauthenticated, "Sign in.")) && ends(&e(ErrorCode::Unauthenticated, "Sign in.")));
+        assert!(signed_out(&e(ErrorCode::PasswordChangeRequired, "Change it.")));
+        let d = Disconnected::from(e(ErrorCode::Unauthenticated, "Sign in."));
+        assert!(d.2 && d.0.is_none() && d.1.is_none(), "no notice, no unpairing: the sign-in screen");
+        assert!(not_built(&e(ErrorCode::UnknownMethod, "This server does not know the method session.list.")));
+        assert!(not_built(&e(ErrorCode::Validation, "This server cannot do this yet.")));
+        assert!(not_built(&e(ErrorCode::Validation, "This server cannot run tickets on board members' own Claude logins yet.")));
+        assert!(!not_built(&e(ErrorCode::Validation, "The title is empty.")));
+        assert_eq!(account_failure(&e(ErrorCode::LastBoardMember, "x")), LAST_BOARD_MEMBER);
+        assert_eq!(board_write_failure(&e(ErrorCode::UnknownMethod, "x")), NOT_BUILT);
     }
 
     mod against_a_daemon {
         use super::super::*;
-        use aurelius_domain::UserId;
         use aurelius_domain::user::WhoAmI;
 
-        const ADA: &str = "Tr0ub4dor&3-zebra-ada";
-        const MARIE: &str = "correct-horse-battery-marie";
+        const ALEX: &str = "Tr0ub4dor&3-zebra-alex";
+        const ROBIN: &str = "correct-horse-battery-robin";
 
         async fn daemon(root: &std::path::Path) -> tokio::task::JoinHandle<anyhow::Result<()>> {
             let (tx, rx) = tokio::sync::oneshot::channel();
@@ -2724,105 +3496,335 @@ mod tests {
             UserCall::Create { username: username.into(), password: Password::new(password.into()) }
         }
 
-        fn use_(user_id: UserId, password: &str) -> UserCall {
-            UserCall::Use { user_id, password: Password::new(password.into()) }
+        fn login(username: &str, password: &str) -> UserCall {
+            UserCall::Login { username: username.into(), password: Password::new(password.into()) }
         }
 
-        /// MU1-20, MU1-21, MU1-22 and B8 through this app's backend: the onboarding,
-        /// a second board member, the choice with its one password check, the
-        /// remembered one in every hello (also after a reconnect, Trace m9), an
-        /// unknown one forgotten, switching, and `board_member_required` on a write.
+        /// MU3-02, MU3-03, MU3-04, MU3-06 and MU3-09 through this app's backend on protocol 5:
+        /// the onboarding signs in at once, a second board member, a new device that shows
+        /// only the sign-in (reads wait, writes are refused), the one generic refusal, the
+        /// sign-in with its held reads, the own sessions and the Claude login (or "update the
+        /// server" while Forge builds them), Run on my login, Sign out, and a kept session
+        /// that the server no longer knows (signed out, token forgotten).
         #[tokio::test(flavor = "multi_thread")]
-        async fn board_members_from_onboarding_to_switching() {
+        async fn signing_in_from_the_onboarding_to_signing_out() {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path().to_path_buf();
             let mut server = daemon(&root).await;
             let target = || Some(Target::Local { root: root.clone(), spawn: false });
 
-            // A server without board members: only the onboarding (MU1-20 AC1).
-            let mut first = start(target(), None);
+            // A server without board members: only the onboarding (MU1-20 AC1, MU3-02 AC5).
+            let (tokens, first_store) = super::memory_tokens();
+            let mut first = start(target(), tokens);
             let empty = who(&mut first).await;
             assert!(!empty.board_members_exist && empty.user.is_none(), "{empty:?}");
 
-            // Refused, nothing made (AC3): a short password, by its field.
-            ask(&first, create("ada", "short"));
+            // Refused, nothing made (MU1-20 AC3): a short password, by its field.
+            ask(&first, create("alex", "short"));
             assert_eq!(failure(&mut first).await.field, Some(MemberField::Password));
 
-            // Made, and this window works as it (AC2, MU1-21 AC1).
-            ask(&first, create("ada", ADA));
-            let onboarded = who(&mut first).await;
-            let ada = onboarded.user.clone().expect("the new board member works here");
-            assert!(onboarded.board_members_exist);
-            assert_eq!(ada.username, "ada");
+            // Made, and this device is signed in as alex at once.
+            ask(&first, create("alex", ALEX));
+            let onboarded = next(&mut first, |u| match u {
+                Update::Who(w) if w.user.is_some() => Some(w),
+                _ => None,
+            })
+            .await;
+            let alex = onboarded.user.clone().unwrap();
+            assert_eq!(alex.username, "alex");
+            let kept = first_store.get("local").expect("the session token is kept (MU3-03 AC1)");
+            assert!(!kept.contains(ALEX), "a token, never a password");
 
-            // A second board member (MU1-22 AC1); this window stays ada.
-            ask(&first, create("ada", MARIE));
-            assert_eq!(failure(&mut first).await, MemberFailure { field: Some(MemberField::Username), message: "This username is taken.".into() }, "MU1-22 AC2");
-            ask(&first, create("marie", MARIE));
+            // Signed in, the session loads: the own Claude login among it (MU3-09 AC2).
+            let claude = next(&mut first, |u| match u {
+                Update::Claude(ClaudeUpdate::Status(v)) => Some(Ok(v)),
+                Update::Claude(ClaudeUpdate::Failed(why)) => Some(Err(why)),
+                _ => None,
+            })
+            .await;
+            let claude = claude.expect("the status is a session read");
+            assert_eq!(claude.user_id, alex.id, "the own login only (B12)");
+            assert_eq!(claude.status, aurelius_domain::user::ClaudeLoginStatus::Missing);
+
+            // A second board member (MU1-22 AC1); this device stays alex.
+            ask(&first, create("robin", ROBIN));
             let made = next(&mut first, |u| match u {
                 Update::BoardMemberCreated(name) => Some(name),
                 _ => None,
             })
             .await;
-            assert_eq!(made, "marie");
-            assert_eq!(who(&mut first).await.user.map(|u| u.id), Some(ada.id), "still ada");
-            let list = next(&mut first, |u| match u {
-                Update::BoardMembers(list) => Some(list),
+            assert_eq!(made, "robin");
+
+            // Alex on a second device: the own sessions list both (MU3-04 AC1); revoking the other
+            // sends that device back to the sign-in at once, its token forgotten (AC2).
+            let (tokens, other_store) = super::memory_tokens();
+            let mut other = start(target(), tokens);
+            assert!(who(&mut other).await.user.is_none());
+            ask(&other, login("alex", ALEX));
+            next(&mut other, |u| match u {
+                Update::Who(w) if w.user.is_some() => Some(()),
                 _ => None,
             })
             .await;
-            assert_eq!(list.iter().map(|u| u.username.as_str()).collect::<Vec<_>>(), ["ada", "marie"]);
-            let marie = list[1].id;
+            assert!(other_store.get("local").is_some());
+            ask(&first, UserCall::Sessions(None));
+            let list = next(&mut first, |u| match u {
+                Update::Sessions(None, r) => Some(r),
+                _ => None,
+            })
+            .await
+            .expect("the own sessions");
+            assert_eq!(list.sessions.len(), 2, "{list:?}");
+            assert!(list.sessions.iter().all(|s| s.device_name.starts_with("Desktop · ")), "{list:?}");
+            let theirs = list.sessions.iter().find(|s| !s.current).expect("the other device").id;
+            ask(&first, UserCall::Revoke { session_id: theirs, of: None });
+            assert_eq!(next(&mut first, |u| match u {
+                Update::Account(AccountUpdate::Revoked(n)) => Some(n),
+                _ => None,
+            })
+            .await, 1);
+            let reason = next(&mut other, |u| match u {
+                Update::SignedOut(reason) => Some(reason),
+                _ => None,
+            })
+            .await;
+            assert_eq!(reason, aurelius_domain::user::SignOutReason::Revoked);
+            assert_eq!(other_store.get("local"), None);
+            let gone = next(&mut other, |u| match u {
+                Update::Who(w) => Some(w),
+                _ => None,
+            })
+            .await;
+            assert!(gone.user.is_none() && gated(&gone), "{gone:?}");
+            let left = next(&mut first, |u| match u {
+                Update::Sessions(None, r) => Some(r),
+                _ => None,
+            })
+            .await
+            .expect("the own sessions");
+            assert_eq!(left.sessions.len(), 1, "{left:?}");
 
-            // A new device: board members exist, none works here (MU1-20 AC5, MU1-21 AC2).
-            let mut device = start(target(), None);
+            // A new device: board members exist, nobody is signed in: the sign-in only (MU3-02 AC1).
+            let (tokens, device_store) = super::memory_tokens();
+            let mut device = start(target(), tokens);
             let fresh = who(&mut device).await;
             assert!(fresh.board_members_exist && fresh.user.is_none(), "{fresh:?}");
+            assert!(gated(&fresh));
+            // Before a session a read waits for the sign-in, a write is refused (MU3-06).
+            device.requests.send(Request::Board(BoardCall::Load(None))).unwrap();
+            let start_ticket = Command::StartTicket(aurelius_domain::ticket::StartTicket { ticket_id: aurelius_domain::TicketId::new(), employee_id: None });
+            device.requests.send(Request::Board(BoardCall::Write { command: start_ticket, expected_version: None, done: None })).unwrap();
+            let refused = next(&mut device, |u| match u {
+                Update::Board(BoardUpdate::Loaded(..)) => panic!("a read before the sign-in"),
+                Update::Board(BoardUpdate::Failed { message, .. }) => Some(message),
+                _ => None,
+            })
+            .await;
+            assert_eq!(refused, BOARD_MEMBER_REQUIRED);
 
-            // Writes wait for the choice: the S5 gate as the window hears it.
-            let (events, _events) = mpsc::unbounded_channel();
-            let bare = Client::open(target().as_ref().unwrap(), "test", events, None, &[]).await.unwrap();
-            let (gate_tx, mut gate_rx) = mpsc::unbounded_channel();
-            let ticket = aurelius_domain::ticket::CreateTicket {
-                project_id: ProjectId::new(),
-                title: "Login per board member".into(),
-                description: None,
-                priority: Default::default(),
-                labels: vec![],
-                deadline_ms: None,
-                owner_employee_id: None,
-                run: Default::default(),
-                files: vec![],
-                start: false,
-                from_message: None,
-            };
-            assert!(send(&bare, envelope(Command::CreateTicket(ticket), None), &gate_tx).await.is_ok(), "the session goes on");
-            assert!(matches!(gate_rx.try_recv(), Ok(Update::BoardMemberRequired)));
+            // One generic refusal (MU3-02 AC3), then signed in (AC2); the held read goes.
+            ask(&device, login("robin", "not her password"));
+            assert_eq!(failure(&mut device).await, MemberFailure::general(SIGN_IN_WRONG));
+            ask(&device, login("nobody", ROBIN));
+            assert_eq!(failure(&mut device).await.message, SIGN_IN_WRONG, "an unknown name says the same");
+            ask(&device, login("robin", ROBIN));
+            let robin = next(&mut device, |u| match u {
+                Update::Who(w) if w.user.is_some() => w.user,
+                _ => None,
+            })
+            .await;
+            assert_eq!(robin.username, "robin");
+            next(&mut device, |u| matches!(u, Update::Board(BoardUpdate::Loaded(None, Ok(_)))).then_some(())).await;
 
-            // The one password check of this device (B8).
-            ask(&device, use_(marie, "not her password"));
-            assert_eq!(failure(&mut device).await, MemberFailure { field: Some(MemberField::Password), message: "That password is wrong.".into() });
-            ask(&device, use_(marie, MARIE));
-            assert_eq!(who(&mut device).await.user.map(|u| u.id), Some(marie));
+            // Run on my login (B4, MU3-12, F2): an unknown ticket is refused with the server's reason.
+            device.requests.send(Request::Board(BoardCall::Write { command: Command::UseMyLogin(aurelius_domain::ticket::UseMyLogin { ticket_id: aurelius_domain::TicketId::new() }), expected_version: None, done: None })).unwrap();
+            let taken = next(&mut device, |u| match u {
+                Update::Board(BoardUpdate::Failed { message, .. }) => Some(message),
+                Update::Board(BoardUpdate::Done { .. }) => Some(String::new()),
+                _ => None,
+            })
+            .await;
+            assert!(taken != NOT_BUILT && !taken.is_empty(), "an unknown ticket is refused: {taken}");
 
-            // The server restarts: the device says marie again in its hello, no password (Trace m9).
+            // Connect (MU3-09, F2): without a Claude Code connection, the daemon's own words.
+            device.requests.send(Request::Claude(ClaudeCall::Link)).unwrap();
+            let link = next(&mut device, |u| match u {
+                Update::Claude(ClaudeUpdate::Linking(id)) => Some(Ok(id)),
+                Update::Claude(ClaudeUpdate::Failed(why)) => Some(Err(why)),
+                _ => None,
+            })
+            .await;
+            assert_eq!(link, Err("There is no Claude Code connection on this server. Add one in Settings → Connections first.".to_string()));
+
+            // Sign out on this device (MU3-04 AC3): the sign-in again, the token forgotten.
+            ask(&device, UserCall::Logout);
+            let out = next(&mut device, |u| match u {
+                Update::Who(w) if w.user.is_none() => Some(w),
+                _ => None,
+            })
+            .await;
+            assert!(out.board_members_exist && gated(&out));
+            assert_eq!(device_store.get("local"), None);
+
+            // A kept session the server does not know: signed out, the token forgotten (MU3-03 AC3).
             stop(&root, server).await;
             server = daemon(&root).await;
-            let back = who(&mut device).await;
-            assert_eq!(back.user.map(|u| u.id), Some(marie), "not forgotten on a reconnect");
+            let (tokens, stale_store) = super::memory_tokens();
+            stale_store.set("local", "aus_not-a-session");
+            let mut stale = start(target(), tokens);
+            let reason = next(&mut stale, |u| match u {
+                Update::SignedOut(reason) => Some(reason),
+                _ => None,
+            })
+            .await;
+            assert_eq!(reason, aurelius_domain::user::SignOutReason::Expired);
+            let back = who(&mut stale).await;
+            assert!(back.user.is_none(), "{back:?}");
+            assert_eq!(stale_store.get("local"), None);
 
-            // A window that remembers ada starts as that board member; an unknown one is not taken.
-            let mut remembered = start(target(), Some(ada.id));
-            assert_eq!(who(&mut remembered).await.user.map(|u| u.id), Some(ada.id));
-            let mut unknown = start(target(), Some(UserId::new()));
-            let gone = who(&mut unknown).await;
-            assert!(gone.board_members_exist && gone.user.is_none(), "the choice shows again: {gone:?}");
+            // A device that kept its session is back after the restart without a password (MU3-03 AC2).
+            next(&mut first, |u| matches!(u, Update::Connection(Connection::Connecting)).then_some(())).await;
+            let back = who(&mut first).await;
+            assert_eq!(back.user.map(|u| u.id), Some(alex.id));
+            assert_eq!(first_store.get("local"), Some(kept));
 
-            // Switch board member.
-            ask(&device, use_(ada.id, ADA));
-            assert_eq!(who(&mut device).await.user.map(|u| u.id), Some(ada.id));
+            drop((first, other, device, stale));
+            stop(&root, server).await;
+        }
 
-            drop((first, device, remembered, unknown));
+        /// Alex onboards and adds Robin; the window is signed in as Alex once it loaded.
+        async fn alex_and_robin(root: &std::path::Path) -> (Handle, std::sync::Arc<super::MemoryTokens>, aurelius_domain::UserId) {
+            let (tokens, store) = super::memory_tokens();
+            let mut first = start(Some(Target::Local { root: root.to_path_buf(), spawn: false }), tokens);
+            assert!(who(&mut first).await.user.is_none());
+            ask(&first, create("alex", ALEX));
+            next(&mut first, |u| matches!(u, Update::Claude(ClaudeUpdate::Status(_))).then_some(())).await;
+            ask(&first, create("robin", ROBIN));
+            let robin = next(&mut first, |u| match u {
+                Update::BoardMembers(list) => list.into_iter().find(|m| m.username == "robin").map(|m| m.id),
+                _ => None,
+            })
+            .await;
+            (first, store, robin)
+        }
+
+        fn new_project(name: &str) -> Request {
+            Request::CreateProject { name: name.into(), description: None, folder: None }
+        }
+
+        /// R3 M2 (MU3-08): a write made offline by Alex, whose session then is no longer
+        /// known (a token the server refuses), never goes as Robin who signs in next on
+        /// the same window; a write at the gate is refused, not kept for after the sign-in.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn writes_from_before_a_sign_out_never_go_as_the_next_board_member() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let server = daemon(&root).await;
+            let (mut first, store, _) = alex_and_robin(&root).await;
+
+            // Offline: Alex's write waits in the outbox.
+            stop(&root, server).await;
+            next(&mut first, |u| matches!(u, Update::Connection(Connection::Offline(_))).then_some(())).await;
+            first.requests.send(new_project("From Alex")).unwrap();
+            // Meanwhile the session ended (here: a token the server never knew).
+            store.set("local", "aus_not-a-session");
+            let server = daemon(&root).await;
+            let reason = next(&mut first, |u| match u {
+                Update::SignedOut(reason) => Some(reason),
+                Update::Created(_) => panic!("Alex's write went without a session"),
+                _ => None,
+            })
+            .await;
+            assert_eq!(reason, aurelius_domain::user::SignOutReason::Expired);
+            assert!(who(&mut first).await.user.is_none());
+
+            // At the gate a write is refused at once (only reads wait for the sign-in).
+            first.requests.send(new_project("Also from Alex")).unwrap();
+            let refused = next(&mut first, |u| match u {
+                Update::Error(why) => Some(why),
+                Update::Created(_) => panic!("a write at the gate went"),
+                _ => None,
+            })
+            .await;
+            assert_eq!(refused, BOARD_MEMBER_REQUIRED);
+
+            // Robin signs in on the same window: Alex's write is dropped, and said so.
+            ask(&first, login("robin", ROBIN));
+            let dropped = next(&mut first, |u| match u {
+                Update::Error(why) if why == NOT_SENT_SIGNED_OUT => Some(why),
+                Update::Created(_) => panic!("Alex's write went as Robin"),
+                _ => None,
+            })
+            .await;
+            assert_eq!(dropped, NOT_SENT_SIGNED_OUT);
+
+            // Robin's own write goes; the server has only that project.
+            first.requests.send(new_project("From Robin")).unwrap();
+            let made = next(&mut first, |u| match u {
+                Update::Created(id) => Some(id),
+                _ => None,
+            })
+            .await;
+            let projects = next(&mut first, |u| match u {
+                Update::Projects(list) if list.iter().any(|p| p.id == made) => Some(list),
+                _ => None,
+            })
+            .await;
+            let names: Vec<_> = projects.iter().map(|p| p.name.as_str()).collect();
+            assert!(!names.iter().any(|n| n.contains("Alex")), "{names:?}");
+
+            drop(first);
+            stop(&root, server).await;
+        }
+
+        /// QA3 D2 (MU3-05, B10): signing in with a temporary password goes on to "Choose a
+        /// new password" without a restart, then into the session. QA3 D-m2: after the own
+        /// password's change the sessions list is read again (the other devices are gone).
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_temporary_password_signs_in_to_its_change_and_the_sessions_follow() {
+            const TEMPORARY: &str = "temporary-horse-staple-41";
+            const ROBIN_NEW: &str = "robin-chose-this-one-42";
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let server = daemon(&root).await;
+            let target = || Some(Target::Local { root: root.clone(), spawn: false });
+            let (mut first, _, robin) = alex_and_robin(&root).await;
+            ask(&first, UserCall::SetPassword { user_id: Some(robin), old: None, new: Password::new(TEMPORARY.into()) });
+            next(&mut first, |u| matches!(u, Update::Account(AccountUpdate::PasswordSaved(Some(_)))).then_some(())).await;
+
+            let (tokens, _) = super::memory_tokens();
+            let mut device = start(target(), tokens);
+            assert!(who(&mut device).await.user.is_none());
+            ask(&device, login("robin", TEMPORARY));
+            let must = next(&mut device, |u| match u {
+                Update::Who(w) if w.user.is_some() => Some(w),
+                Update::BoardMemberFailed(f) => panic!("refused: {f:?}"),
+                _ => None,
+            })
+            .await;
+            assert!(must.must_change_password && gated(&must), "{must:?}");
+            ask(&device, UserCall::SetPassword { user_id: None, old: Some(Password::new(TEMPORARY.into())), new: Password::new(ROBIN_NEW.into()) });
+            let changed = who(&mut device).await;
+            assert!(!changed.must_change_password && !gated(&changed), "{changed:?}");
+            next(&mut device, |u| matches!(u, Update::Claude(ClaudeUpdate::Status(_))).then_some(())).await;
+
+            // Robin on a second device, then a password change on the first: one session left in the list.
+            let (tokens, _) = super::memory_tokens();
+            let mut second = start(target(), tokens);
+            ask(&second, login("robin", ROBIN_NEW));
+            next(&mut second, |u| matches!(u, Update::Who(w) if w.user.is_some()).then_some(())).await;
+            ask(&device, UserCall::SetPassword { user_id: None, old: Some(Password::new(ROBIN_NEW.into())), new: Password::new(ROBIN.into()) });
+            next(&mut device, |u| matches!(u, Update::Account(AccountUpdate::PasswordSaved(None))).then_some(())).await;
+            let list = next(&mut device, |u| match u {
+                Update::Sessions(None, r) => Some(r),
+                _ => None,
+            })
+            .await
+            .expect("the own sessions");
+            assert_eq!(list.sessions.len(), 1, "{list:?}");
+            assert!(list.sessions[0].current);
+
+            drop((first, device, second));
             stop(&root, server).await;
         }
     }
@@ -2920,7 +3922,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let root = dir.path().to_path_buf();
             let server = daemon(&root).await;
-            let mut app = start(Some(Target::Local { root: root.clone(), spawn: false }), None);
+            let mut app = start(Some(Target::Local { root: root.clone(), spawn: false }), super::memory_tokens().0);
             app.requests.send(Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new("Tr0ub4dor&3-zebra-ada".into()) })).unwrap();
             next(&mut app, |u| match u {
                 Update::Who(w) if w.user.is_some() => Some(()),
@@ -3084,7 +4086,7 @@ mod tests {
             let root = dir.path().to_path_buf();
             let server = daemon(&root).await;
             let target = || Some(Target::Local { root: root.clone(), spawn: false });
-            let mut app = start(target(), None);
+            let mut app = start(target(), super::memory_tokens().0);
             app.requests.send(Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new(ADA.into()) })).unwrap();
             next(&mut app, |u| match u {
                 Update::Who(w) if w.user.is_some() => Some(()),
@@ -3165,8 +4167,8 @@ mod tests {
             .await;
 
             // marie's window: #Demo is unread with a mention (B8), #general is not.
-            let mut other = start(target(), None);
-            other.requests.send(Request::BoardMembers(UserCall::Use { user_id: marie, password: Password::new(MARIE.into()) })).unwrap();
+            let mut other = start(target(), super::memory_tokens().0);
+            other.requests.send(Request::BoardMembers(UserCall::Login { username: "marie".into(), password: Password::new(MARIE.into()) })).unwrap();
             next(&mut other, |u| match u {
                 Update::Who(w) if w.user.as_ref().is_some_and(|u| u.id == marie) => Some(()),
                 _ => None,
@@ -3256,6 +4258,340 @@ mod tests {
             drop(other);
             drop(app);
             stop_daemon(&root, server).await;
+        }
+
+        /// The stand-in `claude` of the daemon's tests (F2 3ba4f28), in a folder of its own.
+        #[cfg(unix)]
+        fn fake_claude(root: &std::path::Path) -> std::path::PathBuf {
+            use std::os::unix::fs::PermissionsExt;
+            let bin = root.join("fake-claude-bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let path = bin.join("claude");
+            std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/daemon/tests/fixtures/fake-claude"), &path).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        }
+
+        /// MU3-09, MU3-12 and ui-ontwerp §4–§5 through this app's backend against F2:
+        /// a started ticket waits for its creator's missing Claude login (`needs: login`,
+        /// "Waiting for your Claude login" for the creator, "alex's" for nobody else here),
+        /// a code Claude refuses comes back in the daemon's own words, a good one connects
+        /// (e-mail and plan), the ticket goes on, and `/usage` is the own login's only.
+        #[cfg(unix)]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn the_own_claude_login_from_a_waiting_ticket_to_its_usage() {
+            use aurelius_domain::connection::{ConfigScope, Purpose, RunDefaults};
+            use aurelius_domain::employee::Setting;
+            use aurelius_domain::user::ClaudeLoginStatus;
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let server = daemon(&root).await;
+            let mut app = start(Some(Target::Local { root: root.clone(), spawn: false }), super::memory_tokens().0);
+            app.requests.send(Request::BoardMembers(UserCall::Create { username: "alex".into(), password: Password::new("Tr0ub4dor&3-zebra-alex".into()) })).unwrap();
+            let alex = next(&mut app, |u| match u {
+                Update::Who(w) => w.user,
+                _ => None,
+            })
+            .await;
+            let missing = next(&mut app, |u| match u {
+                Update::Claude(ClaudeUpdate::Status(v)) => Some(v),
+                _ => None,
+            })
+            .await;
+            assert_eq!((missing.user_id, missing.status), (alex.id, ClaudeLoginStatus::Missing));
+            assert!(crate::screens::account::needs_connect(Some(&missing), false), "the Board's banner");
+
+            // A Claude Code connection on the stand-in, the default for employee runs.
+            let program = fake_claude(&root);
+            app.requests.send(Request::AddConnection { provider: aurelius_domain::connection::ProviderKind::ClaudeCode, name: "Claude Code".into(), runtime_path: Some(program.display().to_string()) }).unwrap();
+            let connection = next(&mut app, |u| match u {
+                Update::Connections(c) => c.connections.iter().find(|c| c.provider == "claude_code" && c.status == "ready").map(|c| c.id),
+                _ => None,
+            })
+            .await;
+            let settings = RunDefaults { connection: Setting::Value(connection), model: Setting::Value("sonnet".into()), persona: Setting::Inherit, effort: Setting::Inherit };
+            app.requests.send(Request::SetDefaults { scope: ConfigScope::Global, purpose: Purpose::Employee, settings }).unwrap();
+
+            // Started without a login (P-36): it waits, Needs you for its creator only (§5).
+            app.requests.send(Request::CreateProject { name: "Atlas".into(), description: None, folder: None }).unwrap();
+            let project = next(&mut app, |u| match u {
+                Update::Created(p) => Some(p),
+                _ => None,
+            })
+            .await;
+            app.requests.send(Request::CreateEmployee { name: "Builder".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }).unwrap();
+            let builder = next(&mut app, |u| match u {
+                Update::EmployeeCreated(e) => Some(e),
+                _ => None,
+            })
+            .await;
+            let Command::CreateTicket(mut create) = new_ticket(project, "Login per board member") else { unreachable!() };
+            create.owner_employee_id = Some(builder);
+            done(&mut app, Command::CreateTicket(create), None).await;
+            let id = tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog)[0].id;
+            done(&mut app, Command::StartTicket(ticket::StartTicket { ticket_id: id, employee_id: None }), None).await;
+            let mut waiting = None;
+            for _ in 0..100 {
+                let view = load(&mut app, Some(project)).await;
+                waiting = view.columns.iter().flat_map(|c| c.tickets.iter()).find(|t| t.id == id && t.needs == Some(ticket::TicketNeed::Login)).cloned();
+                if waiting.is_some() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            let waiting = waiting.expect("the ticket waits for alex's login (MU3-12 AC1)");
+            assert_eq!(waiting.login_user, alex.id);
+            assert_eq!(crate::screens::board::login_wait(&waiting, Some(alex.id), false).as_deref(), Some("◆ Waiting for your Claude login"));
+            assert_eq!(crate::screens::board::login_wait(&waiting, Some(aurelius_domain::UserId::new()), false).as_deref(), Some("Waiting for alex's Claude login"));
+            assert!(crate::screens::board::take_over_offered(&waiting, Some(aurelius_domain::UserId::new())), "another board member may run it on theirs");
+            assert!(!crate::screens::board::take_over_offered(&waiting, Some(alex.id)));
+
+            // Connect: Claude's link, a refused code in the daemon's words, then a good one.
+            let prompt = |app: &mut Handle| {
+                app.requests.send(Request::Claude(ClaudeCall::Link)).unwrap();
+            };
+            prompt(&mut app);
+            let first = next(&mut app, |u| match u {
+                Update::Claude(ClaudeUpdate::Prompt(p)) if p.asks_code => Some(p),
+                Update::Claude(ClaudeUpdate::Failed(why)) => panic!("no link: {why}"),
+                _ => None,
+            })
+            .await;
+            assert!(first.url.as_deref().is_some_and(|u| u.starts_with("https://claude.com/cai/oauth/authorize?")), "{first:?}");
+            app.requests.send(Request::Claude(ClaudeCall::Input { link_id: first.link_id.clone(), code: LoginCode::new("wrong#FAKESTATE".into()) })).unwrap();
+            let refused = next(&mut app, |u| match u {
+                Update::Claude(ClaudeUpdate::Prompt(p)) if p.error.is_some() => p.error,
+                Update::Claude(ClaudeUpdate::Failed(why)) => Some(why),
+                _ => None,
+            })
+            .await;
+            assert_eq!(refused, "The code was not accepted. Start again.", "the daemon's own words");
+            let mut link = crate::screens::account::Link { id: Some(first.link_id), failure: Some(refused), started_ms: 1, ..Default::default() };
+            assert!(matches!(crate::screens::account::connect_step(&link), crate::screens::account::ConnectStep::Failed(_)), "Try again");
+            assert!(!crate::screens::account::command_fallback(&link, i64::MAX));
+            link.failure = None;
+            prompt(&mut app);
+            let second = next(&mut app, |u| match u {
+                Update::Claude(ClaudeUpdate::Prompt(p)) if p.asks_code => Some(p),
+                _ => None,
+            })
+            .await;
+            app.requests.send(Request::Claude(ClaudeCall::Input { link_id: second.link_id, code: LoginCode::new("good-code#FAKESTATE".into()) })).unwrap();
+            let linked = next(&mut app, |u| match u {
+                Update::Claude(ClaudeUpdate::Status(v)) if v.status == ClaudeLoginStatus::Linked => Some(v),
+                _ => None,
+            })
+            .await;
+            assert_eq!((linked.email.as_deref(), linked.plan.as_deref()), (Some("test@example.com"), Some("max")));
+            assert!(!crate::screens::account::needs_connect(Some(&linked), false), "the banner goes");
+
+            // The ticket goes on by itself (B11): no longer waiting for a login.
+            let mut resumed = false;
+            for _ in 0..100 {
+                let view = load(&mut app, Some(project)).await;
+                if view.columns.iter().flat_map(|c| c.tickets.iter()).any(|t| t.id == id && t.needs.is_none()) {
+                    resumed = true;
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            assert!(resumed, "the ticket resumes once alex connects");
+
+            // /usage: the own login's, with its limits (B12, P-37).
+            // (The connection is verified again after the defaults changed: until then it is not "ready".)
+            let mut usage = Default::default();
+            for _ in 0..50 {
+                app.requests.send(Request::LoadSubscription(true)).unwrap();
+                usage = next(&mut app, |u| match u {
+                    Update::Subscription(s) if s.fetched_at_ms > 0 => Some(s),
+                    _ => None,
+                })
+                .await;
+                if usage.error.is_none() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            assert_eq!(usage.login_user, Some(alex.id));
+            let shown = crate::screens::account::usage_of(Some(&usage), alex.id);
+            assert!(matches!(&shown, crate::screens::account::Usage::Limits(l) if !l.is_empty()), "{shown:?} from {:?}", usage.raw);
+            assert_eq!(crate::screens::account::usage_of(Some(&usage), aurelius_domain::UserId::new()), crate::screens::account::Usage::Unknown, "never another's");
+
+            drop(app);
+            stop_daemon(&root, server).await;
+        }
+
+        /// The smoke test of AUR-MU-03-D2 against a running test daemon of the real binary
+        /// (`crates/daemon/tests/fixtures/test-daemon.sh <folder> <port>`): set
+        /// `AURELIUS_D2_SMOKE=<folder>` (a fresh one) to run it; without, it does nothing.
+        /// Alex and Robin on their own devices, each on their own login: Robin's ticket
+        /// waits for Robin's login (Needs you for Robin only), Alex runs it on Alex's own
+        /// (Run on my login), each sees only their own /usage, and Alex's limit pauses
+        /// Alex's ticket with "Paused: …" in its discussion.
+        #[cfg(unix)]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn smoke_against_a_test_daemon() {
+            use aurelius_domain::connection::{ConfigScope, Purpose, RunDefaults};
+            use aurelius_domain::employee::Setting;
+            use aurelius_domain::user::ClaudeLoginStatus;
+            use crate::screens::{account, board, discussion};
+            let Some(folder) = std::env::var_os("AURELIUS_D2_SMOKE").map(std::path::PathBuf::from) else { return };
+            let root = folder.join("data");
+            let program = folder.join("bin").join("claude");
+            let target = || Some(Target::Local { root: root.clone(), spawn: false });
+            let say = |step: &str| eprintln!("smoke: {step}");
+
+            // Onboarding: Alex, then Robin; each on a device of their own.
+            let mut alex_app = start(target(), super::memory_tokens().0);
+            alex_app.requests.send(Request::BoardMembers(UserCall::Create { username: "alex".into(), password: Password::new("Tr0ub4dor&3-zebra-alex".into()) })).unwrap();
+            let alex = next(&mut alex_app, |u| match u {
+                Update::Who(w) => w.user,
+                _ => None,
+            })
+            .await;
+            alex_app.requests.send(Request::BoardMembers(UserCall::Create { username: "robin".into(), password: Password::new("correct-horse-battery-robin".into()) })).unwrap();
+            next(&mut alex_app, |u| matches!(u, Update::BoardMemberCreated(_)).then_some(())).await;
+            let mut robin_app = start(target(), super::memory_tokens().0);
+            let gate = next(&mut robin_app, |u| match u {
+                Update::Who(w) => Some(w),
+                _ => None,
+            })
+            .await;
+            assert!(gate.board_members_exist && gate.user.is_none(), "the sign-in from hello/whoami, not user.list: {gate:?}");
+            robin_app.requests.send(Request::BoardMembers(UserCall::Login { username: "robin".into(), password: Password::new("correct-horse-battery-robin".into()) })).unwrap();
+            let robin = next(&mut robin_app, |u| match u {
+                Update::Who(w) => w.user,
+                _ => None,
+            })
+            .await;
+            say("alex and robin signed in on their own devices");
+
+            // The stand-in claude as the Claude Code connection.
+            alex_app.requests.send(Request::AddConnection { provider: aurelius_domain::connection::ProviderKind::ClaudeCode, name: "Claude Code".into(), runtime_path: Some(program.display().to_string()) }).unwrap();
+            let connection = next(&mut alex_app, |u| match u {
+                Update::Connections(c) => c.connections.iter().find(|c| c.provider == "claude_code" && c.status == "ready").map(|c| c.id),
+                _ => None,
+            })
+            .await;
+            let settings = RunDefaults { connection: Setting::Value(connection), model: Setting::Value("sonnet".into()), persona: Setting::Inherit, effort: Setting::Inherit };
+            alex_app.requests.send(Request::SetDefaults { scope: ConfigScope::Global, purpose: Purpose::Employee, settings }).unwrap();
+
+            // Alex connects (the code starts with "good").
+            alex_app.requests.send(Request::Claude(ClaudeCall::Link)).unwrap();
+            let link = next(&mut alex_app, |u| match u {
+                Update::Claude(ClaudeUpdate::Prompt(p)) if p.asks_code => Some(p),
+                Update::Claude(ClaudeUpdate::Failed(why)) => panic!("no link: {why}"),
+                _ => None,
+            })
+            .await;
+            alex_app.requests.send(Request::Claude(ClaudeCall::Input { link_id: link.link_id, code: LoginCode::new("good-smoke#FAKESTATE".into()) })).unwrap();
+            let linked = next(&mut alex_app, |u| match u {
+                Update::Claude(ClaudeUpdate::Status(v)) if v.status == ClaudeLoginStatus::Linked => Some(v),
+                _ => None,
+            })
+            .await;
+            assert_eq!(account::status_line(&linked, &account::Usage::Unknown).text, "Connected  test@example.com · Max");
+            say("alex connected: Connected  test@example.com · Max");
+
+            // A project, an employee; Robin's ticket waits for Robin's login.
+            alex_app.requests.send(Request::CreateProject { name: "Atlas".into(), description: None, folder: None }).unwrap();
+            let project = next(&mut alex_app, |u| match u {
+                Update::Created(p) => Some(p),
+                _ => None,
+            })
+            .await;
+            alex_app.requests.send(Request::CreateEmployee { name: "Builder".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }).unwrap();
+            let builder = next(&mut alex_app, |u| match u {
+                Update::EmployeeCreated(e) => Some(e),
+                _ => None,
+            })
+            .await;
+            let owned = |title: &str| {
+                let Command::CreateTicket(mut create) = new_ticket(project, title) else { unreachable!() };
+                create.owner_employee_id = Some(builder);
+                Command::CreateTicket(create)
+            };
+            done(&mut robin_app, owned("Robin's ticket"), None).await;
+            let robins = tickets(&load(&mut robin_app, Some(project)).await, ColumnKind::Backlog).into_iter().find(|t| t.title == "Robin's ticket").unwrap().id;
+            done(&mut robin_app, Command::StartTicket(ticket::StartTicket { ticket_id: robins, employee_id: None }), None).await;
+            let waiting = until(&mut robin_app, project, |t| t.id == robins && t.needs == Some(ticket::TicketNeed::Login)).await;
+            assert_eq!(board::login_wait(&waiting, Some(robin.id), false).as_deref(), Some("◆ Waiting for your Claude login"));
+            assert_eq!(board::login_wait(&waiting, Some(alex.id), false).as_deref(), Some("Waiting for robin's Claude login"));
+            assert!(board::take_over_offered(&waiting, Some(alex.id)) && !board::take_over_offered(&waiting, Some(robin.id)));
+            say("robin's ticket: '◆ Waiting for your Claude login' for robin, 'Waiting for robin's Claude login' + Run on my login for alex");
+
+            // Alex: Run on my login (after the confirmation in the window); it goes on, on Alex's.
+            done(&mut alex_app, Command::UseMyLogin(ticket::UseMyLogin { ticket_id: robins }), None).await;
+            let taken = until(&mut alex_app, project, |t| t.id == robins && t.needs.is_none() && t.login_user == alex.id).await;
+            assert_eq!((taken.created_by_user, taken.login_username.as_str()), (robin.id, "alex"), "the creator stays");
+            say("run on my login: the ticket runs on alex's login, robin stays its creator");
+
+            // /usage: each their own only.
+            let usage_of = |app: &mut Handle| {
+                app.requests.send(Request::LoadSubscription(true)).unwrap();
+            };
+            let mut mine = Default::default();
+            for _ in 0..50 {
+                usage_of(&mut alex_app);
+                mine = next(&mut alex_app, |u| match u {
+                    Update::Subscription(s) if s.fetched_at_ms > 0 => Some(s),
+                    _ => None,
+                })
+                .await;
+                if mine.error.is_none() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            assert!(matches!(account::usage_of(Some(&mine), alex.id), account::Usage::Limits(l) if !l.is_empty()), "{mine:?}");
+            usage_of(&mut robin_app);
+            let theirs = next(&mut robin_app, |u| match u {
+                Update::Subscription(s) if s.fetched_at_ms > 0 => Some(s),
+                _ => None,
+            })
+            .await;
+            assert_eq!(account::usage_of(Some(&theirs), robin.id), account::Usage::Unavailable("Connect your Claude login to see your usage.".into()));
+            assert_eq!(account::usage_of(Some(&mine), robin.id), account::Usage::Unknown, "never another's");
+            say("usage: alex sees alex's limits; robin sees 'Connect your Claude login to see your usage.'");
+
+            // Alex's limit: Alex's next ticket pauses, its discussion says so.
+            std::fs::write(folder.join("bin").join("quota-users"), format!("{}\n", alex.id)).unwrap();
+            done(&mut alex_app, owned("Alex's ticket"), None).await;
+            let alexs = tickets(&load(&mut alex_app, Some(project)).await, ColumnKind::Backlog).into_iter().find(|t| t.title == "Alex's ticket").unwrap();
+            done(&mut alex_app, Command::StartTicket(ticket::StartTicket { ticket_id: alexs.id, employee_id: None }), None).await;
+            let conversation = alexs.conversation_id.expect("its discussion");
+            let mut paused = None;
+            for _ in 0..150 {
+                alex_app.requests.send(Request::Board(BoardCall::Discussion(Some(conversation)))).unwrap();
+                let messages = next(&mut alex_app, |u| match u {
+                    Update::Board(BoardUpdate::Discussion(c, result)) if c == conversation => Some(result.expect("the discussion reads")),
+                    _ => None,
+                })
+                .await;
+                paused = messages.iter().find_map(|m| m.system.as_ref().filter(|s| discussion::login_line(s, &m.text) == Some(discussion::LoginLine::Paused)).map(|_| m.text.clone()));
+                if paused.is_some() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            let paused = paused.expect("a Paused line in the discussion");
+            assert!(paused.starts_with("Paused: alex's Claude limit is reached until "), "{paused}");
+            alex_app.requests.send(Request::Board(BoardCall::Discussion(None))).unwrap();
+            say(&format!("alex's limit: '{paused}'"));
+            std::fs::remove_file(folder.join("bin").join("quota-users")).unwrap();
+            drop((alex_app, robin_app));
+        }
+
+        /// The ticket that `pick` finds once the board shows it (polled; at most 20 s).
+        async fn until(app: &mut Handle, project: ProjectId, pick: impl Fn(&ticket::TicketView) -> bool) -> ticket::TicketView {
+            for _ in 0..200 {
+                let view = load(app, Some(project)).await;
+                if let Some(t) = view.columns.iter().flat_map(|c| c.tickets.iter()).find(|t| pick(t)) {
+                    return t.clone();
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            panic!("the board never showed it");
         }
 
         async fn stop_daemon(root: &std::path::Path, server: tokio::task::JoinHandle<anyhow::Result<()>>) {

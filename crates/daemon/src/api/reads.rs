@@ -21,7 +21,11 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         | Method::EventSubscribe { .. }
         | Method::TerminalOpen { .. }
         | Method::TerminalDetach { .. }
-        | Method::UserUse(_)
+        | Method::UserLogin(_)
+        | Method::UserLogout
+        | Method::SessionList { .. }
+        | Method::ClaudeLoginStatus
+        | Method::ClaudeLoginInput(_)
         | Method::UserWhoami => {
             Err(internal("a session method reached the reads"))
         }
@@ -102,7 +106,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::ProviderList => connections(shared).await,
         Method::TaskList { project_id, employee_id, state } => tasks(shared, project_id, employee_id, state).await,
         Method::TimelineList(query) => timeline(shared, query).await,
-        Method::NotificationList => notifications(shared).await,
+        Method::NotificationList => notifications(shared, reader).await,
         Method::ShareList { project_id } => {
             let store = shared.store().clone();
             storage_task(move || {
@@ -116,7 +120,8 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         }
         Method::UpdateGet { check } => Ok(ResponseBody::Update(crate::updates::status(shared, check).await)),
         Method::BackupList => Ok(ResponseBody::Backups(aurelius_host::backups::snapshot(&shared.root))),
-        Method::SubscriptionGet { refresh } => Ok(ResponseBody::Subscription(crate::runtimes::subscription_usage(shared, refresh).await)),
+        // Only the reader's own login (B12); an app has none.
+        Method::SubscriptionGet { refresh } => Ok(ResponseBody::Subscription(crate::runtimes::subscription_usage(shared, reader, refresh).await)),
         Method::UsageGet => {
             let store = shared.store().clone();
             storage_task(move || store.read(|c| aurelius_storage::usage::snapshot(c, aurelius_host::utc_offset_minutes_at))).await.map(ResponseBody::Usage)
@@ -180,8 +185,8 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let s = shared.clone();
             app_task(move || s.service.artifact_content(url, version)).await.map(ResponseBody::ArtifactContent)
         }
-        Method::McpList => crate::mcp_servers::list(shared).await.map(ResponseBody::McpServers),
-        Method::McpLoginGet { login_id } => crate::mcp_oauth::get(&login_id).map(ResponseBody::McpLogin),
+        Method::McpList => crate::mcp_servers::list(shared, reader).await.map(ResponseBody::McpServers),
+        Method::McpLoginGet { login_id } => crate::mcp_oauth::get(&login_id, reader).map(ResponseBody::McpLogin),
         Method::McpAlwaysAllowList => crate::mcp_servers::always_allow_list(shared).await.map(ResponseBody::McpAlwaysAllow),
         Method::PluginList => aurelius_host::plugins::list(shared).await.map(ResponseBody::Plugins),
         Method::PluginListAvailable => aurelius_host::plugins::available().await.map(ResponseBody::PluginCatalog),
@@ -508,6 +513,11 @@ async fn company(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
                     employees,
                     roots,
                     company: aurelius_storage::company::get(c)?,
+                    // B6: whose Claude login runs the background jobs (memory consolidation).
+                    background_login: match aurelius_storage::company::background_login_user(c)? {
+                        Some(user) => aurelius_storage::users::get(c, &user.to_string())?.and_then(|u| u.view()),
+                        None => None,
+                    },
                 })
             })();
             c.execute_batch("COMMIT")?;
@@ -643,13 +653,15 @@ async fn timeline(shared: &Arc<Shared>, query: aurelius_protocol::TimelineQuery)
     .map(ResponseBody::Timeline)
 }
 
-async fn notifications(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
+/// The Inbox of `reader`: what is for everyone and their own (e.g. "connect your Claude login").
+async fn notifications(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
     let store = shared.store().clone();
+    let user = reader.map(|u| u.to_string());
     storage_task(move || {
         store.read(|c| {
             Ok(NotificationsSnapshot {
-                notifications: aurelius_storage::timeline::list_notifications(c, 100)?,
-                unread: aurelius_storage::timeline::unread_count(c)?,
+                notifications: aurelius_storage::timeline::list_notifications_for(c, 100, user.as_deref())?,
+                unread: aurelius_storage::timeline::unread_count_for(c, user.as_deref())?,
             })
         })
     })

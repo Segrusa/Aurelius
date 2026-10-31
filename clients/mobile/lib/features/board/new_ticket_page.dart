@@ -116,7 +116,8 @@ class _NewTicketPageState extends State<NewTicketPage> {
       final number = switch (receipt.command) { CommandResultTicketCreated(:final number) => number, _ => null };
       final ticketId = switch (receipt.command) { CommandResultTicketCreated(:final ticketId) => ticketId, _ => null };
       messenger.showSnackBar(SnackBar(
-        content: Text(start ? '#$number created and started.' : '#$number created in Backlog.'),
+        // P-36 (QA3 M-m2): a new ticket runs on the own login; without one it waits.
+        content: Text(start ? '#$number created and started.${waitsForMyLogin(repository.linkState, repository.linkState.user?.id) ? ' $waitsForLoginNote' : ''}' : '#$number created in Backlog.'),
         action: ticketId == null ? null : SnackBarAction(label: 'Open', onPressed: () => router.push('/ticket/$ticketId')),
       ));
       if (mounted && context.canPop()) context.pop();

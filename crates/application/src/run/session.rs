@@ -541,7 +541,7 @@ mod tests {
         assert!(store.write(move |tx| sessions::complete(tx, conversation, a, 1, "digest", answer, "{}", Some(150_000))).unwrap());
         set_status(a, "succeeded");
         assert_eq!(claim(b, Some(a.to_string())), Claim::Continue);
-        let row = store.read(|r| sessions::get(r, conversation)).unwrap().unwrap();
+        let row = store.read(|r| sessions::get(r, conversation, None)).unwrap().unwrap();
         assert_eq!((row.session_id.as_str(), row.busy_run.as_deref(), row.seen_count, row.context_tokens), (a.to_string().as_str(), Some(b.to_string().as_str()), 1, 150_000));
         // b crashed without giving it back: it may hold half a turn, so c starts a new one.
         set_status(b, "failed");
@@ -549,7 +549,47 @@ mod tests {
         // Only the holder gives it up; one that did not complete leaves nothing behind.
         assert_eq!(store.write(move |tx| sessions::release(tx, conversation, b)).unwrap(), None);
         assert_eq!(store.write(move |tx| sessions::release(tx, conversation, c)).unwrap(), Some(c.to_string()));
-        assert_eq!(store.read(|r| sessions::get(r, conversation)).unwrap(), None);
+        assert_eq!(store.read(|r| sessions::get(r, conversation, None)).unwrap(), None);
+    }
+
+    /// R4: a conversation keeps a session per Claude login; one board member's
+    /// is never resumed by another's run, and each goes on in its own.
+    #[test]
+    fn each_login_keeps_its_own_session_of_a_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = aurelius_storage::Store::open(&dir.path().join("data")).unwrap();
+        let conversation = ConversationId::new();
+        let (alex, robin) = (aurelius_domain::UserId::new(), aurelius_domain::UserId::new());
+        let (a1, r1, a2) = (RunId::new(), RunId::new(), RunId::new());
+        store
+            .write(move |tx| {
+                let project = aurelius_domain::ProjectId::new();
+                aurelius_storage::events::insert_project_projection(tx, project, "P", None)?;
+                aurelius_storage::conversations::insert_project_conversation(tx, conversation, project, "")?;
+                for (name, user) in [("alex", alex), ("robin", robin)] {
+                    aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &user.to_string(), username: name, created_by_user: None, now_ms: 1 }, "x")?;
+                }
+                for (run, login) in [(a1, alex), (r1, robin), (a2, alex)] {
+                    tx.execute(
+                        "INSERT INTO runs(id, conversation_id, attempt, runtime_kind, model_id, resolved_config_json, status, login_user) VALUES (?1, ?2, 1, 'claude_code', '', '{}', 'succeeded', ?3)",
+                        [run.to_string(), conversation.to_string(), login.to_string()],
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        let claim = |run: RunId, resume: Option<String>| store.write(move |tx| sessions::claim(tx, conversation, run, resume.as_deref(), &SessionKey::default(), "system")).unwrap();
+        assert_eq!(claim(a1, None), Claim::Start { replaced: None });
+        assert!(store.write(move |tx| sessions::complete(tx, conversation, a1, 1, "digest", MessageId::new(), "{}", None)).unwrap());
+        // Robin's run in the same conversation: a session of its own, Alex's stays.
+        assert_eq!(claim(r1, Some(a1.to_string())), Claim::Start { replaced: None });
+        assert!(store.write(move |tx| sessions::complete(tx, conversation, r1, 2, "digest2", MessageId::new(), "{}", None)).unwrap());
+        assert_eq!(store.read(move |r| sessions::get(r, conversation, Some(alex))).unwrap().unwrap().session_id, a1.to_string());
+        assert_eq!(store.read(move |r| sessions::get(r, conversation, Some(robin))).unwrap().unwrap().session_id, r1.to_string());
+        assert_eq!(store.read(|r| sessions::get(r, conversation, None)).unwrap(), None);
+        // Alex goes on in Alex's own session.
+        assert_eq!(claim(a2, Some(a1.to_string())), Claim::Continue);
+        assert_eq!(store.read(aurelius_storage::conversation_sessions::session_ids).unwrap().len(), 2);
     }
 
     #[test]
@@ -632,7 +672,7 @@ mod tests {
         assert!(store.write(move |tx| sessions::complete(tx, conversation, a, 1, "digest", answer, "{}", Some(180_000))).unwrap());
         assert_eq!(claim(b, Some(a.to_string())), Claim::Continue);
         assert_eq!(claim(b, None), Claim::Start { replaced: Some(a.to_string()) }, "the old session goes");
-        let row = store.read(|r| sessions::get(r, conversation)).unwrap().unwrap();
+        let row = store.read(|r| sessions::get(r, conversation, None)).unwrap().unwrap();
         assert_eq!((row.session_id, row.busy_run, row.context_tokens, row.seen_digest), (b.to_string(), Some(b.to_string()), 0, String::new()));
     }
 

@@ -27,6 +27,12 @@ pub fn insert_task(
     insert_ticket_task(tx, id, project, employee, title, brief_blob, acceptance_blob, status, parent, None)
 }
 
+/// Whose Claude login a task without a ticket runs on (see `tasks.login_user`).
+pub fn set_login_user(tx: &Transaction<'_>, task: TaskId, login_user: Option<&str>) -> Result<(), StorageError> {
+    tx.execute("UPDATE tasks SET login_user = ?2 WHERE id = ?1", params![task.to_string(), login_user])?;
+    Ok(())
+}
+
 /// `insert_task` for the main task of a ticket. A task with a parent always takes
 /// its parent's ticket (a delegation stays on the ticket); `ticket` applies
 /// to a task without one.

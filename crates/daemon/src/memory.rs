@@ -54,6 +54,24 @@ async fn retry_or_drop(shared: &Arc<Shared>, job: &queries::JobRow, error: Strin
     .await;
 }
 
+/// The job's Claude login is missing or expired: it waits for it and goes on once
+/// that board member (re)links it (B11). A job without a source login (memory
+/// consolidation without a company login, B6) does not run at all.
+async fn wait_for_login(shared: &Arc<Shared>, job: &queries::JobRow, login: Option<aurelius_domain::UserId>) {
+    let store = shared.store().clone();
+    let (id, epoch) = (job.id.clone(), job.lease_epoch);
+    match login {
+        Some(user) => {
+            tracing::info!(job = %job.id, "a memory job waits for its board member's Claude login");
+            let _ = blocking(move || store.write(move |tx| queries::park_job_for_login(tx, &id, epoch, Some(&user.to_string())))).await;
+        }
+        None => {
+            tracing::info!(job = %job.id, "no Claude login for this background job; it does not run");
+            close(shared, job).await;
+        }
+    }
+}
+
 /// A failed extraction: one that writes a ticket's summary ends at once, visibly
 /// (`summary_failed`); any other retries later as before (memory is optional).
 async fn failed(shared: &Arc<Shared>, job: &queries::JobRow, ticket: Option<TicketId>, error: String) {
@@ -141,6 +159,7 @@ pub async fn run_extraction(shared: Arc<Shared>, job: queries::JobRow) {
     }
     let output = match complete_text(&shared, &input.config, RunId::new(), system, prompt).await {
         Ok((text, _)) => text,
+        Err(crate::tasks::StepError::Login) => return wait_for_login(&shared, &job, input.config.login_user).await,
         Err(e) => return failed(&shared, &job, input.ticket.as_ref().map(|t| t.id), e.to_string()).await,
     };
     let extraction: Extraction = extract_json(&output).unwrap_or_default();
@@ -160,8 +179,9 @@ pub async fn run_summary(shared: Arc<Shared>, job: queries::JobRow) {
         close(&shared, &job).await;
         return;
     };
+    let source = job.payload["run_id"].as_str().and_then(|r| RunId::parse(r).ok());
     let s = shared.clone();
-    let input = match blocking(move || s.service.summary_input(conversation)).await {
+    let input = match blocking(move || s.service.summary_input(conversation, source)).await {
         Some(Ok(Some(input))) if !input.turns.is_empty() => input,
         Some(Ok(_)) => {
             close(&shared, &job).await;
@@ -183,6 +203,7 @@ pub async fn run_summary(shared: Arc<Shared>, job: queries::JobRow) {
         prompt.push_str(&format!("[{ordinal}] {who}: {text}\n"));
     }
     let text = match complete_text(&shared, &input.config, RunId::new(), system, prompt).await {
+        Err(crate::tasks::StepError::Login) => return wait_for_login(&shared, &job, input.config.login_user).await,
         Ok((text, _)) if !text.trim().is_empty() => text,
         Ok(_) => return retry_or_drop(&shared, &job, "empty summary".into()).await,
         Err(e) => return retry_or_drop(&shared, &job, e.to_string()).await,
@@ -222,6 +243,7 @@ pub async fn run_consolidation(shared: Arc<Shared>, job: queries::JobRow) {
     let prompt = input.items.iter().map(|m| format!("{} [{}] {}", m.label, m.kind.label(), m.content.trim().replace('\n', " "))).collect::<Vec<_>>().join("\n");
     let output = match complete_text(&shared, &input.config, RunId::new(), system, prompt).await {
         Ok((text, _)) => text,
+        Err(crate::tasks::StepError::Login) => return wait_for_login(&shared, &job, input.config.login_user).await,
         Err(e) => return retry_or_drop(&shared, &job, e.to_string()).await,
     };
     let Some(parsed) = extract_json::<ConsolidationOutput>(&output) else {

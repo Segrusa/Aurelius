@@ -1,5 +1,6 @@
 //! Shared helpers of the daemon's integration tests: start a daemon on a data
-//! folder, connect a client, open its database read-only.
+//! folder, connect a client (signed in: protocol 5 lets nothing else through),
+//! open its database read-only.
 //!
 //! Use with `mod common;` at the top of a test file. Items a given test does not
 //! use would warn, hence the allow.
@@ -45,18 +46,82 @@ pub async fn start_real(root: &Path) -> Daemon {
     handle
 }
 
-/// A client on the daemon's local endpoint; events are dropped.
+/// The board member `connect` signs in as; made at the onboarding of a new server.
+pub const BOARD_MEMBER: &str = "alex";
+/// The password of every board member these helpers make.
+pub const BOARD_PASSWORD: &str = "a-test-password-for-board-members";
+
+/// A client on the daemon's local endpoint, signed in as `BOARD_MEMBER`; events are dropped.
 pub async fn connect(root: &Path) -> Client {
-    let (client, rx) = connect_events(root).await;
+    connect_as(root, BOARD_MEMBER).await
+}
+
+/// A client signed in as `name` (made with `BOARD_PASSWORD` when it does not exist yet).
+pub async fn connect_as(root: &Path, name: &str) -> Client {
+    let (client, rx) = connect_events_as(root, name).await;
     std::mem::forget(rx);
     client
 }
 
-/// A client plus the receiver of the typed events it subscribed to.
+/// A client plus the receiver of the typed events it subscribed to, signed in as `BOARD_MEMBER`.
 pub async fn connect_events(root: &Path) -> (Client, mpsc::UnboundedReceiver<Event>) {
+    connect_events_as(root, BOARD_MEMBER).await
+}
+
+pub async fn connect_events_as(root: &Path, name: &str) -> (Client, mpsc::UnboundedReceiver<Event>) {
     let (tx, rx) = mpsc::unbounded_channel();
     let client = Client::connect(&aurelius_host::endpoint(root), "test", tx).await.expect("connect");
+    sign_in(root, &client, name).await;
     (client, rx)
+}
+
+/// A client without a session: only the hello, the sign-in and the onboarding work.
+pub async fn connect_anonymous(root: &Path) -> Client {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let client = Client::connect(&aurelius_host::endpoint(root), "test", tx).await.expect("connect");
+    std::mem::forget(rx);
+    client
+}
+
+/// Sign `client` in as `name`: the first board member is made at the onboarding,
+/// a later one by `BOARD_MEMBER` (or another board member these helpers made:
+/// they share the password). Looks first whether `name` exists, so a new name
+/// costs no failed sign-in (R1 m-11). Answers the session.
+pub fn sign_in<'a>(root: &'a Path, client: &'a Client, name: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = aurelius_domain::user::LoginResult> + Send + 'a>> {
+    Box::pin(async move {
+        if !client.user_whoami().await.expect("whoami").board_members_exist {
+            // The onboarding; another connection may make the first one at the same time.
+            if client.user_create(name, BOARD_PASSWORD).await.is_ok() {
+                return client.user_login(name, BOARD_PASSWORD, "test").await.expect("sign in");
+            }
+        }
+        // A maker signed in with the known password: `BOARD_MEMBER` first, else one of the others.
+        let maker = connect_anonymous(root).await;
+        let mut signed_in = maker.user_login(BOARD_MEMBER, BOARD_PASSWORD, "test").await.is_ok();
+        if !signed_in {
+            for username in usernames(root) {
+                if maker.user_login(&username, BOARD_PASSWORD, "test").await.is_ok() {
+                    signed_in = true;
+                    break;
+                }
+            }
+        }
+        assert!(signed_in, "no board member to make {name}: the test made its own with other passwords");
+        let exists = maker.user_list().await.expect("board members").users.iter().any(|u| u.username.eq_ignore_ascii_case(name));
+        if !exists {
+            // Another connection may make the same one at the same time.
+            let _ = maker.user_create(name, BOARD_PASSWORD).await;
+        }
+        client.user_login(name, BOARD_PASSWORD, "test").await.expect("sign in")
+    })
+}
+
+/// The active board members, oldest first, from the database (without a
+/// session `user.list` names nobody).
+fn usernames(root: &Path) -> Vec<String> {
+    let db = db(root);
+    let mut stmt = db.prepare("SELECT username FROM users WHERE disabled_at_ms IS NULL ORDER BY created_at_ms").unwrap();
+    stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
 }
 
 /// Stop the daemon over its internal channel and wait for it to end.

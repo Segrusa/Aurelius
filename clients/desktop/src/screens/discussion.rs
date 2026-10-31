@@ -46,6 +46,48 @@ pub fn system_text(line: &SystemLine, text: &str) -> String {
     }
 }
 
+/// A `Limit` line about a Claude login or its quota (ui-ontwerp §5, F2 B11): the
+/// server writes them with its own text and no protocol variant of their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginLine {
+    /// "Paused: Alex's Claude limit is reached until 16:00."
+    Paused,
+    /// "Resumed."
+    Resumed,
+    /// "Waiting: Alex's Claude login is missing. …"
+    Waiting,
+    /// "Connect your Claude login to get an answer. …" (a run without a ticket).
+    Connect,
+}
+
+pub fn login_line(line: &SystemLine, text: &str) -> Option<LoginLine> {
+    if line.kind != SystemLineKind::Limit {
+        return None;
+    }
+    let text = text.trim();
+    if text.starts_with("Paused:") {
+        Some(LoginLine::Paused)
+    } else if text == "Resumed." {
+        Some(LoginLine::Resumed)
+    } else if text.starts_with("Connect your Claude login") {
+        Some(LoginLine::Connect)
+    } else if text.starts_with("Waiting:") {
+        Some(LoginLine::Waiting)
+    } else {
+        None
+    }
+}
+
+/// The shape before such a line's text, never only a colour.
+pub fn login_mark(kind: Option<LoginLine>) -> &'static str {
+    match kind {
+        Some(LoginLine::Paused) => "⏸ ",
+        Some(LoginLine::Resumed) => "▸ ",
+        Some(LoginLine::Waiting | LoginLine::Connect) => "◆ ",
+        None => "",
+    }
+}
+
 /// What a screen reader hears for a system line (ui-ontwerp §5): "System: … at 10:41".
 pub fn system_label(text: &str, at: &str) -> String {
     format!("System: {text} at {at}")
@@ -573,6 +615,23 @@ mod tests {
         assert!(system_task(&SystemLine::new(SystemLineKind::Moved)).is_none());
     }
 
+    /// ui-ontwerp §5 / F2 B11: the login and quota lines (`Limit`, the server's text) get a shape.
+    #[test]
+    fn paused_and_resumed_lines_read_as_such() {
+        let limit = SystemLine::new(SystemLineKind::Limit);
+        let paused = "Paused: robin's Claude limit is reached until 16:00.";
+        assert_eq!(login_line(&limit, paused), Some(LoginLine::Paused));
+        assert_eq!(login_mark(login_line(&limit, paused)), "⏸ ");
+        assert_eq!(system_text(&limit, paused), paused, "the server's words as they are");
+        assert_eq!(login_line(&limit, "Resumed."), Some(LoginLine::Resumed));
+        assert_eq!(login_mark(Some(LoginLine::Resumed)), "▸ ");
+        assert_eq!(login_line(&limit, "Waiting: alex's Claude login is missing. It goes on once alex connects it."), Some(LoginLine::Waiting));
+        assert_eq!(login_line(&limit, "Connect your Claude login to get an answer. (alex's Claude login is missing; this answer waits for it.)"), Some(LoginLine::Connect));
+        assert_eq!(login_line(&limit, "Limit reached: Forge was not woken."), None, "a loop limit is no login line");
+        assert_eq!(login_line(&SystemLine::new(SystemLineKind::Moved), "Resumed."), None);
+        assert_eq!(login_mark(None), "");
+    }
+
     #[test]
     fn a_failed_summary_shows_try_again_until_a_later_one_worked() {
         let failed = line(SystemLineKind::SummaryFailed, "The summary failed: quota reached.");
@@ -588,7 +647,7 @@ mod tests {
     #[test]
     fn authors_are_a_board_member_an_employee_with_role_or_aurelius() {
         let mut post = msg(MessageRole::User, "Please keep it configurable.");
-        post.author_user = Some(aurelius_domain::user::UserView { id: aurelius_domain::UserId::new(), username: "alex".into(), created_at_ms: 0, created_by_user: None });
+        post.author_user = Some(aurelius_domain::user::UserView { id: aurelius_domain::UserId::new(), username: "alex".into(), created_at_ms: 0, created_by_user: None, disabled_at_ms: None });
         assert_eq!(author(&post, |_| None), Author { name: "alex".into(), kind: "board member".into(), human: true });
         let mut answer = msg(MessageRole::Assistant, "Done.");
         answer.author = Some("Forge".into());
@@ -674,6 +733,9 @@ mod tests {
             done_at_ms: None,
             archived_at_ms: None,
             conversation_id: Some(ConversationId::new()),
+            login_user: aurelius_domain::UserId::new(),
+            login_username: "alex".into(),
+            needs: None,
         }
     }
 

@@ -10,6 +10,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/commands.dart';
 import '../../data/org_chart.dart';
 import '../../data/views.dart';
+import '../account/claude_login.dart' show ownSubscriptionNote;
 import '../company/company_bloc.dart';
 import '../inbox/instruction_proposal_card.dart';
 
@@ -108,6 +109,11 @@ class EmployeeMenu extends StatelessWidget {
               context: context,
               builder: (sheet) => SafeArea(
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Padding(
+                    key: const ValueKey('heartbeat-subscription'),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: Text(ownSubscriptionNote, style: TextStyle(fontSize: 13, color: Tokens.label2)),
+                  ),
                   for (final (label, value) in [('Off', 0), ('Every 30 minutes', 30), ('Hourly', 60), ('Every 4 hours', 240)])
                     ListTile(
                       title: Text(label),

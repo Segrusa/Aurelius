@@ -22,7 +22,8 @@ use aurelius_storage::{
 const SILENT_REPLY: &str = "Nothing to report";
 
 impl CommandService {
-    pub(crate) fn set_heartbeat(&self, envelope: &CommandEnvelope, hash: String, cmd: &SetHeartbeat) -> Result<Committed, AppError> {
+    pub(crate) fn set_heartbeat(&self, ctx: &crate::CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &SetHeartbeat) -> Result<Committed, AppError> {
+        let login = ctx.login_user();
         let rule = if cmd.every_minutes == 0 {
             None
         } else {
@@ -42,6 +43,10 @@ impl CommandService {
             }
             let next_due = aurelius_storage::now_ms() + i64::from(every) * 60_000;
             hb::upsert(tx, employee, rule, next_due)?;
+            // Its runs use the Claude login of the board member who turned it on (B5).
+            if rule.is_some() && login.is_some() {
+                hb::set_login_user(tx, employee, login.as_deref())?;
+            }
             let (_, n) = emit(tx, Ev {
                 aggregate_type: "heartbeat",
                 aggregate_id: employee.to_string(),
@@ -128,7 +133,9 @@ impl CommandService {
                 }
                 let Some(row) = employees::load_employee(tx, employee)? else { return Ok(vec![]) };
                 blobs::register(tx, &text_blob)?;
-                let meta = serde_json::json!({ "origin": "heartbeat", "schedule_id": schedule_id, "reasons": reasons, "missed": missed });
+                let mut meta = serde_json::json!({ "origin": "heartbeat", "schedule_id": schedule_id, "reasons": reasons, "missed": missed });
+                // On the login of the board member who turned it on (B5); none: it waits for one.
+                meta["login_user"] = serde_json::json!(hb::login_user(tx, employee)?);
                 let (event_id, mut n) = emit(tx, Ev {
                     aggregate_type: "heartbeat",
                     aggregate_id: schedule_id.clone(),

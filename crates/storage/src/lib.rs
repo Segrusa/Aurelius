@@ -43,6 +43,8 @@ pub mod remote;
 pub mod settings;
 pub mod traces;
 pub mod users;
+pub mod user_sessions;
+pub mod claude_logins;
 pub mod company;
 pub mod tickets;
 
@@ -212,6 +214,10 @@ mod schema18_tests;
 mod schema19_tests;
 #[cfg(test)]
 mod users_tests;
+#[cfg(test)]
+mod schema21_tests;
+#[cfg(test)]
+mod sessions_tests;
 #[cfg(test)]
 mod tickets_tests;
 #[cfg(test)]

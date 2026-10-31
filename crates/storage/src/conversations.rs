@@ -136,6 +136,10 @@ pub struct GroupRun {
     /// when the run starts (`run::plan`), never in the job's payload.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<aurelius_domain::autonomy::AgentMode>,
+    /// The board member of hop 0 (who wrote the message that started it): every
+    /// run woken from it, at any hop, runs on their Claude login.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_user: Option<UserId>,
 }
 
 /// The conversation a run answers in.
@@ -297,8 +301,8 @@ pub fn insert_run<C: serde::Serialize + RunConfigInfo>(
         |r| r.get(0),
     )?;
     tx.execute(
-        "INSERT INTO runs(id, conversation_id, attempt, runtime_kind, connection_id, model_id, resolved_config_json, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'created')",
+        "INSERT INTO runs(id, conversation_id, attempt, runtime_kind, connection_id, model_id, resolved_config_json, status, login_user)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'created', ?8)",
         params![
             run_id.to_string(),
             conversation_id.to_string(),
@@ -306,10 +310,22 @@ pub fn insert_run<C: serde::Serialize + RunConfigInfo>(
             resolved.runtime_kind(),
             resolved.connection(),
             resolved.model().unwrap_or_default(),
-            serde_json::to_string(resolved)?
+            serde_json::to_string(resolved)?,
+            resolved.login_user()
         ],
     )?;
     Ok(attempt as u32)
+}
+
+/// Whose Claude login a run uses (for a run not made by `insert_run`).
+pub fn set_run_login_user(tx: &Transaction<'_>, run_id: RunId, login_user: Option<&str>) -> Result<(), StorageError> {
+    tx.execute("UPDATE runs SET login_user = ?2 WHERE id = ?1", params![run_id.to_string(), login_user])?;
+    Ok(())
+}
+
+/// Whose Claude login a run uses; none for a run from before phase 3 or one without.
+pub fn run_login_user(conn: &rusqlite::Connection, run_id: RunId) -> Result<Option<String>, StorageError> {
+    Ok(conn.query_row("SELECT login_user FROM runs WHERE id = ?1", [run_id.to_string()], |r| r.get(0)).optional()?.flatten())
 }
 
 pub fn run_status(tx: &rusqlite::Connection, run_id: RunId) -> Result<Option<String>, StorageError> {
@@ -571,6 +587,10 @@ pub trait RunConfigInfo {
     fn runtime_kind(&self) -> &'static str;
     fn connection(&self) -> Option<String>;
     fn model(&self) -> Option<String>;
+    /// The board member whose Claude login the run uses (`runs.login_user`).
+    fn login_user(&self) -> Option<String> {
+        None
+    }
 }
 
 

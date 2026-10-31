@@ -83,12 +83,14 @@ bool needsOwnerOf(TicketView ticket, CompanyState company, BoardState board) =>
     (board.gaveUp.contains(ticket.id) || (!company.loading && effectiveDispatcher(company.project(ticket.projectId), company.company?.dispatcherEmployeeId, company.employees) == null));
 
 /// [ticket]'s state with what the company and board know.
-TicketState stateOf(TicketView ticket, CompanyState company, BoardState board) => ticketState(ticket,
-    root: company.tasks.where((t) => t.id == ticket.rootTaskId).firstOrNull, needsOwner: needsOwnerOf(ticket, company, board), ownerUnknown: board.ownerUnknown.contains(ticket.id));
+TicketState stateOf(TicketView ticket, CompanyState company, BoardState board, {String? me}) => ticketState(ticket,
+    root: company.tasks.where((t) => t.id == ticket.rootTaskId).firstOrNull, needsOwner: needsOwnerOf(ticket, company, board), ownerUnknown: board.ownerUnknown.contains(ticket.id), me: me);
 
 class _BoardPageState extends State<BoardPage> {
   PageController? _pages;
   bool _olderDone = false;
+  String? _me;
+  bool _myLoginExpired = false;
   TicketView? _dragging;
 
   @override
@@ -103,7 +105,7 @@ class _BoardPageState extends State<BoardPage> {
     if (board.column != null) return board.column!;
     for (final kind in [ColumnKind.review, ColumnKind.planReview, ColumnKind.todo, ColumnKind.doing]) {
       final column = board.columnOf(kind);
-      if (column != null && column.tickets.any((t) => stateOf(t, company, board).needsYou)) return kind;
+      if (column != null && column.tickets.any((t) => stateOf(t, company, board, me: _me).needsYou)) return kind;
     }
     return ColumnKind.doing;
   }
@@ -154,6 +156,53 @@ class _BoardPageState extends State<BoardPage> {
     if (picked != null && context.mounted) context.read<BoardBloc>().add(BoardOwnerChosen(picked.$1));
   }
 
+  /// "Created by: Anyone / Me / a board member" (ui §3, R3 m6). The board
+  /// members come from `user.list`; without it, the creators on the board.
+  Future<void> _pickCreator(BuildContext context, BoardState board) async {
+    final repository = context.read<AureliusRepository>();
+    final bloc = context.read<BoardBloc>();
+    final me = _me;
+    var members = <(String, String)>[];
+    try {
+      members = [for (final u in await repository.boardMembers()) if (u.disabledAtMs == null || board.createdBy == u.id) (u.id, u.username)];
+    } on Object {
+      members = {for (final t in board.board?.columns.expand((c) => c.tickets) ?? const <TicketView>[]) t.createdByUser: t.createdByUsername}.entries.map((e) => (e.key, e.value)).toList();
+    }
+    members = members.where((m) => m.$1 != me).toList()..sort((a, b) => a.$2.toLowerCase().compareTo(b.$2.toLowerCase()));
+    _creatorNames.addAll({for (final (id, name) in members) id: name});
+    if (!context.mounted) return;
+    Widget tick(String? id) => board.createdBy == id ? Icon(Icons.check, color: Tokens.accentText) : const SizedBox.shrink();
+    final picked = await showModalBottomSheet<(String?,)>(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.7),
+          child: ListView(shrinkWrap: true, children: [
+            Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: Eyebrow('Created by')),
+            ListTile(key: const ValueKey('board-creator-anyone'), title: const Text('Anyone'), trailing: tick(null), onTap: () => Navigator.pop(sheet, (null,))),
+            if (me != null) ListTile(key: const ValueKey('board-creator-me'), title: const Text('Me'), trailing: tick(me), onTap: () => Navigator.pop(sheet, (me,))),
+            for (final (id, name) in members) ListTile(key: ValueKey('board-creator-$id'), title: Text(name), trailing: tick(id), onTap: () => Navigator.pop(sheet, (id,))),
+          ]),
+        ),
+      ),
+    );
+    if (picked != null) bloc.add(BoardCreatorChosen(picked.$1));
+  }
+
+  /// The creator filter's name: Me, the board member, or null for anyone.
+  String? _creatorName(BoardState board) {
+    final id = board.createdBy;
+    if (id == null) return null;
+    if (id == _me) return 'Me';
+    return board.board?.columns.expand((c) => c.tickets).where((t) => t.createdByUser == id).firstOrNull?.createdByUsername ?? _creatorNames[id] ?? 'Board member';
+  }
+
+  /// Board members named in the creator picker, for a filter without tickets.
+  final _creatorNames = <String, String>{};
+
   void _newTicket(BuildContext context, BoardState board) => context.push(board.projectId == null ? '/board/new' : '/board/new?project=${board.projectId}');
 
   @override
@@ -161,12 +210,15 @@ class _BoardPageState extends State<BoardPage> {
     final board = context.watch<BoardBloc>().state;
     final company = context.watch<CompanyBloc>().state;
     final online = context.select<ConnectionBloc, bool>((b) => b.state.isOnline);
+    _me = context.select<ConnectionBloc, String?>((b) => b.state.user?.id);
+    _myLoginExpired = context.select<ConnectionBloc, bool>((b) => b.state.claudeLogin?.status == ClaudeLoginStatus.expired);
     final wide = MediaQuery.sizeOf(context).width >= boardWideWidth;
     final columns = board.columns;
     final tickets = board.tickets;
-    final needYou = tickets.where((t) => stateOf(t, company, board).needsYou).length;
+    final needYou = tickets.where((t) => stateOf(t, company, board, me: _me).needsYou).length;
     final project = company.project(board.projectId ?? '');
     final owner = board.owner == null ? null : board.owner == BoardState.noOwner ? 'No owner yet' : company.employee(board.owner!)?.name;
+    final creator = _creatorName(board);
 
     final Widget content;
     if (board.board == null && board.error != null) {
@@ -182,18 +234,19 @@ class _BoardPageState extends State<BoardPage> {
     } else if (board.board == null) {
       content = const _Skeleton();
     } else {
-      final filteredEmpty = tickets.isEmpty && (board.projectId != null || board.owner != null);
+      final filteredEmpty = tickets.isEmpty && (board.projectId != null || board.owner != null || board.createdBy != null);
       final body = wide ? _wide(context, board, company, columns, online) : _phone(context, board, company, columns, online);
       content = Column(children: [
         if (filteredEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
             child: Row(children: [
-              Expanded(child: Text('No tickets in ${project?.name ?? owner ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
+              Expanded(child: Text('No tickets in ${project?.name ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
               TextButton(
                 onPressed: () {
                   final bloc = context.read<BoardBloc>();
                   bloc.add(const BoardOwnerChosen(null));
+                  bloc.add(const BoardCreatorChosen(null));
                   bloc.add(const BoardProjectChosen(null));
                 },
                 child: const Text('Clear filter'),
@@ -238,6 +291,7 @@ class _BoardPageState extends State<BoardPage> {
                 children: [
                   _FilterPill(key: const ValueKey('board-filter-project'), label: project?.name ?? 'All projects', active: project != null, onTap: () => _pickProject(context, board, company)),
                   _FilterPill(key: const ValueKey('board-filter-owner'), label: owner ?? 'Anyone', active: owner != null, onTap: () => _pickOwner(context, board, company)),
+                  _FilterPill(key: const ValueKey('board-filter-creator'), label: 'Created by: ${creator ?? 'Anyone'}', active: creator != null, onTap: () => _pickCreator(context, board)),
                 ],
               ),
             ),
@@ -334,7 +388,7 @@ class _BoardPageState extends State<BoardPage> {
     }
     final allColumns = [for (final x in columns) x.column];
     Widget card(TicketView t) {
-      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide);
+      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide, me: _me, myLoginExpired: _myLoginExpired);
       final face = TicketCard(key: ValueKey('ticket-${t.id}'), ticket: t, board: ctx);
       if (!wide || !online || kind == ColumnKind.done) return face;
       // Drop on a card: it lands above it.

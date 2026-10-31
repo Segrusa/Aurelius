@@ -389,6 +389,45 @@ impl CommandService {
                 Ok(Ok((CommandResult::BoardColumnsUpdated { version: ticket::board_version(&after) }, e.notices)))
             }),
             Command::UpdateCompany(cmd) => self.update_company(base, envelope, hash, cmd, by),
+            // "Run on my login" (B4, D3-3): only the board member's own login, never another's.
+            Command::UseMyLogin(cmd) => self.commit(command_id, hash, move |tx| {
+                let state = check!(load(tx, cmd.ticket_id, expected)?);
+                let before = store::login_user(tx, state.id)?;
+                if before == Some(user) {
+                    return Ok(Ok((CommandResult::TicketChanged { ticket_id: state.id, column: state.column, version: state.version }, Vec::new())));
+                }
+                store::use_my_login(tx, state.id, user)?;
+                let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                e.push(tx, EventKind::TicketUpdated, json!({ "changed": ["login_user"], "by": by, "login_user": user, "before": before }))?;
+                let (me, was) = (crate::conversation::discussion::actor_name(tx, Some(by))?, crate::run::login_wait::name_of(tx, before)?);
+                let mut line = aurelius_domain::views::SystemLine::new(aurelius_domain::views::SystemLineKind::Delegated);
+                (line.from, line.to, line.by) = (Some(was.clone()), Some(me.clone()), Some(me.clone()));
+                e.line(crate::conversation::discussion::ticket_line(tx, state.id, line, &format!("{me} runs this ticket on their own Claude login now (it ran on {was}'s)."))?);
+                finish_then(tx, state.id, e, |tx| crate::run::login_wait::take_over(tx, state.id, user))
+            }),
+            // The company's background jobs on the board member's own login, or on none (B6).
+            Command::SetBackgroundLogin(cmd) => self.commit(command_id, hash, move |tx| {
+                let current = company_store::background_login_user(tx)?;
+                let choice = match (cmd.enabled, current) {
+                    (true, _) => Some(user),
+                    (false, Some(other)) if other != user => {
+                        return rejected(DomainError::Ticket("Only the board member whose Claude login runs the background jobs can turn that off.".into()));
+                    }
+                    (false, _) => None,
+                };
+                let company = company_store::get(tx)?;
+                if current == choice {
+                    return Ok(Ok((CommandResult::CompanyUpdated { version: company.version }, Vec::new())));
+                }
+                let version = company_store::set_background_login_user(tx, choice)?;
+                if let Some(old) = current {
+                    crate::run::login_wait::background_login_left(tx, old)?;
+                }
+                let previous = aurelius_storage::conversations::next_version(tx, "company", &company.id)? - 1;
+                let mut e = Events::new(&base, "company", company.id, None, previous);
+                e.push(tx, EventKind::CompanyUpdated, json!({ "by": by, "changed": ["background_login"], "background_login": choice }))?;
+                Ok(Ok((CommandResult::CompanyUpdated { version }, e.notices)))
+            }),
             _ => Err(AppError::new(aurelius_domain::ErrorCode::Internal, "not a ticket command")),
         }
     }

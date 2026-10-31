@@ -76,6 +76,7 @@ async fn the_ceo_answers_named_employees_answer_and_posts_stop_at_the_hop_limit(
     let (events_tx, events) = mpsc::unbounded_channel();
     let (streams_tx, mut streams) = mpsc::unbounded_channel::<StreamDelta>();
     let client = Client::connect_with_streams(&aurelius_host::endpoint(dir.path()), "test", events_tx, Some(streams_tx)).await.unwrap();
+    common::sign_in(dir.path(), &client, common::BOARD_MEMBER).await;
     std::mem::forget(events);
     let after = client.health().await.unwrap().last_seq;
     client.subscribe(after).await.unwrap();
@@ -117,7 +118,7 @@ async fn the_ceo_answers_named_employees_answer_and_posts_stop_at_the_hop_limit(
     assert_eq!(group.iter().filter(|m| m.role == MessageRole::User).count(), 2, "the user's messages are plain user messages");
     // Bo's update carries the earlier group messages as context.
     let bo_update = client.employee_chat(bo).await.unwrap().messages.into_iter().find(|m| m.update.as_deref() == Some(GROUP_KIND)).unwrap();
-    assert!(bo_update.text.contains(r#"{"from":"Owner","text":"Hallo team, hoe staat het?"}"#) && bo_update.text.contains(r#"{"from":"Atlas","text":"#), "{}", bo_update.text);
+    assert!(bo_update.text.contains(r#"{"from":"alex","board_member":true,"text":"Hallo team, hoe staat het?"}"#) && bo_update.text.contains(r#"{"from":"Atlas","text":"#), "{}", bo_update.text);
     let context = bo_update.text.split("Earlier in the group chat").nth(1).unwrap_or_default();
     assert!(!context.contains("@Ann en @bo: wie pakt"), "the message itself is not in its own context: {}", bo_update.text);
 
@@ -126,7 +127,7 @@ async fn the_ceo_answers_named_employees_answer_and_posts_stop_at_the_hop_limit(
     let bridge = BridgeClient::connect(dir.path()).await.unwrap();
     let ann_run = wait_for_run(dir.path(), ann_chat, 0).await;
     let (ok, read) = bridge.employee_act(ann_run, EmployeeTaskOp::ReadGroupChat { last: None, channel: None }).await.unwrap();
-    assert!(ok && read.contains(r#"{"from":"Owner","text":"@Ann en @bo: wie pakt de release op?"}"#), "{read}");
+    assert!(ok && read.contains(r#"{"from":"alex","board_member":true,"text":"@Ann en @bo: wie pakt de release op?"}"#), "{read}");
     let (ok, posted) = bridge.employee_act(ann_run, EmployeeTaskOp::PostToGroupChat { message: "Ik pak het op, @Ann noteert.".into(), channel: None }).await.unwrap();
     assert_eq!((ok, posted.as_str()), (true, "Posted in the group chat."));
     let posts = answers_of(&client, "Ann", 2).await;
@@ -258,7 +259,7 @@ async fn the_user_hears_when_nobody_answers() {
     client.execute(envelope(Command::SetEmployeeStatus(SetEmployeeStatus { employee_id: ann, status: LifecycleStatus::Active }), None)).await.unwrap();
     send(&client, "@Ann, nu wel?").await;
     let update = client.employee_chat(ann).await.unwrap().messages.into_iter().find(|m| m.update.as_deref() == Some(GROUP_KIND)).unwrap();
-    assert!(!update.text.contains("Nobody was woken") && update.text.contains(r#"{"from":"Owner","text":"Hallo?"}"#), "{}", update.text);
+    assert!(!update.text.contains("Nobody was woken") && update.text.contains(r#"{"from":"alex","board_member":true,"text":"Hallo?"}"#), "{}", update.text);
     stop(dir.path(), daemon).await;
 }
 
@@ -297,6 +298,7 @@ async fn a_group_answer_shows_the_mode_it_was_given_in() {
     let (events_tx, events) = mpsc::unbounded_channel();
     let (streams_tx, mut streams) = mpsc::unbounded_channel::<StreamDelta>();
     let client = Client::connect_with_streams(&aurelius_host::endpoint(dir.path()), "test", events_tx, Some(streams_tx)).await.unwrap();
+    common::sign_in(dir.path(), &client, common::BOARD_MEMBER).await;
     std::mem::forget(events);
     let after = client.health().await.unwrap().last_seq;
     client.subscribe(after).await.unwrap();
@@ -339,7 +341,11 @@ async fn the_group_chat_loads_in_a_fresh_database_and_after_its_row_went_missing
     stop(dir.path(), daemon).await;
 
     // Its row gone (a database edited or restored by hand): the server makes it again when it starts.
-    rusqlite::Connection::open(dir.path().join("data/aurelius.sqlite")).unwrap().execute("DELETE FROM conversations WHERE kind = 'group'", []).unwrap();
+    // (A board member read it, so its read mark goes first.)
+    let db = rusqlite::Connection::open(dir.path().join("data/aurelius.sqlite")).unwrap();
+    db.execute("DELETE FROM discussion_reads WHERE conversation_id IN (SELECT id FROM conversations WHERE kind = 'group')", []).unwrap();
+    db.execute("DELETE FROM conversations WHERE kind = 'group'", []).unwrap();
+    drop(db);
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let again = client.group_chat().await.expect("the server made the group chat again");

@@ -200,3 +200,14 @@ pub fn views(conn: &Connection, project: Option<ProjectId>) -> Result<Vec<TaskSc
     }
     Ok(out)
 }
+
+/// Whose Claude login the tasks of a recurring task run on (migration 21;
+/// none: they wait with 'login').
+pub fn set_login_user(tx: &Transaction<'_>, id: TaskScheduleId, login_user: Option<&str>) -> Result<(), StorageError> {
+    tx.execute("UPDATE recurring_tasks SET login_user = ?2 WHERE id = ?1", params![id.to_string(), login_user])?;
+    Ok(())
+}
+
+pub fn login_user(conn: &Connection, id: TaskScheduleId) -> Result<Option<String>, StorageError> {
+    Ok(conn.query_row("SELECT login_user FROM recurring_tasks WHERE id = ?1", [id.to_string()], |r| r.get(0)).optional()?.flatten())
+}

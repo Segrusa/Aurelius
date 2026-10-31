@@ -419,20 +419,25 @@ final class AppError {
   const AppError({
     required this.code,
     required this.message,
+    this.retryAfterMs,
   });
 
   final ErrorCode code;
   /// User-facing explanation.
   final String message;
+  /// `too_many_attempts`: how long until the next try is taken.
+  final int? retryAfterMs;
 
   factory AppError.fromJson(Map<String, dynamic> json) => AppError(
     code: ErrorCode.fromJson(json['code'] as String),
     message: (json['message'] as String),
+    retryAfterMs: (json['retry_after_ms'] == null ? null : (json['retry_after_ms'] as num).toInt()),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'code': code.toJson(),
     'message': message,
+    if (retryAfterMs != null) 'retry_after_ms': retryAfterMs,
   };
 }
 
@@ -1364,6 +1369,132 @@ final class ChooseTaskVariant {
   };
 }
 
+/// `claude_login.input`. The text (a one-time code) is never printed.
+final class ClaudeLoginInputParams {
+  const ClaudeLoginInputParams({
+    required this.linkId,
+    required this.text,
+  });
+
+  final String linkId;
+  final String text;
+
+  factory ClaudeLoginInputParams.fromJson(Map<String, dynamic> json) => ClaudeLoginInputParams(
+    linkId: (json['link_id'] as String),
+    text: (json['text'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'link_id': linkId,
+    'text': text,
+  };
+}
+
+/// `ServerMessage::ClaudeLoginPrompt`: the sign-in link to open and/or the
+/// question for the code, as `claude` printed them.
+final class ClaudeLoginPrompt {
+  const ClaudeLoginPrompt({
+    required this.asksCode,
+    this.error,
+    required this.linkId,
+    this.url,
+  });
+
+  /// Claude waits for the code: send it with `claude_login.input`.
+  final bool asksCode;
+  /// The link ended without a login: a fixed text of Aurelius (never Claude's
+  /// output), shown with "Try again". A link that worked ends with the event
+  /// `claude_login.updated` instead.
+  final String? error;
+  final String linkId;
+  /// The Anthropic sign-in page to open (`https://claude.com/…/oauth/authorize?…`).
+  final String? url;
+
+  factory ClaudeLoginPrompt.fromJson(Map<String, dynamic> json) => ClaudeLoginPrompt(
+    asksCode: (json['asks_code'] as bool),
+    error: (json['error'] == null ? null : (json['error'] as String)),
+    linkId: (json['link_id'] as String),
+    url: (json['url'] == null ? null : (json['url'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'asks_code': asksCode,
+    if (error != null) 'error': error,
+    'link_id': linkId,
+    if (url != null) 'url': url,
+  };
+}
+
+/// The state of a board member's own Claude login (`<data>/logins/<user_id>/`).
+enum ClaudeLoginStatus {
+  /// Claude asked to sign in again (a 401 in a run): Reconnect.
+  expired('expired'),
+  linked('linked'),
+  /// Never connected, or disconnected: the board member's tickets wait (`needs: login`).
+  missing('missing');
+
+  const ClaudeLoginStatus(this.wire);
+
+  final String wire;
+
+  static ClaudeLoginStatus fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown ClaudeLoginStatus value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
+/// `claude_login.status`, `HelloResult::claude_login`: the session's own login.
+/// Never a token or a path; the email and the plan come from `claude auth status`.
+final class ClaudeLoginView {
+  const ClaudeLoginView({
+    required this.background,
+    this.checkedAtMs,
+    this.email,
+    this.linkId,
+    this.linkedAtMs,
+    this.plan,
+    required this.status,
+    required this.userId,
+  });
+
+  /// This login also runs the company's background jobs (memory
+  /// consolidation, B6): `company.set_background_login`.
+  final bool background;
+  final int? checkedAtMs;
+  final String? email;
+  /// A `claude_login.link` of this board member is running (one at a time).
+  final String? linkId;
+  final int? linkedAtMs;
+  /// e.g. "max", "pro"; none when unknown.
+  final String? plan;
+  final ClaudeLoginStatus status;
+  final String userId;
+
+  factory ClaudeLoginView.fromJson(Map<String, dynamic> json) => ClaudeLoginView(
+    background: (json['background'] as bool),
+    checkedAtMs: (json['checked_at_ms'] == null ? null : (json['checked_at_ms'] as num).toInt()),
+    email: (json['email'] == null ? null : (json['email'] as String)),
+    linkId: (json['link_id'] == null ? null : (json['link_id'] as String)),
+    linkedAtMs: (json['linked_at_ms'] == null ? null : (json['linked_at_ms'] as num).toInt()),
+    plan: (json['plan'] == null ? null : (json['plan'] as String)),
+    status: ClaudeLoginStatus.fromJson(json['status'] as String),
+    userId: (json['user_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'background': background,
+    if (checkedAtMs != null) 'checked_at_ms': checkedAtMs,
+    if (email != null) 'email': email,
+    if (linkId != null) 'link_id': linkId,
+    if (linkedAtMs != null) 'linked_at_ms': linkedAtMs,
+    if (plan != null) 'plan': plan,
+    'status': status.toJson(),
+    'user_id': userId,
+  };
+}
+
 /// What a column does. The six kinds always exist, once each.
 enum ColumnKind {
   /// New tickets; nothing starts from here by itself.
@@ -1541,6 +1672,10 @@ sealed class Command {
         return CommandSendQueuedNow(value: SendQueuedNow.fromJson(json as Map<String, dynamic>));
       case 'set_agent_mode':
         return CommandSetAgentMode(value: SetAgentMode.fromJson(json as Map<String, dynamic>));
+      case 'set_background_login':
+        return CommandSetBackgroundLogin(
+          enabled: (json['enabled'] as bool),
+        );
       case 'set_browser_allowed':
         return CommandSetBrowserAllowed(value: SetBrowserAllowed.fromJson(json as Map<String, dynamic>));
       case 'set_conversation_run':
@@ -1606,6 +1741,10 @@ sealed class Command {
           run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
           ticketId: (json['ticket_id'] as String),
           title: (json['title'] == null ? null : (json['title'] as String)),
+        );
+      case 'use_my_login':
+        return CommandUseMyLogin(
+          ticketId: (json['ticket_id'] as String),
         );
       case 'verify_connection':
         return CommandVerifyConnection(value: VerifyConnection.fromJson(json as Map<String, dynamic>));
@@ -2404,6 +2543,24 @@ final class CommandSetAgentMode extends Command {
     };
 }
 
+/// The company's background jobs (memory consolidation, B6) run on the Claude
+/// login of the board member who asks (`enabled`), or on none (`false`, only
+/// when it is theirs): without one they do not run. Only the own login can be
+/// chosen. Answers `CompanyUpdated`.
+final class CommandSetBackgroundLogin extends Command {
+  const CommandSetBackgroundLogin({
+    required this.enabled,
+  });
+
+  final bool enabled;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'set_background_login',
+      'enabled': enabled,
+    };
+}
+
 final class CommandSetBrowserAllowed extends Command {
   const CommandSetBrowserAllowed({
     required this.value,
@@ -2799,6 +2956,23 @@ final class CommandUpdateTicket extends Command {
       if (run != null) 'run': run?.toJson(),
       'ticket_id': ticketId,
       if (title != null) 'title': title,
+    };
+}
+
+/// Run a ticket on the Claude login of the board member who asks (B4, D3-3):
+/// `TicketView::login_user` becomes that board member, never anyone else. The
+/// creator stays. Only a board member; answers `TicketChanged`.
+final class CommandUseMyLogin extends Command {
+  const CommandUseMyLogin({
+    required this.ticketId,
+  });
+
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'use_my_login',
+      'ticket_id': ticketId,
     };
 }
 
@@ -4146,6 +4320,7 @@ final class CommandResultVerificationStarted extends CommandResult {
 final class CompanySnapshot {
   const CompanySnapshot({
     required this.asOfSeq,
+    this.backgroundLogin,
     required this.company,
     required this.employees,
     required this.followOrgChart,
@@ -4153,6 +4328,8 @@ final class CompanySnapshot {
   });
 
   final int asOfSeq;
+  /// Whose Claude login runs the background jobs (B6); none: they do not run.
+  final UserView? backgroundLogin;
   /// The company itself: its name and default dispatcher.
   final CompanyView company;
   /// Employees that are not archived, oldest first.
@@ -4164,6 +4341,7 @@ final class CompanySnapshot {
 
   factory CompanySnapshot.fromJson(Map<String, dynamic> json) => CompanySnapshot(
     asOfSeq: (json['as_of_seq'] as num).toInt(),
+    backgroundLogin: (json['background_login'] == null ? null : UserView.fromJson(json['background_login'] as Map<String, dynamic>)),
     company: CompanyView.fromJson(json['company'] as Map<String, dynamic>),
     employees: (json['employees'] as List<dynamic>).map((x0) => EmployeeSummary.fromJson(x0 as Map<String, dynamic>)).toList(),
     followOrgChart: (json['follow_org_chart'] as bool),
@@ -4172,6 +4350,7 @@ final class CompanySnapshot {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'as_of_seq': asOfSeq,
+    if (backgroundLogin != null) 'background_login': backgroundLogin?.toJson(),
     'company': company.toJson(),
     'employees': employees.map((x0) => x0.toJson()).toList(),
     'follow_org_chart': followOrgChart,
@@ -5232,8 +5411,9 @@ final class EmployeesSnapshot {
 }
 
 enum ErrorCode {
-  /// A ticket, board or company write needs an active board member on the connection
-  /// (`user.use`, `user.create` or `HelloParams::user_id`).
+  /// A ticket, board or company write needs an active board member on the
+  /// connection (a session: `user.login`, the first `user.create`, or
+  /// `HelloParams::session_token`). The second lock behind `unauthenticated`.
   boardMemberRequired('board_member_required'),
   /// The caller lacks the right for this method.
   forbidden('forbidden'),
@@ -5244,20 +5424,32 @@ enum ErrorCode {
   invalidRequest('invalid_request'),
   /// `user.create`: 3 to 32 letters, digits, `.`, `_` or `-`.
   invalidUsername('invalid_username'),
+  /// `user.disable`: the last active board member cannot be disabled.
+  lastBoardMember('last_board_member'),
   notFound('not_found'),
+  /// The session's board member signed in with a temporary password (set by
+  /// another board member): only `user.set_password` (own), `user.logout`,
+  /// `user.whoami` and `session.hello` work until it is changed.
+  passwordChangeRequired('password_change_required'),
   shuttingDown('shutting_down'),
   storageUnavailable('storage_unavailable'),
-  /// `user.use`: too many tries on this connection; wait a minute.
+  /// `user.login` / `user.create`: too many tries; `AppError::retry_after_ms`
+  /// says when the next one is taken ("Too many attempts. Try again in 0:30.").
   tooManyAttempts('too_many_attempts'),
+  /// Protocol 5: this connection has no (valid) session. Everything but
+  /// `session.hello`, `user.whoami`, `user.login`, `user.list` and the first
+  /// `user.create` answers this; the client shows its sign-in screen.
+  unauthenticated('unauthenticated'),
   /// The server does not know this method (an older server); the connection stays open.
   unknownMethod('unknown_method'),
   /// `user.create`: another board member has this name (case does not count).
   usernameTaken('username_taken'),
   validation('validation'),
   versionConflict('version_conflict'),
-  /// `user.create`: the password is shorter than 12 characters.
+  /// `user.create` / `user.set_password`: the password is shorter than 12 characters.
   weakPassword('weak_password'),
-  /// `user.use`: the board member or the password is wrong (one answer for both).
+  /// `user.login`: the username or the password is wrong (one answer for both,
+  /// also for a disabled board member); `user.set_password`: the old password is wrong.
   wrongPassword('wrong_password');
 
   const ErrorCode(this.wire);
@@ -5325,6 +5517,7 @@ enum EventKind {
   attachmentAdded('attachment.added'),
   attachmentRemoved('attachment.removed'),
   boardColumnsUpdated('board.columns_updated'),
+  claudeLoginUpdated('claude_login.updated'),
   companyConverted('company.converted'),
   companyUpdated('company.updated'),
   configChanged('config.changed'),
@@ -5430,6 +5623,7 @@ enum EventKind {
   ticketStarted('ticket.started'),
   ticketUpdated('ticket.updated'),
   userCreated('user.created'),
+  userDisabled('user.disabled'),
   wakeRequested('wake.requested');
 
   const EventKind(this.wire);
@@ -5903,7 +6097,7 @@ final class HelloParams {
     this.appKey,
     required this.clientName,
     required this.clientVersion,
-    this.userId,
+    this.sessionToken,
   });
 
   /// What this client can take that older clients cannot (`client_feature`).
@@ -5916,19 +6110,19 @@ final class HelloParams {
   final String? appKey;
   final String clientName;
   final String clientVersion;
-  /// The board member this client remembers for the server (from `user.use`
-  /// or `user.create`): active again without a password when it exists
-  /// (`HelloResult::user`). Ignored for apps. A value that is no id (a
-  /// damaged stored one) counts as none, so the hello still works and the
-  /// client asks again who is there.
-  final String? userId;
+  /// The session this device got from `user.login` (or the first
+  /// `user.create`) for this server: valid, it makes its board member this
+  /// connection's (`HelloResult::user`); unknown, revoked or expired, the
+  /// hello still works without a board member and the client shows its
+  /// sign-in screen. Ignored for apps. Never printed.
+  final String? sessionToken;
 
   factory HelloParams.fromJson(Map<String, dynamic> json) => HelloParams(
     accepts: (json['accepts'] == null ? const [] : (json['accepts'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     appKey: (json['app_key'] == null ? null : (json['app_key'] as String)),
     clientName: (json['client_name'] as String),
     clientVersion: (json['client_version'] as String),
-    userId: (json['user_id'] == null ? null : (json['user_id'] as String)),
+    sessionToken: (json['session_token'] == null ? null : (json['session_token'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -5936,7 +6130,7 @@ final class HelloParams {
     if (appKey != null) 'app_key': appKey,
     'client_name': clientName,
     'client_version': clientVersion,
-    if (userId != null) 'user_id': userId,
+    if (sessionToken != null) 'session_token': sessionToken,
   };
 }
 
@@ -5945,12 +6139,14 @@ final class HelloResult {
     this.app,
     this.boardMembersExist = false,
     required this.capabilities,
+    this.claudeLogin,
     this.clientId,
     required this.daemonVersion,
     required this.environment,
     this.features = const [],
     required this.hostId,
     required this.hostName,
+    this.mustChangePassword,
     required this.os,
     required this.protocol,
     required this.remote,
@@ -5964,6 +6160,8 @@ final class HelloResult {
   /// ("Create the first board member") is all a client shows.
   final bool boardMembersExist;
   final List<Capability> capabilities;
+  /// The session's own Claude login; none without a session.
+  final ClaudeLoginView? claudeLogin;
   /// The paired device behind a remote connection.
   final String? clientId;
   final String daemonVersion;
@@ -5975,25 +6173,30 @@ final class HelloResult {
   final String hostId;
   /// The server's computer name.
   final String hostName;
+  /// The session's board member must change a temporary password first.
+  final bool? mustChangePassword;
   /// The server's OS: `windows`, `macos` or `linux`.
   final String os;
   final int protocol;
   /// This connection came in over the network.
   final bool remote;
-  /// This connection's active board member (`HelloParams::user_id` when it
-  /// exists); none: the client asks "Who's working here?".
+  /// The board member of this connection's session (`HelloParams::session_token`
+  /// when it is valid); none: the client shows its sign-in screen (or the
+  /// onboarding without board members).
   final UserView? user;
 
   factory HelloResult.fromJson(Map<String, dynamic> json) => HelloResult(
     app: (json['app'] == null ? null : AppSession.fromJson(json['app'] as Map<String, dynamic>)),
     boardMembersExist: (json['board_members_exist'] == null ? false : (json['board_members_exist'] as bool)),
     capabilities: (json['capabilities'] as List<dynamic>).map((x0) => Capability.fromJson(x0 as String)).toList(),
+    claudeLogin: (json['claude_login'] == null ? null : ClaudeLoginView.fromJson(json['claude_login'] as Map<String, dynamic>)),
     clientId: (json['client_id'] == null ? null : (json['client_id'] as String)),
     daemonVersion: (json['daemon_version'] as String),
     environment: (json['environment'] as String),
     features: (json['features'] == null ? const [] : (json['features'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     hostId: (json['host_id'] as String),
     hostName: (json['host_name'] as String),
+    mustChangePassword: (json['must_change_password'] == null ? null : (json['must_change_password'] as bool)),
     os: (json['os'] as String),
     protocol: (json['protocol'] as num).toInt(),
     remote: (json['remote'] as bool),
@@ -6004,12 +6207,14 @@ final class HelloResult {
     if (app != null) 'app': app?.toJson(),
     'board_members_exist': boardMembersExist,
     'capabilities': capabilities.map((x0) => x0.toJson()).toList(),
+    if (claudeLogin != null) 'claude_login': claudeLogin?.toJson(),
     if (clientId != null) 'client_id': clientId,
     'daemon_version': daemonVersion,
     'environment': environment,
     'features': features,
     'host_id': hostId,
     'host_name': hostName,
+    if (mustChangePassword != null) 'must_change_password': mustChangePassword,
     'os': os,
     'protocol': protocol,
     'remote': remote,
@@ -6040,6 +6245,12 @@ sealed class HostResult {
         return HostResultBackups(value: BackupsSnapshot.fromJson(json as Map<String, dynamic>));
       case 'browser':
         return HostResultBrowser(value: BrowserSetting.fromJson(json as Map<String, dynamic>));
+      case 'claude_login':
+        return HostResultClaudeLogin(value: ClaudeLoginView.fromJson(json as Map<String, dynamic>));
+      case 'claude_login_link':
+        return HostResultClaudeLoginLink(
+          linkId: (json['link_id'] as String),
+        );
       case 'count':
         return HostResultCount(
           count: (json['count'] as num).toInt(),
@@ -6085,6 +6296,8 @@ sealed class HostResult {
         return HostResultTraceSetting(value: TraceSetting.fromJson(json as Map<String, dynamic>));
       case 'update':
         return HostResultUpdate(value: UpdateStatus.fromJson(json as Map<String, dynamic>));
+      case 'user':
+        return HostResultUser(value: UserView.fromJson(json as Map<String, dynamic>));
       case 'variants_setting':
         return HostResultVariantsSetting(value: VariantsSetting.fromJson(json as Map<String, dynamic>));
       default:
@@ -6206,6 +6419,37 @@ final class HostResultBrowser extends HostResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'browser',
       ...value.toJson(),
+    };
+}
+
+/// `claude_login.cancel` / `claude_login.unlink`: the login as it is now.
+final class HostResultClaudeLogin extends HostResult {
+  const HostResultClaudeLogin({
+    required this.value,
+  });
+
+  final ClaudeLoginView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'claude_login',
+      ...value.toJson(),
+    };
+}
+
+/// `claude_login.link`: the link that runs; its prompts follow as
+/// `ServerMessage::ClaudeLoginPrompt` with this id.
+final class HostResultClaudeLoginLink extends HostResult {
+  const HostResultClaudeLoginLink({
+    required this.linkId,
+  });
+
+  final String linkId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'claude_login_link',
+      'link_id': linkId,
     };
 }
 
@@ -6486,6 +6730,21 @@ final class HostResultUpdate extends HostResult {
     };
 }
 
+/// `user.disable`: the board member as it is now.
+final class HostResultUser extends HostResult {
+  const HostResultUser({
+    required this.value,
+  });
+
+  final UserView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'user',
+      ...value.toJson(),
+    };
+}
+
 final class HostResultVariantsSetting extends HostResult {
   const HostResultVariantsSetting({
     required this.value,
@@ -6604,6 +6863,17 @@ sealed class HostWrite {
           backend: BrowserBackend.fromJson(src['backend'] as String),
         );
         }
+      case 'claude_login.cancel':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteClaudeLoginCancel(
+          linkId: (src['link_id'] as String),
+        );
+        }
+      case 'claude_login.link':
+        return const HostWriteClaudeLoginLink();
+      case 'claude_login.unlink':
+        return const HostWriteClaudeLoginUnlink();
       case 'fs.create_dir':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -6812,6 +7082,13 @@ sealed class HostWrite {
         }
       case 'server.restart':
         return const HostWriteServerRestart();
+      case 'session.revoke':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteSessionRevoke(
+          sessionId: (src['session_id'] as String),
+        );
+        }
       case 'trace.set_enabled':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -6829,6 +7106,15 @@ sealed class HostWrite {
         return const HostWriteUpdatePrepareApp();
       case 'user.create':
         return HostWriteUserCreate(params: UserCreateParams.fromJson(json['params'] as Map<String, dynamic>));
+      case 'user.disable':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteUserDisable(
+          userId: (src['user_id'] as String),
+        );
+        }
+      case 'user.set_password':
+        return HostWriteUserSetPassword(params: SetPasswordParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'variants.set_enabled':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -7111,6 +7397,48 @@ final class HostWriteBrowserSetBackend extends HostWrite {
       'params': <String, dynamic>{
       'backend': backend.toJson(),
     },
+    };
+}
+
+/// Stop a running link of the session's own login. Answers `ClaudeLogin`.
+final class HostWriteClaudeLoginCancel extends HostWrite {
+  const HostWriteClaudeLoginCancel({
+    required this.linkId,
+  });
+
+  final String linkId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'claude_login.cancel',
+      'params': <String, dynamic>{
+      'link_id': linkId,
+    },
+    };
+}
+
+/// Connect the session's own Claude login: the server starts `claude auth
+/// login` for `<data>/logins/<user_id>/` and answers `ClaudeLoginLink`. What
+/// Claude asks (the sign-in link, the code) comes to this connection only as
+/// `ServerMessage::ClaudeLoginPrompt`; the code goes back with
+/// `claude_login.input`. One link per board member at a time, 10 minutes.
+final class HostWriteClaudeLoginLink extends HostWrite {
+  const HostWriteClaudeLoginLink();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'claude_login.link',
+    };
+}
+
+/// Disconnect the session's own Claude login (`claude auth logout`, its folder
+/// removed). Answers `ClaudeLogin`.
+final class HostWriteClaudeLoginUnlink extends HostWrite {
+  const HostWriteClaudeLoginUnlink();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'claude_login.unlink',
     };
 }
 
@@ -7677,6 +8005,25 @@ final class HostWriteServerRestart extends HostWrite {
     };
 }
 
+/// End one session (any board member's: one role). Its device's open
+/// connection closes at once (`ServerMessage::SignedOut`); the timeline says
+/// who revoked it. Answers `Done`. Not for apps.
+final class HostWriteSessionRevoke extends HostWrite {
+  const HostWriteSessionRevoke({
+    required this.sessionId,
+  });
+
+  final String sessionId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'session.revoke',
+      'params': <String, dynamic>{
+      'session_id': sessionId,
+    },
+    };
+}
+
 /// Trace mode on or off for every run that starts afterwards (feature `run_trace`).
 /// Off also forgets the traces kept so far.
 final class HostWriteTraceSetEnabled extends HostWrite {
@@ -7733,10 +8080,14 @@ final class HostWriteUpdatePrepareApp extends HostWrite {
 
 /// A new board member (OV-12: `invalid_username`, `weak_password` (also a
 /// password of only spaces), `username_taken`; `too_many_attempts` after five
-/// a minute on one connection); answers `CommandResult::UserCreated` as a command
-/// receipt. A connection without an active board member becomes the new one.
-/// The server hashes the password before anything is recorded: the receipt,
-/// its request hash and the event `user.created` hold the name only. Not for apps.
+/// a minute on one connection or twenty an hour on the server); answers
+/// `CommandResult::UserCreated` as a command receipt. Without a session only
+/// the first board member (the onboarding): that connection then gets a
+/// session, whose token `user.login` would give (see `HelloResult::user`;
+/// the client signs in once more to get the token). After that it needs a
+/// session (any board member, one role). The server hashes the password
+/// before anything is recorded: the receipt, its request hash and the event
+/// `user.created` hold the name only. Not for apps.
 final class HostWriteUserCreate extends HostWrite {
   const HostWriteUserCreate({
     required this.params,
@@ -7747,6 +8098,45 @@ final class HostWriteUserCreate extends HostWrite {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'user.create',
+      'params': params.toJson(),
+    };
+}
+
+/// Disable a board member: their sessions end at once and they cannot sign
+/// in; their Claude login is disconnected; tickets keep their creator. The
+/// last active board member cannot be disabled (`last_board_member`).
+/// Answers `User`. Not for apps.
+final class HostWriteUserDisable extends HostWrite {
+  const HostWriteUserDisable({
+    required this.userId,
+  });
+
+  final String userId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.disable',
+      'params': <String, dynamic>{
+      'user_id': userId,
+    },
+    };
+}
+
+/// Change a password. Own (no `user_id`, or the session's): with the old
+/// password; the other sessions end, this one stays. Another board member's
+/// (B10): a temporary password, changed at their next sign-in
+/// (`must_change_password`); all their sessions end. Like `user.create`, the
+/// passwords are in no receipt, request hash, event or log. Answers `Done`.
+final class HostWriteUserSetPassword extends HostWrite {
+  const HostWriteUserSetPassword({
+    required this.params,
+  });
+
+  final SetPasswordParams params;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.set_password',
       'params': params.toJson(),
     };
 }
@@ -8273,6 +8663,65 @@ final class LoadSnapshot {
     'mem_total_mb': memTotalMb,
     'running': running,
     'sampled_at_ms': sampledAtMs,
+  };
+}
+
+/// `user.login`. The password is never printed.
+final class LoginParams {
+  const LoginParams({
+    required this.deviceName,
+    required this.password,
+    required this.username,
+  });
+
+  /// How the device shows in `session.list` ("Desktop · dev-laptop").
+  final String deviceName;
+  final String password;
+  final String username;
+
+  factory LoginParams.fromJson(Map<String, dynamic> json) => LoginParams(
+    deviceName: (json['device_name'] as String),
+    password: (json['password'] as String),
+    username: (json['username'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'device_name': deviceName,
+    'password': password,
+    'username': username,
+  };
+}
+
+/// `user.login`: what the client keeps for the server. The token is shown
+/// here once; the server keeps only its SHA-256. Never printed.
+final class LoginResult {
+  const LoginResult({
+    required this.expiresAtMs,
+    required this.mustChangePassword,
+    required this.sessionToken,
+    required this.user,
+  });
+
+  /// When the session ends at the latest (90 days); 30 days without use end it earlier.
+  final int expiresAtMs;
+  /// A temporary password: change it with `user.set_password` first.
+  final bool mustChangePassword;
+  /// Give it in every hello (`HelloParams::session_token`) on this device.
+  final String sessionToken;
+  final UserView user;
+
+  factory LoginResult.fromJson(Map<String, dynamic> json) => LoginResult(
+    expiresAtMs: (json['expires_at_ms'] as num).toInt(),
+    mustChangePassword: (json['must_change_password'] as bool),
+    sessionToken: (json['session_token'] as String),
+    user: UserView.fromJson(json['user'] as Map<String, dynamic>),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'expires_at_ms': expiresAtMs,
+    'must_change_password': mustChangePassword,
+    'session_token': sessionToken,
+    'user': user.toJson(),
   };
 }
 
@@ -9259,6 +9708,10 @@ sealed class Method {
         return const MethodBrowserGet();
       case 'channel.list':
         return const MethodChannelList();
+      case 'claude_login.input':
+        return MethodClaudeLoginInput(params: ClaudeLoginInputParams.fromJson(json['params'] as Map<String, dynamic>));
+      case 'claude_login.status':
+        return const MethodClaudeLoginStatus();
       case 'company.get':
         return const MethodCompanyGet();
       case 'connection.detect_runtime':
@@ -9477,6 +9930,13 @@ sealed class Method {
         return const MethodServerGetHealth();
       case 'session.hello':
         return MethodSessionHello(params: HelloParams.fromJson(json['params'] as Map<String, dynamic>));
+      case 'session.list':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodSessionList(
+          userId: (src['user_id'] == null ? null : (src['user_id'] as String)),
+        );
+        }
       case 'share.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -9619,8 +10079,10 @@ sealed class Method {
         }
       case 'user.list':
         return const MethodUserList();
-      case 'user.use':
-        return MethodUserUse(params: UserUseParams.fromJson(json['params'] as Map<String, dynamic>));
+      case 'user.login':
+        return MethodUserLogin(params: LoginParams.fromJson(json['params'] as Map<String, dynamic>));
+      case 'user.logout':
+        return const MethodUserLogout();
       case 'user.whoami':
         return const MethodUserWhoami();
       case 'variants.get_setting':
@@ -9807,6 +10269,34 @@ final class MethodChannelList extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'channel.list',
+    };
+}
+
+/// What a running `claude_login.link` asks for: the code Claude showed after
+/// the sign-in at Anthropic, written to `claude auth login` as typed. Only
+/// the connection that started the link. A session method: no receipt, no
+/// request hash, no event, never printed or logged. Answers `ClaudeLogin`.
+final class MethodClaudeLoginInput extends Method {
+  const MethodClaudeLoginInput({
+    required this.params,
+  });
+
+  final ClaudeLoginInputParams params;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'claude_login.input',
+      'params': params.toJson(),
+    };
+}
+
+/// The session's own Claude login (`ClaudeLoginView`). Feature of protocol 5.
+final class MethodClaudeLoginStatus extends Method {
+  const MethodClaudeLoginStatus();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'claude_login.status',
     };
 }
 
@@ -10446,6 +10936,25 @@ final class MethodSessionHello extends Method {
     };
 }
 
+/// The signed-in devices of a board member (none: the session's own),
+/// newest activity first (`SessionView::current` marks this one). Any board
+/// member may list another's (one role). Never a token or its hash.
+final class MethodSessionList extends Method {
+  const MethodSessionList({
+    this.userId,
+  });
+
+  final String? userId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'session.list',
+      'params': <String, dynamic>{
+      if (userId != null) 'user_id': userId,
+    },
+    };
+}
+
 final class MethodShareList extends Method {
   const MethodShareList({
     required this.projectId,
@@ -10819,8 +11328,9 @@ final class MethodUsageGetTotals extends Method {
     };
 }
 
-/// The board members, oldest first (never a password's hash): the choice
-/// "Who's working here?". Apps may read it too.
+/// The board members, oldest first (never a password's hash), disabled ones
+/// too (`UserView::disabled_at_ms`). Works without a session (the sign-in
+/// screen may offer the names). Apps may read it too.
 final class MethodUserList extends Method {
   const MethodUserList();
 
@@ -10830,27 +11340,41 @@ final class MethodUserList extends Method {
     };
 }
 
-/// The one password check (Fase 1): a right password makes the board member
-/// active on this connection and answers `WhoAmI`. A wrong password and an
-/// unknown board member are both `wrong_password` (after a short delay); more
-/// than 5 tries a minute on one connection are `too_many_attempts`. A session
-/// method: it changes only the connection, so it has no receipt to replay.
+/// Sign in (protocol 5): a right username and password give this connection a
+/// session and answer `Login` with its token, shown once (keep it for the
+/// server and give it in every hello). A wrong password, an unknown username
+/// and a disabled board member all answer `wrong_password`; after 5 failed tries
+/// for one username the server waits longer each time, up to 15 minutes
+/// (`too_many_attempts` with `retry_after_ms`). A session method: it changes
+/// only the connection and the sessions, so it has no receipt and no event.
 /// Not for apps.
-final class MethodUserUse extends Method {
-  const MethodUserUse({
+final class MethodUserLogin extends Method {
+  const MethodUserLogin({
     required this.params,
   });
 
-  final UserUseParams params;
+  final LoginParams params;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'user.use',
+      'method': 'user.login',
       'params': params.toJson(),
     };
 }
 
-/// Whether the server has board members, and this connection's active one.
+/// End this connection's session (the device must sign in again); answers
+/// `WhoAmI` without a board member. A session method.
+final class MethodUserLogout extends Method {
+  const MethodUserLogout();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.logout',
+    };
+}
+
+/// Whether the server has board members, and this connection's session's one.
+/// Works without a session.
 final class MethodUserWhoami extends Method {
   const MethodUserWhoami();
 
@@ -12331,6 +12855,8 @@ sealed class ResponseBody {
         return ResponseBodyBrowser(value: BrowserSetting.fromJson(json['value'] as Map<String, dynamic>));
       case 'channels':
         return ResponseBodyChannels(value: ChannelsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'claude_login':
+        return ResponseBodyClaudeLogin(value: ClaudeLoginView.fromJson(json['value'] as Map<String, dynamic>));
       case 'company':
         return ResponseBodyCompany(value: CompanySnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'connections':
@@ -12371,6 +12897,8 @@ sealed class ResponseBody {
         return ResponseBodyJobs(value: JobsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'load':
         return ResponseBodyLoad(value: LoadSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'login':
+        return ResponseBodyLogin(value: LoginResult.fromJson(json['value'] as Map<String, dynamic>));
       case 'management_mode_setting':
         return ResponseBodyManagementModeSetting(value: ManagementModeSetting.fromJson(json['value'] as Map<String, dynamic>));
       case 'markdown_file':
@@ -12430,6 +12958,8 @@ sealed class ResponseBody {
           jpegBase64: (src['jpeg_base64'] as String),
         );
         }
+      case 'sessions':
+        return ResponseBodySessions(value: SessionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'shares':
         return ResponseBodyShares(value: (json['value'] as List<dynamic>).map((x0) => ShareView.fromJson(x0 as Map<String, dynamic>)).toList());
       case 'subagents':
@@ -12684,6 +13214,20 @@ final class ResponseBodyChannels extends ResponseBody {
     };
 }
 
+final class ResponseBodyClaudeLogin extends ResponseBody {
+  const ResponseBodyClaudeLogin({
+    required this.value,
+  });
+
+  final ClaudeLoginView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'claude_login',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodyCompany extends ResponseBody {
   const ResponseBodyCompany({
     required this.value,
@@ -12916,6 +13460,21 @@ final class ResponseBodyLoad extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'load',
+      'value': value.toJson(),
+    };
+}
+
+/// `user.login`: the session token, once.
+final class ResponseBodyLogin extends ResponseBody {
+  const ResponseBodyLogin({
+    required this.value,
+  });
+
+  final LoginResult value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'login',
       'value': value.toJson(),
     };
 }
@@ -13263,6 +13822,20 @@ final class ResponseBodyScreenshot extends ResponseBody {
       'id': id,
       'jpeg_base64': jpegBase64,
     },
+    };
+}
+
+final class ResponseBodySessions extends ResponseBody {
+  const ResponseBodySessions({
+    required this.value,
+  });
+
+  final SessionsSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'sessions',
+      'value': value.toJson(),
     };
 }
 
@@ -14018,6 +14591,8 @@ sealed class ServerMessage {
   factory ServerMessage.fromJson(Map<String, dynamic> json) {
     final tag = json['type'] as String;
     switch (tag) {
+      case 'claude_login_prompt':
+        return ServerMessageClaudeLoginPrompt(value: ClaudeLoginPrompt.fromJson(json as Map<String, dynamic>));
       case 'event':
         return ServerMessageEvent(value: Event.fromJson(json as Map<String, dynamic>));
       case 'load_changed':
@@ -14029,6 +14604,10 @@ sealed class ServerMessage {
           error: (json['error'] == null ? null : AppError.fromJson(json['error'] as Map<String, dynamic>)),
           ok: (json['ok'] == null ? null : ResponseBody.fromJson(json['ok'] as Map<String, dynamic>)),
           requestId: (json['request_id'] as num).toInt(),
+        );
+      case 'signed_out':
+        return ServerMessageSignedOut(
+          reason: SignOutReason.fromJson(json['reason'] as String),
         );
       case 'stream':
         return ServerMessageStream(value: StreamDelta.fromJson(json as Map<String, dynamic>));
@@ -14044,6 +14623,22 @@ sealed class ServerMessage {
   }
 
   Map<String, dynamic> toJson();
+}
+
+/// What `claude auth login` asks, only to the connection that started the
+/// link (`claude_login.link`); never an event, never logged.
+final class ServerMessageClaudeLoginPrompt extends ServerMessage {
+  const ServerMessageClaudeLoginPrompt({
+    required this.value,
+  });
+
+  final ClaudeLoginPrompt value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'claude_login_prompt',
+      ...value.toJson(),
+    };
 }
 
 /// A committed event (durable); replayed from the log after `event.subscribe`.
@@ -14111,6 +14706,24 @@ final class ServerMessageResponse extends ServerMessage {
     };
 }
 
+/// The session of this connection ended (`user.logout`, `session.revoke`, a
+/// new password, `user.disable`, expiry); the server closes the connection
+/// right after. The client shows "You were signed out on this device." and
+/// its sign-in screen (a logout of its own needs no message).
+final class ServerMessageSignedOut extends ServerMessage {
+  const ServerMessageSignedOut({
+    required this.reason,
+  });
+
+  final SignOutReason reason;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'signed_out',
+      'reason': reason.toJson(),
+    };
+}
+
 /// Ephemeral streamed text; after a reconnect the client refetches instead.
 final class ServerMessageStream extends ServerMessage {
   const ServerMessageStream({
@@ -14168,6 +14781,76 @@ final class ServerMessageTerminalOutput extends ServerMessage {
       'type': 'terminal_output',
       ...value.toJson(),
     };
+}
+
+/// One signed-in device of a board member (`session.list`).
+final class SessionView {
+  const SessionView({
+    this.clientId,
+    required this.createdAtMs,
+    required this.current,
+    required this.deviceName,
+    required this.expiresAtMs,
+    required this.id,
+    required this.lastSeenMs,
+    required this.userId,
+  });
+
+  /// The paired device; none: the desktop on the server itself (local IPC).
+  final String? clientId;
+  final int createdAtMs;
+  /// The session of the connection that asked.
+  final bool current;
+  /// What the device called itself at `user.login`.
+  final String deviceName;
+  /// The absolute end (90 days); 30 days without use end it earlier.
+  final int expiresAtMs;
+  final String id;
+  final int lastSeenMs;
+  final String userId;
+
+  factory SessionView.fromJson(Map<String, dynamic> json) => SessionView(
+    clientId: (json['client_id'] == null ? null : (json['client_id'] as String)),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    current: (json['current'] as bool),
+    deviceName: (json['device_name'] as String),
+    expiresAtMs: (json['expires_at_ms'] as num).toInt(),
+    id: (json['id'] as String),
+    lastSeenMs: (json['last_seen_ms'] as num).toInt(),
+    userId: (json['user_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (clientId != null) 'client_id': clientId,
+    'created_at_ms': createdAtMs,
+    'current': current,
+    'device_name': deviceName,
+    'expires_at_ms': expiresAtMs,
+    'id': id,
+    'last_seen_ms': lastSeenMs,
+    'user_id': userId,
+  };
+}
+
+/// `session.list`: newest activity first; never a token or its hash.
+final class SessionsSnapshot {
+  const SessionsSnapshot({
+    required this.sessions,
+    required this.userId,
+  });
+
+  final List<SessionView> sessions;
+  final String userId;
+
+  factory SessionsSnapshot.fromJson(Map<String, dynamic> json) => SessionsSnapshot(
+    sessions: (json['sessions'] as List<dynamic>).map((x0) => SessionView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    userId: (json['user_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'sessions': sessions.map((x0) => x0.toJson()).toList(),
+    'user_id': userId,
+  };
 }
 
 final class SetAgentMode {
@@ -14391,6 +15074,33 @@ final class SetIdeaStatus {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'idea_id': ideaId,
     'status': status.toJson(),
+  };
+}
+
+/// `user.set_password`. No password is ever printed.
+final class SetPasswordParams {
+  const SetPasswordParams({
+    required this.newPassword,
+    this.oldPassword,
+    this.userId,
+  });
+
+  final String newPassword;
+  /// The current password; required for the own one.
+  final String? oldPassword;
+  /// Another board member (a temporary password); none: the session's own.
+  final String? userId;
+
+  factory SetPasswordParams.fromJson(Map<String, dynamic> json) => SetPasswordParams(
+    newPassword: (json['new_password'] as String),
+    oldPassword: (json['old_password'] == null ? null : (json['old_password'] as String)),
+    userId: (json['user_id'] == null ? null : (json['user_id'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'new_password': newPassword,
+    if (oldPassword != null) 'old_password': oldPassword,
+    if (userId != null) 'user_id': userId,
   };
 }
 
@@ -14792,6 +15502,31 @@ enum ShutdownWhen {
   String toJson() => wire;
 }
 
+/// Why the server ended a connection's session (`ServerMessage::SignedOut`).
+enum SignOutReason {
+  /// The board member was disabled.
+  disabled('disabled'),
+  /// 30 days without use, or 90 days in all.
+  expired('expired'),
+  /// `user.logout` on this device.
+  loggedOut('logged_out'),
+  /// The password changed (on another device, or reset by another board member).
+  passwordChanged('password_changed'),
+  /// `session.revoke` (this or another device), or the paired device was revoked.
+  revoked('revoked');
+
+  const SignOutReason(this.wire);
+
+  final String wire;
+
+  static SignOutReason fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown SignOutReason value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 final class SourceView {
   const SourceView({
     this.error,
@@ -15010,6 +15745,7 @@ final class SubscriptionUsage {
     this.error,
     required this.fetchedAtMs,
     required this.limits,
+    this.loginUser,
     this.plan,
     required this.raw,
   });
@@ -15018,6 +15754,10 @@ final class SubscriptionUsage {
   final String? error;
   final int fetchedAtMs;
   final List<PlanLimitView> limits;
+  /// Whose Claude login this is (protocol 5: `subscription.get` answers the
+  /// session's own; nobody sees another's usage, B12). None: the server's
+  /// own login, until runs move to the board members' logins.
+  final String? loginUser;
   /// e.g. "max"; None when unknown.
   final String? plan;
   /// The full `/usage` text (shown when parsing found nothing).
@@ -15027,6 +15767,7 @@ final class SubscriptionUsage {
     error: (json['error'] == null ? null : (json['error'] as String)),
     fetchedAtMs: (json['fetched_at_ms'] as num).toInt(),
     limits: (json['limits'] as List<dynamic>).map((x0) => PlanLimitView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    loginUser: (json['login_user'] == null ? null : (json['login_user'] as String)),
     plan: (json['plan'] == null ? null : (json['plan'] as String)),
     raw: (json['raw'] as String),
   );
@@ -15035,6 +15776,7 @@ final class SubscriptionUsage {
     if (error != null) 'error': error,
     'fetched_at_ms': fetchedAtMs,
     'limits': limits.map((x0) => x0.toJson()).toList(),
+    if (loginUser != null) 'login_user': loginUser,
     if (plan != null) 'plan': plan,
     'raw': raw,
   };
@@ -15889,6 +16631,25 @@ final class TicketDetail {
   };
 }
 
+/// Why a ticket cannot run yet (`TicketView::needs`).
+enum TicketNeed {
+  /// `login_user` has no working Claude login (none, expired, or disabled):
+  /// "<name> must connect their Claude login". Another board member may take
+  /// it over with `ticket.use_my_login`.
+  login('login');
+
+  const TicketNeed(this.wire);
+
+  final String wire;
+
+  static TicketNeed fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown TicketNeed value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 /// A ticket's priority (B9). Normal unless chosen.
 enum TicketPriority {
   high('high'),
@@ -15924,6 +16685,9 @@ final class TicketView {
     this.doneAtMs,
     required this.id,
     required this.labels,
+    required this.loginUser,
+    required this.loginUsername,
+    this.needs,
     required this.number,
     this.ownerEmployeeId,
     this.ownerName,
@@ -15959,6 +16723,12 @@ final class TicketView {
   final int? doneAtMs;
   final String id;
   final List<String> labels;
+  /// Whose Claude login its runs use (protocol 5): the creator, unless a
+  /// board member took it over on their own login (`ticket.use_my_login`).
+  final String loginUser;
+  final String loginUsername;
+  /// What the ticket waits for before it can run; none: nothing.
+  final TicketNeed? needs;
   /// Per company, from 1: what people call it (`#12`).
   final int number;
   /// The employee whose main task carries the ticket; none until chosen (by
@@ -15996,6 +16766,9 @@ final class TicketView {
     doneAtMs: (json['done_at_ms'] == null ? null : (json['done_at_ms'] as num).toInt()),
     id: (json['id'] as String),
     labels: (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    loginUser: (json['login_user'] as String),
+    loginUsername: (json['login_username'] as String),
+    needs: (json['needs'] == null ? null : TicketNeed.fromJson(json['needs'] as String)),
     number: (json['number'] as num).toInt(),
     ownerEmployeeId: (json['owner_employee_id'] == null ? null : (json['owner_employee_id'] as String)),
     ownerName: (json['owner_name'] == null ? null : (json['owner_name'] as String)),
@@ -16027,6 +16800,9 @@ final class TicketView {
     if (doneAtMs != null) 'done_at_ms': doneAtMs,
     'id': id,
     'labels': labels,
+    'login_user': loginUser,
+    'login_username': loginUsername,
+    if (needs != null) 'needs': needs?.toJson(),
     'number': number,
     if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
     if (ownerName != null) 'owner_name': ownerName,
@@ -16897,32 +17673,12 @@ final class UserCreateParams {
   };
 }
 
-/// `user.use`. The password is never printed.
-final class UserUseParams {
-  const UserUseParams({
-    required this.password,
-    required this.userId,
-  });
-
-  final String password;
-  final String userId;
-
-  factory UserUseParams.fromJson(Map<String, dynamic> json) => UserUseParams(
-    password: (json['password'] as String),
-    userId: (json['user_id'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'password': password,
-    'user_id': userId,
-  };
-}
-
 /// A board member as every client sees it; never the password's hash.
 final class UserView {
   const UserView({
     required this.createdAtMs,
     this.createdByUser,
+    this.disabledAtMs,
     required this.id,
     required this.username,
   });
@@ -16930,12 +17686,15 @@ final class UserView {
   final int createdAtMs;
   /// None: made in the onboarding, without an active board member.
   final String? createdByUser;
+  /// Disabled (`user.disable`): cannot sign in; tickets keep their creator.
+  final int? disabledAtMs;
   final String id;
   final String username;
 
   factory UserView.fromJson(Map<String, dynamic> json) => UserView(
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     createdByUser: (json['created_by_user'] == null ? null : (json['created_by_user'] as String)),
+    disabledAtMs: (json['disabled_at_ms'] == null ? null : (json['disabled_at_ms'] as num).toInt()),
     id: (json['id'] as String),
     username: (json['username'] as String),
   );
@@ -16943,6 +17702,7 @@ final class UserView {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'created_at_ms': createdAtMs,
     if (createdByUser != null) 'created_by_user': createdByUser,
+    if (disabledAtMs != null) 'disabled_at_ms': disabledAtMs,
     'id': id,
     'username': username,
   };
@@ -17063,20 +17823,26 @@ final class VerifyConnection {
 final class WhoAmI {
   const WhoAmI({
     required this.boardMembersExist,
+    this.mustChangePassword,
     this.user,
   });
 
   final bool boardMembersExist;
-  /// The active board member of this connection.
+  /// The session's board member signed in with a temporary password and must
+  /// change it (`user.set_password`) before anything else works.
+  final bool? mustChangePassword;
+  /// The board member of this connection's session.
   final UserView? user;
 
   factory WhoAmI.fromJson(Map<String, dynamic> json) => WhoAmI(
     boardMembersExist: (json['board_members_exist'] as bool),
+    mustChangePassword: (json['must_change_password'] == null ? null : (json['must_change_password'] as bool)),
     user: (json['user'] == null ? null : UserView.fromJson(json['user'] as Map<String, dynamic>)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'board_members_exist': boardMembersExist,
+    if (mustChangePassword != null) 'must_change_password': mustChangePassword,
     if (user != null) 'user': user?.toJson(),
   };
 }

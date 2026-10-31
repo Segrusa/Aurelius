@@ -73,11 +73,17 @@ impl CommandService {
                     conv::set_run_status(tx, plan.run_id, "running", None)?;
                 }
                 // A run that waited for the usage limit goes again; its task with it.
-                let resumed = if conv::run_error(tx, plan.run_id)?.as_deref() == Some("quota") {
-                    tx.execute("UPDATE runs SET error_code = NULL WHERE id = ?1", [plan.run_id.to_string()])?;
-                    crate::task::task_runs::on_run_quota_resumed(tx, plan.run_id)?
-                } else {
-                    vec![]
+                let resumed = match conv::run_error(tx, plan.run_id)?.as_deref() {
+                    Some("quota") => {
+                        tx.execute("UPDATE runs SET error_code = NULL WHERE id = ?1", [plan.run_id.to_string()])?;
+                        crate::task::task_runs::on_run_quota_resumed(tx, plan.run_id)?
+                    }
+                    // Or for its Claude login, which is there now.
+                    Some(aurelius_domain::task::WAITING_LOGIN) => {
+                        tx.execute("UPDATE runs SET error_code = NULL WHERE id = ?1", [plan.run_id.to_string()])?;
+                        crate::run::login_wait::on_run_login_resumed(tx, plan.run_id)?
+                    }
+                    _ => vec![],
                 };
                 // A run that compacted its session first already started under this lease
                 // (its answer showed meanwhile): starting its turn records nothing twice.
@@ -192,6 +198,10 @@ impl CommandService {
                 if let (Some(at), "quota") = (until, reason.as_str()) {
                     notices.extend(crate::task::task_runs::on_run_quota_wait(tx, run_id, at)?);
                 }
+                // No board member's Claude login to run on: it waits for it (MU3-12).
+                if reason == aurelius_domain::task::WAITING_LOGIN {
+                    notices.extend(crate::run::login_wait::on_run_login_wait(tx, &st, run_id)?);
+                }
                 if let Some(blob) = &explanation {
                     notices.extend(explain_failed_start(tx, run_id, blob)?);
                     // Woken by the group chat: the group hears it could not answer.
@@ -239,10 +249,22 @@ impl CommandService {
     /// The Claude usage limit is reached until `until_ms`: every run of the provider
     /// that has not started waits for the reset too ("quota"), instead of failing on it.
     pub fn park_runs_for_quota(&self, until_ms: i64) -> Result<Vec<EventNotice>, AppError> {
+        self.park_quota(None, until_ms)
+    }
+
+    /// The usage limit of `login`'s Claude login is reached until `until_ms`
+    /// (MU3-11): only the runs on that login that have not started wait too; the
+    /// other board members' go on. Never moved to another login.
+    pub fn park_runs_for_quota_of(&self, login: aurelius_domain::UserId, until_ms: i64) -> Result<Vec<EventNotice>, AppError> {
+        self.park_quota(Some(login), until_ms)
+    }
+
+    fn park_quota(&self, login: Option<aurelius_domain::UserId>, until_ms: i64) -> Result<Vec<EventNotice>, AppError> {
         self.store
             .write(move |tx| {
                 let mut notices = Vec::new();
-                for job in queries::park_ready_runs_for_quota(tx, "claude_code", until_ms)? {
+                let login = login.map(|u| u.to_string());
+                for job in queries::park_ready_runs_for_quota_of(tx, "claude_code", login.as_deref(), until_ms)? {
                     let run_id = RunId::parse(&job).map_err(|e| StorageError::Rejected(e.to_string()))?;
                     conv::set_run_status(tx, run_id, "waiting", Some("quota"))?;
                     let version = conv::next_version(tx, "run", &job)?;
@@ -594,7 +616,7 @@ pub(crate) fn commit_end(tx: &aurelius_storage::Tx<'_>, store: &aurelius_storage
         kept_files = files;
     }
     if end.outcome == RunOutcome::Completed {
-        crate::memory::maybe_schedule_summary(tx, conversation_id, message_event_id)?;
+        crate::memory::maybe_schedule_summary(tx, conversation_id, message_event_id, run_id)?;
     }
     // Woken by the group chat: the answer goes there too, under the employee's name.
     let group_failure = match &end.outcome {

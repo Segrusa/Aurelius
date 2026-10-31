@@ -78,6 +78,14 @@ void main() {
       expect(find.byKey(const ValueKey('app-key-webhook')), findsNothing);
     });
 
+    testWidgets('B1-2: a new key says on whose Claude login its calls run', (tester) async {
+      await pump(tester, ['app_keys'], []);
+      await tester.tap(find.byKey(const ValueKey('app-key-create')));
+      await tester.pumpAndSettle();
+      expect(find.text('Tasks of this app run on your own Claude subscription.'), findsOneWidget);
+      expect(find.text('Its calls run on the Claude login of the board member who made it or last set its functions. Only for your own use: don\'t give this key to others. For calls from others, use an employee on an Anthropic API key connection.'), findsOneWidget);
+    });
+
     testWidgets('management turns approve off, bad address is refused, secrets are shown once', (tester) async {
       await pump(tester, ['app_keys', 'management_channel', 'webhooks'], []);
       when(() => repo.createAppKey(any())).thenAnswer((_) async => AppKeyCreated(

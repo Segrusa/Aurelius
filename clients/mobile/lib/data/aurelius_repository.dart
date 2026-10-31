@@ -7,6 +7,7 @@ import '../core/hosts/host.dart';
 import '../core/net/connection.dart';
 import '../core/net/gateway_api.dart';
 import '../core/net/protocol.dart';
+import 'drafts.dart';
 import 'protocol/protocol.dart';
 
 /// The data layer for one host: typed queries and writes over the
@@ -18,6 +19,22 @@ class AureliusRepository {
   final AureliusConnection connection;
 
   Host get host => connection.host;
+
+  /// The composers' unsent text (R3 M1). [drafts] is the phone's store.
+  DraftStore drafts = DraftStore.instance;
+
+  /// The signed-in board member's draft in [slot] ("ticket:…",
+  /// "conversation:…"); null without a board member or a draft.
+  String? draft(String slot) {
+    final me = linkState.user?.id;
+    return me == null ? null : drafts.read(host.hostId, me, slot);
+  }
+
+  /// Keep [text] as the signed-in board member's draft in [slot]; empty forgets it.
+  void keepDraft(String slot, String text) {
+    final me = linkState.user?.id;
+    if (me != null) drafts.write(host.hostId, me, slot, text);
+  }
   Stream<LinkState> get link => connection.states;
   LinkState get linkState => connection.state;
   Stream<Event> get events => connection.events;
@@ -55,17 +72,63 @@ class AureliusRepository {
     return (receipt.result as WriteResultHost).value;
   }
 
-  /// The board members, oldest first ("Who's working here?").
+  /// The board members, oldest first, disabled ones too.
   Future<List<UserView>> boardMembers() async => (await _ask<ResponseBodyUsers>(userList())).value.users;
 
-  /// A board member was added (here or on another client).
-  Stream<Event> get boardMemberChanges => events.where((e) => e.kind == EventKind.userCreated);
+  /// A board member was added or disabled (here or on another client).
+  Stream<Event> get boardMemberChanges => events.where((e) => e.kind == EventKind.userCreated || e.kind == EventKind.userDisabled);
 
-  /// Choose [userId] on this phone after the one password check (B8).
-  Future<UserView> useBoardMember(String userId, String password) => connection.useBoardMember(userId, password);
+  /// Sign in on this phone (`user.login`, MU3-02).
+  Future<LoginResult> signIn(String username, String password) => connection.signIn(username, password);
 
-  /// A new board member; returns its id. Without an active one, it becomes this phone's.
+  /// Sign out on this phone (`user.logout`, MU3-04 AC3).
+  Future<void> signOut() => connection.signOut();
+
+  /// A new board member; returns its id. The first one signs this phone in.
   Future<String> createBoardMember(String username, String password) => connection.createBoardMember(username, password);
+
+  /// Own password ([oldPassword], the other sessions end) or a temporary one
+  /// for [userId] (B10, all their sessions end).
+  Future<void> setPassword({required String newPassword, String? oldPassword, String? userId}) =>
+      connection.setPassword(newPassword: newPassword, oldPassword: oldPassword, userId: userId);
+
+  /// Disable [userId] (MU3-05 AC3); `last_board_member` for the last active one.
+  Future<UserView> disableBoardMember(String userId) async => ((await _host(userDisable(userId: userId))) as HostResultUser).value;
+
+  /// The signed-in devices of [userId] (none: this phone's board member).
+  Future<SessionsSnapshot> sessions({String? userId}) async => (await _ask<ResponseBodySessions>(sessionList(userId: userId))).value;
+
+  /// End [sessionId]; that device falls back to its sign-in screen (MU3-04 AC2).
+  Future<void> revokeSession(String sessionId) => _host(sessionRevoke(sessionId: sessionId));
+
+  /// The own Claude login (`claude_login.status`).
+  Future<ClaudeLoginView?> claudeLogin() => connection.refreshClaudeLogin();
+
+  /// Start Connect (`claude_login.link`); what Claude asks comes on [claudeLoginPrompts].
+  Future<String> linkClaudeLogin() async => ((await _host(claudeLoginLink())) as HostResultClaudeLoginLink).linkId;
+
+  /// What `claude auth login` asks during Connect (only this connection's).
+  Stream<ClaudeLoginPrompt> get claudeLoginPrompts => connection.claudeLoginPrompts;
+
+  /// The code Claude showed, for [linkId] (`claude_login.input`, a session
+  /// method). Sent once, never kept or logged.
+  Future<ClaudeLoginView> sendClaudeLoginCode(String linkId, String code) async =>
+      (await _ask<ResponseBodyClaudeLogin>(claudeLoginInput(ClaudeLoginInputParams(linkId: linkId, text: code)))).value;
+
+  /// Stop a running Connect.
+  Future<void> cancelClaudeLogin(String linkId) => _host(claudeLoginCancel(linkId: linkId));
+
+  /// [login] as the own Claude login (an answer that carries it).
+  void applyClaudeLogin(ClaudeLoginView login) => connection.applyClaudeLogin(login);
+
+  /// The sign-in screen showed "You were signed out on this device.".
+  void dismissSignedOut() => connection.dismissSignedOut();
+
+  /// Disconnect the own Claude login (MU3-09 AC4).
+  Future<void> unlinkClaudeLogin() async {
+    final result = await _host(claudeLoginUnlink());
+    if (result is HostResultClaudeLogin) applyClaudeLogin(result.value);
+  }
 
   /// The Board: its six columns with their cards, for one project or all (B4).
   Future<BoardView> board({String? projectId}) async => (await _ask<ResponseBodyBoard>(boardGet(projectId: projectId))).value;

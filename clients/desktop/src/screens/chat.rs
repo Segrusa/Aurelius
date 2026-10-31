@@ -438,8 +438,14 @@ impl AppView {
             let text = crate::screens::discussion::system_text(line, &m.text);
             let when = ui::fmt_when(m.created_at_ms);
             let ticket = line.ticket_id.filter(|_| line.kind == aurelius_domain::views::SystemLineKind::TicketCreated);
+            // ui-ontwerp §5: a run without a ticket waits for the sender's Claude login.
+            let login = crate::screens::discussion::login_line(line, &text);
+            let connect = login == Some(crate::screens::discussion::LoginLine::Connect) && crate::screens::account::needs_connect(self.claude.view.as_ref(), self.claude.unsupported.is_some());
             return h().id(SharedString::from(format!("system-{}", m.id))).w_full().justify_center().gap(px(8.)).px(px(24.)).role(Role::Note).aria_label(crate::screens::discussion::system_label(&text, &when))
-                .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(c(theme::MUTED)).text_center().child(format!("┄ {text} ┄")))
+                .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(c(theme::MUTED)).text_center().child(format!("┄ {}{text} ┄", crate::screens::discussion::login_mark(login))))
+                .when(connect, |el| {
+                    el.child(div().id(SharedString::from(format!("system-connect-{}", m.id))).role(Role::Button).cursor_pointer().text_size(px(12.)).text_color(c(theme::ACCENT_TEXT)).child(crate::screens::board::connect_label(self.claude.view.as_ref())).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.claude_connect(cx))))
+                })
                 .when_some(ticket, |el, id| {
                     el.child(div().id(SharedString::from(format!("system-open-{}", m.id))).role(Role::Link).cursor_pointer().text_size(px(12.)).text_color(c(theme::ACCENT_TEXT)).child("Open ticket").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket(id, w, cx))))
                 })
@@ -1496,7 +1502,7 @@ mod tests {
     #[test]
     fn another_board_members_post_names_them_and_yours_is_you() {
         let fallback = SharedString::from("Aurelius");
-        let member = |name: &str| aurelius_domain::user::UserView { id: aurelius_domain::UserId::new(), username: name.into(), created_at_ms: 0, created_by_user: None };
+        let member = |name: &str| aurelius_domain::user::UserView { id: aurelius_domain::UserId::new(), username: name.into(), created_at_ms: 0, created_by_user: None, disabled_at_ms: None };
         let (one, two) = (member("board-one"), member("board-two"));
         let post = |by: Option<&aurelius_domain::user::UserView>| aurelius_protocol::MessageView { role: MessageRole::User, author: None, update: None, author_user: by.cloned(), ..streaming_answer(aurelius_domain::MessageId::new(), aurelius_domain::RunId::new(), None, None) };
         let (mine, theirs, unnamed) = (post(Some(&one)), post(Some(&two)), post(None));

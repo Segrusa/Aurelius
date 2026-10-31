@@ -71,12 +71,9 @@ async fn next_ticket_event(events: &mut tokio::sync::mpsc::UnboundedReceiver<aur
 async fn a_board_member_fills_and_works_the_board() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let (client, mut events) = common::connect_events(dir.path()).await;
+    let (client, mut events) = common::connect_events_as(dir.path(), "grace").await;
     client.subscribe(0).await.unwrap();
-    let me = match client.user_create("grace", "a-long-enough-password").await.unwrap().result {
-        CommandResult::UserCreated { user_id } => user_id,
-        other => panic!("{other:?}"),
-    };
+    let me = client.user_whoami().await.unwrap().user.expect("signed in").id;
     let atlas = project(&client, "Atlas").await;
     let hermes = project(&client, "Hermes").await;
 
@@ -143,15 +140,14 @@ async fn a_board_member_fills_and_works_the_board() {
 async fn the_dispatcher_is_set_for_the_company_and_per_project() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let client = common::connect(dir.path()).await;
+    let client = common::connect_as(dir.path(), "grace").await;
     let orion = employee(&client, "Orion").await;
     let forge = employee(&client, "Forge").await;
     let atlas = project(&client, "Atlas").await;
 
-    // company.update is a board member's write; project.update is not a ticket write.
+    // company.update is a board member's write (protocol 5: nothing without a session); project.update is not a ticket write.
     let set_company = Command::UpdateCompany(UpdateCompany { name: Some("Segrusa".into()), dispatcher: Some(SetDispatcher { employee_id: Some(orion) }) });
-    assert_eq!(code(client.ticket_command(set_company.clone(), None).await), ErrorCode::BoardMemberRequired);
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    assert_eq!(code(common::connect_anonymous(dir.path()).await.ticket_command(set_company.clone(), None).await), ErrorCode::Unauthenticated);
     client.ticket_command(set_company, None).await.unwrap();
     let company = client.company().await.unwrap().company;
     assert_eq!((company.name.as_str(), company.dispatcher_employee_id), ("Segrusa", Some(orion)));
@@ -171,8 +167,7 @@ async fn the_dispatcher_is_set_for_the_company_and_per_project() {
 async fn start_with_an_owner_then_update_the_fields() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let client = common::connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(dir.path(), "grace").await;
     let forge = employee(&client, "Forge").await;
     let atlas = project(&client, "Atlas").await;
     let (id, _) = create(&client, atlas, "Owned", TicketPriority::Urgent).await;

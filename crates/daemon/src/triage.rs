@@ -61,8 +61,36 @@ pub async fn run_triage(shared: Arc<Shared>, job: queries::JobRow) {
         };
         shared.publish(notices);
         let Some(run) = run else { break };
-        let run_id = run.run_id;
+        let (run_id, login) = (run.run_id, run.config.login_user);
         let Some(ended) = drive(&shared, run, &job.id, epoch).await else { return };
+        // The ticket's Claude login is missing or expired: the job waits for it (no try used).
+        let ended = match ended {
+            Ended::Login => {
+                let (s, id) = (shared.clone(), job.id.clone());
+                if let Some(Ok(notices)) = blocking(move || s.service.triage_waits_for_login(ticket, run_id, id, epoch)).await {
+                    shared.publish(notices);
+                }
+                shared.live.job_ended(&job.id);
+                return;
+            }
+            // The ticket's login hit its limit: the job waits for the reset (no try used), as its runs do.
+            Ended::Quota(reset_at_ms) => {
+                let at = aurelius_domain::scheduler::quota_wake_ms(reset_at_ms, aurelius_storage::now_ms());
+                let (s, id) = (shared.clone(), job.id.clone());
+                if let Some(Ok(notices)) = blocking(move || s.service.triage_waits_for_quota(ticket, run_id, id, epoch, at)).await {
+                    shared.publish(notices);
+                }
+                if let Some(login) = login {
+                    let s = shared.clone();
+                    if let Some(Ok(notices)) = blocking(move || s.service.park_runs_for_quota_of(login, at)).await {
+                        shared.publish(notices);
+                    }
+                }
+                shared.live.job_ended(&job.id);
+                return;
+            }
+            Ended::Done(result) => result,
+        };
         let s = shared.clone();
         match blocking(move || s.service.triage_ended(ticket, root, run_id, ended.err())).await {
             // It chose nobody: one more run, told to choose.
@@ -103,12 +131,24 @@ async fn renew(shared: &Arc<Shared>, job: &str, epoch: i64) -> bool {
     true
 }
 
-/// Run the dispatcher until its answer is complete; the error when it failed,
-/// none when the job lost its lease (the run is stopped).
-async fn drive(shared: &Arc<Shared>, run: TriageRun, job: &str, epoch: i64) -> Option<Result<(), String>> {
+/// How the dispatcher's run ended: done (the error when it failed), or it
+/// waits for the ticket's Claude login.
+enum Ended {
+    Done(Result<(), String>),
+    Login,
+    /// Its login's usage limit, with the reset when Claude named one.
+    Quota(Option<i64>),
+}
+
+/// Run the dispatcher until its answer is complete; none when the job lost its
+/// lease (the run is stopped).
+async fn drive(shared: &Arc<Shared>, run: TriageRun, job: &str, epoch: i64) -> Option<Ended> {
+    let claude = run.config.provider == Some(aurelius_domain::connection::ProviderKind::ClaudeCode);
+    let login = run.config.login_user;
     let runtime = match runtimes::runtime_for_config(shared, &run.config) {
         Ok(runtime) => runtime,
-        Err(e) => return Some(Err(e.to_string())),
+        Err(aurelius_runtime::RuntimeError::Login(_)) => return Some(Ended::Login),
+        Err(e) => return Some(Ended::Done(Err(e.to_string()))),
     };
     let bridge = crate::dispatcher::with_flag(crate::dispatcher::approval_bridge(shared, run.run_id), "--triage");
     let request = RunRequest {
@@ -125,7 +165,8 @@ async fn drive(shared: &Arc<Shared>, run: TriageRun, job: &str, epoch: i64) -> O
     };
     let mut handle = match runtime.start(request).await {
         Ok(handle) => handle,
-        Err(e) => return Some(Err(e.to_string())),
+        Err(aurelius_runtime::RuntimeError::Login(_)) => return Some(Ended::Login),
+        Err(e) => return Some(Ended::Done(Err(e.to_string()))),
     };
     remember_canceller(shared, run.run_id, Some(handle.canceller()));
     let mut renewal = tokio::time::interval_at(tokio::time::Instant::now() + RENEW_EVERY, RENEW_EVERY);
@@ -151,13 +192,27 @@ async fn drive(shared: &Arc<Shared>, run: TriageRun, job: &str, epoch: i64) -> O
             }
             RuntimeEvent::Completed => break Ok(()),
             RuntimeEvent::Interrupted => break Err("interrupted".to_string()),
-            RuntimeEvent::Quota { .. } => break Err("rate_limit: the usage limit is reached".to_string()),
+            RuntimeEvent::Quota { reset_at_ms } => {
+                remember_canceller(shared, run.run_id, None);
+                return Some(Ended::Quota(reset_at_ms));
+            }
+            RuntimeEvent::Failed { code, .. } if claude && code == aurelius_runtime::claude_code::parse::AUTH_FAILED => {
+                // Claude refused the ticket's login (a 401): expired until reconnected.
+                if let Some(user) = login {
+                    let s = shared.clone();
+                    if let Some(Ok(notices)) = blocking(move || s.service.claude_login_expired(user)).await {
+                        shared.publish(notices);
+                    }
+                }
+                remember_canceller(shared, run.run_id, None);
+                return Some(Ended::Login);
+            }
             RuntimeEvent::Failed { code, message } => break Err(format!("{code}: {message}")),
             _ => {}
         }
     };
     remember_canceller(shared, run.run_id, None);
-    Some(result)
+    Some(Ended::Done(result))
 }
 
 /// A cancelled ticket stops its dispatcher's run too (`api::writes` stops the runs of its tasks).

@@ -1,6 +1,8 @@
 //! The runtime session a conversation goes on in (`migrations/0008`): one per
-//! conversation, claimed by the run that uses it, and given back with what the
-//! session has seen when that run completes.
+//! conversation and Claude login (`migrations/0021`: a transcript lives in its
+//! login's folder, so another board member's run never resumes it), claimed by
+//! the run that uses it, and given back with what the session has seen when
+//! that run completes. A run's login is its `runs.login_user` ('' without one).
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::{ConversationId, RunId};
@@ -68,12 +70,22 @@ pub enum Claim {
     Busy,
 }
 
-pub fn get(conn: &Connection, conversation: ConversationId) -> Result<Option<SessionRow>, StorageError> {
+/// The login a run's session belongs to: its `runs.login_user`, '' without one.
+fn login_of(conn: &Connection, run: &str) -> Result<String, StorageError> {
+    Ok(conn.query_row("SELECT COALESCE(login_user, '') FROM runs WHERE id = ?1", [run], |r| r.get(0)).optional()?.unwrap_or_default())
+}
+
+/// The conversation's session on `login`'s Claude login (none: a run without one).
+pub fn get(conn: &Connection, conversation: ConversationId, login: Option<aurelius_domain::UserId>) -> Result<Option<SessionRow>, StorageError> {
+    get_of(conn, conversation, &login.map(|u| u.to_string()).unwrap_or_default())
+}
+
+fn get_of(conn: &Connection, conversation: ConversationId, login: &str) -> Result<Option<SessionRow>, StorageError> {
     Ok(conn
         .query_row(
             "SELECT session_id, busy_run_id, seen_count, seen_digest, answer_id, model, folder, profile, context_json, system_text, system_at_ms, context_tokens
-             FROM conversation_sessions WHERE conversation_id = ?1",
-            [conversation.to_string()],
+             FROM conversation_sessions WHERE conversation_id = ?1 AND login_user = ?2",
+            params![conversation.to_string(), login],
             |r| {
                 Ok(SessionRow {
                     session_id: r.get(0)?,
@@ -109,7 +121,8 @@ fn unfinished(conn: &Connection, run: &str) -> Result<bool, StorageError> {
 /// has none keeps it from now on.
 pub fn claim(tx: &Transaction<'_>, conversation: ConversationId, run: RunId, resume: Option<&str>, key: &SessionKey, system: &str) -> Result<Claim, StorageError> {
     let run = run.to_string();
-    let row = get(tx, conversation)?;
+    let login = login_of(tx, &run)?;
+    let row = get_of(tx, conversation, &login)?;
     if let Some(row) = &row {
         match row.busy_run.as_deref() {
             Some(busy) if busy != run && unfinished(tx, busy)? => return Ok(Claim::Busy),
@@ -120,8 +133,8 @@ pub fn claim(tx: &Transaction<'_>, conversation: ConversationId, run: RunId, res
                         "UPDATE conversation_sessions SET busy_run_id = ?2, updated_at_ms = ?3,
                            system_at_ms = CASE WHEN system_text = '' THEN ?3 ELSE system_at_ms END,
                            system_text = CASE WHEN system_text = '' THEN ?4 ELSE system_text END
-                         WHERE conversation_id = ?1",
-                        params![conversation.to_string(), run, now_ms(), system],
+                         WHERE conversation_id = ?1 AND login_user = ?5",
+                        params![conversation.to_string(), run, now_ms(), system, login],
                     )?;
                     return Ok(Claim::Continue);
                 }
@@ -129,11 +142,11 @@ pub fn claim(tx: &Transaction<'_>, conversation: ConversationId, run: RunId, res
         }
     }
     tx.execute(
-        "INSERT INTO conversation_sessions(conversation_id, session_id, busy_run_id, seen_count, seen_digest, answer_id, model, folder, profile, context_json, updated_at_ms, system_text, system_at_ms)
-         VALUES (?1, ?2, ?2, 0, '', NULL, ?3, ?4, ?5, '{}', ?6, ?7, ?6)
-         ON CONFLICT(conversation_id) DO UPDATE SET session_id = ?2, busy_run_id = ?2, seen_count = 0, seen_digest = '', answer_id = NULL,
+        "INSERT INTO conversation_sessions(conversation_id, session_id, busy_run_id, seen_count, seen_digest, answer_id, model, folder, profile, context_json, updated_at_ms, system_text, system_at_ms, login_user)
+         VALUES (?1, ?2, ?2, 0, '', NULL, ?3, ?4, ?5, '{}', ?6, ?7, ?6, ?8)
+         ON CONFLICT(conversation_id, login_user) DO UPDATE SET session_id = ?2, busy_run_id = ?2, seen_count = 0, seen_digest = '', answer_id = NULL,
            model = ?3, folder = ?4, profile = ?5, context_json = '{}', updated_at_ms = ?6, system_text = ?7, system_at_ms = ?6, context_tokens = 0",
-        params![conversation.to_string(), run, key.model, key.folder, key.profile, now_ms(), system],
+        params![conversation.to_string(), run, key.model, key.folder, key.profile, now_ms(), system, login],
     )?;
     Ok(Claim::Start { replaced: row.map(|r| r.session_id).filter(|id| *id != run) })
 }
@@ -155,7 +168,7 @@ pub fn complete(
     Ok(tx.execute(
         "UPDATE conversation_sessions SET busy_run_id = NULL, seen_count = ?3, seen_digest = ?4, answer_id = ?5, context_json = ?6, updated_at_ms = ?7,
            context_tokens = COALESCE(?8, context_tokens)
-         WHERE conversation_id = ?1 AND busy_run_id = ?2",
+         WHERE conversation_id = ?1 AND busy_run_id = ?2 AND login_user = (SELECT COALESCE(login_user, '') FROM runs WHERE id = ?2)",
         params![conversation.to_string(), run.to_string(), seen_count, seen_digest, answer.to_string(), context_json, now_ms(), context_tokens.map(|n| n as i64)],
     )? == 1)
 }
@@ -163,9 +176,10 @@ pub fn complete(
 /// Run `run` did not complete (stopped, failed): its session no longer matches the
 /// conversation and goes. Returns its id, for the runtime to remove.
 pub fn release(tx: &Transaction<'_>, conversation: ConversationId, run: RunId) -> Result<Option<String>, StorageError> {
-    let row = get(tx, conversation)?.filter(|r| r.busy_run.as_deref() == Some(run.to_string().as_str()));
+    let login = login_of(tx, &run.to_string())?;
+    let row = get_of(tx, conversation, &login)?.filter(|r| r.busy_run.as_deref() == Some(run.to_string().as_str()));
     if row.is_some() {
-        tx.execute("DELETE FROM conversation_sessions WHERE conversation_id = ?1", [conversation.to_string()])?;
+        tx.execute("DELETE FROM conversation_sessions WHERE conversation_id = ?1 AND login_user = ?2", params![conversation.to_string(), login])?;
     }
     Ok(row.map(|r| r.session_id))
 }
@@ -176,22 +190,22 @@ pub fn release(tx: &Transaction<'_>, conversation: ConversationId, run: RunId) -
 /// forgotten here; returns their ids.
 pub fn take_over(tx: &Transaction<'_>, only: Option<ConversationId>, live: &[String]) -> Result<Vec<String>, StorageError> {
     let mut stmt = tx.prepare(&format!(
-        "SELECT s.conversation_id, s.session_id, s.busy_run_id FROM conversation_sessions s
+        "SELECT s.conversation_id, s.session_id, s.busy_run_id, s.login_user FROM conversation_sessions s
          LEFT JOIN conversations c ON c.id = s.conversation_id
          WHERE (?1 IS NULL OR s.conversation_id = ?1)
            AND (c.id IS NULL OR c.archived_at_ms IS NOT NULL
                 OR (s.busy_run_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.id = s.busy_run_id AND r.status IN {UNFINISHED})))"
     ))?;
-    let rows: Vec<(String, String, Option<String>)> =
-        stmt.query_map([only.map(|c| c.to_string())], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+    let rows: Vec<(String, String, Option<String>, String)> =
+        stmt.query_map([only.map(|c| c.to_string())], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<_, _>>()?;
     drop(stmt);
     let mut out = Vec::new();
-    for (conversation, session, busy) in rows {
+    for (conversation, session, busy, login) in rows {
         // A run still streaming in it (its status may lag behind) keeps it.
         if busy.as_ref().is_some_and(|b| live.contains(b)) {
             continue;
         }
-        tx.execute("DELETE FROM conversation_sessions WHERE conversation_id = ?1", [&conversation])?;
+        tx.execute("DELETE FROM conversation_sessions WHERE conversation_id = ?1 AND login_user = ?2", params![conversation, login])?;
         out.push(session);
     }
     Ok(out)

@@ -76,8 +76,7 @@ async fn setup(client: &Client) -> (EmployeeId, ProjectId, PathBuf) {
 async fn a_real_dispatcher_assigns_the_ticket() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_real(dir.path()).await;
-    let client = connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = connect_as(dir.path(), "grace").await;
     let (dispatcher, project, _) = setup(&client).await;
     let CommandResult::EmployeeCreated { employee_id: designer, .. } = client
         .execute(envelope(Command::CreateEmployee(CreateEmployee { name: "Dana".into(), role: "UI/UX Designer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))

@@ -24,7 +24,6 @@ fn remote_env() {
     // SAFETY (test): every test in this binary sets the same values before its daemon starts.
     unsafe {
         std::env::set_var("AURELIUS_REMOTE_PORT", "0");
-        std::env::set_var("AURELIUS_NO_TAILSCALE", "1");
         std::env::set_var("AURELIUS_ENV", "dev");
     }
 }

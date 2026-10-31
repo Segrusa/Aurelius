@@ -7,21 +7,31 @@ use crate::Shared;
 use aurelius_protocol::{ErrorCode, HostResult, HostWrite, ProtocolError};
 use std::sync::Arc;
 
-pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite) -> Result<HostResult, ProtocolError> {
+/// `user`: the board member of the connection (their own notifications).
+pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite, user: Option<aurelius_domain::UserId>) -> Result<HostResult, ProtocolError> {
+    let user_id = user;
+    let user = user.map(|u| u.to_string());
     let s = shared.clone();
     Ok(match write {
         // Answered by `users::create` before the host pipeline (which would keep the request).
         HostWrite::UserCreate(_) => return Err(super::internal("user.create reached the host pipeline")),
+        // Sessions, passwords and Claude logins: answered by `users` before the pipeline.
+        HostWrite::SessionRevoke { .. }
+        | HostWrite::UserSetPassword(_)
+        | HostWrite::UserDisable { .. }
+        | HostWrite::ClaudeLoginLink
+        | HostWrite::ClaudeLoginCancel { .. }
+        | HostWrite::ClaudeLoginUnlink => return Err(super::internal("a session write reached the host pipeline")),
         HostWrite::SecretSet { connection_id, secret } => {
             crate::runtimes::store_secret(shared, connection_id, secret).await?;
             HostResult::Done
         }
-        HostWrite::McpSet { enabled } => HostResult::McpServers(crate::mcp_servers::set(shared, enabled).await?),
-        HostWrite::McpAdd(params) => HostResult::McpServers(crate::mcp_servers::add(shared, params).await?),
-        HostWrite::McpRemove { name } => HostResult::McpServers(crate::mcp_servers::remove(shared, name).await?),
-        HostWrite::McpLoginStart { name } => HostResult::McpLogin(crate::mcp_oauth::start(shared, name).await?),
-        HostWrite::McpLoginComplete { login_id, redirect_url } => HostResult::McpLogin(crate::mcp_oauth::complete_pasted(shared, login_id, redirect_url).await?),
-        HostWrite::McpLogout { name } => HostResult::McpServers(crate::mcp_oauth::logout(shared, name).await?),
+        HostWrite::McpSet { enabled } => HostResult::McpServers(crate::mcp_servers::set(shared, enabled, user_id).await?),
+        HostWrite::McpAdd(params) => HostResult::McpServers(crate::mcp_servers::add(shared, params, user_id).await?),
+        HostWrite::McpRemove { name } => HostResult::McpServers(crate::mcp_servers::remove(shared, name, user_id).await?),
+        HostWrite::McpLoginStart { name } => HostResult::McpLogin(crate::mcp_oauth::start(shared, name, user_id).await?),
+        HostWrite::McpLoginComplete { login_id, redirect_url } => HostResult::McpLogin(crate::mcp_oauth::complete_pasted(shared, login_id, redirect_url, user_id).await?),
+        HostWrite::McpLogout { name } => HostResult::McpServers(crate::mcp_oauth::logout(shared, name, user_id).await?),
         HostWrite::McpAlwaysAllowRemove { tool } => HostResult::McpAlwaysAllow(crate::mcp_servers::always_allow_remove(shared, tool).await?),
         HostWrite::PluginPreview { source } => HostResult::PluginPreview(aurelius_host::plugins::preview(source).await?),
         HostWrite::PluginInstall { ids, employees, projects } => HostResult::Plugins(aurelius_host::plugins::install(shared, ids, employees, projects).await?),
@@ -111,15 +121,15 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite) -> Result<Ho
         }
         HostWrite::NotificationMarkAllRead => {
             let store = shared.store().clone();
-            HostResult::Count { count: storage_task(move || store.write(|tx| aurelius_storage::timeline::mark_all_read(tx))).await? as u64 }
+            HostResult::Count { count: storage_task(move || store.write(move |tx| aurelius_storage::timeline::mark_all_read_for(tx, user.as_deref()))).await? as u64 }
         }
         HostWrite::NotificationDismiss { id } => {
             let store = shared.store().clone();
-            HostResult::Count { count: storage_task(move || store.write(move |tx| aurelius_storage::timeline::dismiss(tx, &id))).await? as u64 }
+            HostResult::Count { count: storage_task(move || store.write(move |tx| aurelius_storage::timeline::dismiss_for(tx, &id, user.as_deref()))).await? as u64 }
         }
         HostWrite::NotificationDismissAll => {
             let store = shared.store().clone();
-            HostResult::Count { count: storage_task(move || store.write(|tx| aurelius_storage::timeline::dismiss_all(tx))).await? as u64 }
+            HostResult::Count { count: storage_task(move || store.write(move |tx| aurelius_storage::timeline::dismiss_all_for(tx, user.as_deref()))).await? as u64 }
         }
         HostWrite::BackupCreate => backups(aurelius_host::backups::create(shared, "manual").await)?,
         HostWrite::BackupRestore { id } => backups(aurelius_host::backups::restore(shared, &id).await)?,
@@ -144,7 +154,12 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite) -> Result<Ho
         HostWrite::RemoteDisable => HostResult::Remote(crate::remote::disable(shared).await?),
         HostWrite::RemoteStartPairing => HostResult::PairingCode(crate::remote::pairing_start(shared).await?),
         HostWrite::RemoteDecidePairing { pairing_id, approve, owner } => HostResult::Remote(crate::remote::pairing_decide(shared, &pairing_id, approve, owner).await?),
-        HostWrite::RemoteRevoke { client_id } => HostResult::Remote(crate::remote::revoke(shared, client_id).await?),
+        HostWrite::RemoteRevoke { client_id } => {
+            let status = crate::remote::revoke(shared, client_id).await?;
+            // Its board members' sessions ended with it (storage); their connections close now.
+            shared.sessions.end_client(client_id, aurelius_domain::user::SignOutReason::Revoked);
+            HostResult::Remote(status)
+        }
         HostWrite::PushConfigure(config) => HostResult::Remote(crate::remote::push_configure(shared, config).await?),
         HostWrite::PushTest { client_id } => {
             crate::remote::push_test(shared, client_id).await?;

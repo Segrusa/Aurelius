@@ -65,3 +65,4 @@ id_type!(NoteId);
 id_type!(TicketId);
 id_type!(BoardColumnId);
 id_type!(UserId);
+id_type!(SessionId);

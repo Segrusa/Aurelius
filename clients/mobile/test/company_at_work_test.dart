@@ -1,9 +1,11 @@
+import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/core/widgets/ios.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/company/projects_page.dart';
 import 'package:aurelius_mobile/features/company_org/company_org_page.dart';
+import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/dashboard/dashboard_page.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/gestures.dart';
@@ -17,6 +19,8 @@ import 'support/builders.dart';
 
 class MockCompanyBloc extends MockBloc<CompanyEvent, CompanyState> implements CompanyBloc {}
 
+class MockConnectionBloc extends MockBloc<ConnectionEvent, LinkState> implements ConnectionBloc {}
+
 EmployeeSummary employee(String id, String name, {bool working = false, String? reportsTo}) =>
     employeeOf(id: id, name: name, role: 'Lead', conversationId: 'c-$id', working: working, reportsTo: reportsTo);
 
@@ -25,9 +29,11 @@ TaskView task(String id, String employeeId, TaskStatus status, {String projectId
 
 Future<MockCompanyBloc> show(WidgetTester tester, CompanyState state, Widget page) async {
   final bloc = MockCompanyBloc();
+  final link = MockConnectionBloc();
+  whenListen(link, const Stream<LinkState>.empty(), initialState: const LinkState(status: LinkStatus.online));
   whenListen(bloc, const Stream<CompanyState>.empty(), initialState: state);
   final router = GoRouter(routes: [
-    GoRoute(path: '/', builder: (_, _) => BlocProvider<CompanyBloc>.value(value: bloc, child: page)),
+    GoRoute(path: '/', builder: (_, _) => MultiBlocProvider(providers: [BlocProvider<CompanyBloc>.value(value: bloc), BlocProvider<ConnectionBloc>.value(value: link)], child: page)),
     GoRoute(path: '/employee/:eid', builder: (_, s) => Scaffold(body: Text('employee ${s.pathParameters['eid']}'))),
     GoRoute(path: '/project/:pid', builder: (_, s) => Scaffold(body: Text('project ${s.pathParameters['pid']}'))),
     GoRoute(path: '/project/:pid/task/:tid', builder: (_, s) => Scaffold(body: Text('task ${s.pathParameters['tid']}'))),

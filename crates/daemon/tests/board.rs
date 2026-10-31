@@ -172,8 +172,7 @@ async fn discussion_lines(client: &Client, id: TicketId) -> Vec<(aurelius_domain
 async fn a_ticket_is_worked_reported_sent_back_and_accepted() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let client = common::connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder").await;
     let atlas = project(&client, "Atlas").await;
 
@@ -228,8 +227,7 @@ async fn a_ticket_is_worked_reported_sent_back_and_accepted() {
 async fn a_failed_main_task_stays_in_doing_and_starts_again() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start_with(dir.path(), Arc::new(FailMarked)).await;
-    let client = common::connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder").await;
     let atlas = project(&client, "Atlas").await;
 
@@ -297,8 +295,7 @@ async fn accept_waits_for_a_run_in_the_main_tasks_conversation() {
     let dir = tempfile::tempdir().unwrap();
     let held = Held::new();
     let daemon = common::start_with(dir.path(), held.clone()).await;
-    let client = common::connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder").await;
     let atlas = project(&client, "Atlas").await;
     let id = ticket(&client, atlas, "Report page", "A page with the monthly report.", Some(builder), true).await;
@@ -339,8 +336,7 @@ async fn the_engines_card_moves_reach_the_event_stream() {
     // that the job publishes the move itself is `ticket_tests::the_task_job_returns_the_cards_move_with_its_own`.)
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let (client, mut events) = common::connect_events(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let (client, mut events) = common::connect_events_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder").await;
     let atlas = project(&client, "Atlas").await;
     client.execute(aurelius_client::envelope(Command::SetEmployeeStatus(SetEmployeeStatus { employee_id: builder, status: LifecycleStatus::Paused }), None)).await.unwrap();
@@ -369,8 +365,7 @@ async fn cancel_ends_the_delegations_of_failed_and_earlier_main_tasks() {
     let dir = tempfile::tempdir().unwrap();
     let held = Held::new();
     let daemon = common::start_with(dir.path(), held.clone()).await;
-    let client = common::connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder").await;
     let helper = CreateEmployee { name: "Helper".into(), role: "Engineer".into(), title: None, reports_to: Some(builder), instructions: None, folder: None };
     client.execute(aurelius_client::envelope(Command::CreateEmployee(helper), None)).await.unwrap();
@@ -424,8 +419,7 @@ async fn a_tickets_main_task_is_assigned_and_cancelled_on_the_board() {
     // Trace M3 m4: task.assign and task.cancel refuse the main task; the ticket's commands do it.
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let client = common::connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder").await;
     let atlas = project(&client, "Atlas").await;
     let id = ticket(&client, atlas, "On the board", "nothing special", None, true).await;
@@ -463,8 +457,7 @@ async fn a_ticket_in_done_leaves_one_summary_in_its_projects_memory() {
     // a ticket that never reached Done, and a task without a ticket (B7), write none.
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let client = common::connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder").await;
     let atlas = project(&client, "Atlas").await;
     let other = project(&client, "Other").await;

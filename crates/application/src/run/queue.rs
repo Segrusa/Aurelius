@@ -98,7 +98,9 @@ pub(crate) fn queue_run_marked(
     let run_id = RunId::new();
     let message_id = MessageId::new();
     // Every conversation runs like an employee at work: the employee defaults apply.
-    let resolved = crate::run::connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee)?;
+    let mut resolved = crate::run::connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee)?;
+    // Whose Claude login it runs on, fixed now (MU3-10, A-02).
+    resolved.login_user = crate::run::login::for_run(tx, conversation, reply_to, group.as_ref().and_then(|g| g.login_user), ctx_meta)?;
     conv::insert_run(tx, run_id, conversation, &resolved)?;
     // A run in a live task's conversation counts for the task.
     let mut notices = crate::task::task_runs::link_run(tx, run_id, conversation)?;

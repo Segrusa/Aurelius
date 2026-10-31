@@ -1,7 +1,7 @@
 //! Read models served by `query/*`.
 
 use crate::{StorageError, now_ms};
-use aurelius_domain::{EventKind, EventNotice, ProjectId, ProjectStatus, job::JobState, project::Project, views::ProjectSummary};
+use aurelius_domain::{EventKind, EventNotice, ProjectId, ProjectStatus, TaskId, job::JobState, project::Project, views::ProjectSummary};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 pub fn last_seq(conn: &Connection) -> Result<u64, StorageError> {
@@ -234,28 +234,74 @@ pub fn held_runs(conn: &Connection, now: i64) -> Result<u32, StorageError> {
 
 /// Make parked jobs due now (e.g. after the user logged in again).
 pub fn wake_parked(tx: &Transaction<'_>, error_code: &str, now: i64) -> Result<usize, StorageError> {
-    Ok(tx.execute(
-        "UPDATE jobs SET not_before_ms = ?2, last_error_code = NULL WHERE state = 'ready' AND last_error_code = ?1",
-        params![error_code, now],
-    )?)
+    Ok(wake_parked_for_login(tx, error_code, None, now)?.len())
+}
+
+/// Make parked jobs due now, only those of runs on `login_user`'s Claude login
+/// (none: all of them, as `wake_parked`), e.g. when its quota resets or it is
+/// linked again. Returns their ids (run id = job id for a chat run).
+pub fn wake_parked_for_login(tx: &Transaction<'_>, error_code: &str, login_user: Option<&str>, now: i64) -> Result<Vec<String>, StorageError> {
+    let ids: Vec<String> = {
+        let mut stmt = tx.prepare(
+            "SELECT j.id FROM jobs j WHERE j.state = 'ready' AND j.last_error_code = ?1
+             AND (?2 IS NULL OR EXISTS (SELECT 1 FROM runs r WHERE r.id = j.id AND r.login_user = ?2)
+                  OR json_extract(j.payload_json, '$.login_user') = ?2)",
+        )?;
+        let rows = stmt.query_map(params![error_code, login_user], |r| r.get::<_, String>(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    for id in &ids {
+        tx.execute("UPDATE jobs SET not_before_ms = ?2, last_error_code = NULL WHERE id = ?1", params![id, now])?;
+    }
+    Ok(ids)
+}
+
+/// The tasks waiting with 'login' for `login_user`'s Claude login: their latest
+/// run was on it, or their ticket runs on it now. To resume once it is linked
+/// (B11); the caller changes their status and tells it.
+pub fn tasks_waiting_for_login(conn: &Connection, login_user: &str) -> Result<Vec<TaskId>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id FROM tasks t WHERE t.status = 'waiting' AND t.waiting_reason = 'login'
+         AND ((SELECT r.login_user FROM runs r WHERE r.task_id = t.id ORDER BY r.attempt DESC, r.rowid DESC LIMIT 1) = ?1
+              OR EXISTS (SELECT 1 FROM tickets k WHERE k.id = t.ticket_id AND k.login_user = ?1))
+         ORDER BY t.created_at_ms, t.id",
+    )?;
+    let ids: Vec<String> = stmt.query_map([login_user], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    Ok(ids.iter().filter_map(|t| TaskId::parse(t).ok()).collect())
 }
 
 /// The provider's usage limit is reached until `until_ms`: its runs that are
 /// ready (not started) wait for the reset too, instead of each hitting the limit.
 /// Returns their ids (run id = job id).
 pub fn park_ready_runs_for_quota(tx: &Transaction<'_>, provider: &str, until_ms: i64) -> Result<Vec<String>, StorageError> {
+    park_ready_runs_for_quota_of(tx, provider, None, until_ms)
+}
+
+/// Like `park_ready_runs_for_quota`, for the limit of one Claude login: only
+/// the ready runs on `login_user`'s login wait (none: every run of the
+/// provider, the old behaviour).
+pub fn park_ready_runs_for_quota_of(tx: &Transaction<'_>, provider: &str, login_user: Option<&str>, until_ms: i64) -> Result<Vec<String>, StorageError> {
     let ids: Vec<String> = {
         let mut stmt = tx.prepare(
             "SELECT j.id FROM jobs j JOIN runs r ON r.id = j.id
-             WHERE j.kind = 'run.chat' AND j.state = 'ready' AND j.not_before_ms < ?1 AND r.runtime_kind = ?2",
+             WHERE j.kind = 'run.chat' AND j.state = 'ready' AND j.not_before_ms < ?1 AND r.runtime_kind = ?2
+             AND (?3 IS NULL OR r.login_user = ?3)",
         )?;
-        let rows = stmt.query_map(params![until_ms, provider], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map(params![until_ms, provider, login_user], |r| r.get::<_, String>(0))?;
         rows.collect::<Result<_, _>>()?
     };
     for id in &ids {
         tx.execute("UPDATE jobs SET not_before_ms = ?2, last_error_code = 'quota' WHERE id = ?1", params![id, until_ms])?;
     }
     Ok(ids)
+}
+
+/// Park a leased job that is no run (the dispatcher's, a memory job) until
+/// `login_user`'s Claude login is (re)linked: `wake_parked_for_login` finds it by
+/// the login in its payload. Fenced by epoch; never uses up an attempt.
+pub fn park_job_for_login(tx: &Transaction<'_>, job_id: &str, epoch: i64, login_user: Option<&str>) -> Result<bool, StorageError> {
+    tx.execute("UPDATE jobs SET payload_json = json_set(payload_json, '$.login_user', ?3) WHERE id = ?1 AND lease_epoch = ?2 AND state = 'leased'", params![job_id, epoch, login_user])?;
+    reschedule_job(tx, job_id, epoch, i64::MAX / 2, "login", false)
 }
 
 /// Extend a lease; returns false when the epoch no longer matches.

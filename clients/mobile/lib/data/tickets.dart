@@ -180,6 +180,18 @@ enum TicketState {
   /// Doing: the main task failed; "Start again" (B6).
   failed,
 
+  /// Todo/Doing: it waits for the Claude login of the board member it runs
+  /// on (`needs: login`), and that is you: Connect / Reconnect (MU3-12, §5).
+  needsYourLogin,
+
+  /// Todo/Doing: it waits for another board member's Claude login; seen, not
+  /// a Needs you (§3). "Run on my login" takes it over (B4).
+  waitsForLogin,
+
+  /// Todo/Doing: its runs wait for the usage limit of the login they run on
+  /// (MU3-11); no action, only the time.
+  waitingForLimit,
+
   /// Plan review: a plan waits.
   planReview,
 
@@ -190,11 +202,15 @@ enum TicketState {
 }
 
 /// [ticket]'s state; [root] is its main task when known, [needsOwner] whether
-/// nobody chooses its owner in Todo, [ownerUnknown] whether that could not be read.
-TicketState ticketState(TicketView ticket, {TaskView? root, bool needsOwner = false, bool ownerUnknown = false}) => switch (ticket.column) {
+/// nobody chooses its owner in Todo, [ownerUnknown] whether that could not be
+/// read, [me] the signed-in board member (a wait for a login is theirs only).
+TicketState ticketState(TicketView ticket, {TaskView? root, bool needsOwner = false, bool ownerUnknown = false, String? me}) => switch (ticket.column) {
       ColumnKind.backlog => TicketState.backlog,
       // A failed main task, in Todo too (as on the desktop): "Start again" (B6).
       ColumnKind.todo || ColumnKind.doing when (root?.status ?? ticket.rootTaskStatus) == TaskStatus.failed => TicketState.failed,
+      // No fallback to another login (MU3-12): it waits until its own is there.
+      ColumnKind.todo || ColumnKind.doing when ticket.needs == TicketNeed.login => ticket.loginUser == me ? TicketState.needsYourLogin : TicketState.waitsForLogin,
+      ColumnKind.todo || ColumnKind.doing when root != null && root.status == TaskStatus.waiting && root.waitingReason == 'quota' => TicketState.waitingForLimit,
       ColumnKind.todo when ticket.ownerEmployeeId != null => TicketState.queued,
       ColumnKind.todo when needsOwner => TicketState.needsOwner,
       ColumnKind.todo => ownerUnknown ? TicketState.ownerUnknown : TicketState.choosing,
@@ -208,12 +224,14 @@ TicketState ticketState(TicketView ticket, {TaskView? root, bool needsOwner = fa
 extension TicketStateView on TicketState {
   /// Needs a board member (§5.2): the ◆ and the accent edge.
   bool get needsYou => switch (this) {
-        TicketState.needsOwner || TicketState.ownerUnknown || TicketState.waitingForYou || TicketState.failed || TicketState.planReview || TicketState.review => true,
+        TicketState.needsOwner || TicketState.ownerUnknown || TicketState.waitingForYou || TicketState.needsYourLogin || TicketState.failed || TicketState.planReview || TicketState.review => true,
         _ => false,
       };
 
-  /// The status line on a card; null where the column says enough.
-  String? line({String? owner, String? dispatcher}) => switch (this) {
+  /// The status line on a card; null where the column says enough. [login]:
+  /// whose Claude login it runs on (`login_username`, "your" when it is
+  /// yours), [untilMs] when its limit resets.
+  String? line({String? owner, String? dispatcher, String? login, bool mine = false, int? untilMs, bool expired = false}) => switch (this) {
         TicketState.backlog => null,
         TicketState.choosing => '${dispatcher ?? 'The dispatcher'} is choosing…',
         TicketState.needsOwner => 'Choose an employee',
@@ -221,11 +239,24 @@ extension TicketStateView on TicketState {
         TicketState.queued => 'Queued for ${owner ?? 'its owner'}',
         TicketState.working => 'Working',
         TicketState.waitingForYou => 'Waiting for you',
+        TicketState.needsYourLogin => expired ? 'Waiting for your Claude login (expired)' : 'Waiting for your Claude login',
+        TicketState.waitsForLogin => "Waiting for ${login ?? 'its creator'}'s Claude login",
+        TicketState.waitingForLimit => limitWaitOf(mine ? 'your' : "${login ?? 'its creator'}'s", untilMs),
         TicketState.failed => 'Failed',
         TicketState.planReview => 'Plan to review',
         TicketState.review => 'Report to review',
         TicketState.done => 'Done',
       };
+}
+
+/// "Waiting for Robin's limit until 16:00" (P-37: the name and the time, never
+/// someone else's usage), with the day when that is not today.
+String limitWaitOf(String whose, int? untilMs, {DateTime? now}) {
+  if (untilMs == null) return 'Waiting for $whose limit to reset';
+  final at = DateTime.fromMillisecondsSinceEpoch(untilMs);
+  final n = now ?? DateTime.now();
+  final today = at.year == n.year && at.month == n.month && at.day == n.day;
+  return 'Waiting for $whose limit until ${DateFormat(today ? 'HH:mm' : 'EEE d MMM HH:mm').format(at)}';
 }
 
 /// "Due Nov 3", "Due today 17:00", "Overdue · Oct 29" (§5.1); null without a deadline.

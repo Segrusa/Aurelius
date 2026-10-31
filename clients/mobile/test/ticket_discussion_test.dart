@@ -182,6 +182,18 @@ void main() {
       expect(find.text('task sub'), findsOneWidget);
     });
 
+    testWidgets('MU3-11 / ui §5: the server\'s Paused and Resumed lines (SystemLineKind.limit) show as quiet system lines', (tester) async {
+      await open(tester, discussed(), [
+        lineOf('s1', SystemLineKind.limit, "Paused: robin's Claude limit is reached until 16:00."),
+        postOf('m1', 'Ok, we wait.', by: _lena),
+        lineOf('s2', SystemLineKind.limit, 'Resumed.'),
+      ]);
+      expect(find.text("Paused: robin's Claude limit is reached until 16:00."), findsOneWidget);
+      expect(find.bySemanticsLabel("System: Paused: robin's Claude limit is reached until 16:00."), findsOneWidget);
+      expect(find.text('Resumed.'), findsOneWidget);
+      expect(find.textContaining('was not woken'), findsNothing, reason: 'the server\'s own text, not a made-up one');
+    });
+
     testWidgets('a message goes out with ticket.post; without @ the hint names the owner (MU2-02 AC1/AC3, P-21)', (tester) async {
       await open(tester, discussed(), const []);
       expect(find.text('Discuss the ticket here'), findsOneWidget);

@@ -100,6 +100,8 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
   late final AppRouter _router;
   late final ValueNotifier<BoardMemberStep> _boardMember;
   late final StreamSubscription<LinkState> _link;
+  // Kept for dispose, where the context may no longer be read.
+  late final PushService _push;
 
   @override
   void initState() {
@@ -109,7 +111,7 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
     _boardMember = ValueNotifier(_connection.state.boardMemberStep);
     _link = _connection.states.listen((s) => _boardMember.value = s.boardMemberStep);
     _router = AppRouter(widget.host, boardMember: _boardMember);
-    context.read<PushService>().attach(_repository, _router);
+    _push = context.read<PushService>()..attach(_repository, _router);
     WidgetsBinding.instance.addObserver(this);
   }
 
@@ -122,7 +124,7 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    context.read<PushService>().detach(_repository);
+    _push.detach(_repository);
     _link.cancel();
     _router.dispose();
     _boardMember.dispose();

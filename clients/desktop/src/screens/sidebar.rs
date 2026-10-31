@@ -249,7 +249,7 @@ impl AppView {
         let host = self.remote_name().map_or("This computer".to_string(), str::to_owned);
         let (dot, state): (u32, String) = match &self.connection {
             Connection::Connecting => (theme::MUTED, "Connecting…".into()),
-            // MU1-21 AC4: who works in this window.
+            // MU1-21 AC4: who is signed in in this window.
             Connection::Online { .. } => (theme::ACCENT, self.active_member().map_or_else(String::new, |u| format!("as {}", u.username))),
             Connection::Offline(_) => (theme::NEGATIVE, "Offline · reconnecting".into()),
             Connection::Unpaired(_) => (theme::NEGATIVE, "Not paired".into()),
@@ -276,9 +276,10 @@ impl AppView {
                 if update_needed {
                     w.dispatch_action(Box::new(OpenUpdates), cx);
                 } else if member {
-                    // §11.2: Switch board member… next to the choice of server.
+                    // ui-ontwerp §1: "as alex" → Account and Sign out, next to the choice of server.
                     let items = vec![
-                        Some(crate::app::MenuEntry { label: "Switch board member…".into(), keys: None, run: crate::app::MenuDo::Call(|v, w, cx| v.members_switch(w, cx)), danger: false, checked: false, detail: None }),
+                        Some(crate::app::MenuEntry { label: "Account…".into(), keys: None, run: crate::app::MenuDo::Call(|v, _, cx| v.open_account(cx)), danger: false, checked: false, detail: None }),
+                        Some(crate::app::MenuEntry { label: "Sign out".into(), keys: None, run: crate::app::MenuDo::Call(|v, _, cx| v.members_sign_out(cx)), danger: false, checked: false, detail: None }),
                         crate::app::entry("Servers…", "secondary-alt-s", || Box::new(OpenServers)),
                     ];
                     this.open_menu(e.position(), items, w, cx);

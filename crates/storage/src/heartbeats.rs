@@ -198,3 +198,13 @@ pub fn view(conn: &Connection, employee: EmployeeId, day_start_ms: i64) -> Resul
         waiting,
     }))
 }
+
+/// Whose Claude login an employee's heartbeat wakes run on (migration 21;
+/// none: they wait with 'login'). False when the employee has no heartbeat.
+pub fn set_login_user(tx: &Transaction<'_>, employee: EmployeeId, login_user: Option<&str>) -> Result<bool, StorageError> {
+    Ok(tx.execute("UPDATE heartbeats SET login_user = ?2 WHERE employee_id = ?1", params![employee.to_string(), login_user])? == 1)
+}
+
+pub fn login_user(conn: &Connection, employee: EmployeeId) -> Result<Option<String>, StorageError> {
+    Ok(conn.query_row("SELECT login_user FROM heartbeats WHERE employee_id = ?1", [employee.to_string()], |r| r.get(0)).optional()?.flatten())
+}

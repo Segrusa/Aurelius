@@ -27,6 +27,9 @@ pub enum Failure {
     Transient(String),
     /// Login missing or expired: wait for the user, never poll.
     Auth(String),
+    /// The board member's own Claude login is missing or expired (phase 3):
+    /// wait until it is (re)linked ('login'), never poll, never another login.
+    Login(String),
     /// Quota exhausted: wait until the known reset, or `QUOTA_RETRY_MS` if unknown.
     Quota { reset_at_ms: Option<i64> },
     /// Invalid request, unsupported model: retrying cannot help.
@@ -75,6 +78,7 @@ pub fn dispose(failure: &Failure, attempt: u32, max_attempts: u32, now_ms: i64, 
         Failure::Transient(code) if attempt >= max_attempts => Disposition::Fail { code: format!("retries_exhausted:{code}") },
         Failure::Transient(_) => Disposition::RetryAt(now_ms + backoff_ms(base_ms, attempt, seed)),
         Failure::Auth(_) => Disposition::WaitForUser { reason: "auth" },
+        Failure::Login(_) => Disposition::WaitForUser { reason: crate::task::WAITING_LOGIN },
         Failure::Quota { reset_at_ms: Some(at) } if *at > now_ms => Disposition::WaitUntil { at_ms: *at, reason: "quota" },
         Failure::Quota { reset_at_ms } => Disposition::WaitUntil { at_ms: quota_wake_ms(*reset_at_ms, now_ms), reason: "quota" },
         Failure::Permanent(code) => Disposition::Fail { code: code.clone() },
@@ -107,6 +111,7 @@ mod tests {
     #[test]
     fn auth_and_quota_wait_instead_of_polling() {
         assert_eq!(dispose(&Failure::Auth("expired".into()), 1, 3, 0, 1000, "j"), Disposition::WaitForUser { reason: "auth" });
+        assert_eq!(dispose(&Failure::Login("missing".into()), 3, 3, 0, 1000, "j"), Disposition::WaitForUser { reason: "login" }, "never uses up the attempts");
         assert_eq!(
             dispose(&Failure::Quota { reset_at_ms: Some(5_000) }, 1, 3, 1_000, 1000, "j"),
             Disposition::WaitUntil { at_ms: 5_000, reason: "quota" }

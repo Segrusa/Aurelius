@@ -10,10 +10,13 @@ export '../../data/protocol/protocol.dart' show protocolMajor;
 
 /// A daemon error (`code` is the snake_case ErrorCode).
 class ProtocolException implements Exception {
-  const ProtocolException(this.code, this.message);
+  const ProtocolException(this.code, this.message, {this.retryAfterMs});
 
   final ErrorCode code;
   final String message;
+
+  /// `too_many_attempts`: how long until the server takes the next try.
+  final int? retryAfterMs;
 
   bool get isForbidden => code == ErrorCode.forbidden;
   bool get isConflict => code == ErrorCode.versionConflict || code == ErrorCode.idempotencyConflict;
@@ -22,12 +25,18 @@ class ProtocolException implements Exception {
   bool get isTooLarge => code == ErrorCode.frameTooLarge;
 
   /// Only a board member may do this (`board_member_required`): the app goes
-  /// back to "Who's working here?".
+  /// back to its sign-in screen.
   bool get needsBoardMember => code == ErrorCode.boardMemberRequired;
+
+  /// The server does not have this yet: an older server (`unknown_method`), or
+  /// one whose protocol 5 methods are still placeholders ("cannot do this yet").
+  bool get notOnServer =>
+      code == ErrorCode.unknownMethod || (code == ErrorCode.validation && RegExp(r'cannot do this yet|not (yet )?implemented', caseSensitive: false).hasMatch(message));
 
   /// What to show the user.
   String get shown => switch (this) {
         _ when needsBoardMember => boardMemberRequiredMessage,
+        _ when notOnServer => notOnServerMessage,
         _ when isTooLarge && message.isEmpty => "The PC's reply is too large to send.",
         _ => message,
       };
@@ -37,7 +46,10 @@ class ProtocolException implements Exception {
 }
 
 /// `board_member_required`, with the step to take.
-const boardMemberRequiredMessage = 'Only a board member can do this. Choose who you are on this phone first.';
+const boardMemberRequiredMessage = 'Only a board member can do this. Sign in on this phone first.';
+
+/// [ProtocolException.notOnServer], with the step to take.
+const notOnServerMessage = "The server can't do this yet. Update Aurelius on the server.";
 
 /// The connection dropped before an answer arrived. The write may or may
 /// not have been applied; resend with the same idempotency key to find out.

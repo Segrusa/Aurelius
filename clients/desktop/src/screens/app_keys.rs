@@ -304,6 +304,9 @@ impl AppView {
             out.push(
                 v().gap(px(12.)).p(px(16.)).rounded(px(10.)).border_1().border_color(c(theme::BORDER))
                     .child(div().font_family(ui::serif(cx)).text_size(px(18.)).child("New app key"))
+                    // B1-2: what an app does runs on its maker's own Claude login.
+                    .child(div().id("app-key-own-subscription").text_size(px(12.5)).text_color(c(theme::TEXT_2)).child(crate::screens::account::OWN_SUBSCRIPTION))
+                    .child(div().id("app-key-login").text_size(px(12.5)).text_color(c(theme::TEXT_2)).child(crate::screens::account::APP_KEY_LOGIN))
                     .child(labelled_info("Name", "Tasks this app creates show this name.", ui::input(&e.name)))
                     .child(labelled(
                         "Scopes",

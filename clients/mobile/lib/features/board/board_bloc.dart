@@ -39,6 +39,13 @@ class BoardOwnerChosen extends BoardEvent {
   final String? owner;
 }
 
+/// The creator filter (ui §3 "Created by", R3 m6): null anyone, else a board member's id.
+class BoardCreatorChosen extends BoardEvent {
+  const BoardCreatorChosen(this.userId);
+
+  final String? userId;
+}
+
 /// The column the phone shows (the last one viewed is kept).
 class BoardColumnShown extends BoardEvent {
   const BoardColumnShown(this.kind);
@@ -54,6 +61,7 @@ class BoardState extends Equatable {
     this.unsupported = false,
     this.projectId,
     this.owner,
+    this.createdBy,
     this.column,
     this.gaveUp = const {},
     this.ownerUnknown = const {},
@@ -74,6 +82,9 @@ class BoardState extends Equatable {
   final String? projectId;
   final String? owner;
 
+  /// Only tickets this board member created; null: anyone's.
+  final String? createdBy;
+
   /// The column last shown on a phone; null until the user picks one.
   final ColumnKind? column;
 
@@ -84,10 +95,18 @@ class BoardState extends Equatable {
   /// whether the dispatcher still chooses is unknown (M-m3): read again soon.
   final Set<String> ownerUnknown;
 
-  /// The columns left to right, with the owner filter applied to their cards.
+  /// The columns left to right, with the owner and creator filters applied to their cards.
   List<BoardColumnCards> get columns => [
         for (final c in board?.columns ?? const <BoardColumnCards>[])
-          BoardColumnCards(column: c.column, tickets: owner == null ? c.tickets : [for (final t in c.tickets) if ((t.ownerEmployeeId ?? noOwner) == owner) t]),
+          BoardColumnCards(
+            column: c.column,
+            tickets: owner == null && createdBy == null
+                ? c.tickets
+                : [
+                    for (final t in c.tickets)
+                      if ((owner == null || (t.ownerEmployeeId ?? noOwner) == owner) && (createdBy == null || t.createdByUser == createdBy)) t,
+                  ],
+          ),
       ];
 
   List<TicketView> get tickets => [for (final c in columns) ...c.tickets];
@@ -96,20 +115,21 @@ class BoardState extends Equatable {
 
   TicketView? ticket(String id) => tickets.where((t) => t.id == id).firstOrNull;
 
-  BoardState copyWith({bool? loading, BoardView? board, String? error, bool? unsupported, String? projectId, bool clearProject = false, String? owner, bool clearOwner = false, ColumnKind? column, Set<String>? gaveUp, Set<String>? ownerUnknown}) => BoardState(
+  BoardState copyWith({bool? loading, BoardView? board, String? error, bool? unsupported, String? projectId, bool clearProject = false, String? owner, bool clearOwner = false, String? createdBy, bool clearCreatedBy = false, ColumnKind? column, Set<String>? gaveUp, Set<String>? ownerUnknown}) => BoardState(
         loading: loading ?? this.loading,
         board: board ?? this.board,
         error: error,
         unsupported: unsupported ?? this.unsupported,
         projectId: clearProject ? null : projectId ?? this.projectId,
         owner: clearOwner ? null : owner ?? this.owner,
+        createdBy: clearCreatedBy ? null : createdBy ?? this.createdBy,
         column: column ?? this.column,
         gaveUp: gaveUp ?? this.gaveUp,
         ownerUnknown: ownerUnknown ?? this.ownerUnknown,
       );
 
   @override
-  List<Object?> get props => [loading, board?.asOfSeq, board?.projectId, [for (final t in board?.columns.expand((c) => c.tickets) ?? const <TicketView>[]) (t.id, t.version, t.columnId)], [for (final c in board?.columns ?? const <BoardColumnCards>[]) (c.column.name, c.column.version, c.column.position)], error, unsupported, projectId, owner, column, gaveUp, ownerUnknown];
+  List<Object?> get props => [loading, board?.asOfSeq, board?.projectId, [for (final t in board?.columns.expand((c) => c.tickets) ?? const <TicketView>[]) (t.id, t.version, t.columnId)], [for (final c in board?.columns ?? const <BoardColumnCards>[]) (c.column.name, c.column.version, c.column.position)], error, unsupported, projectId, owner, createdBy, column, gaveUp, ownerUnknown];
 }
 
 /// The Board (MU1-05): `board.get` for the chosen project, again on every
@@ -126,6 +146,7 @@ class BoardBloc extends Bloc<BoardEvent, BoardState> {
       add(const BoardRefreshed());
     });
     on<BoardOwnerChosen>((e, emit) => emit(state.copyWith(owner: e.owner, clearOwner: e.owner == null)));
+    on<BoardCreatorChosen>((e, emit) => emit(state.copyWith(createdBy: e.userId, clearCreatedBy: e.userId == null)));
     on<BoardColumnShown>((e, emit) => emit(state.copyWith(column: e.kind)));
     on<BoardShown>((e, emit) {
       _visible = e.visible;

@@ -610,6 +610,16 @@ pub enum ConfirmKind {
     ShutdownNow,
     /// Clear every result (inbox notification); approvals stay.
     ClearResults,
+    /// End a session (MU3-04): its device, and whose list it is in (none: the own).
+    RevokeSession(aurelius_domain::SessionId, Option<aurelius_domain::UserId>),
+    /// End every own session but this device's.
+    RevokeOtherSessions,
+    /// Disable a board member (MU3-05 AC3).
+    DisableMember(aurelius_domain::UserId),
+    /// Disconnect the own Claude login (MU3-09 AC4).
+    DisconnectClaude,
+    /// Run a ticket that waits for another's login on the own Claude login (B4).
+    UseMyLogin(aurelius_domain::TicketId),
 }
 
 /// One manager card, from the daemon or from the design samples.
@@ -648,6 +658,12 @@ pub enum Overlay {
     Menu,
     /// The folder browser (`fs/list_dir`), for this computer and remote servers.
     ServerFolder,
+    /// Connect your Claude login (ui-ontwerp §4): the link and the code, with the
+    /// same-OS-user notice (Sentinel B1-3).
+    ConnectClaude,
+    /// "You were signed out on this device." (ui-ontwerp §1): the server ended this
+    /// device's session; OK shows the sign-in, which already waits beneath it.
+    SignedOut,
 }
 
 /// What a menu entry does: dispatch an action (same as its shortcut) or call
@@ -797,7 +813,7 @@ pub struct AppView {
     pub projects_tab: ProjectsTab,
     /// What the right panel shows beside the page.
     pub panel: Panel,
-    back_stack: Vec<Page>,
+    pub back_stack: Vec<Page>,
     /// Browser-like history of places (screen or chat) for ← and →.
     history_back: Vec<Place>,
     history_forward: Vec<Place>,
@@ -880,8 +896,10 @@ pub struct AppView {
     pub servers: aurelius_client::servers::Servers,
     /// The server in use when it is another computer: (host id, name).
     pub remote_host: Option<(aurelius_domain::HostId, String)>,
-    /// Board members: who works in this window, the onboarding and the choice.
+    /// Board members: who is signed in in this window, the onboarding and the sign-in.
     pub members: crate::screens::board_members::Members,
+    /// The signed-in board member's own Claude login (Settings → Account).
+    pub claude: crate::screens::account::Claude,
     /// The board, the open ticket and their dialogs.
     pub board: crate::screens::board::Board,
     pub adding_server: bool,
@@ -1210,8 +1228,7 @@ impl AppView {
         };
         let pin_server = remote_host.as_ref().map_or_else(|| "local".to_string(), |(id, _)| id.to_string());
         let servers = data_root.as_deref().map(aurelius_client::servers::Servers::load).unwrap_or_default();
-        let remembered = crate::screens::board_members::remembered_load(&ui_prefs(), &pin_server);
-        let backend = backend::start(target, remembered);
+        let backend = backend::start(target, backend::Tokens::os(pin_server.clone()));
         let server_input = cx.new(|cx| InputState::new(window, cx).placeholder("Paste the pairing text (aurelius-pair:…)"));
         let palette_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search a project, employee or command…"));
         let folder_path_input = cx.new(|cx| InputState::new(window, cx).placeholder("Type or paste a folder path"));
@@ -1318,6 +1335,8 @@ impl AppView {
         subscriptions.push(cx.observe_window_appearance(window, |_, _, cx| theme::system_changed(cx)));
         let members = crate::screens::board_members::Members::new(window, cx);
         subscriptions.extend(members.subscriptions(window, cx));
+        let claude = crate::screens::account::Claude::new(window, cx);
+        subscriptions.extend(claude.subscriptions(window, cx));
         let board = crate::screens::board::Board::new(window, cx);
         subscriptions.extend(board.subscriptions(window, cx));
 
@@ -1348,6 +1367,7 @@ impl AppView {
             employee_pins: pins_load(&ui_prefs(), &pin_server),
             pin_server,
             members,
+            claude,
             board,
             folded: folded_load(&ui_prefs()),
             panel_widths: serde_json::from_value(ui_prefs()["panel_widths"].clone()).unwrap_or_default(),
@@ -1657,6 +1677,10 @@ impl AppView {
             }
             Update::DescriptionSaved(project, result) => self.project_settings_description_saved(project, result, cx),
             Update::Who(who) => self.apply_who(who, cx),
+            Update::SignedOut(reason) => self.apply_signed_out(reason, cx),
+            Update::Sessions(of, result) => self.apply_sessions(of, result, cx),
+            Update::Account(update) => self.apply_account(update, cx),
+            Update::Claude(update) => self.apply_claude(update, cx),
             Update::Board(update) => self.apply_board(update, cx),
             Update::BoardMembers(list) => {
                 self.members.list = list;
@@ -2131,12 +2155,13 @@ impl AppView {
     /// Talk to another server: a new backend; the old one ends when its
     /// request channel is dropped, and its late updates are ignored.
     pub fn restart_backend(&mut self, target: Option<aurelius_client::Target>, cx: &mut Context<Self>) {
-        let handle = backend::start(target, self.remembered_member());
+        let handle = backend::start(target, self.server_tokens());
         self.requests = handle.requests;
         self.backend_epoch += 1;
         listen(handle.updates, self.backend_epoch, cx);
         self.reset_server_state();
         self.members_reset(None, cx);
+        self.claude_reset();
         cx.notify();
     }
 
@@ -4611,6 +4636,7 @@ impl AppView {
             crate::screens::load::LOAD_TAB => self.enter_load_tab(),
             crate::screens::app_keys::APP_KEYS_TAB => self.app_keys_load(),
             crate::screens::plugins::PLUGINS_TAB => self.enter_plugins_tab(),
+            crate::screens::account::ACCOUNT_TAB => self.enter_account_tab(),
             crate::screens::servers::SERVERS_TAB => {
                 self.reload_servers();
                 self.adding_server = false;
@@ -5257,7 +5283,7 @@ impl AppView {
         let message = if next == 0 {
             format!("Heartbeat for {name} is off.")
         } else {
-            format!("{name} checks in {}. Only when something changed; quiet 22:00–07:00; at most 20k tokens a day.", heartbeat_label(next))
+            format!("{name} checks in {}. Only when something changed; quiet 22:00–07:00; at most 20k tokens a day. {}", heartbeat_label(next), crate::screens::account::OWN_SUBSCRIPTION)
         };
         self.notify_user(message, false, cx);
     }
@@ -6238,6 +6264,41 @@ impl AppView {
                         cx.notify();
                         return;
                     }
+                    ConfirmKind::RevokeSession(session_id, of) => {
+                        let _ = self.requests.send(backend::Request::BoardMembers(backend::UserCall::Revoke { session_id, of }));
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
+                    ConfirmKind::RevokeOtherSessions => {
+                        let _ = self.requests.send(backend::Request::BoardMembers(backend::UserCall::RevokeOthers));
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
+                    ConfirmKind::DisableMember(user) => {
+                        self.members_disable(user, cx);
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
+                    ConfirmKind::UseMyLogin(ticket) => {
+                        self.ticket_use_my_login(ticket, cx);
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
+                    ConfirmKind::DisconnectClaude => {
+                        self.claude_unlink(cx);
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
                     ConfirmKind::ShutdownNow => {
                         let _ = self.requests.send(backend::Request::Power(backend::PowerCall::Shutdown(aurelius_protocol::ShutdownWhen::Now)));
                         self.overlay = Overlay::None;
@@ -6346,6 +6407,12 @@ impl AppView {
         }
         if self.overlay == Overlay::ServerFolder {
             self.folder_back(window, cx);
+            return;
+        }
+        if self.overlay == Overlay::ConnectClaude {
+            // Closing the dialog ends Claude's sign-in on the server too.
+            self.claude_cancel(cx);
+            self.focus.focus(window, cx);
             return;
         }
         if self.overlay == Overlay::None && self.screen == Page::Settings && self.adding_server {
@@ -6750,8 +6817,10 @@ impl Render for AppView {
         let fonts = Fonts::get(cx).clone();
         // The board member gate (MU1-20/21): only Settings → Servers stays reachable.
         self.members_hold();
+        self.members_show_drafts(window, cx);
+        self.claude_clear_code(window, cx);
         let gated = self.member_gate() != crate::screens::board_members::Gate::Open;
-        let member_step = self.member_step().filter(|_| !(gated && self.screen == Page::Settings));
+        let member_step = crate::screens::board_members::shown_step(self.member_gate(), &self.members.stack, self.screen);
         let page: AnyElement = match member_step {
             Some(step) => self.render_members(step, window, cx),
             None => self.render_company(window, cx),
@@ -7288,7 +7357,8 @@ impl AppView {
                     .child({
                         let today = self.usage.as_ref().and_then(|u| u.windows.first()).map_or(0, |w| w.input_tokens + w.output_tokens);
                         // Prefer the subscription's session limit; fall back to today's tokens.
-                        let session = self.subscription.as_ref().and_then(|s| s.limits.first().cloned());
+                        let me = self.active_member().map(|u| u.id);
+                        let session = crate::screens::account::own_subscription(self.subscription.as_ref(), me).and_then(|s| s.limits.first().cloned());
                         let label = match &session {
                             Some(l) => format!("Session {}%", l.percent),
                             None => format!("{} today", ui::fmt_tokens(today)),

@@ -65,6 +65,7 @@ TaskView taskOf({
   String goal = 'A post',
   TaskStatus status = TaskStatus.queued,
   String? waitingReason,
+  int? waitingUntilMs,
   String? employeeId = 'm1',
   String? employeeName = 'Iris',
   String? conversationId,
@@ -111,6 +112,7 @@ TaskView taskOf({
       updatedAtMs: updatedAtMs,
       variantPhase: variantPhase,
       waitingReason: waitingReason,
+      waitingUntilMs: waitingUntilMs,
     );
 
 MessageView messageOf(

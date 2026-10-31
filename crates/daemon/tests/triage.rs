@@ -85,8 +85,7 @@ async fn board(choices: Vec<Option<&'static str>>) -> Board {
     let root = dir.path().to_path_buf();
     let runtime = Arc::new(Dispatching { root: root.clone(), choices: Mutex::new(choices), seen: Mutex::new(vec![]), no_connection: Default::default(), takes: Mutex::new(Duration::ZERO) });
     let daemon = common::start_with(&root, runtime.clone()).await;
-    let client = common::connect(&root).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(&root, "grace").await;
     let CommandResult::ProjectCreated { project_id, .. } =
         client.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }), None)).await.unwrap().result
     else {

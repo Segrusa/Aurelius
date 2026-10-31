@@ -37,12 +37,21 @@ class TicketPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => BlocProvider(
+        // Another ticket on the same route (a `go`) gets its own bloc, not the last one's.
+        key: ValueKey('ticket-$ticketId'),
         create: (context) => TicketBloc(context.read<AureliusRepository>(), ticketId),
-        child: _TicketView(discussion: discussion),
+        child: _TicketView(key: ValueKey('ticket-view-$ticketId'), discussion: discussion),
       );
 }
 
 enum _Segment { ticket, discussion, activity }
+
+/// Run on my login, then the page reads the ticket again at once, not only
+/// on its event (QA3 M-m3).
+Future<void> _runOnMyLogin(BuildContext context, TicketView ticket) async {
+  final bloc = context.read<TicketBloc>();
+  if (await runOnMyLogin(context, ticket) && !bloc.isClosed) bloc.add(const TicketRefreshed());
+}
 
 /// The discussion of [ticket], when the server has one for it (feature
 /// `ticket_discussion` and its `conversation_id`); null: an older server.
@@ -54,7 +63,7 @@ String? discussionOf(TicketView ticket, LinkState link) => link.has(ticketDiscus
 final _seen = <String, int>{};
 
 class _TicketView extends StatefulWidget {
-  const _TicketView({required this.discussion});
+  const _TicketView({super.key, required this.discussion});
 
   final bool discussion;
 
@@ -103,10 +112,11 @@ class _TicketViewState extends State<_TicketView> {
     final conversation = discussionOf(ticket, link);
     final root = page.root;
     final noDispatcher = effectiveDispatcher(company.project(ticket.projectId), company.company?.dispatcherEmployeeId, company.employees) == null;
-    final state = ticketState(ticket, root: root, needsOwner: ticket.column == ColumnKind.todo && ticket.ownerEmployeeId == null && (page.gaveUp || noDispatcher), ownerUnknown: page.activityFailed);
+    final state = ticketState(ticket, root: root, needsOwner: ticket.column == ColumnKind.todo && ticket.ownerEmployeeId == null && (page.gaveUp || noDispatcher), ownerUnknown: page.activityFailed, me: link.user?.id);
     final owner = ticket.ownerName ?? employeeName(company, ticket.ownerEmployeeId);
     final dispatcher = dispatcherName(company, ticket.projectId);
-    final line = state.line(owner: owner, dispatcher: dispatcher);
+    final expired = link.claudeLogin?.status == ClaudeLoginStatus.expired;
+    final line = state.line(owner: owner, dispatcher: dispatcher, login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired);
     final segment = conversation == null && _segment == _Segment.discussion ? _Segment.ticket : _segment;
     final scaffold = Scaffold(
       appBar: GlassAppBar(
@@ -239,6 +249,8 @@ class _TicketViewState extends State<_TicketView> {
     );
   }
 
+  bool _expired(BuildContext context) => context.read<ConnectionBloc>().state.claudeLogin?.status == ClaudeLoginStatus.expired;
+
   String _columnName(TicketPageState page, TicketView ticket) => switch (ticket.column) {
         ColumnKind.backlog => 'Backlog',
         ColumnKind.todo => 'Todo',
@@ -299,6 +311,27 @@ class _TicketViewState extends State<_TicketView> {
       if (state == TicketState.queued) _Notice(title: 'Queued for ${owner ?? 'its owner'}.'),
       if (state == TicketState.failed)
         _Notice(key: const ValueKey('ticket-failed'), attention: true, title: '✕ The main task failed', body: root?.result ?? 'Start again for a new main task; the old one stays linked.'),
+      if (state == TicketState.needsYourLogin)
+        _Notice(
+          key: const ValueKey('ticket-needs-login'),
+          attention: true,
+          title: '◆ ${state.line(expired: _expired(context))}',
+          body: 'It runs only on your own Claude subscription. It goes on by itself once your login is connected.',
+          action: (_expired(context) ? 'Reconnect Claude login' : 'Connect Claude login', () => context.push('/account/claude')),
+        ),
+      if (state == TicketState.waitsForLogin)
+        _Notice(
+          key: const ValueKey('ticket-waits-login'),
+          title: '⏸ ${state.line(login: ticket.loginUsername)}',
+          body: "It runs only on ${ticket.loginUsername}'s subscription and goes on once that login is connected. Or run it on your own login.",
+          action: online ? ('Run on my login', () => _runOnMyLogin(context, ticket)) : null,
+        ),
+      if (state == TicketState.waitingForLimit)
+        _Notice(
+          key: const ValueKey('ticket-limit'),
+          title: '⏸ ${state.line(login: ticket.loginUsername, mine: ticket.loginUser == context.read<ConnectionBloc>().state.user?.id, untilMs: root?.waitingUntilMs)}',
+          body: "Runs only on the subscription of the login it runs on. It goes on by itself after the reset.",
+        ),
       if (state == TicketState.waitingForYou) _Notice(attention: true, title: '◆ Waiting for your approval', body: 'Answer it in the Inbox.', action: ('Open Inbox', () => context.go('/inbox'))),
       if (state == TicketState.planReview)
         _Notice(attention: true, title: '◆ A plan waits for you', body: 'Approve it, or send it back with what needs to change.', action: ('Review plan', () => _reviewPlan(ticket))),
@@ -347,6 +380,12 @@ class _TicketViewState extends State<_TicketView> {
         DetailRow(key: const ValueKey('ticket-row-deadline'), label: 'Deadline', value: deadline?.text ?? 'None', color: deadline?.late ?? false ? Tokens.negative : null, onTap: editable ? () => _editDeadline(context, ticket) : null),
         DetailRow(label: 'Attachments', value: ticket.attachments.isEmpty ? 'None' : '${ticket.attachments.length} file${ticket.attachments.length == 1 ? '' : 's'}'),
         DetailRow(label: 'Created by', value: '${ticket.createdByUsername} · ${DateFormat.MMMd().format(DateTime.fromMillisecondsSinceEpoch(ticket.createdAtMs))}'),
+        // MU3-10 AC4: whose subscription it uses, in words; never a choice.
+        DetailRow(
+          key: const ValueKey('ticket-row-login'),
+          label: 'Runs on',
+          value: ticket.loginUser == context.read<ConnectionBloc>().state.user?.id ? 'Your Claude login' : "${ticket.loginUsername}'s Claude login",
+        ),
       ]),
       GroupHeader('Tasks', caps: true, count: tree.length),
       if (tree.isEmpty)
@@ -534,6 +573,21 @@ class _ActionBar extends StatelessWidget {
             OutlinedButton(key: const ValueKey('bar-backlog'), onPressed: on(() => backToBacklog(context, ticket)), child: const Text('Back to Backlog')),
             if (state != TicketState.queued) FilledButton(key: const ValueKey('bar-choose'), onPressed: on(() => chooseOwner(context, ticket)), child: const Text('Choose employee')),
           ],
+        TicketState.needsYourLogin => [
+            OutlinedButton(key: const ValueKey('bar-backlog'), onPressed: on(() => backToBacklog(context, ticket)), child: const Text('Back to Backlog')),
+            FilledButton(
+              key: const ValueKey('bar-connect'),
+              onPressed: () => context.push('/account/claude'),
+              child: Text(context.read<ConnectionBloc>().state.claudeLogin?.status == ClaudeLoginStatus.expired ? 'Reconnect Claude login' : 'Connect Claude login'),
+            ),
+          ],
+        TicketState.waitsForLogin => [
+            OutlinedButton(key: const ValueKey('bar-backlog'), onPressed: on(() => backToBacklog(context, ticket)), child: const Text('Back to Backlog')),
+            FilledButton(key: const ValueKey('bar-use-my-login'), onPressed: on(() => _runOnMyLogin(context, ticket)), child: const Text('Run on my login')),
+          ],
+        TicketState.waitingForLimit => [
+            OutlinedButton(key: const ValueKey('bar-backlog'), onPressed: on(() => backToBacklog(context, ticket)), child: const Text('Back to Backlog')),
+          ],
         TicketState.working || TicketState.waitingForYou => [
             OutlinedButton(key: const ValueKey('bar-backlog'), onPressed: on(() => backToBacklog(context, ticket)), child: const Text('Back to Backlog')),
             if (root?.conversationId case final c?) FilledButton(key: const ValueKey('bar-conversation'), onPressed: () => context.push('/conversation/$c?e=${root!.employeeId ?? ''}'), child: const Text('Conversation')),
@@ -598,7 +652,14 @@ class _PlanViewState extends State<_PlanView> {
   @override
   void initState() {
     super.initState();
-    _feedback.addListener(() => setState(() {}));
+    // Kept outside the page, so a sign-out in between does not lose it (R3 M1).
+    final repository = context.read<AureliusRepository>();
+    final slot = 'plan-feedback:${context.read<TicketBloc>().ticketId}';
+    _feedback.text = repository.draft(slot) ?? '';
+    _feedback.addListener(() {
+      repository.keepDraft(slot, _feedback.text);
+      setState(() {});
+    });
   }
 
   @override
@@ -613,6 +674,8 @@ class _PlanViewState extends State<_PlanView> {
     final ok = await ticketWrite(context, request, expectedVersion: ticket.version, retry: false, done: done);
     if (!mounted) return;
     setState(() => _busy = false);
+    // Sent: the draft is done with.
+    if (ok) _feedback.clear();
     if (ok && context.canPop()) context.pop();
   }
 

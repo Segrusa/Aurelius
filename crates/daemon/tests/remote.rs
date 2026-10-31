@@ -39,7 +39,6 @@ fn remote_env() {
     // SAFETY (test): every test in this binary sets the same values.
     unsafe {
         std::env::set_var("AURELIUS_REMOTE_PORT", "0");
-        std::env::set_var("AURELIUS_NO_TAILSCALE", "1");
         // Pairing without Tailscale uses the dev fallback address; production requires Tailscale.
         std::env::set_var("AURELIUS_ENV", "dev");
         // Power requests never reach a real power-off: a harmless command and a countdown nobody waits for.
@@ -221,16 +220,26 @@ async fn next(socket: &mut Socket) -> ServerMessage {
 }
 
 async fn hello(socket: &mut Socket) -> HelloResult {
-    let params = HelloParams { client_name: "phone".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), user_id: None };
+    let params = HelloParams { client_name: "phone".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), session_token: None };
     match call(socket, 1, Method::SessionHello(params)).await {
         Outcome::Ok(ResponseBody::Hello(h)) => {
             assert_eq!(h.protocol, PROTOCOL_MAJOR);
             assert!(h.capabilities.contains(&Capability::Approve));
             assert!(h.remote);
             assert!(h.client_id.is_some());
+            sign_in_phone(socket).await;
             h
         }
         other => panic!("{other:?}"),
+    }
+}
+
+/// The board member the desktop's `connect` made signs in on the phone (protocol 5: the gate).
+async fn sign_in_phone(socket: &mut Socket) {
+    let login = aurelius_protocol::LoginParams { username: BOARD_MEMBER.into(), password: BOARD_PASSWORD.into(), device_name: "Phone".into() };
+    match call(socket, 1_000_000, Method::UserLogin(login)).await {
+        Outcome::Ok(ResponseBody::Login(login)) => assert_eq!(login.user.username, BOARD_MEMBER),
+        other => panic!("sign in on the phone: {other:?}"),
     }
 }
 
@@ -760,5 +769,34 @@ async fn every_subscriber_gets_power_changed() {
             break;
         }
     }
+    stop(dir.path(), daemon).await;
+}
+
+/// MU3-03 AC1: a sign-in on a phone is a session of that paired device (and the
+/// device remembers its board member); revoking the device ends the session too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_phones_session_belongs_to_the_phone_and_ends_with_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_remote(dir.path()).await;
+    let desktop = connect(dir.path()).await;
+    let (phone, _) = pair(&desktop).await;
+    let mut socket = phone.socket(&phone.session().await.unwrap()).await.unwrap();
+    hello(&mut socket).await;
+    let alex = desktop.user_whoami().await.unwrap().user.unwrap().id;
+    let db = db(dir.path());
+    let (client_id, device): (Option<String>, String) =
+        db.query_row("SELECT client_id, device_name FROM user_sessions WHERE device_name = 'Phone' AND revoked_at_ms IS NULL", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((client_id.as_deref(), device.as_str()), (Some(phone.client_id.as_str()), "Phone"));
+    let user: Option<String> = db.query_row("SELECT user_id FROM remote_clients WHERE id = ?1", [&phone.client_id], |r| r.get(0)).unwrap();
+    assert_eq!(user, Some(alex.to_string()));
+    // Its session is the phone's: the desktop lists it with the device.
+    let listed = desktop.sessions(None).await.unwrap().sessions;
+    assert!(listed.iter().any(|s| s.client_id.map(|c| c.to_string()) == Some(phone.client_id.clone())));
+
+    desktop.remote(HostWrite::RemoteRevoke { client_id: ClientId::parse(&phone.client_id).unwrap() }).await.unwrap();
+    assert_eq!(closed_with(&mut socket).await, Some(4401));
+    let open: i64 = db.query_row("SELECT COUNT(*) FROM user_sessions WHERE client_id = ?1 AND revoked_at_ms IS NULL", [&phone.client_id], |r| r.get(0)).unwrap();
+    assert_eq!(open, 0, "the device's sessions ended with it");
+    assert!(!desktop.sessions(None).await.unwrap().sessions.iter().any(|s| s.client_id.is_some()));
     stop(dir.path(), daemon).await;
 }

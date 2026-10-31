@@ -41,6 +41,7 @@ mod screens {
     pub mod artifact;
     pub mod org;
     pub mod board_members;
+    pub mod account;
     pub mod board;
     pub mod ticket;
     pub mod discussion;

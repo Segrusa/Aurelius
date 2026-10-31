@@ -123,6 +123,18 @@ type PowerRoute = Arc<Mutex<Option<mpsc::UnboundedSender<aurelius_protocol::Powe
 /// Where `load_changed` pushes go (see `Client::load_changes`).
 type LoadRoute = Arc<Mutex<Option<mpsc::UnboundedSender<aurelius_protocol::LoadSnapshot>>>>;
 
+/// What the server says about this connection's own session (protocol 5).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionPush {
+    /// What `claude auth login` asks, for the link this connection started.
+    ClaudeLoginPrompt(aurelius_protocol::ClaudeLoginPrompt),
+    /// The session ended; the server closes the connection right after.
+    SignedOut(aurelius_domain::user::SignOutReason),
+}
+
+/// Where session pushes go (see `Client::session_pushes`).
+type SessionRoute = Arc<Mutex<Option<mpsc::UnboundedSender<SessionPush>>>>;
+
 /// A remote connection's HTTP side (uploads), with its session token.
 struct RemoteLink {
     http: reqwest::Client,
@@ -137,9 +149,12 @@ pub struct Client {
     pub hello: HelloResult,
     remote: Option<RemoteLink>,
     revoked: Arc<AtomicBool>,
+    /// The server closed the connection (a call after that fails at once).
+    closed: Arc<AtomicBool>,
     terminals: Terminals,
     loads: LoadRoute,
     powers: PowerRoute,
+    sessions: SessionRoute,
     /// The client features of the hello (`aurelius_protocol::client_feature`),
     /// said again when the client says hello again (`identify`).
     accepts: Vec<String>,
@@ -167,6 +182,8 @@ fn empty_hello() -> HelloResult {
         app: None,
         board_members_exist: false,
         user: None,
+        must_change_password: false,
+        claude_login: None,
     }
 }
 
@@ -332,12 +349,16 @@ impl Client {
         let transport::Duplex { outgoing, mut incoming, revoked } = duplex;
         let pending: Pending = Arc::default();
         let pending_reader = pending.clone();
+        let closed: Arc<AtomicBool> = Arc::default();
+        let closed_reader = closed.clone();
         let terminals: Terminals = Arc::default();
         let terminal_routes = terminals.clone();
         let loads: LoadRoute = Arc::default();
         let load_route = loads.clone();
         let powers: PowerRoute = Arc::default();
         let power_route = powers.clone();
+        let sessions: SessionRoute = Arc::default();
+        let session_route = sessions.clone();
         tokio::spawn(async move {
             let mut rebuild = stream::Rebuild::default();
             let mut calls = stream::Calls::default();
@@ -393,15 +414,26 @@ impl Client {
                             let _ = tx.send(state);
                         }
                     }
+                    ServerMessage::ClaudeLoginPrompt(prompt) => {
+                        if let Some(tx) = session_route.lock().unwrap().as_ref() {
+                            let _ = tx.send(SessionPush::ClaudeLoginPrompt(prompt));
+                        }
+                    }
+                    ServerMessage::SignedOut { reason } => {
+                        if let Some(tx) = session_route.lock().unwrap().as_ref() {
+                            let _ = tx.send(SessionPush::SignedOut(reason));
+                        }
+                    }
                 }
             }
             // Connection closed: wake all waiters with a disconnect.
+            closed_reader.store(true, Ordering::SeqCst);
             pending_reader.lock().unwrap().clear();
         });
 
-        let mut client = Self { outgoing, pending, next_id: AtomicU64::new(1), hello: empty_hello(), remote, revoked, terminals, loads, powers, accepts: accepts.clone() };
+        let mut client = Self { outgoing, pending, next_id: AtomicU64::new(1), hello: empty_hello(), remote, revoked, closed, terminals, loads, powers, sessions, accepts: accepts.clone() };
         let hello = client
-            .call(Method::SessionHello(HelloParams { client_name: client_name.into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key, accepts, user_id: None }))
+            .call(Method::SessionHello(HelloParams { client_name: client_name.into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key, accepts, session_token: None }))
             .await;
         match hello {
             Ok(ResponseBody::Hello(result)) => {
@@ -454,7 +486,8 @@ impl Client {
         let limit = request_timeout(&request.call);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(request_id, tx);
-        if self.outgoing.send(request).await.is_err() {
+        // Closed before the waiter was in (the reader cleared the others): nobody would answer.
+        if self.closed.load(Ordering::SeqCst) || self.outgoing.send(request).await.is_err() {
             self.pending.lock().unwrap().remove(&request_id);
             return Err(self.gone());
         }
@@ -904,21 +937,23 @@ impl Client {
         .await
     }
 
-    // ---- board members (protocol 4; Fase 1: identification) ----
+    // ---- board members and sessions (protocol 5) ----
 
-    /// The board members, oldest first.
+    /// The board members, oldest first (disabled ones too). Without a session
+    /// the list is empty (Titan, SEC1 m9): use `board_members_exist` from the
+    /// hello or `user_whoami` for the sign-in screen.
     pub async fn user_list(&self) -> Result<aurelius_domain::user::UsersSnapshot, ClientError> {
         self.read(Method::UserList, body!(Users)).await
     }
 
-    /// Whether the server has board members, and this connection's active one.
+    /// Whether the server has board members, and this connection's session's one.
     pub async fn user_whoami(&self) -> Result<aurelius_domain::user::WhoAmI, ClientError> {
         self.read(Method::UserWhoami, body!(WhoAmI)).await
     }
 
-    /// A new board member; this connection becomes it when it had none.
-    /// Errors: `invalid_username`, `weak_password`, `username_taken`,
-    /// `too_many_attempts` (more than five a minute on one connection).
+    /// A new board member. Without a session only the first one (the onboarding),
+    /// and this connection then has its session. Errors: `invalid_username`,
+    /// `weak_password`, `username_taken`, `too_many_attempts`, `unauthenticated`.
     pub async fn user_create(&self, username: &str, password: &str) -> Result<CommandReceipt, ClientError> {
         let params = aurelius_protocol::UserCreateParams { username: username.into(), password: password.into() };
         let receipt = self.write(CommandId::new(), None, WriteMethod::Host(HostWrite::UserCreate(params))).await?;
@@ -928,17 +963,78 @@ impl Client {
         }
     }
 
-    /// The one password check: the board member becomes active on this connection.
-    /// Errors: `wrong_password`, `too_many_attempts`.
-    pub async fn user_use(&self, user_id: aurelius_domain::UserId, password: &str) -> Result<aurelius_domain::user::WhoAmI, ClientError> {
-        self.read(Method::UserUse(aurelius_protocol::UserUseParams { user_id, password: password.into() }), body!(WhoAmI)).await
+    /// Sign in: this connection gets a session; keep `session_token` for the
+    /// server and give it to `resume` on the next connection. Errors:
+    /// `wrong_password` (username or password), `too_many_attempts` (with `retry_after_ms`).
+    pub async fn user_login(&self, username: &str, password: &str, device_name: &str) -> Result<aurelius_domain::user::LoginResult, ClientError> {
+        let params = aurelius_protocol::LoginParams { username: username.into(), password: password.into(), device_name: device_name.into() };
+        self.read(Method::UserLogin(params), body!(Login)).await
     }
 
-    /// Say hello again with the board member this client remembers for the server;
-    /// it is active when it still exists (`HelloResult::user`).
-    pub async fn identify(&self, user_id: aurelius_domain::UserId) -> Result<HelloResult, ClientError> {
-        let params = HelloParams { client_name: "aurelius".into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key: None, accepts: self.accepts.clone(), user_id: Some(user_id) };
+    /// Say hello again with the session this device kept for the server: its
+    /// board member is this connection's when it is still valid (`HelloResult::user`),
+    /// else none (sign in again).
+    pub async fn resume(&self, session_token: &str) -> Result<HelloResult, ClientError> {
+        let params = HelloParams { client_name: "aurelius".into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key: None, accepts: self.accepts.clone(), session_token: Some(session_token.into()) };
         self.read(Method::SessionHello(params), body!(Hello)).await
+    }
+
+    /// End this device's session; forget its token.
+    pub async fn user_logout(&self) -> Result<aurelius_domain::user::WhoAmI, ClientError> {
+        self.read(Method::UserLogout, body!(WhoAmI)).await
+    }
+
+    /// The signed-in devices of a board member (none: the own).
+    pub async fn sessions(&self, user_id: Option<aurelius_domain::UserId>) -> Result<aurelius_domain::user::SessionsSnapshot, ClientError> {
+        self.read(Method::SessionList { user_id }, body!(Sessions)).await
+    }
+
+    /// End a session (any board member's); its device is signed out at once.
+    pub async fn revoke_session(&self, session_id: aurelius_domain::SessionId) -> Result<(), ClientError> {
+        self.host_ok(HostWrite::SessionRevoke { session_id }).await
+    }
+
+    /// The own password (with `old_password`; the other sessions end), or a
+    /// temporary one for another board member (all their sessions end).
+    pub async fn set_password(&self, user_id: Option<aurelius_domain::UserId>, old_password: Option<&str>, new_password: &str) -> Result<(), ClientError> {
+        let params = aurelius_protocol::SetPasswordParams { user_id, old_password: old_password.map(str::to_owned), new_password: new_password.into() };
+        self.host_ok(HostWrite::UserSetPassword(params)).await
+    }
+
+    /// Disable a board member (never the last active one: `last_board_member`).
+    pub async fn disable_user(&self, user_id: aurelius_domain::UserId) -> Result<aurelius_domain::user::UserView, ClientError> {
+        self.host(HostWrite::UserDisable { user_id }, done!(User)).await
+    }
+
+    // ---- the own Claude login (protocol 5) ----
+
+    /// The session's own Claude login.
+    pub async fn claude_login(&self) -> Result<aurelius_domain::user::ClaudeLoginView, ClientError> {
+        self.read(Method::ClaudeLoginStatus, body!(ClaudeLogin)).await
+    }
+
+    /// Start connecting the own Claude login; its prompts come as
+    /// `SessionPush::ClaudeLoginPrompt` (see `session_pushes`). Answers the link id.
+    pub async fn claude_login_link(&self) -> Result<String, ClientError> {
+        self.host(HostWrite::ClaudeLoginLink, |r| match r {
+            HostResult::ClaudeLoginLink { link_id } => Some(link_id),
+            _ => None,
+        })
+        .await
+    }
+
+    /// The code Claude showed, for the running link.
+    pub async fn claude_login_input(&self, link_id: &str, text: &str) -> Result<aurelius_domain::user::ClaudeLoginView, ClientError> {
+        let params = aurelius_protocol::ClaudeLoginInputParams { link_id: link_id.into(), text: text.into() };
+        self.read(Method::ClaudeLoginInput(params), body!(ClaudeLogin)).await
+    }
+
+    pub async fn claude_login_cancel(&self, link_id: &str) -> Result<aurelius_domain::user::ClaudeLoginView, ClientError> {
+        self.host(HostWrite::ClaudeLoginCancel { link_id: link_id.into() }, done!(ClaudeLogin)).await
+    }
+
+    pub async fn claude_login_unlink(&self) -> Result<aurelius_domain::user::ClaudeLoginView, ClientError> {
+        self.host(HostWrite::ClaudeLoginUnlink, done!(ClaudeLogin)).await
     }
 
     // ---- the board and its tickets (protocol 4) ----
@@ -1320,6 +1416,14 @@ impl Client {
     pub fn load_changes(&self) -> mpsc::UnboundedReceiver<aurelius_protocol::LoadSnapshot> {
         let (tx, rx) = mpsc::unbounded_channel();
         *self.loads.lock().unwrap() = Some(tx);
+        rx
+    }
+
+    /// What the server says about this connection's session (a Claude login's
+    /// prompts, a sign-out) from now on (a new call replaces the previous receiver).
+    pub fn session_pushes(&self) -> mpsc::UnboundedReceiver<SessionPush> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self.sessions.lock().unwrap() = Some(tx);
         rx
     }
 

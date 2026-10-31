@@ -85,6 +85,8 @@ impl AppView {
             Overlay::Context => self.render_context(max_h, &scroll, cx).into_any_element(),
             Overlay::Usage => self.render_usage(max_h, cx).into_any_element(),
             Overlay::ServerFolder => self.render_server_folder(max_h, window, cx).into_any_element(),
+            Overlay::ConnectClaude => self.render_connect_dialog(max_h, cx).into_any_element(),
+            Overlay::SignedOut => self.render_signed_out(cx).into_any_element(),
             Overlay::None | Overlay::PlanApproval(_) | Overlay::Menu | Overlay::Screenshot | Overlay::Markdown | Overlay::Trace | Overlay::Artifact => div().into_any_element(),
         };
         deferred(ui::fade_in(
@@ -115,6 +117,9 @@ impl AppView {
         let narrow = f32::from(window.viewport_size().width) < 1180.;
         let section = if self.settings_tab == crate::screens::load::LOAD_TAB {
             self.render_load_settings(window, cx).into_any_element()
+        } else if self.settings_tab == crate::screens::account::ACCOUNT_TAB {
+            let page = settings_page().track_focus(&self.focus).key_context(LOAD);
+            self.render_account_settings(page, window, cx).into_any_element()
         } else {
             self.render_settings(cx).into_any_element()
         };
@@ -220,7 +225,7 @@ impl AppView {
         let mut sections = v().gap(px(1.));
         for (i, (label, first)) in SETTINGS_NAV.iter().enumerate() {
             // Advanced itself is not highlighted while one of its pages is: the page is.
-            let advanced_open = i == 3 && current == 3;
+            let advanced_open = i == ADVANCED && current == ADVANCED;
             sections = sections.child(row(("settings-section", i), *label, i == current && !advanced_open, false, *first, cx));
             if advanced_open {
                 for (j, tab) in ADVANCED_TABS.iter().enumerate() {
@@ -693,6 +698,8 @@ impl AppView {
         };
         v().gap(px(8.))
             .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(ui::label_with_info("Repeats", "Times are the server's local time.")))
+            // B1-2: a schedule runs on its maker's own Claude login.
+            .child(div().id("schedule-own-subscription").text_size(px(12.)).text_color(c(theme::MUTED)).child(crate::screens::account::OWN_SUBSCRIPTION))
             .child(h().gap(px(6.)).children(["Every N hours", "Daily", "Weekly"].into_iter().enumerate().map(|(i, label)| {
                 chip(SharedString::from(format!("recur-kind-{i}")), label, kind == i).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.pending_recurrence = i;
@@ -818,6 +825,7 @@ impl AppView {
             let page = settings_page().track_focus(&self.focus).key_context(LOAD);
             return self.render_company_settings(page, cx);
         }
+
         if self.settings_tab == crate::screens::mcp::MCP_TAB {
             let page = settings_page().track_focus(&self.focus);
             return self.render_mcp_settings(page, cx);
@@ -1472,6 +1480,30 @@ impl AppView {
                 "Forget this memory?".to_string(),
                 "It is never used as context again, leaves the search index and its content is erased. The timeline keeps the fact that it existed.",
             ),
+            ConfirmKind::RevokeSession(session, of) => (
+                format!("Sign out {}?", self.session_name(session, of)),
+                "It needs your password to come back. That device is signed out at once; the timeline says who did it.",
+            ),
+            ConfirmKind::RevokeOtherSessions => (
+                "Sign out all other devices?".to_string(),
+                "Every device signed in as you, except this one, is signed out at once and needs your password to come back.",
+            ),
+            ConfirmKind::DisableMember(user) => (
+                format!("Disable {}?", self.member_name(user)),
+                if self.active_member().map(|u| u.id) == Some(user) {
+                    "That is you: you are signed out on every device at once, also here, and cannot sign in again. Your Claude login is disconnected. Your tickets keep you as their creator; they wait until another board member runs them on their own login."
+                } else {
+                    "They are signed out on every device at once and cannot sign in again. Their Claude login is disconnected. Their tickets keep them as creator and wait until another board member runs them on their own login."
+                },
+            ),
+            ConfirmKind::UseMyLogin(ticket) => (
+                format!("Run #{} on your Claude login?", self.board.ticket(ticket).map_or(0, |t| t.number)),
+                "From now on this ticket and all its work use your own Claude subscription instead of its creator's. Its creator stays. Nothing else runs on your login.",
+            ),
+            ConfirmKind::DisconnectClaude => (
+                "Disconnect your Claude login?".to_string(),
+                "Claude Code signs out on the server and your login's folder there is removed. Your tickets wait until you connect again; nothing runs on someone else's login.",
+            ),
         };
         let confirm_label = match kind {
             ConfirmKind::ForgetMemory(_) => "Forget",
@@ -1482,6 +1514,10 @@ impl AppView {
             ConfirmKind::RestartServer => "Restart",
             ConfirmKind::ShutdownNow => "Shut down",
             ConfirmKind::ClearResults => "Clear all",
+            ConfirmKind::RevokeSession(..) | ConfirmKind::RevokeOtherSessions => "Sign out",
+            ConfirmKind::DisableMember(_) => "Disable",
+            ConfirmKind::DisconnectClaude => "Disconnect",
+            ConfirmKind::UseMyLogin(_) => "Run on my login",
             _ => "Archive",
         };
         card(460.)
@@ -1502,7 +1538,7 @@ impl AppView {
 
 impl AppView {
     fn render_subscription(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let s = self.subscription.clone();
+        let s = crate::screens::account::own_subscription(self.subscription.as_ref(), self.active_member().map(|u| u.id)).cloned();
         let plan = s.as_ref().and_then(|s| s.plan.clone()).map(|p| format!(" · {}", p.to_uppercase())).unwrap_or_default();
         let mut section = v().gap(px(12.)).p(px(16.)).rounded(px(9.)).border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE))
             .child(h().justify_between().child(ui::eyebrow(format!("CLAUDE SUBSCRIPTION{plan}"))).child(
@@ -1769,7 +1805,7 @@ fn this_back(_: &mut AppView, window: &mut Window, cx: &mut Context<AppView>) {
 
 /// Every page of Settings, by the index `settings_tab` holds. The navigation shows four
 /// sections (`SETTINGS_NAV`); Advanced holds eight of these pages, "Servers & PC" three.
-const SETTINGS_SECTIONS: [&str; 13] = ["Connections", "App", "Backups", "Remote access", "Servers", "Load limits", "App keys", "Plugins", "MCP & tools", "Server & PC", "Company", "Recurring schedules", "Trace"];
+const SETTINGS_SECTIONS: [&str; 14] = ["Connections", "App", "Backups", "Remote access", "Servers", "Load limits", "App keys", "Plugins", "MCP & tools", "Server & PC", "Company", "Recurring schedules", "Trace", "Account"];
 
 /// Settings → Server & PC: the server's version and updates, restart and shutdown.
 pub const SERVER_PC_TAB: usize = 9;
@@ -1778,7 +1814,7 @@ pub const SERVER_PC_TAB: usize = 9;
 pub const COMPANY_TAB: usize = 10;
 
 /// One line under each page's title (same order as SETTINGS_SECTIONS).
-const SETTINGS_ABOUT: [&str; 13] = [
+const SETTINGS_ABOUT: [&str; 14] = [
     "Runtimes and how to sign in to them",
     "Appearance, start-up and this app's updates",
     "A backup holds the database and all stored files, checked with a manifest. One is made automatically every day (the last 7 are kept); manual backups keep the last 20. Content you delete or forget is removed from existing backups too. Backups are not encrypted by Aurelius; they are protected by your Windows account, like the app data itself. API keys are never in a backup (they stay in the Windows credential store). Export a project as Markdown + JSON with Ctrl Shift A.",
@@ -1792,6 +1828,7 @@ const SETTINGS_ABOUT: [&str; 13] = [
     "How work flows through the company: the management team and the default models",
     "Every recurring task, with its project",
     "What each answer sent and what it cost (rare, server-wide)",
+    "Who is signed in on this device, your sessions, your password and your own Claude login",
 ];
 
 /// The pages behind "Servers & PC" (a row of tabs on top of them) and behind Advanced.
@@ -1807,21 +1844,26 @@ const ADVANCED_TABS: [usize; 8] = [
     crate::screens::trace::TRACE_TAB,
 ];
 
-/// The navigation: four sections, each with the page it opens first (Advanced's pages show
+/// The navigation: five sections, each with the page it opens first (Advanced's pages show
 /// below it while it is open).
-static SETTINGS_NAV: [(&str, usize); 4] = [
+static SETTINGS_NAV: [(&str, usize); 5] = [
+    ("Account", crate::screens::account::ACCOUNT_TAB),
     ("App", 1),
     ("Company", COMPANY_TAB),
     ("Servers & PC", crate::screens::servers::SERVERS_TAB),
     ("Advanced", 0),
 ];
 
-/// Which of the four navigation sections a page belongs to.
+/// The navigation's sections "Servers & PC" and Advanced (by index in `SETTINGS_NAV`).
+const SERVERS: usize = 3;
+const ADVANCED: usize = 4;
+
+/// Which of the navigation sections a page belongs to.
 pub(crate) fn nav_section(tab: usize) -> usize {
     if SERVER_TABS.contains(&tab) {
-        2
+        SERVERS
     } else if ADVANCED_TABS.contains(&tab) {
-        3
+        ADVANCED
     } else {
         SETTINGS_NAV.iter().position(|(_, first)| *first == tab).unwrap_or(0)
     }
@@ -1829,7 +1871,7 @@ pub(crate) fn nav_section(tab: usize) -> usize {
 
 /// The page after `tab` in the order the navigation shows them (Tab key).
 pub(crate) fn next_settings_tab(tab: usize) -> usize {
-    let order: Vec<usize> = [1, COMPANY_TAB].into_iter().chain(SERVER_TABS).chain(ADVANCED_TABS).collect();
+    let order: Vec<usize> = [crate::screens::account::ACCOUNT_TAB, 1, COMPANY_TAB].into_iter().chain(SERVER_TABS).chain(ADVANCED_TABS).collect();
     let at = order.iter().position(|&t| t == tab).unwrap_or(order.len() - 1);
     order[(at + 1) % order.len()]
 }
@@ -1894,15 +1936,16 @@ mod tests {
     }
 
     #[test]
-    fn settings_has_four_sections_with_eight_advanced_pages() {
-        assert_eq!(SETTINGS_NAV.len(), 4);
+    fn settings_has_five_sections_with_eight_advanced_pages() {
+        assert_eq!(SETTINGS_NAV.len(), 5);
         assert_eq!(ADVANCED_TABS.len(), 8);
         assert_eq!(SERVER_TABS.len(), 3);
         for tab in 0..SETTINGS_SECTIONS.len() {
             assert!(nav_section(tab) < SETTINGS_NAV.len());
         }
-        assert_eq!(nav_section(crate::screens::schedules::SCHEDULES_TAB), 3);
-        assert_eq!(nav_section(crate::screens::remote::REMOTE_TAB), 2);
+        assert_eq!(nav_section(crate::screens::schedules::SCHEDULES_TAB), super::ADVANCED);
+        assert_eq!(nav_section(crate::screens::remote::REMOTE_TAB), super::SERVERS);
+        assert_eq!(SETTINGS_NAV[nav_section(crate::screens::account::ACCOUNT_TAB)].0, "Account");
         assert_eq!(SETTINGS_NAV[nav_section(super::COMPANY_TAB)].0, "Company");
     }
 }

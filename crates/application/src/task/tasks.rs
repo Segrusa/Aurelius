@@ -272,6 +272,7 @@ impl CommandService {
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
         let app = ctx.app.clone();
+        let user = ctx.user_id.filter(|_| app.is_none());
         let stored = attachments.clone();
         let committed = self.commit(command_id, hash, move |tx| {
             let mut run = run;
@@ -316,6 +317,8 @@ impl CommandService {
             let status = if cmd.employee_id.is_some() { TaskStatus::Queued } else { TaskStatus::Draft };
             store::insert_task(tx, task_id, cmd.project_id, cmd.employee_id, &valid.title, &goal_blob.id.to_string(), &criteria_blob.id.to_string(), status, None)?;
             store::set_task_run(tx, task_id, &run)?;
+            // It runs on the Claude login of the board member who made it (an app's: its key's, B5).
+            store::set_login_user(tx, task_id, user.map(|u| u.to_string()).as_deref())?;
             if let Some(app) = &app {
                 aurelius_storage::app_keys::set_task_app(tx, task_id, app.key_id)?;
             }

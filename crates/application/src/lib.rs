@@ -44,6 +44,14 @@ pub struct CommandContext {
     pub user_id: Option<aurelius_domain::UserId>,
 }
 
+impl CommandContext {
+    /// The board member acting, never an app: whose Claude login what they make
+    /// or (re)activate runs on (B5).
+    pub(crate) fn login_user(&self) -> Option<String> {
+        self.user_id.filter(|_| self.app.is_none()).map(|u| u.to_string())
+    }
+}
+
 /// An app acting through its app key.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AppActor {
@@ -147,7 +155,7 @@ pub(crate) fn domain_error(err: DomainError) -> AppError {
     AppError::new(code, err.to_string())
 }
 
-fn idempotency_conflict() -> AppError {
+pub(crate) fn idempotency_conflict() -> AppError {
     AppError::new(
         ErrorCode::IdempotencyConflict,
         "This command ID was already used for a different request.",
@@ -229,12 +237,12 @@ impl CommandService {
             Command::AddIdea(cmd) => self.add_idea(&envelope, hash, cmd),
             Command::UpdateIdea(cmd) => self.update_idea(&envelope, hash, cmd),
             Command::SetIdeaStatus(cmd) => self.set_idea_status(&envelope, hash, cmd),
-            Command::StartIdea(cmd) => self.start_idea(&envelope, hash, cmd),
+            Command::StartIdea(cmd) => self.start_idea(ctx, &envelope, hash, cmd),
             Command::DeleteIdea(cmd) => self.delete_idea(&envelope, hash, cmd),
-            Command::CreateTaskSchedule(cmd) => self.create_task_schedule(&envelope, hash, cmd),
-            Command::UpdateTaskSchedule(cmd) => self.update_task_schedule(&envelope, hash, cmd),
+            Command::CreateTaskSchedule(cmd) => self.create_task_schedule(ctx, &envelope, hash, cmd),
+            Command::UpdateTaskSchedule(cmd) => self.update_task_schedule(ctx, &envelope, hash, cmd),
             Command::DeleteTaskSchedule(cmd) => self.delete_task_schedule(&envelope, hash, cmd),
-            Command::SetTaskSchedulePaused(cmd) => self.set_task_schedule_paused(&envelope, hash, cmd),
+            Command::SetTaskSchedulePaused(cmd) => self.set_task_schedule_paused(ctx, &envelope, hash, cmd),
             Command::RunTaskScheduleNow(cmd) => self.run_task_schedule_now(&envelope, hash, cmd),
             Command::AnswerQuestion(cmd) => self.answer_question(ctx, &envelope, hash, cmd),
             Command::AttachFile(cmd) => self.attach_file(ctx, &envelope, hash, cmd),
@@ -256,7 +264,7 @@ impl CommandService {
             Command::RevokeShare(cmd) => self.revoke_share(&envelope, hash, cmd),
             Command::SetEmployeeFolder(cmd) => self.set_employee_folder(&envelope, hash, cmd),
             Command::DeleteConversation(cmd) => self.delete_conversation(ctx, &envelope, hash, cmd),
-            Command::SetHeartbeat(cmd) => self.set_heartbeat(&envelope, hash, cmd),
+            Command::SetHeartbeat(cmd) => self.set_heartbeat(ctx, &envelope, hash, cmd),
             Command::StartProjectConversation(cmd) => self.start_project_conversation(ctx, &envelope, hash, cmd),
             Command::SendProjectMessage(cmd) => self.send_project_message(ctx, &envelope, hash, cmd),
             Command::DeleteQueuedMessage(cmd) => self.delete_queued_message(ctx, &envelope, hash, cmd),
@@ -277,7 +285,9 @@ impl CommandService {
             | Command::CancelTicket(_)
             | Command::ArchiveTicket(_)
             | Command::UpdateBoardColumns(_)
-            | Command::UpdateCompany(_) => self.ticket_command(ctx, &envelope, hash),
+            | Command::UpdateCompany(_)
+            | Command::UseMyLogin(_)
+            | Command::SetBackgroundLogin(_) => self.ticket_command(ctx, &envelope, hash),
             Command::UpdateProject(cmd) => self.update_project(ctx, &envelope, hash, cmd),
             Command::PostTicketMessage(cmd) => self.post_ticket_message(ctx, &envelope, hash, cmd),
             Command::RetryTicketSummary(cmd) => self.retry_ticket_summary(ctx, &envelope, hash, cmd),
@@ -672,3 +682,6 @@ mod ticket_tests;
 
 #[cfg(test)]
 mod discussion_tests;
+
+#[cfg(test)]
+mod login_tests;

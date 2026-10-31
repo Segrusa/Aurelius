@@ -14,6 +14,7 @@ import '../../data/company.dart';
 import '../../data/discussion.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
+import '../account/claude_login.dart' show claudeLoginMissing;
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 
@@ -85,15 +86,38 @@ Future<bool> startTicket(BuildContext context, TicketView ticket, {String? emplo
       : dispatcher != null
           ? 'started. $dispatcher chooses an employee.'
           : 'started. Choose an owner: ${inactiveDispatcher(company, ticket.projectId) ?? 'no dispatcher is set'}.';
+  // P-36: Start stays possible without a Claude login; the toast says it waits.
+  final waitsForLogin = waitsForMyLogin(context.read<ConnectionBloc?>()?.state, ticket.loginUser);
   HapticFeedback.mediumImpact();
   final undo = owner == null && !again ? SnackBarAction(label: 'Undo', onPressed: () => _undoStart(context, ticket)) : null;
   return ticketWrite(
     context,
     ticketStart(ticketId: ticket.id, employeeId: employeeId),
     expectedVersion: ticket.version,
-    done: again ? '#${ticket.number} starts again.' : '#${ticket.number} $next',
+    done: waitsForLogin ? '#${ticket.number} started. $waitsForLoginNote' : again ? '#${ticket.number} starts again.' : '#${ticket.number} $next',
     action: undo,
   );
+}
+
+/// P-36: a ticket on [loginUser]'s login waits when that is the own login
+/// and it is not connected (or not read yet, R3 m5).
+bool waitsForMyLogin(LinkState? link, String? loginUser) => link != null && loginUser == link.user?.id && claudeLoginMissing(link);
+
+/// What P-36 adds to the toast of a start that waits for the own login.
+const waitsForLoginNote = 'It waits until you connect your Claude login.';
+
+/// "Run on my login" (B4, D3-3, OV-06): a ticket waiting for another board
+/// member's Claude login goes on the own login, after a confirmation. Never
+/// someone else's: the server sets the one who asks.
+Future<bool> runOnMyLogin(BuildContext context, TicketView ticket) async {
+  final ok = await confirm(
+    context,
+    title: 'Run #${ticket.number} on your Claude login?',
+    body: "Its runs, delegations included, then use your own Claude subscription instead of ${ticket.loginUsername}'s. ${ticket.createdByUsername} stays its creator.",
+    action: 'Run on my login',
+  );
+  if (!ok || !context.mounted) return false;
+  return ticketWrite(context, ticketUseMyLogin(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: '#${ticket.number} runs on your Claude login now.');
 }
 
 /// Undo of a Start: only while no owner is chosen (§6). The ticket is read

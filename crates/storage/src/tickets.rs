@@ -41,7 +41,7 @@ fn json_or_null<T: serde::Serialize>(value: &T, empty: bool) -> Result<Option<St
 
 /// Insert a ticket at the bottom of its column with the next number of the
 /// company, with its discussion (`discussions::ticket_conversation`); returns
-/// the number. Version 1.
+/// the number. Version 1. Its runs use its creator's Claude login (`login_user`).
 pub fn insert(tx: &Transaction<'_>, ticket: &NewTicket<'_>) -> Result<u32, StorageError> {
     let number: i64 = tx.query_row("SELECT COALESCE(MAX(number), 0) + 1 FROM tickets", [], |r| r.get(0))?;
     let position = next_position(tx, ticket.column_id)?;
@@ -49,8 +49,8 @@ pub fn insert(tx: &Transaction<'_>, ticket: &NewTicket<'_>) -> Result<u32, Stora
     let discussion = crate::discussions::insert_ticket_discussion(tx, ticket.project_id, &crate::discussions::ticket_discussion_title(number as u32, ticket.title))?;
     tx.execute(
         "INSERT INTO tickets(id, company_id, project_id, number, title, description_blob_id, column_id, position, priority, created_by_user,
-                             owner_employee_id, run_json, labels_json, deadline_ms, version, created_at_ms, updated_at_ms, conversation_id)
-         VALUES (?1, (SELECT id FROM company), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14, ?15)",
+                             owner_employee_id, run_json, labels_json, deadline_ms, version, created_at_ms, updated_at_ms, conversation_id, login_user)
+         VALUES (?1, (SELECT id FROM company), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14, ?15, ?9)",
         params![
             ticket.id.to_string(),
             ticket.project_id.to_string(),
@@ -70,6 +70,34 @@ pub fn insert(tx: &Transaction<'_>, ticket: &NewTicket<'_>) -> Result<u32, Stora
         ],
     )?;
     Ok(number as u32)
+}
+
+/// Whose Claude login the ticket's runs use (at first its creator).
+pub fn login_user(conn: &Connection, id: TicketId) -> Result<Option<UserId>, StorageError> {
+    let user: Option<String> = conn.query_row("SELECT login_user FROM tickets WHERE id = ?1", [id.to_string()], |r| r.get(0)).optional()?;
+    Ok(user.and_then(|u| UserId::parse(&u).ok()))
+}
+
+/// "Run on my login": the ticket's runs use the login of `me`, the board
+/// member who asks for it, never someone else (D3-3). The only way to change
+/// `login_user`; `created_by_user` stays. False when the ticket is unknown or
+/// already on that login. The version is left alone (see `touch`).
+pub fn use_my_login(tx: &Transaction<'_>, id: TicketId, me: UserId) -> Result<bool, StorageError> {
+    Ok(tx.execute(
+        "UPDATE tickets SET login_user = ?2 WHERE id = ?1 AND login_user <> ?2",
+        params![id.to_string(), me.to_string()],
+    )? == 1)
+}
+
+/// Whether a task of the ticket (or its dispatcher's job) waits for a Claude login (`needs: login`).
+pub fn waits_for_login(conn: &Connection, id: TicketId) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM tasks w WHERE w.ticket_id = ?1 AND w.status = 'waiting' AND w.waiting_reason = 'login')
+             OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state = 'ready' AND j.last_error_code = 'login'
+                        AND json_extract(j.payload_json, '$.ticket_id') = ?1)",
+        [id.to_string()],
+        |r| r.get(0),
+    )?)
 }
 
 fn next_position(conn: &Connection, column: BoardColumnId) -> Result<f64, StorageError> {
@@ -268,11 +296,16 @@ pub struct TicketFilter {
 
 const SELECT: &str = "SELECT k.id, k.number, k.project_id, p.name, k.title, db.storage_key, k.column_id, c.kind, k.position, k.priority,
         k.created_by_user, u.username, k.owner_employee_id, e.name, k.run_json, k.labels_json, k.deadline_ms, k.root_task_id, t.status,
-        k.review_feedback, k.version, k.created_at_ms, k.updated_at_ms, k.started_at_ms, k.done_at_ms, k.archived_at_ms, k.attachments_json, k.conversation_id
+        k.review_feedback, k.version, k.created_at_ms, k.updated_at_ms, k.started_at_ms, k.done_at_ms, k.archived_at_ms, k.attachments_json, k.conversation_id,
+        k.login_user, lu.username,
+        (EXISTS (SELECT 1 FROM tasks w WHERE w.ticket_id = k.id AND w.status = 'waiting' AND w.waiting_reason = 'login')
+         OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state = 'ready' AND j.last_error_code = 'login'
+                    AND json_extract(j.payload_json, '$.ticket_id') = k.id))
      FROM tickets k
      JOIN projects p ON p.id = k.project_id
      JOIN board_columns c ON c.id = k.column_id
      JOIN users u ON u.id = k.created_by_user
+     JOIN users lu ON lu.id = k.login_user
      LEFT JOIN employees e ON e.id = k.owner_employee_id
      LEFT JOIN tasks t ON t.id = k.root_task_id
      LEFT JOIN blobs db ON db.id = k.description_blob_id
@@ -326,6 +359,10 @@ pub fn list(conn: &Connection, filter: &TicketFilter, read_blob: &dyn Fn(&str) -
                     done_at_ms: r.get(24)?,
                     archived_at_ms: r.get(25)?,
                     conversation_id: r.get::<_, Option<String>>(27)?.and_then(|c| aurelius_domain::ConversationId::parse(&c).ok()),
+                    login_user: parse(UserId::parse(&r.get::<_, String>(28)?))?,
+                    login_username: r.get(29)?,
+                    // A task of it (or its dispatcher) waits for `login_user`'s Claude login (MU3-12).
+                    needs: r.get::<_, bool>(30)?.then_some(aurelius_domain::ticket::TicketNeed::Login),
                 },
                 description,
             ))

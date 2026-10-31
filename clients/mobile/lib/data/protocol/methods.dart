@@ -5,7 +5,7 @@
 import 'models.dart';
 
 /// The protocol major this app speaks. The server refuses another one.
-const int protocolMajor = 4;
+const int protocolMajor = 5;
 
 /// The wire name of every method.
 abstract final class Methods {
@@ -72,9 +72,32 @@ abstract final class Methods {
   static const String channelList = 'channel.list';
   static const String chatRetry = 'chat.retry';
   static const String chatSend = 'chat.send';
+  /// Stop a running link of the session's own login. Answers `ClaudeLogin`.
+  static const String claudeLoginCancel = 'claude_login.cancel';
+  /// What a running `claude_login.link` asks for: the code Claude showed after
+  /// the sign-in at Anthropic, written to `claude auth login` as typed. Only
+  /// the connection that started the link. A session method: no receipt, no
+  /// request hash, no event, never printed or logged. Answers `ClaudeLogin`.
+  static const String claudeLoginInput = 'claude_login.input';
+  /// Connect the session's own Claude login: the server starts `claude auth
+  /// login` for `<data>/logins/<user_id>/` and answers `ClaudeLoginLink`. What
+  /// Claude asks (the sign-in link, the code) comes to this connection only as
+  /// `ServerMessage::ClaudeLoginPrompt`; the code goes back with
+  /// `claude_login.input`. One link per board member at a time, 10 minutes.
+  static const String claudeLoginLink = 'claude_login.link';
+  /// The session's own Claude login (`ClaudeLoginView`). Feature of protocol 5.
+  static const String claudeLoginStatus = 'claude_login.status';
+  /// Disconnect the session's own Claude login (`claude auth logout`, its folder
+  /// removed). Answers `ClaudeLogin`.
+  static const String claudeLoginUnlink = 'claude_login.unlink';
   /// The company in one read: employees, the org chart setting and the
   /// management team (roots).
   static const String companyGet = 'company.get';
+  /// The company's background jobs (memory consolidation, B6) run on the Claude
+  /// login of the board member who asks (`enabled`), or on none (`false`, only
+  /// when it is theirs): without one they do not run. Only the own login can be
+  /// chosen. Answers `CompanyUpdated`.
+  static const String companySetBackgroundLogin = 'company.set_background_login';
   static const String companySetFollowOrgChart = 'company.set_follow_org_chart';
   static const String companyUpdate = 'company.update';
   static const String connectionAdd = 'connection.add';
@@ -262,6 +285,14 @@ abstract final class Methods {
   /// The first request of a session: who is calling. The protocol major in
   /// every request must equal the server's, else the answer is a hard error.
   static const String sessionHello = 'session.hello';
+  /// The signed-in devices of a board member (none: the session's own),
+  /// newest activity first (`SessionView::current` marks this one). Any board
+  /// member may list another's (one role). Never a token or its hash.
+  static const String sessionList = 'session.list';
+  /// End one session (any board member's: one role). Its device's open
+  /// connection closes at once (`ServerMessage::SignedOut`); the timeline says
+  /// who revoked it. Answers `Done`. Not for apps.
+  static const String sessionRevoke = 'session.revoke';
   static const String shareCreate = 'share.create';
   static const String shareList = 'share.list';
   static const String shareRevoke = 'share.revoke';
@@ -341,6 +372,10 @@ abstract final class Methods {
   /// changes; the owner only through `ticket.assign`; mode and model only while
   /// the main task does not run.
   static const String ticketUpdate = 'ticket.update';
+  /// Run a ticket on the Claude login of the board member who asks (B4, D3-3):
+  /// `TicketView::login_user` becomes that board member, never anyone else. The
+  /// creator stays. Only a board member; answers `TicketChanged`.
+  static const String ticketUseMyLogin = 'ticket.use_my_login';
   /// Human-readable timeline cards, newest first (keyset on `seq`).
   static const String timelineList = 'timeline.list';
   /// Whether runs keep a trace (feature `run_trace`).
@@ -367,22 +402,44 @@ abstract final class Methods {
   static const String usageGetTotals = 'usage.get_totals';
   /// A new board member (OV-12: `invalid_username`, `weak_password` (also a
   /// password of only spaces), `username_taken`; `too_many_attempts` after five
-  /// a minute on one connection); answers `CommandResult::UserCreated` as a command
-  /// receipt. A connection without an active board member becomes the new one.
-  /// The server hashes the password before anything is recorded: the receipt,
-  /// its request hash and the event `user.created` hold the name only. Not for apps.
+  /// a minute on one connection or twenty an hour on the server); answers
+  /// `CommandResult::UserCreated` as a command receipt. Without a session only
+  /// the first board member (the onboarding): that connection then gets a
+  /// session, whose token `user.login` would give (see `HelloResult::user`;
+  /// the client signs in once more to get the token). After that it needs a
+  /// session (any board member, one role). The server hashes the password
+  /// before anything is recorded: the receipt, its request hash and the event
+  /// `user.created` hold the name only. Not for apps.
   static const String userCreate = 'user.create';
-  /// The board members, oldest first (never a password's hash): the choice
-  /// "Who's working here?". Apps may read it too.
+  /// Disable a board member: their sessions end at once and they cannot sign
+  /// in; their Claude login is disconnected; tickets keep their creator. The
+  /// last active board member cannot be disabled (`last_board_member`).
+  /// Answers `User`. Not for apps.
+  static const String userDisable = 'user.disable';
+  /// The board members, oldest first (never a password's hash), disabled ones
+  /// too (`UserView::disabled_at_ms`). Works without a session (the sign-in
+  /// screen may offer the names). Apps may read it too.
   static const String userList = 'user.list';
-  /// The one password check (Fase 1): a right password makes the board member
-  /// active on this connection and answers `WhoAmI`. A wrong password and an
-  /// unknown board member are both `wrong_password` (after a short delay); more
-  /// than 5 tries a minute on one connection are `too_many_attempts`. A session
-  /// method: it changes only the connection, so it has no receipt to replay.
+  /// Sign in (protocol 5): a right username and password give this connection a
+  /// session and answer `Login` with its token, shown once (keep it for the
+  /// server and give it in every hello). A wrong password, an unknown username
+  /// and a disabled board member all answer `wrong_password`; after 5 failed tries
+  /// for one username the server waits longer each time, up to 15 minutes
+  /// (`too_many_attempts` with `retry_after_ms`). A session method: it changes
+  /// only the connection and the sessions, so it has no receipt and no event.
   /// Not for apps.
-  static const String userUse = 'user.use';
-  /// Whether the server has board members, and this connection's active one.
+  static const String userLogin = 'user.login';
+  /// End this connection's session (the device must sign in again); answers
+  /// `WhoAmI` without a board member. A session method.
+  static const String userLogout = 'user.logout';
+  /// Change a password. Own (no `user_id`, or the session's): with the old
+  /// password; the other sessions end, this one stays. Another board member's
+  /// (B10): a temporary password, changed at their next sign-in
+  /// (`must_change_password`); all their sessions end. Like `user.create`, the
+  /// passwords are in no receipt, request hash, event or log. Answers `Done`.
+  static const String userSetPassword = 'user.set_password';
+  /// Whether the server has board members, and this connection's session's one.
+  /// Works without a session.
   static const String userWhoami = 'user.whoami';
   /// Whether tasks may be tried in several ways first (feature `task_variants`).
   static const String variantsGetSetting = 'variants.get_setting';
@@ -474,6 +531,20 @@ Map<String, dynamic> browserGet() => <String, dynamic>{
 /// one first, then one per project (archived projects too: read-only).
 Map<String, dynamic> channelList() => <String, dynamic>{
   'method': Methods.channelList,
+};
+
+/// What a running `claude_login.link` asks for: the code Claude showed after
+/// the sign-in at Anthropic, written to `claude auth login` as typed. Only
+/// the connection that started the link. A session method: no receipt, no
+/// request hash, no event, never printed or logged. Answers `ClaudeLogin`.
+Map<String, dynamic> claudeLoginInput(ClaudeLoginInputParams params) => <String, dynamic>{
+  'method': Methods.claudeLoginInput,
+  'params': params.toJson(),
+};
+
+/// The session's own Claude login (`ClaudeLoginView`). Feature of protocol 5.
+Map<String, dynamic> claudeLoginStatus() => <String, dynamic>{
+  'method': Methods.claudeLoginStatus,
 };
 
 /// The company in one read: employees, the org chart setting and the
@@ -778,6 +849,16 @@ Map<String, dynamic> sessionHello(HelloParams params) => <String, dynamic>{
   'params': params.toJson(),
 };
 
+/// The signed-in devices of a board member (none: the session's own),
+/// newest activity first (`SessionView::current` marks this one). Any board
+/// member may list another's (one role). Never a token or its hash.
+Map<String, dynamic> sessionList({String? userId}) => <String, dynamic>{
+  'method': Methods.sessionList,
+  'params': <String, dynamic>{
+    if (userId != null) 'user_id': userId,
+  },
+};
+
 Map<String, dynamic> shareList({required String projectId}) => <String, dynamic>{
   'method': Methods.shareList,
   'params': <String, dynamic>{
@@ -949,24 +1030,34 @@ Map<String, dynamic> usageGetTotals({String? conversationId, String? taskId}) =>
   },
 };
 
-/// The board members, oldest first (never a password's hash): the choice
-/// "Who's working here?". Apps may read it too.
+/// The board members, oldest first (never a password's hash), disabled ones
+/// too (`UserView::disabled_at_ms`). Works without a session (the sign-in
+/// screen may offer the names). Apps may read it too.
 Map<String, dynamic> userList() => <String, dynamic>{
   'method': Methods.userList,
 };
 
-/// The one password check (Fase 1): a right password makes the board member
-/// active on this connection and answers `WhoAmI`. A wrong password and an
-/// unknown board member are both `wrong_password` (after a short delay); more
-/// than 5 tries a minute on one connection are `too_many_attempts`. A session
-/// method: it changes only the connection, so it has no receipt to replay.
+/// Sign in (protocol 5): a right username and password give this connection a
+/// session and answer `Login` with its token, shown once (keep it for the
+/// server and give it in every hello). A wrong password, an unknown username
+/// and a disabled board member all answer `wrong_password`; after 5 failed tries
+/// for one username the server waits longer each time, up to 15 minutes
+/// (`too_many_attempts` with `retry_after_ms`). A session method: it changes
+/// only the connection and the sessions, so it has no receipt and no event.
 /// Not for apps.
-Map<String, dynamic> userUse(UserUseParams params) => <String, dynamic>{
-  'method': Methods.userUse,
+Map<String, dynamic> userLogin(LoginParams params) => <String, dynamic>{
+  'method': Methods.userLogin,
   'params': params.toJson(),
 };
 
-/// Whether the server has board members, and this connection's active one.
+/// End this connection's session (the device must sign in again); answers
+/// `WhoAmI` without a board member. A session method.
+Map<String, dynamic> userLogout() => <String, dynamic>{
+  'method': Methods.userLogout,
+};
+
+/// Whether the server has board members, and this connection's session's one.
+/// Works without a session.
 Map<String, dynamic> userWhoami() => <String, dynamic>{
   'method': Methods.userWhoami,
 };
@@ -1095,6 +1186,29 @@ Map<String, dynamic> browserSetBackend({required BrowserBackend backend}) => <St
   'params': <String, dynamic>{
     'backend': backend.toJson(),
   },
+};
+
+/// Stop a running link of the session's own login. Answers `ClaudeLogin`.
+Map<String, dynamic> claudeLoginCancel({required String linkId}) => <String, dynamic>{
+  'method': Methods.claudeLoginCancel,
+  'params': <String, dynamic>{
+    'link_id': linkId,
+  },
+};
+
+/// Connect the session's own Claude login: the server starts `claude auth
+/// login` for `<data>/logins/<user_id>/` and answers `ClaudeLoginLink`. What
+/// Claude asks (the sign-in link, the code) comes to this connection only as
+/// `ServerMessage::ClaudeLoginPrompt`; the code goes back with
+/// `claude_login.input`. One link per board member at a time, 10 minutes.
+Map<String, dynamic> claudeLoginLink() => <String, dynamic>{
+  'method': Methods.claudeLoginLink,
+};
+
+/// Disconnect the session's own Claude login (`claude auth logout`, its folder
+/// removed). Answers `ClaudeLogin`.
+Map<String, dynamic> claudeLoginUnlink() => <String, dynamic>{
+  'method': Methods.claudeLoginUnlink,
 };
 
 /// A new folder `name` in the folder `parent`.
@@ -1347,6 +1461,16 @@ Map<String, dynamic> serverRestart() => <String, dynamic>{
   'method': Methods.serverRestart,
 };
 
+/// End one session (any board member's: one role). Its device's open
+/// connection closes at once (`ServerMessage::SignedOut`); the timeline says
+/// who revoked it. Answers `Done`. Not for apps.
+Map<String, dynamic> sessionRevoke({required String sessionId}) => <String, dynamic>{
+  'method': Methods.sessionRevoke,
+  'params': <String, dynamic>{
+    'session_id': sessionId,
+  },
+};
+
 /// Trace mode on or off for every run that starts afterwards (feature `run_trace`).
 /// Off also forgets the traces kept so far.
 Map<String, dynamic> traceSetEnabled({required bool enabled}) => <String, dynamic>{
@@ -1374,12 +1498,37 @@ Map<String, dynamic> updatePrepareApp() => <String, dynamic>{
 
 /// A new board member (OV-12: `invalid_username`, `weak_password` (also a
 /// password of only spaces), `username_taken`; `too_many_attempts` after five
-/// a minute on one connection); answers `CommandResult::UserCreated` as a command
-/// receipt. A connection without an active board member becomes the new one.
-/// The server hashes the password before anything is recorded: the receipt,
-/// its request hash and the event `user.created` hold the name only. Not for apps.
+/// a minute on one connection or twenty an hour on the server); answers
+/// `CommandResult::UserCreated` as a command receipt. Without a session only
+/// the first board member (the onboarding): that connection then gets a
+/// session, whose token `user.login` would give (see `HelloResult::user`;
+/// the client signs in once more to get the token). After that it needs a
+/// session (any board member, one role). The server hashes the password
+/// before anything is recorded: the receipt, its request hash and the event
+/// `user.created` hold the name only. Not for apps.
 Map<String, dynamic> userCreate(UserCreateParams params) => <String, dynamic>{
   'method': Methods.userCreate,
+  'params': params.toJson(),
+};
+
+/// Disable a board member: their sessions end at once and they cannot sign
+/// in; their Claude login is disconnected; tickets keep their creator. The
+/// last active board member cannot be disabled (`last_board_member`).
+/// Answers `User`. Not for apps.
+Map<String, dynamic> userDisable({required String userId}) => <String, dynamic>{
+  'method': Methods.userDisable,
+  'params': <String, dynamic>{
+    'user_id': userId,
+  },
+};
+
+/// Change a password. Own (no `user_id`, or the session's): with the old
+/// password; the other sessions end, this one stays. Another board member's
+/// (B10): a temporary password, changed at their next sign-in
+/// (`must_change_password`); all their sessions end. Like `user.create`, the
+/// passwords are in no receipt, request hash, event or log. Answers `Done`.
+Map<String, dynamic> userSetPassword(SetPasswordParams params) => <String, dynamic>{
+  'method': Methods.userSetPassword,
   'params': params.toJson(),
 };
 
@@ -1436,6 +1585,17 @@ Map<String, dynamic> chatRetry(RetryReply params) => <String, dynamic>{
 Map<String, dynamic> chatSend(SendChatMessage params) => <String, dynamic>{
   'method': Methods.chatSend,
   'params': params.toJson(),
+};
+
+/// The company's background jobs (memory consolidation, B6) run on the Claude
+/// login of the board member who asks (`enabled`), or on none (`false`, only
+/// when it is theirs): without one they do not run. Only the own login can be
+/// chosen. Answers `CompanyUpdated`.
+Map<String, dynamic> companySetBackgroundLogin({required bool enabled}) => <String, dynamic>{
+  'method': Methods.companySetBackgroundLogin,
+  'params': <String, dynamic>{
+    'enabled': enabled,
+  },
 };
 
 Map<String, dynamic> companySetFollowOrgChart(SetFollowOrgChart params) => <String, dynamic>{
@@ -1863,5 +2023,15 @@ Map<String, dynamic> ticketUpdate({bool? clearDeadline, int? deadlineMs, String?
     if (run != null) 'run': run.toJson(),
     'ticket_id': ticketId,
     if (title != null) 'title': title,
+  },
+};
+
+/// Run a ticket on the Claude login of the board member who asks (B4, D3-3):
+/// `TicketView::login_user` becomes that board member, never anyone else. The
+/// creator stays. Only a board member; answers `TicketChanged`.
+Map<String, dynamic> ticketUseMyLogin({required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketUseMyLogin,
+  'params': <String, dynamic>{
+    'ticket_id': ticketId,
   },
 };

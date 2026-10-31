@@ -1,0 +1,140 @@
+#!/bin/sh
+# A stand-in for the `claude` CLI, for tests and a test daemon (impact analysis
+# §7a). Never contacts anyone and never sees a real login. Set it as the path of
+# a Claude Code connection; it then behaves per board member's login folder
+# (CLAUDE_CONFIG_DIR = <data>/logins/<user_id>):
+#
+#   claude --version                 a version line
+#   claude auth login --claudeai     the sign-in link and the code prompt as
+#                                    `claude` 2.1.312 prints them (ANSI, OSC 8);
+#                                    a code "good…#<state>" signs in
+#                                    (writes .fake-login), "…#<state>" fails;
+#                                    one without "#" or "incomplete…" gets
+#                                    "Invalid code…" and it waits on (2.1.312)
+#   claude auth status --json        loggedIn, authMethod, e-mail, plan
+#   claude auth logout               signs out (removes .fake-login)
+#   claude -p /usage ...             a /usage text ("% used"), or one without
+#                                    when the folder has .fake-api-only
+#   claude -p ... (a run)            one answer "Done." in stream-json
+#
+# What it records and what makes it act, in files next to this script:
+#   runs.log       one line per call: the login folder (CLAUDE_CONFIG_DIR), HOME,
+#                  whether ANTHROPIC_*/CLAUDE_CODE_OAUTH_TOKEN reached it, and the call
+#   quota-users    user ids (one per line) whose runs hit the usage limit
+#   expired-users  user ids whose runs get a 401 (expired login)
+#   login-mode     "silent": auth login prints nothing (the link is never recognized);
+#                  "child": auth login leaves a child that ignores SIGHUP
+#   login-children (written) the process id of each such child
+#   login-pids     (written) the process id of every auth login, to see it end
+
+here=$(cd "$(dirname "$0")" && pwd)
+dir=${CLAUDE_CONFIG_DIR:-}
+user=$(basename "${dir:-none}")
+leaked=""
+env | grep -q '^ANTHROPIC_' && leaked="$leaked ANTHROPIC_*"
+[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && leaked="$leaked CLAUDE_CODE_OAUTH_TOKEN"
+printf 'config=%s home=%s leaked=[%s] call=%s\n' "$dir" "${HOME:-}" "$leaked" "$1 $2" >> "$here/runs.log"
+
+listed() { [ -f "$here/$1" ] && grep -qx "$user" "$here/$1"; }
+signed_in() { [ -n "$dir" ] && [ -f "$dir/.fake-login" ]; }
+
+case "$1" in
+--version)
+    echo "9.9.9 (Fake Claude Code)"
+    exit 0
+    ;;
+auth)
+    case "$2" in
+    status)
+        if signed_in; then
+            printf '{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty", "email": "%s", "subscriptionType": "max"}\n' "$(cat "$dir/.fake-login")"
+            exit 0
+        fi
+        printf '{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty"}\n'
+        exit 1
+        ;;
+    logout)
+        rm -f "$dir/.fake-login"
+        echo "Successfully logged out from your Anthropic account."
+        exit 0
+        ;;
+    login)
+        echo $$ >> "$here/login-pids"
+        if [ "$(cat "$here/login-mode" 2>/dev/null)" = "silent" ]; then
+            sleep 3600
+            exit 1
+        fi
+        # "child": it leaves a child that ignores the hang-up (it must still end with the group).
+        if [ "$(cat "$here/login-mode" 2>/dev/null)" = "child" ]; then
+            (trap '' HUP; exec sleep 3600) &
+            echo $! >> "$here/login-children"
+        fi
+        url="https://claude.com/cai/oauth/authorize?code=true&client_id=00000000-0000-4000-8000-000000000000&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&code_challenge=FAKECHALLENGE&code_challenge_method=S256&state=FAKESTATE"
+        printf 'Opening browser to sign in\342\200\246\r\n'
+        printf "If the browser didn't open, visit: \033]8;;%s\007\033[94m%s\033[39m\033]8;;\007\r\nPaste code here if prompted > " "$url" "$url"
+        stty -echo 2>/dev/null
+        while IFS= read -r code; do
+            code=$(printf '%s' "$code" | tr -d '\r')
+            case "$code" in
+            # Not whole (no "#state", or "incomplete…"): as 2.1.312, it says so and waits for another.
+            *"#"*) case "$code" in incomplete*) ;; *) break ;; esac ;;
+            esac
+            printf 'Invalid code. Please make sure the full code was copied.\r\n'
+        done
+        stty echo 2>/dev/null
+        case "$code" in
+        good*)
+            mkdir -p "$dir"
+            echo "test@example.com" > "$dir/.fake-login"
+            printf 'Login successful.\r\n'
+            exit 0
+            ;;
+        *)
+            printf "Login failed: That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code.\r\n"
+            exit 1
+            ;;
+        esac
+        ;;
+    esac
+    exit 2
+    ;;
+esac
+
+# `claude -p …`: the usage overview or one run.
+case " $* " in
+*" /usage "*)
+    if ! signed_in; then
+        echo '{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}'
+        exit 1
+    fi
+    if [ -f "$dir/.fake-api-only" ]; then
+        echo '{"type":"result","subtype":"success","is_error":false,"result":"You are using an API key; there are no plan limits to show."}'
+    else
+        echo '{"type":"result","subtype":"success","is_error":false,"result":"Current session: 12% used · resets 4pm (UTC)\nCurrent week (all models): 34% used · resets Mon 8am (UTC)"}'
+    fi
+    exit 0
+    ;;
+esac
+
+# Stream-json input stays open until the answer is in: read its one message; text input to its end.
+case " $* " in
+*" --input-format stream-json "*) IFS= read -r prompt ;;
+*) cat > /dev/null ;;
+esac
+echo '{"type":"system","subtype":"init","tools":[],"mcp_servers":[],"model":"fake-claude","plugins":[]}'
+if ! signed_in; then
+    echo '{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}'
+    exit 1
+fi
+if listed expired-users; then
+    echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth token has expired.\"}}"}'
+    exit 1
+fi
+if listed quota-users; then
+    reset=$(( $(date +%s) + 3600 ))
+    printf '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude AI usage limit reached|%s"}\n' "$reset"
+    exit 1
+fi
+echo '{"type":"assistant","message":{"id":"msg_fake","role":"assistant","content":[{"type":"text","text":"Done."}],"usage":{"input_tokens":3,"output_tokens":1}}}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"Done.","usage":{"input_tokens":3,"output_tokens":1}}'
+exit 0

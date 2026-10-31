@@ -122,8 +122,8 @@ void main() {
       expect(ticketState(ticketOf(column: ColumnKind.todo, rootTaskStatus: TaskStatus.failed), needsOwner: true), TicketState.failed);
     });
 
-    test('Needs you: the gates, a failure, a question, nobody to choose an owner (§5.2)', () {
-      expect([for (final s in TicketState.values) if (s.needsYou) s], [TicketState.needsOwner, TicketState.ownerUnknown, TicketState.waitingForYou, TicketState.failed, TicketState.planReview, TicketState.review]);
+    test('Needs you: the gates, a failure, a question, nobody to choose an owner (§5.2), your own Claude login (Fase 3 §3)', () {
+      expect([for (final s in TicketState.values) if (s.needsYou) s], [TicketState.needsOwner, TicketState.ownerUnknown, TicketState.waitingForYou, TicketState.failed, TicketState.needsYourLogin, TicketState.planReview, TicketState.review]);
       expect(TicketState.choosing.line(dispatcher: 'Orion'), 'Orion is choosing…');
       expect(TicketState.queued.line(owner: 'Forge'), 'Queued for Forge');
     });

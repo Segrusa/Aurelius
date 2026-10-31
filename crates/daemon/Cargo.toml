@@ -40,6 +40,11 @@ hex.workspace = true
 getrandom.workspace = true
 argon2.workspace = true
 sysinfo = { version = "0.31", default-features = false, features = ["system"] }
+# Connecting a board member's Claude login: `claude auth login` in a PTY, without a shell.
+portable-pty = "0.9"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
@@ -61,6 +66,7 @@ async-trait = "0.1"
 aurelius-client.workspace = true
 aurelius-mcp.workspace = true
 tempfile.workspace = true
+schemars.workspace = true
 
 [build-dependencies]
 winresource = "0.1"

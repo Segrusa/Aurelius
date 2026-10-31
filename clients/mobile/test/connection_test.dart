@@ -66,15 +66,15 @@ void main() {
     expect(connection.state.message, contains('Pair again'));
   });
 
-  test('only the major is checked: an older server (3.x) is refused with "update"', () async {
-    daemon.helloProtocol = 3;
+  test('only the major is checked: an older server (4.x) is refused with "update"', () async {
+    daemon.helloProtocol = 4;
     connection.start();
     await until(() => connection.state.status == LinkStatus.incompatible);
     expect(connection.state.message, 'Update Aurelius on the phone and the PC.');
   });
 
   test('a server that refuses our major (incompatible_protocol) says the same', () async {
-    daemon.serverProtocol = 5;
+    daemon.serverProtocol = 6;
     connection.start();
     await until(() => connection.state.status == LinkStatus.incompatible);
     expect(connection.state.message, 'Update Aurelius on the phone and the PC.');

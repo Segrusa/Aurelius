@@ -162,7 +162,7 @@ mod tests {
     fn bridge_messages_use_their_own_method_names() {
         let request = BridgeRequest { protocol: crate::PROTOCOL_MAJOR, request_id: 1, call: BridgeCall::DaemonShutdown };
         let json = serde_json::to_value(&request).unwrap();
-        assert_eq!((json["method"].as_str(), json["protocol"].as_u64()), (Some("daemon.shutdown"), Some(4)));
+        assert_eq!((json["method"].as_str(), json["protocol"].as_u64()), (Some("daemon.shutdown"), Some(5)));
         assert_eq!(serde_json::from_value::<BridgeRequest>(json).unwrap(), request);
         // A client method is not a bridge method, and the other way round.
         let client = serde_json::json!({ "protocol": 3, "request_id": 1, "method": "project.list" });

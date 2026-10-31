@@ -311,6 +311,8 @@ impl StreamState {
                 if code == "rate_limit" || quota_in(result_text).is_some() {
                     return Ok(vec![RuntimeEvent::Quota { reset_at_ms: quota_in(result_text).flatten().or(self.limit_reset_ms) }]);
                 }
+                // Signed out, or the login expired (a 401): the run waits for its login.
+                let code = if auth_in(result_text) { AUTH_FAILED.to_owned() } else { code };
                 let errors = value["errors"].as_array().map(|e| e.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; ")).unwrap_or_default();
                 let message = if errors.is_empty() { describe(&code) } else { errors };
                 Ok(vec![RuntimeEvent::Failed { code, message }])
@@ -378,6 +380,19 @@ pub fn quota_in(text: &str) -> Option<Option<i64>> {
     }
     let after = text.split_once('|').map(|(_, rest)| rest);
     Some(after.and_then(|rest| rest.trim().split(|c: char| !c.is_ascii_digit()).next()?.parse::<i64>().ok()).filter(|n| *n > 1_000_000_000).map(epoch_ms))
+}
+
+/// The code of a run whose Claude login is not signed in or expired (a 401).
+pub const AUTH_FAILED: &str = "authentication_failed";
+
+/// Whether Claude Code says its login is gone, in the CLI's own words only: never
+/// signed in in this folder or a refused key ("Not logged in · Please run /login",
+/// "Invalid API key · Please run /login"), or Anthropic's 401 for the login
+/// (`authentication_error`, "OAuth token has expired"). A generic "401" or
+/// "invalid api key" (a tool's, a web page's) is no reason to mark a board
+/// member's login expired and stop all their runs (R2 m1).
+pub fn auth_in(text: &str) -> bool {
+    text.contains("Please run /login") || (text.contains("\"authentication_error\"") && (text.contains("API Error: 401") || text.contains("OAuth token has expired")))
 }
 
 /// Text of a tool result (a string or text blocks), capped for storage.
@@ -535,6 +550,22 @@ mod tests {
         s.feed(r#"{"type":"assistant","error":"rate_limit","message":{"content":[]}}"#).unwrap();
         let events = s.feed(r#"{"type":"result","subtype":"success","is_error":true,"result":"limit"}"#).unwrap();
         assert_eq!(events, vec![RuntimeEvent::Quota { reset_at_ms: None }]);
+    }
+
+    #[test]
+    fn a_signed_out_or_expired_login_is_an_auth_failure() {
+        let mut s = StreamState::default();
+        let events = s.feed(r#"{"type":"result","subtype":"success","is_error":true,"result":"Not logged in · Please run /login"}"#).unwrap();
+        assert!(matches!(&events[..], [RuntimeEvent::Failed { code, .. }] if code == AUTH_FAILED), "{events:?}");
+        let mut s = StreamState::default();
+        let events = s.feed(r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth token has expired.\"}}"}"#).unwrap();
+        assert!(matches!(&events[..], [RuntimeEvent::Failed { code, .. }] if code == AUTH_FAILED), "{events:?}");
+        assert!(!auth_in("some other crash"));
+        assert!(auth_in("Invalid API key · Please run /login"));
+        // R2 m1: generic texts of something else are not the login's.
+        for other in ["Error: 401 Unauthorized from the weather API", "invalid api key for the search service", "not logged in to GitHub", "authentication_error in my test fixture"] {
+            assert!(!auth_in(other), "{other}");
+        }
     }
 
     #[test]

@@ -5,9 +5,10 @@
 //!                                                              └─► daemon session (same dispatch as IPC)
 //! ```
 //!
-//! * Off by default; binds only on loopback. Tailscale Serve terminates TLS
-//!   and decides which tailnet devices can reach it; pairing decides what a
-//!   device may do.
+//! * Off by default; binds only on loopback (`bind`). Tailscale Serve listens
+//!   on the tailnet addresses, terminates TLS and decides which tailnet devices
+//!   can reach it; pairing decides what a device may do. Another address only
+//!   with `AURELIUS_REMOTE_BIND`, and with a warning in the log.
 //! * A device pairs with a one-time code shown on the desktop and confirmed
 //!   there, gets a long-lived device secret (stored on the phone in the
 //!   Keychain, only its SHA-256 here) and trades it for 12-hour session tokens.
@@ -18,6 +19,7 @@
 //!   (`mcp`): the tools of `aurelius-mcp`, on a daemon session of that app.
 
 mod auth;
+pub mod bind;
 mod http;
 mod mcp;
 pub mod push;
@@ -89,7 +91,7 @@ pub struct PushIds {
 const APNS_KEY_REF: &str = "remote/apns-key";
 
 struct Server {
-    port: u16,
+    addr: SocketAddr,
     stop: oneshot::Sender<()>,
     task: tokio::task::JoinHandle<()>,
 }
@@ -206,21 +208,41 @@ impl Hub {
         }
     }
 
-    /// The bound loopback address, while running (tests use port 0).
+    /// The bound address, while running (tests use port 0).
     pub async fn local_addr(&self) -> Option<SocketAddr> {
-        self.inner.server.lock().await.as_ref().map(|s| SocketAddr::from(([127, 0, 0, 1], s.port)))
+        self.inner.server.lock().await.as_ref().map(|s| s.addr)
     }
 
-    async fn start_server(&self) -> Result<u16, ProtocolError> {
+    /// Where the gateway listens, or would listen: what Tailscale Serve targets.
+    async fn target(&self) -> SocketAddr {
+        match self.local_addr().await {
+            Some(addr) => addr,
+            None => SocketAddr::new(
+                bind::from_env().unwrap_or(std::net::Ipv4Addr::LOCALHOST.into()),
+                Self::configured_port(),
+            ),
+        }
+    }
+
+    async fn start_server(&self) -> Result<SocketAddr, ProtocolError> {
         let mut server = self.inner.server.lock().await;
         if let Some(running) = server.as_ref() {
-            return Ok(running.port);
+            return Ok(running.addr);
         }
-        // Loopback only (R06): Tailscale Serve is the single way in from the tailnet.
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", Self::configured_port()))
+        // Loopback only (R06, MU3-07): Tailscale Serve is the single way in
+        // from the tailnet. Another address only when set explicitly.
+        let ip = bind::from_env().map_err(validation)?;
+        let tailnet = if ip.is_loopback() {
+            Vec::new()
+        } else {
+            let root = self.inner.root.clone();
+            tokio::task::spawn_blocking(move || tailscale::own_ips(&root)).await.unwrap_or_default()
+        };
+        let listener = tokio::net::TcpListener::bind((ip, Self::configured_port()))
             .await
             .map_err(|e| validation(format!("The remote port is in use: {e}")))?;
-        let port = listener.local_addr().map_err(internal)?.port();
+        let addr = listener.local_addr().map_err(internal)?;
+        let reach = bind::reach(addr.ip(), &tailnet);
         let (stop, stopped) = oneshot::channel::<()>();
         let app = http::router(self.clone());
         let task = tokio::spawn(async move {
@@ -233,9 +255,12 @@ impl Hub {
                 tracing::warn!(error = %err, "remote gateway stopped");
             }
         });
-        tracing::info!(port, "remote gateway listening on loopback");
-        *server = Some(Server { port, stop, task });
-        Ok(port)
+        match bind::warning(addr, reach) {
+            None => tracing::info!(%addr, "remote gateway listening on loopback"),
+            Some(warning) => tracing::warn!(%addr, ?reach, "{warning}"),
+        }
+        *server = Some(Server { addr, stop, task });
+        Ok(addr)
     }
 
     async fn stop_server(&self) {
@@ -258,11 +283,11 @@ impl Hub {
     }
 
     pub async fn enable(&self) -> Result<RemoteStatus, ProtocolError> {
-        let port = self.start_server().await?;
+        let addr = self.start_server().await?;
         self.inner.config.lock().unwrap().enabled = true;
         self.save_config()?;
-        let https = Self::https_port();
-        let serve = tokio::task::spawn_blocking(move || tailscale::serve_on(https, port)).await.map_err(internal)?;
+        let (https, root) = (Self::https_port(), self.inner.root.clone());
+        let serve = tokio::task::spawn_blocking(move || tailscale::serve_on(&root, https, addr)).await.map_err(internal)?;
         let mut status = self.status().await;
         if let Err(err) = serve {
             status.error = Some(err);
@@ -279,8 +304,8 @@ impl Hub {
             .await
             .map_err(internal)?
             .map_err(internal)?;
-        let https = Self::https_port();
-        let serve = tokio::task::spawn_blocking(move || tailscale::serve_off(https)).await.map_err(internal)?;
+        let (https, root) = (Self::https_port(), self.inner.root.clone());
+        let serve = tokio::task::spawn_blocking(move || tailscale::serve_off(&root, https)).await.map_err(internal)?;
         let mut status = self.status().await;
         if let Err(err) = serve {
             status.error = Some(err);
@@ -289,9 +314,10 @@ impl Hub {
     }
 
     pub async fn status(&self) -> RemoteStatus {
-        let port = self.inner.server.lock().await.as_ref().map(|s| s.port).unwrap_or_else(Self::configured_port);
-        let https = Self::https_port();
-        let tailscale = tokio::task::spawn_blocking(move || tailscale::status(https, port)).await.unwrap_or_default();
+        let target = self.target().await;
+        let port = target.port();
+        let (https, root) = (Self::https_port(), self.inner.root.clone());
+        let tailscale = tokio::task::spawn_blocking(move || tailscale::status(&root, https, target)).await.unwrap_or_default();
         let store = self.inner.store.clone();
         let mut clients = tokio::task::spawn_blocking(move || store.read(aurelius_storage::remote::list_clients))
             .await
@@ -351,8 +377,7 @@ impl Hub {
         // Tailscale, a second window on this PC uses loopback.
         let computer = aurelius_protocol::remote::PairingPayload {
             url: if payload.url.starts_with("http://10.0.2.2:") {
-                let port = self.local_addr().await.map(|a| a.port()).unwrap_or_else(Self::configured_port);
-                format!("http://127.0.0.1:{port}")
+                bind::local_url(self.target().await)
             } else {
                 payload.url.clone()
             },
@@ -531,10 +556,8 @@ impl Hub {
                 let store = hub.inner.store.clone();
                 let seq = notice.seq;
                 let found = tokio::task::spawn_blocking(move || {
-                    store.read(|c| {
-                        let Some(found) = aurelius_storage::timeline::notification_at_seq(c, seq)? else { return Ok(None) };
-                        Ok(Some((found, aurelius_storage::remote::push_targets(c)?)))
-                    })
+                    // A board member's own notification goes only to their devices (MU3-12 AC2).
+                    store.read(|c| aurelius_storage::remote::push_for_seq(c, seq))
                 })
                 .await;
                 let Ok(Ok(Some((found, targets)))) = found else { continue };

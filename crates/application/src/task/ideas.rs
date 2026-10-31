@@ -152,7 +152,8 @@ impl CommandService {
     }
 
     /// The idea becomes a task for the employee: its title, its note as the goal.
-    pub(crate) fn start_idea(&self, envelope: &CommandEnvelope, hash: String, cmd: &StartIdea) -> Result<Committed, AppError> {
+    pub(crate) fn start_idea(&self, ctx: &crate::CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &StartIdea) -> Result<Committed, AppError> {
+        let login = ctx.login_user();
         let (id, employee) = (cmd.idea_id, cmd.employee_id);
         let run = cmd.run.validated().map_err(domain_error)?;
         let row = self.store.read(|c| store::load(c, id)).map_err(storage_error)?.ok_or_else(|| domain_error(DomainError::IdeaNotFound(id)))?;
@@ -191,6 +192,7 @@ impl CommandService {
             let task_id = TaskId::new();
             tasks::insert_task(tx, task_id, row.project_id, Some(employee), &row.title, &goal_blob.id.to_string(), &criteria_blob.id.to_string(), TaskStatus::Queued, None)?;
             tasks::set_task_run(tx, task_id, &run)?;
+            tasks::set_login_user(tx, task_id, login.as_deref())?;
             if stored.is_some() {
                 tasks::set_attachments(tx, task_id, stored.as_ref())?;
             }

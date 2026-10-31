@@ -18,7 +18,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// There are no minors: additions within a major are announced in
 /// `HelloResult::features` (see `FEATURES`). 3: the company (employees, one
 /// org chart). 4: departments are gone (methods, fields and commands).
-pub const PROTOCOL_MAJOR: u16 = 4;
+/// 5: sign-in and sessions (`user.login`, `HelloParams::session_token`; `user.use`
+/// and the remembered `user_id` are gone) and the gate: nothing without a session
+/// but the hello, `user.whoami`, `user.login`, `user.list` and the first `user.create`.
+pub const PROTOCOL_MAJOR: u16 = 5;
 
 /// The message of `incompatible_protocol`: what the user must do.
 pub fn incompatible_message(client: u16) -> String {
@@ -159,10 +162,17 @@ pub struct HelloResult {
     /// ("Create the first board member") is all a client shows.
     #[serde(default)]
     pub board_members_exist: bool,
-    /// This connection's active board member (`HelloParams::user_id` when it
-    /// exists); none: the client asks "Who's working here?".
+    /// The board member of this connection's session (`HelloParams::session_token`
+    /// when it is valid); none: the client shows its sign-in screen (or the
+    /// onboarding without board members).
     #[serde(default)]
     pub user: Option<aurelius_domain::user::UserView>,
+    /// The session's board member must change a temporary password first.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub must_change_password: bool,
+    /// The session's own Claude login; none without a session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_login: Option<aurelius_domain::user::ClaudeLoginView>,
 }
 
 /// What `HelloResult::features` names.
@@ -306,6 +316,54 @@ pub enum ServerMessage {
     LoadChanged(LoadSnapshot),
     /// The pending shutdown changed.
     PowerChanged(PowerState),
+    /// What `claude auth login` asks, only to the connection that started the
+    /// link (`claude_login.link`); never an event, never logged.
+    ClaudeLoginPrompt(ClaudeLoginPrompt),
+    /// The session of this connection ended (`user.logout`, `session.revoke`, a
+    /// new password, `user.disable`, expiry); the server closes the connection
+    /// right after. The client shows "You were signed out on this device." and
+    /// its sign-in screen (a logout of its own needs no message).
+    SignedOut { reason: aurelius_domain::user::SignOutReason },
+}
+
+/// `ServerMessage::ClaudeLoginPrompt`: the sign-in link to open and/or the
+/// question for the code, as `claude` printed them.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ClaudeLoginPrompt {
+    pub link_id: String,
+    /// The Anthropic sign-in page to open (`https://claude.com/…/oauth/authorize?…`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Claude waits for the code: send it with `claude_login.input`.
+    pub asks_code: bool,
+    /// The link ended without a login: a fixed text of Aurelius (never Claude's
+    /// output), shown with "Try again". A link that worked ends with the event
+    /// `claude_login.updated` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Hides the link (it carries the sign-in's state): never in a log (C6).
+impl std::fmt::Debug for ClaudeLoginPrompt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClaudeLoginPrompt")
+            .field("link_id", &self.link_id)
+            .field("url", &self.url.as_ref().map(|_| "<redacted>"))
+            .field("asks_code", &self.asks_code)
+            .field("error", &self.error)
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod claude_login_prompt_tests {
+    #[test]
+    fn the_sign_in_link_and_the_code_never_show_in_debug_output() {
+        let prompt = super::ClaudeLoginPrompt { link_id: "l".into(), url: Some("https://claude.com/cai/oauth/authorize?state=SECRET-STATE".into()), asks_code: true, error: None };
+        assert!(!format!("{prompt:?}").contains("SECRET-STATE"));
+        let input = crate::ClaudeLoginInputParams { link_id: "l".into(), text: "SECRET-CODE".into() };
+        assert!(!format!("{input:?}").contains("SECRET-CODE"));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -333,6 +391,10 @@ pub enum ResponseBody {
     Users(aurelius_domain::user::UsersSnapshot),
     Channels(aurelius_domain::views::ChannelsSnapshot),
     WhoAmI(aurelius_domain::user::WhoAmI),
+    /// `user.login`: the session token, once.
+    Login(aurelius_domain::user::LoginResult),
+    Sessions(aurelius_domain::user::SessionsSnapshot),
+    ClaudeLogin(aurelius_domain::user::ClaudeLoginView),
     ProjectConversations(ProjectConversationsSnapshot),
     Approvals(ApprovalsSnapshot),
     Connections(ProvidersSnapshot),
@@ -417,7 +479,7 @@ mod tests {
         let key = CommandId::new();
         let request = write_request(key);
         let json = serde_json::to_value(&request).unwrap();
-        assert_eq!((json["protocol"].as_u64(), json["request_id"].as_u64()), (Some(4), Some(7)));
+        assert_eq!((json["protocol"].as_u64(), json["request_id"].as_u64()), (Some(5), Some(7)));
         assert_eq!(json["idempotency_key"], serde_json::json!(key));
         assert_eq!(json["method"], "project.create");
         assert_eq!(json["params"]["name"], "Atlas");

@@ -12,6 +12,8 @@ import '../core/net/gateway_api.dart';
 import '../core/push/push_action.dart';
 import '../core/widgets/widgets.dart' show toast;
 import '../data/aurelius_repository.dart';
+import '../features/account/account.dart';
+import '../features/account/claude_login.dart' show ClaudeLoginPage;
 import '../features/board/board_page.dart';
 import '../features/board/board_settings_page.dart';
 import '../data/discussion.dart';
@@ -65,7 +67,16 @@ class AppRouter {
           GoRoute(parentNavigatorKey: _root, path: 'new', pageBuilder: (context, state) => routePage(state, const NewBoardMemberPage())),
         ],
       ),
-      GoRoute(parentNavigatorKey: _root, path: '/switch-board-member', pageBuilder: (context, state) => routePage(state, const ChooseBoardMemberPage(switching: true))),
+      GoRoute(
+        parentNavigatorKey: _root,
+        path: '/account',
+        pageBuilder: (context, state) => routePage(state, const AccountPage()),
+        routes: [
+          GoRoute(parentNavigatorKey: _root, path: 'sessions', pageBuilder: (context, state) => routePage(state, const SessionsPage())),
+          GoRoute(parentNavigatorKey: _root, path: 'password', pageBuilder: (context, state) => routePage(state, const ChangePasswordPage())),
+          GoRoute(parentNavigatorKey: _root, path: 'claude', pageBuilder: (context, state) => routePage(state, const ClaudeLoginPage())),
+        ],
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => HomeShell(shell: shell),
         branches: [
@@ -153,6 +164,16 @@ class AppRouter {
             pageBuilder: (context, state) => routePage(state, const BoardMembersPage()),
             routes: [
               GoRoute(parentNavigatorKey: _root, path: 'new', pageBuilder: (context, state) => routePage(state, const NewBoardMemberPage())),
+              GoRoute(
+                parentNavigatorKey: _root,
+                path: ':uid/sessions',
+                pageBuilder: (context, state) => routePage(state, SessionsPage(userId: state.pathParameters['uid'], username: state.uri.queryParameters['name'])),
+              ),
+              GoRoute(
+                parentNavigatorKey: _root,
+                path: ':uid/password',
+                pageBuilder: (context, state) => routePage(state, TemporaryPasswordPage(userId: state.pathParameters['uid']!, username: state.uri.queryParameters['name'] ?? 'this board member')),
+              ),
             ],
           ),
         ],

@@ -398,7 +398,36 @@ impl AppView {
             }))
         };
         let dispatcher = self.dispatcher_for(t.project_id);
+        let me = self.active_member().map(|u| u.id);
+        // ui-ontwerp §5: the creator's login or quota; only the own login has a direct action.
+        let wait = self.ticket_wait(t).filter(|_| matches!(t.column, ColumnKind::Todo | ColumnKind::Doing) && !failed);
         let el = match t.column {
+            _ if wait.is_some() => {
+                let own = needs == Some(Needs::ConnectLogin);
+                let expired = self.claude.view.as_ref().is_some_and(|v| v.status == aurelius_domain::user::ClaudeLoginStatus::Expired);
+                let wait = wait.unwrap_or_default();
+                let quota = wait.starts_with('⏸');
+                let text = match (own, quota) {
+                    (true, _) if expired => format!("{wait} (expired)"),
+                    (_, true) => format!("{wait}. Runs only on {} subscription.", crate::screens::board::login_owner(t, me)),
+                    (false, false) => format!("{wait}. It runs only on {} subscription, unless you run it on yours.", crate::screens::board::login_owner(t, me)),
+                    (true, false) => wait,
+                };
+                bar.child(line(text, if own { theme::ACCENT_TEXT } else { theme::TEXT_2 }))
+                    .when(own, |el| {
+                        el.child(ui::button("ticket-connect", if expired { "Reconnect Claude login" } else { "Connect Claude login" }, ButtonKind::Primary, None).h(px(28.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.claude_connect(cx))))
+                    })
+                    .when(crate::screens::board::take_over_offered(t, me), |el| {
+                        el.child(dim(ui::button("ticket-use-my-login", "Run on my login", ButtonKind::Outline, None).h(px(28.)), can).when(can, |el| {
+                            el.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                                this.overlay = crate::app::Overlay::Confirm(crate::app::ConfirmKind::UseMyLogin(id));
+                                this.overlay_focus.focus(w, cx);
+                                cx.notify();
+                            }))
+                        }))
+                    })
+                    .child(back(cx))
+            }
             ColumnKind::Backlog => {
                 let text = t.owner_name.clone().unwrap_or_else(|| dispatcher.choice());
                 bar.child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Owner:"))
@@ -780,6 +809,8 @@ impl AppView {
             .child(row("Deadline", deadline))
             .child(row("Attachments", attachments))
             .child(row("Created by", div().child(format!("{} · {}", t.created_by_username, ui::fmt_when(t.created_at_ms)))))
+            // MU3-10 AC4: whose subscription its runs use; there is no choice of "someone's login".
+            .child(row("Runs on", div().child(format!("{} Claude login", ui::capitalised(&crate::screens::board::login_owner(t, self.active_member().map(|u| u.id)))))))
             .into_any_element()
     }
 

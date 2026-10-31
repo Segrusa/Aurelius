@@ -70,21 +70,46 @@ pub enum Method {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         query: Option<String>,
     },
-    /// The board members, oldest first (never a password's hash): the choice
-    /// "Who's working here?". Apps may read it too.
+    /// The board members, oldest first (never a password's hash), disabled ones
+    /// too (`UserView::disabled_at_ms`). Works without a session (the sign-in
+    /// screen may offer the names). Apps may read it too.
     #[serde(rename = "user.list")]
     UserList,
-    /// Whether the server has board members, and this connection's active one.
+    /// Whether the server has board members, and this connection's session's one.
+    /// Works without a session.
     #[serde(rename = "user.whoami")]
     UserWhoami,
-    /// The one password check (Fase 1): a right password makes the board member
-    /// active on this connection and answers `WhoAmI`. A wrong password and an
-    /// unknown board member are both `wrong_password` (after a short delay); more
-    /// than 5 tries a minute on one connection are `too_many_attempts`. A session
-    /// method: it changes only the connection, so it has no receipt to replay.
+    /// Sign in (protocol 5): a right username and password give this connection a
+    /// session and answer `Login` with its token, shown once (keep it for the
+    /// server and give it in every hello). A wrong password, an unknown username
+    /// and a disabled board member all answer `wrong_password`; after 5 failed tries
+    /// for one username the server waits longer each time, up to 15 minutes
+    /// (`too_many_attempts` with `retry_after_ms`). A session method: it changes
+    /// only the connection and the sessions, so it has no receipt and no event.
     /// Not for apps.
-    #[serde(rename = "user.use")]
-    UserUse(UserUseParams),
+    #[serde(rename = "user.login")]
+    UserLogin(LoginParams),
+    /// End this connection's session (the device must sign in again); answers
+    /// `WhoAmI` without a board member. A session method.
+    #[serde(rename = "user.logout")]
+    UserLogout,
+    /// The signed-in devices of a board member (none: the session's own),
+    /// newest activity first (`SessionView::current` marks this one). Any board
+    /// member may list another's (one role). Never a token or its hash.
+    #[serde(rename = "session.list")]
+    SessionList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user_id: Option<aurelius_domain::UserId>,
+    },
+    /// The session's own Claude login (`ClaudeLoginView`). Feature of protocol 5.
+    #[serde(rename = "claude_login.status")]
+    ClaudeLoginStatus,
+    /// What a running `claude_login.link` asks for: the code Claude showed after
+    /// the sign-in at Anthropic, written to `claude auth login` as typed. Only
+    /// the connection that started the link. A session method: no receipt, no
+    /// request hash, no event, never printed or logged. Answers `ClaudeLogin`.
+    #[serde(rename = "claude_login.input")]
+    ClaudeLoginInput(ClaudeLoginInputParams),
     /// The conversations of a project, most recently active first.
     #[serde(rename = "project_conversation.list")]
     ProjectConversationList { project_id: ProjectId },
@@ -370,30 +395,40 @@ pub struct HelloParams {
     /// Servers without such a feature ignore the name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub accepts: Vec<String>,
-    /// The board member this client remembers for the server (from `user.use`
-    /// or `user.create`): active again without a password when it exists
-    /// (`HelloResult::user`). Ignored for apps. A value that is no id (a
-    /// damaged stored one) counts as none, so the hello still works and the
-    /// client asks again who is there.
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "remembered_user")]
-    pub user_id: Option<aurelius_domain::UserId>,
+    /// The session this device got from `user.login` (or the first
+    /// `user.create`) for this server: valid, it makes its board member this
+    /// connection's (`HelloResult::user`); unknown, revoked or expired, the
+    /// hello still works without a board member and the client shows its
+    /// sign-in screen. Ignored for apps. Never printed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_token: Option<String>,
 }
 
-fn remembered_user<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<aurelius_domain::UserId>, D::Error> {
-    let value = serde_json::Value::deserialize(deserializer)?;
-    Ok(serde_json::from_value(value).ok())
-}
-
-/// `user.use`. The password is never printed.
+/// `user.login`. The password is never printed.
 #[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct UserUseParams {
-    pub user_id: aurelius_domain::UserId,
+pub struct LoginParams {
+    pub username: String,
     pub password: String,
+    /// How the device shows in `session.list` ("Desktop · dev-laptop").
+    pub device_name: String,
 }
 
-impl std::fmt::Debug for UserUseParams {
+impl std::fmt::Debug for LoginParams {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("UserUseParams").field("user_id", &self.user_id).field("password", &"<redacted>").finish()
+        f.debug_struct("LoginParams").field("username", &self.username).field("password", &"<redacted>").field("device_name", &self.device_name).finish()
+    }
+}
+
+/// `claude_login.input`. The text (a one-time code) is never printed.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ClaudeLoginInputParams {
+    pub link_id: String,
+    pub text: String,
+}
+
+impl std::fmt::Debug for ClaudeLoginInputParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClaudeLoginInputParams").field("link_id", &self.link_id).field("text", &"<redacted>").finish()
     }
 }
 
@@ -415,7 +450,7 @@ impl std::fmt::Debug for HelloParams {
             .field("client_version", &self.client_version)
             .field("app_key", &self.app_key.as_ref().map(|_| "<hidden>"))
             .field("accepts", &self.accepts)
-            .field("user_id", &self.user_id)
+            .field("session_token", &self.session_token.as_ref().map(|_| "<hidden>"))
             .finish()
     }
 }

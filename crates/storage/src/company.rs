@@ -3,7 +3,7 @@
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::{
-    BoardColumnId, EmployeeId, ProjectId,
+    BoardColumnId, EmployeeId, ProjectId, UserId,
     company::CompanyView,
     ticket::{BoardColumnView, ColumnKind},
 };
@@ -33,6 +33,25 @@ pub fn update(tx: &Transaction<'_>, name: Option<&str>, dispatcher: Option<Optio
     tx.execute(
         "UPDATE company SET name = ?2, dispatcher_employee_id = ?3, version = ?4, updated_at_ms = ?5 WHERE id = ?1",
         params![current.id, name.unwrap_or(&current.name), dispatcher.map(|d| d.to_string()), version as i64, now_ms()],
+    )?;
+    Ok(version)
+}
+
+/// The "company login": the board member whose Claude login runs the
+/// background jobs without a source (memory consolidation); none: they do not run.
+pub fn background_login_user(conn: &Connection) -> Result<Option<UserId>, StorageError> {
+    let user: Option<String> = conn.query_row("SELECT background_login_user FROM company", [], |r| r.get(0)).optional()?.flatten();
+    Ok(user.and_then(|u| UserId::parse(&u).ok()))
+}
+
+/// Choose (or clear) the company login; a board member chooses their own.
+/// Returns the company's new version.
+pub fn set_background_login_user(tx: &Transaction<'_>, user: Option<UserId>) -> Result<u64, StorageError> {
+    let current = get(tx)?;
+    let version = current.version + 1;
+    tx.execute(
+        "UPDATE company SET background_login_user = ?2, version = ?3, updated_at_ms = ?4 WHERE id = ?1",
+        params![current.id, user.map(|u| u.to_string()), version as i64, now_ms()],
     )?;
     Ok(version)
 }

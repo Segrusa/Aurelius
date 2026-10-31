@@ -99,22 +99,23 @@ pub fn enabled_names(conn: &aurelius_storage::Conn) -> Result<Vec<String>, aurel
     Ok(json.and_then(|j| serde_json::from_str::<Vec<String>>(&j).ok()).unwrap_or_default())
 }
 
-fn listing(conn: &aurelius_storage::Conn) -> Result<McpServers, ProtocolError> {
+/// `files`: the board member's own Claude login (their MCP logins); none: none of them.
+fn listing(conn: &aurelius_storage::Conn, files: Option<crate::mcp_oauth::ClaudeFiles>) -> Result<McpServers, ProtocolError> {
     let enabled = enabled_names(conn).map_err(|e| ProtocolError::new(ErrorCode::StorageUnavailable, e.to_string()))?;
     let found = discover();
     let missing = enabled.iter().filter(|n| !found.iter().any(|f| &f.name == *n)).cloned().collect();
-    // The OAuth status comes from Claude Code's own files (no network here).
-    let files = crate::mcp_oauth::ClaudeFiles::locate();
+    // The OAuth status comes from Claude Code's own files of the board member's login (no network here).
     let (credentials, needs_auth) = files.map(|f| (f.credentials(), f.needs_auth())).unwrap_or_default();
     let now = aurelius_storage::now_ms();
     let auth = |f: &Found| crate::mcp_oauth::status_of(&f.name, &f.config, &credentials, &needs_auth, now);
     Ok(McpServers { servers: found.iter().map(|f| info(f, &enabled, auth(f))).collect(), missing })
 }
 
-/// `mcp/list`.
-pub async fn list(shared: &Arc<Shared>) -> Result<McpServers, ProtocolError> {
+/// `mcp/list`, with the MCP logins of `user`'s own Claude login.
+pub async fn list(shared: &Arc<Shared>, user: Option<aurelius_domain::UserId>) -> Result<McpServers, ProtocolError> {
     let store = shared.store().clone();
-    tokio::task::spawn_blocking(move || store.read(|c| Ok(listing(c))).map_err(internal)?).await.map_err(internal)?
+    let files = crate::mcp_oauth::ClaudeFiles::locate(&shared.root, user);
+    tokio::task::spawn_blocking(move || store.read(|c| Ok(listing(c, files))).map_err(internal)?).await.map_err(internal)?
 }
 
 fn clean_names(enabled: Vec<String>) -> Result<Vec<String>, ProtocolError> {
@@ -133,13 +134,14 @@ fn clean_names(enabled: Vec<String>) -> Result<Vec<String>, ProtocolError> {
 
 /// `mcp/set`: replaces the server-wide list (names only; the config is read from
 /// Claude Code's file at each run). Applies from each run that starts afterwards.
-pub async fn set(shared: &Arc<Shared>, enabled: Vec<String>) -> Result<McpServers, ProtocolError> {
+pub async fn set(shared: &Arc<Shared>, enabled: Vec<String>, user: Option<aurelius_domain::UserId>) -> Result<McpServers, ProtocolError> {
     let names = clean_names(enabled)?;
+    let files = crate::mcp_oauth::ClaudeFiles::locate(&shared.root, user);
     let json = serde_json::to_string(&names).map_err(internal)?;
     let store = shared.store().clone();
     tokio::task::spawn_blocking(move || {
         store.write(move |tx| aurelius_storage::settings::put(tx, SETTINGS_KEY, &json, aurelius_storage::now_ms())).map_err(internal)?;
-        store.read(|c| Ok(listing(c))).map_err(internal)?
+        store.read(|c| Ok(listing(c, files))).map_err(internal)?
     })
     .await
     .map_err(internal)?
@@ -248,7 +250,7 @@ fn write_enabled(shared: &Arc<Shared>, change: impl FnOnce(&mut Vec<String>) + S
 
 /// `mcp/add`: Claude Code adds the server (we never edit its file); then it is
 /// enabled when asked. Errors carry the CLI's text without any secret value.
-pub async fn add(shared: &Arc<Shared>, params: McpAddParams) -> Result<McpServers, ProtocolError> {
+pub async fn add(shared: &Arc<Shared>, params: McpAddParams, user: Option<aurelius_domain::UserId>) -> Result<McpServers, ProtocolError> {
     let args = add_args(&params)?;
     if discover().iter().any(|f| f.name == params.name) {
         return Err(invalid(format!("A server named '{}' already exists.", params.name)));
@@ -267,11 +269,11 @@ pub async fn add(shared: &Arc<Shared>, params: McpAddParams) -> Result<McpServer
             .await
             .map_err(internal)??;
     }
-    list(shared).await
+    list(shared, user).await
 }
 
 /// `mcp/remove`: `claude mcp remove --scope user`, then off the enabled list.
-pub async fn remove(shared: &Arc<Shared>, name: String) -> Result<McpServers, ProtocolError> {
+pub async fn remove(shared: &Arc<Shared>, name: String, user: Option<aurelius_domain::UserId>) -> Result<McpServers, ProtocolError> {
     check_name(&name)?;
     if !discover().iter().any(|f| f.name == name) {
         return Err(invalid(format!("There is no user-scope server named '{name}'.")));
@@ -279,7 +281,7 @@ pub async fn remove(shared: &Arc<Shared>, name: String) -> Result<McpServers, Pr
     aurelius_host::plugins::claude(&["mcp", "remove", "--scope", "user", &name], std::time::Duration::from_secs(60)).await?;
     let shared2 = shared.clone();
     tokio::task::spawn_blocking(move || write_enabled(&shared2, move |names| names.retain(|n| *n != name))).await.map_err(internal)??;
-    list(shared).await
+    list(shared, user).await
 }
 
 /// The full configs of the enabled servers that still exist, read now.

@@ -16,6 +16,8 @@ pub struct RemoteClient {
     pub created_at_ms: i64,
     pub last_seen_ms: Option<i64>,
     pub revoked: bool,
+    /// The board member who last logged in on it (migration 21).
+    pub user_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,11 +52,12 @@ fn client_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteClient> {
         created_at_ms: r.get(5)?,
         last_seen_ms: r.get(6)?,
         revoked: r.get::<_, Option<i64>>(7)?.is_some(),
+        user_id: r.get(8)?,
     })
 }
 
 const SELECT: &str =
-    "SELECT id, name, platform, credential_verifier, capabilities_json, created_at_ms, last_seen_ms, revoked_at_ms FROM remote_clients";
+    "SELECT id, name, platform, credential_verifier, capabilities_json, created_at_ms, last_seen_ms, revoked_at_ms, user_id FROM remote_clients";
 
 pub fn create_client(
     tx: &Transaction<'_>,
@@ -109,6 +112,7 @@ pub fn revoke_client(tx: &Transaction<'_>, id: ClientId) -> Result<bool, Storage
     let now = now_ms();
     let changed = tx.execute("UPDATE remote_clients SET revoked_at_ms = ?2 WHERE id = ?1 AND revoked_at_ms IS NULL", params![id.to_string(), now])?;
     tx.execute("UPDATE remote_sessions SET revoked_at_ms = ?2 WHERE client_id = ?1 AND revoked_at_ms IS NULL", params![id.to_string(), now])?;
+    crate::user_sessions::revoke_for_client(tx, id, now)?;
     tx.execute("DELETE FROM push_registrations WHERE client_id = ?1", [id.to_string()])?;
     Ok(changed > 0)
 }
@@ -133,7 +137,7 @@ pub fn create_session(tx: &Transaction<'_>, id: &str, client_id: ClientId, token
 pub fn session_client(conn: &Connection, token_verifier: &str, now_ms: i64) -> Result<Option<RemoteClient>, StorageError> {
     Ok(conn
         .query_row(
-            "SELECT c.id, c.name, c.platform, c.credential_verifier, c.capabilities_json, c.created_at_ms, c.last_seen_ms, c.revoked_at_ms
+            "SELECT c.id, c.name, c.platform, c.credential_verifier, c.capabilities_json, c.created_at_ms, c.last_seen_ms, c.revoked_at_ms, c.user_id
              FROM remote_sessions s JOIN remote_clients c ON c.id = s.client_id
              WHERE s.token_verifier = ?1 AND s.revoked_at_ms IS NULL AND s.expires_at_ms > ?2 AND c.revoked_at_ms IS NULL",
             params![token_verifier, now_ms],
@@ -163,16 +167,31 @@ pub fn delete_push(tx: &Transaction<'_>, client_id: ClientId) -> Result<(), Stor
 }
 
 pub fn push_targets(conn: &Connection) -> Result<Vec<PushTarget>, StorageError> {
+    push_targets_for(conn, None)
+}
+
+/// The devices a notification for `user` may reach: only those of that board
+/// member (`remote_clients.user_id`); `None` (a notification for everyone): all.
+pub fn push_targets_for(conn: &Connection, user: Option<&str>) -> Result<Vec<PushTarget>, StorageError> {
     let mut stmt = conn.prepare(
         "SELECT p.client_id, p.platform, p.token, p.environment FROM push_registrations p
-         JOIN remote_clients c ON c.id = p.client_id WHERE c.revoked_at_ms IS NULL",
+         JOIN remote_clients c ON c.id = p.client_id WHERE c.revoked_at_ms IS NULL AND (?1 IS NULL OR c.user_id = ?1)",
     )?;
     let rows = stmt
-        .query_map([], |r| {
+        .query_map([user], |r| {
             Ok(PushTarget { client_id: parse_id(r.get(0)?, 0)?, platform: r.get(1)?, token: r.get(2)?, environment: r.get(3)? })
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
+}
+
+/// The notification the event at `seq` made and the devices its push goes to:
+/// a board member's own only to that board member's, one for everyone to all
+/// (MU3-12 AC2, R2 M2). `None`: the event made no notification.
+pub fn push_for_seq(conn: &Connection, seq: u64) -> Result<Option<(crate::timeline::FoundNotification, Vec<PushTarget>)>, StorageError> {
+    let Some(found) = crate::timeline::notification_at_seq(conn, seq)? else { return Ok(None) };
+    let targets = push_targets_for(conn, found.user_id.as_deref())?;
+    Ok(Some((found, targets)))
 }
 
 #[cfg(test)]

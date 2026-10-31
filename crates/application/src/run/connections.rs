@@ -33,6 +33,11 @@ pub struct ResolvedRunConfig {
     /// = the runtime's default, empty = the runtime decides (set to Disabled).
     #[serde(default)]
     pub subagent_model: Option<String>,
+    /// The board member whose own Claude login the run uses (phase 3), fixed
+    /// when the run is queued: retries and resumptions keep it (A-02). None: a
+    /// run with no board member behind it, which never starts on Claude Code.
+    #[serde(default)]
+    pub login_user: Option<aurelius_domain::UserId>,
 }
 
 impl ResolvedRunConfig {
@@ -95,6 +100,7 @@ pub fn resolve(tx: &Tx<'_>, conversation: ConversationId, purpose: Purpose) -> R
         subagent_model,
         connection_origin: conn.origin.map(|o| o.label),
         model_origin,
+        login_user: None,
     })
 }
 
@@ -227,5 +233,8 @@ impl aurelius_storage::conversations::RunConfigInfo for ResolvedRunConfig {
     }
     fn model(&self) -> Option<String> {
         self.model.clone()
+    }
+    fn login_user(&self) -> Option<String> {
+        self.login_user.map(|u| u.to_string())
     }
 }

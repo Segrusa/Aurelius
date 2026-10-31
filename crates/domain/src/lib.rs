@@ -153,8 +153,10 @@ pub enum Command {
     ArchiveTicket(ticket::ArchiveTicket),
     PostTicketMessage(ticket::PostTicketMessage),
     RetryTicketSummary(ticket::RetryTicketSummary),
+    UseMyLogin(ticket::UseMyLogin),
     UpdateBoardColumns(ticket::UpdateBoardColumns),
     UpdateCompany(company::UpdateCompany),
+    SetBackgroundLogin(company::SetBackgroundLogin),
     UpdateProject(company::UpdateProject),
 }
 
@@ -235,8 +237,10 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("archive_ticket", "ticket.archive"),
     ("post_ticket_message", "ticket.post"),
     ("retry_ticket_summary", "ticket.retry_summary"),
+    ("use_my_login", "ticket.use_my_login"),
     ("update_board_columns", "board.columns_update"),
     ("update_company", "company.update"),
+    ("set_background_login", "company.set_background_login"),
     ("update_project", "project.update"),
 ];
 

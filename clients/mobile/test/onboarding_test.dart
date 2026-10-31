@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:aurelius_mobile/app/router.dart';
 import 'package:aurelius_mobile/core/hosts/host_store.dart';
@@ -33,7 +34,7 @@ const ada = UserView(id: 'u-1', username: 'ada', createdAtMs: 0);
 const marie = UserView(id: 'u-2', username: 'marie', createdAtMs: 1, createdByUser: 'u-1');
 
 void main() {
-  group('connection (S5: hello user_id, user.use, user.create)', () {
+  group('connection (protocol 5: hello session_token, user.login, user.create)', () {
     late FakeDaemon daemon;
     late MemoryHostStore store;
     late AureliusConnection connection;
@@ -41,7 +42,7 @@ void main() {
     setUp(() async {
       daemon = FakeDaemon();
       store = await storeWithSecret();
-      connection = AureliusConnection(host: testHost, store: store, api: FakeApi(), connect: daemon.connect);
+      connection = AureliusConnection(host: testHost, store: store, api: FakeApi(), connect: daemon.connect, deviceName: 'Test phone');
     });
 
     tearDown(() => connection.dispose());
@@ -54,97 +55,92 @@ void main() {
       await until(() => connection.state.isOnline);
     }
 
-    test('a server without board members: the first one is created and the app opens (MU1-20 AC1/AC2)', () async {
+    test('a server without board members: the first one is created, signed in, and the app opens (MU1-20, MU3-02 AC5)', () async {
       connection.start();
       await until(() => connection.state.isOnline);
       expect(connection.state.boardMemberStep, BoardMemberStep.createFirst);
-      expect(daemon.hello!.containsKey('user_id'), isFalse);
+      expect(daemon.hello!.containsKey('session_token'), isFalse);
 
-      final id = await connection.createBoardMember('ada', secret);
+      final id = await connection.createBoardMember('alex', secret);
       expect(id, 'u-1');
       expect(connection.state.boardMemberStep, BoardMemberStep.ready);
-      expect(connection.state.user?.username, 'ada');
-      expect(await store.boardMember(testHost.hostId), 'u-1', reason: 'remembered for the next hello');
+      expect(connection.state.user?.username, 'alex');
+      expect(await store.sessionToken(testHost.hostId), isNotNull, reason: 'signed in once more for the token');
     });
 
-    test('the remembered board member goes with every hello: a reconnect needs no password', () async {
-      daemon.addUser('u-1', 'ada', secret);
-      await store.setBoardMember(testHost.hostId, 'u-1');
+    test('the kept session goes with every hello: a reconnect needs no password (MU3-03 AC2)', () async {
+      daemon.addUser('u-1', 'alex', secret);
+      await store.setSessionToken(testHost.hostId, daemon.sessionFor('u-1'));
       connection.start();
       await until(() => connection.state.isOnline);
-      expect(daemon.hello!['user_id'], 'u-1');
+      expect(daemon.hello!['session_token'], 'aus_1');
+      expect(daemon.hello!.containsKey('user_id'), isFalse, reason: 'protocol 5 has no user_id in the hello');
       expect(connection.state.boardMemberStep, BoardMemberStep.ready);
 
       await reconnect();
       expect(daemon.sockets.length, greaterThanOrEqualTo(2));
-      expect(daemon.hello!['user_id'], 'u-1');
+      expect(daemon.hello!['session_token'], 'aus_1');
       expect(connection.state.user?.id, 'u-1');
     });
 
-    test('with board members and none chosen: the choice, one password check, then remembered (MU1-21 AC2, B8)', () async {
-      daemon.addUser('u-1', 'ada', secret);
+    test('with board members and no session: the sign-in screen, one generic error, then signed in (MU3-02 AC1–AC3)', () async {
+      daemon.addUser('u-1', 'alex', secret);
       connection.start();
       await until(() => connection.state.isOnline);
-      expect(connection.state.boardMemberStep, BoardMemberStep.choose);
+      expect(connection.state.boardMemberStep, BoardMemberStep.signIn);
 
-      await expectLater(connection.useBoardMember('u-1', 'wrong password!'), throwsA(isA<ProtocolException>().having((e) => e.code, 'code', ErrorCode.wrongPassword)));
-      expect(connection.state.boardMemberStep, BoardMemberStep.choose);
-      expect(await store.boardMember(testHost.hostId), isNull);
+      await expectLater(connection.signIn('alex', 'wrong password!'), throwsA(isA<ProtocolException>().having((e) => e.code, 'code', ErrorCode.wrongPassword)));
+      expect(connection.state.boardMemberStep, BoardMemberStep.signIn);
+      expect(await store.sessionToken(testHost.hostId), isNull);
 
-      final user = await connection.useBoardMember('u-1', secret);
-      expect(user.username, 'ada');
+      final login = await connection.signIn(' alex ', secret);
+      expect(login.user.username, 'alex');
       expect(connection.state.boardMemberStep, BoardMemberStep.ready);
-      expect(await store.boardMember(testHost.hostId), 'u-1');
+      expect(await store.sessionToken(testHost.hostId), login.sessionToken);
+      final sent = daemon.frames.lastWhere((f) => f.contains('"user.login"'));
+      expect(sent, contains('"device_name":"Test phone"'));
+      expect(sent, contains('"username":"alex"'));
     });
 
-    test('too many tries say so', () async {
-      daemon.addUser('u-1', 'ada', secret);
+    test('too many tries: too_many_attempts with its wait (B9)', () async {
+      daemon.addUser('u-1', 'alex', secret);
       connection.start();
       await until(() => connection.state.isOnline);
       for (var i = 0; i < 5; i++) {
-        await expectLater(connection.useBoardMember('u-1', 'nope nope nope'), throwsA(isA<ProtocolException>()));
+        await expectLater(connection.signIn('alex', 'nope nope nope'), throwsA(isA<ProtocolException>()));
       }
-      await expectLater(connection.useBoardMember('u-1', secret), throwsA(isA<ProtocolException>().having((e) => e.code, 'code', ErrorCode.tooManyAttempts)));
+      await expectLater(
+        connection.signIn('alex', secret),
+        throwsA(isA<ProtocolException>().having((e) => e.code, 'code', ErrorCode.tooManyAttempts).having((e) => e.retryAfterMs, 'retryAfterMs', 30000)),
+      );
     });
 
-    test('a remembered board member the server does not know: forgotten, back to the choice', () async {
-      daemon.addUser('u-9', 'marie', secret);
-      await store.setBoardMember(testHost.hostId, 'u-1');
+    test('a kept session the server no longer has: forgotten, the sign-in screen (MU3-03 AC3)', () async {
+      daemon.addUser('u-9', 'robin', secret);
+      await store.setSessionToken(testHost.hostId, 'aus_gone');
       connection.start();
       await until(() => connection.state.isOnline);
-      expect(daemon.hello!['user_id'], 'u-1');
-      expect(connection.state.boardMemberStep, BoardMemberStep.choose);
-      expect(await store.boardMember(testHost.hostId), isNull);
+      expect(daemon.hello!['session_token'], 'aus_gone');
+      expect(connection.state.boardMemberStep, BoardMemberStep.signIn);
+      expect(await store.sessionToken(testHost.hostId), isNull);
     });
 
-    test('a second board member: the creator stays itself (MU1-22 AC1); a taken name is refused (AC2)', () async {
-      daemon.addUser('u-1', 'ada', secret);
-      await store.setBoardMember(testHost.hostId, 'u-1');
+    test('a second board member: the creator stays signed in (MU1-22 AC1); a taken name is refused (AC2)', () async {
+      daemon.addUser('u-1', 'alex', secret);
+      await store.setSessionToken(testHost.hostId, daemon.sessionFor('u-1'));
       connection.start();
       await until(() => connection.state.isOnline);
 
-      expect(await connection.createBoardMember('marie', 'another long secret'), 'u-2');
+      expect(await connection.createBoardMember('robin', 'another long secret'), 'u-2');
       expect(connection.state.user?.id, 'u-1');
-      expect(await store.boardMember(testHost.hostId), 'u-1');
-      await expectLater(connection.createBoardMember('Marie', 'another long secret'), throwsA(isA<ProtocolException>().having((e) => e.code, 'code', ErrorCode.usernameTaken)));
+      expect(await store.sessionToken(testHost.hostId), 'aus_1');
+      expect(daemon.frames.where((f) => f.contains('"user.login"')), isEmpty);
+      await expectLater(connection.createBoardMember('Robin', 'another long secret'), throwsA(isA<ProtocolException>().having((e) => e.code, 'code', ErrorCode.usernameTaken)));
     });
 
-    test('switching is a new user.use on the same connection', () async {
-      daemon
-        ..addUser('u-1', 'ada', secret)
-        ..addUser('u-2', 'marie', 'marie her secret');
-      await store.setBoardMember(testHost.hostId, 'u-1');
-      connection.start();
-      await until(() => connection.state.isOnline);
-      await connection.useBoardMember('u-2', 'marie her secret');
-      expect(connection.state.user?.username, 'marie');
-      expect(await store.boardMember(testHost.hostId), 'u-2');
-      expect(daemon.sockets, hasLength(1));
-    });
-
-    test('board_member_required: a clear message, and the app goes back to the choice', () async {
-      daemon.addUser('u-1', 'ada', secret);
-      await store.setBoardMember(testHost.hostId, 'u-1');
+    test('board_member_required: a clear message, and the app goes back to the sign-in screen', () async {
+      daemon.addUser('u-1', 'alex', secret);
+      await store.setSessionToken(testHost.hostId, daemon.sessionFor('u-1'));
       connection.start();
       await until(() => connection.state.isOnline);
       daemon.current!.user = null; // the server lost this connection's board member
@@ -156,8 +152,8 @@ void main() {
       }
       expect(error, isA<ProtocolException>().having((e) => e.needsBoardMember, 'needsBoardMember', isTrue));
       expect('$error', boardMemberRequiredMessage);
-      expect(boardMemberRequiredMessage, contains('Choose who you are'));
-      expect(connection.state.boardMemberStep, BoardMemberStep.choose);
+      expect(boardMemberRequiredMessage, contains('Sign in'));
+      await until(() => connection.state.boardMemberStep == BoardMemberStep.signIn);
     });
 
     test('passwords are sent, never kept: not in storage, not in the logs', () async {
@@ -167,44 +163,43 @@ void main() {
       addTearDown(() => debugPrint = print);
       connection.start();
       await until(() => connection.state.isOnline);
-      await connection.createBoardMember('ada', secret);
+      await connection.createBoardMember('alex', secret);
       await reconnect();
-      expect(await store.boardMember(testHost.hostId), 'u-1');
+      expect(await store.sessionToken(testHost.hostId), isNot(contains(secret)));
       expect(logged.where((l) => l.contains(secret)), isEmpty);
-      expect(daemon.frames.where((f) => f.contains(secret)), hasLength(1), reason: 'only the user.create itself; a reconnect resends nothing');
-      expect(daemon.frames.firstWhere((f) => f.contains(secret)), contains('"user.create"'));
+      expect(daemon.frames.where((f) => f.contains(secret)).map((f) => (jsonDecode(f) as Map)['method']), ['user.create', 'user.login'], reason: 'a reconnect resends nothing');
     });
 
     test('a user.create whose answer never came is not "Not sent": the PC may have made it (Trace M3a m2)', () async {
       connection.start();
       await until(() => connection.state.isOnline);
       daemon.dropNextCommand = true;
-      await expectLater(connection.createBoardMember('ada', secret), throwsA(isA<NotSentException>().having((e) => e.sent, 'sent', isTrue)));
-      expect(daemon.users.map((u) => u['username']), ['ada'], reason: 'made on the PC');
+      await expectLater(connection.createBoardMember('alex', secret), throwsA(isA<NotSentException>().having((e) => e.sent, 'sent', isTrue)));
+      expect(daemon.users.map((u) => u['username']), ['alex'], reason: 'made on the PC');
       connection.wake();
       await until(() => connection.state.isOnline);
       expect(daemon.frames.where((f) => f.contains(secret)), hasLength(1), reason: 'never resent after the reconnect');
     });
 
     test('offline a user.create is not sent at all', () async {
-      await expectLater(connection.createBoardMember('ada', secret), throwsA(isA<NotSentException>().having((e) => e.sent, 'sent', isFalse)));
+      await expectLater(connection.createBoardMember('alex', secret), throwsA(isA<NotSentException>().having((e) => e.sent, 'sent', isFalse)));
       expect(daemon.frames.where((f) => f.contains(secret)), isEmpty);
     });
 
-    test('forgetting a server forgets its board member', () async {
-      await store.setBoardMember(testHost.hostId, 'u-1');
+    test('forgetting a server forgets its session', () async {
+      await store.setSessionToken(testHost.hostId, 'aus_1');
       await store.remove(testHost.hostId);
-      expect(await store.boardMember(testHost.hostId), isNull);
+      expect(await store.sessionToken(testHost.hostId), isNull);
     });
   });
 
   group('the gate (impactanalyse §4b.4)', () {
-    test('without a board member only the onboarding and the server choice are reachable (MU1-20 AC1)', () {
-      for (final step in [BoardMemberStep.createFirst, BoardMemberStep.choose]) {
+    test('without a session only the onboarding and the server choice are reachable (MU1-20 AC1, MU3-02 AC1, MU3-06)', () {
+      for (final step in [BoardMemberStep.createFirst, BoardMemberStep.signIn]) {
         expect(boardMemberRedirect(step, '/home'), '/onboarding');
         expect(boardMemberRedirect(step, '/team'), '/onboarding');
         expect(boardMemberRedirect(step, '/project/p/task/t'), '/onboarding');
-        expect(boardMemberRedirect(step, '/switch-board-member'), '/onboarding');
+        expect(boardMemberRedirect(step, '/account'), '/onboarding');
         expect(boardMemberRedirect(step, '/onboarding'), isNull);
         expect(boardMemberRedirect(step, '/onboarding/new'), isNull);
         expect(boardMemberRedirect(step, '/hosts'), isNull);
@@ -222,18 +217,19 @@ void main() {
     test('the step follows the hello', () {
       expect(const LinkState(status: LinkStatus.connecting).boardMemberStep, BoardMemberStep.unknown);
       expect(const LinkState(status: LinkStatus.online, boardMembersExist: false).boardMemberStep, BoardMemberStep.createFirst);
-      expect(const LinkState(status: LinkStatus.online, boardMembersExist: true).boardMemberStep, BoardMemberStep.choose);
+      expect(const LinkState(status: LinkStatus.online, boardMembersExist: true).boardMemberStep, BoardMemberStep.signIn);
       const ready = LinkState(status: LinkStatus.online, boardMembersExist: true, user: ada);
       expect(ready.boardMemberStep, BoardMemberStep.ready);
       expect(ready.copyWith(status: LinkStatus.offline).user, ada, reason: 'offline keeps who you are');
-      expect(ready.withBoardMember(exists: true).boardMemberStep, BoardMemberStep.choose);
+      expect(ready.withBoardMember(exists: true).boardMemberStep, BoardMemberStep.signIn);
+      expect(ready.withBoardMember(exists: true, user: ada, mustChangePassword: true).boardMemberStep, BoardMemberStep.changePassword);
     });
 
     test('the app has the onboarding and board member routes', () {
       final router = AppRouter(testHost, boardMember: ValueNotifier(BoardMemberStep.ready));
       addTearDown(router.dispose);
       final paths = pathsOf(router.config.configuration.routes);
-      expect(paths, containsAll(['/onboarding', '/onboarding/new', '/switch-board-member', '/settings/board-members', '/settings/board-members/new']));
+      expect(paths, containsAll(['/onboarding', '/onboarding/new', '/account', '/account/sessions', '/account/password', '/account/claude', '/settings/board-members', '/settings/board-members/new', '/settings/board-members/:uid/sessions', '/settings/board-members/:uid/password']));
     });
   });
 
@@ -284,7 +280,7 @@ void main() {
           GoRoute(path: '/onboarding', builder: (_, _) => const OnboardingPage(), routes: [
             GoRoute(path: 'new', builder: (_, _) => const NewBoardMemberPage()),
           ]),
-          GoRoute(path: '/switch-board-member', builder: (_, _) => const ChooseBoardMemberPage(switching: true)),
+          GoRoute(path: '/account', builder: (_, _) => const Scaffold(body: Text('page account'))),
           GoRoute(path: '/settings/board-members', builder: (_, _) => const BoardMembersPage(), routes: [
             GoRoute(path: 'new', builder: (_, _) => const NewBoardMemberPage()),
           ]),
@@ -375,7 +371,7 @@ void main() {
       when(() => repo.createBoardMember(any(), any())).thenThrow(const NotSentException('k', sent: true));
       await fill(tester, 'ada', secret);
       await tapCreate(tester);
-      expect(find.text('The connection dropped. If ada is in the list, choose it.'), findsOneWidget);
+      expect(find.text('The connection dropped. If ada was made, sign in as ada.'), findsOneWidget);
       expect(find.textContaining('Not sent'), findsNothing);
     });
 
@@ -387,87 +383,19 @@ void main() {
       expect(find.text('page hosts'), findsOneWidget);
     });
 
-    testWidgets("with board members: Who's working here?, the password once, then the app (MU1-21 AC2, B8)", (tester) async {
-      members = [ada, marie];
-      await pump(tester, const LinkState(status: LinkStatus.online, boardMembersExist: true));
-      expect(find.text("Who's working here?"), findsWidgets);
-      expect(find.text('ada'), findsOneWidget);
-      expect(find.text('marie'), findsOneWidget);
-
-      when(() => repo.useBoardMember('u-2', 'wrong')).thenThrow(const ProtocolException(ErrorCode.wrongPassword, 'That board member or password is wrong.'));
-      when(() => repo.useBoardMember('u-2', 'marie her secret')).thenAnswer((_) async {
-        setLink(const LinkState(status: LinkStatus.online, boardMembersExist: true, user: marie));
-        return marie;
-      });
-      await tester.tap(find.byKey(const ValueKey('board-member-u-2')));
-      await tester.pumpAndSettle();
-      expect(find.text('This device remembers you. Full sign-in comes later.'), findsOneWidget);
-      await tester.enterText(find.byKey(const ValueKey('board-member-check-password')), 'wrong');
-      await tester.tap(find.byKey(const ValueKey('board-member-check')));
-      await tester.pumpAndSettle();
-      expect(find.text('Wrong password.'), findsOneWidget);
-
-      await tester.enterText(find.byKey(const ValueKey('board-member-check-password')), 'marie her secret');
-      await tester.tap(find.byKey(const ValueKey('board-member-check')));
-      await tester.pumpAndSettle();
-      expect(find.text('page home'), findsOneWidget);
-      expect(find.text('Welcome, marie.'), findsOneWidget);
-    });
-
-    testWidgets('a board member added elsewhere shows up in the choice', (tester) async {
-      members = [ada];
-      await pump(tester, const LinkState(status: LinkStatus.online, boardMembersExist: true));
-      expect(find.text('marie'), findsNothing);
-      members = [ada, marie];
-      userEvents.add(Event.fromJson({'seq': 12, 'kind': 'user.created', 'aggregate_id': 'u-2', 'at_ms': 0}));
-      await tester.pumpAndSettle();
-      expect(find.text('marie'), findsOneWidget);
-    });
-
-    testWidgets('New board member from the choice: this phone becomes that board member', (tester) async {
-      members = [ada];
-      await pump(tester, const LinkState(status: LinkStatus.online, boardMembersExist: true));
-      await tester.tap(find.byKey(const ValueKey('board-member-new')));
-      await tester.pumpAndSettle();
-      expect(find.text('New board member'), findsWidgets);
-      when(() => repo.createBoardMember('marie', 'marie her secret')).thenAnswer((_) async {
-        setLink(const LinkState(status: LinkStatus.online, boardMembersExist: true, user: marie));
-        return 'u-2';
-      });
-      await fill(tester, 'marie', 'marie her secret');
-      await tapCreate(tester);
-      expect(find.text('page home'), findsOneWidget);
-    });
-
-    testWidgets('More shows who you are and switches (MU1-21 AC4)', (tester) async {
-      members = [ada, marie];
+    testWidgets('More shows who you are and opens Account (MU1-21 AC4)', (tester) async {
       final router = await pump(tester, const LinkState(status: LinkStatus.online, boardMembersExist: true, user: ada), at: '/more');
       expect(find.byKey(const ValueKey('more-board-member')), findsOneWidget);
       expect(find.text('ada'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('more-board-member')));
       await tester.pumpAndSettle();
-      expect(router.state.matchedLocation, '/switch-board-member');
-      expect(find.text('you'), findsOneWidget);
-
-      when(() => repo.useBoardMember('u-2', 'marie her secret')).thenAnswer((_) async {
-        setLink(const LinkState(status: LinkStatus.online, boardMembersExist: true, user: marie));
-        return marie;
-      });
-      await tester.tap(find.byKey(const ValueKey('board-member-u-2')));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const ValueKey('board-member-check-password')), 'marie her secret');
-      await tester.tap(find.byKey(const ValueKey('board-member-check')));
-      await tester.pumpAndSettle();
-      expect(find.text('You are marie now.'), findsOneWidget);
-      expect(router.state.matchedLocation, '/more');
-      expect(find.text('marie'), findsOneWidget);
+      expect(router.state.matchedLocation, '/account');
     });
 
     testWidgets('Settings → Board members: the list with "you", and a second board member (MU1-22)', (tester) async {
       members = [ada];
       await pump(tester, const LinkState(status: LinkStatus.online, boardMembersExist: true, user: ada), at: '/settings/board-members');
       expect(find.text('you'), findsOneWidget);
-      expect(find.textContaining('Delete'), findsNothing, reason: 'no delete or reset in Fase 1 (OV-14)');
       await tester.tap(find.byKey(const ValueKey('board-members-new')));
       await tester.pumpAndSettle();
       when(() => repo.createBoardMember('marie', 'marie her secret')).thenAnswer((_) async {
@@ -483,13 +411,13 @@ void main() {
       expect(find.text('you'), findsOneWidget, reason: 'the creator stays itself');
     });
 
-    testWidgets('board_member_required while in the app: back to the choice', (tester) async {
+    testWidgets('no session any more while in the app: back to the sign-in screen', (tester) async {
       members = [ada];
       await pump(tester, const LinkState(status: LinkStatus.online, boardMembersExist: true, user: ada));
       expect(find.text('page home'), findsOneWidget);
       setLink(const LinkState(status: LinkStatus.online, boardMembersExist: true));
       await tester.pumpAndSettle();
-      expect(find.text("Who's working here?"), findsWidgets);
+      expect(find.byKey(const ValueKey('sign-in')), findsOneWidget);
     });
   });
 }

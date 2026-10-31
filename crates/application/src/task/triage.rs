@@ -85,7 +85,8 @@ fn still_waiting(tx: &Tx<'_>, ticket: TicketId, root: TaskId) -> Result<Option<s
 
 /// Earlier runs of the dispatcher for this main task.
 fn runs_so_far(conn: &rusqlite::Connection, root: TaskId) -> Result<u32, StorageError> {
-    Ok(conn.query_row("SELECT COUNT(*) FROM runs WHERE task_id = ?1 AND conversation_id IS NULL", [root.to_string()], |r| r.get::<_, i64>(0))? as u32)
+    // One that waited for the ticket's Claude login never ran: it is no try.
+    Ok(conn.query_row("SELECT COUNT(*) FROM runs WHERE task_id = ?1 AND conversation_id IS NULL AND COALESCE(error_code, '') <> 'login'", [root.to_string()], |r| r.get::<_, i64>(0))? as u32)
 }
 
 /// Each active colleague with its role, focus and the number of open tasks.
@@ -141,7 +142,10 @@ impl CommandService {
             })
             .map_err(storage_error)?;
         let (Some((dispatcher, system, prompt)), notices) = prepared else { return Ok((None, prepared.1)) };
-        let config = self.resolve_for_employee(dispatcher, aurelius_domain::connection::Purpose::Employee)?;
+        let mut config = self.resolve_for_employee(dispatcher, aurelius_domain::connection::Purpose::Employee)?;
+        // The ticket's login (MU3-10 AC1).
+        config.login_user = self.store.read(|c| aurelius_storage::tickets::login_user(c, ticket)).map_err(storage_error)?;
+        let login = config.login_user.map(|u| u.to_string());
         let run_id = RunId::new();
         let resolved = serde_json::to_string(&config).map_err(|e| AppError::new(aurelius_domain::ErrorCode::Internal, e.to_string()))?;
         let (kind, model) = (config.runtime_kind().to_owned(), config.model.clone().unwrap_or_default());
@@ -149,9 +153,9 @@ impl CommandService {
         self.store
             .write(move |tx| {
                 tx.execute(
-                    "INSERT INTO runs(id, task_id, employee_id, attempt, runtime_kind, connection_id, model_id, resolved_config_json, status, started_at_ms)
-                     VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7, 'running', ?8)",
-                    rusqlite::params![run_id.to_string(), root.to_string(), dispatcher.to_string(), kind, connection, model, resolved, aurelius_storage::now_ms()],
+                    "INSERT INTO runs(id, task_id, employee_id, attempt, runtime_kind, connection_id, model_id, resolved_config_json, status, started_at_ms, login_user)
+                     VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, ?7, 'running', ?8, ?9)",
+                    rusqlite::params![run_id.to_string(), root.to_string(), dispatcher.to_string(), kind, connection, model, resolved, aurelius_storage::now_ms(), login],
                 )?;
                 Ok(())
             })

@@ -237,12 +237,48 @@ pub enum HostWrite {
     FsCreateDir { parent: String, name: String },
     /// A new board member (OV-12: `invalid_username`, `weak_password` (also a
     /// password of only spaces), `username_taken`; `too_many_attempts` after five
-    /// a minute on one connection); answers `CommandResult::UserCreated` as a command
-    /// receipt. A connection without an active board member becomes the new one.
-    /// The server hashes the password before anything is recorded: the receipt,
-    /// its request hash and the event `user.created` hold the name only. Not for apps.
+    /// a minute on one connection or twenty an hour on the server); answers
+    /// `CommandResult::UserCreated` as a command receipt. Without a session only
+    /// the first board member (the onboarding): that connection then gets a
+    /// session, whose token `user.login` would give (see `HelloResult::user`;
+    /// the client signs in once more to get the token). After that it needs a
+    /// session (any board member, one role). The server hashes the password
+    /// before anything is recorded: the receipt, its request hash and the event
+    /// `user.created` hold the name only. Not for apps.
     #[serde(rename = "user.create")]
     UserCreate(UserCreateParams),
+    /// End one session (any board member's: one role). Its device's open
+    /// connection closes at once (`ServerMessage::SignedOut`); the timeline says
+    /// who revoked it. Answers `Done`. Not for apps.
+    #[serde(rename = "session.revoke")]
+    SessionRevoke { session_id: aurelius_domain::SessionId },
+    /// Change a password. Own (no `user_id`, or the session's): with the old
+    /// password; the other sessions end, this one stays. Another board member's
+    /// (B10): a temporary password, changed at their next sign-in
+    /// (`must_change_password`); all their sessions end. Like `user.create`, the
+    /// passwords are in no receipt, request hash, event or log. Answers `Done`.
+    #[serde(rename = "user.set_password")]
+    UserSetPassword(SetPasswordParams),
+    /// Disable a board member: their sessions end at once and they cannot sign
+    /// in; their Claude login is disconnected; tickets keep their creator. The
+    /// last active board member cannot be disabled (`last_board_member`).
+    /// Answers `User`. Not for apps.
+    #[serde(rename = "user.disable")]
+    UserDisable { user_id: aurelius_domain::UserId },
+    /// Connect the session's own Claude login: the server starts `claude auth
+    /// login` for `<data>/logins/<user_id>/` and answers `ClaudeLoginLink`. What
+    /// Claude asks (the sign-in link, the code) comes to this connection only as
+    /// `ServerMessage::ClaudeLoginPrompt`; the code goes back with
+    /// `claude_login.input`. One link per board member at a time, 10 minutes.
+    #[serde(rename = "claude_login.link")]
+    ClaudeLoginLink,
+    /// Stop a running link of the session's own login. Answers `ClaudeLogin`.
+    #[serde(rename = "claude_login.cancel")]
+    ClaudeLoginCancel { link_id: String },
+    /// Disconnect the session's own Claude login (`claude auth logout`, its folder
+    /// removed). Answers `ClaudeLogin`.
+    #[serde(rename = "claude_login.unlink")]
+    ClaudeLoginUnlink,
 }
 
 /// `user.create`. The password is never printed.
@@ -255,6 +291,24 @@ pub struct UserCreateParams {
 impl fmt::Debug for UserCreateParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UserCreateParams").field("username", &self.username).field("password", &"<redacted>").finish()
+    }
+}
+
+/// `user.set_password`. No password is ever printed.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SetPasswordParams {
+    /// Another board member (a temporary password); none: the session's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<aurelius_domain::UserId>,
+    /// The current password; required for the own one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_password: Option<String>,
+    pub new_password: String,
+}
+
+impl fmt::Debug for SetPasswordParams {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SetPasswordParams").field("user_id", &self.user_id).field("old_password", &self.old_password.as_ref().map(|_| "<redacted>")).field("new_password", &"<redacted>").finish()
     }
 }
 
@@ -320,6 +374,12 @@ impl HostWrite {
         "push.test",
         "fs.create_dir",
         "user.create",
+        "session.revoke",
+        "user.set_password",
+        "user.disable",
+        "claude_login.link",
+        "claude_login.cancel",
+        "claude_login.unlink",
     ];
 
     pub fn name(&self) -> String {
@@ -376,6 +436,13 @@ pub enum HostResult {
     /// A replayed receipt has empty codes.
     PairingCode(PairingCode),
     DirListing(DirListing),
+    /// `user.disable`: the board member as it is now.
+    User(aurelius_domain::user::UserView),
+    /// `claude_login.link`: the link that runs; its prompts follow as
+    /// `ServerMessage::ClaudeLoginPrompt` with this id.
+    ClaudeLoginLink { link_id: String },
+    /// `claude_login.cancel` / `claude_login.unlink`: the login as it is now.
+    ClaudeLogin(aurelius_domain::user::ClaudeLoginView),
 }
 
 impl HostResult {

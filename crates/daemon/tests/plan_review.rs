@@ -17,7 +17,6 @@ use aurelius_domain::{Command, CommandResult, ConversationId, EmployeeId, ErrorC
 use std::time::Duration;
 
 async fn setup(client: &Client) -> (EmployeeId, ProjectId) {
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
     let create = CreateEmployee { name: "Planner".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let CommandResult::ProjectCreated { project_id, .. } =
@@ -100,7 +99,7 @@ async fn a_tickets_plan_waits_for_the_board_and_is_revised_then_approved() {
     let dir = tempfile::tempdir().unwrap();
     // Slow enough to hand a plan in while the run goes.
     let daemon = common::start_with_delay(dir.path(), 40).await;
-    let client = common::connect(dir.path()).await;
+    let client = common::connect_as(dir.path(), "grace").await;
     let (planner, atlas) = setup(&client).await;
     let id = planned_ticket(&client, atlas, planner, Some(AgentMode::Plan)).await;
 
@@ -160,7 +159,7 @@ async fn a_tickets_plan_waits_for_the_board_and_is_revised_then_approved() {
 async fn without_plan_mode_plan_review_is_skipped() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let client = common::connect(dir.path()).await;
+    let client = common::connect_as(dir.path(), "grace").await;
     let (planner, atlas) = setup(&client).await;
     let id = planned_ticket(&client, atlas, planner, Some(AgentMode::Auto)).await;
     until(&client, id, ColumnKind::Review, TaskStatus::Review).await;

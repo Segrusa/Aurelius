@@ -233,6 +233,9 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     let mut last_checkpoint = tokio::time::Instant::now();
     let mut last_renew = tokio::time::Instant::now();
     let mut quota: Option<Option<i64>> = None;
+    // Claude refused the board member's login (a 401): the run waits for it, never another.
+    let claude = plan.config.provider == Some(aurelius_domain::connection::ProviderKind::ClaudeCode);
+    let mut login_lost = false;
     // The watchdog: a run that shows no progress at all (no output, no tool use)
     // for the idle limit is stopped with a note, so its conversation goes on.
     let mut open_tools: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -411,6 +414,10 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                 quota = Some(reset_at_ms);
                 break RunOutcome::Failed("rate_limit".into());
             }
+            RuntimeEvent::Failed { code, .. } if claude && code == aurelius_runtime::claude_code::parse::AUTH_FAILED => {
+                login_lost = true;
+                break RunOutcome::Failed(code);
+            }
             RuntimeEvent::Failed { code, message } => {
                 if text.is_empty() {
                     // Keep the reason visible in the conversation.
@@ -422,6 +429,8 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     };
     if let Some(reset_at_ms) = quota {
         park_for_quota(&shared, &plan, epoch, reset_at_ms).await;
+    } else if login_lost {
+        park_for_login(&shared, &plan, epoch).await;
     } else {
         finish(&shared, &plan, outcome, text, epoch).await;
         // A conversation deleted during this answer keeps no session.
@@ -431,6 +440,8 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                 && shared.owns_session(&id)
             {
                 runtime.remove_session(&id);
+                // A session of the conversation on another board member's login goes from its folder too.
+                crate::sessions::remove_everywhere(&shared, &id);
             }
         }
     }
@@ -480,9 +491,31 @@ async fn park_for_quota(shared: &Arc<Shared>, plan: &ChatRunPlan, epoch: i64, re
         Some(Ok(notices)) => shared.publish(notices),
         other => tracing::error!(run = %plan.run_id, ?other, "could not park the run for the usage limit"),
     }
-    let s = shared.clone();
-    if let Some(Ok(notices)) = blocking(move || s.service.park_runs_for_quota(at)).await {
-        shared.publish(notices);
+    // The other runs on the same Claude login wait too (MU3-11); those on another board member's go on.
+    if let Some(login) = plan.config.login_user {
+        let s = shared.clone();
+        if let Some(Ok(notices)) = blocking(move || s.service.park_runs_for_quota_of(login, at)).await {
+            shared.publish(notices);
+        }
+    }
+}
+
+/// Claude refused the run's login (a 401): the login is expired until its board
+/// member reconnects it, and the run waits for that ('login'), as do the others
+/// on it (they find it expired when they start). Never uses up an attempt.
+async fn park_for_login(shared: &Arc<Shared>, plan: &ChatRunPlan, epoch: i64) {
+    tracing::warn!(run = %plan.run_id, "Claude refused the board member's login; the run waits for it");
+    if let Some(user) = plan.config.login_user {
+        let s = shared.clone();
+        if let Some(Ok(notices)) = blocking(move || s.service.claude_login_expired(user)).await {
+            shared.publish(notices);
+        }
+    }
+    let disposition = aurelius_domain::scheduler::Disposition::WaitForUser { reason: aurelius_domain::task::WAITING_LOGIN };
+    let (s, p) = (shared.clone(), plan.clone());
+    match blocking(move || s.service.defer_chat_run(&p, epoch, disposition)).await {
+        Some(Ok(notices)) => shared.publish(notices),
+        other => tracing::error!(run = %plan.run_id, ?other, "could not park the run for its Claude login"),
     }
 }
 

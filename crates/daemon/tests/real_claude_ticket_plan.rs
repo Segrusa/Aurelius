@@ -92,8 +92,7 @@ async fn until(client: &Client, id: TicketId, column: ColumnKind, status: TaskSt
 async fn a_real_ticket_plan_stops_after_the_deny_and_goes_on_once_approved() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_real(dir.path()).await;
-    let client = connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = connect_as(dir.path(), "grace").await;
     let (employee, project, folder) = setup(&client).await;
     let made = client
         .create_ticket(CreateTicket {

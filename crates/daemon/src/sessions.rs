@@ -1,5 +1,6 @@
 //! Claude Code sessions that runs left behind. A run that stops for a usage
-//! limit keeps its session (under `~/.claude`) for its next attempt; when that
+//! limit keeps its session (in its board member's login folder,
+//! `<data>/logins/<user_id>/`) for its next attempt; when that
 //! attempt never comes (the run or its task is stopped, the chat deleted, or the
 //! daemon stopped meanwhile) nothing else removes it. A conversation keeps its
 //! own session to go on in (a task's too, after the task ended); that one goes
@@ -13,31 +14,49 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Remove the sessions of our runs that will not run again. In the background.
+/// The folders Claude Code keeps sessions in: every board member's login folder
+/// (never the daemon user's `~/.claude`, R4).
+fn session_dirs(shared: &Shared) -> Vec<std::path::PathBuf> {
+    aurelius_runtime::claude_code::login::all(&shared.root).into_iter().map(|l| l.config_dir().to_path_buf()).collect()
+}
+
+/// Remove session `id` wherever a login folder has it (the run that made it knew whose).
+pub(crate) fn remove_everywhere(shared: &Shared, id: &str) {
+    for dir in session_dirs(shared) {
+        session::remove(&dir, id);
+    }
+}
+
+/// Remove the sessions of our runs that will not run again, in every login folder. In the background.
 pub(crate) fn sweep(shared: &Arc<Shared>) {
-    let Some(dir) = session::claude_dir() else { return };
     let store = shared.store().clone();
     let shared = shared.clone();
     tokio::task::spawn_blocking(move || {
         // A run still going removes its own session when it ends.
         let live: HashSet<String> = shared.cancellers.lock().map(|m| m.keys().map(|id| id.to_string()).collect()).unwrap_or_default();
         let since = shared.sessions_since;
-        let removed = forget_over(&shared, &dir, &live, since) + forget_done(&store, &dir, &live, since);
+        let dirs = session_dirs(&shared);
+        let mut removed = forget_over(&shared, &dirs, &live, since);
+        for dir in &dirs {
+            removed += forget_done(&store, dir, &live, since);
+        }
         if removed > 0 {
-            tracing::info!(removed, "removed Claude Code sessions of runs that will not resume");
+            tracing::info!(removed, logins = dirs.len(), "removed Claude Code sessions of runs that will not resume");
         }
     });
 }
 
 /// The sessions of conversations that are over (deleted, task ended, or held by
 /// a run that is over without finishing): forgotten in the database, and removed
-/// when this data root started them (`since`, see `claim_root`).
-fn forget_over(shared: &Shared, dir: &Path, live: &HashSet<String>, since: Option<i64>) -> usize {
+/// from every login folder when this data root started them (`since`, see `claim_root`).
+fn forget_over(shared: &Shared, dirs: &[std::path::PathBuf], live: &HashSet<String>, since: Option<i64>) -> usize {
     match shared.service.close_sessions_over(live.iter().cloned().collect()) {
         Ok(ids) => {
             let ours: Vec<&String> = ids.iter().filter(|id| started_since(id, since)).collect();
             for id in &ours {
-                session::remove(dir, id);
+                for dir in dirs {
+                    session::remove(dir, id);
+                }
             }
             ours.len()
         }

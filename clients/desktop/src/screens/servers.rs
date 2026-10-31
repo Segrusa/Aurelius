@@ -272,6 +272,8 @@ impl AppView {
         {
             let _ = self.requests_handle().send(backend::Request::Remote(backend::RemoteCall::Revoke(me)));
         }
+        // Its session on this device goes too (S8): a forgotten server keeps no token here.
+        backend::Tokens::os(host_id.to_string()).forget();
         let mut saved = Servers::load(&root);
         let forgotten = saved.forget(host_id).and_then(|()| saved.save(&root));
         self.servers = saved;

@@ -7,7 +7,7 @@ use aurelius_application::run::connections::ResolvedRunConfig;
 use aurelius_domain::{ProviderId, connection::ProviderKind};
 use aurelius_protocol::{ErrorCode, ProtocolError};
 use aurelius_runtime::{AgentRuntime, RuntimeError};
-use aurelius_runtime::claude_code::ClaudeCodeRuntime;
+use aurelius_runtime::claude_code::{ClaudeCodeRuntime, ClaudeLogin};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -44,10 +44,12 @@ pub fn runtime_for_config(shared: &Arc<Shared>, config: &ResolvedRunConfig) -> R
                 .runtime_path
                 .clone()
                 .ok_or_else(|| RuntimeError::Permanent("The path to Claude Code is missing.".into()))?;
+            let login = claude_login(shared, config.login_user)?;
             Ok(Arc::new(ClaudeCodeRuntime {
                 executable: PathBuf::from(executable),
                 run_root: shared.root.join("runtimes").join(connection_id.to_string()).join("runs"),
                 model: config.model.clone(),
+                login: Some(login),
             }))
         }
         ProviderKind::AnthropicApi | ProviderKind::OpenaiApi => {
@@ -61,6 +63,20 @@ pub fn runtime_for_config(shared: &Arc<Shared>, config: &ResolvedRunConfig) -> R
     }
 }
 
+/// The Claude login a run on Claude Code uses: its board member's own, linked
+/// and not disabled. Never another one and never the daemon user's: without it
+/// the run waits for it (`RuntimeError::Login`, reason 'login').
+pub fn claude_login(shared: &Arc<Shared>, user: Option<aurelius_domain::UserId>) -> Result<ClaudeLogin, RuntimeError> {
+    let Some(user) = user else {
+        return Err(RuntimeError::Login("No board member's Claude login belongs to this run.".into()));
+    };
+    let linked = shared.store().read(|c| aurelius_storage::claude_logins::is_linked(c, &user.to_string())).map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
+    if !linked {
+        return Err(RuntimeError::Login("The board member's Claude login is not connected.".into()));
+    }
+    ClaudeLogin::of(&shared.root, user).map_err(|e| RuntimeError::Unavailable(format!("the Claude login folder: {}", e.kind())))
+}
+
 /// Probe a connection without sending a prompt, then record status and models.
 pub fn spawn_verification(shared: Arc<Shared>, id: ProviderId) {
     tokio::spawn(async move {
@@ -71,18 +87,17 @@ pub fn spawn_verification(shared: Arc<Shared>, id: ProviderId) {
             #[cfg(not(feature = "testing"))]
             ProviderKind::Fake => ("unavailable", vec![], Some("The built-in test connection is not available.".into())),
             ProviderKind::ClaudeCode => {
+                // Only that it runs: every board member signs in with their own
+                // login (`claude_login.link`); the daemon user's is never used.
                 let runtime = ClaudeCodeRuntime {
                     executable: PathBuf::from(row.runtime_path.clone().unwrap_or_default()),
                     run_root: shared.root.join("runtimes"),
                     model: None,
+                    login: None,
                 };
                 match runtime.version().await {
                     Err(e) => ("unavailable", vec![], Some(e.to_string())),
-                    Ok(version) => match runtime.signed_in().await {
-                        Ok(true) => ("ready", CLAUDE_CODE_MODELS.iter().map(|s| s.to_string()).collect(), Some(format!("{version} · signed in"))),
-                        Ok(false) => ("needs_auth", vec![], Some(format!("{version} · not signed in: run `claude auth login`"))),
-                        Err(e) => ("unavailable", vec![], Some(e.to_string())),
-                    },
+                    Ok(version) => ("ready", CLAUDE_CODE_MODELS.iter().map(|s| s.to_string()).collect(), Some(format!("{version} · runs on each board member's own Claude login"))),
                 }
             }
             ProviderKind::AnthropicApi | ProviderKind::OpenaiApi => {
@@ -132,42 +147,66 @@ pub async fn store_secret(shared: &Arc<Shared>, id: ProviderId, secret: String) 
     Ok(())
 }
 
-/// Claude subscription limits through the user's own Claude Code (local `/usage`,
-/// no prompt to a model, no cost). Answers from the cache at once and refreshes
-/// it in the background when older than a minute; `refresh` waits for fresh data.
-pub async fn subscription_usage(shared: &Arc<Shared>, refresh: bool) -> aurelius_protocol::SubscriptionUsage {
+/// The plan limits of `user`'s own Claude login (local `/usage` of their login
+/// folder: no prompt to a model, no cost). Answers from the cache at once and
+/// refreshes it in the background when older than a minute; `refresh` waits for
+/// fresh data. Only ever the asker's own (B12); without a board member, nothing.
+pub async fn subscription_usage(shared: &Arc<Shared>, user: Option<aurelius_domain::UserId>, refresh: bool) -> aurelius_protocol::SubscriptionUsage {
     let now = aurelius_storage::now_ms();
-    let cached = shared.subscription.lock().ok().and_then(|c| c.clone());
+    let Some(user) = user else {
+        return aurelius_protocol::SubscriptionUsage { fetched_at_ms: now, error: Some("Only a board member has a Claude login.".into()), ..Default::default() };
+    };
+    let cached = shared.subscription.lock().ok().and_then(|c| c.get(&user).cloned());
     if refresh {
-        return fetch_subscription(shared).await;
+        return fetch_subscription(shared, user).await;
     }
     let stale = cached.as_ref().is_none_or(|c| now - c.fetched_at_ms >= 60_000);
-    if stale && !shared.subscription_busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
+    let start = stale && shared.subscription_busy.lock().map(|mut busy| busy.insert(user)).unwrap_or(false);
+    if start {
         let s = shared.clone();
         tokio::spawn(async move {
-            fetch_subscription(&s).await;
-            s.subscription_busy.store(false, std::sync::atomic::Ordering::SeqCst);
+            fetch_subscription(&s, user).await;
+            if let Ok(mut busy) = s.subscription_busy.lock() {
+                busy.remove(&user);
+            }
         });
     }
-    cached.unwrap_or_default()
+    cached.unwrap_or(aurelius_protocol::SubscriptionUsage { login_user: Some(user), ..Default::default() })
 }
 
-async fn fetch_subscription(shared: &Arc<Shared>) -> aurelius_protocol::SubscriptionUsage {
+/// Forget what `/usage` said for `user` (their login was unlinked or linked
+/// again): the next read fetches it for the login there is now (R2 m5).
+pub fn forget_usage(shared: &Shared, user: aurelius_domain::UserId) {
+    if let Ok(mut cache) = shared.subscription.lock() {
+        cache.remove(&user);
+    }
+    if let Ok(mut busy) = shared.subscription_busy.lock() {
+        busy.remove(&user);
+    }
+}
+
+/// `/usage` of `user`'s login now. Its lines without "% used" are no limits:
+/// no subscription (an API login), never 0% (MU3-09 AC5).
+async fn fetch_subscription(shared: &Arc<Shared>, user: aurelius_domain::UserId) -> aurelius_protocol::SubscriptionUsage {
     use aurelius_protocol::{PlanLimitView, SubscriptionUsage};
     let now = aurelius_storage::now_ms();
     let store = shared.store().clone();
-    let path: Option<String> = tokio::task::spawn_blocking(move || store.read(|c| aurelius_storage::connections::find_by_provider(c, ProviderKind::ClaudeCode)))
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .flatten()
-        .filter(|row| row.status == "ready")
-        .and_then(|row| row.runtime_path);
-    let result = match path {
-        None => SubscriptionUsage { fetched_at_ms: now, error: Some("No working Claude Code connection (Settings → Connections).".into()), ..Default::default() },
-        Some(path) => {
-            let runtime = ClaudeCodeRuntime { executable: PathBuf::from(path), run_root: shared.root.join("runtimes").join("usage"), model: None };
-            let plan = runtime.subscription_type().await;
+    let me = user.to_string();
+    let found = tokio::task::spawn_blocking(move || {
+        store.read(move |c| Ok((aurelius_storage::connections::find_by_provider(c, ProviderKind::ClaudeCode)?, aurelius_storage::claude_logins::is_linked(c, &me)?)))
+    })
+    .await
+    .ok()
+    .and_then(Result::ok);
+    let (row, linked) = found.unwrap_or((None, false));
+    let path = row.filter(|row| row.status == "ready").and_then(|row| row.runtime_path);
+    let failed = |error: String| SubscriptionUsage { login_user: Some(user), fetched_at_ms: now, error: Some(error), ..Default::default() };
+    let result = match (path, linked) {
+        (None, _) => failed("No working Claude Code connection (Settings → Connections).".into()),
+        (Some(_), false) => failed("Connect your Claude login to see your usage.".into()),
+        (Some(path), true) => {
+            let runtime = ClaudeCodeRuntime { executable: PathBuf::from(path), run_root: shared.root.join("runtimes").join("usage"), model: None, login: Some(ClaudeLogin::at(&shared.root, user)) };
+            let plan = runtime.auth_status().await.ok().and_then(|s| s.plan);
             match runtime.subscription_usage().await {
                 Ok(raw) => SubscriptionUsage {
                     plan,
@@ -178,13 +217,14 @@ async fn fetch_subscription(shared: &Arc<Shared>) -> aurelius_protocol::Subscrip
                     raw,
                     fetched_at_ms: now,
                     error: None,
+                    login_user: Some(user),
                 },
-                Err(e) => SubscriptionUsage { plan, fetched_at_ms: now, error: Some(e.to_string()), ..Default::default() },
+                Err(e) => SubscriptionUsage { plan, ..failed(e.to_string()) },
             }
         }
     };
     if let Ok(mut cache) = shared.subscription.lock() {
-        *cache = Some(result.clone());
+        cache.insert(user, result.clone());
     }
     result
 }

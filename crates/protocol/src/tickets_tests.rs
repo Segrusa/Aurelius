@@ -133,24 +133,6 @@ fn a_move_with_the_old_position_is_refused_on_the_wire() {
 }
 
 #[test]
-fn a_damaged_remembered_user_does_not_fail_the_hello() {
-    let hello = |user_id: serde_json::Value| {
-        let parsed: Request = serde_json::from_value(serde_json::json!({
-            "protocol": 4, "request_id": 6, "method": "session.hello",
-            "params": { "client_name": "t", "client_version": "1", "user_id": user_id }
-        }))
-        .unwrap();
-        let Call::Read(Method::SessionHello(params)) = parsed.call else { panic!() };
-        params.user_id
-    };
-    assert_eq!(hello(serde_json::json!("not-a-uuid")), None);
-    assert_eq!(hello(serde_json::json!(42)), None);
-    assert_eq!(hello(serde_json::Value::Null), None);
-    let id = aurelius_domain::UserId::new();
-    assert_eq!(hello(serde_json::json!(id)), Some(id));
-}
-
-#[test]
 fn discussion_writes_travel_as_method_and_params() {
     let t = TicketId::new();
     let post = Command::PostTicketMessage(PostTicketMessage { ticket_id: t, text: "@Ann can you look?".into(), images: vec![], files: vec![] });

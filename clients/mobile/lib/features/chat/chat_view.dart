@@ -83,6 +83,7 @@ class ChatView extends StatefulWidget {
     this.taskProjectId,
     this.composerText,
     this.composerActions,
+    this.draftSlot,
   });
 
   final String emptyTitle;
@@ -105,6 +106,10 @@ class ChatView extends StatefulWidget {
 
   /// The composer's text, when the page acts on it too (Send back, Pas aan).
   final TextEditingController? composerText;
+
+  /// Where the composer's unsent text is kept (R3 M1); null: the chat's own
+  /// (its conversation, else its employee, project or channel).
+  final String? draftSlot;
 
   /// Under the composer: the decisions of a ticket's discussion (Plan review, Review).
   final Widget Function(BuildContext context, TextEditingController text)? composerActions;
@@ -1062,10 +1067,36 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
     _focus.addListener(() {
       if (_focus.hasFocus) _checkClipboard();
     });
+    // A draft kept from before (a sign-out in between, R3 M1) comes back.
+    final repository = context.read<AureliusRepository>();
+    _slot = widget.config.draftSlot ?? _chatSlot(context.read<ChatBloc>());
+    final kept = _slot == null ? null : repository.draft(_slot!);
+    if (kept != null && _text.text.isEmpty) _text.text = kept;
+    _keep = (text) {
+      if (_slot != null) repository.keepDraft(_slot!, text);
+    };
     _text.addListener(_drafted);
+    // Quick replies step aside for it too, after this build.
+    if (kept != null) WidgetsBinding.instance.addPostFrameCallback((_) => mounted ? widget.draft?.value = _text.text : null);
   }
 
-  void _drafted() => widget.draft?.value = _text.text;
+  String? _slot;
+  late final void Function(String text) _keep;
+
+  static String? _chatSlot(ChatBloc bloc) => switch (bloc) {
+        ChatBloc(:final ticketId?) => 'ticket:$ticketId',
+        ChatBloc(state: ChatState(:final conversationId?)) => 'conversation:$conversationId',
+        ChatBloc(:final channel?) => 'channel:$channel',
+        ChatBloc(:final employeeId?) => 'employee:$employeeId',
+        ChatBloc(:final projectId?) => 'project:$projectId',
+        _ => null,
+      };
+
+  /// Every change is kept at once; a send clears the field, which forgets it.
+  void _drafted() {
+    widget.draft?.value = _text.text;
+    _keep(_text.text);
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {

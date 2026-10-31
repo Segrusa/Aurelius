@@ -1,8 +1,12 @@
 //! OAuth login for the user's remote (http/sse) MCP servers, so runs get their
 //! tools without `claude /mcp`.
 //!
-//! Claude Code keeps MCP tokens in its credential file (`~/.claude/.credentials.json`,
+//! Claude Code keeps MCP tokens in its credential file (`.credentials.json` of the
+//! board member's own login folder, `<data>/logins/<user_id>/`,
 //! `mcpOAuth["<name>|<hash of type, url, headers>"]`) and refreshes them itself.
+//! Aurelius changes only that `mcpOAuth` entry: the Claude login (`claudeAiOauth`)
+//! in the same file is never logged, sent or changed (Sentinel D6), and the file
+//! is written with mode 0600.
 //! `claude mcp login` needs a terminal, so the daemon runs the MCP authorization
 //! flow (protected-resource and authorization-server metadata, dynamic client
 //! registration, PKCE) and writes the result into that same entry. The browser
@@ -51,17 +55,22 @@ pub struct ClaudeFiles {
 }
 
 impl ClaudeFiles {
-    /// `AURELIUS_CLAUDE_CREDENTIALS` (tests), else `CLAUDE_CONFIG_DIR` or `~/.claude`.
-    pub fn locate() -> Option<Self> {
-        if let Some(file) = std::env::var_os("AURELIUS_CLAUDE_CREDENTIALS").map(PathBuf::from) {
+    /// The files of the Claude login in `dir`.
+    pub fn in_dir(dir: &std::path::Path) -> Self {
+        Self { credentials: dir.join(".credentials.json"), needs_auth_cache: dir.join("mcp-needs-auth-cache.json") }
+    }
+
+    /// `AURELIUS_CLAUDE_CREDENTIALS` (tests: only in a debug build, so a released
+    /// daemon never lets every board member share one file, SEC2 m7), else the
+    /// files of `user`'s own Claude login (`<root>/logins/<user_id>/`); none
+    /// without a board member: never the daemon user's `~/.claude`.
+    pub fn locate(root: &std::path::Path, user: Option<aurelius_domain::UserId>) -> Option<Self> {
+        if let Some(file) = std::env::var_os("AURELIUS_CLAUDE_CREDENTIALS").filter(|_| cfg!(debug_assertions)).map(PathBuf::from) {
             let dir = file.parent().map(PathBuf::from).unwrap_or_default();
             return Some(Self { credentials: file, needs_auth_cache: dir.join("mcp-needs-auth-cache.json") });
         }
-        let dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).or_else(|| {
-            let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
-            Some(PathBuf::from(home).join(".claude"))
-        })?;
-        Some(Self { credentials: dir.join(".credentials.json"), needs_auth_cache: dir.join("mcp-needs-auth-cache.json") })
+        let login = aurelius_runtime::claude_code::ClaudeLogin::of(root, user?).ok()?;
+        Some(Self::in_dir(login.config_dir()))
     }
 
     fn read(path: &std::path::Path) -> Value {
@@ -93,7 +102,19 @@ impl ClaudeFiles {
         }
         let tmp = path.with_extension("json.aurelius-tmp");
         let text = serde_json::to_vec_pretty(&Value::Object(root)).map_err(|e| e.to_string())?;
-        std::fs::write(&tmp, text).map_err(|e| format!("Could not write {}: {e}", tmp.display()))?;
+        // Only its owner may read it (D6): made 0600 (never the umask's 0644), and
+        // never wider than the original was.
+        let _ = std::fs::remove_file(&tmp);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let original = std::fs::metadata(path).ok().map(|m| m.permissions().mode() & 0o600).filter(|m| m & 0o400 != 0);
+            options.mode(original.unwrap_or(0o600));
+        }
+        let written = options.open(&tmp).and_then(|mut file| std::io::Write::write_all(&mut file, &text).and_then(|_| file.sync_all()));
+        written.map_err(|e| format!("Could not write {}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, path).map_err(|e| format!("Could not replace {}: {e}", path.display()))
     }
 
@@ -396,6 +417,8 @@ async fn register(http: &reqwest::Client, name: &str, config: &Value, found: &Di
 
 /// What a pending login keeps for its last step. Never sent anywhere but the token endpoint.
 struct Flow {
+    /// The files of the board member's own login it saves into.
+    files: ClaudeFiles,
     name: String,
     key: String,
     server_url: String,
@@ -487,6 +510,8 @@ fn save(files: &ClaudeFiles, flow: &Flow, tokens: Tokens) -> Result<(), String> 
 
 struct Login {
     view: McpLogin,
+    /// The board member who started it: only they may see or complete it (SEC2 m6).
+    user: Option<aurelius_domain::UserId>,
     /// Taken by whoever completes it (the callback or `mcp.login_complete`).
     flow: Option<Flow>,
     listener: Option<tokio::task::AbortHandle>,
@@ -534,7 +559,7 @@ fn find_server(name: &str) -> Result<crate::mcp_servers::Found, ProtocolError> {
     crate::mcp_servers::discover().into_iter().find(|f| f.name == name).ok_or_else(|| invalid(format!("There is no user-scope server named '{name}'.")))
 }
 
-fn oauth_server(name: &str) -> Result<(crate::mcp_servers::Found, ClaudeFiles), ProtocolError> {
+fn oauth_server(shared: &Shared, name: &str, user: Option<aurelius_domain::UserId>) -> Result<(crate::mcp_servers::Found, ClaudeFiles), ProtocolError> {
     let found = find_server(name)?;
     if crate::mcp_servers::transport_of(&found.config) == McpTransport::Stdio {
         return Err(invalid("Only http and sse servers log in with OAuth."));
@@ -542,16 +567,17 @@ fn oauth_server(name: &str) -> Result<(crate::mcp_servers::Found, ClaudeFiles), 
     if fixed_auth(&found.config) {
         return Err(invalid("This server uses a fixed Authorization header; it has no login."));
     }
-    let files = ClaudeFiles::locate().ok_or_else(|| internal("Claude Code's folder was not found."))?;
+    let files = ClaudeFiles::locate(&shared.root, user).ok_or_else(|| invalid("Only a board member logs in to an MCP server, on their own Claude login."))?;
     Ok((found, files))
 }
 
 /// `mcp.login_start`: discover, register, and wait for the browser.
-pub async fn start(shared: &Arc<Shared>, name: String) -> Result<McpLogin, ProtocolError> {
+/// `user`: the board member whose own Claude login keeps the tokens.
+pub async fn start(shared: &Arc<Shared>, name: String, user: Option<aurelius_domain::UserId>) -> Result<McpLogin, ProtocolError> {
     if cfg!(target_os = "macos") {
         return Err(invalid("On macOS Claude Code keeps MCP logins in the Keychain; log in with `claude /mcp` for now."));
     }
-    let (found, files) = oauth_server(&name)?;
+    let (found, files) = oauth_server(shared, &name, user)?;
     let key = store_key(&name, &found.config);
     let previous = files.credentials()["mcpOAuth"][&key]["discoveryState"].clone();
 
@@ -605,6 +631,7 @@ pub async fn start(shared: &Arc<Shared>, name: String) -> Result<McpLogin, Proto
     }
     let basic_auth = found_auth.auth_methods.iter().any(|m| m == "client_secret_basic") && !found_auth.auth_methods.iter().any(|m| m == "client_secret_post");
     let flow = Flow {
+        files: files.clone(),
         name: name.clone(),
         key,
         server_url: found.config["url"].as_str().unwrap_or("").to_string(),
@@ -624,8 +651,8 @@ pub async fn start(shared: &Arc<Shared>, name: String) -> Result<McpLogin, Proto
     {
         let mut all = logins();
         all.retain(|_, l| l.finished_at_ms.is_none_or(|at| now - at < KEEP_FINISHED_MS));
-        // One login per server: a new one replaces the one still waiting.
-        for old in all.values_mut().filter(|l| l.view.name == name && l.view.state == McpLoginState::Pending) {
+        // One login per server and board member: a new one replaces their one still waiting.
+        for old in all.values_mut().filter(|l| l.view.name == name && l.user == user && l.view.state == McpLoginState::Pending) {
             old.view.state = McpLoginState::Expired;
             old.view.error = Some("A newer login replaced this one.".into());
             old.flow = None;
@@ -634,7 +661,7 @@ pub async fn start(shared: &Arc<Shared>, name: String) -> Result<McpLogin, Proto
                 l.abort();
             }
         }
-        all.insert(login_id, Login { view: view.clone(), flow: Some(flow), listener: Some(listener.abort_handle()), finished_at_ms: None });
+        all.insert(login_id, Login { view: view.clone(), user, flow: Some(flow), listener: Some(listener.abort_handle()), finished_at_ms: None });
     }
     Ok(view)
 }
@@ -669,8 +696,7 @@ async fn complete(shared: &Arc<Shared>, login_id: &str, redirect: &str) -> Resul
     let code = params.get("code").cloned().unwrap_or_default();
     let outcome = match exchange(&flow, &code).await {
         Ok(tokens) => {
-            let files = ClaudeFiles::locate().ok_or_else(|| "Claude Code's folder was not found.".to_string());
-            tokio::task::spawn_blocking(move || files.and_then(|files| save(&files, &flow, tokens))).await.unwrap_or_else(|e| Err(e.to_string()))
+            tokio::task::spawn_blocking(move || save(&flow.files.clone(), &flow, tokens)).await.unwrap_or_else(|e| Err(e.to_string()))
         }
         Err(e) => Err(e),
     };
@@ -689,8 +715,10 @@ async fn complete(shared: &Arc<Shared>, login_id: &str, redirect: &str) -> Resul
     }
 }
 
-/// `mcp.login_complete`: the address a browser elsewhere ended on.
-pub async fn complete_pasted(shared: &Arc<Shared>, login_id: String, redirect_url: String) -> Result<McpLogin, ProtocolError> {
+/// `mcp.login_complete`: the address a browser elsewhere ended on, from the
+/// board member who started the login (anyone else: `NotFound`, SEC2 m6).
+pub async fn complete_pasted(shared: &Arc<Shared>, login_id: String, redirect_url: String, user: Option<aurelius_domain::UserId>) -> Result<McpLogin, ProtocolError> {
+    get(&login_id, user)?;
     let result = complete(shared, &login_id, &redirect_url).await;
     let listener = logins().get_mut(&login_id).filter(|l| l.view.state != McpLoginState::Pending).and_then(|l| l.listener.take());
     if let Some(listener) = listener {
@@ -699,15 +727,15 @@ pub async fn complete_pasted(shared: &Arc<Shared>, login_id: String, redirect_ur
     result
 }
 
-/// `mcp.login_get`.
-pub fn get(login_id: &str) -> Result<McpLogin, ProtocolError> {
-    logins().get(login_id).map(|l| l.view.clone()).ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "This login is unknown or too old."))
+/// `mcp.login_get`: only the login `user` started; another's reads as unknown.
+pub fn get(login_id: &str, user: Option<aurelius_domain::UserId>) -> Result<McpLogin, ProtocolError> {
+    logins().get(login_id).filter(|l| l.user == user).map(|l| l.view.clone()).ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "This login is unknown or too old."))
 }
 
 /// `mcp.logout`: Claude Code's tokens of the server are removed; its client
 /// registration stays so a next login is quicker. Runs ask for a login again.
-pub async fn logout(shared: &Arc<Shared>, name: String) -> Result<McpServers, ProtocolError> {
-    let (found, files) = oauth_server(&name)?;
+pub async fn logout(shared: &Arc<Shared>, name: String, user: Option<aurelius_domain::UserId>) -> Result<McpServers, ProtocolError> {
+    let (found, files) = oauth_server(shared, &name, user)?;
     let key = store_key(&name, &found.config);
     let had = files.credentials()["mcpOAuth"].get(&key).is_some();
     if had {
@@ -729,7 +757,7 @@ pub async fn logout(shared: &Arc<Shared>, name: String) -> Result<McpServers, Pr
         .map_err(internal)?;
         announce(shared, EventKind::McpAuthChanged, name.clone(), json!({ "server": name, "auth": "needs_login" })).await;
     }
-    crate::mcp_servers::list(shared).await
+    crate::mcp_servers::list(shared, user).await
 }
 
 // ---------------------------------------------------------------------------
@@ -822,6 +850,65 @@ async fn serve(shared: Weak<Shared>, login_id: String, v4: std::net::TcpListener
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Sentinel F1/D6: an MCP login changes only its `mcpOAuth` entry, in the
+    /// board member's own login folder, and leaves the file readable by its owner only.
+    #[cfg(unix)]
+    #[test]
+    fn an_mcp_login_writes_only_its_entry_with_mode_0600_in_the_board_members_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let (alex, robin) = (aurelius_domain::UserId::new(), aurelius_domain::UserId::new());
+        let login = aurelius_runtime::claude_code::ClaudeLogin::of(root.path(), alex).unwrap();
+        let files = ClaudeFiles::in_dir(login.config_dir());
+        // What `claude` wrote at its own sign-in: the Claude login, 0600.
+        let claude_login = r#"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-CANARY","refreshToken":"sk-ant-ort01-CANARY","expiresAt":1,"scopes":["user:inference"]}}"#;
+        std::fs::write(&files.credentials, claude_login).unwrap();
+        std::fs::set_permissions(&files.credentials, std::fs::Permissions::from_mode(0o600)).unwrap();
+        files.update_entry("notes|0123456789abcdef", |entry| {
+            entry.insert("accessToken".into(), json!("mcp-token"));
+        })
+        .unwrap();
+        assert_eq!(std::fs::metadata(&files.credentials).unwrap().permissions().mode() & 0o777, 0o600);
+        let after = files.credentials();
+        assert_eq!(after["claudeAiOauth"], serde_json::from_str::<Value>(claude_login).unwrap()["claudeAiOauth"], "the Claude login is untouched");
+        assert_eq!(after["mcpOAuth"]["notes|0123456789abcdef"]["accessToken"], "mcp-token");
+        assert!(!files.credentials.with_extension("json.aurelius-tmp").exists());
+
+        // A file made new by an MCP login (no sign-in yet) is 0600 too, whatever the umask.
+        let other = ClaudeFiles::in_dir(aurelius_runtime::claude_code::ClaudeLogin::of(root.path(), robin).unwrap().config_dir());
+        other.update_entry("notes|0123456789abcdef", |_| {}).unwrap();
+        assert_eq!(std::fs::metadata(&other.credentials).unwrap().permissions().mode() & 0o777, 0o600);
+
+        // Without the test override, a board member's files are those of their own login
+        // folder, and without a board member there are none (never ~/.claude).
+        if std::env::var_os("AURELIUS_CLAUDE_CREDENTIALS").is_none() {
+            assert_eq!(ClaudeFiles::locate(root.path(), Some(alex)).unwrap().credentials, files.credentials);
+            assert!(ClaudeFiles::locate(root.path(), None).is_none());
+        }
+    }
+
+    #[test]
+    fn a_login_is_seen_and_completed_only_by_who_started_it() {
+        // SEC2 m6: another board member who knows the id finds nothing.
+        let (alex, robin) = (aurelius_domain::UserId::new(), aurelius_domain::UserId::new());
+        let id = random_text(16);
+        let view = McpLogin {
+            login_id: id.clone(),
+            name: "recipes".into(),
+            state: McpLoginState::Pending,
+            authorization_url: "https://mcp.example.com/authorize".into(),
+            redirect_uri: "http://localhost:1/callback".into(),
+            expires_at_ms: aurelius_storage::now_ms() + LOGIN_TTL_MS,
+            error: None,
+        };
+        logins().insert(id.clone(), Login { view, user: Some(alex), flow: None, listener: None, finished_at_ms: None });
+        assert_eq!(get(&id, Some(alex)).unwrap().login_id, id);
+        for other in [Some(robin), None] {
+            assert_eq!(get(&id, other).err().map(|e| e.code), Some(ErrorCode::NotFound));
+        }
+        logins().remove(&id);
+    }
 
     #[test]
     fn the_key_is_claude_codes() {

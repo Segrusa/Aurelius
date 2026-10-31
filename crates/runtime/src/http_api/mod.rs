@@ -111,7 +111,7 @@ pub(crate) fn spawn_stream(
                 let body = response.text().await.unwrap_or_default();
                 let err = map_status(status, retry, &body);
                 let code = match &err {
-                    RuntimeError::Auth(_) => "authentication_failed",
+                    RuntimeError::Auth(_) | RuntimeError::Login(_) => "authentication_failed",
                     RuntimeError::Quota { .. } => "rate_limit",
                     RuntimeError::Unavailable(_) => "unavailable",
                     RuntimeError::Permanent(_) => "invalid_request",

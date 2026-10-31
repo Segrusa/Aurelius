@@ -199,7 +199,9 @@ pub(crate) fn escalate(tx: &Tx<'_>, st: &Store, task: TaskId, row: &store::TaskR
     );
     let colleague = Colleague { id: boss, name: boss_row.name.clone(), role: boss_row.role, focus: String::new(), title: boss_row.title, reports_to: boss_row.reports_to };
     let note = format!("(Escalated by {} because of the org chart.)", me_row.name);
-    let Some((_, _, notices)) = insert_part(tx, st, row.project_id, Some(me), &colleague, &format!("Escalated: {}", row.title), &text, &[], &note, None, Some(conversation))? else {
+    // On the escalated task's login.
+    let login = crate::run::login::of_task(tx, task)?;
+    let Some((_, _, notices)) = insert_part(tx, st, row.project_id, Some(me), &colleague, &format!("Escalated: {}", row.title), &text, &[], &note, None, Some(conversation), login)? else {
         return Ok(None);
     };
     Ok(Some((boss_row.name, notices)))
@@ -427,7 +429,7 @@ impl CommandService {
                 },
             )?;
             notices.push(decided);
-            notices.extend(answer_proposer(tx, &st, &p, id, &text)?);
+            notices.extend(answer_proposer(tx, &st, &p, id, &text, &meta["user_id"])?);
             Ok(Ok((CommandResult::ProposalDecided { proposal_id: id, status, employee_id: created }, notices)))
         })
     }
@@ -506,7 +508,7 @@ impl CommandService {
                 },
             )?;
             notices.push(decided);
-            notices.extend(answer_proposer(tx, &st, &p, id, &text)?);
+            notices.extend(answer_proposer(tx, &st, &p, id, &text, &meta["user_id"])?);
             Ok(Ok((CommandResult::ProposalDecided { proposal_id: id, status, employee_id: None }, notices)))
         })
     }
@@ -602,14 +604,15 @@ fn apply_instructions(
 
 /// The decision on a proposal goes back to the proposer, in the conversation it
 /// proposed from; the proposer answers it unless a run of that conversation is live.
-fn answer_proposer(tx: &Tx<'_>, st: &Store, p: &proposals::ProposalRow, id: ProposalId, text: &str) -> Result<Vec<EventNotice>, StorageError> {
+/// `user`: the board member who decided (whose Claude login the answer runs on, outside a task).
+fn answer_proposer(tx: &Tx<'_>, st: &Store, p: &proposals::ProposalRow, id: ProposalId, text: &str, user: &serde_json::Value) -> Result<Vec<EventNotice>, StorageError> {
     let mut notices = Vec::new();
     if let Some(conversation) = p.origin_conversation_id.filter(|c| conversation_is_open(tx, *c)) {
         let (message, mut posted) = thread::post_note(tx, st, conversation, Speaker::Update { kind: "status", from: "You" }, text)?;
         posted.project_id = aurelius_storage::conversations::owner_of(tx, conversation)?.1;
         notices.push(posted);
         if !live_in(tx, conversation, None)? {
-            let (_, queued) = crate::run::queue::queue_run(tx, &serde_json::json!({ "origin": "proposal", "proposal_id": id }), &id.to_string(), conversation, message)?;
+            let (_, queued) = crate::run::queue::queue_run(tx, &serde_json::json!({ "origin": "proposal", "proposal_id": id, "user_id": user }), &id.to_string(), conversation, message)?;
             notices.extend(queued);
         }
     }

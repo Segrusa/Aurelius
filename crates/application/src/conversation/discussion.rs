@@ -456,6 +456,8 @@ struct Wake<'a> {
     shared: Shared<'a>,
     context: String,
     hop: u32,
+    /// The board member of hop 0, whose Claude login the woken runs use.
+    login: Option<UserId>,
 }
 
 /// Wake `employee` for the message `w`: the message and the latest messages of
@@ -497,7 +499,7 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     if !shared.images.is_empty() {
         conv::set_message_files(tx, update, shared.images)?;
     }
-    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None };
+    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login };
     let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
     Ok(Some((run, std::iter::once(posted).chain(queued).collect())))
 }
@@ -721,7 +723,7 @@ impl CommandService {
             let kept: Vec<aurelius_domain::views::FileRef> = images.iter().map(|i| i.file.clone()).collect();
             let mut notices = vec![n];
             let from = board_name(tx, user)?;
-            let sent = board_message(tx, &store, &meta, &correlation, &d, message_id, from, &text, Shared { images: &kept, files: files.clone() }, &mut notices)?;
+            let sent = board_message(tx, &store, &meta, &correlation, &d, message_id, (from, user), &text, Shared { images: &kept, files: files.clone() }, &mut notices)?;
             Ok(Ok((result(&d, (message_id, sent)), notices)))
         })
     }
@@ -770,7 +772,7 @@ fn board_name(conn: &rusqlite::Connection, user: Option<UserId>) -> Result<Optio
 /// Route a board member's message in `d` (already stored as `message`): wake
 /// those it names (or the one B3 names), or give it to the ticket's owner.
 #[allow(clippy::too_many_arguments)]
-fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, d: &Discussion, message: MessageId, user: Option<String>, text: &str, shared: Shared<'_>, notices: &mut Vec<EventNotice>) -> Result<Sent, StorageError> {
+fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, d: &Discussion, message: MessageId, (user, login): (Option<String>, Option<UserId>), text: &str, shared: Shared<'_>, notices: &mut Vec<EventNotice>) -> Result<Sent, StorageError> {
     let named = addressees(tx, d, text, None)?;
     let mut sent = Sent { to: Vec::new(), run_ids: Vec::new() };
     let mut ended = None;
@@ -784,7 +786,7 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
         }
     }
     let read = reader(store);
-    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, context: context_text(tx, &read, d.id, Some(message))?, hop: 0 };
+    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, context: context_text(tx, &read, d.id, Some(message))?, hop: 0, login };
     for (employee, name) in &named.awake {
         if let Some((run, n)) = wake(tx, store, meta, correlation, (*employee, name), &w)? {
             sent.to.push(*employee);
@@ -959,7 +961,9 @@ pub(crate) fn post_from_run(tx: &Tx<'_>, store: &Store, run: RunId, d: &Discussi
     }
     let meta = serde_json::json!({ "run_id": run, "group_post": posted });
     let read = reader(store);
-    let w = Wake { discussion: d, from: &name, board: None, text, shared: Shared::default(), context: context_text(tx, &read, d.id, Some(posted))?, hop };
+    // The login of hop 0 goes on with every colleague it wakes (its own run's).
+    let login = crate::run::login::of_run(tx, run)?;
+    let w = Wake { discussion: d, from: &name, board: None, text, shared: Shared::default(), context: context_text(tx, &read, d.id, Some(posted))?, hop, login };
     let mut woken = Vec::new();
     for (employee, colleague) in &named.awake {
         if let Some((_, n)) = wake(tx, store, &meta, &run.to_string(), (*employee, colleague), &w)? {

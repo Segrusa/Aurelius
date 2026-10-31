@@ -555,6 +555,9 @@ pub struct CompanySnapshot {
     pub roots: Vec<EmployeeId>,
     /// The company itself: its name and default dispatcher.
     pub company: crate::company::CompanyView,
+    /// Whose Claude login runs the background jobs (B6); none: they do not run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_login: Option<crate::user::UserView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

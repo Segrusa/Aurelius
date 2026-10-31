@@ -231,3 +231,14 @@ pub fn webhook_keys(conn: &Connection) -> Result<Vec<AppKeyRow>, StorageError> {
     let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM app_keys WHERE webhook_url IS NOT NULL AND webhook_secret IS NOT NULL AND revoked_at_ms IS NULL ORDER BY created_at_ms, id"))?;
     Ok(stmt.query_map([], row_of)?.collect::<Result<Vec<_>, rusqlite::Error>>()?)
 }
+
+/// Whose Claude login the tasks of an app key run on (migration 21; none:
+/// they wait with 'login').
+pub fn set_login_user(tx: &Transaction<'_>, id: AppKeyId, login_user: Option<&str>) -> Result<(), StorageError> {
+    tx.execute("UPDATE app_keys SET login_user = ?2 WHERE id = ?1", params![id.to_string(), login_user])?;
+    Ok(())
+}
+
+pub fn login_user(conn: &Connection, id: AppKeyId) -> Result<Option<String>, StorageError> {
+    Ok(conn.query_row("SELECT login_user FROM app_keys WHERE id = ?1", [id.to_string()], |r| r.get(0)).optional()?.flatten())
+}

@@ -149,6 +149,23 @@ pub struct TicketView {
     /// `conversation.get`, write in it with `ticket.post`. Left out by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conversation_id: Option<ConversationId>,
+    /// Whose Claude login its runs use (protocol 5): the creator, unless a
+    /// board member took it over on their own login (`ticket.use_my_login`).
+    pub login_user: UserId,
+    pub login_username: String,
+    /// What the ticket waits for before it can run; none: nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs: Option<TicketNeed>,
+}
+
+/// Why a ticket cannot run yet (`TicketView::needs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TicketNeed {
+    /// `login_user` has no working Claude login (none, expired, or disabled):
+    /// "<name> must connect their Claude login". Another board member may take
+    /// it over with `ticket.use_my_login`.
+    Login,
 }
 
 /// One column with its cards, in order.
@@ -364,6 +381,15 @@ impl PostTicketMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RetryTicketSummary {
+    pub ticket_id: TicketId,
+}
+
+/// Run a ticket on the Claude login of the board member who asks (B4, D3-3):
+/// `TicketView::login_user` becomes that board member, never anyone else. The
+/// creator stays. Only a board member; answers `TicketChanged`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UseMyLogin {
     pub ticket_id: TicketId,
 }
 

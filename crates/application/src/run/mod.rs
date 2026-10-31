@@ -7,6 +7,8 @@ pub mod connections;
 pub mod events;
 pub mod heartbeat;
 pub mod lifecycle;
+pub mod login;
+pub mod login_wait;
 pub mod plan;
 pub mod queue;
 pub mod session;

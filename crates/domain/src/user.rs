@@ -1,10 +1,13 @@
-//! Board members (Fase 1: identification, not authentication). A connection has
-//! at most one active board member; ticket, board and company writes need one.
+//! Board members and their sessions (protocol 5). A connection has at most one
+//! board member, and only through a session: `user.login`, the first
+//! `user.create`, or the session token in the hello. Without one the server
+//! answers `unauthenticated` (the gate).
 //!
-//! The password never enters the domain: the protocol hashes it (argon2id)
-//! before a command exists, so it is in no command, receipt hash or event.
+//! Neither a password nor a session token enters the domain: the daemon hashes
+//! the password (argon2id) and keeps only the token's SHA-256, so they are in
+//! no command, receipt hash, event or log.
 
-use crate::{DomainError, UserId};
+use crate::{ClientId, DomainError, SessionId, UserId};
 use serde::{Deserialize, Serialize};
 
 pub const USERNAME_MIN: usize = 3;
@@ -45,7 +48,8 @@ pub fn check_password(password: &str) -> Result<(), DomainError> {
     if count < PASSWORD_MIN {
         return Err(DomainError::WeakPassword(format!("A password has at least {PASSWORD_MIN} characters.")));
     }
-    if count > PASSWORD_MAX {
+    // In bytes, which bound the hashing work (SEC1 m7): never more than in characters.
+    if password.len() > PASSWORD_MAX {
         return Err(DomainError::WeakPassword(format!("A password has at most {PASSWORD_MAX} characters.")));
     }
     Ok(())
@@ -59,6 +63,9 @@ pub struct UserView {
     pub created_at_ms: i64,
     /// None: made in the onboarding, without an active board member.
     pub created_by_user: Option<UserId>,
+    /// Disabled (`user.disable`): cannot sign in; tickets keep their creator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_at_ms: Option<i64>,
 }
 
 /// `user.list`, oldest first.
@@ -71,8 +78,105 @@ pub struct UsersSnapshot {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WhoAmI {
     pub board_members_exist: bool,
-    /// The active board member of this connection.
+    /// The board member of this connection's session.
     pub user: Option<UserView>,
+    /// The session's board member signed in with a temporary password and must
+    /// change it (`user.set_password`) before anything else works.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub must_change_password: bool,
+}
+
+/// `user.login`: what the client keeps for the server. The token is shown
+/// here once; the server keeps only its SHA-256. Never printed.
+#[derive(Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LoginResult {
+    pub user: UserView,
+    /// Give it in every hello (`HelloParams::session_token`) on this device.
+    pub session_token: String,
+    /// When the session ends at the latest (90 days); 30 days without use end it earlier.
+    pub expires_at_ms: i64,
+    /// A temporary password: change it with `user.set_password` first.
+    pub must_change_password: bool,
+}
+
+impl std::fmt::Debug for LoginResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginResult")
+            .field("user", &self.user)
+            .field("session_token", &"<redacted>")
+            .field("expires_at_ms", &self.expires_at_ms)
+            .field("must_change_password", &self.must_change_password)
+            .finish()
+    }
+}
+
+/// One signed-in device of a board member (`session.list`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionView {
+    pub id: SessionId,
+    pub user_id: UserId,
+    /// What the device called itself at `user.login`.
+    pub device_name: String,
+    /// The paired device; none: the desktop on the server itself (local IPC).
+    pub client_id: Option<ClientId>,
+    pub created_at_ms: i64,
+    pub last_seen_ms: i64,
+    /// The absolute end (90 days); 30 days without use end it earlier.
+    pub expires_at_ms: i64,
+    /// The session of the connection that asked.
+    pub current: bool,
+}
+
+/// `session.list`: newest activity first; never a token or its hash.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionsSnapshot {
+    pub user_id: UserId,
+    pub sessions: Vec<SessionView>,
+}
+
+/// Why the server ended a connection's session (`ServerMessage::SignedOut`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SignOutReason {
+    /// `user.logout` on this device.
+    LoggedOut,
+    /// `session.revoke` (this or another device), or the paired device was revoked.
+    Revoked,
+    /// The password changed (on another device, or reset by another board member).
+    PasswordChanged,
+    /// The board member was disabled.
+    Disabled,
+    /// 30 days without use, or 90 days in all.
+    Expired,
+}
+
+/// The state of a board member's own Claude login (`<data>/logins/<user_id>/`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeLoginStatus {
+    /// Never connected, or disconnected: the board member's tickets wait (`needs: login`).
+    Missing,
+    Linked,
+    /// Claude asked to sign in again (a 401 in a run): Reconnect.
+    Expired,
+}
+
+/// `claude_login.status`, `HelloResult::claude_login`: the session's own login.
+/// Never a token or a path; the email and the plan come from `claude auth status`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ClaudeLoginView {
+    pub user_id: UserId,
+    pub status: ClaudeLoginStatus,
+    pub email: Option<String>,
+    /// e.g. "max", "pro"; none when unknown.
+    pub plan: Option<String>,
+    pub linked_at_ms: Option<i64>,
+    pub checked_at_ms: Option<i64>,
+    /// A `claude_login.link` of this board member is running (one at a time).
+    pub link_id: Option<String>,
+    /// This login also runs the company's background jobs (memory
+    /// consolidation, B6): `company.set_background_login`.
+    pub background: bool,
 }
 
 /// The domain side of `user.create`: the name only. The password's hash is
@@ -85,6 +189,14 @@ pub struct CreateUser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_login_result_never_prints_its_token() {
+        let user = UserView { id: UserId::new(), username: "alex".into(), created_at_ms: 1, created_by_user: None, disabled_at_ms: None };
+        let login = LoginResult { user, session_token: "TOKEN-SECRET".into(), expires_at_ms: 9, must_change_password: false };
+        assert!(!format!("{login:?}").contains("TOKEN-SECRET"));
+        assert!(serde_json::to_string(&login).unwrap().contains("TOKEN-SECRET"), "the answer itself carries it once");
+    }
 
     #[test]
     fn usernames_follow_ov_12() {
@@ -102,6 +214,9 @@ mod tests {
         assert!(matches!(check_password("short-pass1"), Err(DomainError::WeakPassword(_))));
         assert!(check_password("twelve-chars").is_ok());
         assert!(check_password(&"x".repeat(PASSWORD_MAX + 1)).is_err());
+        // Counted in bytes (SEC1 m7): 1 024 characters of 4 bytes are too long, 256 are not.
+        assert!(check_password(&"😀".repeat(PASSWORD_MAX)).is_err());
+        assert!(check_password(&"😀".repeat(PASSWORD_MAX / 4)).is_ok());
     }
 
     #[test]

@@ -8,6 +8,7 @@ import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/views.dart';
+import '../account/claude_login.dart' show ownUsage;
 import 'usage_bloc.dart';
 import '../../core/widgets/ios.dart';
 
@@ -25,7 +26,8 @@ class UsagePage extends StatelessWidget {
             if (state.loading) return const Center(child: CircularProgressIndicator());
             final usage = state.usage;
             if (usage == null) return ErrorRetry(state.error ?? 'No usage data.', onRetry: () => context.read<UsageBloc>().add(const UsageRequested()));
-            final sub = state.subscription;
+            // Only the own login's /usage (B12, R3 m3).
+            final sub = ownUsage(state.subscription, context.read<AureliusRepository>().linkState.user?.id);
             return RefreshIndicator(
               onRefresh: () async => context.read<UsageBloc>().add(const UsageRequested(refreshLimits: true)),
               child: ListView(

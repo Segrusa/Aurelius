@@ -190,6 +190,7 @@ fn classify(err: &aurelius_runtime::RuntimeError) -> aurelius_domain::scheduler:
     match err {
         E::Unavailable(m) => F::Transient(m.clone()),
         E::Auth(m) => F::Auth(m.clone()),
+        E::Login(m) => F::Login(m.clone()),
         // Always a time: a limit without a known reset is tried again after a default delay.
         E::Quota { reset_at_ms } => F::Quota { reset_at_ms: Some(aurelius_domain::scheduler::quota_wake_ms(*reset_at_ms, aurelius_storage::now_ms())) },
         E::Permanent(m) => F::Permanent(m.clone()),

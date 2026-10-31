@@ -723,6 +723,11 @@ pub struct PlanLimitView {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SubscriptionUsage {
+    /// Whose Claude login this is (protocol 5: `subscription.get` answers the
+    /// session's own; nobody sees another's usage, B12). None: the server's
+    /// own login, until runs move to the board members' logins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_user: Option<aurelius_domain::UserId>,
     /// e.g. "max"; None when unknown.
     pub plan: Option<String>,
     pub limits: Vec<PlanLimitView>,

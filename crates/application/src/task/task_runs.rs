@@ -200,8 +200,13 @@ pub(crate) fn on_run_quota_wait(tx: &Tx<'_>, run: RunId, until_ms: i64) -> Resul
     if !matches!(row.status, TaskStatus::Running | TaskStatus::Queued) {
         return Ok(vec![]);
     }
-    let mut notices = crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("quota"))?.into_vec();
-    notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "quota", "until_ms": until_ms }))?);
+    // The ticket's discussion says so once per wait, with whose limit (MU3-11, ui-ontwerp §5).
+    let mut notices = match crate::task::ticket_line::ticket_of(tx, task)? {
+        Some(ticket) => crate::run::login_wait::quota_paused(tx, ticket, run, until_ms)?,
+        None => Vec::new(),
+    };
+    notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("quota"))?.into_vec());
+    notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "quota", "until_ms": until_ms, "login_user": crate::run::login::of_run(tx, run)? }))?);
     Ok(notices)
 }
 
@@ -226,6 +231,9 @@ pub(crate) fn on_run_quota_resumed(tx: &Tx<'_>, run: RunId) -> Result<Vec<EventN
     let mut notices = crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?.into_vec();
     notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
     notices.push(task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": "quota" }))?);
+    if let Some(ticket) = crate::task::ticket_line::ticket_of(tx, task)? {
+        notices.extend(crate::run::login_wait::quota_resumed(tx, ticket)?);
+    }
     Ok(notices)
 }
 
@@ -754,7 +762,7 @@ impl CommandService {
                         }
                         let me_name = employees::load_employee(tx, me)?.map(|m| m.name).unwrap_or_default();
                         let note = format!("(Delegated by {me_name} as part of the task \"{}\".)", row.title);
-                        let Some((child, title, mut notices)) = insert_part(tx, &st, row.project_id, Some(me), &to, &title, &goal, &criteria, &note, Some(task), None)? else {
+                        let Some((child, title, mut notices)) = insert_part(tx, &st, row.project_id, Some(me), &to, &title, &goal, &criteria, &note, Some(task), None, None)? else {
                             return Ok((false, "Give the part a title.".to_string(), vec![]));
                         };
                         inherit_mode(tx, run, child, to.id)?;
@@ -934,6 +942,7 @@ pub(crate) fn insert_part(
     note: &str,
     parent: Option<TaskId>,
     origin: Option<ConversationId>,
+    login: Option<aurelius_domain::UserId>,
 ) -> Result<Option<(TaskId, String, Vec<EventNotice>)>, StorageError> {
     let title = title.trim().chars().take(task::TITLE_MAX).collect::<String>();
     if title.is_empty() {
@@ -950,6 +959,12 @@ pub(crate) fn insert_part(
     store::insert_task(tx, child, project, Some(to.id), &title, &goal_blob.id.to_string(), &criteria_blob.id.to_string(), TaskStatus::Queued, parent)?;
     if let Some(conversation) = origin {
         store::set_task_origin(tx, child, conversation, me)?;
+        // Asked from a conversation (not a part of a task): it runs on the login
+        // the caller names (the delegating run's, an escalated task's), never on
+        // whatever run of the conversation came last (B1-1).
+        if parent.is_none() {
+            store::set_login_user(tx, child, login.map(|u| u.to_string()).as_deref())?;
+        }
     }
     let correlation = parent.map_or_else(|| child.to_string(), |p| p.to_string());
     let (event_id, mut created) = crate::run::events::emit(tx, crate::run::events::Ev {
@@ -1070,7 +1085,9 @@ fn delegate_from_conversation(tx: &Tx<'_>, st: &Store, run: RunId, action: Emplo
         None => "The project assistant".to_string(),
     };
     let note = format!("(Asked by {asked_by} from a conversation with the user.)");
-    let Some((child, title, notices)) = insert_part(tx, st, project, me, &to, &title, &goal, &criteria, &note, None, Some(conversation))? else {
+    // On the login of the run that delegates, not of another run queued in the same conversation.
+    let login = crate::run::login::of_run(tx, run)?;
+    let Some((child, title, notices)) = insert_part(tx, st, project, me, &to, &title, &goal, &criteria, &note, None, Some(conversation), login)? else {
         return Ok((false, "Give the task a title.".to_string(), vec![]));
     };
     inherit_mode(tx, run, child, to.id)?;

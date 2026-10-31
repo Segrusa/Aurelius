@@ -315,6 +315,9 @@ impl AppView {
             let reported = line.kind == SystemLineKind::Reported;
             let open = self.board.open_reports.contains(&m.id);
             let failed = line.kind == SystemLineKind::SummaryFailed;
+            // ui-ontwerp §5: Paused / Resumed / Waiting for a Claude login, with a shape.
+            let login = d::login_line(line, &text);
+            let connect = login == Some(d::LoginLine::Connect) && crate::screens::account::needs_connect(self.claude.view.as_ref(), self.claude.unsupported.is_some());
             let first = text.lines().next().unwrap_or("").to_string();
             let shown = if reported && !open { first.clone() } else { text.clone() };
             let message = m.id;
@@ -336,7 +339,7 @@ impl AppView {
             let color = if failed { theme::NEGATIVE } else { theme::TEXT_2 };
             // A long line (a failed summary's reason) wraps instead of being cut off.
             return v().id(("discussion-line", i)).w_full().items_center().gap(px(4.)).role(Role::Note).aria_label(d::system_label(&text, &when))
-                .child(div().w_full().min_w_0().text_center().text_size(px(11.5)).text_color(c(color)).child(format!("┄ {shown} · {when} ┄")))
+                .child(div().w_full().min_w_0().text_center().text_size(px(11.5)).text_color(c(color)).child(format!("┄ {}{shown} · {when} ┄", d::login_mark(login))))
                 .child(
                     h().gap(px(8.)).justify_center().flex_wrap().text_size(px(11.5)).text_color(c(color))
                         .when(reported && text.lines().count() > 1, |el| {
@@ -346,6 +349,9 @@ impl AppView {
                                 }
                                 cx.notify();
                             })))
+                        })
+                        .when(connect, |el| {
+                            el.child(div().id(("discussion-connect", i)).role(Role::Button).cursor_pointer().text_color(c(theme::ACCENT_TEXT)).child(crate::screens::board::connect_label(self.claude.view.as_ref())).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.claude_connect(cx))))
                         })
                         .children(task.map(|task| {
                             div().id(("discussion-task", i)).role(Role::Link).cursor_pointer().text_color(c(theme::ACCENT_TEXT)).child("Open task").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.discussion_open_task(task, w, cx)))
@@ -370,7 +376,7 @@ impl AppView {
             .when(marked, |el| el.border_l_2().border_color(c(theme::ACCENT)))
             .child(
                 h().gap(px(8.))
-                    .child(ui::monogram(&who.name, 20., cx))
+                    .child(if who.human { ui::member_monogram(&who.name, 20., cx) } else { ui::monogram(&who.name, 20., cx) })
                     .child(div().text_size(px(12.5)).font_weight(FontWeight::MEDIUM).child(who.name.clone()))
                     .child(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(if who.human { "· board member".to_string() } else { format!("— {}", who.kind) }))
                     .when(marked, |el| el.child(div().text_size(px(11.)).text_color(c(theme::ACCENT_TEXT)).child("@ you")))
@@ -426,7 +432,7 @@ impl AppView {
                     h().id(("discussion-mention", i)).role(Role::ListBoxOption).aria_label(d::suggestion_label(&p, i, of)).aria_selected(on).gap(px(8.)).px(px(6.)).py(px(3.)).rounded(px(4.)).cursor_pointer()
                         .when(on, |el| el.bg(c(theme::SURFACE_2)))
                         .hover(|s| s.bg(c(theme::SURFACE_2)))
-                        .child(ui::monogram(&p.name, 16., cx))
+                        .child(if p.employee { ui::monogram(&p.name, 16., cx) } else { ui::member_monogram(&p.name, 16., cx) })
                         .child(div().text_size(px(12.5)).child(p.name.clone()))
                         .child(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(p.kind.clone()))
                         .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.discussion_complete(at, name.clone(), w, cx)))

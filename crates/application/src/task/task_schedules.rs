@@ -92,7 +92,8 @@ fn not_found(id: TaskScheduleId) -> AppError {
 }
 
 impl CommandService {
-    pub(crate) fn create_task_schedule(&self, envelope: &CommandEnvelope, hash: String, cmd: &CreateTaskSchedule) -> Result<Committed, AppError> {
+    pub(crate) fn create_task_schedule(&self, ctx: &crate::CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &CreateTaskSchedule) -> Result<Committed, AppError> {
+        let login = ctx.login_user();
         let (title, goal, criteria, run) =
             schedule::validate_template(cmd.project_id, cmd.employee_id, &cmd.title, &cmd.goal, &cmd.acceptance_criteria, &cmd.run, cmd.files.len()).map_err(domain_error)?;
         let recurrence = cmd.recurrence.validated().map_err(domain_error)?;
@@ -128,6 +129,8 @@ impl CommandService {
                 }
             }
             store::insert(tx, &row)?;
+            // Its tasks run on the Claude login of who made it (B5).
+            store::set_login_user(tx, id, login.as_deref())?;
             let n = changed(tx, id, row.project_id, "created", ActorKind::User, &command_id.to_string(), serde_json::json!({ "title": row.title }))?;
             Ok(Ok((CommandResult::TaskScheduleCreated { schedule_id: id }, vec![n])))
         });
@@ -135,7 +138,8 @@ impl CommandService {
         committed
     }
 
-    pub(crate) fn update_task_schedule(&self, envelope: &CommandEnvelope, hash: String, cmd: &UpdateTaskSchedule) -> Result<Committed, AppError> {
+    pub(crate) fn update_task_schedule(&self, ctx: &crate::CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &UpdateTaskSchedule) -> Result<Committed, AppError> {
+        let login = ctx.login_user();
         let id = cmd.schedule_id;
         let existing = self.store.read(|c| store::load(c, id)).map_err(storage_error)?.ok_or_else(|| not_found(id))?;
         let kept = existing.attachments.as_ref().map_or(0, |a| a.files.iter().filter(|f| !cmd.remove_files.contains(&f.path)).count());
@@ -182,6 +186,10 @@ impl CommandService {
                 }
             }
             store::update(tx, &row)?;
+            // Changed by a board member: from now on on their login (B5); an app keeps the one it had.
+            if login.is_some() {
+                store::set_login_user(tx, id, login.as_deref())?;
+            }
             let n = changed(tx, id, row.project_id, "updated", ActorKind::User, &command_id.to_string(), serde_json::json!({ "title": row.title }))?;
             Ok(Ok((CommandResult::TaskScheduleUpdated { schedule_id: id }, vec![n])))
         });
@@ -202,7 +210,8 @@ impl CommandService {
         })
     }
 
-    pub(crate) fn set_task_schedule_paused(&self, envelope: &CommandEnvelope, hash: String, cmd: &SetTaskSchedulePaused) -> Result<Committed, AppError> {
+    pub(crate) fn set_task_schedule_paused(&self, ctx: &crate::CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &SetTaskSchedulePaused) -> Result<Committed, AppError> {
+        let login = ctx.login_user();
         let (id, paused) = (cmd.schedule_id, cmd.paused);
         let (now, offset) = (aurelius_storage::now_ms(), aurelius_host::utc_offset_minutes_at);
         let command_id = envelope.command_id;
@@ -214,6 +223,10 @@ impl CommandService {
             // Resuming plans from now: what was due while paused is not made up.
             let next = (!paused).then(|| row.recurrence.next_after(row.anchor_ms, now, offset));
             store::set_paused(tx, id, paused, next)?;
+            // Resumed by a board member: on their login from now on (B5, OV-07).
+            if !paused && login.is_some() {
+                store::set_login_user(tx, id, login.as_deref())?;
+            }
             let change = if paused { "paused" } else { "resumed" };
             let n = changed(tx, id, row.project_id, change, ActorKind::User, &command_id.to_string(), serde_json::json!({ "title": row.title }))?;
             Ok(Ok((CommandResult::TaskScheduleUpdated { schedule_id: id }, vec![n])))

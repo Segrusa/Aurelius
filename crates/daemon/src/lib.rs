@@ -24,6 +24,7 @@ mod webhooks;
 pub(crate) mod live;
 mod load;
 mod sessions;
+pub mod claude_connect;
 
 use aurelius_application::{CommandService, Followup};
 use aurelius_domain::RunId;
@@ -82,9 +83,10 @@ pub struct Shared {
     pub started_at_ms: i64,
     /// Running jobs: since when, tokens so far (in memory, for the UI).
     pub live: live::Live,
-    /// Last `/usage` result; fetched at most once a minute.
-    pub subscription: Mutex<Option<aurelius_protocol::SubscriptionUsage>>,
-    pub subscription_busy: std::sync::atomic::AtomicBool,
+    /// Last `/usage` result per board member's own Claude login; fetched at most once a minute each.
+    pub subscription: Mutex<HashMap<aurelius_domain::UserId, aurelius_protocol::SubscriptionUsage>>,
+    /// The logins whose `/usage` is being fetched now.
+    pub subscription_busy: Mutex<std::collections::HashSet<aurelius_domain::UserId>>,
     pub update: Mutex<aurelius_protocol::UpdateStatus>,
     /// Set after a restore: no jobs are claimed until the user resumes.
     pub paused: std::sync::atomic::AtomicBool,
@@ -105,6 +107,19 @@ pub struct Shared {
     /// How long a run may go without progress, when not the setting's;
     /// `AURELIUS_RUN_IDLE_MS` sets it (tests).
     pub run_idle_ms: Option<i64>,
+    /// The limits on `user.login` per username and `user.create` on the server (B9).
+    pub sign_in_limits: api::limits::Limits,
+    /// The open connections of the board members' sessions (to close them at once).
+    pub sessions: api::sessions::Hub,
+    /// How often an open connection checks its session against the database:
+    /// `AURELIUS_SESSION_CHECK_MS` (tests), else a minute.
+    pub session_check_ms: i64,
+    /// The running sign-ins of board members' Claude logins (`claude_login.link`).
+    pub claude_links: claude_connect::Links,
+    /// How long a sign-in may take to show Claude's link: `AURELIUS_CLAUDE_LINK_RECOGNIZE_MS` (tests), else 15 s.
+    pub claude_link_recognize: Option<std::time::Duration>,
+    /// How long a sign-in may take in all: `AURELIUS_CLAUDE_LINK_TIMEOUT_MS` (tests), else 10 minutes.
+    pub claude_link_timeout: Option<std::time::Duration>,
 }
 
 impl Shared {
@@ -272,6 +287,12 @@ async fn run_inner(
         .await??
     };
     let store = Arc::new(store);
+    // The board members' Claude logins: `logins/` and each folder in it only for this user (D1).
+    match aurelius_runtime::claude_code::login::check_all(&root) {
+        Ok(fixed) if !fixed.is_empty() => tracing::warn!(folders = fixed.len(), "Claude login folders were open to others; set back to 0700"),
+        Ok(_) => {}
+        Err(err) => tracing::warn!(error = %err.kind(), "could not check the Claude login folders"),
+    }
 
     // We hold the instance lock, so every lease belongs to a dead daemon.
     // Task executors are resumable from durable state; their leases can be released.
@@ -351,8 +372,14 @@ async fn run_inner(
         cancellers: Mutex::new(HashMap::new()),
         drivers: Mutex::new(Default::default()),
         run_idle_ms: std::env::var("AURELIUS_RUN_IDLE_MS").ok().and_then(|v| v.parse().ok()).filter(|v: &i64| *v > 0),
-        subscription: Mutex::new(None),
-        subscription_busy: std::sync::atomic::AtomicBool::new(false),
+        sign_in_limits: Default::default(),
+        sessions: Default::default(),
+        session_check_ms: std::env::var("AURELIUS_SESSION_CHECK_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(api::SESSION_CHECK_MS),
+        claude_links: Default::default(),
+        claude_link_recognize: std::env::var("AURELIUS_CLAUDE_LINK_RECOGNIZE_MS").ok().and_then(|v| v.parse().ok()).map(std::time::Duration::from_millis),
+        claude_link_timeout: std::env::var("AURELIUS_CLAUDE_LINK_TIMEOUT_MS").ok().and_then(|v| v.parse().ok()).map(std::time::Duration::from_millis),
+        subscription: Mutex::new(HashMap::new()),
+        subscription_busy: Mutex::new(Default::default()),
         update: Mutex::new(Default::default()),
         paused: std::sync::atomic::AtomicBool::new(aurelius_storage::backup::is_paused(&root)),
         live_text: Mutex::new(HashMap::new()),
@@ -425,6 +452,8 @@ async fn run_inner(
     }
 
     tracing::info!("controlled shutdown");
+    // Sign-ins to Claude end with the daemon (C13).
+    shared.claude_links.cancel_all();
     shared.remote.shutdown().await;
     shared.terminals.close_all();
     // Give the shutdown response a moment to flush, then close every connection.

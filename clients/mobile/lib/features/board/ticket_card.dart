@@ -15,7 +15,7 @@ import 'ticket_actions.dart';
 
 /// What a card needs from the board around it.
 class CardContext {
-  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false});
+  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false});
 
   /// Every column in board order (Move to…).
   final List<BoardColumnView> columns;
@@ -37,10 +37,16 @@ class CardContext {
 
   /// Tablet: long press drags, so the menu sits behind ⋯.
   final bool wide;
+
+  /// The signed-in board member: a wait for a Claude login is theirs only.
+  final String? me;
+
+  /// [me]'s own Claude login expired (a Reconnect, not a Connect).
+  final bool myLoginExpired;
 }
 
 /// The card's main action, by column (§4.2, §5.1): Start, Choose owner, Review, Start again.
-enum CardAction { start, chooseOwner, reviewPlan, review, startAgain }
+enum CardAction { start, chooseOwner, reviewPlan, review, startAgain, connect }
 
 CardAction? cardAction(TicketState state) => switch (state) {
       TicketState.backlog => CardAction.start,
@@ -48,14 +54,17 @@ CardAction? cardAction(TicketState state) => switch (state) {
       TicketState.planReview => CardAction.reviewPlan,
       TicketState.review => CardAction.review,
       TicketState.failed => CardAction.startAgain,
+      TicketState.needsYourLogin => CardAction.connect,
       _ => null,
     };
 
-String cardActionLabel(CardAction a) => switch (a) {
+/// [expired]: the own Claude login expired, so Connect is a Reconnect (ui §5, R3 m4).
+String cardActionLabel(CardAction a, {bool expired = false}) => switch (a) {
       CardAction.start => 'Start',
       CardAction.chooseOwner => 'Choose owner',
       CardAction.reviewPlan || CardAction.review => 'Review',
       CardAction.startAgain => 'Start again',
+      CardAction.connect => expired ? 'Reconnect Claude' : 'Connect Claude',
     };
 
 /// Do the card's main action.
@@ -69,6 +78,8 @@ Future<void> runCardAction(BuildContext context, TicketView ticket, CardAction a
       context.push('/ticket/${ticket.id}/plan');
     case CardAction.review:
       context.push('/ticket/${ticket.id}');
+    case CardAction.connect:
+      context.push('/account/claude');
   }
 }
 
@@ -86,14 +97,14 @@ class TicketCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final company = context.watch<CompanyBloc>().state;
     final root = company.tasks.where((t) => t.id == ticket.rootTaskId).firstOrNull;
-    final state = ticketState(ticket, root: root, needsOwner: board.needsOwner, ownerUnknown: board.ownerUnknown);
+    final state = ticketState(ticket, root: root, needsOwner: board.needsOwner, ownerUnknown: board.ownerUnknown, me: board.me);
     final delegations = company.tasks.where((t) => t.ticketId == ticket.id && t.parentTaskId != null && t.isOpen).length;
     final owner = ticket.ownerName ?? employeeName(company, ticket.ownerEmployeeId);
     final dispatcher = dispatcherName(company, ticket.projectId);
     final action = cardAction(state);
     final deadline = deadlineOf(ticket);
     final done = state == TicketState.done;
-    final line = state.line(owner: owner, dispatcher: dispatcher);
+    final line = state.line(owner: owner, dispatcher: dispatcher, login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired);
 
     final summary = [
       'Ticket ${ticket.number}, ${ticket.title}',
@@ -143,14 +154,19 @@ class TicketCard extends StatelessWidget {
         ],
         if (line != null && !done || delegations > 0) ...[
           const SizedBox(height: 6),
-          Row(children: [
+          // The line takes the whole width and wraps once, so a wait keeps its
+          // name and time ("Waiting for alex's limit until 13:48", QA3 M-m4).
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             if (line != null && !done) ...[
-              _StateMark(state),
+              Padding(padding: const EdgeInsets.only(top: 2), child: _StateMark(state)),
               const SizedBox(width: 6),
-              Flexible(child: Text(line, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: state.needsYou ? Tokens.accentText : Tokens.label2, fontWeight: state.needsYou ? FontWeight.w600 : null))),
+              Expanded(child: Text(line, key: ValueKey('card-line-${ticket.id}'), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: state.needsYou ? Tokens.accentText : Tokens.label2, fontWeight: state.needsYou ? FontWeight.w600 : null))),
+            ] else
+              const Spacer(),
+            if (delegations > 0) ...[
+              const SizedBox(width: 8),
+              Text('⑂ $delegations task${delegations == 1 ? '' : 's'}', style: TextStyle(fontSize: 13, color: Tokens.label2)),
             ],
-            const Spacer(),
-            if (delegations > 0) Text('⑂ $delegations task${delegations == 1 ? '' : 's'}', style: TextStyle(fontSize: 13, color: Tokens.label2)),
           ]),
         ],
         const SizedBox(height: 6),
@@ -181,7 +197,7 @@ class TicketCard extends StatelessWidget {
                 key: ValueKey('card-action-${ticket.id}'),
                 style: FilledButton.styleFrom(minimumSize: const Size(44, 44), shape: const StadiumBorder(), padding: const EdgeInsets.symmetric(horizontal: 16)),
                 onPressed: board.online ? () => runCardAction(context, ticket, action) : null,
-                child: Text(action == CardAction.start ? '▸ Start' : cardActionLabel(action)),
+                child: Text(action == CardAction.start ? '▸ Start' : cardActionLabel(action, expired: board.myLoginExpired)),
               ),
             ),
           ),
@@ -214,7 +230,7 @@ class TicketCard extends StatelessWidget {
       label: summary,
       customSemanticsActions: {
         const CustomSemanticsAction(label: 'Open'): () => context.push('/ticket/${ticket.id}'),
-        if (action != null && board.online) CustomSemanticsAction(label: cardActionLabel(action)): () => runCardAction(context, ticket, action),
+        if (action != null && board.online) CustomSemanticsAction(label: cardActionLabel(action, expired: board.myLoginExpired)): () => runCardAction(context, ticket, action),
         if (!done && board.online) const CustomSemanticsAction(label: 'Move to…'): () => showMoveSheet(context, ticket, board.columns),
       },
       child: card,
@@ -235,7 +251,7 @@ class TicketCard extends StatelessWidget {
         // The card never leaves by itself; the board follows the server.
         return false;
       },
-      background: _SwipeFace(color: Tokens.accent, ink: Tokens.accentInk, icon: CupertinoIcons.play_fill, label: action == null ? '' : cardActionLabel(action), alignment: Alignment.centerLeft),
+      background: _SwipeFace(color: Tokens.accent, ink: Tokens.accentInk, icon: CupertinoIcons.play_fill, label: action == null ? '' : cardActionLabel(action, expired: board.myLoginExpired), alignment: Alignment.centerLeft),
       secondaryBackground: _SwipeFace(color: Tokens.gray, ink: Colors.white, icon: CupertinoIcons.arrow_right_arrow_left, label: 'Move to…', alignment: Alignment.centerRight),
       child: semantic,
     );
@@ -321,6 +337,7 @@ class _StateMark extends StatelessWidget {
         TicketState.working => const StatusDot(pulse: true),
         TicketState.choosing => Icon(CupertinoIcons.circle_lefthalf_fill, size: 12, color: Tokens.label2),
         TicketState.failed => Text('✕', style: TextStyle(color: Tokens.negative, fontWeight: FontWeight.w700)),
+        TicketState.waitingForLimit || TicketState.waitsForLogin => Text('⏸', style: TextStyle(color: Tokens.label2, fontSize: 12)),
         _ when state.needsYou => Text('◆', style: TextStyle(color: Tokens.accent, fontSize: 12)),
         _ => StatusDot(color: Tokens.label3),
       };

@@ -38,6 +38,7 @@ Same dispatch as the desktop IPC   → same chats, tasks, approvals, policy
   loopback and is **off after a new install**. Turning it on also runs
   `tailscale serve --bg --yes --https=8443 http://127.0.0.1:47613`; turning it off
   removes that route. No public Funnel route is ever created.
+  Server setup, ACL, MagicDNS and the reachability checks: [tailscale.md](tailscale.md).
 - Endpoints: `POST /v1/pair`, `GET /v1/pair/{id}` (long poll), `POST /v1/session`,
   `GET /v1/ws`, `POST /v1/upload` (25 MB, per-device inbox), `PUT/DELETE /v1/push`,
   `GET /v1/health`. Protocol 1.2; streamed text arrives as `stream_append`.

@@ -9,6 +9,9 @@ pub const GOAL_MAX: usize = 20_000;
 pub const MAX_CRITERIA: usize = 12;
 /// `waiting_reason` of a ticket's main task whose plan waits for a board member.
 pub const WAITING_PLAN_REVIEW: &str = "plan_review";
+/// `waiting_reason` of a run whose board member has no working Claude login
+/// (none, expired, or disabled): it waits, never on another login (protocol 5).
+pub const WAITING_LOGIN: &str = "login";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]

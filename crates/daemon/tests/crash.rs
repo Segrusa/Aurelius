@@ -31,6 +31,7 @@ async fn connect(root: &Path) -> Client {
         let (tx, rx) = mpsc::unbounded_channel();
         std::mem::forget(rx);
         if let Ok(client) = Client::connect(&aurelius_host::endpoint(root), "test", tx).await {
+            common::sign_in(root, &client, common::BOARD_MEMBER).await;
             return client;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;

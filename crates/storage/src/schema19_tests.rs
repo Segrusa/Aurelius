@@ -60,8 +60,8 @@ fn migration_18_is_released_and_19_rebuilds() {
     let discussions = migrate::MIGRATIONS.iter().find(|m| m.version == discussions::DISCUSSIONS_SCHEMA).unwrap();
     assert!(discussions.rebuild);
     // 20 only adds the read markers.
-    let last = migrate::MIGRATIONS.last().unwrap();
-    assert_eq!((last.version, last.rebuild), (discussions::READS_SCHEMA, false));
+    let reads = migrate::MIGRATIONS.iter().find(|m| m.version == discussions::READS_SCHEMA).unwrap();
+    assert!(!reads.rebuild);
 }
 
 /// A schema 18 database with the group chat (and a message in it), a project

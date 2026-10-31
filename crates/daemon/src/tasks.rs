@@ -19,6 +19,8 @@ const PARK_POLL_MS: i64 = 60_000;
 pub(crate) enum StepError {
     Runtime(RuntimeError),
     Failed(String),
+    /// The board member's Claude login is missing, expired or refused (a 401): wait for it.
+    Login,
 }
 
 impl std::fmt::Display for StepError {
@@ -26,6 +28,7 @@ impl std::fmt::Display for StepError {
         match self {
             StepError::Runtime(e) => write!(f, "{e}"),
             StepError::Failed(m) => f.write_str(m),
+            StepError::Login => f.write_str("waiting for the board member's Claude login"),
         }
     }
 }
@@ -37,7 +40,7 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 /// Run one text-only step to completion and return (text, reported model)
 /// (memory extraction and summaries).
 pub(crate) async fn complete_text(shared: &Arc<Shared>, config: &ResolvedRunConfig, run_id: RunId, system: String, prompt: String) -> Result<(String, Option<String>), StepError> {
-    let runtime = runtimes::runtime_for_config(shared, config).map_err(StepError::Runtime)?;
+    let runtime = runtimes::runtime_for_config(shared, config).map_err(step_error)?;
     let request = RunRequest {
         run_id,
         model_id: config.model.clone().unwrap_or_default(),
@@ -50,7 +53,8 @@ pub(crate) async fn complete_text(shared: &Arc<Shared>, config: &ResolvedRunConf
         session_id: None,
         keep_session: false,
     };
-    let mut handle = runtime.start(request).await.map_err(StepError::Runtime)?;
+    let mut handle = runtime.start(request).await.map_err(step_error)?;
+    let claude = config.provider == Some(aurelius_domain::connection::ProviderKind::ClaudeCode);
     if let Ok(mut map) = shared.cancellers.lock() {
         map.insert(run_id, handle.canceller());
     }
@@ -71,6 +75,16 @@ pub(crate) async fn complete_text(shared: &Arc<Shared>, config: &ResolvedRunConf
             RuntimeEvent::Completed => break Ok(()),
             RuntimeEvent::Interrupted => break Err(StepError::Failed("onderbroken".into())),
             RuntimeEvent::Quota { .. } => break Err(StepError::Failed("rate_limit: the usage limit is reached".into())),
+            RuntimeEvent::Failed { code, .. } if claude && code == aurelius_runtime::claude_code::parse::AUTH_FAILED => {
+                // Claude refused the login (a 401): expired until reconnected.
+                if let Some(user) = config.login_user {
+                    let s = shared.clone();
+                    if let Some(Ok(notices)) = blocking(move || s.service.claude_login_expired(user)).await {
+                        shared.publish(notices);
+                    }
+                }
+                break Err(StepError::Login);
+            }
             RuntimeEvent::Failed { code, message } => break Err(StepError::Failed(format!("{code}: {message}"))),
             _ => {}
         }
@@ -79,6 +93,13 @@ pub(crate) async fn complete_text(shared: &Arc<Shared>, config: &ResolvedRunConf
         map.remove(&run_id);
     }
     result.map(|_| (text, model))
+}
+
+fn step_error(err: RuntimeError) -> StepError {
+    match err {
+        RuntimeError::Login(_) => StepError::Login,
+        other => StepError::Runtime(other),
+    }
 }
 
 pub async fn run_task(shared: Arc<Shared>, job: queries::JobRow) {

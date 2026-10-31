@@ -81,6 +81,27 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('B1-2: a recurring task, new or set again, runs on your own Claude subscription; a one-off task does not say so', (tester) async {
+    final employees = [iris()];
+    await tester.pumpWidget(app(Builder(
+      builder: (context) => Scaffold(
+        body: Column(children: [
+          TextButton(onPressed: () => NewTaskPage.open(context, employees, recurring: true), child: const Text('recurring')),
+          TextButton(onPressed: () => NewTaskPage.open(context, employees), child: const Text('once')),
+        ]),
+      ),
+    )));
+    await tester.tap(find.text('recurring'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('schedule-subscription')));
+    expect(find.text('Tasks of this app run on your own Claude subscription.'), findsOneWidget);
+    Navigator.of(tester.element(find.byType(NewTaskPage))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('once'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('schedule-subscription')), findsNothing);
+  });
+
   testWidgets('a new task is one screen: title, criteria per line, lead employee', (tester) async {
     NewTask? result;
     final employees = [iris(), employeeOf(id: 'mgr-2', name: 'Atlas')];

@@ -57,6 +57,8 @@ fn column_for(status: TaskStatus, waiting_reason: Option<&str>) -> Option<Column
         // resumption passes through Queued too, so it moves nothing.
         TaskStatus::Draft | TaskStatus::Queued => None,
         TaskStatus::Waiting if waiting_reason == Some(WAITING_PLAN_REVIEW) => Some(ColumnKind::PlanReview),
+        // Waiting for the Claude login of its board member: it stays where it is (Todo or Doing, `needs: login`).
+        TaskStatus::Waiting if waiting_reason == Some(aurelius_domain::task::WAITING_LOGIN) => None,
         TaskStatus::Running | TaskStatus::Waiting | TaskStatus::Failed => Some(ColumnKind::Doing),
         TaskStatus::Review => Some(ColumnKind::Review),
         TaskStatus::Succeeded => Some(ColumnKind::Done),

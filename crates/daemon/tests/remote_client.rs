@@ -15,7 +15,6 @@ async fn start_remote(root: &std::path::Path) -> Daemon {
     // SAFETY (test): every test in this binary sets the same values.
     unsafe {
         std::env::set_var("AURELIUS_REMOTE_PORT", "0");
-        std::env::set_var("AURELIUS_NO_TAILSCALE", "1");
         std::env::set_var("AURELIUS_ENV", "dev");
     }
     start_with_delay(root, 5).await
@@ -44,6 +43,8 @@ async fn connect_remote(server: &RemoteServer) -> Result<(Client, Channels), Cli
     let (events_tx, events) = mpsc::unbounded_channel();
     let (streams_tx, streams) = mpsc::unbounded_channel();
     let client = Client::connect_remote(server, "remote-window", events_tx, Some(streams_tx)).await?;
+    // The board member `connect` made on the server signs in on this device too.
+    client.user_login(common::BOARD_MEMBER, common::BOARD_PASSWORD, "remote window").await?;
     Ok((client, (events, streams)))
 }
 

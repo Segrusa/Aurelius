@@ -198,8 +198,7 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     let dir = tempfile::tempdir().unwrap();
     let rt = Scripted::new();
     let daemon = common::start_with(dir.path(), rt.clone()).await;
-    let client = common::connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder", None).await;
     employee(&client, "Helper", Some(builder)).await;
     let atlas = project(&client, "Atlas").await;
@@ -307,8 +306,7 @@ async fn a_failed_summary_is_visible_and_a_retry_writes_it_once() {
     rt.main.send_replace(true);
     rt.fail_memory.store(true, Ordering::SeqCst);
     let daemon = common::start_with(dir.path(), rt.clone()).await;
-    let client = common::connect(dir.path()).await;
-    client.user_create("grace", "a-long-enough-password").await.unwrap();
+    let client = common::connect_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder", None).await;
     let atlas = project(&client, "Atlas").await;
     let id = ticket(&client, atlas, "Login page", "A login page.", builder).await;

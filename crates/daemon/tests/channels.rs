@@ -13,7 +13,9 @@ use std::time::Duration;
 
 async fn raw(root: &std::path::Path, accepts: Vec<String>) -> BoxStream {
     let mut stream = ipc::connect(&aurelius_host::endpoint(root)).await.unwrap();
-    let hello = Request::read(1, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts, user_id: None }));
+    // Signed in: a board member's session (the helper's), its token in the hello.
+    let token = sign_in(root, &connect_anonymous(root).await, BOARD_MEMBER).await.session_token;
+    let hello = Request::read(1, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts, session_token: Some(token) }));
     write_frame(&mut stream, &hello).await.unwrap();
     loop {
         if let ServerMessage::Response { request_id: 1, .. } = read_frame::<ServerMessage, _>(&mut stream).await.unwrap().unwrap() {
@@ -98,10 +100,12 @@ async fn client_open_names_team_channels_in_its_hello_and_again_when_it_identifi
     let channels = aurelius_client::Client::open(&target, "test", tx, None, &[client_feature::TEAM_CHANNELS]).await.unwrap();
     let (tx, mut plain) = tokio::sync::mpsc::unbounded_channel();
     let older = aurelius_client::Client::open(&target, "test", tx, None, &[]).await.unwrap();
+    let token = sign_in(dir.path(), &channels, BOARD_MEMBER).await.session_token;
+    let older_token = sign_in(dir.path(), &older, BOARD_MEMBER).await.session_token;
     let orbit = channels.channels().await.unwrap().channels.into_iter().find(|c| c.project_id.is_some()).unwrap().conversation_id;
-    // A second hello (the remembered board member) keeps the client's features.
-    channels.identify(aurelius_domain::UserId::new()).await.unwrap();
-    older.identify(aurelius_domain::UserId::new()).await.unwrap();
+    // A second hello (the session this device kept) keeps the client's features.
+    channels.resume(&token).await.unwrap();
+    older.resume(&older_token).await.unwrap();
     channels.subscribe(0).await.unwrap();
     older.subscribe(0).await.unwrap();
     send(&client, Some(orbit), "Live in Orbit").await;
@@ -114,16 +118,8 @@ async fn client_open_names_team_channels_in_its_hello_and_again_when_it_identifi
 async fn reading_a_channel_marks_it_read_for_that_board_member_only() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
-    let (alex, robin) = (connect(dir.path()).await, connect(dir.path()).await);
-    let password = "correct-Horse-battery-7";
-    let user = |r: aurelius_domain::CommandReceipt| match r.result {
-        CommandResult::UserCreated { user_id } => user_id,
-        other => panic!("{other:?}"),
-    };
-    let first = user(alex.user_create("alex", password).await.unwrap());
-    alex.user_use(first, password).await.unwrap();
-    let second = user(alex.user_create("robin", password).await.unwrap());
-    robin.user_use(second, password).await.unwrap();
+    let alex = connect_as(dir.path(), "alex").await;
+    let robin = connect_as(dir.path(), "robin").await;
     alex.execute(envelope(Command::CreateProject(CreateProject { name: "Orbit".into(), description: None, folder: None }), None)).await.unwrap();
     let orbit = |c: aurelius_domain::views::ChannelsSnapshot| c.channels.into_iter().find(|c| c.project_id.is_some()).unwrap();
     let id = orbit(alex.channels().await.unwrap()).conversation_id;

@@ -46,7 +46,14 @@ const MEANINGFUL: &[&str] = &[
 ];
 
 fn is_meaningful(event_type: &str) -> bool {
-    MEANINGFUL.contains(&event_type)
+    MEANINGFUL.contains(&event_type) || event_type == "user.disabled"
+}
+
+/// Account writes recorded as `host.write` that belong in the timeline (MU3-04 AC4).
+const ACCOUNT_WRITES: &[&str] = &["session.revoke", "user.set_password"];
+
+fn meaningful(row: &Row) -> bool {
+    is_meaningful(&row.event_type) || (row.event_type == "host.write" && row.metadata["method"].as_str().is_some_and(|m| ACCOUNT_WRITES.contains(&m)))
 }
 
 struct Row {
@@ -62,6 +69,11 @@ struct Row {
 
 fn lookup(conn: &Connection, sql: &str, id: &str) -> Option<String> {
     conn.query_row(sql, [id], |r| r.get::<_, String>(0)).ok()
+}
+
+/// A board member's name by the id in event metadata ("A board member" when gone).
+fn board_member(conn: &Connection, id: &serde_json::Value) -> String {
+    id.as_str().and_then(|id| lookup(conn, "SELECT username FROM users WHERE id = ?1", id)).unwrap_or_else(|| "A board member".into())
 }
 
 fn card(conn: &Connection, row: &Row) -> TimelineCard {
@@ -162,6 +174,21 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
         ),
         "employee.proposal_decided" => ("decision", "DECISION", format!("You {} the colleague {}", if m["approved"].as_bool() == Some(true) { "approved" } else { "turned down" }, s(&m["subject"])), s(&m["note"]), "You".into()),
         "attachment.added" => ("minor", "ATTACHMENT", format!("Attachment {}", s(&m["name"])), String::new(), "You".into()),
+        // Accounts: always with the name of the board member who did it.
+        "host.write" if m["method"].as_str() == Some("session.revoke") => {
+            let by = board_member(conn, &m["by"]);
+            let whose = if m["by"] == m["subject_user_id"] { "their own".to_string() } else { format!("{}'s", s(&m["subject"])) };
+            ("decision", "SESSION", format!("{by} signed out {whose} session on {}", s(&m["device_name"])), String::new(), by)
+        }
+        "host.write" if m["method"].as_str() == Some("user.set_password") => {
+            let by = board_member(conn, &m["by"]);
+            let title = if m["temporary"].as_bool() == Some(true) { format!("{by} set a temporary password for {}", s(&m["subject"])) } else { format!("{by} changed their password") };
+            ("decision", "ACCOUNT", title, "Other sessions were signed out".into(), by)
+        }
+        "user.disabled" => {
+            let by = board_member(conn, &m["by"]);
+            ("decision", "ACCOUNT", format!("{by} disabled {}", s(&m["subject"])), "Their sessions were signed out".into(), by)
+        }
         other => ("activity", "ACTIVITY", other.to_string(), row.aggregate_type.clone(), row.actor_kind.clone()),
     };
     TimelineCard {
@@ -225,7 +252,7 @@ pub fn cards(
     for row in rows {
         let row = row?;
         last_seq = Some(row.seq as u64);
-        if !activity && !is_meaningful(&row.event_type) {
+        if !activity && !meaningful(&row) {
             continue;
         }
         out.push(card(conn, &row));
@@ -245,6 +272,13 @@ pub const PLAN_TITLE: &str = "Plan to review";
 
 /// Events that deserve a notification.
 pub fn notification_for(event_type: &str, metadata: &serde_json::Value) -> Option<(&'static str, &'static str)> {
+    // A board member's own Claude login is needed: for that board member only (`for_user`).
+    if metadata["needs"].as_str() == Some("login") && metadata["for_user"].is_string() {
+        return Some(match metadata["login"].as_str() {
+            Some("expired") => ("action", "Reconnect your Claude login"),
+            _ => ("action", "Connect your Claude login"),
+        });
+    }
     match event_type {
         "approval.requested" if metadata["tool"].as_str() == Some("claude.AskUserQuestion") => Some(("action", "Claude asks you something")),
         "approval.requested" if metadata["tool"].as_str() == Some("claude.ExitPlanMode") => Some(("action", PLAN_TITLE)),
@@ -268,6 +302,14 @@ pub fn notification_for(event_type: &str, metadata: &serde_json::Value) -> Optio
     }
 }
 
+/// "Connect/Reconnect your Claude login" (`n`) is resolved once that board
+/// member linked their login after it was made (QA2 m2).
+macro_rules! login_linked_since {
+    () => {
+        "EXISTS (SELECT 1 FROM claude_logins l WHERE l.user_id = n.user_id AND l.status = 'linked' AND l.linked_at_ms >= n.created_at_ms)"
+    };
+}
+
 /// Create a notification for an event, deduplicated by the event. Called from
 /// `events::append`, so it happens exactly once per event (never on replay).
 pub fn notify(tx: &rusqlite::Transaction<'_>, seq: u64) -> Result<bool, StorageError> {
@@ -281,22 +323,63 @@ pub fn notify(tx: &rusqlite::Transaction<'_>, seq: u64) -> Result<bool, StorageE
     let Some((event_id, event_type, aggregate_type, aggregate_id, metadata)) = row else { return Ok(false) };
     let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap_or_default();
     let Some((severity, _)) = notification_for(&event_type, &metadata) else { return Ok(false) };
+    // For one board member only; one unread "connect your login" at a time is enough.
+    let user = metadata["for_user"].as_str();
+    if let (Some(user), Some("login")) = (user, metadata["needs"].as_str()) {
+        let unread: bool = tx.query_row(
+            concat!(
+                "SELECT EXISTS(SELECT 1 FROM notifications n JOIN events e ON e.id = n.event_id
+                           WHERE n.user_id = ?1 AND n.read_at_ms IS NULL AND json_extract(e.metadata_json, '$.needs') = 'login' AND NOT ",
+                login_linked_since!(),
+                ")"
+            ),
+            [user],
+            |r| r.get(0),
+        )?;
+        if unread {
+            return Ok(false);
+        }
+    }
     let target = serde_json::json!({ "type": event_type, "aggregate_type": aggregate_type, "aggregate_id": aggregate_id, "seq": seq });
     let inserted = tx.execute(
-        "INSERT OR IGNORE INTO notifications(id, event_id, dedupe_key, severity, target_json, created_at_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![aurelius_domain::EventId::new().to_string(), event_id, format!("event:{event_id}"), severity, target.to_string(), now_ms()],
+        "INSERT OR IGNORE INTO notifications(id, event_id, dedupe_key, severity, target_json, created_at_ms, user_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![aurelius_domain::EventId::new().to_string(), event_id, format!("event:{event_id}"), severity, target.to_string(), now_ms(), user],
     )?;
     Ok(inserted == 1)
 }
 
+/// Every notification, also those for one board member (push routing, tests).
 pub fn list_notifications(conn: &Connection, limit: u32) -> Result<Vec<NotificationView>, StorageError> {
+    list(conn, limit, None)
+}
+
+/// What `user`'s Inbox shows: the notifications for everyone and their own
+/// (none: only those for everyone).
+pub fn list_notifications_for(conn: &Connection, limit: u32, user: Option<&str>) -> Result<Vec<NotificationView>, StorageError> {
+    list(conn, limit, Some(viewer(user)))
+}
+
+/// Whose notifications a query sees: everyone's and those of the board member
+/// bound at `?{at}` (`viewer`; NULL: only everyone's).
+fn visible_to(at: u8) -> String {
+    format!("(n.user_id IS NULL OR n.user_id = ?{at})")
+}
+
+/// The value for `visible_to`: `user` when it is a board member's id, else NULL.
+fn viewer(user: Option<&str>) -> Option<String> {
+    user.filter(|u| aurelius_domain::UserId::parse(u).is_ok()).map(str::to_owned)
+}
+
+/// `viewer`: whose Inbox (`Some(None)`: only everyone's); `None`: every notification.
+fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>) -> Result<Vec<NotificationView>, StorageError> {
+    let visible = if viewer.is_some() { visible_to(2) } else { "?2 IS NULL".to_string() };
     let mut stmt = conn.prepare(
         &format!(
             "SELECT n.id, n.severity, n.target_json, n.created_at_ms, n.read_at_ms, e.type, e.metadata_json, e.correlation_id
-             FROM notifications n JOIN events e ON e.id = n.event_id WHERE {STILL_RELEVANT} ORDER BY n.created_at_ms DESC LIMIT ?1"
+             FROM notifications n JOIN events e ON e.id = n.event_id WHERE {STILL_RELEVANT} AND {visible} ORDER BY n.created_at_ms DESC LIMIT ?1"
         ),
     )?;
-    let rows = stmt.query_map([limit], |r| {
+    let rows = stmt.query_map(params![limit, viewer.flatten()], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
@@ -334,31 +417,51 @@ pub fn list_notifications(conn: &Connection, limit: u32) -> Result<Vec<Notificat
 }
 
 pub fn unread_count(conn: &Connection) -> Result<u64, StorageError> {
+    unread_count_for(conn, None)
+}
+
+pub fn unread_count_for(conn: &Connection, user: Option<&str>) -> Result<u64, StorageError> {
     Ok(conn.query_row(
-        &format!("SELECT COUNT(*) FROM notifications n JOIN events e ON e.id = n.event_id WHERE n.read_at_ms IS NULL AND {STILL_RELEVANT}"),
-        [],
+        &format!("SELECT COUNT(*) FROM notifications n JOIN events e ON e.id = n.event_id WHERE n.read_at_ms IS NULL AND {STILL_RELEVANT} AND {}", visible_to(1)),
+        [viewer(user)],
         |r| r.get::<_, i64>(0),
     )? as u64)
 }
 
 /// A request for the user that was handled (an approval or a colleague
 /// proposal decided, answered or expired; a task no longer waiting for them) is no longer shown.
-const STILL_RELEVANT: &str = "NOT (e.type = 'approval.requested' AND EXISTS (SELECT 1 FROM approvals a WHERE a.id = e.aggregate_id AND a.status <> 'pending'))
+const STILL_RELEVANT: &str = concat!("NOT (e.type = 'approval.requested' AND EXISTS (SELECT 1 FROM approvals a WHERE a.id = e.aggregate_id AND a.status <> 'pending'))
      AND NOT (e.type IN ('employee.proposed','employee.instructions_proposed') AND EXISTS (SELECT 1 FROM proposals p WHERE p.id = e.aggregate_id AND p.status <> 'pending'))
      AND NOT (e.type = 'task.variants_ready' AND NOT EXISTS (SELECT 1 FROM task_variant_sets s WHERE s.task_id = e.aggregate_id AND s.phase = 'ready'))
-     AND NOT (e.type = 'task.waiting' AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = e.aggregate_id AND t.status = 'waiting'))";
+     AND NOT (e.type = 'task.waiting' AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = e.aggregate_id AND t.status = 'waiting'))
+     AND NOT (n.user_id IS NOT NULL AND json_extract(e.metadata_json, '$.needs') = 'login' AND ", login_linked_since!(), ")");
+
+
 
 /// Remove one notification (the event it was about stays).
 pub fn dismiss(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<usize, StorageError> {
-    Ok(tx.execute("DELETE FROM notifications WHERE id = ?1", [id])?)
+    dismiss_for(tx, id, None)
+}
+
+/// `dismiss`, only of what `user` sees (never another board member's own).
+pub fn dismiss_for(tx: &rusqlite::Transaction<'_>, id: &str, user: Option<&str>) -> Result<usize, StorageError> {
+    Ok(tx.execute(&format!("DELETE FROM notifications AS n WHERE n.id = ?1 AND {}", visible_to(2)), params![id, viewer(user)])?)
 }
 
 pub fn dismiss_all(tx: &rusqlite::Transaction<'_>) -> Result<usize, StorageError> {
-    Ok(tx.execute("DELETE FROM notifications", [])?)
+    dismiss_all_for(tx, None)
+}
+
+pub fn dismiss_all_for(tx: &rusqlite::Transaction<'_>, user: Option<&str>) -> Result<usize, StorageError> {
+    Ok(tx.execute(&format!("DELETE FROM notifications AS n WHERE {}", visible_to(1)), [viewer(user)])?)
 }
 
 pub fn mark_all_read(tx: &rusqlite::Transaction<'_>) -> Result<usize, StorageError> {
-    Ok(tx.execute("UPDATE notifications SET read_at_ms = ?1 WHERE read_at_ms IS NULL", [now_ms()])?)
+    mark_all_read_for(tx, None)
+}
+
+pub fn mark_all_read_for(tx: &rusqlite::Transaction<'_>, user: Option<&str>) -> Result<usize, StorageError> {
+    Ok(tx.execute(&format!("UPDATE notifications AS n SET read_at_ms = ?1 WHERE n.read_at_ms IS NULL AND {}", visible_to(2)), params![now_ms(), viewer(user)])?)
 }
 
 /// The notification created for the event at `seq`, with what it points at
@@ -368,19 +471,21 @@ pub struct FoundNotification {
     pub view: NotificationView,
     pub aggregate_type: String,
     pub aggregate_id: String,
+    /// The board member it is for (`notifications.user_id`); none: for everyone.
+    pub user_id: Option<String>,
 }
 
 pub fn notification_at_seq(conn: &Connection, seq: u64) -> Result<Option<FoundNotification>, StorageError> {
-    let found: Option<(String, String, String)> = conn
+    let found: Option<(String, String, String, Option<String>)> = conn
         .query_row(
-            "SELECT n.id, e.aggregate_type, e.aggregate_id FROM notifications n JOIN events e ON e.id = n.event_id WHERE e.seq = ?1",
+            "SELECT n.id, e.aggregate_type, e.aggregate_id, n.user_id FROM notifications n JOIN events e ON e.id = n.event_id WHERE e.seq = ?1",
             [seq as i64],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .ok();
-    let Some((id, aggregate_type, aggregate_id)) = found else { return Ok(None) };
+    let Some((id, aggregate_type, aggregate_id, user_id)) = found else { return Ok(None) };
     Ok(list_notifications(conn, 50)?
         .into_iter()
         .find(|n| n.id == id)
-        .map(|view| FoundNotification { view, aggregate_type, aggregate_id }))
+        .map(|view| FoundNotification { view, aggregate_type, aggregate_id, user_id }))
 }

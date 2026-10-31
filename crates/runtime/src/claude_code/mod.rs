@@ -14,11 +14,15 @@
 //!   employee's mode becomes `--permission-mode`; anything that mode would ask
 //!   goes to Aurelius' approval bridge (an MCP tool) and so to the user's inbox.
 //! The init line is checked against the profile (fail closed). The child gets
-//! an allowlisted environment.
+//! an allowlisted environment and exactly one Claude login: the board member's
+//! own config folder (`login`), never the daemon user's `~/.claude`.
 
 mod job;
+pub mod login;
 pub mod parse;
 pub mod session;
+
+pub use login::ClaudeLogin;
 
 use crate::*;
 use std::path::{Path, PathBuf};
@@ -33,11 +37,15 @@ pub struct ClaudeCodeRuntime {
     /// Aurelius-managed working directories (`<data>/runtimes/<connection>/runs`).
     pub run_root: PathBuf,
     pub model: Option<String>,
+    /// Whose Claude login the child uses: a run always has one (it never starts
+    /// without, `start` refuses). Without one (`--version`) the child gets an
+    /// empty config folder of Aurelius' own, never `~/.claude`.
+    pub login: Option<ClaudeLogin>,
 }
 
 /// Environment variables passed to the child. Everything else (including any
-/// API keys in the parent environment) is left out; the CLI then uses the
-/// login the user made in Claude Code itself.
+/// API keys, tokens or a `CLAUDE_CONFIG_DIR` in the daemon's environment) is
+/// left out; the child gets its login only through `ClaudeCodeRuntime::login`.
 const ENV_ALLOWLIST: &[&str] = &[
     "PATH", "PATHEXT", "SYSTEMROOT", "SystemRoot", "WINDIR", "COMSPEC", "TEMP", "TMP", "USERPROFILE", "HOMEDRIVE",
     "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "USERNAME", "USERDOMAIN", "HOME", "USER", "LOGNAME", "SHELL",
@@ -295,6 +303,75 @@ pub fn profile_arguments(profile: &ToolProfile, model: Option<&str>, system_file
     args
 }
 
+/// The file tools Sentinel D5 denies on what is not the run's own.
+const DENIED_TOOLS: &[&str] = &["Read", "Edit", "Write", "Glob", "Grep"];
+/// The tools that search a folder: Claude Code checks the folder their `path`
+/// resolves to against the `Read` deny rules (SEC2 M1). `Grep(…)`/`Glob(…)` rules
+/// are kept with them: they do no harm if Claude Code only reads `Read(…)` ones.
+const SEARCH_TOOLS: &[&str] = &["Read", "Glob", "Grep"];
+
+/// A path as Claude Code's permission rules take an absolute one (`//abs/path`).
+fn rule_path(path: &Path) -> String {
+    let text = path.to_string_lossy().replace('\\', "/");
+    format!("/{}", if text.starts_with('/') { text } else { format!("/{text}") })
+}
+
+/// The permission rules a run on `login` gets (Sentinel D5, F2, SEC2 M1).
+///
+/// - Every file tool is denied what is in another board member's login folder
+///   (`<other>/**`), Aurelius' database and the daemon user's own Claude folders.
+/// - A search is denied the folder `logins/` itself and each other login folder
+///   itself (`Read`/`Grep`/`Glob` on the exact folder): Claude Code checks the
+///   folder a Grep or Glob searches against these, so `path = logins` or
+///   `path = <other>` is refused for certain, not best-effort.
+/// - The run's own login folder stays open (Claude keeps its plans there).
+///
+/// What this cannot close (SEC2 M1, documented in f4-rapport.md): a search from a
+/// folder above `logins/` (`<data>`, the home folder) is checked on that folder
+/// only, and whether Claude Code then skips the login folders inside is
+/// best-effort. `logins/.ignore` (`ensure_dir`) makes ripgrep skip them, as one
+/// more layer that is not relied on. No run works in such a folder unless a
+/// project's folder holds the data folder (`holds_logins` warns then). Bash
+/// (`grep -r`, a script) is the accepted rest risk of phase 3 (until runs are
+/// sandboxed); whether Claude Code enforces all this is proven only by an E2E
+/// run on a real login (an open point).
+pub fn deny_rules(login: &ClaudeLogin) -> Vec<String> {
+    let own = login.config_dir();
+    let mut paths: Vec<String> = Vec::new();
+    let mut searched: Vec<String> = Vec::new();
+    if let Some(logins) = own.parent() {
+        searched.push(rule_path(logins));
+        for other in std::fs::read_dir(logins).into_iter().flatten().filter_map(Result::ok).filter(|e| e.path().is_dir()).map(|e| e.path()) {
+            if other != own {
+                paths.push(format!("{}/**", rule_path(&other)));
+                searched.push(rule_path(&other));
+            }
+        }
+        if let Some(data) = logins.parent() {
+            paths.push(format!("{}*", rule_path(&data.join("data").join("aurelius.sqlite"))));
+        }
+    }
+    paths.extend(["~/.claude/**", "~/.claude*", "~/.config/claude/**"].map(str::to_owned));
+    DENIED_TOOLS
+        .iter()
+        .flat_map(|tool| paths.iter().map(move |p| format!("{tool}({p})")))
+        .chain(SEARCH_TOOLS.iter().flat_map(|tool| searched.iter().map(move |p| format!("{tool}({p})"))))
+        .collect()
+}
+
+/// Whether a run's work folders hold `logins/` (a project's folder above the
+/// data folder): then a search of its own tree reaches the login folders, and
+/// only the best-effort part of `deny_rules` keeps them out.
+pub fn holds_logins(folders: &[std::path::PathBuf], login: &ClaudeLogin) -> bool {
+    let Some(logins) = login.config_dir().parent().and_then(|l| l.canonicalize().ok()) else { return false };
+    folders.iter().filter_map(|f| f.canonicalize().ok()).any(|f| logins.starts_with(f))
+}
+
+/// `--settings` of a run: its deny rules (D5).
+fn deny_settings(login: &ClaudeLogin) -> String {
+    serde_json::json!({ "permissions": { "deny": deny_rules(login) } }).to_string()
+}
+
 /// Whether `--session-id` takes this: a lowercase hyphenated UUID.
 fn is_session_id(id: &str) -> bool {
     id.len() == 36
@@ -407,6 +484,13 @@ pub fn sent_request(args: &[String], session: SessionUse, turns: &[Turn]) -> cra
             *config = format!("<{} MCP server(s): {}>", mcp_servers.len(), mcp_servers.join(", "));
         }
     }
+    // The deny rules name the login folders (D4): only how many there are.
+    if let Some(i) = shown.iter().position(|a| a == "--settings") {
+        if let Some(settings) = shown.get_mut(i + 1) {
+            let value: serde_json::Value = serde_json::from_str(settings).unwrap_or_default();
+            *settings = format!("<{} deny rule(s)>", value["permissions"]["deny"].as_array().map_or(0, Vec::len));
+        }
+    }
     let session = match session {
         SessionUse::None => "none",
         SessionUse::Keep => "new",
@@ -434,15 +518,60 @@ pub fn permission_mode_request(request_id: &str, mode: &str) -> Option<String> {
     Some(serde_json::json!({ "type": "control_request", "request_id": request_id, "request": { "subtype": "set_permission_mode", "mode": mode } }).to_string())
 }
 
+/// What `claude auth status --json` says of a login (no prompt, no cost).
+/// Only these fields are read; nothing of the credentials themselves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuthStatus {
+    pub logged_in: bool,
+    /// e.g. "claude.ai", "none".
+    pub auth_method: Option<String>,
+    pub email: Option<String>,
+    /// e.g. "max", "pro".
+    pub plan: Option<String>,
+}
+
+impl AuthStatus {
+    /// Tolerant: the JSON is not a documented format (CLI 2.1.312 has `loggedIn`,
+    /// `authMethod` and, once signed in, `subscriptionType` and the account's e-mail).
+    pub fn parse(json: &[u8]) -> Option<Self> {
+        let value: serde_json::Value = serde_json::from_slice(json).ok()?;
+        let text = |v: &serde_json::Value| v.as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+        let email = ["email", "emailAddress"].iter().find_map(|k| text(&value[*k])).or_else(|| text(&value["account"]["email"])).or_else(|| text(&value["account"]["emailAddress"]));
+        Some(Self {
+            logged_in: value["loggedIn"].as_bool().unwrap_or(false),
+            auth_method: text(&value["authMethod"]),
+            email: email.filter(|e| e.contains('@') && e.len() <= 320),
+            plan: text(&value["subscriptionType"]).filter(|p| p.len() <= 64),
+        })
+    }
+}
+
 impl ClaudeCodeRuntime {
     fn command(&self, args: &[String]) -> Command {
+        self.command_from(args, |key| std::env::var_os(key))
+    }
+
+    /// The folder the child keeps its config, login and sessions in: the run's
+    /// login, else an empty one of Aurelius' own (so never `~/.claude`).
+    pub fn config_dir(&self) -> PathBuf {
+        match &self.login {
+            Some(login) => login.config_dir().to_path_buf(),
+            None => self.run_root.join("no-login"),
+        }
+    }
+
+    /// `command` with the daemon's environment given, so a test can show what
+    /// of it reaches the child.
+    fn command_from(&self, args: &[String], parent: impl Fn(&str) -> Option<std::ffi::OsString>) -> Command {
         let mut command = Command::new(&self.executable);
         command.args(args).env_clear().kill_on_drop(true);
         for key in ENV_ALLOWLIST {
-            if let Some(value) = std::env::var_os(key) {
+            if let Some(value) = parent(key) {
                 command.env(key, value);
             }
         }
+        // The run's own login, after the allowlist: the only one the child gets.
+        command.env(login::CONFIG_DIR_ENV, self.config_dir());
         // A run is one turn: it ends at the first `result` and the job object
         // kills what is left. A background subagent or shell would answer after
         // that, into nothing ("I'll wait for the agent…"). In the foreground the
@@ -502,23 +631,34 @@ impl ClaudeCodeRuntime {
         value["result"].as_str().map(str::to_owned).ok_or_else(|| RuntimeError::Unavailable("Claude Code returned no usage overview.".into()))
     }
 
-    /// `claude auth status --json` → subscription type (e.g. "max"). No prompt, no cost.
-    pub async fn subscription_type(&self) -> Option<String> {
-        let output = self.command(&["auth".into(), "status".into(), "--json".into()]).stdout(Stdio::piped()).stderr(Stdio::null()).output().await.ok()?;
-        let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-        value["subscriptionType"].as_str().map(str::to_owned)
+    /// `claude auth status --json` of this login: signed in or not, the e-mail
+    /// and the plan. No prompt, no cost; never opens `.credentials.json` itself.
+    pub async fn auth_status(&self) -> Result<AuthStatus, RuntimeError> {
+        let output = self
+            .command(&["auth".into(), "status".into(), "--json".into()])
+            .current_dir(self.login.as_ref().map_or(self.run_root.as_path(), |l| l.config_dir()))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .await
+            .map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
+        // Signed out it exits 1 with `loggedIn: false` (CLI 2.1.312).
+        AuthStatus::parse(&output.stdout).ok_or_else(|| RuntimeError::Unavailable("Claude Code gave no sign-in status.".into()))
     }
 
-    /// `claude auth status`: exit 0 when signed in, 1 when not. No prompt, no cost.
-    pub async fn signed_in(&self) -> Result<bool, RuntimeError> {
-        let status = self
-            .command(&["auth".into(), "status".into()])
+    /// `claude auth logout` of this login (unlink, a disabled board member).
+    pub async fn logout(&self) -> Result<(), RuntimeError> {
+        let Some(login) = &self.login else { return Ok(()) };
+        self.command(&["auth".into(), "logout".into()])
+            .current_dir(login.config_dir())
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .await
             .map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
-        Ok(status.success())
+        Ok(())
     }
 }
 
@@ -539,6 +679,10 @@ impl AgentRuntime for ClaudeCodeRuntime {
     }
 
     async fn start(&self, request: RunRequest) -> Result<RunHandle, RuntimeError> {
+        // No fallback: a run without a board member's login never starts (MU3-12).
+        if self.login.is_none() {
+            return Err(RuntimeError::Login("This run has no board member's Claude login.".into()));
+        }
         // An employee works in its project folder; everything else in a scratch folder.
         let workdir = match &request.profile {
             ToolProfile::Work { folders, .. } if !folders.is_empty() => folders[0].clone(),
@@ -554,12 +698,22 @@ impl AgentRuntime for ClaudeCodeRuntime {
             None => None,
         };
         let mut args = profile_arguments(&request.profile, model, system_file.as_ref().map(|f| f.0.as_path()), request.effort.as_deref());
+        // Its file tools stay out of the other logins, the database and ~/.claude (D5).
+        if let Some(login) = &self.login {
+            args.push("--settings".into());
+            args.push(deny_settings(login));
+            if let ToolProfile::Work { folders, .. } = &request.profile {
+                if holds_logins(folders, login) {
+                    tracing::warn!(run = %request.run_id, "a work folder of this run holds the Claude login folders; only Claude Code's best effort keeps its searches out of them");
+                }
+            }
+        }
         // The conversation's session, or the run's own (named after the run).
         // Resumed only if Claude Code still has it; otherwise a fresh one, and the
         // turns carry the context. A browser run keeps its employee's session id and
         // stores nothing, so after a usage limit it starts over from the turns.
         let session_id = request.session_id.clone().filter(|id| is_session_id(id)).unwrap_or_else(|| request.run_id.to_string());
-        let claude_dir = session::claude_dir();
+        let claude_dir = Some(self.config_dir());
         let session = match (request.session, claude_dir.as_deref()) {
             _ if pins_session(&request.profile) => SessionUse::None,
             (SessionUse::None, _) | (_, None) => SessionUse::None,
@@ -732,6 +886,10 @@ impl AgentRuntime for ClaudeCodeRuntime {
                 None if parse::quota_in(&stderr_text).is_some() => {
                     let _ = tx.send(RuntimeEvent::Quota { reset_at_ms: parse::quota_in(&stderr_text).flatten() }).await;
                 }
+                // Or that its login is gone: it waits for the login, not a failure.
+                None if parse::auth_in(&stderr_text) => {
+                    let _ = tx.send(RuntimeEvent::Failed { code: parse::AUTH_FAILED.into(), message: parse::describe(parse::AUTH_FAILED) }).await;
+                }
                 None => {
                     // No result line: never success.
                     let detail = if stderr_text.trim().is_empty() {
@@ -750,13 +908,14 @@ impl AgentRuntime for ClaudeCodeRuntime {
         true
     }
 
+    /// Only in this login's folder: a session of another login is never found (R4).
     fn has_session(&self, id: &str) -> bool {
-        is_session_id(id) && session::claude_dir().is_some_and(|dir| session::transcript(&dir, id).is_some())
+        is_session_id(id) && self.login.is_some() && session::transcript(&self.config_dir(), id).is_some()
     }
 
     fn remove_session(&self, id: &str) {
-        if let (true, Some(dir)) = (is_session_id(id), session::claude_dir()) {
-            session::remove(&dir, id);
+        if is_session_id(id) && self.login.is_some() {
+            session::remove(&self.config_dir(), id);
         }
     }
 }
@@ -1008,7 +1167,7 @@ Look"));
 
     #[test]
     fn every_child_runs_without_background_tasks() {
-        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None };
+        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None, login: None };
         let command = runtime.command(&["--version".into()]);
         let value = command.as_std().get_envs().find(|(k, _)| *k == DISABLE_BACKGROUND_TASKS).and_then(|(_, v)| v);
         assert_eq!(value, Some(std::ffi::OsStr::new("1")));
@@ -1024,7 +1183,7 @@ Look"));
         assert_eq!(subagent_model(None, Some("")), None, "set to Disabled: the CLI decides");
         assert_eq!(subagent_model(Some("opus"), Some("haiku")).as_deref(), Some("opus"));
         // The child gets it (this test binary does not set AURELIUS_SUBAGENT_MODEL).
-        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None };
+        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None, login: None };
         let command = runtime.command(&["--version".into()]);
         let value = command.as_std().get_envs().find(|(k, _)| *k == SUBAGENT_MODEL).and_then(|(_, v)| v);
         let expected = subagent_model(std::env::var(SUBAGENT_MODEL_SETTING).ok().as_deref(), None);
@@ -1033,11 +1192,164 @@ Look"));
 
     #[test]
     fn every_child_builds_with_half_the_cores() {
-        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None };
+        let runtime = ClaudeCodeRuntime { executable: "claude".into(), run_root: "runs".into(), model: None, login: None };
         let command = runtime.command(&["--version".into()]);
         let value = command.as_std().get_envs().find(|(k, _)| *k == CARGO_BUILD_JOBS).and_then(|(_, v)| v);
         let jobs: usize = value.and_then(|v| v.to_str()).and_then(|v| v.parse().ok()).unwrap();
         let cores = std::thread::available_parallelism().unwrap().get();
         assert_eq!(jobs, (cores / 2).max(1));
+    }
+}
+
+#[cfg(test)]
+mod login_tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    /// The daemon's environment in these tests, poisoned with its own login and keys.
+    fn parent(key: &str) -> Option<OsString> {
+        match key {
+            "PATH" => Some("/usr/bin".into()),
+            "HOME" => Some("/home/daemon".into()),
+            "ANTHROPIC_API_KEY" => Some("sk-ant-api03-PARENT".into()),
+            "ANTHROPIC_AUTH_TOKEN" => Some("PARENT-BEARER".into()),
+            "ANTHROPIC_BASE_URL" => Some("https://parent.example.com".into()),
+            "ANTHROPIC_PROFILE" => Some("parent".into()),
+            "CLAUDE_CODE_OAUTH_TOKEN" => Some("sk-ant-oat01-PARENT".into()),
+            "CLAUDE_CONFIG_DIR" => Some("/home/daemon/.claude-parent".into()),
+            "CLAUDE_CODE_USE_BEDROCK" => Some("1".into()),
+            "DISPLAY" => Some(":0".into()),
+            "BROWSER" => Some("firefox".into()),
+            _ => None,
+        }
+    }
+
+    fn runtime(login: Option<ClaudeLogin>) -> ClaudeCodeRuntime {
+        ClaudeCodeRuntime { executable: "claude".into(), run_root: "/srv/aurelius/runtimes/c/runs".into(), model: None, login }
+    }
+
+    fn env_of(login: Option<ClaudeLogin>) -> Vec<(String, Option<String>)> {
+        let command = runtime(login).command_from(&["-p".into()], parent);
+        let mut env: Vec<_> = command.as_std().get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        env.sort();
+        env
+    }
+
+    fn get<'a>(env: &'a [(String, Option<String>)], key: &str) -> Option<&'a str> {
+        env.iter().find(|(k, _)| k == key).and_then(|(_, v)| v.as_deref())
+    }
+
+    fn alex() -> ClaudeLogin {
+        ClaudeLogin::at(Path::new("/srv/aurelius"), aurelius_domain::UserId::parse("0199c3a2-0000-7000-8000-0000000000a1").unwrap())
+    }
+
+    /// MU3-12 AC5: nothing of the daemon's login or keys reaches a run, with or without a login.
+    #[test]
+    fn nothing_of_the_daemons_login_reaches_the_child() {
+        for login in [None, Some(alex())] {
+            let env = env_of(login);
+            let leaked: Vec<_> = env.iter().filter(|(k, _)| k.starts_with("ANTHROPIC_") || k == "CLAUDE_CODE_OAUTH_TOKEN" || k == "CLAUDE_CODE_USE_BEDROCK" || k == "DISPLAY" || k == "BROWSER").collect();
+            assert!(leaked.is_empty(), "leaked: {leaked:?}");
+            let shown = format!("{env:?}");
+            assert!(!shown.contains("PARENT") && !shown.contains("claude-parent") && !shown.contains("parent.example"), "{shown}");
+            assert_eq!((get(&env, "PATH"), get(&env, "HOME")), (Some("/usr/bin"), Some("/home/daemon")), "the allowlist still passes");
+        }
+    }
+
+    #[test]
+    fn a_run_gets_its_own_login_and_never_the_default_folder() {
+        let env = env_of(Some(alex()));
+        assert_eq!(get(&env, login::CONFIG_DIR_ENV), Some("/srv/aurelius/logins/0199c3a2-0000-7000-8000-0000000000a1"));
+        // Without a login: an empty folder of Aurelius', never ~/.claude nor the daemon's CLAUDE_CONFIG_DIR.
+        let none = env_of(None);
+        let dir = get(&none, login::CONFIG_DIR_ENV).expect("always set, so the CLI never falls back to ~/.claude");
+        assert_eq!(dir, "/srv/aurelius/runtimes/c/runs/no-login");
+        assert!(!dir.contains(".claude"));
+    }
+
+    #[tokio::test]
+    async fn a_run_without_a_login_never_starts() {
+        // A program that would record that it ran: it must never be started.
+        let request = RunRequest {
+            run_id: aurelius_domain::RunId::new(), model_id: "sonnet".into(), system: None,
+            turns: vec![Turn { role: TurnRole::User, text: "hi".into(), images: Vec::new() }],
+            effort: None, profile: ToolProfile::TextOnly, subagent_model: None, session: SessionUse::Keep, session_id: None, keep_session: false,
+        };
+        let runtime = ClaudeCodeRuntime { executable: "/nonexistent/claude-that-must-not-run".into(), run_root: std::env::temp_dir().join("aurelius-no-login"), model: None, login: None };
+        assert!(matches!(runtime.start(request).await, Err(RuntimeError::Login(_))));
+        assert!(!runtime.has_session("0199c3a2-0000-7000-8000-000000000001"), "no login, no sessions (not even ~/.claude's)");
+    }
+
+    #[test]
+    fn sessions_are_looked_up_in_the_logins_own_folder_only() {
+        let data = std::env::temp_dir().join(format!("aurelius-login-sessions-{}", std::process::id()));
+        std::fs::create_dir_all(&data).unwrap();
+        let (a, r) = (aurelius_domain::UserId::new(), aurelius_domain::UserId::new());
+        let (alex, robin) = (ClaudeLogin::of(&data, a).unwrap(), ClaudeLogin::of(&data, r).unwrap());
+        let id = "0199c3a2-0000-7000-8000-000000000001";
+        std::fs::create_dir_all(alex.config_dir().join("projects").join("-work")).unwrap();
+        std::fs::write(alex.config_dir().join("projects").join("-work").join(format!("{id}.jsonl")), "{}\n").unwrap();
+        let on = |login: &ClaudeLogin| ClaudeCodeRuntime { executable: "claude".into(), run_root: data.join("runs"), model: None, login: Some(login.clone()) };
+        assert!(on(&alex).has_session(id));
+        assert!(!on(&robin).has_session(id), "Alex's transcript is never resumed on Robin's login (R4)");
+        on(&robin).remove_session(id);
+        assert!(on(&alex).has_session(id), "removing on Robin's login leaves Alex's");
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    /// Sentinel D5 (F2): a run's file tools are denied the other board members'
+    /// login folders, the database and ~/.claude*, never its own folder.
+    #[test]
+    fn a_runs_file_tools_are_denied_what_is_not_its_own() {
+        let data = std::env::temp_dir().join(format!("aurelius-deny-{}", aurelius_domain::UserId::new()));
+        std::fs::create_dir_all(&data).unwrap();
+        let (alex, robin) = (aurelius_domain::UserId::new(), aurelius_domain::UserId::new());
+        let own = ClaudeLogin::of(&data, alex).unwrap();
+        ClaudeLogin::of(&data, robin).unwrap();
+        let rules = deny_rules(&own);
+        let robins = format!("//{}/logins/{robin}/**", data.display().to_string().trim_start_matches('/'));
+        let db = format!("//{}/data/aurelius.sqlite*", data.display().to_string().trim_start_matches('/'));
+        for tool in ["Read", "Edit", "Write", "Glob", "Grep"] {
+            for path in [robins.as_str(), db.as_str(), "~/.claude/**", "~/.claude*"] {
+                assert!(rules.contains(&format!("{tool}({path})")), "{tool}({path}) missing: {rules:?}");
+            }
+        }
+        assert!(!rules.iter().any(|r| r.contains(&alex.to_string())), "the run's own folder stays open: {rules:?}");
+        // SEC2 M1: a Grep or Glob of logins/ itself or of Robin's folder itself is refused for certain.
+        let logins = format!("//{}/logins", data.display().to_string().trim_start_matches('/'));
+        let robin_dir = format!("{logins}/{robin}");
+        for tool in ["Read", "Glob", "Grep"] {
+            for path in [logins.as_str(), robin_dir.as_str()] {
+                assert!(rules.contains(&format!("{tool}({path})")), "{tool}({path}) missing: {rules:?}");
+            }
+        }
+        assert!(!rules.contains(&format!("Write({logins})")) && !rules.contains(&format!("Edit({logins})")), "only searching the folder itself is denied");
+        assert!(!rules.iter().any(|r| r.contains(".ignore")), "only folders: {rules:?}");
+        // One more layer: ripgrep skips logins/ when it searches above it.
+        assert_eq!(std::fs::read_to_string(data.join("logins").join(".ignore")).unwrap(), "*\n");
+        // A work folder above the data folder holds the logins; the run's own workspace does not.
+        let workspace = data.join("workspaces").join("c");
+        std::fs::create_dir_all(&workspace).unwrap();
+        assert!(holds_logins(&[workspace.clone(), data.clone()], &own));
+        assert!(!holds_logins(&[workspace], &own));
+        // They go in with the run, as --settings.
+        let settings: serde_json::Value = serde_json::from_str(&deny_settings(&own)).unwrap();
+        assert_eq!(settings["permissions"]["deny"].as_array().unwrap().len(), rules.len());
+        // The trace of what was sent names no folder.
+        let args = vec!["-p".to_string(), "--settings".into(), deny_settings(&own)];
+        let shown = sent_request(&args, SessionUse::None, &[]).args.join(" ");
+        assert!(!shown.contains("logins") && shown.contains("deny rule(s)"), "{shown}");
+        let _ = std::fs::remove_dir_all(data);
+    }
+
+    #[test]
+    fn auth_status_reads_only_the_sign_in_fields() {
+        let out = br#"{"loggedIn": false, "authMethod": "none", "apiProvider": "firstParty", "configDirectory": "/tmp/x"}"#;
+        assert_eq!(AuthStatus::parse(out), Some(AuthStatus { logged_in: false, auth_method: Some("none".into()), email: None, plan: None }));
+        let out = br#"{"loggedIn": true, "authMethod": "claude.ai", "email": "test@example.com", "subscriptionType": "max", "accessToken": "sk-ant-oat01-NEVER"}"#;
+        let status = AuthStatus::parse(out).unwrap();
+        assert_eq!((status.logged_in, status.email.as_deref(), status.plan.as_deref()), (true, Some("test@example.com"), Some("max")));
+        assert!(!format!("{status:?}").contains("NEVER"));
+        assert_eq!(AuthStatus::parse(b"not json"), None);
     }
 }

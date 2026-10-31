@@ -26,6 +26,16 @@ pub struct UpdateCompany {
     pub dispatcher: Option<SetDispatcher>,
 }
 
+/// The company's background jobs (memory consolidation, B6) run on the Claude
+/// login of the board member who asks (`enabled`), or on none (`false`, only
+/// when it is theirs): without one they do not run. Only the own login can be
+/// chosen. Answers `CompanyUpdated`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetBackgroundLogin {
+    pub enabled: bool,
+}
+
 /// Change a project's settings; left out: unchanged. `dispatcher` with no
 /// employee: the company's dispatcher again.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

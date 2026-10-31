@@ -366,6 +366,7 @@ impl AppView {
                     .child(line(if team.is_empty() { "Nobody yet.".into() } else { team.join(", ") })),
             )
             .child(self.render_members_section(cx))
+            .child(self.render_background_login(cx))
             .child(self.employee_default_model_section(cx))
             .child(
                 v().gap(px(6.))

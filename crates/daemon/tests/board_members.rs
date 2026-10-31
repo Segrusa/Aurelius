@@ -1,6 +1,6 @@
-//! Board members over the protocol (Fase 1, S5): the onboarding, `user.*`, the
-//! hello fields, `board_member_required` on ticket writes, and that a password
-//! (or its hash) never ends up in the database, a receipt, an event or the log.
+//! Board members over the protocol: the onboarding, `user.*`, the hello fields,
+//! the gate (protocol 5: nothing without a session), and that a password (or
+//! its hash) never ends up in the database, a receipt, an event or the log.
 
 mod common;
 
@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const PASSWORD: &str = "Tr0ub4dor&3-zebra-UNIQUE";
+const CHANGED: &str = "a-CHANGED-password-UNIQUE";
 
 fn code<T: std::fmt::Debug>(result: Result<T, ClientError>) -> ErrorCode {
     match result {
@@ -84,12 +85,13 @@ fn created(receipt: aurelius_domain::CommandReceipt) -> UserId {
 async fn the_first_board_member_is_made_in_the_onboarding_and_becomes_active() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let first = common::connect(dir.path()).await;
+    let first = common::connect_anonymous(dir.path()).await;
     // MU1-20 AC1: a new server has no board members; the client shows the onboarding.
-    let hello = first.identify(UserId::new()).await.unwrap();
+    let hello = first.user_whoami().await.unwrap();
     assert_eq!((hello.board_members_exist, hello.user), (false, None));
-    let project = project(&first).await;
-    assert_eq!(code(first.ticket_command(ticket(project, "Too early"), None).await), ErrorCode::BoardMemberRequired);
+    // Protocol 5: nothing else before the first board member.
+    let early = first.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }), None)).await;
+    assert_eq!(code(early), ErrorCode::Unauthenticated);
 
     // AC3: the reasons, nothing made.
     assert_eq!(code(first.user_create("grace", "short").await), ErrorCode::WeakPassword);
@@ -104,6 +106,7 @@ async fn the_first_board_member_is_made_in_the_onboarding_and_becomes_active() {
     assert_eq!(me.user.as_ref().map(|u| (u.id, u.username.as_str(), u.created_by_user)), Some((grace, "grace", None)));
 
     // MU1-21 AC1: tickets are by this board member.
+    let project = project(&first).await;
     let made = first.ticket_command(ticket(project, "Mine"), None).await.unwrap();
     let CommandResult::TicketCreated { ticket_id, .. } = made.result else { panic!("{:?}", made.result) };
     assert_eq!(first.ticket(ticket_id).await.unwrap().ticket.created_by_user, grace);
@@ -116,9 +119,11 @@ async fn the_first_board_member_is_made_in_the_onboarding_and_becomes_active() {
     assert_eq!(users.iter().map(|u| (u.username.as_str(), u.created_by_user)).collect::<Vec<_>>(), [("grace", None), ("ada", Some(grace))]);
 
     // AC5: a new client sees board members but has no active one yet.
-    let second = common::connect(dir.path()).await;
+    let second = common::connect_anonymous(dir.path()).await;
     let who = second.user_whoami().await.unwrap();
     assert_eq!((who.board_members_exist, who.user), (true, None));
+    // Titan (SEC1 m9): without a session nobody is named; `board_members_exist` is all the sign-in needs.
+    assert!(second.user_list().await.unwrap().users.is_empty());
     // The event says who made whom, never the password.
     let db = common::db(dir.path());
     let meta: String = db.query_row("SELECT metadata_json FROM events WHERE type = 'user.created' AND aggregate_id = ?1", [ada.to_string()], |r| r.get(0)).unwrap();
@@ -136,48 +141,152 @@ async fn the_first_board_member_is_made_in_the_onboarding_and_becomes_active() {
     common::stop(dir.path(), daemon).await;
 }
 
+/// R8 (R1 B-1, SEC1 M1): the onboarding is decided in the write transaction, so
+/// of two first board members at the same time exactly one is made; the other
+/// is `unauthenticated`. After it, names clash regardless of case (MU1-20 AC4).
 #[tokio::test(flavor = "multi_thread")]
-async fn two_first_board_members_at_once_only_clash_on_the_same_name() {
+async fn of_two_first_board_members_at_once_exactly_one_is_made() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let (a, b) = (common::connect(dir.path()).await, common::connect(dir.path()).await);
+    let (a, b) = (common::connect_anonymous(dir.path()).await, common::connect_anonymous(dir.path()).await);
     let (one, two) = tokio::join!(a.user_create("first", PASSWORD), b.user_create("second", PASSWORD));
-    assert!(one.is_ok() && two.is_ok(), "MU1-20 AC4: different names both work");
-    let (c, d) = (common::connect(dir.path()).await, common::connect(dir.path()).await);
+    let made: Vec<&str> = [("first", &one), ("second", &two)].into_iter().filter(|(_, r)| r.is_ok()).map(|(n, _)| n).collect();
+    assert_eq!(made.len(), 1, "exactly one first board member: {one:?} / {two:?}");
+    for result in [one, two].into_iter().filter(|r| r.is_err()) {
+        assert_eq!(code(result), ErrorCode::Unauthenticated);
+    }
+    let name = made[0];
+    let winner = if name == "first" { &a } else { &b };
+    assert_eq!(winner.user_list().await.unwrap().users.iter().map(|u| u.username.as_str()).collect::<Vec<_>>(), [name]);
+    let loser = if name == "first" { &b } else { &a };
+    assert!(loser.user_whoami().await.unwrap().user.is_none(), "the other connection has no board member");
+    let db = common::db(dir.path());
+    let users: i64 = db.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0)).unwrap();
+    let events: i64 = db.query_row("SELECT COUNT(*) FROM events WHERE type = 'user.created'", [], |r| r.get(0)).unwrap();
+    assert_eq!((users, events), (1, 1));
+
+    let (c, d) = (common::connect_anonymous(dir.path()).await, common::connect_anonymous(dir.path()).await);
+    assert_eq!(code(c.user_create("third", PASSWORD).await), ErrorCode::Unauthenticated, "after the onboarding only with a session");
+    c.user_login(name, PASSWORD, "test").await.unwrap();
+    d.user_login(name, PASSWORD, "test").await.unwrap();
     let (three, four) = tokio::join!(c.user_create("same", PASSWORD), d.user_create("SAME", PASSWORD));
     let codes: Vec<Option<ErrorCode>> = [three, four].into_iter().map(|r| r.err().map(|e| match e { ClientError::Protocol(p) => p.code, other => panic!("{other:?}") })).collect();
     assert_eq!(codes.iter().filter(|c| c.is_none()).count(), 1, "{codes:?}");
     assert!(codes.contains(&Some(ErrorCode::UsernameTaken)));
-    assert_eq!(a.user_list().await.unwrap().users.len(), 3);
+    assert_eq!(c.user_list().await.unwrap().users.len(), 2);
     drop((a, b, c, d));
     common::stop(dir.path(), daemon).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn user_use_checks_the_password_once_with_a_delay_and_a_limit() {
+async fn user_login_checks_the_password_with_one_answer_a_delay_and_a_limit() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let maker = common::connect(dir.path()).await;
+    let maker = common::connect_anonymous(dir.path()).await;
     let grace = created(maker.user_create("grace", PASSWORD).await.unwrap());
 
-    let device = common::connect(dir.path()).await;
+    let device = common::connect_anonymous(dir.path()).await;
     let started = Instant::now();
-    assert_eq!(code(device.user_use(grace, "wrong password!!").await), ErrorCode::WrongPassword);
+    assert_eq!(code(device.user_login("grace", "wrong password!!", "test").await), ErrorCode::WrongPassword);
     assert!(started.elapsed() >= Duration::from_millis(400), "a wrong answer takes a while");
     // An unknown board member gets the very same answer.
-    assert_eq!(code(device.user_use(UserId::new(), PASSWORD).await), ErrorCode::WrongPassword);
+    assert_eq!(code(device.user_login("nobody", PASSWORD, "test").await), ErrorCode::WrongPassword);
     assert!(device.user_whoami().await.unwrap().user.is_none());
-    let me = device.user_use(grace, PASSWORD).await.unwrap();
-    assert_eq!(me.user.map(|u| u.id), Some(grace));
+    let me = device.user_login("grace", PASSWORD, "test").await.unwrap();
+    assert_eq!(me.user.id, grace);
     // Five tries a minute on one connection, right or wrong.
-    assert_eq!(code(device.user_use(grace, "wrong password!!").await), ErrorCode::WrongPassword);
-    assert_eq!(code(device.user_use(grace, "wrong password!!").await), ErrorCode::WrongPassword);
-    assert_eq!(code(device.user_use(grace, PASSWORD).await), ErrorCode::TooManyAttempts);
+    assert_eq!(code(device.user_login("grace", "wrong password!!", "test").await), ErrorCode::WrongPassword);
+    assert_eq!(code(device.user_login("grace", "wrong password!!", "test").await), ErrorCode::WrongPassword);
+    assert_eq!(code(device.user_login("grace", PASSWORD, "test").await), ErrorCode::TooManyAttempts);
     assert_eq!(device.user_whoami().await.unwrap().user.map(|u| u.id), Some(grace), "a refused try changes nothing");
     // Another connection has its own tries.
-    let other = common::connect(dir.path()).await;
-    assert!(other.user_use(grace, PASSWORD).await.is_ok());
+    let other = common::connect_anonymous(dir.path()).await;
+    assert!(other.user_login("grace", PASSWORD, "test").await.is_ok());
     drop((maker, device, other));
+    common::stop(dir.path(), daemon).await;
+}
+
+/// B9 / MU3-02 AC4: after five failed tries for one username, from any
+/// connections, the next waits ("Try again in 1:00"), even with the right
+/// password; other usernames are not affected and nothing is blocked for good.
+#[tokio::test(flavor = "multi_thread")]
+async fn five_failed_sign_ins_for_a_username_make_the_next_one_wait() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = common::start(dir.path()).await;
+    let maker = common::connect_anonymous(dir.path()).await;
+    created(maker.user_create("alex", PASSWORD).await.unwrap());
+    created(maker.user_create("robin", PASSWORD).await.unwrap());
+    for _ in 0..5 {
+        // A fresh connection each time: the per-connection limit plays no part.
+        let device = common::connect_anonymous(dir.path()).await;
+        assert_eq!(code(device.user_login("Alex", "not the password", "test").await), ErrorCode::WrongPassword);
+    }
+    let device = common::connect_anonymous(dir.path()).await;
+    match device.user_login("alex", PASSWORD, "test").await {
+        Err(ClientError::Protocol(err)) => {
+            assert_eq!(err.code, ErrorCode::TooManyAttempts);
+            let wait = err.retry_after_ms.expect("when to try again");
+            assert!((55_000..=60_000).contains(&wait), "a minute (SEC1 m2): {wait}");
+            assert!(err.message.starts_with("Too many attempts. Try again in 0:") || err.message == "Too many attempts. Try again in 1:00.", "{}", err.message);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(device.user_whoami().await.unwrap().user.is_none());
+    // Robin signs in as usual; an unknown name counts the same way, so it tells nothing.
+    assert_eq!(device.user_login("robin", PASSWORD, "test").await.unwrap().user.username, "robin");
+    drop((maker, device));
+    common::stop(dir.path(), daemon).await;
+}
+
+/// R1 M-3 / SEC1 M2: tries at the same time on one username are reserved
+/// before their argon2 work, so twenty at once from twenty connections check
+/// at most five passwords; the rest wait.
+#[tokio::test(flavor = "multi_thread")]
+async fn twenty_wrong_sign_ins_at_once_check_at_most_five_passwords() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = common::start(dir.path()).await;
+    let maker = common::connect_anonymous(dir.path()).await;
+    created(maker.user_create("alex", PASSWORD).await.unwrap());
+    let mut devices = Vec::new();
+    for _ in 0..20 {
+        devices.push(common::connect_anonymous(dir.path()).await);
+    }
+    let tries = devices.iter().map(|d| d.user_login("alex", "not the password", "test"));
+    let codes: Vec<ErrorCode> = futures_util::future::join_all(tries).await.into_iter().map(code).collect();
+    let checked = codes.iter().filter(|c| **c == ErrorCode::WrongPassword).count();
+    assert!((1..=5).contains(&checked), "at most five checked: {codes:?}");
+    assert!(codes.iter().all(|c| matches!(c, ErrorCode::WrongPassword | ErrorCode::TooManyAttempts)), "{codes:?}");
+    assert_eq!(codes.iter().filter(|c| **c == ErrorCode::TooManyAttempts).count(), 20 - checked);
+    drop((maker, devices));
+    common::stop(dir.path(), daemon).await;
+}
+
+/// SEC1 M3: a name no board member can have answers `wrong_password` after the
+/// same wait, but is not counted (nor kept); a password longer than any is wrong
+/// too (SEC1 m7, R1 m-5), and too long for a new one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_name_that_cannot_exist_is_wrong_but_not_counted() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = common::start(dir.path()).await;
+    let maker = common::connect_anonymous(dir.path()).await;
+    created(maker.user_create("alex", PASSWORD).await.unwrap());
+    let huge = "n".repeat(100_000);
+    for name in ["no spaces here", huge.as_str(), "x", "x", "x", "x", "x", "x"] {
+        // A fresh connection each time: only the limits of the name could stop it.
+        let device = common::connect_anonymous(dir.path()).await;
+        let started = Instant::now();
+        assert_eq!(code(device.user_login(name, PASSWORD, "test").await), ErrorCode::WrongPassword, "never too_many_attempts");
+        assert!(started.elapsed() >= Duration::from_millis(400), "the same wait as a wrong password");
+    }
+    let device = common::connect_anonymous(dir.path()).await;
+    let started = Instant::now();
+    assert_eq!(code(device.user_login("alex", &"p".repeat(2_000), "test").await), ErrorCode::WrongPassword);
+    assert!(started.elapsed() >= Duration::from_millis(400));
+    // 1 024 characters of 4 bytes each are over the bound in bytes.
+    assert_eq!(code(maker.user_create("robin", &"😀".repeat(1_024)).await), ErrorCode::WeakPassword);
+    assert_eq!(code(maker.set_password(None, Some(PASSWORD), &"😀".repeat(1_024)).await), ErrorCode::WeakPassword);
+    assert_eq!(device.user_login("alex", PASSWORD, "test").await.unwrap().user.username, "alex");
+    drop((maker, device));
     common::stop(dir.path(), daemon).await;
 }
 
@@ -185,7 +294,7 @@ async fn user_use_checks_the_password_once_with_a_delay_and_a_limit() {
 async fn a_connection_makes_at_most_five_board_members_a_minute() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let device = common::connect(dir.path()).await;
+    let device = common::connect_anonymous(dir.path()).await;
     // Refused names and passwords cost nothing and do not count (S5-3).
     assert_eq!(code(device.user_create("x", PASSWORD).await), ErrorCode::InvalidUsername);
     assert_eq!(code(device.user_create("grace", &" ".repeat(12)).await), ErrorCode::WeakPassword, "QA-m7: only spaces");
@@ -197,33 +306,33 @@ async fn a_connection_makes_at_most_five_board_members_a_minute() {
     }
     assert_eq!(code(device.user_create("barbara", PASSWORD).await), ErrorCode::TooManyAttempts);
     assert_eq!(device.user_list().await.unwrap().users.len(), 4);
-    // Another connection has its own count.
-    let other = common::connect(dir.path()).await;
+    // Another connection has its own count (with a session: after the onboarding).
+    let other = common::connect_anonymous(dir.path()).await;
+    other.user_login("grace", PASSWORD, "test").await.unwrap();
     created(other.user_create("barbara", PASSWORD).await.unwrap());
     drop((device, other));
     common::stop(dir.path(), daemon).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_hello_brings_back_a_remembered_board_member() {
+async fn a_signed_in_device_makes_tickets_as_its_board_member() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let maker = common::connect(dir.path()).await;
+    let maker = common::connect_anonymous(dir.path()).await;
     let grace = created(maker.user_create("grace", PASSWORD).await.unwrap());
+    let project = project(&maker).await;
 
-    let device = common::connect(dir.path()).await;
-    let hello = device.identify(grace).await.unwrap();
-    assert!(hello.board_members_exist);
-    assert_eq!(hello.user.map(|u| (u.id, u.username)), Some((grace, "grace".to_owned())));
-    let project = project(&device).await;
-    let made = device.ticket_command(ticket(project, "Remembered"), None).await.unwrap();
+    let device = common::connect_anonymous(dir.path()).await;
+    assert_eq!(code(device.ticket_command(ticket(project, "Nobody"), None).await), ErrorCode::Unauthenticated);
+    let login = device.user_login("grace", PASSWORD, "test").await.unwrap();
+    assert_eq!((login.user.id, login.user.username.as_str()), (grace, "grace"));
+    let made = device.ticket_command(ticket(project, "Signed in"), None).await.unwrap();
     let CommandResult::TicketCreated { ticket_id, .. } = made.result else { panic!() };
     assert_eq!(device.ticket(ticket_id).await.unwrap().ticket.created_by_user, grace);
 
-    // A remembered board member that does not exist (a restore): back to the choice.
-    let hello = device.identify(UserId::new()).await.unwrap();
-    assert_eq!((hello.board_members_exist, hello.user), (true, None));
-    assert_eq!(code(device.ticket_command(ticket(project, "Nobody"), None).await), ErrorCode::BoardMemberRequired);
+    // Signed out: no board member on this connection any more.
+    assert!(device.user_logout().await.unwrap().user.is_none());
+    assert_eq!(code(device.ticket_command(ticket(project, "Nobody"), None).await), ErrorCode::Unauthenticated);
     drop((maker, device));
     common::stop(dir.path(), daemon).await;
 }
@@ -232,7 +341,7 @@ async fn the_hello_brings_back_a_remembered_board_member() {
 async fn apps_may_list_board_members_but_never_create_or_become_one() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let owner = common::connect(dir.path()).await;
+    let owner = common::connect_anonymous(dir.path()).await;
     let grace = created(owner.user_create("grace", PASSWORD).await.unwrap());
     let project = project(&owner).await;
     let key = owner
@@ -242,9 +351,10 @@ async fn apps_may_list_board_members_but_never_create_or_become_one() {
     let app = Client::connect_app(&aurelius_host::endpoint(dir.path()), &key.secret, "test app").await.unwrap();
     assert_eq!(app.user_list().await.unwrap().users.len(), 1);
     assert_eq!(code(app.user_create("robot", PASSWORD).await), ErrorCode::Forbidden);
-    assert_eq!(code(app.user_use(grace, PASSWORD).await), ErrorCode::Forbidden);
-    // A remembered board member in an app's hello is ignored: apps have none.
-    assert!(app.identify(grace).await.unwrap().user.is_none());
+    assert_eq!(code(app.user_login("grace", PASSWORD, "app").await), ErrorCode::Forbidden);
+    // A session token in an app's hello is ignored: apps have no board member.
+    assert!(app.resume("not-a-session").await.unwrap().user.is_none());
+    let _ = grace;
     // So tickets are out of reach (board_member_required), and the review gate is refused outright.
     assert_eq!(code(app.ticket_command(ticket(project, "From an app"), None).await), ErrorCode::BoardMemberRequired);
     let accept = Command::AcceptTicket(aurelius_domain::ticket::AcceptTicket { ticket_id: aurelius_domain::TicketId::new(), note: None });
@@ -259,29 +369,29 @@ async fn apps_may_list_board_members_but_never_create_or_become_one() {
 async fn an_app_key_after_a_board_member_drops_the_board_member() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let owner = common::connect(dir.path()).await;
+    let owner = common::connect_anonymous(dir.path()).await;
     let grace = created(owner.user_create("grace", PASSWORD).await.unwrap());
     let project = project(&owner).await;
     let key = owner
         .create_app_key(CreateAppKey { name: "assistant".into(), scopes: AppScope::ALL.to_vec(), limit_per_hour: None, limit_concurrent: None, audience: Default::default(), webhook_url: None })
         .await
         .unwrap();
-    let mixed = common::connect(dir.path()).await;
-    assert_eq!(mixed.identify(grace).await.unwrap().user.map(|u| u.id), Some(grace));
+    let mixed = common::connect_anonymous(dir.path()).await;
+    assert_eq!(mixed.user_login("grace", PASSWORD, "test").await.unwrap().user.id, grace);
     let hello = aurelius_protocol::HelloParams {
         client_name: "test app".into(),
         client_version: "0".into(),
         app_key: Some(key.secret.clone()),
         accepts: vec![],
-        user_id: None,
+        session_token: None,
     };
     let answer = mixed.call(aurelius_protocol::Method::SessionHello(hello)).await.unwrap();
     let aurelius_protocol::ResponseBody::Hello(answer) = answer else { panic!("{answer:?}") };
     assert!(answer.user.is_none(), "the app key drops the board member");
     assert!(mixed.user_whoami().await.unwrap().user.is_none());
     assert_eq!(code(mixed.ticket_command(ticket(project, "From an app"), None).await), ErrorCode::BoardMemberRequired);
-    // And naming the board member again does not bring it back for the app.
-    assert!(mixed.identify(grace).await.unwrap().user.is_none());
+    // And a session in a later hello does not bring it back for the app.
+    assert!(mixed.resume("a-session-token").await.unwrap().user.is_none());
     assert_eq!(code(mixed.ticket_command(ticket(project, "From an app"), None).await), ErrorCode::BoardMemberRequired);
     let db = common::db(dir.path());
     let tickets: i64 = db.query_row("SELECT COUNT(*) FROM tickets", [], |r| r.get(0)).unwrap();
@@ -338,17 +448,20 @@ async fn a_password_is_nowhere_in_the_database_the_files_or_the_log() {
     let log = log();
     let dir = tempfile::tempdir().unwrap();
     let daemon = common::start(dir.path()).await;
-    let client = common::connect(dir.path()).await;
+    let client = common::connect_anonymous(dir.path()).await;
     let user = created(client.user_create("grace", PASSWORD).await.unwrap());
-    let other = common::connect(dir.path()).await;
-    assert!(other.user_use(user, "a-wrong-PASSWORD-guess").await.is_err());
-    other.user_use(user, PASSWORD).await.unwrap();
+    let other = common::connect_anonymous(dir.path()).await;
+    assert!(other.user_login("grace", "a-wrong-PASSWORD-guess", "test").await.is_err());
+    let token = other.user_login("grace", PASSWORD, "test").await.unwrap().session_token;
+    // A new password, and a hello with the token: neither may show up anywhere either.
+    other.set_password(None, Some(PASSWORD), CHANGED).await.unwrap();
+    other.resume(&token).await.unwrap();
     let project = project(&other).await;
     other.ticket_command(ticket(project, "After the onboarding"), None).await.unwrap();
 
     let db = common::db(dir.path());
     let hash: String = db.query_row("SELECT password_hash FROM users WHERE id = ?1", [user.to_string()], |r| r.get(0)).unwrap();
-    assert!(hash.starts_with("$argon2id$v=19$m=19456,t=2,p=1$"), "{hash}");
+    assert!(hash.starts_with("$argon2id$v=19$m=65536,t=3,p=1$"), "{hash}");
     let receipts: String = db.query_row("SELECT group_concat(request_hash || result_json, ' ') FROM command_receipts", [], |r| r.get(0)).unwrap();
     let events: String = db.query_row("SELECT group_concat(type || metadata_json, ' ') FROM events", [], |r| r.get(0)).unwrap();
     assert!(events.contains("user.created"));
@@ -356,23 +469,28 @@ async fn a_password_is_nowhere_in_the_database_the_files_or_the_log() {
         assert!(!text.contains(PASSWORD) && !text.contains(&hash), "the password or its hash is in {place}");
     }
     let everything = dump(&db);
-    assert!(!everything.contains(PASSWORD) && !everything.contains("a-wrong-PASSWORD-guess"), "the password is in the database");
+    assert!(!everything.contains(PASSWORD) && !everything.contains("a-wrong-PASSWORD-guess") && !everything.contains(CHANGED), "the password is in the database");
+    assert!(!everything.contains(&token), "the session token is in the database");
     assert_eq!(everything.matches(&hash).count(), 1, "the hash is only in users.password_hash");
     drop(db);
     drop((client, other));
     common::stop(dir.path(), daemon).await;
     let on_disk = files(dir.path());
-    assert!(!on_disk.contains(PASSWORD) && !on_disk.contains("a-wrong-PASSWORD-guess"), "the password is in a file of the data folder");
+    assert!(!on_disk.contains(PASSWORD) && !on_disk.contains("a-wrong-PASSWORD-guess") && !on_disk.contains(CHANGED) && !on_disk.contains(&token), "a secret is in a file of the data folder");
     let logged = String::from_utf8_lossy(&log.lock().unwrap()).into_owned();
     assert!(!logged.is_empty(), "the log was captured");
     assert!(!logged.contains(PASSWORD) && !logged.contains("a-wrong-PASSWORD-guess") && !logged.contains(&hash), "the password is in the log");
+    assert!(!logged.contains(CHANGED) && !logged.contains(&token), "the new password or the session token is in the log");
+    // L3/R4 (SEC1 m3): the failed sign-in is logged, by the name as counted, with the connection.
+    let failed = logged.lines().find(|l| l.contains("sign-in failed") && l.contains("username=grace")).expect("the failed sign-in is logged");
+    assert!(failed.contains("conn=") && failed.contains("failures=1"), "{failed}");
 }
 
 #[test]
 fn the_password_parameters_print_redacted() {
     let create = aurelius_protocol::UserCreateParams { username: "grace".into(), password: PASSWORD.into() };
-    let used = aurelius_protocol::UserUseParams { user_id: UserId::new(), password: PASSWORD.into() };
-    for printed in [format!("{create:?}"), format!("{used:?}"), format!("{:?}", aurelius_protocol::Method::UserUse(used.clone()))] {
+    let login = aurelius_protocol::LoginParams { username: "grace".into(), password: PASSWORD.into(), device_name: "test".into() };
+    for printed in [format!("{create:?}"), format!("{login:?}"), format!("{:?}", aurelius_protocol::Method::UserLogin(login.clone()))] {
         assert!(!printed.contains(PASSWORD) && printed.contains("<redacted>"), "{printed}");
     }
     let write = aurelius_protocol::WriteMethod::Host(aurelius_protocol::HostWrite::UserCreate(create));

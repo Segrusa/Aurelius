@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:equatable/equatable.dart';
@@ -16,9 +17,10 @@ import 'protocol.dart';
 
 enum LinkStatus { connecting, online, offline, revoked, incompatible }
 
-/// What the onboarding gate shows (impactanalyse §4b.4): nothing before the
-/// first hello, then the first board member, the choice, or the app.
-enum BoardMemberStep { unknown, createFirst, choose, ready }
+/// What the sign-in gate shows (protocol 5, MU3-02/06): nothing before the
+/// first hello, then the first board member, the sign-in screen, a temporary
+/// password to change, or the app.
+enum BoardMemberStep { unknown, createFirst, signIn, changePassword, ready }
 
 /// What the app shows about the PC connection (honest status,
 /// which host, and how fresh the data is).
@@ -33,6 +35,9 @@ class LinkState extends Equatable {
     this.features = const [],
     this.boardMembersExist,
     this.user,
+    this.mustChangePassword = false,
+    this.claudeLogin,
+    this.signedOut,
   });
 
   final LinkStatus status;
@@ -50,14 +55,24 @@ class LinkState extends Equatable {
   /// The server has board members; null until the first hello.
   final bool? boardMembersExist;
 
-  /// This connection's active board member.
+  /// The board member of this phone's session.
   final UserView? user;
 
+  /// [user] signed in with a temporary password and must change it first (B10).
+  final bool mustChangePassword;
+
+  /// [user]'s own Claude login (MU3-09); none without a session.
+  final ClaudeLoginView? claudeLogin;
+
+  /// The session ended without this phone asking (revoked, expired, a new
+  /// password, disabled): "You were signed out on this device." until seen.
+  final SignOutReason? signedOut;
+
   BoardMemberStep get boardMemberStep => switch ((boardMembersExist, user)) {
-        (_, UserView()) => BoardMemberStep.ready,
+        (_, UserView()) => mustChangePassword ? BoardMemberStep.changePassword : BoardMemberStep.ready,
         (null, _) => BoardMemberStep.unknown,
         (false, _) => BoardMemberStep.createFirst,
-        (true, _) => BoardMemberStep.choose,
+        (true, _) => BoardMemberStep.signIn,
       };
 
   bool get isOnline => status == LinkStatus.online;
@@ -83,10 +98,13 @@ class LinkState extends Equatable {
         features: features ?? this.features,
         boardMembersExist: boardMembersExist,
         user: user,
+        mustChangePassword: mustChangePassword,
+        claudeLogin: claudeLogin,
+        signedOut: signedOut,
       );
 
-  /// The same link with what the server said about board members.
-  LinkState withBoardMember({required bool exists, UserView? user}) => LinkState(
+  /// The same link with what the server said about the session's board member.
+  LinkState withBoardMember({required bool exists, UserView? user, bool mustChangePassword = false, ClaudeLoginView? claudeLogin, SignOutReason? signedOut}) => LinkState(
         status: status,
         message: message,
         lastOnlineMs: lastOnlineMs,
@@ -96,10 +114,36 @@ class LinkState extends Equatable {
         features: features,
         boardMembersExist: exists || user != null,
         user: user,
+        mustChangePassword: user != null && mustChangePassword,
+        claudeLogin: user == null ? null : claudeLogin,
+        signedOut: user == null ? signedOut : null,
       );
 
+  /// The same link with [login] as the own Claude login.
+  LinkState withClaudeLogin(ClaudeLoginView? login) => user == null
+      ? this
+      : withBoardMember(exists: true, user: user, mustChangePassword: mustChangePassword, claudeLogin: login);
+
   @override
-  List<Object?> get props => [status, message, lastOnlineMs, retryAtMs, capabilities, daemonVersion, features, boardMembersExist, user?.id, user?.username];
+  List<Object?> get props => [
+        status,
+        message,
+        lastOnlineMs,
+        retryAtMs,
+        capabilities,
+        daemonVersion,
+        features,
+        boardMembersExist,
+        user?.id,
+        user?.username,
+        mustChangePassword,
+        claudeLogin?.status,
+        claudeLogin?.email,
+        claudeLogin?.plan,
+        claudeLogin?.linkId,
+        claudeLogin?.checkedAtMs,
+        signedOut,
+      ];
 }
 
 /// The write was not delivered and will not be retried automatically.
@@ -177,7 +221,9 @@ class AureliusConnection {
     SocketFactory? connect,
     this.clientName = 'aurelius-mobile',
     this.clientVersion = '0.7.0',
+    String? deviceName,
   })  : _store = store, // ignore: prefer_initializing_formals
+        deviceName = deviceName ?? (Platform.isIOS ? 'iPhone' : Platform.isAndroid ? 'Android phone' : 'Phone'),
         api = api ?? GatewayApi(),
         _connect = connect ?? _connectSocket;
 
@@ -187,6 +233,9 @@ class AureliusConnection {
   final SocketFactory _connect;
   final String clientName;
   final String clientVersion;
+
+  /// What the sessions list calls this phone (`LoginParams.device_name`).
+  final String deviceName;
 
   /// Auto-retry window for unconfirmed commands (nothing is
   /// replayed silently much later).
@@ -198,6 +247,7 @@ class AureliusConnection {
   final _appends = StreamController<StreamAppend>.broadcast();
   final _loads = StreamController<LoadSnapshot>.broadcast();
   final _powers = StreamController<PowerState>.broadcast();
+  final _prompts = StreamController<ClaudeLoginPrompt>.broadcast();
   final Map<int, Completer<ResponseBody>> _waiting = {};
   final List<_Pending> _outbox = [];
 
@@ -226,6 +276,11 @@ class AureliusConnection {
 
   /// `power_changed` states.
   Stream<PowerState> get powers => _powers.stream;
+
+  /// What `claude auth login` asks during this connection's Connect
+  /// (`claude_login_prompt`). Never logged or kept: the link and the code
+  /// live in the Connect sheet only.
+  Stream<ClaudeLoginPrompt> get claudeLoginPrompts => _prompts.stream;
 
   void _emit(LinkState next) {
     if (_disposed || next == _state) return;
@@ -261,6 +316,7 @@ class AureliusConnection {
     await _appends.close();
     await _loads.close();
     await _powers.close();
+    await _prompts.close();
   }
 
   Future<void> _run() async {
@@ -342,11 +398,23 @@ class AureliusConnection {
     try {
       _calls.clear(); // a new session starts with whole lists
       compactingConversations.value = const {};
-      final remembered = await _store.boardMember(host.hostId);
-      final body = await call(sessionHello(HelloParams(clientName: clientName, clientVersion: clientVersion, accepts: const ['activity_changes', 'team_channels'], userId: remembered)));
-      hello = (body as ResponseBodyHello).value;
-      // A board member the server no longer knows (a restore): choose again.
-      if (remembered != null && hello.user == null) await _store.setBoardMember(host.hostId, null);
+      final token = await _store.sessionToken(host.hostId);
+      HelloResult answer;
+      try {
+        answer = await _hello(token);
+      } on ProtocolException catch (e) {
+        if (e.code != ErrorCode.unauthenticated || token == null) rethrow;
+        // The server refused the kept session: forget it, hello without one.
+        await _store.setSessionToken(host.hostId, null);
+        answer = await _hello(null);
+      }
+      hello = answer;
+      // A kept session the server no longer has (expired, revoked meanwhile,
+      // a restore): forget it; the sign-in screen comes (MU3-03 AC3).
+      if (token != null && hello.user == null) {
+        await _store.setSessionToken(host.hostId, null);
+        if (_state.user != null && hello.boardMembersExist) _signedOutNotice = SignOutReason.expired;
+      }
     } on ProtocolException catch (e) {
       if (e.code != ErrorCode.incompatibleProtocol) rethrow;
       throw const _Incompatible(differentVersions);
@@ -359,8 +427,10 @@ class AureliusConnection {
       await socket.close();
       throw _Incompatible('This phone is paired with the ${hello.environment} Aurelius on ${host.name}, which changed. Pair again.');
     }
-    final health = (await call(serverGetHealth()) as ResponseBodyHealth).value;
-    await call(eventSubscribe(afterSeq: health.lastSeq));
+    // The gate (protocol 5) answers health and events only with a session:
+    // without one they follow the sign-in (or the new password).
+    _subscribed = false;
+    if (hello.user != null && !(hello.mustChangePassword ?? false)) await _subscribe();
     final now = DateTime.now().millisecondsSinceEpoch;
     _emit(LinkState(
       status: LinkStatus.online,
@@ -370,8 +440,43 @@ class AureliusConnection {
       features: hello.features,
       boardMembersExist: hello.boardMembersExist || hello.user != null,
       user: hello.user,
+      mustChangePassword: hello.user != null && (hello.mustChangePassword ?? false),
+      claudeLogin: hello.user == null ? null : hello.claudeLogin,
+      signedOut: hello.user == null ? _signedOutNotice : null,
     ));
+    if (hello.user != null) _signedOutNotice = null;
     _flushOutbox();
+  }
+
+  /// This socket gets the events (`event.subscribe`).
+  bool _subscribed = false;
+
+  /// Subscribe this socket to the events from the server's last seq, once.
+  Future<void> _subscribe() async {
+    if (_subscribed) return;
+    final health = (await call(serverGetHealth()) as ResponseBodyHealth).value;
+    await call(eventSubscribe(afterSeq: health.lastSeq));
+    _subscribed = true;
+  }
+
+  Future<HelloResult> _hello(String? token) async {
+    final body = await call(sessionHello(HelloParams(clientName: clientName, clientVersion: clientVersion, accepts: const ['activity_changes', 'team_channels'], sessionToken: token)));
+    return (body as ResponseBodyHello).value;
+  }
+
+  /// "You were signed out on this device." waits here across the reconnect
+  /// that follows `signed_out`, until the sign-in screen showed it.
+  SignOutReason? _signedOutNotice;
+
+  /// The session ended on the server's side: forget its token at once (S8) and
+  /// go to the sign-in screen with [reason] as the notice.
+  Future<void> _endSession(SignOutReason? reason) async {
+    // The server stops this connection's events with its board member (QA3
+    // M2): the next sign-in on it subscribes again.
+    _subscribed = false;
+    await _store.setSessionToken(host.hostId, null);
+    _signedOutNotice = reason;
+    if (_state.user != null || reason != null) _emit(_state.withBoardMember(exists: true, signedOut: reason));
   }
 
   void _onFrame(dynamic frame) {
@@ -397,15 +502,25 @@ class AureliusConnection {
         final ok = message.ok;
         final waiting = _waiting.remove(message.requestId);
         if (error != null) {
-          // The server has no board member for this connection: back to the choice.
-          if (error.code == ErrorCode.boardMemberRequired && _state.user != null) _emit(_state.withBoardMember(exists: true));
-          waiting?.completeError(ProtocolException(error.code, error.message));
+          switch (error.code) {
+            // The server has no session for this connection: back to the sign-in screen.
+            case ErrorCode.unauthenticated when _state.user != null:
+              unawaited(_endSession(SignOutReason.expired));
+            case ErrorCode.boardMemberRequired when _state.user != null:
+              unawaited(_endSession(null));
+            case ErrorCode.passwordChangeRequired when _state.user != null && !_state.mustChangePassword:
+              _emit(_state.withBoardMember(exists: true, user: _state.user, mustChangePassword: true, claudeLogin: _state.claudeLogin));
+            default:
+              break;
+          }
+          waiting?.completeError(ProtocolException(error.code, error.message, retryAfterMs: error.retryAfterMs));
         } else if (ok != null) {
           waiting?.complete(ok);
         }
       case ServerMessageEvent():
         // The server forgets what it sent on these, so the next update is whole again.
         if (message.value.kind.wire.startsWith('message.') || message.value.kind.wire.startsWith('run.')) _calls.clear();
+        if (message.value.kind == EventKind.claudeLoginUpdated && _state.user != null) unawaited(refreshClaudeLogin().catchError((Object _) => _state.claudeLogin));
         _events.add(message.value);
         if (_state.isOnline) _emit(_state.copyWith(status: LinkStatus.online, lastOnlineMs: DateTime.now().millisecondsSinceEpoch, message: _state.message));
       case ServerMessageStreamAppend():
@@ -415,6 +530,11 @@ class AureliusConnection {
         _loads.add(message.value);
       case ServerMessagePowerChanged():
         _powers.add(message.value);
+      case ServerMessageClaudeLoginPrompt():
+        _prompts.add(message.value);
+      case ServerMessageSignedOut():
+        // A sign-out this phone asked for needs no message.
+        unawaited(_endSession(_signingOut && message.reason == SignOutReason.loggedOut ? null : message.reason));
       case ServerMessageStream() || ServerMessageTerminalOutput() || ServerMessageTerminalExit():
         break; // local IPC and terminals only
     }
@@ -528,31 +648,80 @@ class AureliusConnection {
     }
   }
 
-  /// The one password check (`user.use`): [userId] becomes this connection's
-  /// board member and is remembered for the next hello. The password is only
-  /// sent, never kept.
-  Future<UserView> useBoardMember(String userId, String password) async {
-    final body = await call(userUse(UserUseParams(userId: userId, password: password)));
-    return _applyWhoAmI((body as ResponseBodyWhoAmI).value);
+  /// Sign in (`user.login`, MU3-02): the session's token goes to the
+  /// Keychain / Keystore for the next hellos (S8). The password is only sent,
+  /// never kept. Throws [ProtocolException] (`wrong_password`,
+  /// `too_many_attempts` with its wait).
+  Future<LoginResult> signIn(String username, String password) async {
+    final body = await call(userLogin(LoginParams(deviceName: deviceName, password: password, username: username.trim())));
+    final login = (body as ResponseBodyLogin).value;
+    // A server still on the freeze gives no token yet: nothing to keep.
+    await _store.setSessionToken(host.hostId, login.sessionToken.isEmpty ? null : login.sessionToken);
+    _signedOutNotice = null;
+    if (!login.mustChangePassword) await _subscribe();
+    _emit(_state.withBoardMember(exists: true, user: login.user, mustChangePassword: login.mustChangePassword));
+    unawaited(refreshClaudeLogin().catchError((Object _) => null));
+    return login;
   }
 
-  /// A new board member (`user.create`). Without an active one, this connection
-  /// becomes the new board member. Never resent after a reconnect, so the
-  /// password does not wait in the outbox.
+  bool _signingOut = false;
+
+  /// Sign out on this phone (`user.logout`, MU3-04 AC3): the token is
+  /// forgotten even when the server cannot be told.
+  Future<void> signOut() async {
+    _signingOut = true;
+    try {
+      await call(userLogout());
+    } on DisconnectedException {
+      // Offline: forget it here; the server ends it after 30 days unused.
+    } on ProtocolException catch (e) {
+      if (e.code != ErrorCode.unauthenticated) rethrow;
+    } finally {
+      _signingOut = false;
+    }
+    await _endSession(null);
+  }
+
+  /// Change a password (`user.set_password`). Own ([userId] null): with
+  /// [oldPassword]; the other sessions end. Another board member's (B10): a
+  /// temporary one. Never resent after a reconnect, so no password waits in
+  /// the outbox.
+  Future<void> setPassword({required String newPassword, String? oldPassword, String? userId}) async {
+    await write(userSetPassword(SetPasswordParams(newPassword: newPassword, oldPassword: oldPassword, userId: userId)), retry: false);
+    final me = _state.user;
+    if (me != null && (userId == null || userId == me.id)) {
+      // The temporary password is gone: now the gate lets the events through.
+      if (_state.mustChangePassword) await _subscribe();
+      _emit(_state.withBoardMember(exists: true, user: me, claudeLogin: _state.claudeLogin));
+    }
+  }
+
+  /// A new board member (`user.create`). The first one (no session yet)
+  /// signs in right after, for the session's token. Never resent after a
+  /// reconnect, so the password does not wait in the outbox.
   Future<String> createBoardMember(String username, String password) async {
+    final first = _state.user == null;
     final receipt = await write(userCreate(UserCreateParams(username: username, password: password)), retry: false);
     final created = ((receipt.result as WriteResultCommand).value as CommandResultUserCreated).userId;
-    final body = await call(userWhoami());
-    await _applyWhoAmI((body as ResponseBodyWhoAmI).value);
+    if (first) await signIn(username, password);
     return created;
   }
 
-  Future<UserView> _applyWhoAmI(WhoAmI who) async {
-    final user = who.user;
-    if (user == null) throw const ProtocolException(ErrorCode.boardMemberRequired, 'The server did not make you a board member. Try again.');
-    await _store.setBoardMember(host.hostId, user.id);
-    _emit(_state.withBoardMember(exists: who.boardMembersExist, user: user));
-    return user;
+  /// The own Claude login, asked again (`claude_login.status`).
+  Future<ClaudeLoginView?> refreshClaudeLogin() async {
+    final body = await call(claudeLoginStatus());
+    final login = (body as ResponseBodyClaudeLogin).value;
+    _emit(_state.withClaudeLogin(login));
+    return login;
+  }
+
+  /// [login] as the own Claude login (an answer that carries it).
+  void applyClaudeLogin(ClaudeLoginView login) => _emit(_state.withClaudeLogin(login));
+
+  /// The sign-in screen showed "You were signed out on this device.".
+  void dismissSignedOut() {
+    _signedOutNotice = null;
+    if (_state.signedOut != null) _emit(_state.withBoardMember(exists: _state.boardMembersExist ?? true));
   }
 
   /// Take back a command that never left this phone: it fails with

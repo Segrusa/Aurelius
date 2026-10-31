@@ -231,7 +231,8 @@ impl CommandService {
                     }).map(|turn| (crate::run::session::HistoryItem { id: m.id, item: crate::run::session::item(m), role: if m.update.is_some() { MessageRole::User } else { m.role }, reply_to: m.reply_to, run: run_of(m) }, turn)))
                     .collect();
                 let seen_history: Vec<crate::run::session::HistoryItem> = entries.iter().map(|(seen, _)| seen.clone()).collect();
-                let stored = aurelius_storage::conversation_sessions::get(conn, conversation_id)?;
+                // The session of this run's own login: another board member's is never resumed (R4).
+                let stored = aurelius_storage::conversation_sessions::get(conn, conversation_id, config.login_user)?;
                 let first_new = stored.as_ref().and_then(|s| crate::run::session::new_since(s, &seen_history));
                 let new_turns: Option<Vec<Turn>> = first_new.map(|i| entries[i..].iter().map(|(_, t)| t.clone()).collect());
                 let new_messages = first_new.map(|i| entries.len() - i).unwrap_or(0);

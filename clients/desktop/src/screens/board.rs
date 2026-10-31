@@ -14,8 +14,8 @@ use crate::app::{AppView, MenuDo, MenuEntry, MenuItems, Overlay, Panel};
 use crate::backend::{self, BoardCall, BoardUpdate};
 use crate::theme::{self, c};
 use crate::ui::{self, ButtonKind, h, v};
-use aurelius_domain::ticket::{BoardColumnCards, BoardView, ColumnKind, TicketDetail, TicketPriority, TicketView};
-use aurelius_domain::{Command, ConversationId, EmployeeId, ProjectId, TicketId, ticket};
+use aurelius_domain::ticket::{BoardColumnCards, BoardView, ColumnKind, TicketDetail, TicketNeed, TicketPriority, TicketView};
+use aurelius_domain::{Command, ConversationId, EmployeeId, ProjectId, TicketId, UserId, ticket};
 use aurelius_protocol::TimelineCard;
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -99,6 +99,8 @@ pub enum Needs {
     Failed,
     /// The main task waits for an approval (in the Inbox).
     Approval,
+    /// It waits for the own Claude login (missing or expired): Connect (MU3-12 AC2).
+    ConnectLogin,
 }
 
 impl Needs {
@@ -109,6 +111,7 @@ impl Needs {
             Needs::ChooseOwner => "Choose an employee",
             Needs::Failed => "✕ Failed · Needs you",
             Needs::Approval => "Waiting for your approval",
+            Needs::ConnectLogin => "Needs you · Claude login",
         }
     }
 }
@@ -214,6 +217,40 @@ pub fn needs_you(t: &TicketView, choosing: bool, root_approvals: u32) -> Option<
         ColumnKind::Todo if t.owner_employee_id.is_none() && !choosing => Some(Needs::ChooseOwner),
         _ => None,
     }
+}
+
+/// Whose Claude login a ticket runs on (MU3-10 AC4): "your" or "Alex's".
+pub fn login_owner(t: &TicketView, me: Option<UserId>) -> String {
+    if me == Some(t.login_user) { "your".into() } else { format!("{}'s", t.login_username) }
+}
+
+/// What a ticket that waits for its Claude login says (MU3-12 AC2/AC4); none
+/// when it does not. `disabled`: its login's board member was disabled.
+pub fn login_wait(t: &TicketView, me: Option<UserId>, disabled: bool) -> Option<String> {
+    if t.needs != Some(TicketNeed::Login) {
+        return None;
+    }
+    Some(match (me == Some(t.login_user), disabled) {
+        (true, _) => "◆ Waiting for your Claude login".into(),
+        (false, true) => format!("Waiting: {} is disabled", t.login_username),
+        (false, false) => format!("Waiting for {}'s Claude login", t.login_username),
+    })
+}
+
+/// The own login's direct action on a card (ui-ontwerp §5): Connect, or Reconnect once it expired.
+pub fn connect_label(view: Option<&aurelius_domain::user::ClaudeLoginView>) -> &'static str {
+    if view.is_some_and(|v| v.status == aurelius_domain::user::ClaudeLoginStatus::Expired) { "Reconnect" } else { "Connect" }
+}
+
+/// Start's toast (P-36, ui-ontwerp §4): without the own Claude login it says only that it waits.
+pub fn start_toast(number: u32, started: String, waits_for_login: bool) -> String {
+    if waits_for_login { format!("#{number} started. It waits until you connect your Claude login.") } else { started }
+}
+
+/// "Run on my login" (B4, D3-3): another board member takes a ticket that waits for
+/// someone else's login over on their own; never anyone else's, never silently.
+pub fn take_over_offered(t: &TicketView, me: Option<UserId>) -> bool {
+    t.needs == Some(TicketNeed::Login) && me.is_some_and(|me| me != t.login_user) && !matches!(t.column, ColumnKind::Done | ColumnKind::Backlog)
 }
 
 /// The priority as text and shape, never only colour (§5.1); Normal shows nothing.
@@ -367,9 +404,29 @@ pub enum OwnerFilter {
     Employee(EmployeeId),
 }
 
-/// The cards a column shows under the filters: owner, "Find" (title, `#number`
-/// and labels) and "Needs you only". Done: newest first, `DONE_SHOWN` unless all.
-pub fn shown_cards<'a>(column: &'a BoardColumnCards, owner: OwnerFilter, query: &str, needs: impl Fn(&TicketView) -> bool, needs_only: bool, done_all: bool) -> (Vec<&'a TicketView>, usize) {
+/// Whose tickets the board shows (ui-ontwerp §3: "Created by: Anyone / Me / <board member>").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CreatorFilter {
+    #[default]
+    Anyone,
+    Me,
+    Member(UserId),
+}
+
+impl CreatorFilter {
+    /// The creator a card must have; none: anyone (also while nobody is signed in).
+    pub fn user(self, me: Option<UserId>) -> Option<UserId> {
+        match self {
+            CreatorFilter::Anyone => None,
+            CreatorFilter::Me => me,
+            CreatorFilter::Member(u) => Some(u),
+        }
+    }
+}
+
+/// The cards a column shows under the filters: owner, creator, "Find" (title,
+/// `#number` and labels) and "Needs you only". Done: newest first, `DONE_SHOWN` unless all.
+pub fn shown_cards<'a>(column: &'a BoardColumnCards, owner: OwnerFilter, creator: Option<UserId>, query: &str, needs: impl Fn(&TicketView) -> bool, needs_only: bool, done_all: bool) -> (Vec<&'a TicketView>, usize) {
     let query = query.trim().to_lowercase();
     let number = query.trim_start_matches('#');
     let mut cards: Vec<&TicketView> = column
@@ -380,6 +437,7 @@ pub fn shown_cards<'a>(column: &'a BoardColumnCards, owner: OwnerFilter, query: 
             OwnerFilter::NoOwner => t.owner_employee_id.is_none(),
             OwnerFilter::Employee(e) => t.owner_employee_id == Some(e),
         })
+        .filter(|t| creator.is_none_or(|u| t.created_by_user == u))
         .filter(|t| {
             query.is_empty()
                 || t.title.to_lowercase().contains(&query)
@@ -768,6 +826,7 @@ pub enum BoardDo {
     Dialog(BoardDialog),
     FilterProject(Option<ProjectId>),
     FilterOwner(OwnerFilter),
+    FilterCreator(CreatorFilter),
     /// The New ticket form's dropdowns.
     FormProject(ProjectId),
     FormPriority(TicketPriority),
@@ -828,6 +887,8 @@ pub struct Board {
     /// The project filter (B4), remembered per client.
     pub project: Option<ProjectId>,
     pub owner: OwnerFilter,
+    /// "Created by" (ui-ontwerp §3).
+    pub creator: CreatorFilter,
     pub needs_only: bool,
     pub find: Entity<InputState>,
     /// The ticket in the right panel, once loaded.
@@ -939,6 +1000,7 @@ impl Board {
             again: false,
             project,
             owner: OwnerFilter::Anyone,
+            creator: CreatorFilter::Anyone,
             needs_only: false,
             find: input("Find… (title, #number, label)", window, cx),
             detail: None,
@@ -1520,7 +1582,7 @@ impl AppView {
         view.columns
             .iter()
             .map(|column| {
-                let (cards, _) = shown_cards(column, self.board.owner, &query, |t| self.ticket_needs(t).is_some(), self.board.needs_only, self.board.done_all);
+                let (cards, _) = shown_cards(column, self.board.owner, self.board.creator.user(self.active_member().map(|u| u.id)), &query, |t| self.ticket_needs(t).is_some(), self.board.needs_only, self.board.done_all);
                 (column.column.kind, cards.into_iter().map(|t| t.id).collect())
             })
             .collect()
@@ -1636,8 +1698,37 @@ impl AppView {
     }
 
     pub fn ticket_needs(&self, t: &TicketView) -> Option<Needs> {
+        // Needs you is per board member (ui-ontwerp §3): a missing login only for its own.
+        if t.needs == Some(TicketNeed::Login) && matches!(t.column, ColumnKind::Todo | ColumnKind::Doing) {
+            return (self.active_member().map(|u| u.id) == Some(t.login_user)).then_some(Needs::ConnectLogin);
+        }
         let approvals = t.root_task_id.and_then(|r| self.tasks.iter().find(|x| x.id == r)).map_or(0, |r| r.pending_approvals);
         needs_you(t, self.ticket_choosing(t), approvals)
+    }
+
+    /// Whether the board member whose login a ticket runs on is disabled (MU3-12 AC4).
+    pub fn login_disabled(&self, t: &TicketView) -> bool {
+        self.members.list.iter().any(|u| u.id == t.login_user && u.disabled_at_ms.is_some())
+    }
+
+    /// A ticket's wait, by whose login (ui-ontwerp §5): its Claude login, else its quota.
+    pub fn ticket_wait(&self, t: &TicketView) -> Option<String> {
+        let me = self.active_member().map(|u| u.id);
+        if let Some(text) = login_wait(t, me, self.login_disabled(t)) {
+            return Some(text);
+        }
+        let root = t.root_task_id.and_then(|r| self.tasks.iter().find(|x| x.id == r))?;
+        match self.task_mark(root) {
+            crate::ui::TaskMark::LimitReset(until) => Some(format!("⏸ {}", crate::ui::limit_wait_for(&login_owner(t, me), until))),
+            _ => None,
+        }
+    }
+
+    /// Run on my login (B4): after its confirmation.
+    pub fn ticket_use_my_login(&mut self, id: TicketId, cx: &mut Context<Self>) {
+        let number = self.board.ticket(id).map_or(0, |t| t.number);
+        self.board_send(Command::UseMyLogin(ticket::UseMyLogin { ticket_id: id }), Some(format!("#{number} now runs on your Claude login.")));
+        cx.notify();
     }
 
     /// Tickets that need a board member now: the sidebar badge and the board's counter.
@@ -1710,6 +1801,9 @@ impl AppView {
                 }
             }
         };
+        // P-36: Start without the own Claude login is allowed, and says what follows.
+        let mine = self.active_member().map(|u| u.id) == Some(t.login_user);
+        let done = start_toast(t.number, done, mine && crate::screens::account::needs_connect(self.claude.view.as_ref(), self.claude.unsupported.is_some()));
         self.board_send(Command::StartTicket(ticket::StartTicket { ticket_id: id, employee_id: employee }), Some(done));
         cx.notify();
     }
@@ -1896,6 +1990,7 @@ impl AppView {
             BoardDo::Dialog(d) => self.board_dialog(d, window, cx),
             BoardDo::FilterProject(p) => self.set_board_project(p, cx),
             BoardDo::FilterOwner(o) => self.board.owner = o,
+            BoardDo::FilterCreator(f) => self.board.creator = f,
             BoardDo::FormProject(p) => self.board.form.project = Some(p),
             BoardDo::FormPriority(p) => self.board.form.priority = p,
             BoardDo::FormOwner(o) => self.board.form.owner = o,
@@ -1941,6 +2036,19 @@ impl AppView {
                     .filter(|p| p.status == aurelius_domain::project::ProjectStatus::Active)
                     .map(|p| menu_entry(p.name.clone(), BoardDo::FilterProject(Some(p.id)), self.board.project == Some(p.id), None)),
             );
+            return items;
+        }
+        if field == "board-creator" {
+            let me = self.active_member().map(|u| u.id);
+            let mut items = vec![
+                menu_entry("Anyone", BoardDo::FilterCreator(CreatorFilter::Anyone), self.board.creator == CreatorFilter::Anyone, None),
+                menu_entry("Me", BoardDo::FilterCreator(CreatorFilter::Me), self.board.creator == CreatorFilter::Me, None),
+                None,
+            ];
+            items.extend(self.members.list.iter().filter(|u| Some(u.id) != me).map(|u| {
+                let f = CreatorFilter::Member(u.id);
+                menu_entry(u.username.clone(), BoardDo::FilterCreator(f), self.board.creator == f, None)
+            }));
             return items;
         }
         let mut items = vec![
@@ -2020,6 +2128,11 @@ impl AppView {
             OwnerFilter::NoOwner => "No owner yet".to_string(),
             OwnerFilter::Employee(e) => self.employee_name(e).unwrap_or_else(|| "Owner".into()),
         };
+        let creator = match self.board.creator {
+            CreatorFilter::Anyone => "Created by: Anyone".to_string(),
+            CreatorFilter::Me => "Created by: Me".to_string(),
+            CreatorFilter::Member(u) => format!("Created by: {}", self.member_name(u)),
+        };
         let picker = |id: &'static str, label: String, set: bool, cx: &mut Context<Self>| {
             let open = self.overlay == Overlay::Menu && self.menu.as_ref().is_some_and(|m| m.field == Some(id));
             ui::dropdown_trigger(id, 28., set, open)
@@ -2046,6 +2159,7 @@ impl AppView {
                     el.child(ui::icon_button("board-project-clear").aria_label("Clear the project filter").tooltip(ui::tip("Clear filter", None)).child("×").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.set_board_project(None, cx))))
                 })
                 .child(picker("board-owner", owner, self.board.owner != OwnerFilter::Anyone, cx))
+                .child(picker("board-creator", creator, self.board.creator != CreatorFilter::Anyone, cx))
                 .child(div().w(px(200.)).child(ui::input(&self.board.find)))
                 .child(
                     h().id("board-needs")
@@ -2074,6 +2188,18 @@ impl AppView {
                 )
                 .child(ui::icon_button("board-settings").aria_label("Board settings").tooltip(ui::tip("Board settings…", None)).child("⋯").on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.board_dialog(BoardDialog::Columns, w, cx)))),
         );
+
+        // ui-ontwerp §4: the own Claude login is missing or expired.
+        let header = header.when(crate::screens::account::needs_connect(self.claude.view.as_ref(), self.claude.unsupported.is_some()), |el| {
+            let expired = self.claude.view.as_ref().is_some_and(|v| v.status == aurelius_domain::user::ClaudeLoginStatus::Expired);
+            let text = if expired { "Your Claude login expired. Reconnect it to run your tickets." } else { "Connect your Claude login to run your tickets." };
+            el.child(
+                h().id("board-connect-banner").role(Role::Status).aria_label(text).gap(px(10.)).px(px(12.)).py(px(8.)).rounded(px(8.)).border_1().border_color(c(theme::ATTENTION_BORDER)).bg(c(theme::ATTENTION_BG))
+                    .child(div().text_size(px(11.)).text_color(c(theme::ACCENT_TEXT)).child("ATTENTION"))
+                    .child(div().flex_1().text_size(px(12.5)).child(text))
+                    .child(ui::button("board-connect", if expired { "Reconnect" } else { "Connect" }, ButtonKind::Primary, None).h(px(26.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.claude_connect(cx)))),
+            )
+        });
 
         let body: AnyElement = if self.projects.is_empty() {
             v().flex_1()
@@ -2122,7 +2248,7 @@ impl AppView {
     fn render_columns(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let online = self.board_online();
         let query = self.board.find.read(cx).value().to_string();
-        let filtered = self.board.project.is_some() || self.board.owner != OwnerFilter::Anyone || !query.trim().is_empty() || self.board.needs_only;
+        let filtered = self.board.project.is_some() || self.board.owner != OwnerFilter::Anyone || self.board.creator != CreatorFilter::Anyone || !query.trim().is_empty() || self.board.needs_only;
         let loading = self.board.view.is_none();
         // Before the first answer: the default columns with skeleton cards (§3.3).
         let columns: Vec<BoardColumnCards> = match &self.board.view {
@@ -2144,7 +2270,7 @@ impl AppView {
         let mut lanes: Vec<AnyElement> = Vec::new();
         for (ci, column) in columns.iter().enumerate() {
             let kind = column.column.kind;
-            let (cards, older) = shown_cards(column, self.board.owner, &query, |t| self.ticket_needs(t).is_some(), self.board.needs_only, self.board.done_all);
+            let (cards, older) = shown_cards(column, self.board.owner, self.board.creator.user(self.active_member().map(|u| u.id)), &query, |t| self.ticket_needs(t).is_some(), self.board.needs_only, self.board.done_all);
             shown_any |= !cards.is_empty();
             let folded = kind == ColumnKind::PlanReview && column.tickets.is_empty() && !self.board.plan_open && held.is_none_or(|h| h.to != ci);
             let name = column.column.name.clone();
@@ -2257,6 +2383,7 @@ impl AppView {
                 el.child(h().px(px(24.)).pb(px(8.)).gap(px(10.)).text_size(px(12.5)).text_color(c(theme::TEXT_2)).child(format!("No tickets in {name}.")).child(
                     div().id("board-clear-filter").cursor_pointer().text_color(c(theme::ACCENT_TEXT)).child("Clear filter").on_click(cx.listener(|this, _: &ClickEvent, w, cx| {
                         this.board.owner = OwnerFilter::Anyone;
+                        this.board.creator = CreatorFilter::Anyone;
                         this.board.needs_only = false;
                         this.board.find.update(cx, |i, cx| i.set_value("", w, cx));
                         this.set_board_project(None, cx);
@@ -2280,7 +2407,11 @@ impl AppView {
         let failed = t.root_task_status == Some(aurelius_domain::task::TaskStatus::Failed);
         let focused = self.board.focused == Some(id);
         let held = self.board.held.is_some_and(|h| h.id == id);
+        // Its Claude login or its quota (ui-ontwerp §5) before anything else the card says.
+        let wait = self.ticket_wait(t).filter(|_| matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Review));
+        let me = self.active_member().map(|u| u.id);
         let status: Option<AnyElement> = match t.column {
+            _ if wait.is_some() => wait.clone().map(|text| div().id(("card-wait", key)).text_size(px(11.5)).text_color(c(if needs == Some(Needs::ConnectLogin) { theme::ACCENT_TEXT } else { theme::TEXT_2 })).child(text).into_any_element()),
             ColumnKind::Todo if failed => None,
             ColumnKind::Todo if choosing => Some(
                 h().gap(px(6.))
@@ -2305,6 +2436,23 @@ impl AppView {
         };
         let label = SharedString::from(card_label(t, state.as_deref(), deadline.as_ref().map(|(d, _)| d.as_str()), &self.board.column_name(t.column)));
         let action: Option<AnyElement> = match t.column {
+            // B4: someone else's login is missing; take it over on the own, explicitly.
+            _ if online && take_over_offered(t, me) => Some(
+                ui::button(("card-use-my-login", key), "Run on my login", ButtonKind::Outline, None).h(px(24.)).px(px(8.)).text_size(px(12.)).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                    cx.stop_propagation();
+                    this.overlay = Overlay::Confirm(crate::app::ConfirmKind::UseMyLogin(id));
+                    this.overlay_focus.focus(w, cx);
+                    cx.notify();
+                }))
+                .into_any_element(),
+            ),
+            _ if needs == Some(Needs::ConnectLogin) => Some(
+                ui::button(("card-connect", key), connect_label(self.claude.view.as_ref()), ButtonKind::Primary, None).h(px(24.)).px(px(10.)).text_size(px(12.)).on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.claude_connect(cx);
+                }))
+                .into_any_element(),
+            ),
             ColumnKind::Backlog if online => Some(
                 h().child(ui::button(("card-start", key), "▸ Start", ButtonKind::Outline, None).h(px(24.)).px(px(8.)).text_size(px(12.)).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     cx.stop_propagation();
@@ -2403,7 +2551,7 @@ impl AppView {
                     .child(div().min_w_0().truncate().child(owner.clone().unwrap_or_else(|| "No owner".into())))
                     .child(div().flex_1())
                     .children(deadline.map(|(text, color)| div().flex_none().text_color(c(color)).child(text)))
-                    .child(div().flex_none().child(format!("by {}", t.created_by_username))),
+                    .child(h().flex_none().gap(px(4.)).child(ui::member_monogram(&t.created_by_username, 14., cx)).child(format!("by {}", t.created_by_username))),
             )
             .children(action.map(|a| h().justify_end().child(a)))
             .into_any_element()
@@ -2414,7 +2562,7 @@ impl AppView {
 pub(crate) mod tests {
     // Not `super::*`: gpui's `test` attribute would shadow the standard one.
     use super::{
-        BoardColumnCards, BoardDialog, ColumnsReload, DAY_MS, DONE_SHOWN, DoneCheck, dialog_reads, done_check, expected_version_for, newest_version, board_changed, load_now, plan_to_read, default_columns, Grid, Step, TimelineCard, activity_detail, activity_text, feedback_label, mode_text, card_label, focus_step, held_step, held_target, moved_elsewhere, moves_announcement, pick_up, Dispatcher, Drop, HIGH, Needs, OwnerFilter, PRIORITIES, before_for, choosing, dispatcher_gave_up, dispatcher_stopped, forget_unknown, gave_up_to_read, owner_unknown, columns_edit, days_from_civil, deadline_input, deadline_text, dispatcher_of, drop_effect, empty_text, feedback_ready, move_column,
+        BoardColumnCards, BoardDialog, CreatorFilter, ColumnsReload, DAY_MS, DONE_SHOWN, DoneCheck, dialog_reads, done_check, expected_version_for, newest_version, board_changed, load_now, plan_to_read, default_columns, Grid, Step, TimelineCard, activity_detail, activity_text, feedback_label, mode_text, card_label, focus_step, held_step, held_target, moved_elsewhere, moves_announcement, pick_up, Dispatcher, Drop, HIGH, Needs, OwnerFilter, PRIORITIES, before_for, choosing, dispatcher_gave_up, dispatcher_stopped, forget_unknown, gave_up_to_read, owner_unknown, columns_edit, days_from_civil, deadline_input, deadline_text, dispatcher_of, drop_effect, empty_text, feedback_ready, move_column,
         board_keys_live, needs_you, new_ticket_problems, parse_deadline, parse_labels, priority_label, priority_mark, shown_cards, theme, ticket,
     };
     use aurelius_domain::task::TaskStatus;
@@ -2426,6 +2574,7 @@ pub(crate) mod tests {
             "id": TicketId::new(), "number": number, "project_id": ProjectId::new(), "project_name": "Atlas",
             "title": format!("Ticket {number}"), "description": null, "column_id": aurelius_domain::BoardColumnId::new(), "column": column.as_str(),
             "position": number as f64, "priority": "normal", "created_by_user": aurelius_domain::UserId::new(), "created_by_username": "ada",
+            "login_user": aurelius_domain::UserId::new(), "login_username": "ada",
             "owner_employee_id": null, "owner_name": null, "run": {}, "labels": [], "attachments": [], "deadline_ms": null,
             "root_task_id": null, "root_task_status": null, "review_feedback": null, "version": 1, "created_at_ms": 0, "updated_at_ms": number,
             "started_at_ms": null, "done_at_ms": null, "archived_at_ms": null,
@@ -2439,6 +2588,54 @@ pub(crate) mod tests {
 
     pub(crate) fn timeline(title: &str, actor: &str) -> TimelineCard {
         TimelineCard { seq: 1, at_ms: 0, kind: "activity".into(), label: "ACTIVITY".into(), title: title.into(), detail: "ticket".into(), actor: actor.into(), correlation_id: String::new(), task_id: None }
+    }
+
+    /// MU3-10 AC4, MU3-12 AC2/AC4 and B4: whose login, its wait, and who may take it over.
+    #[test]
+    fn a_ticket_says_whose_login_it_waits_for_and_others_may_run_it_on_theirs() {
+        use super::{login_owner, login_wait, take_over_offered};
+        use aurelius_domain::ticket::TicketNeed;
+        let alex = aurelius_domain::UserId::new();
+        let robin = aurelius_domain::UserId::new();
+        let mut t = card(42, ColumnKind::Todo);
+        t.login_user = alex;
+        t.login_username = "alex".into();
+        assert_eq!(login_owner(&t, Some(alex)), "your");
+        assert_eq!(login_owner(&t, Some(robin)), "alex's");
+        assert_eq!(login_wait(&t, Some(alex), false), None, "nothing to wait for");
+        assert!(!take_over_offered(&t, Some(robin)));
+        t.needs = Some(TicketNeed::Login);
+        assert_eq!(login_wait(&t, Some(alex), false).as_deref(), Some("◆ Waiting for your Claude login"));
+        assert_eq!(login_wait(&t, Some(robin), false).as_deref(), Some("Waiting for alex's Claude login"));
+        assert_eq!(login_wait(&t, Some(robin), true).as_deref(), Some("Waiting: alex is disabled"), "AC4");
+        // Only another board member, on their own login; never the creator's own, never in Backlog or Done.
+        assert!(take_over_offered(&t, Some(robin)));
+        assert!(!take_over_offered(&t, Some(alex)));
+        assert!(!take_over_offered(&t, None));
+        t.column = ColumnKind::Backlog;
+        assert!(!take_over_offered(&t, Some(robin)));
+    }
+
+    /// ui-ontwerp §5, B12: a quota wait names whose limit, and nothing more of it.
+    #[test]
+    fn a_quota_wait_names_whose_limit() {
+        let soon = crate::ui::now_ms();
+        assert!(crate::ui::limit_wait_for("alex's", Some(soon)).starts_with("Waiting for alex's limit until "));
+        assert_eq!(crate::ui::limit_wait_for("your", None), "Waiting for your limit");
+        assert_eq!(Needs::ConnectLogin.label(), "Needs you · Claude login");
+    }
+
+    /// P-36 / ui-ontwerp §4–§5: Start without the own login says it waits; the card's action follows the login.
+    #[test]
+    fn start_without_a_login_says_it_waits_and_the_card_offers_connect() {
+        use super::{connect_label, start_toast};
+        use aurelius_domain::user::{ClaudeLoginStatus, ClaudeLoginView};
+        assert_eq!(start_toast(51, "#51 started. Orion chooses an employee.".into(), true), "#51 started. It waits until you connect your Claude login.");
+        assert_eq!(start_toast(51, "#51 started. Orion chooses an employee.".into(), false), "#51 started. Orion chooses an employee.");
+        let view = |status| ClaudeLoginView { user_id: aurelius_domain::UserId::new(), status, email: None, plan: None, linked_at_ms: None, checked_at_ms: None, link_id: None, background: false };
+        assert_eq!(connect_label(Some(&view(ClaudeLoginStatus::Missing))), "Connect");
+        assert_eq!(connect_label(Some(&view(ClaudeLoginStatus::Expired))), "Reconnect");
+        assert_eq!(connect_label(None), "Connect");
     }
 
     /// MU1-15 AC4: each line says who (a board member, the owner or Aurelius) and what.
@@ -2939,7 +3136,7 @@ pub(crate) mod tests {
         column.tickets[0].title = "Login per board member".into();
         column.tickets[0].owner_employee_id = Some(lead);
         column.tickets[1].labels = vec!["UI".into()];
-        let numbers = |owner, query: &str, needs_only| shown_cards(&column, owner, query, |t| t.number == 7, needs_only, false).0.iter().map(|t| t.number).collect::<Vec<_>>();
+        let numbers = |owner, query: &str, needs_only| shown_cards(&column, owner, None, query, |t| t.number == 7, needs_only, false).0.iter().map(|t| t.number).collect::<Vec<_>>();
         assert_eq!(numbers(OwnerFilter::Anyone, "", false), [42, 7]);
         assert_eq!(numbers(OwnerFilter::Anyone, "login", false), [42]);
         assert_eq!(numbers(OwnerFilter::Anyone, "#7", false), [7]);
@@ -2947,6 +3144,25 @@ pub(crate) mod tests {
         assert_eq!(numbers(OwnerFilter::Employee(lead), "", false), [42]);
         assert_eq!(numbers(OwnerFilter::NoOwner, "", false), [7]);
         assert_eq!(numbers(OwnerFilter::Anyone, "", true), [7], "Needs you only");
+    }
+
+    /// ui-ontwerp §3: "Created by: Anyone / Me / <board member>".
+    #[test]
+    fn the_board_filters_by_who_created_a_ticket() {
+        let (alex, robin) = (aurelius_domain::UserId::new(), aurelius_domain::UserId::new());
+        let mut column = BoardColumnCards {
+            column: ticket::BoardColumnView { id: aurelius_domain::BoardColumnId::new(), kind: ColumnKind::Todo, name: "Todo".into(), position: 1, version: 1 },
+            tickets: vec![card(1, ColumnKind::Todo), card(2, ColumnKind::Todo), card(3, ColumnKind::Todo)],
+        };
+        column.tickets[0].created_by_user = alex;
+        column.tickets[1].created_by_user = robin;
+        column.tickets[2].created_by_user = alex;
+        let numbers = |filter: CreatorFilter, me| shown_cards(&column, OwnerFilter::Anyone, filter.user(me), "", |_| false, false, false).0.iter().map(|t| t.number).collect::<Vec<_>>();
+        assert_eq!(numbers(CreatorFilter::Anyone, Some(alex)), [1, 2, 3]);
+        assert_eq!(numbers(CreatorFilter::Me, Some(alex)), [1, 3]);
+        assert_eq!(numbers(CreatorFilter::Me, Some(robin)), [2]);
+        assert_eq!(numbers(CreatorFilter::Member(robin), Some(alex)), [2]);
+        assert_eq!(numbers(CreatorFilter::Me, None), [1, 2, 3], "nobody signed in: no filter");
     }
 
     #[test]
@@ -2959,10 +3175,10 @@ pub(crate) mod tests {
             })
             .collect();
         let column = BoardColumnCards { column: ticket::BoardColumnView { id: aurelius_domain::BoardColumnId::new(), kind: ColumnKind::Done, name: "Done".into(), position: 5, version: 1 }, tickets };
-        let (shown, older) = shown_cards(&column, OwnerFilter::Anyone, "", |_| false, false, false);
+        let (shown, older) = shown_cards(&column, OwnerFilter::Anyone, None, "", |_| false, false, false);
         assert_eq!((shown.len(), older), (DONE_SHOWN, 3));
         assert_eq!(shown[0].number, 23, "newest first");
-        assert_eq!(shown_cards(&column, OwnerFilter::Anyone, "", |_| false, false, true).0.len(), 23);
+        assert_eq!(shown_cards(&column, OwnerFilter::Anyone, None, "", |_| false, false, true).0.len(), 23);
     }
 
     #[test]

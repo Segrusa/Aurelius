@@ -301,15 +301,45 @@ pub fn ring(size: f32, color: u32) -> Div {
     div().size(px(size)).flex_none().rounded_full().border_1().border_color(c(color))
 }
 
-/// Manager monogram: a serif initial in a hairline circle. No faces.
+/// Employee monogram: a serif initial in a hairline rounded square. No faces. A
+/// board member is a circle (`member_monogram`), so human and agent differ by
+/// shape, not only by colour (P-31).
 pub fn monogram(name: &str, size: f32, cx: &App) -> Div {
     let initial: String = name.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();
     div()
         .size(px(size))
         .flex_none()
-        .rounded_full()
+        .rounded(px(size * 0.28))
         .border_1()
         .border_color(c(theme::BORDER_STRONG))
+        .flex()
+        .items_center()
+        .justify_center()
+        .font_family(serif(cx))
+        .text_size(px(size * 0.47))
+        .child(initial)
+}
+
+/// Eight colours for board members, each readable on the panels (4.5:1, P-31).
+pub const MEMBER_COLOURS: [u32; 8] = [0x8FB6E0, 0xE0A87A, 0x9CCB8F, 0xD9A0C8, 0xC9B66F, 0x8FCFC6, 0xB9A6E6, 0xE39C9C];
+
+/// A board member's fixed colour: the same name, the same colour, on every device.
+pub fn member_colour(name: &str) -> u32 {
+    let hash = name.to_lowercase().bytes().fold(2_166_136_261u32, |h, b| (h ^ b as u32).wrapping_mul(16_777_619));
+    MEMBER_COLOURS[(hash % MEMBER_COLOURS.len() as u32) as usize]
+}
+
+/// Board member monogram: the initial in a circle of their own colour (P-31).
+pub fn member_monogram(name: &str, size: f32, cx: &App) -> Div {
+    let initial: String = name.chars().next().map(|ch| ch.to_uppercase().collect()).unwrap_or_default();
+    let colour = member_colour(name);
+    div()
+        .size(px(size))
+        .flex_none()
+        .rounded_full()
+        .border_1()
+        .border_color(c(colour))
+        .text_color(c(colour))
         .flex()
         .items_center()
         .justify_center()
@@ -823,12 +853,28 @@ pub fn fmt_when(ms: i64) -> String {
 /// "Waiting for limit reset until 14:05", with the day when that is not today;
 /// the plain text when the reset time is unknown.
 pub fn limit_wait(until_ms: Option<i64>) -> String {
-    let Some(ms) = until_ms else { return LIMIT_WAIT.into() };
+    limit_wait_as(LIMIT_WAIT, until_ms)
+}
+
+/// "your" → "Your" (a sentence's first word).
+pub fn capitalised(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |f| f.to_uppercase().collect::<String>() + chars.as_str())
+}
+
+/// A ticket's quota wait with whose limit it is (ui-ontwerp §5, B12): "Waiting for
+/// Alex's limit until 16:00", or "your" for the own; never more of the other's usage.
+pub fn limit_wait_for(owner: &str, until_ms: Option<i64>) -> String {
+    limit_wait_as(&format!("Waiting for {owner} limit"), until_ms)
+}
+
+fn limit_wait_as(text: &str, until_ms: Option<i64>) -> String {
+    let Some(ms) = until_ms else { return text.into() };
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
         + aurelius_host::local_utc_offset_minutes() * 60;
     let t = ms / 1000 + aurelius_host::utc_offset_minutes_at(ms) * 60;
     let clock = format!("{:02}:{:02}", t.rem_euclid(86_400) / 3600, t.rem_euclid(3600) / 60);
-    if t.div_euclid(86_400) == now.div_euclid(86_400) { format!("{LIMIT_WAIT} until {clock}") } else { format!("{LIMIT_WAIT} until {} {clock}", fmt_day(ms)) }
+    if t.div_euclid(86_400) == now.div_euclid(86_400) { format!("{text} until {clock}") } else { format!("{text} until {} {clock}", fmt_day(ms)) }
 }
 
 /// "Mon 5 Oct" for the local day that contains `ms`.
@@ -1001,4 +1047,18 @@ pub fn setting_row(label: impl Into<SharedString>, explain: Option<&str>, contro
         None => h().child(label),
     };
     h().w_full().gap(px(12.)).items_center().justify_between().child(left.text_size(px(13.)).text_color(c(theme::TEXT))).child(control)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MEMBER_COLOURS, member_colour};
+
+    /// P-31: a board member's monogram has one fixed colour of the eight, whatever the device or case.
+    #[test]
+    fn a_board_member_keeps_one_colour_of_the_palette() {
+        assert_eq!(member_colour("alex"), member_colour("Alex"));
+        assert!(MEMBER_COLOURS.contains(&member_colour("robin")));
+        let distinct: std::collections::HashSet<u32> = MEMBER_COLOURS.into_iter().collect();
+        assert_eq!(distinct.len(), 8);
+    }
 }

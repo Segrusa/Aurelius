@@ -199,6 +199,12 @@ pub fn load_key(conn: &Connection, id: ApiKeyId) -> Result<Option<KeyRow>, Stora
     Ok(conn.query_row(&format!("SELECT {KEY_COLUMNS} FROM api_keys WHERE id = ?1"), [id.to_string()], key_of).optional()?)
 }
 
+/// The board member on whose Claude login the key's calls run (B5); none: they wait with 'login'.
+pub fn set_key_login_user(tx: &Transaction<'_>, id: ApiKeyId, login_user: Option<&str>) -> Result<(), StorageError> {
+    tx.execute("UPDATE api_keys SET login_user = ?2 WHERE id = ?1", params![id.to_string(), login_user])?;
+    Ok(())
+}
+
 pub fn revoke_key(tx: &Transaction<'_>, id: ApiKeyId) -> Result<(), StorageError> {
     tx.execute("UPDATE api_keys SET revoked_at_ms = COALESCE(revoked_at_ms, ?2) WHERE id = ?1", params![id.to_string(), now_ms()])?;
     Ok(())

@@ -242,7 +242,9 @@ impl CommandService {
         let Some(ctx) = ctx else { return Ok(None) };
         let Some(employee_id) = ctx.employee_id else { return Ok(None) };
         let store_ref = self.store.clone();
-        let config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory)?;
+        let mut config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory)?;
+        // On the task's own login: a ticket's summary after Done on the ticket's (MU3-10 AC1).
+        config.login_user = self.store.read(|c| crate::run::login::of_task(c, task_id)).map_err(storage_error)?;
         self.store
             .read(|conn| {
                 let read = |key: &str| store_ref.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
@@ -536,14 +538,27 @@ impl CommandService {
     }
 
     /// Turns of an employee conversation not yet covered by a summary.
-    pub fn summary_input(&self, conversation_id: ConversationId) -> Result<Option<SummaryInput>, AppError> {
+    /// `source`: the run that scheduled it (`maybe_schedule_summary`); none (an older job): it does not run.
+    pub fn summary_input(&self, conversation_id: ConversationId, source: Option<aurelius_domain::RunId>) -> Result<Option<SummaryInput>, AppError> {
         let store_ref = self.store.clone();
         let employee = self
             .store
             .read(|c| Ok(c.query_row("SELECT employee_id FROM conversations WHERE id = ?1", [conversation_id.to_string()], |r| r.get::<_, Option<String>>(0)).ok().flatten()))
             .map_err(storage_error)?;
         let Some(employee_id) = employee.and_then(|m| EmployeeId::parse(&m).ok()) else { return Ok(None) };
-        let config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory)?;
+        let mut config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory)?;
+        // On the login of what it summarizes: the task's, else the login of the run
+        // that scheduled it, never of another run of a shared conversation (B1-1).
+        config.login_user = self
+            .store
+            .read(|c| {
+                let task: Option<String> = c.query_row("SELECT id FROM tasks WHERE conversation_id = ?1", [conversation_id.to_string()], |r| r.get(0)).optional()?;
+                match task.and_then(|t| TaskId::parse(&t).ok()) {
+                    Some(task) => crate::run::login::of_task(c, task),
+                    None => source.map_or(Ok(None), |run| crate::run::login::of_run(c, run)),
+                }
+            })
+            .map_err(storage_error)?;
         self.store
             .read(|conn| {
                 let read = |key: &str| store_ref.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
@@ -845,7 +860,9 @@ impl CommandService {
             })
             .map_err(storage_error)?;
         let Some(employee) = employee.and_then(|m| EmployeeId::parse(&m).ok()) else { return Ok(None) };
-        let config = self.resolve_for_employee(employee, aurelius_domain::connection::Purpose::Memory)?;
+        let mut config = self.resolve_for_employee(employee, aurelius_domain::connection::Purpose::Memory)?;
+        // No source: the company's login (B6); without one it does not run.
+        config.login_user = self.store.read(crate::run::login::of_company).map_err(storage_error)?;
         let store_ref = self.store.clone();
         let scope = scope_id.to_owned();
         self.store
@@ -1101,7 +1118,8 @@ pub(crate) fn schedule_extraction(tx: &Tx<'_>, task: TaskId, ticket: Option<Tick
 }
 
 /// Schedule a summary when enough uncovered messages accumulated in an employee conversation.
-pub(crate) fn maybe_schedule_summary(tx: &Tx<'_>, conversation: ConversationId, source: EventId) -> Result<(), StorageError> {
+/// `run`: the run whose answer completed it; the summary runs on that run's login.
+pub(crate) fn maybe_schedule_summary(tx: &Tx<'_>, conversation: ConversationId, source: EventId, run: aurelius_domain::RunId) -> Result<(), StorageError> {
     let employee: Option<String> = tx.query_row("SELECT employee_id FROM conversations WHERE id = ?1", [conversation.to_string()], |r| r.get(0)).ok().flatten();
     if employee.is_none() {
         return Ok(());
@@ -1124,5 +1142,5 @@ pub(crate) fn maybe_schedule_summary(tx: &Tx<'_>, conversation: ConversationId, 
         return Ok(());
     }
     let id = format!("summary-{}", aurelius_domain::JobId::new());
-    aurelius_storage::events::insert_job(tx, &id, SUMMARY_JOB_KIND, source, &id, &serde_json::json!({ "conversation_id": conversation }))
+    aurelius_storage::events::insert_job(tx, &id, SUMMARY_JOB_KIND, source, &id, &serde_json::json!({ "conversation_id": conversation, "run_id": run }))
 }

@@ -31,8 +31,10 @@ class MockInboxBloc extends MockBloc<InboxEvent, InboxState> implements InboxBlo
 class MockRuntimeBloc extends MockBloc<RuntimeEvent, RuntimeState> implements RuntimeBloc {}
 
 const testUser = UserView(id: 'u-1', username: 'ada', createdAtMs: 0);
-const onlineLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], boardMembersExist: true, user: testUser);
-const offlineLink = LinkState(status: LinkStatus.offline, boardMembersExist: true, user: testUser);
+/// The test board member's own Claude login, connected (a login not read yet counts as missing, R3 m5).
+const testLogin = ClaudeLoginView(userId: 'u-1', status: ClaudeLoginStatus.linked, background: false);
+const onlineLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], boardMembersExist: true, user: testUser, claudeLogin: testLogin);
+const offlineLink = LinkState(status: LinkStatus.offline, boardMembersExist: true, user: testUser, claudeLogin: testLogin);
 
 /// The six columns in their default order (MU1-05 AC1).
 const defaultColumns = [
@@ -70,6 +72,9 @@ TicketView ticketOf({
   TaskRun run = const TaskRun(),
   double position = 1,
   int version = 3,
+  UserView creator = testUser,
+  UserView? login,
+  TicketNeed? needs,
 }) =>
     TicketView(
       archivedAtMs: archivedAtMs,
@@ -77,13 +82,16 @@ TicketView ticketOf({
       column: column,
       columnId: columnIdOf(column),
       createdAtMs: 0,
-      createdByUser: testUser.id,
-      createdByUsername: testUser.username,
+      createdByUser: creator.id,
+      createdByUsername: creator.username,
       deadlineMs: deadlineMs,
       description: description,
       doneAtMs: doneAtMs,
       id: id,
       labels: labels,
+      loginUser: (login ?? creator).id,
+      loginUsername: (login ?? creator).username,
+      needs: needs,
       number: number,
       ownerEmployeeId: ownerEmployeeId,
       ownerName: ownerName,

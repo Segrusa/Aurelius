@@ -14,6 +14,7 @@ import '../company_org/employee_widgets.dart';
 import '../project/new_task_page.dart';
 import '../project/task_status_mark.dart';
 import 'give_work.dart';
+import '../account/claude_login.dart' show ClaudeLoginCard;
 
 /// Home: the Board's dashboard. Give work (to the management team by default),
 /// the management team, who is at work and what needs the user.
@@ -54,6 +55,7 @@ class DashboardPage extends StatelessWidget {
             onRefresh: () => untilReloaded(context.read<CompanyBloc>(), () => context.read<CompanyBloc>().add(const CompanyRefreshed()), busy: (s) => s.loading),
             fill: state.loading && state.employees.isEmpty ? const Center(child: CupertinoActivityIndicator()) : null,
             children: [
+              const ClaudeLoginCard(),
               const GroupHeader('Give Work'),
               GiveWorkBox(state: state),
               const SizedBox(height: 8),

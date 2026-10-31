@@ -30,7 +30,8 @@ const fn plain(version: i64, sql: &'static str) -> Migration {
 /// (conversation kind 'group', made by the migration itself); 18 is v0.11's
 /// board (protocol 4): company, users, board columns, tickets, departments gone;
 /// 19 the discussions: a channel per project, a discussion per ticket, and the
-/// board member who wrote a message. A 14–17 database does not migrate into 18: `fresh_start` imports it.
+/// board member who wrote a message; 20 the read markers; 21 phase 3's logins:
+/// user sessions, disabled users, Claude logins and whose login runs use. A 14–17 database does not migrate into 18: `fresh_start` imports it.
 pub const MIGRATIONS: &[Migration] = &[
     plain(1, include_str!("../../../migrations/0001_schema.sql")),
     plain(2, include_str!("../../../migrations/0002_artifacts.sql")),
@@ -52,6 +53,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 18, sql: include_str!("../../../migrations/0018_board.sql"), rebuild: true, then: None },
     Migration { version: 19, sql: include_str!("../../../migrations/0019_discussions.sql"), rebuild: true, then: None },
     plain(20, include_str!("../../../migrations/0020_discussion_reads.sql")),
+    Migration { version: 21, sql: include_str!("../../../migrations/0021_multi_user_sessions.sql"), rebuild: true, then: None },
 ];
 
 /// The last schema of protocol 2 (managers per project). The v0.6 import writes

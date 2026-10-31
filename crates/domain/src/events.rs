@@ -182,6 +182,12 @@ event_kinds! {
     // event, `metadata.user_id` is the board member who made it (none in the
     // onboarding), also as `metadata.by`. Never a password or hash.
     UserCreated => "user.created",
+    // A board member was disabled (`metadata.disabled_user_id`, `metadata.by`): their
+    // sessions are gone and they cannot sign in. Sessions themselves have no events.
+    UserDisabled => "user.disabled",
+    // A board member's Claude login was connected, expired or disconnected, or became
+    // the company's background login; the aggregate is the user. Never a token.
+    ClaudeLoginUpdated => "claude_login.updated",
 }
 
 impl EventKind {

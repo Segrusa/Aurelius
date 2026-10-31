@@ -110,10 +110,16 @@ fn method_needs(method: &Method) -> Needs {
         | Method::BoardGet { .. }
         | Method::TicketGet { .. }
         | Method::TicketList { .. }
-        // Every own client must pass the onboarding (MU1-20/21): identification, not a right.
+        // Every own client must sign in and pass the onboarding (MU1-20, MU3-02):
+        // the board member's session is the second layer, not a device right.
         | Method::UserList
         | Method::UserWhoami
-        | Method::UserUse(_) => Needs::Cap(Read),
+        | Method::UserLogin(_)
+        | Method::UserLogout
+        | Method::SessionList { .. }
+        // A board member's own Claude login, from any of their devices (the phone opens the link).
+        | Method::ClaudeLoginStatus
+        | Method::ClaudeLoginInput(_) => Needs::Cap(Read),
         // Functions and API keys let outside apps start work on the server.
         Method::AgentFunctionList { .. }
         | Method::FunctionCallList { .. }
@@ -172,6 +178,10 @@ fn host_needs(host: &HostWrite) -> Needs {
         HostWrite::NoteCreate { .. } | HostWrite::NoteUpdate { .. } | HostWrite::NoteSetPinned { .. } | HostWrite::NoteDelete { .. } => Needs::Cap(TaskControl),
         // Every own client must be able to make the first board member (MU1-20).
         HostWrite::UserCreate(_) => Needs::Cap(Read),
+        // One role: every board member manages sessions, passwords and board members,
+        // from any device they signed in on (the session decides, MU3-04/05).
+        HostWrite::SessionRevoke { .. } | HostWrite::UserSetPassword(_) | HostWrite::UserDisable { .. } => Needs::Cap(Read),
+        HostWrite::ClaudeLoginLink | HostWrite::ClaudeLoginCancel { .. } | HostWrite::ClaudeLoginUnlink => Needs::Cap(Read),
         // The inbox is the user's own: reading, dismissing.
         HostWrite::NotificationMarkAllRead | HostWrite::NotificationDismiss { .. } | HostWrite::NotificationDismissAll => Needs::Cap(Read),
         HostWrite::SecretSet { .. }
@@ -291,6 +301,10 @@ fn command_needs(command: &Command) -> Needs {
         | Command::CancelTicket(_)
         | Command::ArchiveTicket(_)
         | Command::RetryTicketSummary(_)
+        // Running a ticket on one's own Claude login, or the company's background
+        // jobs: the board member's own subscription, from any device that controls tasks.
+        | Command::UseMyLogin(_)
+        | Command::SetBackgroundLogin(_)
         | Command::UpdateBoardColumns(_)
         | Command::UpdateCompany(_)
         | Command::UpdateProject(_) => Needs::Cap(TaskControl),
