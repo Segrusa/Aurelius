@@ -67,7 +67,7 @@
 │ Time           Who                     Action        Item           Via        │
 │ Oct 31 11:02   (S) You                 Revealed      GitHub token   iPhone     │
 │ Oct 31 10:40   ▢ Forge (employee)      Read by run   GitHub token   #42 · run ›│
-│ Oct 31 09:15   (M) Marie               Replaced      Sentry DSN     sdc-laptop │
+│ Oct 31 09:15   (M) Marie               Replaced      Sentry DSN     dev-laptop │
 │ Oct 30 17:20   (S) You                 Copied        GitHub token   Desktop    │
 │ Oct 30 16:03   (M) Marie               Created       Staging URL    Desktop    │
 │                                    Load older                                  │

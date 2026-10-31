@@ -10,12 +10,12 @@ Volgens D-06 vervangt de tab **Discussion** de tab Conversation, op dezelfde pla
 ┌ Ticket ─────────────────────────────────────────────── ⋯  × ┐
 │ #42 · aurelius  Login per board member         [Review] ◆   │
 ├ [ Ticket ] [ Discussion 3 ] [ Activity ] ───────────────────┤  ← 3 = ongelezen
-│ (S) Sébastien · board member                        10:02   │
+│ (A) Alexandra · board member                        10:02   │
 │     Please keep the argon2 params configurable.             │
 │ ┄┄ Orion delegated "Users table" to (S) Schema · 10:05 ┄┄   │  ← systeemregel
 │ ┄┄ Schema reported on "Users table" ✓ Done  [Open report]┄┄ │  ← subtask-rapport, ingeklapt
 │ (F) Forge — Backend Developer                       10:40   │
-│     Done. @Sébastien the hash cost is set via config.       │  ← @jij = gemarkeerd
+│     Done. @Alexandra the hash cost is set via config.       │  ← @jij = gemarkeerd
 │ ┄┄ Forge moved #42 Doing → Review · 10:41 ┄┄                │  ← kolomwijziging
 │ ┌ ◆ Review · Report from Forge ──────────────── [Expand] ┐  │  ← reviewkaart in de stroom
 │ │ Branch feat/users-argon2 · 2 commits                   │  │
@@ -25,7 +25,7 @@ Volgens D-06 vervangt de tab **Discussion** de tab Conversation, op dezelfde pla
 │ │ Use m=64MiB and add a test for @Sen|                  │   │
 │ │  ┌──────────────────────────────┐                     │   │
 │ │  │ (S) Sentinel  Security Eng.  │ ← autocomplete      │   │
-│ │  │ (S) Sébastien board member   │                     │   │
+│ │  │ (A) Alexandra board member   │                     │   │
 │ │  └──────────────────────────────┘                     │   │
 │ └───────────────────────────────────────────────────────┘   │
 │ [Send back to Doing]   [Send ⏎]                [✓ Done]     │  ← alleen in Review
@@ -45,17 +45,17 @@ Volgens D-06 vervangt de tab **Discussion** de tab Conversation, op dezelfde pla
 ┌─────────────────────────────────┐
 │ ‹ Board   #42 Login per…    ⋯   │
 │ ( Ticket | Discussion ● | Act. )│  ← segmented, ● = ongelezen
-│ (S) Sébastien · 10:02           │
+│ (A) Alexandra · 10:02           │
 │ Please keep the argon2 params…  │
 │ ┄ Orion delegated to Schema ┄   │
 │ ┄ Schema reported ✓  Report › ┄ │
 │ (F) Forge · 10:40               │
-│ Done. @Sébastien the hash cost… │
+│ Done. @Alexandra the hash cost… │
 │ ┄ Forge moved to Review ┄       │
 │ ┌ ◆ Review · Report  ›        ┐ │
 │ └─────────────────────────────┘ │
 │ ┌ @Sen ───────────────────────┐ │  ← suggestiestrook boven het toetsenbord
-│ │ (S) Sentinel  (S) Sébastien │ │
+│ │ (S) Sentinel  (A) Alexandra │ │
 │ └─────────────────────────────┘ │
 │ ╭─────────────────────────────╮ │
 │ │ Use m=64MiB…            [↑] │ │  ← composer (glas)
@@ -76,9 +76,9 @@ Volgens D-06 vervangt de tab **Discussion** de tab Conversation, op dezelfde pla
 │       │ PROJECTS        │ ─────────── New ─────────────               │  ← ongelezen-scheiding
 │       │  # aurelius  3  │ (A) Atlas — CEO Agent                10:12  │
 │       │  # segrusa-web @│     The vault design is ready for review.   │
-│       │  # docs         │ (S) Sébastien · board member  ⋯ hover:      │
+│       │  # docs         │ (A) Alexandra · board member  ⋯ hover:      │
 │       │                 │     Can we add an audit export?  [⌁ Ticket] │
-│       │                 │ ┄┄ Sébastien created #52 from a message ┄┄  │
+│       │                 │ ┄┄ Alexandra created #52 from a message ┄┄  │
 │       │                 │ ┌ Message #aurelius · @ to mention ────┐    │
 │       │                 │ └──────────────────────────────────────┘    │
 └───────┴─────────────────┴─────────────────────────────────────────────┘
@@ -107,7 +107,7 @@ Sheet "Channels"
 ## 4. "Create ticket" vanuit een chatbericht
 - **Desktop:** bij hover verschijnt op een bericht de actie **⌁ Ticket**. Dezelfde actie staat in het rechtsklikmenu (*Create ticket…*) en geldt in kanalen, employee-gesprekken, de project-assistent en taskgesprekken. **Mobiel:** lang indrukken → actiesheet → **Create ticket**.
 - Dit opent **New ticket** (Fase 1 §10.1/§10.2), al ingevuld volgens Fase 1 §10.3. Het project is dat van het kanaal, of leeg in #general. De beschrijving citeert het bericht en linkt terug.
-- Na **Create** komt in het kanaal een systeemregel *"Sébastien created #52 from a message"*, en op het bronbericht een kleine link-pill **→ #52**, zodat het bericht niet twee keer omgezet wordt. Een tweede keer *Create ticket* op hetzelfde bericht vraagt: *"#52 was already created from this message. Create another?"*
+- Na **Create** komt in het kanaal een systeemregel *"Alexandra created #52 from a message"*, en op het bronbericht een kleine link-pill **→ #52**, zodat het bericht niet twee keer omgezet wordt. Een tweede keer *Create ticket* op hetzelfde bericht vraagt: *"#52 was already created from this message. Create another?"*
 - De eerste discussieregel van het nieuwe ticket is de systeemregel *"Created from #aurelius · Atlas · 10:12"*.
 
 ## 5. Toegankelijkheid (aanvulling op Fase 1 §15)

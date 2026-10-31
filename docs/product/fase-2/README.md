@@ -13,6 +13,7 @@
 **Protocol:** **protocol 4 blijft, alleen additief**: features `ticket_discussion` en `team_channels`, de write `ticket.post`, `channel.list`, `ticket.create {from_message}` en een optioneel veld `system` op berichten (geen nieuwe `MessageRole`). Events van projectkanalen gaan alleen naar clients met `accepts: team_channels`. Zie impactanalyse §2.
 **Schatting:** ≈ **25 dagen** werk, doorlooptijd 2 à 2,5 weken (Forge 10, Flux 5,5, Bridge 5,5, Schema 1, Sentinel 0,5, Pulse 2, Trace 1).
 **Afhankelijkheden:** Fase 1 is af en heeft review en QA gehad (tickets, task-engine, `created_by_user`, B2-knop). De bouw takt af van `feat/aur-mu-01`.
+**Doorgeschoven uit Fase 1:** MU1-18 AC4 (een mislukte samenvatting na Done is zichtbaar en kan opnieuw geprobeerd worden). Protocol 4 heeft er in Fase 1 geen veld voor. Het valt nu onder MU2-12 AC4, met de fout als systeemregel in de discussie (Atlas, 2026-10-31).
 **Bouwvolgorde:** Schema 0019 ‖ Forge discussiemotor (veralgemening van `conversation/group_chat.rs`) → protocol bevriezen + gen-dart → Flux en Bridge parallel, en Forge doet ondertussen systeemregels, kanalen en samenvatting → Sentinel, Pulse, Trace.
 **Risico's:** een lus via meerdere discussies (het budget telt over alle discussies samen); ruis van systeemregels (inklapbaar); runkosten per @vermelding (bestaande limieten); auteurschap zonder bewijs tot Fase 3 (aanvaard, R2 uit Fase 1).
 

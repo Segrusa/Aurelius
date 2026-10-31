@@ -14,7 +14,7 @@
 │             │ to aurelius-server (tailnet)      │            │
 │             │ Username                          │            │
 │             │ ┌───────────────────────────────┐ │            │
-│             │ │ sebastien                     │ │            │
+│             │ │ alexandra                     │ │            │
 │             │ └───────────────────────────────┘ │            │
 │             │ Password                          │            │
 │             │ ┌───────────────────────────┐ 👁  │            │
@@ -32,16 +32,16 @@
 - **Fouten:** altijd *"Username or password is wrong."*, zonder te verraden welke van de twee. Na te veel pogingen: *"Too many attempts. Try again in 0:30."* met een aftellende knop.
 - **Sessie verlopen of ingetrokken** tijdens het werk: een modale melding *"You were signed out on this device."* en daarna het loginscherm. Een concept in een composer blijft lokaal bewaard.
 - **Mobiel:** een volledige pagina zonder tabbalk, large title **Sign in**, één gegroepeerde sectie, autofill-hints `username` en `password`, en een `FilledButton` boven het toetsenbord.
-- **Uitloggen:** desktop via de server picker (*"as sebastien"* → **Sign out**), mobiel via More → (S) Sébastien → **Sign out**.
+- **Uitloggen:** desktop via de server picker (*"as alexandra"* → **Sign out**), mobiel via More → (A) Alexandra → **Sign out**.
 
 ## 2. Eigen sessies en apparaten
 **Settings → Account → Sessions** (mobiel: More → Account → Sessions)
 ```
 ┌ Settings › Account › Sessions ─────────────────────────────────┐
-│ Devices signed in as sebastien                                 │
-│ ▣ Desktop · sdc-laptop (Linux)        This device              │
+│ Devices signed in as alexandra                                 │
+│ ▣ Desktop · dev-laptop (Linux)        This device              │
 │   Signed in Oct 31 · active now                                │
-│ ▯ iPhone · Sébastien's iPhone         Active 2 h ago  [Revoke] │
+│ ▯ iPhone · Alexandra's iPhone         Active 2 h ago  [Revoke] │
 │ ▯ Android · Pixel 9                   Active Oct 12   [Revoke] │
 │                                                                │
 │ [Sign out all other devices]                                   │
@@ -56,8 +56,8 @@
 | Waar | Weergave |
 |---|---|
 | Berichten (discussie, kanalen, chats) | monogram + naam + *board member* of de rol |
-| Ticketkaart en ticketweergave | *"by Sébastien"* (aanmaker); de Activity-regels krijgen een monogram en naam per actor |
-| Tasks, approvals, Inbox | *"Approved by Marie"*, *"Started by Sébastien"* |
+| Ticketkaart en ticketweergave | *"by Alexandra"* (aanmaker); de Activity-regels krijgen een monogram en naam per actor |
+| Tasks, approvals, Inbox | *"Approved by Marie"*, *"Started by Alexandra"* |
 | Board-filter | nieuw filter **Created by: Anyone / Me / <board member>** |
 - **Avatar:** het bestaande monogram. **Board members** zijn een cirkel, **employees** een afgeronde rechthoek, zodat je mens en agent ook zonder kleur uit elkaar houdt. Een board member krijgt een vaste kleur uit een palet van 8 kleuren, met een contrast van minstens 4,5:1 (P-31).
 - **"You":** je eigen berichten en acties tonen *"You"* in de activiteit, en je naam in berichten.
@@ -69,7 +69,7 @@
 ┌ Claude login ──────────────────────────────────────────────────┐
 │ Tickets you create run on your own Claude subscription.        │
 │                                                                │
-│ ● Connected  sebastien@example.com · Max                       │  ← status
+│ ● Connected  alexandra@example.com · Max                       │  ← status
 │   Session limit   ███████░░░  68 % · resets 16:00              │  ← /usage per user
 │   Weekly limit    ██░░░░░░░░  21 % · resets Mon                │
 │   [Check now]  [Reconnect]  [Disconnect]                       │

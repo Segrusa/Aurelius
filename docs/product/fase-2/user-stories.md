@@ -117,7 +117,7 @@ Prioriteit: **M** = Must, **S** = Should, **C** = Could.
 - **AC1.** *Given* een ticket dat op Done gaat, *When* het gesloten is, *Then* schrijft het systeem precies één samenvatting naar de project-memory, op basis van de ticketvelden, de discussie en de rapporten van de tasks (de bestaande extractie, met een andere bron).
 - **AC2.** *Given* de samenvatting, *When* ik ze bekijk, *Then* verwijst ze naar het ticket (id en titel) en staat ze als systeembericht in de discussie.
 - **AC3.** *Given* de tasks onder het ticket, *When* ze eindigen, *Then* is er geen dubbele extractie: per ticket komt er één samenvatting, niet één per task (OV-06).
-- **AC4.** *Given* een mislukte extractie (bijvoorbeeld door quotum), *When* die mislukt, *Then* blijft het ticket op Done, is de fout zichtbaar in de discussie en kan een board member opnieuw proberen.
+- **AC4.** *Given* een mislukte extractie (bijvoorbeeld door quotum), *When* die mislukt, *Then* blijft het ticket op Done, is de fout zichtbaar in de discussie en kan een board member opnieuw proberen. *(Neemt MU1-18 AC4 over, dat uit Fase 1 is doorgeschoven omdat protocol 4 er geen veld voor had.)*
 
 ## Open vragen (escalatie naar Orion)
 
