@@ -114,8 +114,9 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
         }
         let failed_notice = task_event(tx, task, row.project_id, "task.failed", failed_meta)?;
         // A failed task teaches too: the cheap extraction looks at what went wrong (lessons).
+        // Not below a ticket: the ticket's one extraction after Done covers its tasks (MU2-12 AC3).
         let source: String = tx.query_row("SELECT id FROM events WHERE seq = ?1", [failed_notice.seq as i64], |r| r.get(0))?;
-        if let Ok(source) = aurelius_domain::EventId::parse(&source) {
+        if let (Ok(source), None) = (aurelius_domain::EventId::parse(&source), crate::task::ticket_line::ticket_of(tx, task)?) {
             crate::memory::schedule_extraction(tx, task, None, source)?;
         }
         notices.push(failed_notice);
@@ -279,12 +280,15 @@ pub(crate) fn accept(tx: &Tx<'_>, st: &Store, task: TaskId, report: &str, by: Op
     };
     let succeeded = task_event(tx, task, row.project_id, "task.succeeded", meta)?;
     let source: String = tx.query_row("SELECT id FROM events WHERE seq = ?1", [succeeded.seq as i64], |r| r.get(0))?;
-    // Accepted on the board (Done): the main task's extraction also writes the ticket's summary (MU1-18).
+    // Accepted on the board (Done): the main task's extraction is the ticket's one
+    // extraction and writes its summary (MU2-12). The other tasks of a ticket get
+    // none of their own (AC3); a task without a ticket does, as before.
     let ticket = match by {
         Some(_) => crate::task::ticket_line::root_of(tx, task)?.map(|(ticket, _, _)| ticket),
         None => None,
     };
-    if let Ok(source) = aurelius_domain::EventId::parse(&source) {
+    let extract = ticket.is_some() || crate::task::ticket_line::ticket_of(tx, task)?.is_none();
+    if let (Ok(source), true) = (aurelius_domain::EventId::parse(&source), extract) {
         crate::memory::schedule_extraction(tx, task, ticket, source)?;
     }
     notices.push(succeeded);
@@ -308,7 +312,8 @@ fn after_ended(tx: &Tx<'_>, st: &Store, task: TaskId, text: &str, succeeded: boo
     let finding = if succeeded { format!("Finished “{}”:\n\n{}", row.title, text.trim()) } else { text.to_owned() };
     let speaker = Speaker::Update { kind: if succeeded { "finding" } else { "status" }, from: &colleague };
     if let Some(parent) = row.parent {
-        let mut notices = Vec::new();
+        // Below a ticket: a short line in its discussion too (MU2-03).
+        let mut notices = crate::task::ticket_line::sub_task_line(tx, task, &colleague, &row.title, text, succeeded)?;
         if let Some((conversation, _)) = store::task_conversation(tx, parent)? {
             notices.push(thread::post_result(tx, st, conversation, parent, task, speaker, &finding)?.1);
         }
@@ -501,10 +506,15 @@ pub enum EmployeeAction {
     ProposeInstructions { employee: Option<String>, instructions: String, reason: String, evidence: Vec<String> },
     /// Management chooses the mode (`auto` or `plan`) of its own task, with a reason.
     SetMode { mode: String, reason: String },
-    /// The latest messages of the company's group chat (nothing changes).
-    ReadGroupChat { last: Option<u32> },
-    /// A message in the group chat under the employee's name; wakes the colleagues it names.
-    PostToGroupChat { message: String },
+    /// The latest messages of a channel of the Team chat (nothing changes); `channel`
+    /// none: the run's own (see `discussion::run_channel`).
+    ReadGroupChat { last: Option<u32>, channel: Option<String> },
+    /// A message in a channel under the employee's name; wakes the colleagues it names.
+    PostToGroupChat { message: String, channel: Option<String> },
+    /// The latest messages of the discussion of the run's ticket (nothing changes).
+    ReadDiscussion { last: Option<u32> },
+    /// A message in the discussion of the run's ticket; wakes the colleagues it names.
+    PostToDiscussion { message: String },
     /// The dispatcher of a ticket chooses its owner (`triage`; only in a dispatcher's run).
     AssignTicket { employee: String, reason: String },
 }
@@ -609,21 +619,51 @@ impl CommandService {
                 })
                 .map_err(storage_error);
         }
-        if let EmployeeAction::ReadGroupChat { last } = &action {
-            let last = *last;
+        if let EmployeeAction::ReadGroupChat { last, channel } = &action {
+            let (last, channel) = (*last, channel.clone());
             return self
                 .store
                 .read(|conn| {
                     if run_owner(conn, run)?.and_then(|o| o.employee).is_none() {
                         return Ok((false, "Only an employee can read the group chat.".to_string(), vec![]));
                     }
-                    Ok((true, crate::conversation::group_chat::read_text(conn, &st, last)?, vec![]))
+                    match crate::conversation::discussion::run_channel(conn, run, channel.as_deref())? {
+                        Ok(d) => Ok((true, crate::conversation::discussion::read_text(conn, &st, &d, last)?, vec![])),
+                        Err(why) => Ok((false, why, vec![])),
+                    }
                 })
                 .map_err(storage_error);
         }
-        if let EmployeeAction::PostToGroupChat { message } = &action {
+        if let EmployeeAction::PostToGroupChat { message, channel } = &action {
+            let (message, channel) = (message.clone(), channel.clone());
+            return self
+                .store
+                .write(move |tx| match crate::conversation::discussion::run_channel(tx, run, channel.as_deref())? {
+                    Ok(d) => crate::conversation::discussion::post_from_run(tx, &st, run, &d, &message),
+                    Err(why) => Ok((false, why, vec![])),
+                })
+                .map_err(storage_error);
+        }
+        const NO_DISCUSSION: &str = "This run has no ticket discussion: only a run under a ticket, or one woken from its discussion, can use it.";
+        if let EmployeeAction::ReadDiscussion { last } = &action {
+            let last = *last;
+            return self
+                .store
+                .read(|conn| match crate::conversation::discussion::run_discussion(conn, run)? {
+                    Some(d) => Ok((true, crate::conversation::discussion::read_text(conn, &st, &d, last)?, vec![])),
+                    None => Ok((false, NO_DISCUSSION.to_string(), vec![])),
+                })
+                .map_err(storage_error);
+        }
+        if let EmployeeAction::PostToDiscussion { message } = &action {
             let message = message.clone();
-            return self.store.write(move |tx| crate::conversation::group_chat::post_from_run(tx, &st, run, &message)).map_err(storage_error);
+            return self
+                .store
+                .write(move |tx| match crate::conversation::discussion::run_discussion(tx, run)? {
+                    Some(d) => crate::conversation::discussion::post_from_run(tx, &st, run, &d, &message),
+                    None => Ok((false, NO_DISCUSSION.to_string(), vec![])),
+                })
+                .map_err(storage_error);
         }
         if let EmployeeAction::ProposeColleague { name, role, title, instructions, reports_to, reason } = &action {
             let input = crate::org::ProposalInput {
@@ -719,6 +759,7 @@ impl CommandService {
                         };
                         inherit_mode(tx, run, child, to.id)?;
                         notices.insert(1, task_event(tx, task, row.project_id, "task.delegated", serde_json::json!({ "child": child, "to": to.id, "subject": to.name, "title": title }))?);
+                        notices.extend(crate::task::ticket_line::delegated_line(tx, task, child, &me_name, &to.name, &title)?);
                         Ok((true, format!("Delegated “{title}” to {}. Their result comes back in this conversation; finish your own part meanwhile.", to.name), notices))
                     }
                     EmployeeAction::AddIdea { .. }
@@ -732,6 +773,8 @@ impl CommandService {
                     | EmployeeAction::SetMode { .. }
                     | EmployeeAction::ReadGroupChat { .. }
                     | EmployeeAction::PostToGroupChat { .. }
+                    | EmployeeAction::ReadDiscussion { .. }
+                    | EmployeeAction::PostToDiscussion { .. }
                     | EmployeeAction::AssignTicket { .. } => unreachable!("handled above"),
                     EmployeeAction::HandOver { employee, reason } => {
                         let Some(to) = find(&employee) else {

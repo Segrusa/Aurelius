@@ -109,7 +109,7 @@ async fn the_project_assistant_sees_and_reads_the_projects_tasks() {
     // What is remembered of the task is drawn from its report too.
     let mut extracted = false;
     for _ in 0..400 {
-        extracted = runtime.prompts.lock().unwrap().iter().any(|p| p.contains("Task completed: Dark mode\nReport:\n") && p.contains(&first_line));
+        extracted = runtime.prompts.lock().unwrap().iter().any(|p| p.contains("Task completed: Dark mode\nReport (JSON-quoted):\n\"") && p.contains(&first_line));
         if extracted {
             break;
         }

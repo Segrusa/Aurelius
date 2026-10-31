@@ -2,7 +2,7 @@
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::{
-    ConversationId, EmployeeId, EventId, MessageId, RunId,
+    ConversationId, EmployeeId, EventId, MessageId, RunId, UserId,
     conversation::{MessageRole, MessageStatus},
 };
 use aurelius_domain::views::{ConversationSummary, MessageView};
@@ -64,30 +64,33 @@ pub fn project_conversations(conn: &Connection, project: aurelius_domain::Projec
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// A project conversation (no employee). The group chat is not one: it takes
-/// messages only through `group_chat.send`.
+/// A project conversation (no employee). The channels and ticket discussions are
+/// not: they take messages only through their own writes (`group_chat.send`).
 pub fn conversation_exists(tx: &Transaction<'_>, id: ConversationId) -> Result<bool, StorageError> {
-    Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND employee_id IS NULL AND kind <> 'group')", [id.to_string()], |r| r.get(0))?)
+    Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND employee_id IS NULL AND kind NOT IN ('group','ticket'))", [id.to_string()], |r| r.get(0))?)
 }
 
 /// The schema version whose migration makes the group chat.
 pub const GROUP_CHAT_SCHEMA: i64 = 17;
 
-/// Make the company's group chat again when its row is missing (a database
-/// edited or restored by hand): migration 17 makes it once, and `group_chat.get`
-/// only reads. Called when the store opens; true when it had to make it.
+/// Make the company's group chat (the general channel) again when its row is
+/// missing (a database edited or restored by hand): migration 17 makes it once,
+/// and `group_chat.get` only reads. Called when the store opens; true when it
+/// had to make it.
 pub fn ensure_group_conversation(conn: &Connection) -> Result<bool, StorageError> {
     let made = conn.execute(
         "INSERT INTO conversations(id, kind, title, version, created_at_ms)
-         SELECT ?1, 'group', 'Team chat', 1, ?2 WHERE NOT EXISTS (SELECT 1 FROM conversations WHERE kind = 'group')",
+         SELECT ?1, 'group', 'Team chat', 1, ?2 WHERE NOT EXISTS (SELECT 1 FROM conversations WHERE kind = 'group' AND project_id IS NULL)",
         params![ConversationId::new().to_string(), now_ms()],
     )?;
     Ok(made == 1)
 }
 
-/// The company's group chat (migration 17 makes it).
+/// The company's group chat, the general channel (migration 17 makes it). The
+/// projects' channels: `discussions::channel`.
 pub fn group_conversation(conn: &Connection) -> Result<Option<ConversationId>, StorageError> {
-    let id: Option<String> = conn.query_row("SELECT id FROM conversations WHERE kind = 'group' ORDER BY created_at_ms, id LIMIT 1", [], |r| r.get(0)).optional()?;
+    let id: Option<String> =
+        conn.query_row("SELECT id FROM conversations WHERE kind = 'group' AND project_id IS NULL ORDER BY created_at_ms, id LIMIT 1", [], |r| r.get(0)).optional()?;
     Ok(id.and_then(|c| ConversationId::parse(&c).ok()))
 }
 
@@ -112,16 +115,12 @@ pub fn group_message_count(conn: &Connection, group: ConversationId) -> Result<u
     Ok(conn.query_row(&format!("SELECT COUNT(*) {GROUP_MESSAGES}"), [group.to_string()], |r| r.get(0))?)
 }
 
-/// How many posts in the group chat woke colleagues (`woke` in their meta): of
-/// run `run`, and of employee `employee` since `since_ms`.
-pub fn waking_posts(conn: &Connection, group: ConversationId, run: RunId, employee: EmployeeId, since_ms: i64) -> Result<(u32, u32), StorageError> {
-    Ok(conn.query_row(
-        "SELECT COALESCE(SUM(json_extract(meta_json, '$.run_id') = ?2), 0),
-                COALESCE(SUM(json_extract(meta_json, '$.employee_id') = ?3 AND created_at_ms >= ?4), 0)
-         FROM messages WHERE conversation_id = ?1 AND role = 'tool' AND json_extract(meta_json, '$.woke') > 0",
-        params![group.to_string(), run.to_string(), employee.to_string(), since_ms],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?)
+/// How many posts woke colleagues (`woke` in their meta): of run `run`, and of
+/// employee `employee` since `since_ms`. Counted over every channel and ticket
+/// discussion together (`discussions::waking_posts`); `_group` is no longer
+/// used and goes with the discussion engine.
+pub fn waking_posts(conn: &Connection, _group: ConversationId, run: RunId, employee: EmployeeId, since_ms: i64) -> Result<(u32, u32), StorageError> {
+    crate::discussions::waking_posts(conn, run, employee, since_ms)
 }
 
 /// A run woken by the group chat: the `group` of its job's payload.
@@ -165,6 +164,13 @@ pub struct NewMessage {
 }
 
 pub fn insert_message(tx: &Transaction<'_>, m: NewMessage) -> Result<u32, StorageError> {
+    insert_message_by(tx, m, None)
+}
+
+/// `insert_message` with the board member who wrote it (`author_user_id`,
+/// schema 19). Without one the column is left out, so an older schema (the
+/// v0.6 import, fixtures) takes the message as before.
+pub fn insert_message_by(tx: &Transaction<'_>, m: NewMessage, author: Option<UserId>) -> Result<u32, StorageError> {
     let ordinal: i64 = tx.query_row(
         "SELECT COALESCE(MAX(ordinal), 0) + 1 FROM messages WHERE conversation_id = ?1",
         [m.conversation_id.to_string()],
@@ -174,22 +180,27 @@ pub fn insert_message(tx: &Transaction<'_>, m: NewMessage) -> Result<u32, Storag
         MessageRole::User => "user",
         MessageRole::Assistant => "assistant",
     };
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![
+        Box::new(m.id.to_string()),
+        Box::new(m.conversation_id.to_string()),
+        Box::new(ordinal),
+        Box::new(role),
+        Box::new(m.content_blob_id),
+        Box::new(m.source_event_id.to_string()),
+        Box::new(m.status.as_str()),
+        Box::new(now_ms()),
+        Box::new(m.run_id.map(|r| r.to_string())),
+        Box::new(m.reply_to.map(|r| r.to_string())),
+    ];
+    let column = with_author(&mut values, author);
     tx.execute(
-        "INSERT INTO messages(id, conversation_id, ordinal, role, content_blob_id, source_event_id, status,
-             input_kind, created_at_ms, run_id, reply_to_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'text', ?8, ?9, ?10)",
-        params![
-            m.id.to_string(),
-            m.conversation_id.to_string(),
-            ordinal,
-            role,
-            m.content_blob_id,
-            m.source_event_id.to_string(),
-            m.status.as_str(),
-            now_ms(),
-            m.run_id.map(|r| r.to_string()),
-            m.reply_to.map(|r| r.to_string()),
-        ],
+        &format!(
+            "INSERT INTO messages(id, conversation_id, ordinal, role, content_blob_id, source_event_id, status,
+                 input_kind, created_at_ms, run_id, reply_to_id{column})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'text', ?8, ?9, ?10{})",
+            if column.is_empty() { "" } else { ", ?11" }
+        ),
+        rusqlite::params_from_iter(values.iter()),
     )?;
     Ok(ordinal as u32)
 }
@@ -203,13 +214,53 @@ pub fn insert_update(
     source_event: aurelius_domain::EventId,
     meta: &serde_json::Value,
 ) -> Result<u32, StorageError> {
+    insert_update_by(tx, id, conversation, content_blob_id, source_event, meta, None)
+}
+
+/// `insert_update` with the board member it is on behalf of (`author_user_id`,
+/// schema 19), e.g. a system line of a discussion for a board member's move.
+/// Without one the column is left out, as in `insert_message_by`.
+pub fn insert_update_by(
+    tx: &Transaction<'_>,
+    id: MessageId,
+    conversation: ConversationId,
+    content_blob_id: &str,
+    source_event: aurelius_domain::EventId,
+    meta: &serde_json::Value,
+    author: Option<UserId>,
+) -> Result<u32, StorageError> {
     let ordinal: i64 = tx.query_row("SELECT COALESCE(MAX(ordinal), 0) + 1 FROM messages WHERE conversation_id = ?1", [conversation.to_string()], |r| r.get(0))?;
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = vec![
+        Box::new(id.to_string()),
+        Box::new(conversation.to_string()),
+        Box::new(ordinal),
+        Box::new(content_blob_id.to_owned()),
+        Box::new(source_event.to_string()),
+        Box::new(now_ms()),
+        Box::new(meta.to_string()),
+    ];
+    let column = with_author(&mut values, author);
     tx.execute(
-        "INSERT INTO messages(id, conversation_id, ordinal, role, content_blob_id, source_event_id, status, input_kind, created_at_ms, meta_json)
-         VALUES (?1, ?2, ?3, 'tool', ?4, ?5, 'complete', 'tool', ?6, ?7)",
-        params![id.to_string(), conversation.to_string(), ordinal, content_blob_id, source_event.to_string(), now_ms(), meta.to_string()],
+        &format!(
+            "INSERT INTO messages(id, conversation_id, ordinal, role, content_blob_id, source_event_id, status, input_kind, created_at_ms, meta_json{column})
+             VALUES (?1, ?2, ?3, 'tool', ?4, ?5, 'complete', 'tool', ?6, ?7{})",
+            if column.is_empty() { "" } else { ", ?8" }
+        ),
+        rusqlite::params_from_iter(values.iter()),
     )?;
     Ok(ordinal as u32)
+}
+
+/// The board member as the last value of a message insert: its column, or
+/// nothing without one (an older schema has no `author_user_id`).
+fn with_author(values: &mut Vec<Box<dyn rusqlite::ToSql>>, author: Option<UserId>) -> &'static str {
+    match author {
+        Some(user) => {
+            values.push(Box::new(user.to_string()));
+            ", author_user_id"
+        }
+        None => "",
+    }
 }
 
 pub fn update_message(
@@ -368,7 +419,7 @@ pub fn list_messages(
         "SELECT m.id, m.ordinal, m.role, m.status, b.storage_key, m.created_at_ms, m.run_id, m.reply_to_id,
                 c.display_name, r.model_id, json_extract(r.resolved_config_json, '$.persona_name'),
                 json_extract(m.meta_json, '$.kind'), json_extract(m.meta_json, '$.from'), json_extract(m.meta_json, '$.approval_id'), json_extract(m.meta_json, '$.files'), json_extract(m.meta_json, '$.uploads'),
-                json_extract(m.meta_json, '$.mode')
+                json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system')
          FROM messages m LEFT JOIN blobs b ON b.id = m.content_blob_id
          LEFT JOIN runs r ON r.id = m.run_id LEFT JOIN connections c ON c.id = r.connection_id
          WHERE m.conversation_id = ?1 ORDER BY m.ordinal",
@@ -392,11 +443,12 @@ pub fn list_messages(
             r.get::<_, Option<String>>(14)?,
             r.get::<_, Option<String>>(15)?,
             r.get::<_, Option<String>>(16)?,
+            r.get::<_, Option<String>>(17)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode) = row?;
+        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode, system) = row?;
         let produced_by = match (connection, model.filter(|m| !m.is_empty())) {
             (Some(c), Some(m)) => Some(format!("{c} · {m}")),
             (Some(c), None) => Some(format!("{c} · default model")),
@@ -425,7 +477,20 @@ pub fn list_messages(
             queued: false,
             usage: None,
             mode: mode.and_then(|m| serde_json::from_value(serde_json::Value::String(m)).ok()),
+            author_user: None,
+            system: system.and_then(|s| serde_json::from_str(&s).ok()),
         });
+    }
+    // The board members who wrote in a discussion (schema 19).
+    if crate::discussions::has_discussions(conn)? {
+        let authors = crate::discussions::message_author_users(conn, conversation)?;
+        if !authors.is_empty() {
+            let users: std::collections::HashMap<String, aurelius_domain::user::UserView> =
+                crate::users::list(conn)?.iter().filter_map(|u| Some((u.id.clone(), u.view()?))).collect();
+            for message in out.iter_mut() {
+                message.author_user = authors.get(&message.id).and_then(|u| users.get(&u.to_string())).cloned();
+            }
+        }
     }
     let waiting = queued_messages(conn, conversation)?;
     for message in out.iter_mut() {

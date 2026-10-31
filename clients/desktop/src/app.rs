@@ -976,6 +976,20 @@ pub struct AppView {
     pub group_error: Option<String>,
     /// Answers streaming into the open group chat that are no message there yet.
     pub group_live: Vec<GroupLive>,
+    /// The Team chat's channels (AUR-MU-02); none: the server has none (one general chat).
+    pub channels: Option<Vec<aurelius_domain::views::ChannelView>>,
+    /// The channel the Team chat shows (none: the general one).
+    pub channel: Option<ConversationId>,
+    /// A channel just opened with this many unread messages: where "New" goes is fixed
+    /// when its messages arrive (its conversation, the count).
+    pub channel_divider: Option<(ConversationId, usize)>,
+    /// The first message after the "New" divider in the open channel (it stays there while more come).
+    pub channel_new_at: Option<MessageId>,
+    /// The archived projects' channels are unfolded.
+    pub channels_archived_open: bool,
+    /// The backend reads the channels on every chat event while the Team chat shows
+    /// (`Request::FollowChannels`); this window last asked for that.
+    pub channels_followed: bool,
     /// The subagent chip's panel is open; which subagent shows its full prompt.
     pub subagents_open: bool,
     /// Subagents running in a conversation, from `query/subagents` (protocol 1.6).
@@ -1440,6 +1454,12 @@ impl AppView {
             group_conversation: None,
             group_error: None,
             group_live: Vec::new(),
+            channels: None,
+            channel: None,
+            channel_divider: None,
+            channel_new_at: None,
+            channels_archived_open: false,
+            channels_followed: false,
             subagents_open: false,
             subagents: None,
             subagents_stepped: false,
@@ -1570,8 +1590,10 @@ impl AppView {
                     self.board_refresh();
                     // The Team chat opened while offline: its id is known only now.
                     if self.screen == Page::GroupChat && self.group_conversation.is_none() {
-                        let _ = self.requests.send(backend::Request::OpenGroupChat);
+                        let _ = self.requests.send(backend::Request::OpenGroupChat(self.channel));
                     }
+                    // The channels' counts give the Team chat its badge (B8), also off its page.
+                    let _ = self.requests.send(backend::Request::LoadChannels);
                     // The Trace buttons follow the server's trace mode.
                     if self.trace_supported() {
                         let _ = self.requests.send(backend::Request::LoadTraceSetting);
@@ -1957,6 +1979,11 @@ impl AppView {
                 self.notify_user("Employee added.", false, cx);
             }
             Update::Messages(snapshot) => {
+                // A channel just opened: "New" goes before its first unread message, and stays there (fase 2 §3).
+                if let Some((_, unread)) = self.channel_divider.filter(|(c, _)| *c == snapshot.conversation_id) {
+                    self.channel_new_at = crate::screens::discussion::new_divider(snapshot.messages.len(), unread as u32).map(|i| snapshot.messages[i].id);
+                    self.channel_divider = None;
+                }
                 if self.open_conversation == Some(snapshot.conversation_id) {
                     // Just opened: always all the way down, also once late layout (Markdown, images) settles.
                     if self.messages.is_none() {
@@ -2000,6 +2027,7 @@ impl AppView {
             Update::GroupChatFailed(why) => {
                 self.group_error = Some(why);
             }
+            Update::Channels(channels) => self.channels_loaded(channels),
             Update::Stream(delta) => {
                 if stream_stepped(self.streams.get(&delta.conversation_id), &delta) && self.chip_conversation() == Some(delta.conversation_id) {
                     self.subagents_stepped = true;
@@ -2008,7 +2036,12 @@ impl AppView {
                 let open = self.open_conversation == Some(conversation);
                 // Outside the open conversation only the preview pane and the run panel show a stream;
                 // the first delta also makes a manager "work in" it (`render_manager_preview`).
-                let shown = self.streams.insert(conversation, delta.clone()).is_none() || self.stream_shown_beside(conversation);
+                // The open ticket's discussion shows "Forge is answering…" with the text so far.
+                let discussion = self.board.discussion.as_ref().is_some_and(|(c, _)| *c == conversation);
+                if discussion && self.discussion_at_bottom() {
+                    self.board.discussion_scroll.scroll_to_bottom();
+                }
+                let shown = self.streams.insert(conversation, delta.clone()).is_none() || self.stream_shown_beside(conversation) || discussion;
                 if !open && !shown {
                     return;
                 }
@@ -2146,6 +2179,9 @@ impl AppView {
         self.manager_thread = None;
         self.group_conversation = None;
         self.group_live.clear();
+        self.channels = None;
+        self.channel = None;
+        self.channel_divider = None;
         self.screen = Page::Dashboard;
         tracing::info!(panel = ?self.panel, "server state reset (see B6)");
         self.panel = Panel::None;
@@ -2233,6 +2269,11 @@ impl AppView {
     /// The server lets management choose its own task mode (feature `management_chooses_mode`).
     pub fn management_mode_supported(&self) -> bool {
         matches!(&self.connection, Connection::Online { server, .. } if server.management_chooses_mode)
+    }
+
+    /// Tickets have their discussion and a ticket can be made from a message (feature `ticket_discussion`).
+    pub fn ticket_discussion_supported(&self) -> bool {
+        matches!(&self.connection, Connection::Online { server, .. } if server.ticket_discussion)
     }
 
     /// The server can auto-allow safe read-only tools (feature `auto_allow`).
@@ -2393,7 +2434,12 @@ impl AppView {
     }
 
     /// Load (and follow) one conversation's messages.
-    fn open(&mut self, conversation: Option<ConversationId>) {
+    /// The composer's placeholder from the next render on.
+    pub(crate) fn pending_placeholder_set(&mut self, text: String) {
+        self.pending_placeholder = Some(text);
+    }
+
+    pub(crate) fn open(&mut self, conversation: Option<ConversationId>) {
         if self.open_conversation != conversation {
             self.live.clear();
             self.live_activity.clear();
@@ -5126,7 +5172,7 @@ impl AppView {
 
     /// Who wrote an answer: in the group chat an employee's name with their role ("Orion — Project Manager").
     pub fn author_label(&self, m: &aurelius_protocol::MessageView, fallback: &SharedString) -> SharedString {
-        let name = crate::screens::chat::message_author(m, fallback);
+        let name = crate::screens::chat::message_author(m, fallback, self.active_member());
         if self.screen != Page::GroupChat || m.role == aurelius_domain::conversation::MessageRole::User {
             return name;
         }
@@ -5492,7 +5538,7 @@ impl AppView {
     /// Ask for the group chat again after it failed to load.
     pub fn retry_group_chat(&mut self, cx: &mut Context<Self>) {
         self.group_error = None;
-        let _ = self.requests.send(backend::Request::OpenGroupChat);
+        let _ = self.requests.send(backend::Request::OpenGroupChat(self.channel));
         cx.notify();
     }
 
@@ -5500,10 +5546,12 @@ impl AppView {
     /// or the group chat (asked for by name until its id is known).
     fn open_thread(&mut self) {
         if self.screen == Page::GroupChat {
-            self.pending_placeholder = Some(GROUP_PLACEHOLDER.into());
+            self.pending_placeholder = Some(self.channel_placeholder());
+            self.channels_followed = true;
+            let _ = self.requests.send(backend::Request::FollowChannels(true));
             if self.group_conversation.is_none() {
                 self.open(None);
-                let _ = self.requests.send(backend::Request::OpenGroupChat);
+                let _ = self.requests.send(backend::Request::OpenGroupChat(self.channel));
                 return;
             }
         }
@@ -6456,6 +6504,11 @@ impl AppView {
             self.notify_user(why, true, cx);
             return;
         }
+        // MU2-08 AC2: an archived project's channel is read-only.
+        if self.thread_screen() == Page::GroupChat && self.current_channel().is_some_and(|c| c.archived) {
+            self.notify_user("This project is archived: its channel is read-only.", true, cx);
+            return;
+        }
         if !self.pending_files.is_empty() && !self.takes_manager_files() {
             self.notify_user("Files go to an employee conversation; remove them or open one.", true, cx);
             return;
@@ -6469,7 +6522,7 @@ impl AppView {
             }
             // Who answers follows from the @names in it (else the top of the org chart); nothing to interrupt.
             Page::GroupChat => {
-                let _ = self.requests.send(backend::Request::SendGroup { text, images, files });
+                let _ = self.requests.send(backend::Request::SendGroup { text, images, files, channel: self.channel });
             }
             _ => {
                 self.manager_extra.push(text.into());
@@ -6591,6 +6644,18 @@ impl AppView {
                 target: PaletteTarget::Employee(m.id),
             });
         }
+        // Ctrl+K "Go to #…" (fase 2 §3): the Team chat's channels, in the list's order.
+        if self.window_project.is_none() {
+            let (general, projects, archived) = crate::screens::discussion::ordered(self.channels.as_deref().unwrap_or_default());
+            for ch in general.into_iter().chain(projects).chain(archived) {
+                entries.push(PaletteEntry {
+                    label: crate::screens::discussion::go_to_channel_label(ch).into(),
+                    hint: "Channel".into(),
+                    keys: None,
+                    target: PaletteTarget::Channel(ch.conversation_id),
+                });
+            }
+        }
         for shortcut in SHORTCUTS.iter().filter(|s| s.in_palette) {
             entries.push(PaletteEntry {
                 label: shortcut.label.into(),
@@ -6622,6 +6687,7 @@ impl AppView {
             PaletteTarget::ProjectWindow(p) => self.open_project_window(p, cx),
             PaletteTarget::Manager(_, m) => self.open_manager(m, window, cx),
             PaletteTarget::Employee(id) => self.open_manager(ManagerRef::Real(id), window, cx),
+            PaletteTarget::Channel(id) => self.go_to_channel(id, window, cx),
             PaletteTarget::Action(make) => window.dispatch_action(make(), cx),
         }
         cx.notify();
@@ -6641,11 +6707,19 @@ pub enum PaletteTarget {
     ProjectWindow(ProjectId),
     Manager(ProjectRef, ManagerRef),
     Employee(EmployeeId),
+    /// A channel of the Team chat.
+    Channel(ConversationId),
     Action(fn() -> Box<dyn Action>),
 }
 
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Whatever left the Team chat (a page, Back, a jump), its channels stop being read on every chat event.
+        let team_chat = self.screen == Page::GroupChat;
+        if team_chat != self.channels_followed {
+            self.channels_followed = team_chat;
+            let _ = self.requests.send(backend::Request::FollowChannels(team_chat));
+        }
         if let Some(project) = self.window_project {
             // Whatever led elsewhere (Back, Chat, an archive), a project window stays on its project.
             // Employees work company-wide: their pages may open in a project window too.
@@ -6995,6 +7069,8 @@ impl Render for AppView {
                 this.open_menu(point(size.width - px(320.), size.height - px(70.)), items, w, cx);
             }))
             .on_action(cx.listener(|this, _: &TogglePlanFold, _, cx| this.toggle_latest_plan(cx)))
+            .on_action(cx.listener(|this, _: &PrevChannel, w, cx| if this.screen == Page::GroupChat { this.step_channel(false, w, cx) }))
+            .on_action(cx.listener(|this, _: &NextChannel, w, cx| if this.screen == Page::GroupChat { this.step_channel(true, w, cx) }))
             .on_action(cx.listener(|this, _: &ScrollPageUp, _, cx| this.scroll_by(-1., cx)))
             .on_action(cx.listener(|this, _: &ScrollPageDown, _, cx| this.scroll_by(1., cx)))
             .on_action(cx.listener(|this, _: &ScrollTop, _, cx| {

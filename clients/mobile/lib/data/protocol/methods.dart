@@ -67,6 +67,9 @@ abstract final class Methods {
   static const String browserSet = 'browser.set';
   /// Claude in Chrome or Playwright, for every run that starts afterwards.
   static const String browserSetBackend = 'browser.set_backend';
+  /// The channels of the Team chat (feature `team_channels`): the general
+  /// one first, then one per project (archived projects too: read-only).
+  static const String channelList = 'channel.list';
   static const String chatRetry = 'chat.retry';
   static const String chatSend = 'chat.send';
   /// The company in one read: employees, the org chart setting and the
@@ -119,6 +122,8 @@ abstract final class Methods {
   /// The company's group chat (Team chat): the user and every employee. Its
   /// messages and settings, as `conversation.get` answers them; an employee's
   /// messages carry its name as `author`. Write with `group_chat.send`.
+  /// `channel` (feature `team_channels`): a project's channel from
+  /// `channel.list`; none: the general channel, the one older servers have.
   static const String groupChatGet = 'group_chat.get';
   static const String groupChatSend = 'group_chat.send';
   static const String heartbeatSet = 'heartbeat.set';
@@ -317,6 +322,14 @@ abstract final class Methods {
   /// its own column stays where it is: no event, the version is unchanged.
   /// Unknown fields (such as the old `position`) are refused.
   static const String ticketMove = 'ticket.move';
+  /// A board member writes in a ticket's discussion (feature `ticket_discussion`).
+  /// Without `@Name` it goes to the owner while the ticket is in Todo (with an
+  /// owner), Doing or Plan review; else it wakes nobody. `@Name` wakes those
+  /// employees. Refused on Done (the discussion is read-only there). Not for apps.
+  static const String ticketPost = 'ticket.post';
+  /// Try the summary of a ticket on Done again after it failed (`SystemLineKind::SummaryFailed`).
+  /// Only a board member; refused when the summary is already there or still being made.
+  static const String ticketRetrySummary = 'ticket.retry_summary';
   /// Plan review → Doing in Plan mode: the owner makes a new plan with the feedback.
   static const String ticketRevisePlan = 'ticket.revise_plan';
   /// Review → Doing with feedback (required) for the owner.
@@ -457,6 +470,12 @@ Map<String, dynamic> browserGet() => <String, dynamic>{
   'method': Methods.browserGet,
 };
 
+/// The channels of the Team chat (feature `team_channels`): the general
+/// one first, then one per project (archived projects too: read-only).
+Map<String, dynamic> channelList() => <String, dynamic>{
+  'method': Methods.channelList,
+};
+
 /// The company in one read: employees, the org chart setting and the
 /// management team (roots).
 Map<String, dynamic> companyGet() => <String, dynamic>{
@@ -552,8 +571,13 @@ Map<String, dynamic> gitGetStatus({required String conversationId}) => <String, 
 /// The company's group chat (Team chat): the user and every employee. Its
 /// messages and settings, as `conversation.get` answers them; an employee's
 /// messages carry its name as `author`. Write with `group_chat.send`.
-Map<String, dynamic> groupChatGet() => <String, dynamic>{
+/// `channel` (feature `team_channels`): a project's channel from
+/// `channel.list`; none: the general channel, the one older servers have.
+Map<String, dynamic> groupChatGet({String? channel}) => <String, dynamic>{
   'method': Methods.groupChatGet,
+  'params': <String, dynamic>{
+    if (channel != null) 'channel': channel,
+  },
 };
 
 Map<String, dynamic> ideaList({required String projectId}) => <String, dynamic>{
@@ -1740,12 +1764,13 @@ Map<String, dynamic> ticketCancel({required String ticketId}) => <String, dynami
 };
 
 /// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
-Map<String, dynamic> ticketCreate({int? deadlineMs, String? description, List<String> files = const [], List<String> labels = const [], String? ownerEmployeeId, TicketPriority? priority, required String projectId, TaskRun? run, bool? start, required String title}) => <String, dynamic>{
+Map<String, dynamic> ticketCreate({int? deadlineMs, String? description, List<String> files = const [], String? fromMessage, List<String> labels = const [], String? ownerEmployeeId, TicketPriority? priority, required String projectId, TaskRun? run, bool? start, required String title}) => <String, dynamic>{
   'method': Methods.ticketCreate,
   'params': <String, dynamic>{
     if (deadlineMs != null) 'deadline_ms': deadlineMs,
     if (description != null) 'description': description,
     'files': files,
+    if (fromMessage != null) 'from_message': fromMessage,
     'labels': labels,
     if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
     if (priority != null) 'priority': priority.toJson(),
@@ -1769,6 +1794,29 @@ Map<String, dynamic> ticketMove({String? beforeTicketId, required String columnI
   'params': <String, dynamic>{
     if (beforeTicketId != null) 'before_ticket_id': beforeTicketId,
     'column_id': columnId,
+    'ticket_id': ticketId,
+  },
+};
+
+/// A board member writes in a ticket's discussion (feature `ticket_discussion`).
+/// Without `@Name` it goes to the owner while the ticket is in Todo (with an
+/// owner), Doing or Plan review; else it wakes nobody. `@Name` wakes those
+/// employees. Refused on Done (the discussion is read-only there). Not for apps.
+Map<String, dynamic> ticketPost({List<String> files = const [], List<String> images = const [], required String text, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketPost,
+  'params': <String, dynamic>{
+    'files': files,
+    'images': images,
+    'text': text,
+    'ticket_id': ticketId,
+  },
+};
+
+/// Try the summary of a ticket on Done again after it failed (`SystemLineKind::SummaryFailed`).
+/// Only a board member; refused when the summary is already there or still being made.
+Map<String, dynamic> ticketRetrySummary({required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketRetrySummary,
+  'params': <String, dynamic>{
     'ticket_id': ticketId,
   },
 };

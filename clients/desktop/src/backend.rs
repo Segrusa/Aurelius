@@ -84,6 +84,9 @@ pub struct ServerInfo {
     pub management_chooses_mode: bool,
     /// Safe read-only tools pass without asking, a server setting (feature `auto_allow`).
     pub auto_allow: bool,
+    /// Tickets have their discussion and a ticket can be made from a message
+    /// (feature `ticket_discussion`, `CreateTicket::from_message`).
+    pub ticket_discussion: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -205,8 +208,14 @@ pub enum Request {
     SendQueuedNow { conversation_id: ConversationId, message_id: MessageId },
     /// Show this conversation; its messages are kept up to date.
     OpenConversation(Option<ConversationId>),
-    /// Show the group chat (Team chat), kept up to date like `OpenConversation`.
-    OpenGroupChat,
+    /// Show the group chat (Team chat), kept up to date like `OpenConversation`:
+    /// a channel from `channel.list` (feature `team_channels`), or none for the general one.
+    OpenGroupChat(Option<ConversationId>),
+    /// The Team chat's channels (`channel.list`) once; answered with `Update::Channels`.
+    LoadChannels,
+    /// The Team chat shows (`true`: read the channels now and again on every chat
+    /// event, for their counts) or closed (`false`: stop that).
+    FollowChannels(bool),
     CreateEmployee { name: String, role: String, title: Option<String>, reports_to: Option<EmployeeId>, instructions: Option<String>, folder: Option<String> },
     /// `title`: `None` leaves it, an empty text clears it.
     UpdateEmployee { employee_id: EmployeeId, name: String, role: String, title: Option<String>, instructions: Option<String>, sequential_tasks: Option<bool>, expected_version: u64 },
@@ -229,8 +238,8 @@ pub enum Request {
     SetEmployeeStatus { employee_id: EmployeeId, status: LifecycleStatus },
     SetProjectStatus { project_id: ProjectId, status: LifecycleStatus },
     SendManager { employee_id: EmployeeId, text: String, conversation_id: ConversationId, images: Vec<String>, files: Vec<String>, interrupt: bool },
-    /// A message in the group chat (`group_chat.send`).
-    SendGroup { text: String, images: Vec<String>, files: Vec<String> },
+    /// A message in the group chat (`group_chat.send`), in a channel (none: the general one).
+    SendGroup { text: String, images: Vec<String>, files: Vec<String>, channel: Option<ConversationId> },
     /// `always_allow`: approve and allow this MCP tool from now on (only for `always_allow_eligible` approvals).
     DecideApproval { approval_id: ApprovalId, action_digest: String, approve: bool, always_allow: bool },
     AnswerQuestion { approval_id: ApprovalId, answers: std::collections::BTreeMap<String, String> },
@@ -389,6 +398,9 @@ pub enum BoardCall {
     Load(Option<ProjectId>),
     /// `ticket.get`.
     Ticket(aurelius_domain::TicketId),
+    /// A ticket's discussion (`conversation.get` on `TicketView::conversation_id`),
+    /// kept up to date while it shows (AUR-MU-02); none: it no longer shows.
+    Discussion(Option<ConversationId>),
     /// The latest plan in the main task's conversation (Plan review).
     Plan(ConversationId),
     /// What happened to a ticket, newest first (`timeline.list` on its id, Activity).
@@ -403,6 +415,16 @@ pub enum BoardCall {
 impl BoardCall {
     pub fn is_write(&self) -> bool {
         matches!(self, BoardCall::Write { .. })
+    }
+
+    /// A write that could not go, answered as its own kind: the discussion's writes
+    /// to the discussion (its draft stays and its buttons wait no longer), the others to the board.
+    pub fn refused(&self, message: String) -> BoardUpdate {
+        match self {
+            BoardCall::Write { command: Command::PostTicketMessage(p), .. } => BoardUpdate::PostFailed { ticket: p.ticket_id, message },
+            BoardCall::Write { command: Command::RetryTicketSummary(r), .. } => BoardUpdate::SummaryRetried { ticket: r.ticket_id, failure: Some(message) },
+            _ => BoardUpdate::Failed { ticket: self.ticket(), message },
+        }
     }
 
     /// The ticket a write is about (its card springs back when it fails).
@@ -442,6 +464,15 @@ pub enum BoardUpdate {
     Plan(ConversationId, Option<String>, Option<aurelius_domain::autonomy::AgentMode>),
     /// A ticket's activity, newest first.
     Activity(aurelius_domain::TicketId, Result<Vec<aurelius_protocol::TimelineCard>, String>),
+    /// A ticket's discussion, or why it did not load.
+    Discussion(ConversationId, Result<Vec<aurelius_protocol::MessageView>, String>),
+    /// `ticket.post` went through: its `to` (the owner first when the post went to
+    /// them in the main task, then those woken in the discussion; `discussion::reached`).
+    Posted { ticket: aurelius_domain::TicketId, to: Vec<EmployeeId> },
+    /// `ticket.post` did not go: why (the draft stays; `unknown_method` from an older server).
+    PostFailed { ticket: aurelius_domain::TicketId, message: String },
+    /// `ticket.retry_summary` answered: none when it went, else why not (MU2-12 AC4).
+    SummaryRetried { ticket: aurelius_domain::TicketId, failure: Option<String> },
     /// `gave_up`: none when the timeline did not load.
     GaveUp { ticket: aurelius_domain::TicketId, version: u64, gave_up: Option<bool> },
     /// A write worked; `text` is what to say.
@@ -757,6 +788,8 @@ pub enum Update {
     GroupChat(ConversationId),
     /// The group chat could not be loaded: what to tell the user (see [`group_chat_failure`]).
     GroupChatFailed(String),
+    /// The Team chat's channels; none when the server has no channels (before `team_channels`).
+    Channels(Option<Vec<aurelius_domain::views::ChannelView>>),
     Stream(StreamDelta),
     EmployeeCreated(EmployeeId),
     Info(String),
@@ -816,7 +849,7 @@ async fn idle(requests: &mut mpsc::UnboundedReceiver<Request>, updates: &mpsc::U
         // A form that waits for its answer gets it, so it does not stay busy (Trace M3a m1).
         let _ = updates.send(match request {
             Request::BoardMembers(UserCall::Create { .. } | UserCall::Use { .. }) => Update::BoardMemberFailed(MemberFailure { field: None, message: text.into() }),
-            Request::Board(call) if call.is_write() => Update::Board(BoardUpdate::Failed { ticket: call.ticket(), message: text.into() }),
+            Request::Board(call) if call.is_write() => Update::Board(call.refused(text.into())),
             _ => Update::Error(text.into()),
         });
     }
@@ -833,6 +866,9 @@ async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>
     let mut open_conversation: Option<ConversationId> = None;
     let mut open_memory: Option<ProjectId> = None;
     let mut open_ideas: Option<Option<ProjectId>> = None;
+    // A ticket's discussion in the panel, and whether the Team chat shows its channels (AUR-MU-02).
+    let mut open_discussion: Option<ConversationId> = None;
+    let mut channels_shown = false;
     let mut backoff = Duration::from_millis(250);
     // Who works in this window: said again in every hello, so a reconnect keeps it (Trace m9).
     let mut me = remembered;
@@ -841,7 +877,7 @@ async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>
         let _ = updates.send(Update::Connection(Connection::Connecting));
         let (events_tx, mut events) = mpsc::unbounded_channel();
         let (streams_tx, mut streams) = mpsc::unbounded_channel();
-        let client = match Client::open(&target, "aurelius-desktop", events_tx, Some(streams_tx)).await {
+        let client = match Client::open(&target, "aurelius-desktop", events_tx, Some(streams_tx), &[aurelius_protocol::client_feature::TEAM_CHANNELS]).await {
             Ok(client) => client,
             // Before `is_final`, which an update-needed error also is.
             Err(err) if update_needed(&err) => {
@@ -865,7 +901,8 @@ async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>
                             None => return,
                             Some(Request::OpenConversation(id)) => open_conversation = id,
                             // Its id is known once connected; the window asks again then.
-                            Some(Request::OpenGroupChat) => {}
+                            Some(Request::OpenGroupChat(_) | Request::LoadChannels) => {}
+                            Some(Request::FollowChannels(on)) => channels_shown = on,
                             Some(Request::LoadMemory(project_id)) => open_memory = Some(project_id),
                             Some(Request::LoadIdeas(project_id)) => open_ideas = Some(project_id),
                             Some(Request::SendManager { ref images, .. } | Request::SendGroup { ref images, .. }) if remote_target && !images.is_empty() => {
@@ -893,7 +930,7 @@ async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>
                             }
                             // The board's writes are not kept for later; its reads come again once online.
                             Some(Request::Board(call)) => if call.is_write() {
-                                let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket: call.ticket(), message: "Not connected to the server. Try again when it is back.".into() }));
+                                let _ = updates.send(Update::Board(call.refused("Not connected to the server. Try again when it is back.".into())));
                             },
                             Some(other) => if let Some(env) = to_envelope(other) { outbox.push_back(env) },
                         },
@@ -935,10 +972,11 @@ async fn run(target: Option<Target>, remembered: Option<aurelius_domain::UserId>
                 quick_replies: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::QUICK_REPLIES),
                 management_chooses_mode: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::MANAGEMENT_CHOOSES_MODE),
                 auto_allow: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::AUTO_ALLOW),
+                ticket_discussion: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_DISCUSSION),
             },
         }));
 
-        match session(&client, &mut requests, &mut events, &mut streams, &updates, &mut outbox, &mut open_conversation, &mut open_memory, &mut open_ideas, &mut me).await {
+        match session(&client, &mut requests, &mut events, &mut streams, &updates, &mut outbox, &mut open_conversation, &mut open_memory, &mut open_ideas, &mut me, &mut open_discussion, &mut channels_shown).await {
             Ok(()) => return, // UI dropped the request channel: window closed
             Err(Disconnected(Some(reason), _)) => {
                 idle(&mut requests, &updates, Connection::Unpaired(reason)).await;
@@ -975,7 +1013,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SendQueuedNow { conversation_id, message_id } => {
             envelope(Command::SendQueuedNow(conversation::SendQueuedNow { conversation_id, message_id }), None)
         }
-        Request::OpenConversation(_) | Request::OpenGroupChat => return None,
+        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::FollowChannels(_) => return None,
         Request::CreateEmployee { name, role, title, reports_to, instructions, folder } => {
             envelope(Command::CreateEmployee(employee::CreateEmployee { name, role, title, reports_to, instructions, folder }), None)
         }
@@ -999,7 +1037,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SendManager { employee_id, text, conversation_id, images, files, interrupt } => {
             envelope(Command::SendEmployeeMessage(employee::SendEmployeeMessage { employee_id, text, conversation_id, images, files, interrupt }), None)
         }
-        Request::SendGroup { text, images, files } => envelope(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text, images, files }), None),
+        Request::SendGroup { text, images, files, channel } => envelope(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text, images, files, channel }), None),
         Request::DecideApproval { approval_id, action_digest, approve, always_allow } => {
             envelope(Command::DecideApproval(approval::DecideApproval { approval_id, action_digest, approve, always_allow }), None)
         }
@@ -1116,6 +1154,8 @@ async fn session(
     open_memory: &mut Option<ProjectId>,
     open_ideas: &mut Option<Option<ProjectId>>,
     me: &mut Option<aurelius_domain::UserId>,
+    open_discussion: &mut Option<ConversationId>,
+    channels_shown: &mut bool,
 ) -> Result<(), Disconnected> {
     // Snapshot first, then subscribe from its cursor.
     let (as_of, mut jobs_running) = refresh(client, updates).await?;
@@ -1161,8 +1201,12 @@ async fn session(
                     refresh_messages(client, updates, id).await?;
                     continue;
                 }
-                if let Request::OpenGroupChat = request {
-                    match client.group_chat().await {
+                if let Request::OpenGroupChat(channel) = request {
+                    let asked = match channel {
+                        None => client.group_chat().await,
+                        Some(c) => read(client, Method::GroupChatGet { channel: Some(c) }, |b| match b { ResponseBody::Messages(m) => Some(m), _ => None }).await,
+                    };
+                    match asked {
                         Ok(messages) => {
                             *open_conversation = Some(messages.conversation_id);
                             let _ = updates.send(Update::GroupChat(messages.conversation_id));
@@ -1176,6 +1220,17 @@ async fn session(
                                 return Err(e.into());
                             }
                         }
+                    }
+                    continue;
+                }
+                if let Request::LoadChannels = request {
+                    send_channels(client, updates).await?;
+                    continue;
+                }
+                if let Request::FollowChannels(on) = request {
+                    *channels_shown = on;
+                    if on {
+                        send_channels(client, updates).await?;
                     }
                     continue;
                 }
@@ -1698,6 +1753,9 @@ async fn session(
                     continue;
                 }
                 if let Request::Board(call) = request {
+                    if let BoardCall::Discussion(conversation) = call {
+                        *open_discussion = conversation;
+                    }
                     board(client, call, updates).await?;
                     continue;
                 }
@@ -1897,6 +1955,13 @@ async fn session(
                 }
                 if chat {
                     refresh_messages(client, updates, *open_conversation).await?;
+                    // A ticket's discussion and the channels' counts follow their messages (AUR-MU-02).
+                    if let Some(conversation) = *open_discussion {
+                        board(client, BoardCall::Discussion(Some(conversation)), updates).await?;
+                    }
+                    if *channels_shown {
+                        send_channels(client, updates).await?;
+                    }
                     // Presence ("working") of employees derives from runs.
                     send_company(updates, company(client).await.map_err(Disconnected::from)?);
                     let usage = client.usage().await.map_err(Disconnected::from)?;
@@ -2049,6 +2114,60 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
                 let _ = updates.send(Update::Board(BoardUpdate::Plan(conversation, None, None)));
             }
         },
+        BoardCall::Discussion(None) => {}
+        BoardCall::Discussion(Some(conversation)) => match client.messages(conversation).await {
+            Ok(snapshot) => {
+                let _ = updates.send(Update::Board(BoardUpdate::Discussion(conversation, Ok(snapshot.messages))));
+            }
+            Err(e) if lost(&e) => return Err(e.into()),
+            Err(e) => {
+                let _ = updates.send(Update::Board(BoardUpdate::Discussion(conversation, Err(crate::screens::discussion::load_failure(&e)))));
+            }
+        },
+        // The discussion's writes answer the discussion: the draft stays when they fail.
+        BoardCall::Write { command: Command::PostTicketMessage(post), .. } => {
+            let ticket = post.ticket_id;
+            match client.execute(envelope(Command::PostTicketMessage(post), None)).await {
+                Ok(receipt) => {
+                    // Whether the owner took it in the main task, the window reads from `to`
+                    // and the ticket (`discussion::reached`): `run_ids` cannot tell, the
+                    // owner may have a run there or not.
+                    let to = match receipt.result {
+                        CommandResult::TicketMessagePosted { to, .. } => to,
+                        _ => Vec::new(),
+                    };
+                    let _ = updates.send(Update::Board(BoardUpdate::Posted { ticket, to }));
+                }
+                Err(e) if needs_board_member(&e) => {
+                    let _ = updates.send(Update::Board(BoardUpdate::PostFailed { ticket, message: BOARD_MEMBER_REQUIRED.into() }));
+                    let _ = updates.send(Update::BoardMemberRequired);
+                }
+                Err(e) => {
+                    let _ = updates.send(Update::Board(BoardUpdate::PostFailed { ticket, message: crate::screens::discussion::post_failure(&e) }));
+                    if lost(&e) {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+        BoardCall::Write { command: Command::RetryTicketSummary(retry), .. } => {
+            let ticket = retry.ticket_id;
+            match client.execute(envelope(Command::RetryTicketSummary(retry), None)).await {
+                Ok(_) => {
+                    let _ = updates.send(Update::Board(BoardUpdate::SummaryRetried { ticket, failure: None }));
+                }
+                Err(e) if needs_board_member(&e) => {
+                    let _ = updates.send(Update::Board(BoardUpdate::SummaryRetried { ticket, failure: Some(BOARD_MEMBER_REQUIRED.into()) }));
+                    let _ = updates.send(Update::BoardMemberRequired);
+                }
+                Err(e) => {
+                    let _ = updates.send(Update::Board(BoardUpdate::SummaryRetried { ticket, failure: Some(crate::screens::discussion::retry_failure(&e)) }));
+                    if lost(&e) {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
         BoardCall::Activity(ticket_id) => {
             let query = aurelius_protocol::TimelineQuery { correlation_id: Some(ticket_id.to_string()), limit: ACTIVITY_LIMIT, activity: true, ..Default::default() };
             let result = client.timeline(query).await;
@@ -2102,6 +2221,22 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
                     }
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// The Team chat's channels (`channel.list`): none from a server without channels
+/// (`unknown_method`, or any other refusal: the Team chat then is the one general chat).
+async fn send_channels(client: &Client, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
+    let result = read(client, Method::ChannelList, |b| match b { ResponseBody::Channels(c) => Some(c), _ => None }).await;
+    match result {
+        Ok(snapshot) => {
+            let _ = updates.send(Update::Channels(Some(snapshot.channels)));
+        }
+        Err(e) if e.is_disconnect() || e.is_final() => return Err(e.into()),
+        Err(_) => {
+            let _ = updates.send(Update::Channels(None));
         }
     }
     Ok(())
@@ -2646,7 +2781,7 @@ mod tests {
 
             // Writes wait for the choice: the S5 gate as the window hears it.
             let (events, _events) = mpsc::unbounded_channel();
-            let bare = Client::open(target().as_ref().unwrap(), "test", events, None).await.unwrap();
+            let bare = Client::open(target().as_ref().unwrap(), "test", events, None, &[]).await.unwrap();
             let (gate_tx, mut gate_rx) = mpsc::unbounded_channel();
             let ticket = aurelius_domain::ticket::CreateTicket {
                 project_id: ProjectId::new(),
@@ -2659,6 +2794,7 @@ mod tests {
                 run: Default::default(),
                 files: vec![],
                 start: false,
+                from_message: None,
             };
             assert!(send(&bare, envelope(Command::CreateTicket(ticket), None), &gate_tx).await.is_ok(), "the session goes on");
             assert!(matches!(gate_rx.try_recv(), Ok(Update::BoardMemberRequired)));
@@ -2769,6 +2905,7 @@ mod tests {
                 run: Default::default(),
                 files: vec![],
                 start: false,
+                from_message: None,
             })
         }
 
@@ -2930,6 +3067,212 @@ mod tests {
             let message = refused(&mut app, Command::StartTicket(ticket::StartTicket { ticket_id: two, employee_id: None }), None).await;
             assert!(message.starts_with("Not connected"), "{message}");
         }
+
+        /// AUR-MU-02 end to end against the discussion engine, in two windows (ada and
+        /// marie, no employees, so nobody is woken and nothing runs): a post with an
+        /// `@mention` in a ticket's discussion, by its author; `channel.list` with
+        /// #general and one channel per project; a mention in a project channel that
+        /// marie sees as unread with a mention, reading it marks it read, and a next
+        /// message comes in live (`team_channels`, no reload); a ticket from that
+        /// message; Try again on the summary of a ticket that is not Done is refused
+        /// as the discussion's own answer.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn the_discussion_and_channels_end_to_end() {
+            const ADA: &str = "Tr0ub4dor&3-zebra-ada";
+            const MARIE: &str = "correct-horse-battery-marie";
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let server = daemon(&root).await;
+            let target = || Some(Target::Local { root: root.clone(), spawn: false });
+            let mut app = start(target(), None);
+            app.requests.send(Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new(ADA.into()) })).unwrap();
+            next(&mut app, |u| match u {
+                Update::Who(w) if w.user.is_some() => Some(()),
+                _ => None,
+            })
+            .await;
+            app.requests.send(Request::BoardMembers(UserCall::Create { username: "marie".into(), password: Password::new(MARIE.into()) })).unwrap();
+            next(&mut app, |u| matches!(u, Update::BoardMemberCreated(_)).then_some(())).await;
+            let marie = next(&mut app, |u| match u {
+                Update::BoardMembers(list) => list.into_iter().find(|m| m.username == "marie").map(|m| m.id),
+                _ => None,
+            })
+            .await;
+            let mut projects = Vec::new();
+            for name in ["Demo", "Docs"] {
+                app.requests.send(Request::CreateProject { name: name.into(), description: None, folder: None }).unwrap();
+                projects.push(next(&mut app, |u| match u {
+                    Update::Created(p) => Some(p),
+                    _ => None,
+                })
+                .await);
+            }
+            let project = projects[0];
+            done(&mut app, new_ticket(project, "Discuss me"), None).await;
+            let ticket = tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog)[0].clone();
+            let discussion = ticket.conversation_id.expect("every ticket has its discussion");
+
+            // MU2-02 / MU2-04: a post with a mention; in Backlog with no owner it wakes nobody.
+            let post = Command::PostTicketMessage(ticket::PostTicketMessage { ticket_id: ticket.id, text: "@marie can you look?".into(), images: vec![], files: vec![] });
+            app.requests.send(Request::Board(BoardCall::Write { command: post, expected_version: None, done: None })).unwrap();
+            let to = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::Posted { ticket: t, to }) if t == ticket.id => Some(to),
+                Update::Board(other @ (BoardUpdate::PostFailed { .. } | BoardUpdate::Failed { .. })) => panic!("refused: {other:?}"),
+                _ => None,
+            })
+            .await;
+            assert!(to.is_empty(), "nobody is woken: {to:?}");
+            app.requests.send(Request::Board(BoardCall::Discussion(Some(discussion)))).unwrap();
+            let messages = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::Discussion(c, result)) if c == discussion => Some(result.expect("the discussion reads")),
+                _ => None,
+            })
+            .await;
+            let mine = messages.iter().find(|m| m.system.is_none() && m.text == "@marie can you look?").expect("the post is in the discussion");
+            assert_eq!(mine.author_user.as_ref().map(|u| u.username.as_str()), Some("ada"), "a board member's post carries their name (A-01)");
+            // System lines carry the server's own sentence, which the app shows as is.
+            for line in messages.iter().filter(|m| m.system.is_some()) {
+                assert!(!line.text.trim().is_empty(), "{line:?}");
+                assert_eq!(crate::screens::discussion::system_text(line.system.as_ref().unwrap(), &line.text), line.text.trim());
+            }
+            app.requests.send(Request::Board(BoardCall::Discussion(None))).unwrap();
+
+            // MU2-08: #general first, then one channel per project by name.
+            app.requests.send(Request::LoadChannels).unwrap();
+            let channels = next(&mut app, |u| match u {
+                Update::Channels(c) => Some(c),
+                _ => None,
+            })
+            .await
+            .expect("this server has channel.list");
+            assert_eq!(channels.iter().map(|c| (c.project_id, c.name.as_str())).collect::<Vec<_>>(), [(None, "General"), (Some(projects[0]), "Demo"), (Some(projects[1]), "Docs")]);
+            let general = channels[0].conversation_id;
+            let demo = channels[1].conversation_id;
+
+            // ada writes in #Demo and names marie.
+            app.requests.send(Request::OpenGroupChat(Some(demo))).unwrap();
+            assert_eq!(next(&mut app, |u| match u {
+                Update::GroupChat(c) => Some(c),
+                Update::GroupChatFailed(why) => panic!("{why}"),
+                _ => None,
+            })
+            .await, demo);
+            app.requests.send(Request::SendGroup { text: "@marie the spec is ready".into(), images: vec![], files: vec![], channel: Some(demo) }).unwrap();
+            let source = next(&mut app, |u| match u {
+                Update::Messages(m) if m.conversation_id == demo => m.messages.iter().find(|m| m.text == "@marie the spec is ready").map(|m| m.id),
+                _ => None,
+            })
+            .await;
+
+            // marie's window: #Demo is unread with a mention (B8), #general is not.
+            let mut other = start(target(), None);
+            other.requests.send(Request::BoardMembers(UserCall::Use { user_id: marie, password: Password::new(MARIE.into()) })).unwrap();
+            next(&mut other, |u| match u {
+                Update::Who(w) if w.user.as_ref().is_some_and(|u| u.id == marie) => Some(()),
+                _ => None,
+            })
+            .await;
+            let counts = |list: &[aurelius_domain::views::ChannelView], id| list.iter().find(|c| c.conversation_id == id).map(|c| (c.unread, c.mentions));
+            // Her Team chat shows: its channels follow every chat event.
+            other.requests.send(Request::FollowChannels(true)).unwrap();
+            let unread = next(&mut other, |u| match u {
+                Update::Channels(Some(c)) => Some(c),
+                _ => None,
+            })
+            .await;
+            assert_eq!(counts(&unread, demo), Some((1, 1)), "{unread:?}");
+            assert_eq!(counts(&unread, general), Some((0, 0)));
+
+            // Opening it reads it, and marks it read on the server.
+            other.requests.send(Request::OpenGroupChat(Some(demo))).unwrap();
+            next(&mut other, |u| match u {
+                Update::Messages(m) if m.conversation_id == demo => Some(()),
+                _ => None,
+            })
+            .await;
+            other.requests.send(Request::LoadChannels).unwrap();
+            let read = next(&mut other, |u| match u {
+                Update::Channels(Some(c)) => Some(c),
+                _ => None,
+            })
+            .await;
+            assert_eq!(counts(&read, demo), Some((0, 0)), "{read:?}");
+
+            // Live (team_channels): ada's next message in #Demo reaches marie's open channel
+            // and her counts without any reload from her side.
+            app.requests.send(Request::SendGroup { text: "Second note".into(), images: vec![], files: vec![], channel: Some(demo) }).unwrap();
+            next(&mut other, |u| match u {
+                Update::Messages(m) if m.conversation_id == demo && m.messages.iter().any(|m| m.text == "Second note") => Some(()),
+                _ => None,
+            })
+            .await;
+            let live = next(&mut other, |u| match u {
+                Update::Channels(Some(c)) => Some(c),
+                _ => None,
+            })
+            .await;
+            assert_eq!(counts(&live, demo), Some((0, 0)), "the open channel is read as it comes: {live:?}");
+
+            // Trace c2: her Team chat closed, a chat event no longer reads channel.list.
+            other.requests.send(Request::FollowChannels(false)).unwrap();
+            // Requests go in order: once the discussion answers, the window stopped following
+            // (a channel.list of the earlier burst may still come before it).
+            other.requests.send(Request::Board(BoardCall::Discussion(Some(discussion)))).unwrap();
+            next(&mut other, |u| matches!(u, Update::Board(BoardUpdate::Discussion(c, _)) if c == discussion).then_some(())).await;
+            other.requests.send(Request::Board(BoardCall::Discussion(None))).unwrap();
+            app.requests.send(Request::SendGroup { text: "Third note".into(), images: vec![], files: vec![], channel: Some(demo) }).unwrap();
+            let mut seen = false;
+            next(&mut other, |u| match u {
+                Update::Channels(_) => panic!("channel.list after the Team chat closed"),
+                Update::Messages(m) if m.conversation_id == demo && m.messages.iter().any(|m| m.text == "Third note") => {
+                    seen = true;
+                    None
+                }
+                // The chat event's refresh ends with the company; channels would have come before it.
+                Update::Company(_) if seen => Some(()),
+                _ => None,
+            })
+            .await;
+
+            // MU2-10: a ticket from the channel's message lands in Backlog.
+            let Command::CreateTicket(mut create) = new_ticket(project, "From a message") else { unreachable!() };
+            create.from_message = Some(source);
+            match write(&mut app, Command::CreateTicket(create), None).await.0 {
+                BoardUpdate::Created { .. } => {}
+                other => panic!("not made: {other:?}"),
+            }
+            assert!(tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog).iter().any(|t| t.title == "From a message"));
+
+            // MU2-12 AC4: Try again on a ticket that is not Done is the discussion's own failure.
+            app.requests.send(Request::Board(BoardCall::Write { command: Command::RetryTicketSummary(ticket::RetryTicketSummary { ticket_id: ticket.id }), expected_version: None, done: None })).unwrap();
+            let retried = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::SummaryRetried { ticket: t, failure }) if t == ticket.id => Some(failure),
+                Update::Board(other @ BoardUpdate::Failed { .. }) => panic!("not the discussion's answer: {other:?}"),
+                _ => None,
+            })
+            .await;
+            assert!(retried.is_some(), "nothing to retry before Done");
+
+            drop(other);
+            drop(app);
+            stop_daemon(&root, server).await;
+        }
+
+        async fn stop_daemon(root: &std::path::Path, server: tokio::task::JoinHandle<anyhow::Result<()>>) {
+            aurelius_client::bridge::shutdown_daemon(root).await.expect("shutdown");
+            tokio::time::timeout(Duration::from_secs(20), server).await.expect("daemon stops").expect("join").expect("clean stop");
+        }
+    }
+
+    #[test]
+    fn a_discussion_write_that_cannot_go_answers_the_discussion() {
+        let ticket = aurelius_domain::TicketId::new();
+        let post = BoardCall::Write { command: Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { ticket_id: ticket, text: "Hi".into(), images: vec![], files: vec![] }), expected_version: None, done: None };
+        assert!(matches!(post.refused("offline".into()), BoardUpdate::PostFailed { ticket: t, .. } if t == ticket), "the Sending… state ends, the draft stays");
+        let retry = BoardCall::Write { command: Command::RetryTicketSummary(aurelius_domain::ticket::RetryTicketSummary { ticket_id: ticket }), expected_version: None, done: None };
+        assert!(matches!(retry.refused("offline".into()), BoardUpdate::SummaryRetried { failure: Some(_), .. }));
+        let cancel = BoardCall::Write { command: Command::CancelTicket(aurelius_domain::ticket::CancelTicket { ticket_id: ticket }), expected_version: None, done: None };
+        assert!(matches!(cancel.refused("offline".into()), BoardUpdate::Failed { ticket: Some(t), .. } if t == ticket));
     }
 
     #[tokio::test(start_paused = true)]

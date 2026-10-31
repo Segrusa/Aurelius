@@ -94,3 +94,15 @@ pub fn count(conn: &Connection) -> Result<u64, StorageError> {
 pub fn password_hash(conn: &Connection, id: &str) -> Result<Option<String>, StorageError> {
     Ok(conn.query_row("SELECT password_hash FROM users WHERE id = ?1", [id], |r| r.get(0)).optional()?)
 }
+
+impl UserRow {
+    /// As every client sees it (never the password's hash); none for a damaged id.
+    pub fn view(&self) -> Option<aurelius_domain::user::UserView> {
+        Some(aurelius_domain::user::UserView {
+            id: aurelius_domain::UserId::parse(&self.id).ok()?,
+            username: self.username.clone(),
+            created_at_ms: self.created_at_ms,
+            created_by_user: self.created_by_user.as_deref().and_then(|u| aurelius_domain::UserId::parse(u).ok()),
+        })
+    }
+}

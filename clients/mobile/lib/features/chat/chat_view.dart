@@ -13,9 +13,14 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/clipboard/image_clipboard.dart';
 import '../../core/net/compacting.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/widgets/dialogs.dart';
 import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
+import '../../core/net/connection.dart';
+import '../../core/net/protocol.dart';
+import '../../data/aurelius_repository.dart';
 import '../../data/company.dart';
+import '../../data/discussion.dart';
 import '../../data/views.dart';
 import '../../data/markdown_paths.dart';
 import '../../data/run_config.dart';
@@ -67,13 +72,42 @@ FileScope? chatFileScope(BuildContext context) {
 
 /// Messages and composer of one conversation (chat or employee).
 class ChatView extends StatefulWidget {
-  const ChatView({super.key, this.emptyTitle = 'What can I do for you?', this.emptyDetail, this.composer = true});
+  const ChatView({
+    super.key,
+    this.emptyTitle = 'What can I do for you?',
+    this.emptyDetail,
+    this.composer = true,
+    this.readOnlyNote,
+    this.hint,
+    this.source,
+    this.taskProjectId,
+    this.composerText,
+    this.composerActions,
+  });
 
   final String emptyTitle;
   final String? emptyDetail;
 
   /// `false` for a conversation that cannot be written to.
   final bool composer;
+
+  /// Without a composer: why it cannot be written to (a ticket on Done, an archived project's channel).
+  final String? readOnlyNote;
+
+  /// The composer's hint, in place of the usual one ("Message Forge (owner) · …").
+  final String? hint;
+
+  /// Where this chat is: its messages can become a ticket (MU2-10). Null: they cannot.
+  final TicketSource? source;
+
+  /// The project a system line's task is in (a ticket's discussion), to open it.
+  final String? taskProjectId;
+
+  /// The composer's text, when the page acts on it too (Send back, Pas aan).
+  final TextEditingController? composerText;
+
+  /// Under the composer: the decisions of a ticket's discussion (Plan review, Review).
+  final Widget Function(BuildContext context, TextEditingController text)? composerActions;
 
   @override
   State<ChatView> createState() => _ChatViewState();
@@ -109,7 +143,7 @@ class _ChatViewState extends State<ChatView> {
         },
         child: Column(
           children: [
-            Expanded(child: _Messages(emptyTitle: emptyTitle, emptyDetail: emptyDetail)),
+            Expanded(child: _Messages(emptyTitle: emptyTitle, emptyDetail: emptyDetail, config: widget)),
             BlocSelector<ChatBloc, ChatState, bool>(
               selector: (s) => s.awaitingStart,
               builder: (context, waiting) => LoadBanner(waiting: waiting),
@@ -129,7 +163,15 @@ class _ChatViewState extends State<ChatView> {
               ),
               ),
             if (composer) _QuickRepliesCard(draft: _draft),
-            if (composer) _Composer(draft: _draft),
+            if (composer) _Composer(draft: _draft, config: widget),
+            if (!composer && widget.readOnlyNote != null)
+              Container(
+                key: const Key('chat-read-only'),
+                width: double.infinity,
+                decoration: BoxDecoration(color: Tokens.plain, border: Border(top: BorderSide(color: Tokens.sep, width: 0.5))),
+                padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + MediaQuery.paddingOf(context).bottom),
+                child: Text(widget.readOnlyNote!, textAlign: TextAlign.center, style: TextStyle(color: Tokens.label2, fontSize: 13.5)),
+              ),
           ],
         ),
       ),
@@ -223,10 +265,11 @@ class _QuickRepliesCardState extends State<_QuickRepliesCard> {
 }
 
 class _Messages extends StatefulWidget {
-  const _Messages({required this.emptyTitle, this.emptyDetail});
+  const _Messages({required this.emptyTitle, this.emptyDetail, required this.config});
 
   final String emptyTitle;
   final String? emptyDetail;
+  final ChatView config;
 
   @override
   State<_Messages> createState() => _MessagesState();
@@ -234,6 +277,9 @@ class _Messages extends StatefulWidget {
 
 class _MessagesState extends State<_Messages> {
   final _list = GlobalKey<FollowingListState>();
+
+  /// The active board member: a message naming them is marked (B9).
+  String? _me;
 
   @override
   Widget build(BuildContext context) {
@@ -243,6 +289,8 @@ class _MessagesState extends State<_Messages> {
     // The group chat: an answer runs in its employee's own chat, so what it asks carries that run.
     final approvals = bloc.group ? context.select<InboxBloc, List<ApprovalView>>((b) => b.state.approvals) : const <ApprovalView>[];
     final mainChats = bloc.group ? context.select<CompanyBloc, List<String>>((b) => [for (final e in b.state.employees) e.conversationId]) : const <String>[];
+    final me = context.select<ConnectionBloc, String?>((b) => b.state.user?.username);
+    _me = me;
     // Sending a message of your own goes back to the end and follows again.
     return BlocListener<ChatBloc, ChatState>(
       listenWhen: (a, b) => b.unsent.length > a.unsent.length,
@@ -271,13 +319,32 @@ class _MessagesState extends State<_Messages> {
     ];
     final live = state.messages.indexWhere((m) => m.isStreaming);
     final shared = state.shares.isNotEmpty ? 1 : 0;
+    final source = widget.config.source;
+    final made = source == null ? const <String, TicketRef>{} : ticketsFromMessages(state.messages);
+    // Only the last summary line can be tried again: a later one saved it or failed anew.
+    final lastSummary = state.messages.where((m) => m.system?.kind == SystemLineKind.summary || m.system?.kind == SystemLineKind.summaryFailed).lastOrNull?.id;
+    bool named(MessageView m) => group && authorOf(m) != _me && mentionsName(m.text, _me);
     final items = <FollowItem>[
       if (state.shares.isNotEmpty) FollowItem('shares', _SharedContext(shares: state.shares)),
       for (final m in state.messages)
         FollowItem(
           m.id,
-          m.isUser
-              ? _UserBubble(id: m.id, text: m.text, files: m.files, uploads: m.uploads, queuedId: m.queued ? m.id : null)
+          m.system != null
+              // A system line of a discussion or channel (Phase 2): what happened, never a bubble.
+              ? SystemLineView(message: m, ticketId: context.read<ChatBloc>().ticketId, taskProjectId: widget.config.taskProjectId, summarized: m.id != lastSummary)
+              : m.isUser
+              ? _UserBubble(
+                  id: m.id,
+                  text: m.text,
+                  files: m.files,
+                  uploads: m.uploads,
+                  queuedId: m.queued ? m.id : null,
+                  message: m,
+                  author: group ? m.authorUser?.username : null,
+                  mentioned: named(m),
+                  source: source,
+                  ticket: made[m.id],
+                )
               // A line the server writes in the group chat itself: a quiet note.
               : isSystemLine(m, inGroup: group)
                   ? _SystemLine(message: m)
@@ -287,6 +354,9 @@ class _MessagesState extends State<_Messages> {
                       : _AssistantMessage(
                           message: m,
                           group: group,
+                          mentioned: named(m),
+                          source: source,
+                          ticket: made[m.id],
                           version: versions[m.id],
                           blocking: !m.isStreaming ? null : group ? approvals.where((a) => a.runId == m.runId).firstOrNull : blocking,
                         ),
@@ -329,6 +399,7 @@ class _MessagesState extends State<_Messages> {
 /// author. A streaming answer whose employee is not known yet is no note; in a
 /// task, `status` stays an update card. As on the desktop.
 bool isSystemLine(MessageView m, {required bool inGroup}) {
+  if (m.system != null) return true;
   if (m.isUser) return false;
   final unnamed = m.author == null || m.author!.trim().isEmpty;
   return switch (m.update) {
@@ -458,7 +529,22 @@ class _TaskUpdate extends StatelessWidget {
 }
 
 class _UserBubble extends StatelessWidget {
-  const _UserBubble({required this.id, required this.text, this.files = const [], this.uploads = const [], this.unsent, this.queuedId});
+  const _UserBubble({required this.id, required this.text, this.files = const [], this.uploads = const [], this.unsent, this.queuedId, this.message, this.author, this.mentioned = false, this.source, this.ticket});
+
+  /// The message itself (not for one still on its way), for "Create ticket".
+  final MessageView? message;
+
+  /// In a discussion or channel: the board member who wrote it (A-01).
+  final String? author;
+
+  /// It names the active board member with `@` (B9).
+  final bool mentioned;
+
+  /// Where the chat is: the message can become a ticket (MU2-10).
+  final TicketSource? source;
+
+  /// The ticket already made from it ("→ #52").
+  final TicketRef? ticket;
 
   /// Keeps it unfolded or folded while the list scrolls.
   final String id;
@@ -475,18 +561,23 @@ class _UserBubble extends StatelessWidget {
   final String? queuedId;
 
   void _longPress(BuildContext context) async {
-    if (queuedId == null) {
+    final ticketable = source != null && message != null;
+    if (queuedId == null && !ticketable) {
       Clipboard.setData(ClipboardData(text: text));
       toast(context, 'Copied.');
       return;
     }
     final bloc = context.read<ChatBloc>();
-    final choice = await showGlassMenu<String>(context, const [
-      GlassMenuItem('now', 'Send now'),
-      GlassMenuItem('copy', 'Copy'),
-      GlassMenuItem('delete', 'Delete', danger: true),
+    final choice = await showGlassMenu<String>(context, [
+      if (queuedId != null) const GlassMenuItem('now', 'Send now'),
+      const GlassMenuItem('copy', 'Copy'),
+      if (ticketable) const GlassMenuItem('ticket', 'Create ticket'),
+      if (queuedId != null) const GlassMenuItem('delete', 'Delete', danger: true),
     ]);
+    if (!context.mounted) return;
     switch (choice) {
+      case 'ticket':
+        await createTicketFrom(context, message!, source!, already: ticket);
       case 'now':
         bloc.add(ChatQueuedSentNow(queuedId!));
       case 'delete':
@@ -510,6 +601,11 @@ class _UserBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          if (author != null || mentioned)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text([if (author != null) '$author · board member', if (mentioned) '@ you'].join(' · '), style: Tokens.monoSmall().copyWith(color: mentioned ? Tokens.accentText : null)),
+            ),
           if (text.isNotEmpty || (files.isEmpty && sentFiles.isEmpty && unsent?.images.isEmpty != false)) Collapsible(
             id: id,
             text: text,
@@ -521,6 +617,7 @@ class _UserBubble extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: queuedId != null ? Tokens.cell2.withValues(alpha: 0.55) : Tokens.cell2,
+                  border: mentioned ? Border.all(color: Tokens.accent.withValues(alpha: 0.6)) : null,
                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20), bottomLeft: Radius.circular(20), bottomRight: Radius.circular(6)),
                 ),
                 child: LinkedText(cut == null ? text : text.substring(0, cut), scope: chatFileScope(context), style: TextStyle(fontSize: 16, height: 1.4, color: muted ? Tokens.label2 : Tokens.label)),
@@ -528,6 +625,7 @@ class _UserBubble extends StatelessWidget {
             ),
           ),
           if (text.isNotEmpty) CopyButton(key: const Key('copy-user'), text: text),
+          if (ticket != null) TicketPill(ticket: ticket!),
           if (files.isNotEmpty) MessageFiles(files: files),
           if (sentFiles.isNotEmpty)
             Padding(
@@ -577,8 +675,10 @@ class _UserBubble extends StatelessWidget {
           if (unsent?.failed == true)
             Padding(
               padding: const EdgeInsets.only(top: 2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+              // Wraps on a narrow phone or with large text rather than overflowing.
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Icon(Icons.error_outline, size: 14, color: Tokens.negative),
                   const SizedBox(width: 4),
@@ -599,9 +699,18 @@ class _UserBubble extends StatelessWidget {
 }
 
 class _AssistantMessage extends StatelessWidget {
-  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking});
+  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket});
 
   final MessageView message;
+
+  /// It names the active board member with `@` (B9).
+  final bool mentioned;
+
+  /// Where the chat is: the message can become a ticket (MU2-10).
+  final TicketSource? source;
+
+  /// The ticket already made from it ("→ #52").
+  final TicketRef? ticket;
 
   /// In the Team chat: the sender shows with their role.
   final bool group;
@@ -634,6 +743,16 @@ class _AssistantMessage extends StatelessWidget {
                 Navigator.pop(sheet);
               },
             ),
+            if (source != null && !message.isStreaming)
+              ListTile(
+                key: const Key('message-create-ticket'),
+                leading: const Icon(CupertinoIcons.square_split_2x1),
+                title: const Text('Create ticket'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  createTicketFrom(context, message, source!, already: ticket);
+                },
+              ),
             if (target != null && !message.isStreaming && !bloc.group)
               ListTile(
                 leading: const Icon(Icons.refresh),
@@ -684,6 +803,7 @@ class _AssistantMessage extends StatelessWidget {
       if (message.mode case final mode?) '${mode.label} mode',
       if (message.producedBy != null) message.producedBy!,
       if (version != null) 'version ${version!.$1}/${version!.$2}',
+      if (mentioned) '@ you',
     ].join(' · ');
     return Padding(
       padding: const EdgeInsets.only(top: 18),
@@ -692,7 +812,7 @@ class _AssistantMessage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (header.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(header, style: Tokens.monoSmall())),
+            if (header.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(header, style: Tokens.monoSmall().copyWith(color: mentioned ? Tokens.accentText : null))),
             if (message.text.isNotEmpty || message.activity.isNotEmpty)
               Collapsible(id: message.id, text: message.text, streaming: message.isStreaming, builder: (context, cut) => AnswerBody(message: message, cut: cut)),
             if (message.files.isNotEmpty) MessageFiles(files: message.files),
@@ -712,6 +832,7 @@ class _AssistantMessage extends StatelessWidget {
                 ),
               ),
             if (message.text.isNotEmpty && !message.isStreaming) CopyButton(key: const Key('copy-assistant'), text: message.text),
+            if (ticket != null) TicketPill(ticket: ticket!),
             _StatusLine(message: message, blocking: blocking, retryTarget: _replyTarget(context.read<ChatBloc>().state)),
           ],
         ),
@@ -913,17 +1034,19 @@ void showShareSheet(BuildContext context, ChatBloc bloc, String messageId) {
 }
 
 class _Composer extends StatefulWidget {
-  const _Composer({this.draft});
+  const _Composer({this.draft, required this.config});
 
   /// Told what is typed, so quick replies can step aside.
   final ValueNotifier<String>? draft;
+  final ChatView config;
 
   @override
   State<_Composer> createState() => _ComposerState();
 }
 
 class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
-  final _text = TextEditingController();
+  final _own = TextEditingController();
+  late final TextEditingController _text = widget.config.composerText ?? _own;
   final _focus = FocusNode();
   final _clipboard = ImageClipboard();
 
@@ -939,8 +1062,10 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
     _focus.addListener(() {
       if (_focus.hasFocus) _checkClipboard();
     });
-    _text.addListener(() => widget.draft?.value = _text.text);
+    _text.addListener(_drafted);
   }
+
+  void _drafted() => widget.draft?.value = _text.text;
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -950,7 +1075,8 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _text.dispose();
+    _text.removeListener(_drafted);
+    _own.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -995,6 +1121,12 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
     final text = _text.text;
     final bloc = context.read<ChatBloc>();
     if (text.trim().isEmpty && bloc.state.images.isEmpty && bloc.state.files.isEmpty) return;
+    // A name that is nobody (or archived) wakes no one: said, never silently (MU2-04 AC5).
+    if (bloc.group) {
+      final known = [for (final p in mentionables(context.read<CompanyBloc>().state)) p.$1, ...bloc.state.boardMembers];
+      final nobody = unknownMentions(text, known);
+      if (nobody.isNotEmpty) toast(context, '${nobody.map((n) => '@$n').join(', ')} ${nobody.length == 1 ? 'is' : 'are'} nobody here: no one is woken for ${nobody.length == 1 ? 'it' : 'them'}.');
+    }
     bloc.add(ChatMessageSent(text, now: now));
     _text.clear();
   }
@@ -1188,7 +1320,13 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
               ValueListenableBuilder<TextEditingValue>(
                 valueListenable: _text,
                 builder: (context, value, _) {
-                  final people = mentionables(context.read<CompanyBloc>().state);
+                  // Employees first, then the other board members (B9: marked, not woken).
+                  final me = context.read<ConnectionBloc>().state.user?.username;
+                  final people = [
+                    ...mentionables(context.read<CompanyBloc>().state),
+                    for (final u in state.boardMembers)
+                      if (u != me) (u, 'board member'),
+                  ];
                   final found = mentionSuggestions(value.text, [for (final p in people) p.$1]);
                   if (found == null) return const SizedBox.shrink();
                   return MentionRow(
@@ -1304,7 +1442,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                       onContentInserted: _insert,
                     ),
                     decoration: InputDecoration(
-                      hintText: state.history ? 'Read-only: an earlier chat' : readOnly ? 'Read-only: this phone may not chat' : group ? 'Message the team · @Name asks someone' : 'Message',
+                      hintText: state.history ? 'Read-only: an earlier chat' : readOnly ? 'Read-only: this phone may not chat' : widget.config.hint ?? (group ? 'Message the team · @Name asks someone' : 'Message'),
                       isDense: true,
                       fillColor: Tokens.cell2,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
@@ -1353,6 +1491,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                 ),
               ],
             ),
+            if (widget.config.composerActions case final actions?) actions(context, _text),
             if (!group) const SizedBox(height: 6),
             // Mode and model, then what is switched on under "+" (tap to switch it off).
             if (!group) SingleChildScrollView(
@@ -1768,4 +1907,168 @@ void showModelSheet(BuildContext context, Purpose purpose) {
       ),
     ),
   );
+}
+
+/// "Create ticket" on a message (MU2-10 AC1): "New ticket" opens filled in from
+/// it. A message a ticket was made from asks first (ui-ontwerp §4).
+Future<void> createTicketFrom(BuildContext context, MessageView message, TicketSource source, {TicketRef? already}) async {
+  if (already != null) {
+    final again = await confirm(context, title: '${already.label} was already created from this message. Create another?', action: 'Create another');
+    if (!again || !context.mounted) return;
+  }
+  context.push('/board/new', extra: draftFromMessage(message, source, author: authorOf(message)));
+}
+
+/// "→ #52" under a message a ticket was made from; a tap opens the ticket.
+class TicketPill extends StatelessWidget {
+  const TicketPill({super.key, required this.ticket});
+
+  final TicketRef ticket;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Semantics(
+          button: true,
+          label: 'Open ticket ${ticket.number ?? ''}'.trim(),
+          excludeSemantics: true,
+          child: _GlassPill(key: ValueKey('ticket-pill-${ticket.ticketId}'), label: '→ ${ticket.label}', accent: true, onTap: () => context.push('/ticket/${ticket.ticketId}')),
+        ),
+      );
+}
+
+/// A system line of a discussion or channel (`MessageView.system`, Phase 2):
+/// one quiet centred line that never wakes anyone (MU2-03 AC5). A line about a
+/// task opens it; the plan and the report that wait for a board member are a
+/// card with their action; a failed summary has Try again (MU2-12 AC4).
+class SystemLineView extends StatelessWidget {
+  const SystemLineView({super.key, required this.message, this.ticketId, this.taskProjectId, this.summarized = false});
+
+  final MessageView message;
+
+  /// The discussion's ticket (a line may name its own).
+  final String? ticketId;
+
+  /// The project of the tasks the lines name.
+  final String? taskProjectId;
+
+  /// A later line says the summary went to memory (or failed again): Try again is gone.
+  final bool summarized;
+
+  @override
+  Widget build(BuildContext context) {
+    final line = message.system!;
+    final text = message.text.trim().isEmpty ? '…' : message.text.trim();
+    final ticket = line.ticketId ?? ticketId;
+    final project = taskProjectId;
+    return switch (line.kind) {
+      SystemLineKind.plan when ticket != null => _FlowCard(
+          key: ValueKey('system-plan-${message.id}'),
+          eyebrow: '◆ PLAN${line.from == null ? '' : ' · ${line.from!.toUpperCase()}'}',
+          text: text,
+          action: 'Review plan',
+          onTap: () => context.push('/ticket/$ticket/plan'),
+        ),
+      SystemLineKind.review when ticket != null => _FlowCard(
+          key: ValueKey('system-review-${message.id}'),
+          eyebrow: '◆ REVIEW · REPORT${line.from == null ? '' : ' FROM ${line.from!.toUpperCase()}'}',
+          text: text,
+          action: 'Report ›',
+          onTap: () => context.push('/ticket/$ticket/report'),
+        ),
+      SystemLineKind.summaryFailed => _Line(
+          key: ValueKey('system-summary-failed-${message.id}'),
+          message: message,
+          text: '⚠ $text',
+          color: Tokens.warning,
+          action: summarized || ticket == null ? null : ('Try again', () => retrySummary(context, ticket)),
+        ),
+      SystemLineKind.ticketCreated when line.ticketId != null => _Line(message: message, text: text, onTap: () => context.push('/ticket/${line.ticketId}')),
+      SystemLineKind.reported when line.taskId != null && project != null =>
+        _Line(message: message, text: '$text · Report ›', onTap: () => context.push('/project/$project/task/${line.taskId}')),
+      SystemLineKind.delegated when line.taskId != null && project != null => _Line(message: message, text: text, onTap: () => context.push('/project/$project/task/${line.taskId}')),
+      _ => _Line(message: message, text: text),
+    };
+  }
+}
+
+/// `ticket.retry_summary` (MU2-12 AC4): the summary of a ticket on Done again.
+/// A server without the engine answers `unknown_method`: it says so.
+Future<bool> retrySummary(BuildContext context, String ticketId) async {
+  final repository = context.read<AureliusRepository>();
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  void show(String text) => messenger
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(text)));
+  try {
+    await repository.write(ticketRetrySummary(ticketId: ticketId), retry: false);
+    show('Trying the summary again.');
+    return true;
+  } on NotSentException catch (e) {
+    show(e.toString());
+  } on DisconnectedException catch (e) {
+    show(e.message);
+  } on Object catch (e) {
+    show(summaryRetryFailure(e));
+  }
+  return false;
+}
+
+class _Line extends StatelessWidget {
+  const _Line({super.key, required this.message, required this.text, this.onTap, this.color, this.action});
+
+  final MessageView message;
+  final String text;
+  final VoidCallback? onTap;
+  final Color? color;
+  final (String, VoidCallback)? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final online = context.select<ConnectionBloc, bool>((b) => b.state.isOnline);
+    final line = Text(text, textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, height: 1.4, color: color ?? (onTap != null ? Tokens.text2 : Tokens.muted), decoration: onTap != null ? TextDecoration.underline : null, decorationColor: Tokens.border));
+    return Padding(
+      key: key == null ? const Key('system-line') : null,
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+      child: Column(children: [
+        Semantics(
+          label: systemLineLabel(message),
+          button: onTap != null,
+          excludeSemantics: true,
+          child: onTap == null ? line : InkWell(onTap: onTap, borderRadius: BorderRadius.circular(6), child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: line)),
+        ),
+        if (action != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: OutlinedButton(key: const Key('system-line-action'), onPressed: online ? action!.$2 : null, child: Text(action!.$1)),
+          ),
+      ]),
+    );
+  }
+}
+
+/// The plan or the report in the stream, with what opens it.
+class _FlowCard extends StatelessWidget {
+  const _FlowCard({super.key, required this.eyebrow, required this.text, required this.action, required this.onTap});
+
+  final String eyebrow;
+  final String text;
+  final String action;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 14),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          decoration: BoxDecoration(color: Tokens.attentionBg, border: Border.all(color: Tokens.attentionBorder), borderRadius: BorderRadius.circular(8)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(eyebrow, style: Tokens.eyebrow().copyWith(fontSize: 10.5)),
+            const SizedBox(height: 6),
+            Text(text, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, color: Tokens.text2)),
+            Padding(padding: const EdgeInsets.only(top: 8), child: FilledButton(onPressed: onTap, child: Text(action))),
+          ]),
+        ),
+      );
 }

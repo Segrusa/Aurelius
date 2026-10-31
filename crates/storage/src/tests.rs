@@ -1166,7 +1166,8 @@ fn migration_17_adds_one_group_chat_and_keeps_every_conversation_and_message() {
     assert_eq!((conversations_before, messages_before), (2, 3));
     drop(store);
 
-    let store = Store::open(dir.path()).unwrap();
+    // Up to 17 only: 19 adds a channel for the project (schema19_tests).
+    let store = Store::open_until(dir.path(), 17).unwrap();
     // Every row, as it was; the only new one is the group chat.
     assert_eq!(rows(&store), before);
     assert_eq!(count(&store, "SELECT COUNT(*) FROM conversations"), conversations_before + 1);

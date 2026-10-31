@@ -66,6 +66,10 @@ pub(crate) fn on_finished(tx: &Tx<'_>, run: RunId) -> Result<Option<Vec<EventNot
     notices.push(task_event(tx, task, row.project_id, "task.waiting", json!({ "reason": WAITING_PLAN_REVIEW }))?);
     let by = row.employee_id.map(|employee_id| Actor::Employee { employee_id });
     notices.push(crate::task::ticket_line::ticket_event(tx, ticket, project, EventKind::TicketPlanReview, by, json!({ "task_id": task, "run_id": run }))?);
+    // The plan handed in (MU2-03): a card with the main task, for a board member.
+    let mut line = aurelius_domain::views::SystemLine::new(aurelius_domain::views::SystemLineKind::Plan);
+    (line.from, line.task_id) = (Some(crate::conversation::discussion::actor_name(tx, by)?), Some(task));
+    notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, "")?);
     Ok(Some(notices))
 }
 

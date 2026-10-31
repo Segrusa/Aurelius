@@ -146,9 +146,9 @@ impl AppView {
 
     /// The right panel: a task (or conversation) opened from a page, with its conversation
     /// and composer; ↗ opens it on its employee's page, × closes it (Esc too).
-    pub fn render_panel(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub fn render_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if let Panel::Ticket(id) = self.panel {
-            return self.render_ticket_panel(id, cx);
+            return self.render_ticket_panel(id, window, cx);
         }
         let task = self.panel_task().cloned();
         let manager = self.panel_manager().cloned();

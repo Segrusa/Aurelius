@@ -490,7 +490,12 @@ impl AppView {
                     ProjectRef::Sample(i) => Some(preview::PROJECTS[i].description).filter(|d| !d.is_empty()).map(str::to_owned),
                     ProjectRef::Real(_) => self.real(project).and_then(|p| p.description.clone()).filter(|d| !d.trim().is_empty()),
                 };
+                let channel = match project {
+                    ProjectRef::Real(id) => self.project_channel_link(id, cx),
+                    ProjectRef::Sample(_) => None,
+                };
                 v().children(about.map(|d| div().pt(px(22.)).text_size(px(14.)).text_color(c(theme::TEXT_2)).child(d)))
+                    .children(channel)
                     .child(self.render_overview(project, cx))
                     .into_any_element()
             }

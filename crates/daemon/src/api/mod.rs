@@ -262,6 +262,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
     let mut terminals: HashMap<String, aurelius_host::terminal::Attachment> = HashMap::new();
     // The hello said this client merges tool-use changes in live updates.
     let mut activity_changes = false;
+    let mut team_channels = false;
     // The tries of `user.use` on this connection, and its new board members (S5-3).
     let mut attempts = users::Attempts::default();
     let mut creates = users::Attempts::default();
@@ -281,6 +282,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             },
             Call::Read(Method::SessionHello(params)) => {
                 activity_changes = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::ACTIVITY_CHANGES);
+                team_channels = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::TEAM_CHANNELS);
                 let remembered = params.user_id;
                 match authenticate(&shared, &mut peer, params.app_key).await {
                     Ok(()) => users::remembered(&shared, &mut peer, remembered).await.map(|who| ResponseBody::Hello(hello(&shared, &peer, who))),
@@ -289,7 +291,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             }
             Call::Read(Method::UserUse(params)) => users::use_user(&shared, &mut peer, &mut attempts, params).await.map(ResponseBody::WhoAmI),
             Call::Read(Method::UserWhoami) => users::whoami(&shared, peer.user).await.map(ResponseBody::WhoAmI),
-            Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, activity_changes, out_tx.clone()).await {
+            Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, activity_changes, team_channels, out_tx.clone()).await {
                 Ok((body, task)) => {
                     if let Some(old) = forwarder.replace(task) {
                         old.abort();
@@ -326,7 +328,8 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
                 None if shared.terminals.exists(&terminal_id) => Ok(ResponseBody::TerminalDone),
                 None => Err(ProtocolError::new(ErrorCode::NotFound, "This terminal has ended.")),
             },
-            Call::Read(method) => match (reads::handle(&shared, method).await, peer.app.as_ref().filter(|a| a.audience == AppAudience::Management)) {
+            // The board member reading a discussion marks it read for themselves (not an app).
+            Call::Read(method) => match (reads::handle(&shared, method, peer.user.filter(|_| peer.app.is_none())).await, peer.app.as_ref().filter(|a| a.audience == AppAudience::Management)) {
                 // What a management app reads is cut down to the management (and its own work).
                 (Ok(body), Some(app)) => management::filter(&shared, app, body).await,
                 (outcome, _) => outcome,

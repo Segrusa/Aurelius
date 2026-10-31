@@ -8,14 +8,25 @@ use crate::ui::{self, h, v, ButtonKind};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
-/// Who wrote a message, as the conversation shows it: "You" for the user, else its
-/// author (an employee in the group chat, a persona), else `fallback` (the screen's employee).
-pub fn message_author(m: &aurelius_protocol::MessageView, fallback: &SharedString) -> SharedString {
+/// Who wrote a message, as the conversation shows it: another board member as the discussion
+/// names them ("ada · board member"), "You" for your own posts (`me` is this connection's
+/// board member) and those without a board member, else its author (an employee in the group
+/// chat, a persona), else `fallback` (the screen's employee).
+pub fn message_author(m: &aurelius_protocol::MessageView, fallback: &SharedString, me: Option<&aurelius_domain::user::UserView>) -> SharedString {
     match m.role {
+        MessageRole::User if other_member(m, me) => {
+            let a = crate::screens::discussion::author(m, |_| None);
+            format!("{} · {}", a.name, a.kind).into()
+        }
         MessageRole::User => "You".into(),
         // A line the server writes itself (nobody was woken, say) may come without a name.
         MessageRole::Assistant => m.author.as_deref().map(str::trim).filter(|a| !a.is_empty()).map(|a| SharedString::from(a.to_string())).unwrap_or_else(|| fallback.clone()),
     }
+}
+
+/// A post by a board member other than `me`: it reads with their name and stands on the left.
+pub fn other_member(m: &aurelius_protocol::MessageView, me: Option<&aurelius_domain::user::UserView>) -> bool {
+    m.author_user.as_ref().is_some_and(|u| me.is_none_or(|me| me.id != u.id))
 }
 
 /// An employee's name with their role, as the group chat shows senders and `@` suggestions:
@@ -51,6 +62,8 @@ fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<S
         queued: false,
         usage: None,
         mode,
+        author_user: None,
+        system: None,
     }
 }
 
@@ -247,13 +260,34 @@ impl AppView {
             cache.full
         };
         let mut rows: Vec<AnyElement> = Vec::new();
+        // A channel opened with messages not read yet: "New" before the first of them (fase 2 §3).
+        let divider = self.channel_new_at.filter(|_| self.screen == crate::app::Page::GroupChat);
         for m in snapshot.messages.iter().filter(|m| !self.deleted_queued.contains(&m.id)) {
+            if divider == Some(m.id) {
+                rows.push(h().id("channel-new").role(Role::Note).aria_label("New messages").w_full().gap(px(10.)).text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT))
+                    .child(div().flex_1().h(px(1.)).bg(c(theme::ACCENT)))
+                    .child("New")
+                    .child(div().flex_1().h(px(1.)).bg(c(theme::ACCENT)))
+                    .into_any_element());
+            }
             let el = if m.status == MessageStatus::Partial || self.live.contains_key(&m.id) {
                 self.render_message(m, &author, cx)
             } else {
                 self.message_cell(m.id, full, cx)
             };
-            rows.push(ui::rise(v().w_full().child(el), SharedString::from(format!("msg-{}", m.id)), 0).into_any_element());
+            // Right-click: "Create ticket…" (fase 2 §4), as the hover action does.
+            let row = v().w_full().child(el);
+            let row = if self.make_ticket_action_allowed(m) {
+                let message = m.id;
+                row.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, w, cx| {
+                    cx.stop_propagation();
+                    let items = vec![crate::screens::board::menu_entry("Create ticket…", crate::screens::board::BoardDo::TicketFromMessage(message), false, None)];
+                    this.open_menu(e.position, items, w, cx);
+                }))
+            } else {
+                row
+            };
+            rows.push(ui::rise(row, SharedString::from(format!("msg-{}", m.id)), 0).into_any_element());
         }
         // Group chat: answers still streaming in, before they are messages there.
         for l in self.group_live.iter().filter(|l| !snapshot.messages.iter().any(|m| m.id == l.message)) {
@@ -357,19 +391,22 @@ impl AppView {
         let all = self.messages.as_ref().map_or(&[][..], |s| &s.messages[..]);
         if m.role == MessageRole::User {
             let waiting = m.queued;
+            // Another board member's post stands on the left; yours on the right.
+            let mine = !other_member(m, self.active_member());
+            let side = |el: Div| if mine { el.self_end().items_end() } else { el.self_start().items_start() };
             // Images sent with it show under it (the text may be empty then).
             let (folded, fold_toggle) = self.fold_view(m.id, &m.text, cx);
             let shown = folded.map_or_else(|| m.text.clone(), |(s, _)| s);
-            let sent = v().self_end().items_end().gap(px(6.))
-                .when(!m.text.trim().is_empty() || (m.files.is_empty() && m.uploads.is_empty()), |el| el.child(bubble(self.message_markdown(m.id, format!("user-{}", m.id), crate::screens::markdown::linked(&shown), cx).on_link_click(self.markdown_link_handler(false, cx)))))
+            let sent = side(v()).gap(px(6.))
+                .when(!m.text.trim().is_empty() || (m.files.is_empty() && m.uploads.is_empty()), |el| el.child(bubble(self.message_markdown(m.id, format!("user-{}", m.id), crate::screens::markdown::linked(&shown), cx).on_link_click(self.markdown_link_handler(false, cx)), mine)))
                 .children(fold_toggle)
                 .when(!m.files.is_empty(), |el| el.child(self.message_files(m.id, &m.files, cx)))
                 .when(!m.uploads.is_empty(), |el| el.child(self.message_uploads(m.id, &m.uploads, cx)))
                 .children(self.markdown_chips(m.id, &m.text, cx))
-                .when(!m.text.trim().is_empty(), |el| el.child(self.copy_button(format!("msg-{}", m.id), m.text.clone(), cx)));
-            // In the group chat every message says who wrote it, yours too.
-            let sent = if self.screen == crate::app::Page::GroupChat {
-                v().self_end().items_end().gap(px(6.)).child(div().text_size(px(12.)).text_color(c(theme::MUTED)).child(message_author(m, author))).child(sent)
+                .child(h().gap(px(4.)).children(self.message_ticket_pill(m.id, cx)).children(self.make_ticket_action(m, cx)).when(!m.text.trim().is_empty(), |el| el.child(self.copy_button(format!("msg-{}", m.id), m.text.clone(), cx))));
+            // In the group chat every message says who wrote it, yours too; elsewhere another board member's.
+            let sent = if self.screen == crate::app::Page::GroupChat || !mine {
+                side(v()).gap(px(6.)).child(div().text_size(px(12.)).text_color(c(theme::MUTED)).child(message_author(m, author, self.active_member()))).child(sent)
             } else {
                 sent
             };
@@ -396,6 +433,18 @@ impl AppView {
         }
         // A line the server writes in the group chat itself (nobody could answer, an answer
         // was cut off): a quiet note, not an answer by somebody.
+        // A system line of phase 2 (a ticket made from a message here, a loop limit): a quiet note.
+        if let Some(line) = &m.system {
+            let text = crate::screens::discussion::system_text(line, &m.text);
+            let when = ui::fmt_when(m.created_at_ms);
+            let ticket = line.ticket_id.filter(|_| line.kind == aurelius_domain::views::SystemLineKind::TicketCreated);
+            return h().id(SharedString::from(format!("system-{}", m.id))).w_full().justify_center().gap(px(8.)).px(px(24.)).role(Role::Note).aria_label(crate::screens::discussion::system_label(&text, &when))
+                .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(c(theme::MUTED)).text_center().child(format!("┄ {text} ┄")))
+                .when_some(ticket, |el, id| {
+                    el.child(div().id(SharedString::from(format!("system-open-{}", m.id))).role(Role::Link).cursor_pointer().text_size(px(12.)).text_color(c(theme::ACCENT_TEXT)).child("Open ticket").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket(id, w, cx))))
+                })
+                .into_any_element();
+        }
         if is_system_line(m, self.open_conversation.is_some() && self.open_conversation == self.group_conversation) {
             let text = m.text.trim().to_string();
             return h().w_full().justify_center().px(px(24.))
@@ -582,6 +631,8 @@ impl AppView {
                     .when_some(m.produced_by.clone(), |el, label| el.child(div().text_color(c(theme::TEXT_2)).child(format!("· {label}"))))
                     .when(total > 1, |el| el.child(format!("· version {}/{}", index.unwrap_or(1), total)))
                     .child(div().flex_1())
+                    .children(self.message_ticket_pill(m.id, cx))
+                    .children((m.status != MessageStatus::Partial).then(|| self.make_ticket_action(m, cx)).flatten())
                     .children(trace)
                     .children(copy),
             )
@@ -1021,7 +1072,7 @@ fn send_now_button(id: SharedString, label: &'static str) -> Stateful<Div> {
 }
 
 pub fn user_bubble(text: impl Into<SharedString>) -> Div {
-    bubble(user_text(text.into()))
+    bubble(user_text(text.into()), true)
 }
 
 fn user_text(text: SharedString) -> gpui_kit::component::text::TextView {
@@ -1034,17 +1085,18 @@ fn user_text(text: SharedString) -> gpui_kit::component::text::TextView {
     gpui_kit::component::text::TextView::markdown(("user-md", id), text).selectable(true).plugin(crate::screens::mermaid::Mermaid)
 }
 
-fn bubble(text: gpui_kit::component::text::TextView) -> Div {
-    div()
-        .self_end()
-        .max_w(px(520.))
+/// A posted message's bubble: yours (`mine`) on the right, another board member's on the left.
+fn bubble(text: gpui_kit::component::text::TextView, mine: bool) -> Div {
+    let el = div();
+    let el = if mine { el.self_end() } else { el.self_start() };
+    el.max_w(px(520.))
         .bg(c(theme::SURFACE_2))
         .border_1()
         .border_color(c(theme::BORDER))
         .rounded_tl(px(14.))
         .rounded_tr(px(14.))
-        .rounded_bl(px(14.))
-        .rounded_br(px(4.))
+        .rounded_bl(px(if mine { 14. } else { 4. }))
+        .rounded_br(px(if mine { 4. } else { 14. }))
         .px(px(15.))
         .py(px(11.))
         .text_size(px(14.))
@@ -1416,7 +1468,7 @@ fn activity_ring(busy: bool) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{artifact_url, fold, is_system_line, mention_suggestions, message_author, streaming_answer, web_search_summary, with_role};
+    use super::{artifact_url, fold, is_system_line, mention_suggestions, message_author, other_member, streaming_answer, web_search_summary, with_role};
     use aurelius_domain::conversation::{MessageRole, MessageStatus};
     use gpui_kit::SharedString;
 
@@ -1429,7 +1481,7 @@ mod tests {
         let orion = aurelius_protocol::MessageView { author: Some("Orion".into()), ..atlas.clone() };
         let you = aurelius_protocol::MessageView { role: MessageRole::User, author: None, update: None, ..atlas.clone() };
         let unnamed = aurelius_protocol::MessageView { author: None, update: None, ..atlas.clone() };
-        let names: Vec<String> = [&atlas, &orion, &you, &unnamed].iter().map(|m| message_author(m, &fallback).to_string()).collect();
+        let names: Vec<String> = [&atlas, &orion, &you, &unnamed].iter().map(|m| message_author(m, &fallback, None).to_string()).collect();
         assert_eq!(names, ["Atlas", "Orion", "You", "Aurelius"], "each message its own author, the user is You");
         // Streaming into the group chat it reads as that employee's group post.
         assert_eq!(atlas.update.as_deref(), Some(aurelius_domain::group_chat::GROUP_KIND));
@@ -1442,6 +1494,29 @@ mod tests {
     }
 
     #[test]
+    fn another_board_members_post_names_them_and_yours_is_you() {
+        let fallback = SharedString::from("Aurelius");
+        let member = |name: &str| aurelius_domain::user::UserView { id: aurelius_domain::UserId::new(), username: name.into(), created_at_ms: 0, created_by_user: None };
+        let (one, two) = (member("board-one"), member("board-two"));
+        let post = |by: Option<&aurelius_domain::user::UserView>| aurelius_protocol::MessageView { role: MessageRole::User, author: None, update: None, author_user: by.cloned(), ..streaming_answer(aurelius_domain::MessageId::new(), aurelius_domain::RunId::new(), None, None) };
+        let (mine, theirs, unnamed) = (post(Some(&one)), post(Some(&two)), post(None));
+        // Signed in as board-one: board-two's post reads as the discussion names it, on the left.
+        assert_eq!(message_author(&theirs, &fallback, Some(&one)).as_ref(), "board-two · board member");
+        assert!(other_member(&theirs, Some(&one)));
+        // Your own post, and one without a board member (an older server, the local owner), are You on the right.
+        assert_eq!(message_author(&mine, &fallback, Some(&one)).as_ref(), "You");
+        assert!(!other_member(&mine, Some(&one)));
+        assert_eq!(message_author(&unnamed, &fallback, Some(&one)).as_ref(), "You");
+        assert!(!other_member(&unnamed, Some(&one)));
+        // The same name is no proof: only the same board member is you.
+        let namesake = member("board-one");
+        assert!(other_member(&mine, Some(&namesake)));
+        // A connection without a board member: every board member's post is somebody else's.
+        assert_eq!(message_author(&mine, &fallback, None).as_ref(), "board-one · board member");
+        assert_eq!(message_author(&unnamed, &fallback, None).as_ref(), "You");
+    }
+
+    #[test]
     fn a_line_the_server_writes_is_a_note_not_a_nameless_answer() {
         let fallback = SharedString::from("Aurelius");
         let mut line = streaming_answer(aurelius_domain::MessageId::new(), aurelius_domain::RunId::new(), None, None);
@@ -1449,7 +1524,7 @@ mod tests {
         assert!(is_system_line(&line, true), "a finished group post without an author");
         let blank = aurelius_protocol::MessageView { author: Some("  ".into()), ..line.clone() };
         assert!(is_system_line(&blank, true), "a blank author is none");
-        assert_eq!(message_author(&blank, &fallback).as_ref(), "Aurelius", "never an empty name");
+        assert_eq!(message_author(&blank, &fallback, None).as_ref(), "Aurelius", "never an empty name");
         let system = aurelius_protocol::MessageView { author: Some("Aurelius".into()), update: Some("system".into()), ..line.clone() };
         assert!(is_system_line(&system, true), "kind system");
         // Nobody was woken: Aurelius' status note in the group; in a task a status stays a card.

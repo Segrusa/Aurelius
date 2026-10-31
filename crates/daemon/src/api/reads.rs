@@ -13,7 +13,9 @@ use aurelius_storage::queries;
 use base64::Engine;
 use std::sync::Arc;
 
-pub(super) async fn handle(shared: &Arc<Shared>, method: Method) -> Result<ResponseBody, ProtocolError> {
+/// `reader`: the board member of the connection (none for an app): reading a
+/// discussion (a channel, a ticket's) marks it read for them.
+pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
     match method {
         Method::SessionHello(_)
         | Method::EventSubscribe { .. }
@@ -26,7 +28,11 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method) -> Result<Respo
         Method::ServerGetHealth => health(shared).await,
         Method::ProjectList => projects(shared).await,
         Method::JobList => jobs(shared).await,
-        Method::ConversationGet { conversation_id } => messages(shared, conversation_id).await,
+        Method::ConversationGet { conversation_id } => {
+            let body = messages(shared, conversation_id).await?;
+            mark_read(shared, reader, conversation_id).await;
+            Ok(body)
+        }
         Method::EmployeeList => employees(shared).await,
         Method::EmployeeChat { employee_id } => {
             let store = shared.store().clone();
@@ -36,12 +42,52 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method) -> Result<Respo
                 None => Err(ProtocolError::new(ErrorCode::NotFound, format!("employee {employee_id} does not exist"))),
             }
         }
-        Method::GroupChatGet => {
+        Method::GroupChatGet { channel } => {
             let store = shared.store().clone();
-            match storage_task(move || store.read(aurelius_storage::conversations::group_conversation)).await? {
-                Some(conversation_id) => messages(shared, conversation_id).await,
-                None => Err(ProtocolError::new(ErrorCode::NotFound, "the group chat does not exist")),
+            let found = storage_task(move || {
+                store.read(|c| match channel {
+                    None => aurelius_storage::conversations::group_conversation(c),
+                    // Only a channel: a ticket's discussion is read with `conversation.get`.
+                    Some(id) => Ok(aurelius_storage::discussions::channels(c)?.into_iter().find(|ch| ch.conversation_id == id).map(|ch| ch.conversation_id)),
+                })
+            })
+            .await?;
+            match (found, channel) {
+                (Some(conversation_id), _) => {
+                    let body = messages(shared, conversation_id).await?;
+                    mark_read(shared, reader, conversation_id).await;
+                    Ok(body)
+                }
+                (None, Some(_)) => Err(ProtocolError::new(ErrorCode::NotFound, "this channel does not exist")),
+                (None, None) => Err(ProtocolError::new(ErrorCode::NotFound, "the group chat does not exist")),
             }
+        }
+        Method::ChannelList => {
+            let store = shared.store().clone();
+            storage_task(move || {
+                store.read(|c| {
+                    let as_of_seq = queries::last_seq(c)?;
+                    let read_text = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+                    // Unread and mentions are the reader's own; none without a board member.
+                    let reader = match reader {
+                        Some(user) => aurelius_storage::users::get(c, &user.to_string())?.map(|u| (user, u.username)),
+                        None => None,
+                    };
+                    let mut channels = Vec::new();
+                    for ch in aurelius_storage::discussions::channels(c)? {
+                        let last: Option<i64> = c.query_row("SELECT MAX(created_at_ms) FROM messages WHERE conversation_id = ?1", [ch.conversation_id.to_string()], |r| r.get(0))?;
+                        let name = if ch.project_id.is_none() { "General".to_owned() } else { ch.name };
+                        let (unread, mentions) = match &reader {
+                            Some((user, username)) => aurelius_storage::discussions::unread(c, *user, username, ch.conversation_id, &read_text)?,
+                            None => (0, 0),
+                        };
+                        channels.push(aurelius_domain::views::ChannelView { conversation_id: ch.conversation_id, project_id: ch.project_id, name, unread, mentions, archived: ch.read_only, last_activity_ms: last });
+                    }
+                    Ok(aurelius_domain::views::ChannelsSnapshot { as_of_seq, channels })
+                })
+            })
+            .await
+            .map(ResponseBody::Channels)
         }
         Method::CompanyGet => company(shared).await,
         Method::BoardGet { project_id } => board(shared, project_id).await,
@@ -347,6 +393,16 @@ async fn jobs(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
     Ok(ResponseBody::Jobs(JobsSnapshot { as_of_seq, jobs }))
 }
 
+/// `reader` read `conversation` (when it is a discussion): it counts as read up
+/// to its latest message. A failure only costs the unread count; the read still answers.
+async fn mark_read(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, conversation: ConversationId) {
+    let Some(user) = reader else { return };
+    let store = shared.store().clone();
+    if let Err(err) = storage_task(move || store.write(move |tx| aurelius_storage::discussions::mark_read(tx, user, conversation))).await {
+        tracing::warn!(error = %err.message, %conversation, "could not mark the discussion read");
+    }
+}
+
 /// Messages plus the live text of runs still streaming, so a reconnecting
 /// client sees everything produced so far. Tool use comes shortened
 /// (`activity.get` has a call whole), so hundreds of calls stay small.
@@ -484,18 +540,26 @@ async fn board(shared: &Arc<Shared>, project_id: Option<ProjectId>) -> Result<Re
     .map(ResponseBody::Board)
 }
 
+/// The ticket and its tasks in one read transaction (as `board`): the card's
+/// column and its main task's status come from the same commit, never a card
+/// still in Todo with a main task that already runs.
 async fn ticket(shared: &Arc<Shared>, ticket_id: aurelius_domain::TicketId) -> Result<ResponseBody, ProtocolError> {
     let store = shared.store().clone();
     let found = storage_task(move || {
         store.read(|c| {
-            let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
-            let Some(ticket) = aurelius_storage::tickets::view(c, ticket_id, &read_blob)? else { return Ok(None) };
-            let mut tasks = Vec::new();
-            for id in aurelius_storage::tickets::tasks_of_ticket(c, ticket_id)? {
-                tasks.extend(aurelius_storage::tasks::task_view(c, id, &read_blob)?);
-            }
-            let root_task = ticket.root_task_id.and_then(|root| tasks.iter().find(|t| t.id == root).cloned());
-            Ok(Some(aurelius_domain::ticket::TicketDetail { as_of_seq: queries::last_seq(c)?, ticket, root_task, tasks }))
+            c.execute_batch("BEGIN DEFERRED")?;
+            let result = (|| {
+                let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+                let Some(ticket) = aurelius_storage::tickets::view(c, ticket_id, &read_blob)? else { return Ok(None) };
+                let mut tasks = Vec::new();
+                for id in aurelius_storage::tickets::tasks_of_ticket(c, ticket_id)? {
+                    tasks.extend(aurelius_storage::tasks::task_view(c, id, &read_blob)?);
+                }
+                let root_task = ticket.root_task_id.and_then(|root| tasks.iter().find(|t| t.id == root).cloned());
+                Ok(Some(aurelius_domain::ticket::TicketDetail { as_of_seq: queries::last_seq(c)?, ticket, root_task, tasks }))
+            })();
+            c.execute_batch("COMMIT")?;
+            result
         })
     })
     .await?;

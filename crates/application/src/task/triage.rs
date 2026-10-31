@@ -42,7 +42,16 @@ const RETRY: &str = "You ended without choosing. Choose with assign_ticket now: 
 /// The ticket waits in Todo for a board member to choose (B5): no dispatcher, or it chose nobody.
 fn needs_owner(tx: &Tx<'_>, ticket: TicketId, why: &str) -> Result<Vec<EventNotice>, StorageError> {
     let Some(state) = store::state(tx, ticket)? else { return Ok(vec![]) };
-    Ok(vec![ticket_line::ticket_event(tx, ticket, state.project_id, EventKind::TicketUpdated, None, json!({ "changed": [], "needs": "owner", "reason": why }))?])
+    let mut notices = vec![ticket_line::ticket_event(tx, ticket, state.project_id, EventKind::TicketUpdated, None, json!({ "changed": [], "needs": "owner", "reason": why }))?];
+    // The dispatcher's choice (MU2-03), also when nobody was chosen: a board member chooses then.
+    let text = match why {
+        "no_dispatcher" => "Nobody chose an owner: there is no active dispatcher. Choose one on the card.",
+        "dispatcher_did_not_choose" => "The dispatcher chose nobody. Choose an owner on the card.",
+        _ => "The dispatcher could not choose an owner. Choose one on the card.",
+    };
+    let line = aurelius_domain::views::SystemLine::new(aurelius_domain::views::SystemLineKind::Delegated);
+    notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, text)?);
+    Ok(notices)
 }
 
 /// The ticket is in Todo with its main task a draft: the dispatcher's job, or "choose an owner" (B5).
@@ -233,6 +242,7 @@ pub(crate) fn assign(tx: &Tx<'_>, st: &Store, run: RunId, employee: &str, reason
         Some(by),
         json!({ "employee_id": chosen.id, "reason": if reason.is_empty() { serde_json::Value::Null } else { json!(reason) } }),
     )?];
+    notices.extend(ticket_line::owner_line(tx, ticket, Some(by), chosen.id, Some(&reason))?);
     notices.extend(ticket_line::dispatched(tx, ticket, chosen.id)?);
     Ok((true, format!("Assigned the ticket to {}; their main task starts now. Answer in one sentence.", chosen.name), notices))
 }

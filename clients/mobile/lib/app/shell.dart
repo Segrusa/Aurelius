@@ -10,6 +10,7 @@ import '../features/connection/connection_bloc.dart';
 import '../features/dashboard/give_work.dart';
 import '../features/inbox/inbox_bloc.dart';
 import '../features/power/power_widgets.dart';
+import '../features/team/channels_bloc.dart';
 
 /// The bottom tabs, in this order (branch indices of the router's shell).
 /// The Board took the place of Tasks (D-03); Tasks is under More.
@@ -24,6 +25,17 @@ const shellTabs = [
 /// The inbox tab, with the badge of what waits for you (its index in [shellTabs]).
 const inboxTab = 3;
 
+/// The Team tab: the mentions of a board member over the channels, a dot for anything unread (B8).
+const teamTab = 2;
+
+({int mentions, bool unread}) _teamBadge(BuildContext context) {
+  try {
+    return context.select<ChannelsBloc, ({int mentions, bool unread})>((b) => b.state.badge);
+  } on ProviderNotFoundException {
+    return (mentions: 0, unread: false);
+  }
+}
+
 /// Tabs: Home · Board · Team · Inbox · More in a floating glass tab bar,
 /// with the connection banner on top. Hardware keyboards (iPad, Android with a
 /// keyboard): ⌘/Ctrl+1…5 switch tabs, ⌘/Ctrl+N gives work (a new task).
@@ -37,6 +49,7 @@ class HomeShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final badge = context.select<InboxBloc, int>((b) => b.state.badge);
+    final team = _teamBadge(context);
     final bannerVisible = context.select<ConnectionBloc, bool>((b) => ConnectionBanner.visible(b.state));
     final digits = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3, LogicalKeyboardKey.digit4, LogicalKeyboardKey.digit5];
     final shortcuts = <ShortcutActivator, VoidCallback>{
@@ -60,7 +73,12 @@ class HomeShell extends StatelessWidget {
             onTap: _go,
             fade: Tokens.bg,
             tabs: [
-              for (final (i, t) in shellTabs.indexed) i == inboxTab ? GlassTab(t.icon, t.label, badge: badge) : t,
+              for (final (i, t) in shellTabs.indexed)
+                i == inboxTab
+                    ? GlassTab(t.icon, t.label, badge: badge)
+                    : i == teamTab
+                        ? GlassTab(t.icon, t.label, badge: team.mentions, dot: team.unread)
+                        : t,
             ],
           ),
           child: shell,

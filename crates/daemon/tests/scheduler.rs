@@ -168,7 +168,9 @@ async fn a_run_that_cannot_be_planned_fails_and_frees_the_conversation() {
     let id = chat(&client, "kapot").await;
     // Every retry waits a little longer: allow for all of them, also under load.
     for _ in 0..1200 {
-        if run_state(dir.path()).2 != "leased" && run_state(dir.path()).2 != "ready" {
+        // One read: two could see "leased" and then "ready" (a retry) and stop too early.
+        let job = run_state(dir.path()).2;
+        if job != "leased" && job != "ready" {
             break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;

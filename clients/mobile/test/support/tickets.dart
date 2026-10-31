@@ -5,6 +5,8 @@ import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
+import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
+import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -23,6 +25,10 @@ class MockRepository extends Mock implements AureliusRepository {}
 class MockCompanyBloc extends MockBloc<CompanyEvent, CompanyState> implements CompanyBloc {}
 
 class MockConnectionBloc extends MockBloc<ConnectionEvent, LinkState> implements ConnectionBloc {}
+
+class MockInboxBloc extends MockBloc<InboxEvent, InboxState> implements InboxBloc {}
+
+class MockRuntimeBloc extends MockBloc<RuntimeEvent, RuntimeState> implements RuntimeBloc {}
 
 const testUser = UserView(id: 'u-1', username: 'ada', createdAtMs: 0);
 const onlineLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], boardMembersExist: true, user: testUser);
@@ -58,6 +64,7 @@ TicketView ticketOf({
   List<String> labels = const [],
   int? deadlineMs,
   int? doneAtMs,
+  int? archivedAtMs,
   String? description,
   String? reviewFeedback,
   TaskRun run = const TaskRun(),
@@ -65,6 +72,7 @@ TicketView ticketOf({
   int version = 3,
 }) =>
     TicketView(
+      archivedAtMs: archivedAtMs,
       attachments: const [],
       column: column,
       columnId: columnIdOf(column),
@@ -147,10 +155,16 @@ Future<GoRouter> pumpBoardPage(WidgetTester tester, MockRepository repo, Widget 
   whenListen(companyBloc, const Stream<CompanyState>.empty(), initialState: company ?? companyWith());
   final connection = MockConnectionBloc();
   whenListen(connection, const Stream<LinkState>.empty(), initialState: link);
+  // A ticket's discussion is a chat (Phase 2): it asks the Inbox and the runtime too.
+  final inbox = MockInboxBloc();
+  whenListen(inbox, const Stream<InboxState>.empty(), initialState: const InboxState(loading: false));
+  final runtime = MockRuntimeBloc();
+  whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: const RuntimeState());
   final router = GoRouter(initialLocation: '/', routes: [
     GoRoute(path: '/', builder: (_, _) => page),
     GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']}'))),
     GoRoute(path: '/ticket/:tid/plan', builder: (_, s) => Scaffold(body: Text('plan ${s.pathParameters['tid']}'))),
+    GoRoute(path: '/ticket/:tid/report', builder: (_, s) => Scaffold(body: Text('report ${s.pathParameters['tid']}'))),
     GoRoute(path: '/board/new', builder: (_, s) => Scaffold(body: Text('new ticket ${s.uri.queryParameters['project'] ?? ''}'))),
     GoRoute(path: '/settings/board', builder: (_, _) => const Scaffold(body: Text('board settings'))),
     GoRoute(path: '/project/:pid', builder: (_, s) => Scaffold(body: Text('project ${s.pathParameters['pid']}'))),
@@ -163,7 +177,12 @@ Future<GoRouter> pumpBoardPage(WidgetTester tester, MockRepository repo, Widget 
   await tester.pumpWidget(RepositoryProvider<AureliusRepository>.value(
     value: repo,
     child: MultiBlocProvider(
-      providers: [BlocProvider<CompanyBloc>.value(value: companyBloc), BlocProvider<ConnectionBloc>.value(value: connection)],
+      providers: [
+        BlocProvider<CompanyBloc>.value(value: companyBloc),
+        BlocProvider<ConnectionBloc>.value(value: connection),
+        BlocProvider<InboxBloc>.value(value: inbox),
+        BlocProvider<RuntimeBloc>.value(value: runtime),
+      ],
       child: MaterialApp.router(theme: aureliusTheme(), routerConfig: router),
     ),
   ));

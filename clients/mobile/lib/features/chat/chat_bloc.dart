@@ -11,6 +11,7 @@ import '../../core/net/connection.dart';
 import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/commands.dart';
+import '../../data/discussion.dart';
 import '../../data/mode_memory.dart';
 import '../../data/views.dart';
 
@@ -20,6 +21,15 @@ sealed class ChatEvent {
 
 class ChatRefreshed extends ChatEvent {
   const ChatRefreshed();
+}
+
+/// Whether the Team chat is on screen. Reading a channel marks it read on the
+/// server (`group_chat.get`, schema 20): hidden, changes only mark it stale and
+/// it is read again once it shows, so its unread and mentions stay in the badge.
+class ChatShown extends ChatEvent {
+  const ChatShown(this.visible);
+
+  final bool visible;
 }
 
 class _AppendReceived extends ChatEvent {
@@ -236,6 +246,7 @@ class ChatState extends Equatable {
     this.notice,
     this.loadError,
     this.progress = const {},
+    this.boardMembers = const [],
   });
 
   final bool loading;
@@ -279,6 +290,10 @@ class ChatState extends Equatable {
   /// Answers still streaming: since when they run and their tokens so far.
   final Map<String, RunProgress> progress;
 
+  /// The board members' names, for `@` in a discussion or channel (B9: they
+  /// are marked, not woken). Empty elsewhere and when they could not be read.
+  final List<String> boardMembers;
+
   /// The run that is streaming now, if any.
   MessageView? get streaming {
     for (final m in messages.reversed) {
@@ -319,6 +334,7 @@ class ChatState extends Equatable {
     String? loadError,
     bool clearLoadError = false,
     Map<String, RunProgress>? progress,
+    List<String>? boardMembers,
   }) =>
       ChatState(
         loading: loading ?? this.loading,
@@ -339,10 +355,11 @@ class ChatState extends Equatable {
         notice: notice,
         loadError: clearLoadError ? null : loadError ?? this.loadError,
         progress: progress ?? this.progress,
+        boardMembers: boardMembers ?? this.boardMembers,
       );
 
   @override
-  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress];
+  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers];
 }
 
 /// One conversation: an employee's task conversation when [employeeId] is set
@@ -353,7 +370,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc(this._repository, {String? conversationId, this.employeeId, this.projectId})
       : assert(employeeId != null || projectId != null, 'a conversation belongs to an employee or a project'),
         group = false,
+        channel = null,
+        ticketId = null,
         runAuthor = null,
+        onRead = null,
         liveTimeout = Duration.zero,
         super(ChatState(conversationId: conversationId, loading: conversationId != null)) {
     _init(conversationId != null);
@@ -364,11 +384,27 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// message in the group until it ends); `null` once that run no longer works.
   /// A live answer that never becomes a message goes [liveTimeout] after its
   /// last update once its run no longer works.
-  ChatBloc.group(this._repository, {this.runAuthor, this.liveTimeout = const Duration(seconds: 3)})
+  /// [onRead] runs after each read of the channel (which the server counts as
+  /// read): the channels' unread and mentions are asked for again then.
+  ChatBloc.group(this._repository, {this.runAuthor, this.liveTimeout = const Duration(seconds: 3), this.channel, this.onRead})
       : employeeId = null,
         projectId = null,
+        ticketId = null,
         group = true,
         super(const ChatState()) {
+    _init(true);
+  }
+
+  /// A ticket's discussion (feature `ticket_discussion`): read as any
+  /// conversation, written with `ticket.post`. It works as the group chat:
+  /// board members and employees write in it, answers stream under their name.
+  ChatBloc.discussion(this._repository, {required String this.ticketId, required String conversationId, this.runAuthor, this.liveTimeout = const Duration(seconds: 3)})
+      : employeeId = null,
+        projectId = null,
+        channel = null,
+        onRead = null,
+        group = true,
+        super(ChatState(conversationId: conversationId)) {
     _init(true);
   }
 
@@ -398,10 +434,17 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           emit(state.copyWith(notice: e.mode == ShareMode.memory ? 'Proposed as memory.' : 'Shared as context.'));
         }));
     on<ChatNoticeShown>((e, emit) => emit(state.copyWith()));
+    on<ChatShown>((e, emit) {
+      _shown = e.visible;
+      if (_shown && _stale) {
+        _stale = false;
+        add(const ChatRefreshed());
+      }
+    });
 
     _subs = [
-      _repository.online.listen((_) => add(const ChatRefreshed())),
-      _repository.chatChanges.where((e) => e.aggregateId == state.conversationId || e.isRun).listen((_) => add(const ChatRefreshed())),
+      _repository.online.listen((_) => _changed()),
+      _repository.chatChanges.where((e) => e.aggregateId == state.conversationId || e.isRun).listen((_) => _changed()),
       _repository.appends.where((a) => a.conversationId == state.conversationId).listen((a) => add(_AppendReceived(a))),
     ];
     if (load && _repository.linkState.isOnline) add(const ChatRefreshed());
@@ -414,6 +457,34 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// The company's group chat: messages carry their author, answers stream
   /// before they are messages there (see [_live]).
   final bool group;
+
+  /// The group chat's channel (a project's, from `channel.list`); null: General.
+  final String? channel;
+
+  /// The ticket whose discussion this is; null for every other chat.
+  final String? ticketId;
+
+  bool get discussion => ticketId != null;
+
+  /// See [ChatBloc.group].
+  final void Function()? onRead;
+
+  /// The Team chat is on screen ([ChatShown]); a change while hidden leaves it [_stale].
+  bool _shown = true;
+  bool _stale = false;
+
+  /// Reading the Team chat marks its channel read for the board member; a
+  /// hidden one waits. Every other chat reads again at once.
+  void _changed() {
+    if (group && !discussion && !_shown) {
+      _stale = true;
+    } else {
+      add(const ChatRefreshed());
+    }
+  }
+
+  /// The board members were asked for once (they rarely change).
+  bool _membersRead = false;
   final String? Function(String runId)? runAuthor;
   final Duration liveTimeout;
   late final List<StreamSubscription<Object?>> _subs;
@@ -474,7 +545,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     // Trying again after it failed: loading shows again.
     if (group && state.loadError != null && state.messages.isEmpty) emit(state.copyWith(loading: true));
     try {
-      final snapshot = group ? await _repository.groupChat() : await _repository.messages(id!);
+      final snapshot = discussion ? await _repository.messages(id!) : group ? await _repository.groupChat(channel: channel) : await _repository.messages(id!);
       final messages = _deleting.isEmpty ? snapshot.messages : snapshot.messages.where((m) => !_deleting.contains(m.id)).toList();
       emit(state.copyWith(
         loading: false,
@@ -489,17 +560,29 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         shares: snapshot.shares,
         unsent: state.unsent.where((u) => !u.delivered).toList(),
         clearLoadError: true,
+        boardMembers: group && !_membersRead ? await _boardMembers() : null,
       ));
+      if (group && !discussion) onRead?.call();
     } on DisconnectedException catch (e) {
       // The Team chat that never loaded says why (a reconnect loads it again), not that it is empty.
       emit(state.copyWith(loading: false, loadError: group && state.conversationId == null ? e.message : null));
     } on ProtocolException catch (e) {
-      final shown = group ? groupChatFailure(e) : e.shown;
+      final shown = discussion ? 'The discussion could not be loaded: ${e.shown}' : group ? groupChatFailure(e) : e.shown;
       emit(state.copyWith(loading: false, notice: shown, loadError: shown));
     } catch (e) {
       // Anything else (an answer this app cannot read) stops the loading too.
       if (!group) rethrow;
-      emit(state.copyWith(loading: false, loadError: 'The Team chat could not be loaded: $e'));
+      emit(state.copyWith(loading: false, loadError: '${discussion ? 'The discussion' : 'The Team chat'} could not be loaded: $e'));
+    }
+  }
+
+  /// The board members' names (`user.list`); none when they cannot be read.
+  Future<List<String>> _boardMembers() async {
+    _membersRead = true;
+    try {
+      return [for (final u in await _repository.boardMembers()) u.username];
+    } on Object {
+      return const [];
     }
   }
 
@@ -623,8 +706,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     final images = [for (final i in unsent.images) i.path];
     final files = [for (final f in unsent.files) f.path];
     final fresh = !group && employeeId == null && state.conversationId == null;
-    final command = group
-        ? Commands.sendGroupMessage(unsent.text, images: images, files: files)
+    final command = discussion
+        ? Commands.postTicketMessage(ticketId!, unsent.text, images: images, files: files)
+        : group
+        ? Commands.sendGroupMessage(unsent.text, images: images, files: files, channel: channel)
         : employeeId != null
         ? Commands.sendEmployeeMessage(employeeId!, unsent.text, conversationId: state.conversationId!, images: images, files: files, interrupt: unsent.interrupt)
         : Commands.sendProjectMessage(
@@ -655,7 +740,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     } on NotSentException {
       emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asFailed(true) : u).toList()));
     } on ProtocolException catch (e) {
-      emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asFailed(true) : u).toList(), notice: e.message));
+      // A server without the discussion engine (`unknown_method`): kept, to try again after an update.
+      emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asFailed(true) : u).toList(), notice: discussion ? discussionPostFailure(e) : e.message));
     }
   }
 
@@ -730,6 +816,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         CommandResultEmployeeMessageSent(:final conversationId, :final messageId) => (conversationId, messageId),
         CommandResultProjectMessageSent(:final conversationId, :final messageId) => (conversationId, messageId),
         CommandResultGroupMessageSent(:final conversationId, :final messageId) => (conversationId, messageId),
+        CommandResultTicketMessagePosted(:final conversationId, :final messageId) => (conversationId, messageId),
         _ => (null, null),
       };
 

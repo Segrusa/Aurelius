@@ -89,6 +89,12 @@ actions!(
         ChangeProjectFolder,
         OpenProjectSettings,
         TogglePlanFold,
+        PrevChannel,
+        NextChannel,
+        MentionUp,
+        MentionDown,
+        MentionPick,
+        MentionClose,
         RemoveMemory,
         TogglePin,
         ShowContext,
@@ -168,6 +174,8 @@ pub const APP: &str = "Aurelius";
 /// Main content has focus (not a text field): single-letter keys are active.
 pub const NAV: &str = "Workspace";
 pub const PALETTE: &str = "Palette";
+/// A composer while its `@` suggestions show: ↑↓, Enter/Tab and Esc are theirs.
+pub const MENTIONS: &str = "Mentions";
 pub const DIALOG: &str = "AureliusDialog";
 /// The Dashboard's Give work box.
 pub const GIVE_WORK: &str = "GiveWork";
@@ -306,6 +314,8 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc!(&["secondary-shift-r"], Some(APP), &["r"], "Review approval", Project, true, ReviewApproval),
     sc!(&["secondary-shift-y"], Some(APP), &["y"], "Accept memory proposal", Project, true, AcceptMemory),
     sc!(&["alt-shift-p"], Some(APP), NONE, "Fold / unfold the latest plan in this conversation", General, true, TogglePlanFold),
+    sc!(&["alt-up"], Some(APP), NONE, "Team chat: the channel above", General, true, PrevChannel),
+    sc!(&["alt-down"], Some(APP), NONE, "Team chat: the channel below", General, true, NextChannel),
     sc!(&["delete"], Some(NAV), NONE, "Reject / forget memory (Memory) · drop idea (Ideas)", Project, false, RemoveMemory),
     sc!(&["secondary-shift-b"], Some(APP), &["b"], "Pin / unpin memory", Project, true, TogglePin),
     sc!(&["secondary-shift-e"], Some(APP), &["e"], "Show the context of the last answer", General, true, ShowContext),
@@ -325,6 +335,11 @@ fn overlay_bindings() -> Vec<KeyBinding> {
         key("ctrl-n", PaletteDown, Some(palette_input)),
         key("enter", PaletteConfirm, Some(palette_input)),
         key("escape", PaletteClose, Some(palette_input)),
+        key("up", MentionUp, Some("Mentions > Input")),
+        key("down", MentionDown, Some("Mentions > Input")),
+        key("enter", MentionPick, Some("Mentions > Input")),
+        key("tab", MentionPick, Some("Mentions > Input")),
+        key("escape", MentionClose, Some("Mentions > Input")),
         key("tab", DialogNextField, Some(dialog_input)),
         key("secondary-o", ChooseDialogFolder, Some(DIALOG)),
         // New task dropdowns: which manager gets it (or none: a draft), and how its conversation runs
@@ -575,5 +590,29 @@ mod tests {
         }
         // Esc stays "one level up": it puts a held card back, then closes the panel.
         assert_eq!(action("escape", &[APP, &board]).as_deref(), Some("aurelius::Back"));
+    }
+
+    /// ui-ontwerp fase 2 §1: while the `@` suggestions show, ↑↓ / Enter / Tab / Esc are
+    /// theirs, ahead of the text field's own (bound before ours, as `gpui_kit::init` does).
+    #[::core::prelude::v1::test]
+    fn the_mention_suggestions_take_their_keys_from_the_text_field() {
+        use gpui_kit::component::input::{Enter, Escape, IndentInline, MoveDown, MoveUp};
+        let mut bindings = vec![
+            KeyBinding::new("up", MoveUp, Some("Input")),
+            KeyBinding::new("down", MoveDown, Some("Input")),
+            KeyBinding::new("enter", Enter { secondary: false, shift: false }, Some("Input")),
+            KeyBinding::new("tab", IndentInline, Some("Input")),
+            KeyBinding::new("escape", Escape, Some("Input")),
+        ];
+        bindings.extend(all_bindings());
+        let keymap = Keymap::new(bindings);
+        let action = |key: &str, stack: &[&str]| {
+            let stack: Vec<KeyContext> = stack.iter().map(|c| KeyContext::parse(c).unwrap()).collect();
+            keymap.bindings_for_input(&[Keystroke::parse(key).unwrap()], &stack).0.first().map(|b| b.action().name().to_string())
+        };
+        for (key, name) in [("up", "MentionUp"), ("down", "MentionDown"), ("enter", "MentionPick"), ("tab", "MentionPick"), ("escape", "MentionClose")] {
+            assert_eq!(action(key, &[APP, SIDE_PANEL, MENTIONS, "Input"]).as_deref(), Some(format!("aurelius::{name}").as_str()), "{key}");
+            assert!(!action(key, &[APP, SIDE_PANEL, "Input"]).is_some_and(|a| a.starts_with("aurelius::Mention")), "{key} without suggestions is the field's");
+        }
     }
 }

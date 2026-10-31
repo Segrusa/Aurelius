@@ -59,6 +59,9 @@ fn scripted(request: &RunRequest) -> Option<String> {
             }
             if let Some(rest) = what.strip_prefix("Assignment: ") {
                 let goal = rest.split_once(" — ").map_or(rest, |(_, g)| g);
+                // The goal is JSON-quoted (data, not instructions): its first line, as before.
+                let decoded = serde_json::from_str::<String>(goal).ok();
+                let goal = decoded.as_deref().map_or(goal, |g| g.lines().next().unwrap_or_default());
                 items.push(serde_json::json!({ "kind": "project_knowledge", "content": format!("Requested goal: {goal}"), "source": label, "scope": "project", "importance": 0.6, "confidence": 0.8 }));
             }
         }

@@ -11,9 +11,11 @@ import '../../core/widgets/dialogs.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/company.dart';
+import '../../data/discussion.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
+import '../connection/connection_bloc.dart';
 
 // The writes a board member makes on a ticket (ui-ontwerp §6, §8, §9): every
 // button, swipe, "Move to…" and drop on a tablet ends here, so they all follow
@@ -149,9 +151,24 @@ Future<bool> moveTicket(BuildContext context, TicketView ticket, BoardColumnView
       context.push('/ticket/${ticket.id}/plan');
       return false;
     case MoveAllowed(kind: MoveKind.sendBack):
+      // Phase 2: the feedback is a message of the discussion (MU2-06 AC1, MU2-05 AC4).
+      if (_discussed(context, ticket)) {
+        toast(context, 'Write what needs to change, then Send back.');
+        context.push('/ticket/${ticket.id}?tab=discussion');
+        return false;
+      }
       return showSendBack(context, ticket);
     case MoveAllowed(kind: MoveKind.accept):
       return showMarkDone(context, ticket);
+  }
+}
+
+/// The server keeps a discussion for [ticket] (feature `ticket_discussion`).
+bool _discussed(BuildContext context, TicketView ticket) {
+  try {
+    return ticket.conversationId != null && context.read<ConnectionBloc>().state.has(ticketDiscussionFeature);
+  } on ProviderNotFoundException {
+    return false;
   }
 }
 

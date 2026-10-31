@@ -27,6 +27,7 @@ use aurelius_domain::{
     ActorKind, EmployeeId, EventKind, EventNotice, ProjectId, TaskId, TicketId, UserId,
     task::{TaskStatus, WAITING_PLAN_REVIEW},
     ticket::{Actor, ColumnKind},
+    views::{SystemLine, SystemLineKind},
 };
 use aurelius_storage::{StorageError, Store, Tx, blobs, company as company_store, conversations as conv, tasks as task_store, tickets as store};
 use rusqlite::OptionalExtension;
@@ -91,6 +92,89 @@ pub(crate) fn ticket_event(tx: &Tx<'_>, ticket: TicketId, project: ProjectId, ki
     Ok(notice)
 }
 
+/// The name of a column on this board ("Plan review", or what the board calls it).
+fn column_name(tx: &Tx<'_>, kind: ColumnKind) -> Result<String, StorageError> {
+    Ok(company_store::column_of_kind(tx, kind)?.name)
+}
+
+/// The system line of a column change in the ticket's discussion (MU2-03): who
+/// moved it, from → to, and what it was when it was more than a move
+/// (`what`: "started it", "approved the plan", …). One line per change.
+pub(crate) fn column_line(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>, from: ColumnKind, to: ColumnKind, what: Option<&str>) -> Result<Vec<EventNotice>, StorageError> {
+    let name = crate::conversation::discussion::actor_name(tx, by)?;
+    let (from_name, to_name) = (column_name(tx, from)?, column_name(tx, to)?);
+    let text = match what {
+        Some(what) => format!("{name} {what} · {from_name} → {to_name}"),
+        None => format!("{name} moved {from_name} → {to_name}"),
+    };
+    let mut line = SystemLine::new(SystemLineKind::Moved);
+    (line.by, line.from, line.to) = (Some(name), Some(from_name), Some(to_name));
+    crate::conversation::discussion::ticket_line(tx, ticket, line, &text)
+}
+
+/// The system line of an owner chosen (`ticket.dispatched`) by a board member or
+/// the dispatcher, with the reason the dispatcher gave (MU2-03): a link to the main task.
+pub(crate) fn owner_line(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>, owner: EmployeeId, reason: Option<&str>) -> Result<Vec<EventNotice>, StorageError> {
+    let name = crate::conversation::discussion::actor_name(tx, by)?;
+    let owner_name = crate::conversation::discussion::employee_name(tx, owner)?;
+    let reason = reason.map(str::trim).filter(|r| !r.is_empty());
+    let text = match reason {
+        Some(reason) => format!("{name} chose {owner_name} as owner: {reason}"),
+        None => format!("{name} chose {owner_name} as owner"),
+    };
+    let mut line = SystemLine::new(SystemLineKind::Delegated);
+    (line.from, line.to, line.by) = (Some(name), Some(owner_name), None);
+    line.task_id = store::state(tx, ticket)?.and_then(|s| s.root_task_id);
+    crate::conversation::discussion::ticket_line(tx, ticket, line, &text)
+}
+
+/// The ticket a task works for (its main task or a delegation below it), if any.
+pub(crate) fn ticket_of(conn: &rusqlite::Connection, task: TaskId) -> Result<Option<TicketId>, StorageError> {
+    let ticket: Option<Option<String>> = conn.query_row("SELECT ticket_id FROM tasks WHERE id = ?1", [task.to_string()], |r| r.get(0)).optional()?;
+    Ok(ticket.flatten().and_then(|t| TicketId::parse(&t).ok()))
+}
+
+/// A delegation below a ticket's task (MU2-03): who gave what to whom, with a link to the new task.
+pub(crate) fn delegated_line(tx: &Tx<'_>, parent: TaskId, child: TaskId, from: &str, to: &str, title: &str) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(ticket) = ticket_of(tx, parent)? else { return Ok(vec![]) };
+    let mut line = SystemLine::new(SystemLineKind::Delegated);
+    (line.from, line.to, line.task_id) = (Some(from.to_owned()), Some(to.to_owned()), Some(child));
+    crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{from} delegated “{title}” to {to}"))
+}
+
+/// How much of a sub-task's report its line in the discussion shows: a short summary, not the report.
+pub const REPORT_LINE_CHARS: usize = 160;
+
+/// A sub-task below a ticket reported or failed (MU2-03): a short summary and a
+/// link to the task (its report is there). Nothing for a main task (it has its own lines).
+pub(crate) fn sub_task_line(tx: &Tx<'_>, task: TaskId, who: &str, title: &str, text: &str, succeeded: bool) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(ticket) = ticket_of(tx, task)? else { return Ok(vec![]) };
+    if is_root(tx, task)? || store::state(tx, ticket)?.is_some_and(|s| s.root_task_id == Some(task)) {
+        return Ok(vec![]);
+    }
+    let gist = report_gist(text, title);
+    let text = match (succeeded, gist.is_empty()) {
+        (true, true) => format!("{who} reported on “{title}”"),
+        (true, false) => format!("{who} reported on “{title}”: {gist}"),
+        (false, true) => format!("{who}'s task “{title}” failed"),
+        (false, false) => format!("{who}: {gist}"),
+    };
+    let mut line = SystemLine::new(SystemLineKind::Reported);
+    (line.from, line.task_id) = (Some(who.to_owned()), Some(task));
+    crate::conversation::discussion::ticket_line(tx, ticket, line, &text)
+}
+
+/// The first words of a report, on one line: without its title heading, at most `REPORT_LINE_CHARS`.
+fn report_gist(text: &str, title: &str) -> String {
+    let body: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).filter(|l| l.trim_start_matches('#').trim() != title.trim() || !l.starts_with('#')).collect();
+    let flat = body.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= REPORT_LINE_CHARS {
+        return flat;
+    }
+    let cut: String = flat.chars().take(REPORT_LINE_CHARS - 1).collect();
+    format!("{}…", cut.trim_end())
+}
+
 /// The engine's own work on a main task is by its employee; a change nobody
 /// of the company made (a cancel, an accept) has no `by` here.
 fn worked_by(tx: &Tx<'_>, task: TaskId) -> Result<Option<Actor>, StorageError> {
@@ -101,6 +185,9 @@ fn worked_by(tx: &Tx<'_>, task: TaskId) -> Result<Option<Actor>, StorageError> {
 pub(crate) fn on_status(tx: &Tx<'_>, task: TaskId, status: TaskStatus, waiting_reason: Option<&str>) -> Result<Vec<EventNotice>, StorageError> {
     let Some((ticket, project, column)) = root_of(tx, task)? else { return Ok(vec![]) };
     let Some(to) = column_for(status, waiting_reason) else { return Ok(vec![]) };
+    if status == TaskStatus::Failed && to == column {
+        return failed_in_place(tx, task, ticket);
+    }
     // Done is closed; only `ticket.accept` puts a card there (it moves it itself first).
     if to == column || column == ColumnKind::Done || to == ColumnKind::Done {
         return Ok(vec![]);
@@ -111,7 +198,26 @@ pub(crate) fn on_status(tx: &Tx<'_>, task: TaskId, status: TaskStatus, waiting_r
     };
     let target = company_store::column_of_kind(tx, to)?;
     store::move_to(tx, ticket, target.id, None)?;
-    Ok(vec![ticket_event(tx, ticket, project, EventKind::TicketMoved, by, json!({ "from": column, "to": to, "reason": status.as_str() }))?])
+    let mut notices = vec![ticket_event(tx, ticket, project, EventKind::TicketMoved, by, json!({ "from": column, "to": to, "reason": status.as_str() }))?];
+    // Plan review and Review get the line of the plan or the report instead (`plan_review`, `reported`).
+    let what = match (status, column) {
+        (TaskStatus::Failed, _) => Some("could not finish the main task"),
+        (TaskStatus::Running, ColumnKind::Todo) => Some("started working"),
+        _ => None,
+    };
+    if !matches!(to, ColumnKind::PlanReview | ColumnKind::Review) {
+        notices.extend(column_line(tx, ticket, by, column, to, what)?);
+    }
+    Ok(notices)
+}
+
+/// A failed main task whose card stays where it is (Doing) still says so in
+/// the discussion (MU2-03): Start makes a new main task (B6).
+fn failed_in_place(tx: &Tx<'_>, task: TaskId, ticket: TicketId) -> Result<Vec<EventNotice>, StorageError> {
+    let name = crate::conversation::discussion::actor_name(tx, worked_by(tx, task)?)?;
+    let mut line = SystemLine::new(SystemLineKind::Reported);
+    (line.from, line.task_id) = (Some(name.clone()), Some(task));
+    crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{name} could not finish the main task · Start makes a new one"))
 }
 
 /// The hook of `task_line::set_employee`: a hand-over of the main task makes the
@@ -124,7 +230,15 @@ pub(crate) fn on_employee(tx: &Tx<'_>, task: TaskId, employee: Option<EmployeeId
     }
     store::set_owner(tx, ticket, employee)?;
     let by = employee.map(|employee_id| Actor::Employee { employee_id });
-    Ok(vec![ticket_event(tx, ticket, project, EventKind::TicketUpdated, by, json!({ "changed": ["owner"], "reason": "handed_over" }))?])
+    let mut notices = vec![ticket_event(tx, ticket, project, EventKind::TicketUpdated, by, json!({ "changed": ["owner"], "reason": "handed_over" }))?];
+    // A hand-over of the main task (MU2-03): from the owner before to the new one.
+    if let (Some(before), Some(after)) = (state.owner, employee) {
+        let (from, to) = (crate::conversation::discussion::employee_name(tx, before)?, crate::conversation::discussion::employee_name(tx, after)?);
+        let mut line = SystemLine::new(SystemLineKind::Delegated);
+        (line.from, line.to, line.task_id) = (Some(from.clone()), Some(to.clone()), Some(task));
+        notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{from} handed the ticket over to {to}"))?);
+    }
+    Ok(notices)
 }
 
 /// The main task reported (it is in Review now, the card too): the board member
@@ -132,7 +246,12 @@ pub(crate) fn on_employee(tx: &Tx<'_>, task: TaskId, employee: Option<EmployeeId
 pub(crate) fn reported(tx: &Tx<'_>, task: TaskId) -> Result<Vec<EventNotice>, StorageError> {
     let Some((ticket, project, _)) = root_of(tx, task)? else { return Ok(vec![]) };
     let by = worked_by(tx, task)?;
-    Ok(vec![ticket_event(tx, ticket, project, EventKind::TicketReview, by, json!({ "task_id": task }))?])
+    let mut notices = vec![ticket_event(tx, ticket, project, EventKind::TicketReview, by, json!({ "task_id": task }))?];
+    // The final report → Review (MU2-03): a card with the main task, for a board member.
+    let mut line = SystemLine::new(SystemLineKind::Review);
+    (line.from, line.task_id) = (Some(crate::conversation::discussion::actor_name(tx, by)?), Some(task));
+    notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, "")?);
+    Ok(notices)
 }
 
 /// The ticket was started (it is in Todo): a new main task in Draft, with the

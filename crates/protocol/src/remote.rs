@@ -54,7 +54,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ConversationGet { .. }
         | Method::EmployeeList
         | Method::EmployeeChat { .. }
-        | Method::GroupChatGet
+        | Method::GroupChatGet { .. }
+        | Method::ChannelList
         | Method::CompanyGet
         | Method::ProjectConversationList { .. }
         | Method::ApprovalList
@@ -220,6 +221,7 @@ fn command_needs(command: &Command) -> Needs {
         | Command::RemoveAttachment(_)
         | Command::SendEmployeeMessage(_)
         | Command::SendGroupMessage(_)
+        | Command::PostTicketMessage(_)
         | Command::StartProjectConversation(_)
         | Command::SendProjectMessage(_)
         | Command::ShareMessage(_)
@@ -288,6 +290,7 @@ fn command_needs(command: &Command) -> Needs {
         | Command::SendBackTicket(_)
         | Command::CancelTicket(_)
         | Command::ArchiveTicket(_)
+        | Command::RetryTicketSummary(_)
         | Command::UpdateBoardColumns(_)
         | Command::UpdateCompany(_)
         | Command::UpdateProject(_) => Needs::Cap(TaskControl),
@@ -653,11 +656,11 @@ mod tests {
         assert_eq!(required(&decide), cap(Capability::Approve));
         assert_eq!(required(&read(Method::ProposalList)), cap(Capability::Read));
         // The company is an org chart read too.
-        for method in [Method::CompanyGet, Method::EmployeeChat { employee_id: EmployeeId::new() }, Method::GroupChatGet] {
+        for method in [Method::CompanyGet, Method::EmployeeChat { employee_id: EmployeeId::new() }, Method::GroupChatGet { channel: None }, Method::ChannelList] {
             assert_eq!(required(&read(method)), cap(Capability::Read));
         }
         // Writing in the group chat is chatting.
-        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text: "Hi".into(), images: vec![], files: vec![] });
+        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { text: "Hi".into(), images: vec![], files: vec![], channel: None });
         assert_eq!(required(&exec(group)), cap(Capability::Chat));
     }
 

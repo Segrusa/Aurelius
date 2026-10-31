@@ -266,9 +266,9 @@ impl CommandService {
                 for row in rows {
                     let (id, event_type, metadata) = row?;
                     let what = match event_type.as_str() {
-                        "task.created" => format!("Assignment: {} — {}", ctx.title, ctx.goal),
+                        "task.created" => format!("Assignment: {} — {}", ctx.title, serde_json::Value::from(ctx.goal.as_str())),
                         "task.succeeded" => match &report {
-                            Some(report) => format!("Task completed: {}\nReport:\n{report}", ctx.title),
+                            Some(report) => format!("Task completed: {}\nReport (JSON-quoted):\n{}", ctx.title, serde_json::Value::from(report.as_str())),
                             None => format!("Task completed: {}", ctx.title),
                         },
                         "task.failed" => {
@@ -293,6 +293,13 @@ impl CommandService {
                     Some(id) => ticket_to_summarize(conn, id, &project_scope)?,
                     None => None,
                 };
+                // The ticket's summary rests on the whole ticket (MU2-12 B4): its fields, its
+                // discussion and the reports of the tasks linked to it, besides the main task.
+                if let Some(t) = &ticket {
+                    for (event, what) in ticket_sources(conn, t.id, task_id, &read)? {
+                        sources.push((format!("E{}", sources.len() + 1), event, what));
+                    }
+                }
                 Ok(Some(ExtractionInput { task_id, employee_id, project_scope, employee_scope, sources, existing, signals, lessons, config, employee_system: ctx.employee_system.clone(), ticket }))
             })
             .map_err(storage_error)
@@ -491,6 +498,8 @@ impl CommandService {
                                 extraction_version: memory::EXTRACTION_VERSION,
                             })?;
                             notices.push(n);
+                            // AC2: the discussion says so (a system line, also on Done).
+                            notices.extend(crate::conversation::discussion::ticket_line(tx, ticket.id, aurelius_domain::views::SystemLine::new(aurelius_domain::views::SystemLineKind::Summary), "")?);
                         }
                     }
                 }
@@ -502,6 +511,26 @@ impl CommandService {
                 }
                 queries::complete_job(tx, &job, epoch)?;
                 Ok(notices)
+            })
+            .map_err(storage_error)
+    }
+
+    /// The extraction after a ticket's Done failed (MU2-12 AC4: quota, a run that
+    /// failed, nothing to summarize): the job ends (no retry by itself: a board
+    /// member tries again with `ticket.retry_summary`) and, while the ticket has no
+    /// summary, its discussion says so in neutral words (`SUMMARY_FAILED`): `why` (a
+    /// runtime error, maybe with a path on the server) only goes to the server's log
+    /// (the daemon logs it with the job, `memory::summary_failed`).
+    /// The ticket stays on Done. Fenced like a result.
+    pub fn ticket_summary_failed(&self, job_id: &str, epoch: i64, ticket: TicketId, _why: &str) -> Result<Vec<EventNotice>, AppError> {
+        let job = job_id.to_owned();
+        self.store
+            .write(move |tx| {
+                if !queries::kill_job(tx, &job, epoch, "memory_failed")? || has_ticket_summary(tx, ticket)? {
+                    return Ok(Vec::new());
+                }
+                let line = aurelius_domain::views::SystemLine::new(aurelius_domain::views::SystemLineKind::SummaryFailed);
+                crate::conversation::discussion::ticket_line(tx, ticket, line, SUMMARY_FAILED)
             })
             .map_err(storage_error)
     }
@@ -954,6 +983,91 @@ pub(crate) fn schedule_consolidation(tx: &Tx<'_>, scope_id: &str, source: EventI
     let id = format!("consolidate-{}", aurelius_domain::JobId::new());
     aurelius_storage::events::insert_job(tx, &id, CONSOLIDATE_JOB_KIND, source, &id, &serde_json::json!({ "scope_id": scope_id, "forced": forced }))?;
     Ok(true)
+}
+
+/// How much of the ticket's discussion and of each linked task's report goes into its summary.
+pub const TICKET_DISCUSSION_MESSAGES: u32 = 40;
+pub const TICKET_DISCUSSION_CHARS: usize = 600;
+pub const LINKED_REPORT_CHARS: usize = 1_500;
+pub const LINKED_REPORTS: usize = 12;
+
+/// The sources of a ticket's summary besides its main task (`root`): the ticket's
+/// fields (its `ticket.created`), its discussion (its `ticket.accepted`) and the
+/// reports of the other tasks linked to it (each its `task.succeeded` or `task.failed`).
+fn ticket_sources(conn: &rusqlite::Connection, ticket: TicketId, root: TaskId, read: &dyn Fn(&str) -> Option<String>) -> Result<Vec<(EventId, String)>, StorageError> {
+    let event_of = |sql: &str, id: &str| -> Result<Option<EventId>, StorageError> {
+        let found: Option<String> = conn.query_row(sql, [id], |r| r.get(0)).optional()?;
+        Ok(found.and_then(|e| EventId::parse(&e).ok()))
+    };
+    let mut out = Vec::new();
+    let Some(view) = aurelius_storage::tickets::view(conn, ticket, read)? else { return Ok(out) };
+    if let Some(event) = event_of("SELECT id FROM events WHERE aggregate_type = 'ticket' AND aggregate_id = ?1 AND type = 'ticket.created' ORDER BY seq LIMIT 1", &ticket.to_string())? {
+        let priority = serde_json::to_value(view.priority).ok().and_then(|p| p.as_str().map(str::to_owned)).unwrap_or_default();
+        let mut what = format!("Ticket #{} “{}”, priority {priority}", view.number, view.title);
+        if !view.labels.is_empty() {
+            what.push_str(&format!(", labels {}", view.labels.join(", ")));
+        }
+        if let Some(description) = view.description.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+            what.push_str(&format!("\nDescription (JSON-quoted):\n{}", serde_json::Value::from(description.chars().take(REPORT_MAX_CHARS).collect::<String>())));
+        }
+        out.push((event, what));
+    }
+    if let (Some(d), Some(event)) = (
+        crate::conversation::discussion::of_ticket(conn, ticket)?,
+        event_of("SELECT id FROM events WHERE aggregate_type = 'ticket' AND aggregate_id = ?1 AND type = 'ticket.accepted' ORDER BY seq DESC LIMIT 1", &ticket.to_string())?,
+    ) {
+        let lines = crate::conversation::discussion::discussion_json(conn, read, d.id, None, TICKET_DISCUSSION_MESSAGES, TICKET_DISCUSSION_CHARS)?;
+        if !lines.is_empty() {
+            out.push((event, format!("Discussion of the ticket (oldest first, one JSON object per message):\n[\n{}\n]", lines.join(",\n"))));
+        }
+    }
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.title, t.status, COALESCE(m.name, ''), b.storage_key FROM tasks t LEFT JOIN employees m ON m.id = t.employee_id
+         LEFT JOIN blobs b ON b.id = t.result_blob_id WHERE t.ticket_id = ?1 AND t.id <> ?2 AND t.status IN ('succeeded', 'failed') ORDER BY t.created_at_ms, t.id",
+    )?;
+    let rows = stmt.query_map([ticket.to_string(), root.to_string()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?, r.get::<_, Option<String>>(4)?)))?;
+    for row in rows.take(LINKED_REPORTS) {
+        let (id, title, status, who, key) = row?;
+        let ended = if status == "succeeded" { "task.succeeded" } else { "task.failed" };
+        let Some(event) = conn
+            .query_row("SELECT id FROM events WHERE aggregate_type = 'task' AND aggregate_id = ?1 AND type = ?2 ORDER BY seq DESC LIMIT 1", [id.as_str(), ended], |r| r.get::<_, String>(0))
+            .optional()?
+            .and_then(|e| EventId::parse(&e).ok())
+        else {
+            continue;
+        };
+        let who = if who.is_empty() { String::new() } else { format!(" ({who})") };
+        let what = match (status.as_str(), key.and_then(|k| read(&k)).map(|r| r.trim().chars().take(LINKED_REPORT_CHARS).collect::<String>()).filter(|r| !r.is_empty())) {
+            ("succeeded", Some(report)) => format!("Linked task completed: {title}{who}\nReport (JSON-quoted):\n{}", serde_json::Value::from(report)),
+            ("succeeded", None) => format!("Linked task completed: {title}{who}"),
+            _ => format!("Linked task failed: {title}{who}"),
+        };
+        out.push((event, what));
+    }
+    Ok(out)
+}
+
+/// The line in a ticket's discussion when its summary failed: never the error itself.
+pub const SUMMARY_FAILED: &str = "The summary for project memory could not be made (quota or run error). A board member can try again.";
+
+/// Whether the ticket's summary is in memory already (in any scope: never a second one).
+pub(crate) fn has_ticket_summary(conn: &rusqlite::Connection, ticket: TicketId) -> Result<bool, StorageError> {
+    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM memory_items WHERE json_extract(locator_json, '$.ticket_id') = ?1)", [ticket.to_string()], |r| r.get(0))?)
+}
+
+/// Whether the extraction that writes the ticket's summary is queued or running.
+pub(crate) fn ticket_summary_pending(conn: &rusqlite::Connection, ticket: TicketId) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM jobs WHERE kind = ?1 AND state IN ('ready','leased') AND json_extract(payload_json, '$.ticket_id') = ?2)",
+        rusqlite::params![EXTRACT_JOB_KIND, ticket.to_string()],
+        |r| r.get(0),
+    )?)
+}
+
+/// `ticket.retry_summary`: the ticket's extraction once more, as a job of its own.
+pub(crate) fn schedule_ticket_summary(tx: &Tx<'_>, root: TaskId, ticket: TicketId, source: EventId) -> Result<(), StorageError> {
+    let id = format!("extract-{root}-retry-{}", aurelius_domain::JobId::new());
+    aurelius_storage::events::insert_job(tx, &id, EXTRACT_JOB_KIND, source, &id, &serde_json::json!({ "task_id": root, "ticket_id": ticket }))
 }
 
 /// The ticket to summarize: in Done and without a summary in `project_scope` yet.

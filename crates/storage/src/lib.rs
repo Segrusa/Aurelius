@@ -13,6 +13,7 @@ pub mod backup;
 pub mod blobs;
 pub mod heartbeats;
 pub mod conversations;
+pub mod discussions;
 pub mod conversation_sessions;
 pub mod employees;
 pub mod company_convert;
@@ -207,6 +208,8 @@ impl Store {
 mod tests;
 #[cfg(test)]
 mod schema18_tests;
+#[cfg(test)]
+mod schema19_tests;
 #[cfg(test)]
 mod users_tests;
 #[cfg(test)]

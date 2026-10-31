@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
         }
     };
     let (events_tx, mut events) = mpsc::unbounded_channel();
-    let client: Client = Client::open(&target, "aurelius-ctl", events_tx, None).await?;
+    let client: Client = Client::open(&target, "aurelius-ctl", events_tx, None, &[]).await?;
 
     match (cmd, &args[1..]) {
         ("health", _) => println!("{:#?}", client.health().await?),

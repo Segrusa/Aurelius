@@ -14,6 +14,7 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/company.dart';
+import '../../data/discussion.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
@@ -30,21 +31,24 @@ const ticketTitleMax = 160;
 /// labels, a photo or file; mode and deadline under Advanced. Create puts it
 /// in Backlog; "Create and start" also starts it (D-09).
 class NewTicketPage extends StatefulWidget {
-  const NewTicketPage({super.key, this.projectId});
+  const NewTicketPage({super.key, this.projectId, this.draft});
 
   /// The board's project filter, when set.
   final String? projectId;
+
+  /// Made from a chat message (MU2-10 AC1): title, description and project filled in.
+  final TicketDraft? draft;
 
   @override
   State<NewTicketPage> createState() => _NewTicketPageState();
 }
 
 class _NewTicketPageState extends State<NewTicketPage> {
-  final _title = TextEditingController();
-  final _description = TextEditingController();
+  late final _title = TextEditingController(text: widget.draft?.title);
+  late final _description = TextEditingController(text: widget.draft?.description);
   final _labels = TextEditingController();
   final _titleFocus = FocusNode();
-  late String? _project = widget.projectId;
+  late String? _project = widget.draft?.projectId ?? widget.projectId;
   TicketPriority _priority = TicketPriority.normal;
   String? _owner;
   AgentMode? _mode;
@@ -94,7 +98,10 @@ class _NewTicketPageState extends State<NewTicketPage> {
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _busy = true);
     try {
+      // Only a server of Phase 2 knows `from_message`; an older one refuses unknown fields.
+      final from = repository.linkState.has(ticketDiscussionFeature) ? widget.draft?.fromMessage : null;
       final receipt = await repository.write(ticketCreate(
+        fromMessage: from,
         title: title,
         projectId: _project!,
         description: _description.text.trim().isEmpty ? null : _description.text.trim(),

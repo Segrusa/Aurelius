@@ -34,8 +34,17 @@ pub enum Method {
     /// The company's group chat (Team chat): the user and every employee. Its
     /// messages and settings, as `conversation.get` answers them; an employee's
     /// messages carry its name as `author`. Write with `group_chat.send`.
+    /// `channel` (feature `team_channels`): a project's channel from
+    /// `channel.list`; none: the general channel, the one older servers have.
     #[serde(rename = "group_chat.get")]
-    GroupChatGet,
+    GroupChatGet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel: Option<ConversationId>,
+    },
+    /// The channels of the Team chat (feature `team_channels`): the general
+    /// one first, then one per project (archived projects too: read-only).
+    #[serde(rename = "channel.list")]
+    ChannelList,
     /// The company in one read: employees, the org chart setting and the
     /// management team (roots).
     #[serde(rename = "company.get")]
@@ -393,6 +402,10 @@ pub mod client_feature {
     /// Live updates may carry only the tool calls that are new or changed
     /// (`StreamDelta::activity_changes`); the client merges them by `call_id`.
     pub const ACTIVITY_CHANGES: &str = "activity_changes";
+    /// The client shows the Team chat's channels (feature `team_channels`):
+    /// only such a connection gets the live events of project channels, so an
+    /// older client never shows them in its one Team chat.
+    pub const TEAM_CHANNELS: &str = "team_channels";
 }
 
 impl std::fmt::Debug for HelloParams {

@@ -111,6 +111,7 @@ async fn a_real_ticket_plan_stops_after_the_deny_and_goes_on_once_approved() {
             run: RunSettings { mode: Some(AgentMode::Plan), ..Default::default() },
             files: vec![],
             start: true,
+            from_message: None,
         })
         .await
         .unwrap();

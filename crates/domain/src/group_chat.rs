@@ -41,6 +41,9 @@ pub struct SendGroupMessage {
     /// Files of any type for the employees (host paths, or this device's upload inbox).
     #[serde(default)]
     pub files: Vec<String>,
+    /// The channel (feature `team_channels`): a project's, or none for the general one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<crate::ConversationId>,
 }
 
 impl SendGroupMessage {
@@ -104,8 +107,8 @@ mod tests {
 
     #[test]
     fn a_message_needs_text_or_files() {
-        assert!(SendGroupMessage { text: "  ".into(), images: vec![], files: vec![] }.validate().is_err());
-        assert_eq!(SendGroupMessage { text: " Hi ".into(), images: vec![], files: vec![] }.validate().unwrap(), "Hi");
+        assert!(SendGroupMessage { text: "  ".into(), images: vec![], files: vec![], channel: None }.validate().is_err());
+        assert_eq!(SendGroupMessage { text: " Hi ".into(), images: vec![], files: vec![], channel: None }.validate().unwrap(), "Hi");
         assert_eq!(shortened("abcdef", 3), "abc…");
         assert_eq!(shortened(" ab ", 3), "ab");
     }

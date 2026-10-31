@@ -61,13 +61,14 @@ impl AppView {
 
     /// Approve the plan (Goedkeuren + Auto / Goedkeuren) or ask for a new one (Pas aan, feedback required).
     pub fn ticket_plan(&mut self, id: TicketId, decision: Option<PlanApproval>, window: &mut Window, cx: &mut Context<Self>) {
-        let feedback = self.board.feedback.read(cx).value().trim().to_string();
+        let (input, discussion) = self.feedback_input(id);
+        let feedback = input.read(cx).value().trim().to_string();
         let number = self.board.ticket(id).map_or(0, |t| t.number);
         let command = match decision {
             Some(decision) => Command::ApprovePlan(ticket::ApprovePlan { ticket_id: id, decision, feedback: Some(feedback.clone()).filter(|f| !f.is_empty()) }),
             None if !feedback_ready(&feedback) => {
-                self.board.feedback_missing = true;
-                self.board.feedback.update(cx, |f, cx| f.focus(window, cx));
+                self.feedback_missing(discussion);
+                input.update(cx, |f, cx| f.focus(window, cx));
                 cx.notify();
                 return;
             }
@@ -79,15 +80,25 @@ impl AppView {
             None => format!("#{number}: the owner makes a new plan with your feedback."),
         };
         self.board_send(command, Some(done));
-        self.board_feedback_sent(window, cx);
+        self.board_feedback_sent(discussion, window, cx);
+    }
+
+    /// Feedback was needed and the field is empty: say so under the field it goes in.
+    fn feedback_missing(&mut self, discussion: bool) {
+        if discussion {
+            self.board.composer_missing = true;
+        } else {
+            self.board.feedback_missing = true;
+        }
     }
 
     /// Send back to Doing with the required feedback (B2, MU1-16 AC2/AC3).
     pub fn ticket_send_back(&mut self, id: TicketId, window: &mut Window, cx: &mut Context<Self>) {
-        let feedback = self.board.feedback.read(cx).value().trim().to_string();
+        let (input, discussion) = self.feedback_input(id);
+        let feedback = input.read(cx).value().trim().to_string();
         if !feedback_ready(&feedback) {
-            self.board.feedback_missing = true;
-            self.board.feedback.update(cx, |f, cx| f.focus(window, cx));
+            self.feedback_missing(discussion);
+            input.update(cx, |f, cx| f.focus(window, cx));
             cx.notify();
             return;
         }
@@ -95,7 +106,7 @@ impl AppView {
         let who = t.as_ref().and_then(|t| t.owner_name.clone()).unwrap_or_else(|| "The owner".into());
         let number = t.map_or(0, |t| t.number);
         self.board_send(Command::SendBackTicket(ticket::SendBackTicket { ticket_id: id, feedback }), Some(format!("#{number} is back in Doing. {who} gets your feedback.")));
-        self.board_feedback_sent(window, cx);
+        self.board_feedback_sent(discussion, window, cx);
     }
 
     /// What still works on the ticket before Done (B6): its linked tasks, and a
@@ -114,8 +125,14 @@ impl AppView {
         self.board_close_dialog(window, cx);
     }
 
-    fn board_feedback_sent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.board.feedback.update(cx, |f, cx| f.set_value("", window, cx));
+    /// The feedback went: empty the field it came from (the composer: it is a message in the discussion now).
+    fn board_feedback_sent(&mut self, discussion: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if discussion {
+            self.board.composer.update(cx, |f, cx| f.set_value("", window, cx));
+            self.board.composer_missing = false;
+        } else {
+            self.board.feedback.update(cx, |f, cx| f.set_value("", window, cx));
+        }
         self.board.feedback_missing = false;
         if matches!(self.board.dialog, Some(BoardDialog::SendBack(_) | BoardDialog::Plan(_))) {
             self.board.dialog = None;
@@ -143,7 +160,8 @@ impl AppView {
             cx.notify();
             return;
         };
-        let create = ticket::CreateTicket { project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start };
+        let from_message = crate::screens::discussion::from_message(self.board.form.from_message, self.ticket_discussion_supported());
+        let create = ticket::CreateTicket { project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start, from_message };
         let done = start.then(|| match owner.and_then(|e| self.employee_name(e)) {
             Some(name) => format!("Created and started with {name}."),
             None => {
@@ -423,14 +441,27 @@ impl AppView {
             }
             ColumnKind::PlanReview => bar.child(line("◆ Plan review · only a board member decides.".into(), theme::ACCENT_TEXT)).when(root_id.is_some(), |el| el.child(open_conversation(cx))),
             ColumnKind::Review => bar.child(line("◆ Review · only a board member decides.".into(), theme::ACCENT_TEXT)).when(root_id.is_some(), |el| el.child(open_conversation(cx))).child(back(cx)),
-            ColumnKind::Done => bar
-                .child(
+            ColumnKind::Done => {
+                // MU2-12: how the summary went, from the discussion; a failure can be tried again (AC4).
+                let summary = match self.ticket_summary(t) {
+                    Some(crate::screens::discussion::Summary::Saved) => "Nothing was merged, pushed or deployed. The summary is in project memory.".to_string(),
+                    Some(crate::screens::discussion::Summary::Failed(why)) => format!("Nothing was merged, pushed or deployed. ✕ The summary failed{}", if why.is_empty() { ".".to_string() } else { format!(": {}", why.lines().next().unwrap_or("")) }),
+                    _ => "Nothing was merged, pushed or deployed. A summary goes to project memory.".to_string(),
+                };
+                let failed = self.ticket_summary_failed(t);
+                let retry = can && !self.board.retrying;
+                bar.child(
+                    // A min width as `line` has: without it the column takes the text's full width and cuts it off.
                     v().flex_1()
+                        .min_w(px(160.))
                         .gap(px(2.))
-                        .child(div().text_size(px(12.5)).text_color(c(theme::ACCENT_TEXT)).child(format!("✓ Closed{}", t.done_at_ms.map(|d| format!(" · {}", ui::fmt_when(d))).unwrap_or_default())))
-                        .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Nothing was merged, pushed or deployed. A summary goes to project memory.")),
+                        .child(div().w_full().min_w_0().text_size(px(12.5)).text_color(c(theme::ACCENT_TEXT)).child(format!("✓ Closed{}", t.done_at_ms.map(|d| format!(" · {}", ui::fmt_when(d))).unwrap_or_default())))
+                        .child(div().w_full().min_w_0().text_size(px(12.)).text_color(c(if failed { theme::NEGATIVE } else { theme::TEXT_2 })).child(summary))
+                        .children(self.board.retry_error.clone().filter(|_| failed).map(|e| div().w_full().min_w_0().text_size(px(12.)).text_color(c(theme::NEGATIVE)).child(e))),
                 )
-                .when(root_id.is_some(), |el| el.child(open_conversation(cx))),
+                .when(failed, |el| el.child(dim(ui::button("ticket-retry-summary", if self.board.retrying { "Trying again…" } else { "Try again" }, ButtonKind::Outline, None).h(px(28.)), retry).when(retry, |el| el.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.discussion_retry_summary(id, cx))))))
+                .when(root_id.is_some(), |el| el.child(open_conversation(cx)))
+            }
         };
         el.into_any_element()
     }
@@ -438,7 +469,9 @@ impl AppView {
     /// The review gate (§7.3 Review, §9.2): the report, the required feedback, Send back and Done.
     fn render_review_gate(&mut self, t: &TicketView, root: Option<&aurelius_protocol::TaskView>, can: bool, in_dialog: bool, cx: &mut Context<Self>) -> AnyElement {
         let id = t.id;
-        let ready = feedback_ready(&self.board.feedback.read(cx).value());
+        // With a discussion the feedback is a message there (MU2-05 AC4, P-27): the button jumps to its composer.
+        let discussion = !in_dialog && t.conversation_id.is_some();
+        let ready = discussion || feedback_ready(&self.board.feedback.read(cx).value());
         let report = root.and_then(|r| r.result.clone()).filter(|r| !r.trim().is_empty());
         let who = t.owner_name.clone().unwrap_or_else(|| "the owner".into());
         let report: AnyElement = match report {
@@ -459,12 +492,15 @@ impl AppView {
                     .child(div().id("ticket-report").max_h(px(260.)).overflow_y_scroll().p(px(10.)).rounded(px(6.)).bg(c(theme::SURFACE)).child(report))
                     .child(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child("Branches and commits in the report are information only: nothing is merged automatically."))
             })
-            .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Feedback (required to send back)"))
-            .child(Textarea::new(&self.board.feedback).py(px(7.)).line_height(px(20.)))
-            .when(self.board.feedback_missing, |el| el.child(div().text_size(px(12.)).text_color(c(theme::NEGATIVE)).child("Write what needs to change.")))
+            .when(!discussion, |el| {
+                el.child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Feedback (required to send back)"))
+                    .child(Textarea::new(&self.board.feedback).py(px(7.)).line_height(px(20.)))
+                    .when(self.board.feedback_missing, |el| el.child(div().text_size(px(12.)).text_color(c(theme::NEGATIVE)).child("Write what needs to change.")))
+            })
+            .when(discussion, |el| el.child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Send back writes your feedback as a message in the discussion.")))
             .child(
                 h().gap(px(8.))
-                    .child(dim(send, can).when(can, |el| el.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.ticket_send_back(id, w, cx)))))
+                    .child(dim(send, can).when(can, |el| el.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| if discussion { this.ticket_to_composer(id, w, cx) } else { this.ticket_send_back(id, w, cx) }))))
                     .child(div().flex_1())
                     .when(!in_dialog, |el| el.child(dim(ui::button("ticket-done", "✓ Done", ButtonKind::Primary, None).h(px(30.)), can).when(can, |el| el.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.board_dialog(BoardDialog::MarkDone(id), w, cx)))))),
             )
@@ -474,7 +510,8 @@ impl AppView {
     /// Plan review (§9.1): the plan, the feedback and the four buttons of the existing component.
     fn render_plan_gate(&mut self, t: &TicketView, can: bool, in_dialog: bool, cx: &mut Context<Self>) -> AnyElement {
         let id = t.id;
-        let ready = feedback_ready(&self.board.feedback.read(cx).value());
+        let discussion = !in_dialog && t.conversation_id.is_some();
+        let ready = discussion || feedback_ready(&self.board.feedback.read(cx).value());
         let conversation = self.board.detail_of(id).and_then(|d| d.root_task.as_ref()).and_then(|r| r.conversation_id);
         let plan = conversation.and_then(|c| self.board.plans.get(&c).cloned());
         let text: AnyElement = match plan {
@@ -495,15 +532,18 @@ impl AppView {
             .bg(c(theme::ATTENTION_BG))
             .when(!in_dialog, |el| el.child(h().gap(px(6.)).child(ui::diamond(7., theme::ACCENT_TEXT, true)).child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child("Plan review · nothing changes until you approve"))))
             .child(div().id("ticket-plan").max_h(px(320.)).overflow_y_scroll().p(px(10.)).rounded(px(6.)).bg(c(theme::SURFACE)).child(text))
-            .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Feedback (needed for Pas aan)"))
-            .child(Textarea::new(&self.board.feedback).py(px(7.)).line_height(px(20.)))
-            .when(self.board.feedback_missing, |el| el.child(div().text_size(px(12.)).text_color(c(theme::NEGATIVE)).child("Write what needs to change.")))
+            .when(!discussion, |el| {
+                el.child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Feedback (needed for Pas aan)"))
+                    .child(Textarea::new(&self.board.feedback).py(px(7.)).line_height(px(20.)))
+                    .when(self.board.feedback_missing, |el| el.child(div().text_size(px(12.)).text_color(c(theme::NEGATIVE)).child("Write what needs to change.")))
+            })
+            .when(discussion, |el| el.child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Pas aan writes your feedback as a message in the discussion.")))
             .child(
                 h().gap(px(8.))
                     .flex_wrap()
                     .child(approve("ticket-plan-approve", "Goedkeuren + Auto", ButtonKind::Primary, PlanApproval::Approve, cx))
                     .child(approve("ticket-plan-approve-edits", "Goedkeuren", ButtonKind::Outline, PlanApproval::ApproveEdits, cx))
-                    .child(dim(revise, can).when(can, |el| el.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.ticket_plan(id, None, w, cx)))))
+                    .child(dim(revise, can).when(can, |el| el.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| if discussion { this.ticket_to_composer(id, w, cx) } else { this.ticket_plan(id, None, w, cx) }))))
                     .child(div().flex_1())
                     .child(dim(ui::button("ticket-plan-reject", "Afwijzen", ButtonKind::Outline, None).h(px(30.)), can).when(can, |el| el.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.board_dialog(BoardDialog::Reject(id), w, cx))))),
             )
@@ -512,7 +552,7 @@ impl AppView {
 
     // ---- The panel ----------------------------------------------------------
 
-    pub fn render_ticket_panel(&mut self, id: TicketId, cx: &mut Context<Self>) -> AnyElement {
+    pub fn render_ticket_panel(&mut self, id: TicketId, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(t) = self.board.ticket(id).cloned() else {
             let text = self.board.detail_error.clone().unwrap_or_else(|| "Loading the ticket…".into());
             return v().size_full().bg(c(theme::BG)).border_l_1().border_color(c(theme::BORDER))
@@ -595,7 +635,11 @@ impl AppView {
                 .child(div().flex_none().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(task.employee_name.clone().unwrap_or_default()))
                 .child(ui::task_mark(self.task_mark(task), ("ticket-task-mark", i)))
         }));
-        let tabs = self.render_ticket_tabs(cx);
+        let tabs = self.render_ticket_tabs(id, cx);
+        if self.board.tab == TicketTab::Discussion {
+            let (body, footer) = self.render_ticket_discussion(&t, root.as_ref(), can, window, cx);
+            return v().size_full().bg(c(theme::BG)).border_l_1().border_color(c(theme::BORDER)).child(header).child(actions).child(tabs).child(body).children(footer).into_any_element();
+        }
         if self.board.tab == TicketTab::Activity {
             let body = v().id("ticket-body").flex_1().min_h_0().overflow_y_scroll().px(px(18.)).py(px(14.)).gap(px(6.)).child(self.render_ticket_activity(id, cx));
             return v().size_full().bg(c(theme::BG)).border_l_1().border_color(c(theme::BORDER)).child(header).child(actions).child(tabs).child(body).into_any_element();
@@ -610,20 +654,16 @@ impl AppView {
                     .child(ui::eyebrow(format!("TASKS ({})", tasks.len())))
                     .when(tasks.is_empty(), |el| el.child(div().text_size(px(12.5)).text_color(c(theme::TEXT_2)).child("The main task starts when the ticket starts.")))
                     .child(task_rows),
-            )
-            .child(
-                v().gap(px(4.))
-                    .child(h().child(div().flex_1().child(ui::eyebrow("DISCUSSION"))).child(div().text_size(px(11.)).text_color(c(theme::TEXT_2)).child("Coming soon")))
-                    .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("The ticket discussion arrives in a later version. Until then, use the main task's conversation.")),
             );
         v().size_full().bg(c(theme::BG)).border_l_1().border_color(c(theme::BORDER)).child(header).child(actions).child(tabs).child(body).into_any_element()
     }
 
-    /// Ticket | Activity (§7.4).
-    fn render_ticket_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// Ticket | Discussion | Activity (fase 2 §1: Discussion takes the place of Conversation).
+    fn render_ticket_tabs(&self, id: TicketId, cx: &mut Context<Self>) -> AnyElement {
         let current = self.board.tab;
+        let discussion = self.discussion_tab_label(id);
         h().flex_none().gap(px(4.)).px(px(14.)).py(px(6.)).border_b_1().border_color(c(theme::BORDER))
-            .children([(TicketTab::Ticket, "Ticket"), (TicketTab::Activity, "Activity")].into_iter().enumerate().map(|(i, (tab, text))| {
+            .children([(TicketTab::Ticket, "Ticket".to_string()), (TicketTab::Discussion, discussion), (TicketTab::Activity, "Activity".to_string())].into_iter().enumerate().map(|(i, (tab, text))| {
                 let on = tab == current;
                 h().id(("ticket-tab", i)).role(Role::Tab).aria_label(if on { format!("{text}, selected") } else { text.to_string() }).px(px(10.)).py(px(4.)).rounded(px(6.)).cursor_pointer()
                     .text_size(px(12.5))
@@ -754,6 +794,11 @@ impl AppView {
             }
             self.board.form.description.update(cx, |i, cx| i.set_value("", window, cx));
         }
+        // "Create ticket" from a message (MU2-10 AC1): the form starts filled in.
+        if let Some(fill) = self.board.form.prefill.take() {
+            self.board.form.title.update(cx, |i, cx| i.set_value(fill.title, window, cx));
+            self.board.form.description.update(cx, |i, cx| i.set_value(fill.description, window, cx));
+        }
         // After a conflict the columns show what the server has now (D-m2); the message stays.
         if self.board.columns_reload.take_rebuild() && dialog == BoardDialog::Columns {
             let message = self.board.columns_error.take();
@@ -769,6 +814,17 @@ impl AppView {
             (BoardDialog::NewTicket, _) => {
                 let (body, buttons) = self.render_new_ticket(online, cx);
                 ("New ticket".into(), 680., body, buttons)
+            }
+            (BoardDialog::AnotherTicket, _) => {
+                let Some(another) = self.board.another.clone() else { return div().into_any_element() };
+                let go = dim(ui::button("board-another-confirm", "Create another", ButtonKind::Primary, None), online).when(online, |el| {
+                    el.on_click(cx.listener(|this, _: &ClickEvent, w, cx| {
+                        if let Some(a) = this.board.another.take() {
+                            this.ticket_from_message_form(a.message, a.project, a.prefill, w, cx);
+                        }
+                    }))
+                });
+                (format!("{} was already created from this message", another.existing), 460., div().text_size(px(13.)).child(format!("{} was already created from this message. Create another?", another.existing)).into_any_element(), vec![go.into_any_element()])
             }
             (BoardDialog::Columns, _) => {
                 let (body, buttons) = self.render_columns_settings(online, cx);
@@ -994,7 +1050,7 @@ impl AppView {
 fn dialog_ticket(dialog: BoardDialog) -> Option<TicketId> {
     match dialog {
         BoardDialog::SendBack(id) | BoardDialog::MarkDone(id) | BoardDialog::Plan(id) | BoardDialog::BackToBacklog(id) | BoardDialog::Reject(id) | BoardDialog::Delete(id) => Some(id),
-        BoardDialog::NewTicket | BoardDialog::Columns => None,
+        BoardDialog::NewTicket | BoardDialog::Columns | BoardDialog::AnotherTicket => None,
     }
 }
 

@@ -725,6 +725,8 @@ mod tests {
             queued: false,
             usage: None,
             mode: None,
+            author_user: None,
+            system: None,
         };
         let before = item(&m);
         m.files.push(aurelius_domain::views::FileRef { id: "f".into(), name: "r.md".into(), media_type: "text/markdown".into(), size: 1 });

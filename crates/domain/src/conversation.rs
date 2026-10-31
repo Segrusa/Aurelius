@@ -24,8 +24,11 @@ pub enum ConversationKind {
     /// An employee's chat with the user, outside projects (company scope). Also
     /// its hidden workspace, where it answers the group chat.
     Employee,
-    /// The company's group chat: the user and every employee (no project, no employee).
+    /// A channel of the Team chat: the user and every employee (no employee). The
+    /// general channel has no project; every project has one channel of its own.
     Group,
+    /// A ticket's discussion (its project, no employee): one per ticket.
+    Ticket,
 }
 
 impl ConversationKind {
@@ -35,6 +38,7 @@ impl ConversationKind {
             ConversationKind::Task => "task",
             ConversationKind::Employee => "employee",
             ConversationKind::Group => "group",
+            ConversationKind::Ticket => "ticket",
         }
     }
 
@@ -44,6 +48,7 @@ impl ConversationKind {
             "task" => Some(Self::Task),
             "employee" => Some(Self::Employee),
             "group" => Some(Self::Group),
+            "ticket" => Some(Self::Ticket),
             _ => None,
         }
     }

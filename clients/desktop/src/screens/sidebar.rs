@@ -68,6 +68,8 @@ impl AppView {
         let inbox = self.inbox_count();
         // The board's "Needs you": Review, Plan review and tickets without an owner (B5).
         let board = self.board_needs_count();
+        // The Team chat counts mentions only, with a dot while anything is unread (B8, P-24).
+        let (mentions, unread) = self.team_chat_badge();
         let item = |nav: NavItem, cx: &mut Context<Self>| {
             let active = current == nav;
             let icon_color = if active { theme::ACCENT_TEXT } else { theme::MUTED };
@@ -91,6 +93,13 @@ impl AppView {
                 .child(div().flex_1().min_w_0().truncate().child(nav.label()))
                 .when(nav == NavItem::Board && board > 0, |el| {
                     el.child(div().px(px(6.)).rounded(px(8.)).bg(c(theme::ACCENT)).text_color(c(theme::BG)).text_size(px(11.)).font_weight(FontWeight::BOLD).child(board.to_string()))
+                })
+                .when(nav == NavItem::Chat && mentions > 0, |el| {
+                    el.aria_label(format!("{}, {mentions} mention{}", nav.label(), if mentions == 1 { "" } else { "s" }))
+                        .child(div().px(px(6.)).rounded(px(8.)).bg(c(theme::ACCENT)).text_color(c(theme::BG)).text_size(px(11.)).font_weight(FontWeight::BOLD).child(format!("@{mentions}")))
+                })
+                .when(nav == NavItem::Chat && mentions == 0 && unread && current != nav, |el| {
+                    el.aria_label(format!("{}, unread", nav.label())).child(div().size(px(7.)).rounded_full().bg(c(theme::TEXT_2)))
                 })
                 .when(nav == NavItem::Inbox && inbox > 0, |el| {
                     el.child(div().px(px(6.)).rounded(px(8.)).bg(c(theme::ACCENT)).text_color(c(theme::BG)).text_size(px(11.)).font_weight(FontWeight::BOLD).child(inbox.to_string()))

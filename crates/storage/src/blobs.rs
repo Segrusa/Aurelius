@@ -119,6 +119,18 @@ impl BlobStore {
     }
 }
 
+/// Write `bytes` as a blob of the store `tx` writes to and register it, inside the
+/// transaction: for a short text the engine writes deep in a hook that has no
+/// `Store` (a system line of a discussion). The blobs live beside the database
+/// (`root/blobs`, see `Store::open`); a rollback leaves only an unreferenced file.
+pub fn put_beside(tx: &Transaction<'_>, bytes: &[u8], media_type: &str) -> Result<PreparedBlob, StorageError> {
+    let db = tx.path().filter(|p| !p.is_empty()).ok_or_else(|| StorageError::Rejected("the database has no file to keep blobs beside".into()))?;
+    let root = std::path::Path::new(db).parent().and_then(std::path::Path::parent).ok_or_else(|| StorageError::Rejected("the database is not below a store root".into()))?;
+    let blob = BlobStore::new(root.join("blobs"))?.put(bytes, media_type)?;
+    register(tx, &blob)?;
+    Ok(blob)
+}
+
 /// Register a prepared blob inside the command transaction.
 pub fn register(tx: &Transaction<'_>, blob: &PreparedBlob) -> Result<(), StorageError> {
     tx.execute(

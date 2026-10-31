@@ -5,46 +5,85 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/net/connection.dart' show LinkState;
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/dialogs.dart';
 import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/discussion.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
+import '../chat/chat_bloc.dart';
+import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../markdown/links.dart';
+import '../team/team_page.dart' show runAuthorOf;
 import 'ticket_actions.dart';
 import 'ticket_bloc.dart';
 import 'detail_row.dart';
 import 'ticket_card.dart' show priorityColor, startWith;
 
 /// `/ticket/:tid` (§8): a full page with the ticket's fields, its tasks, its
-/// activity and, at the bottom, the actions of its column.
+/// activity and, at the bottom, the actions of its column. With a server of
+/// Phase 2 also its discussion (ui-ontwerp Fase 2 §2), where the plan and the
+/// report are decided; [discussion] opens on it.
 class TicketPage extends StatelessWidget {
-  const TicketPage({super.key, required this.ticketId});
+  const TicketPage({super.key, required this.ticketId, this.discussion = false});
 
   final String ticketId;
+  final bool discussion;
 
   @override
   Widget build(BuildContext context) => BlocProvider(
         create: (context) => TicketBloc(context.read<AureliusRepository>(), ticketId),
-        child: const _TicketView(),
+        child: _TicketView(discussion: discussion),
       );
 }
 
-enum _Segment { ticket, activity }
+enum _Segment { ticket, discussion, activity }
+
+/// The discussion of [ticket], when the server has one for it (feature
+/// `ticket_discussion` and its `conversation_id`); null: an older server.
+String? discussionOf(TicketView ticket, LinkState link) => link.has(ticketDiscussionFeature) ? ticket.conversationId : null;
+
+/// How many messages of a discussion this phone showed, by conversation: the
+/// Discussion tab gets a dot for newer ones (ui-ontwerp Fase 2 §2). The server
+/// keeps no read state for a ticket's discussion.
+final _seen = <String, int>{};
 
 class _TicketView extends StatefulWidget {
-  const _TicketView();
+  const _TicketView({required this.discussion});
+
+  final bool discussion;
 
   @override
   State<_TicketView> createState() => _TicketViewState();
 }
 
 class _TicketViewState extends State<_TicketView> {
-  _Segment _segment = _Segment.ticket;
+  late _Segment _segment = widget.discussion ? _Segment.discussion : _Segment.ticket;
+
+  /// The discussion's composer: Send back and Pas aan take their text from it (MU2-05/06).
+  final _composer = TextEditingController();
+
+  @override
+  void dispose() {
+    _composer.dispose();
+    super.dispose();
+  }
+
+  /// A decision that needs words (P-27): the Discussion tab, with what to write.
+  void _toDiscussion(String why) {
+    setState(() => _segment = _Segment.discussion);
+    toast(context, why);
+  }
+
+  Future<void> _reviewPlan(TicketView ticket) async {
+    final next = await context.push<String>('/ticket/${ticket.id}/plan');
+    if (next == 'discussion' && mounted) _toDiscussion('Write what needs to change, then Pas aan.');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,13 +99,16 @@ class _TicketViewState extends State<_TicketView> {
             : const Center(child: CircularProgressIndicator()),
       );
     }
+    final link = context.watch<ConnectionBloc>().state;
+    final conversation = discussionOf(ticket, link);
     final root = page.root;
     final noDispatcher = effectiveDispatcher(company.project(ticket.projectId), company.company?.dispatcherEmployeeId, company.employees) == null;
     final state = ticketState(ticket, root: root, needsOwner: ticket.column == ColumnKind.todo && ticket.ownerEmployeeId == null && (page.gaveUp || noDispatcher), ownerUnknown: page.activityFailed);
     final owner = ticket.ownerName ?? employeeName(company, ticket.ownerEmployeeId);
     final dispatcher = dispatcherName(company, ticket.projectId);
     final line = state.line(owner: owner, dispatcher: dispatcher);
-    return Scaffold(
+    final segment = conversation == null && _segment == _Segment.discussion ? _Segment.ticket : _segment;
+    final scaffold = Scaffold(
       appBar: GlassAppBar(
         title: Text('#${ticket.number} · ${ticket.projectName}'),
         actions: [
@@ -76,12 +118,16 @@ class _TicketViewState extends State<_TicketView> {
               GlassMenuItem('copy', 'Copy #${ticket.number}'),
               if (ticket.column != ColumnKind.backlog && ticket.column != ColumnKind.done && online) GlassMenuItem('backlog', ticket.column == ColumnKind.planReview ? 'Afwijzen' : 'Back to Backlog', danger: true),
               if ((ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.done) && online) GlassMenuItem('archive', 'Archive'),
+              // P-23: the main task's own conversation stays reachable.
+              if (conversation != null && root?.conversationId != null) const GlassMenuItem('main', 'Open main task conversation'),
             ],
             onSelected: (v) async {
               switch (v) {
                 case 'copy':
                   await Clipboard.setData(ClipboardData(text: '#${ticket.number} ${ticket.title}'));
                   if (context.mounted) toast(context, 'Copied #${ticket.number}.');
+                case 'main':
+                  await context.push('/conversation/${root!.conversationId}?e=${root.employeeId ?? ''}');
                 case 'backlog':
                   await backToBacklog(context, ticket);
                 case 'archive':
@@ -92,8 +138,23 @@ class _TicketViewState extends State<_TicketView> {
           ),
         ],
       ),
-      bottomNavigationBar: _ActionBar(ticket: ticket, state: state, root: root, online: online),
-      body: RefreshIndicator.adaptive(
+      // In the discussion its decisions sit under the composer.
+      bottomNavigationBar: segment == _Segment.discussion
+          ? null
+          : _ActionBar(
+              ticket: ticket,
+              state: state,
+              root: root,
+              online: online,
+              onReviewPlan: () => _reviewPlan(ticket),
+              onSendBack: conversation == null ? null : () => _toDiscussion('Write what needs to change, then Send back.'),
+            ),
+      body: segment == _Segment.discussion
+          ? Column(children: [
+              _segments(context, conversation),
+              Expanded(child: _discussion(context, ticket, state, owner, online)),
+            ])
+          : RefreshIndicator.adaptive(
         onRefresh: () async => context.read<TicketBloc>().add(const TicketRefreshed()),
         child: ListView(
           key: const ValueKey('ticket-page'),
@@ -114,18 +175,67 @@ class _TicketViewState extends State<_TicketView> {
                 if (line != null && state != TicketState.done) Text(state.needsYou ? '◆ $line' : line, style: TextStyle(color: state.needsYou ? Tokens.accentText : Tokens.label2, fontWeight: state.needsYou ? FontWeight.w600 : null)),
               ]),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-              child: PillSegments<_Segment>(
-                segments: const [(_Segment.ticket, 'Ticket'), (_Segment.activity, 'Activity')],
-                selected: _segment,
-                onChanged: (s) => setState(() => _segment = s),
-              ),
-            ),
-            if (_segment == _Segment.ticket) ..._ticketTab(context, page, company, ticket, state, owner, dispatcher, online) else ..._activityTab(page),
+            _segments(context, conversation),
+            if (segment == _Segment.ticket) ..._ticketTab(context, page, company, ticket, state, owner, dispatcher, online, conversation != null) else ..._activityTab(page),
           ],
         ),
       ),
+    );
+    if (conversation == null) return scaffold;
+    // One bloc for the discussion while the page is open: the tab's dot counts what arrived meanwhile.
+    return BlocProvider(
+      key: ValueKey('discussion-$conversation'),
+      create: (context) => ChatBloc.discussion(context.read<AureliusRepository>(), ticketId: ticket.id, conversationId: conversation, runAuthor: (runId) => runAuthorOf(context.read<CompanyBloc>().state, runId)),
+      child: scaffold,
+    );
+  }
+
+  Widget _segments(BuildContext context, String? conversation) {
+    Widget pills(bool unread) => Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: PillSegments<_Segment>(
+            key: const ValueKey('ticket-segments'),
+            segments: [
+              (_Segment.ticket, 'Ticket'),
+              if (conversation != null) (_Segment.discussion, unread ? 'Discussion ●' : 'Discussion'),
+              (_Segment.activity, 'Activity'),
+            ],
+            selected: _segment,
+            onChanged: (s) => setState(() => _segment = s),
+          ),
+        );
+    if (conversation == null) return pills(false);
+    return BlocBuilder<ChatBloc, ChatState>(
+      buildWhen: (a, b) => a.messages.length != b.messages.length || a.loading != b.loading,
+      builder: (context, chat) {
+        if (chat.loading) return pills(false);
+        final count = chat.messages.length;
+        // First seen on this phone: what is there now counts as read.
+        final seen = _seen.putIfAbsent(conversation, () => count);
+        if ((_segment == _Segment.discussion || count < seen) && seen != count) _seen[conversation] = count;
+        return pills(_segment != _Segment.discussion && count > seen);
+      },
+    );
+  }
+
+  /// The Discussion tab (MU2-01..06): the chat of the ticket, read-only on Done
+  /// and when archived (B7).
+  Widget _discussion(BuildContext context, TicketView ticket, TicketState state, String? owner, bool online) {
+    final readOnly = discussionReadOnly(ticket);
+    final member = context.select<ConnectionBloc, bool>((b) => b.state.user != null);
+    return ChatView(
+      key: ValueKey('discussion-${ticket.id}'),
+      emptyTitle: 'Discuss the ticket here',
+      emptyDetail: 'Employees join when you @mention them or when it starts.',
+      composer: readOnly == null,
+      readOnlyNote: readOnly,
+      hint: discussionHint(ticket, owner: owner),
+      source: TicketSource(from: 'Discussion of #${ticket.number}', projectId: ticket.projectId),
+      taskProjectId: ticket.projectId,
+      composerText: _composer,
+      composerActions: !member || readOnly != null || (ticket.column != ColumnKind.planReview && ticket.column != ColumnKind.review)
+          ? null
+          : (context, text) => _Decisions(ticket: ticket, text: text, online: online),
     );
   }
 
@@ -152,7 +262,7 @@ class _TicketViewState extends State<_TicketView> {
           ]),
       ];
 
-  List<Widget> _ticketTab(BuildContext context, TicketPageState page, CompanyState company, TicketView ticket, TicketState state, String? owner, String? dispatcher, bool online) {
+  List<Widget> _ticketTab(BuildContext context, TicketPageState page, CompanyState company, TicketView ticket, TicketState state, String? owner, String? dispatcher, bool online, bool discussion) {
     final root = page.root;
     final editable = online && ticket.column != ColumnKind.done;
     final running = root != null && (root.status == TaskStatus.running || root.hasLiveRun);
@@ -191,7 +301,7 @@ class _TicketViewState extends State<_TicketView> {
         _Notice(key: const ValueKey('ticket-failed'), attention: true, title: '✕ The main task failed', body: root?.result ?? 'Start again for a new main task; the old one stays linked.'),
       if (state == TicketState.waitingForYou) _Notice(attention: true, title: '◆ Waiting for your approval', body: 'Answer it in the Inbox.', action: ('Open Inbox', () => context.go('/inbox'))),
       if (state == TicketState.planReview)
-        _Notice(attention: true, title: '◆ A plan waits for you', body: 'Approve it, or send it back with what needs to change.', action: ('Review plan', () => context.push('/ticket/${ticket.id}/plan'))),
+        _Notice(attention: true, title: '◆ A plan waits for you', body: 'Approve it, or send it back with what needs to change.', action: ('Review plan', () => _reviewPlan(ticket))),
       if (state == TicketState.review) ...[
         GroupHeader('Report', caps: true, info: 'Only a board member decides. Done merges, pushes and deploys nothing.'),
         InsetGroup(padding: const EdgeInsets.all(16), children: [
@@ -258,8 +368,10 @@ class _TicketViewState extends State<_TicketView> {
           GroupRow(key: const ValueKey('ticket-conversation'), leading: const IconTile(CupertinoIcons.chat_bubble_2_fill), title: 'Conversation', subtitle: 'The main task\'s conversation', onTap: () => context.push('/conversation/$conversation?e=${root!.employeeId ?? ''}')),
         ]),
       ],
-      GroupHeader('Discussion', caps: true),
-      Padding(padding: const EdgeInsets.fromLTRB(32, 0, 32, 16), child: Text('Arrives in a later version. Until then, use the conversation.', style: TextStyle(color: Tokens.label2))),
+      if (!discussion) ...[
+        GroupHeader('Discussion', caps: true),
+        Padding(padding: const EdgeInsets.fromLTRB(32, 0, 32, 16), child: Text('Arrives in a later version. Until then, use the conversation.', style: TextStyle(color: Tokens.label2))),
+      ],
     ];
   }
 
@@ -397,12 +509,16 @@ class _Notice extends StatelessWidget {
 
 /// The glass bar at the bottom (§8): at most two buttons, the main one right.
 class _ActionBar extends StatelessWidget {
-  const _ActionBar({required this.ticket, required this.state, required this.root, required this.online});
+  const _ActionBar({required this.ticket, required this.state, required this.root, required this.online, required this.onReviewPlan, this.onSendBack});
 
   final TicketView ticket;
   final TicketState state;
   final TaskView? root;
   final bool online;
+  final VoidCallback onReviewPlan;
+
+  /// With a discussion: Send back goes to its composer (P-27); without, the Fase 1 sheet.
+  final VoidCallback? onSendBack;
 
   @override
   Widget build(BuildContext context) {
@@ -427,10 +543,10 @@ class _ActionBar extends StatelessWidget {
             FilledButton(key: const ValueKey('bar-start-again'), onPressed: on(() => startTicket(context, ticket)), child: const Text('Start again')),
           ],
         TicketState.planReview => [
-            FilledButton(key: const ValueKey('bar-review-plan'), onPressed: () => context.push('/ticket/${ticket.id}/plan'), child: const Text('Review plan')),
+            FilledButton(key: const ValueKey('bar-review-plan'), onPressed: onReviewPlan, child: const Text('Review plan')),
           ],
         TicketState.review => [
-            OutlinedButton(key: const ValueKey('bar-send-back'), onPressed: on(() => showSendBack(context, ticket)), child: const Text('Send back')),
+            OutlinedButton(key: const ValueKey('bar-send-back'), onPressed: on(onSendBack ?? () => showSendBack(context, ticket)), child: const Text('Send back')),
             FilledButton.icon(key: const ValueKey('bar-done'), onPressed: on(() => showMarkDone(context, ticket)), icon: const Icon(Icons.check), label: const Text('Done')),
           ],
         TicketState.done => const <Widget>[],
@@ -510,6 +626,8 @@ class _PlanViewState extends State<_PlanView> {
     }
     final open = ticket.column == ColumnKind.planReview;
     final can = open && online && !_busy;
+    // Phase 2: the feedback is a message of the discussion, not a field here (MU2-05 AC4).
+    final discussion = discussionOf(ticket, context.watch<ConnectionBloc>().state) != null;
     final feedback = _feedback.text.trim();
     final plan = page.plan ?? '';
     return Scaffold(
@@ -526,6 +644,16 @@ class _PlanViewState extends State<_PlanView> {
               ? Center(child: Text(page.loading ? 'Loading the plan…' : 'This plan has no text.', style: TextStyle(color: Tokens.label2)))
               : SingleChildScrollView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 16), child: MessageMarkdown(key: const ValueKey('ticket-plan-text'), data: plan, scope: null, selectable: true)),
         ),
+        if (discussion)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: OutlinedButton(
+              key: const ValueKey('ticket-plan-discuss'),
+              onPressed: can ? () => context.canPop() ? context.pop('discussion') : context.pushReplacement('/ticket/${ticket.id}?tab=discussion') : null,
+              child: const Text('Request changes in the discussion'),
+            ),
+          ),
+        if (!discussion)
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
           child: Row(children: [
@@ -585,4 +713,121 @@ class _PlanViewState extends State<_PlanView> {
       ]),
     );
   }
+}
+
+/// Under the discussion's composer (ui-ontwerp Fase 2 §1, MU2-05/06): in Plan
+/// review Goedkeuren + Auto · Goedkeuren · Pas aan · Afwijzen, in Review Send
+/// back and ✓ Done. Pas aan and Send back take the composer's text as the
+/// feedback (the server puts it in the discussion) and stay off without it.
+class _Decisions extends StatefulWidget {
+  const _Decisions({required this.ticket, required this.text, required this.online});
+
+  final TicketView ticket;
+  final TextEditingController text;
+  final bool online;
+
+  @override
+  State<_Decisions> createState() => _DecisionsState();
+}
+
+class _DecisionsState extends State<_Decisions> {
+  bool _busy = false;
+
+  Future<void> _decide(Map<String, dynamic> request, String done) async {
+    HapticFeedback.mediumImpact();
+    setState(() => _busy = true);
+    final ok = await ticketWrite(context, request, expectedVersion: widget.ticket.version, retry: false, done: done);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (ok) widget.text.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ticket = widget.ticket;
+    final owner = ticket.ownerName ?? 'The owner';
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: widget.text,
+      builder: (context, value, _) {
+        final can = widget.online && !_busy;
+        final words = value.text.trim();
+        final feedback = words.isEmpty ? null : words;
+        final buttons = ticket.column == ColumnKind.planReview
+            ? <Widget>[
+                FilledButton(
+                  key: const ValueKey('discussion-approve-auto'),
+                  onPressed: can ? () => _decide(ticketApprovePlan(ticketId: ticket.id, decision: PlanApproval.approve, feedback: feedback), 'Approved. The work goes on in Auto.') : null,
+                  child: const Text('Goedkeuren + Auto'),
+                ),
+                OutlinedButton(
+                  key: const ValueKey('discussion-approve'),
+                  onPressed: can ? () => _decide(ticketApprovePlan(ticketId: ticket.id, decision: PlanApproval.approveEdits, feedback: feedback), 'Approved. Edits go through; the rest is asked.') : null,
+                  child: const Text('Goedkeuren'),
+                ),
+                OutlinedButton(
+                  key: const ValueKey('discussion-revise'),
+                  onPressed: can && feedback != null ? () => _decide(ticketRevisePlan(ticketId: ticket.id, feedback: feedback), 'Changes requested. $owner makes a new plan.') : null,
+                  child: const Text('Pas aan'),
+                ),
+                TextButton(
+                  key: const ValueKey('discussion-reject'),
+                  style: TextButton.styleFrom(foregroundColor: Tokens.negative),
+                  onPressed: can ? () => backToBacklog(context, ticket) : null,
+                  child: const Text('Afwijzen'),
+                ),
+              ]
+            : <Widget>[
+                OutlinedButton(
+                  key: const ValueKey('discussion-send-back'),
+                  onPressed: !can
+                      ? null
+                      : feedback == null
+                          ? () => toast(context, 'Write what needs to change first.')
+                          : () => _decide(ticketSendBack(ticketId: ticket.id, feedback: feedback), '#${ticket.number} is back in Doing with your feedback.'),
+                  child: const Text('Send back to Doing'),
+                ),
+                FilledButton.icon(
+                  key: const ValueKey('discussion-done'),
+                  onPressed: can ? () => showMarkDone(context, ticket) : null,
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text('Done'),
+                ),
+              ];
+        return Padding(
+          key: const ValueKey('discussion-decisions'),
+          padding: const EdgeInsets.only(top: 8),
+          // All of them in sight on a phone: they wrap rather than scroll.
+          child: Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: buttons),
+        );
+      },
+    );
+  }
+}
+
+/// `/ticket/:tid/report`: the main task's report, from the Review card in the
+/// discussion ("Report ›"). Decided in the discussion or on the ticket.
+class TicketReportPage extends StatelessWidget {
+  const TicketReportPage({super.key, required this.ticketId});
+
+  final String ticketId;
+
+  @override
+  Widget build(BuildContext context) => BlocProvider(
+        create: (context) => TicketBloc(context.read<AureliusRepository>(), ticketId),
+        child: Builder(builder: (context) {
+          final page = context.watch<TicketBloc>().state;
+          final ticket = page.ticket;
+          final report = page.root?.result?.trim() ?? '';
+          return Scaffold(
+            appBar: GlassAppBar(title: Text(ticket == null ? 'Report' : 'Report · #${ticket.number}')),
+            body: ticket == null
+                ? (page.error != null ? ErrorRetry(page.error!, onRetry: () => context.read<TicketBloc>().add(const TicketRefreshed())) : const Center(child: CircularProgressIndicator()))
+                : ListView(padding: EdgeInsets.fromLTRB(20, 8, 20, listBottom(context)), children: [
+                    Text('From ${ticket.ownerName ?? 'the owner'}${page.root == null ? '' : ' · ${Fmt.ago(page.root!.updatedAtMs)}'}', style: TextStyle(color: Tokens.label2, fontSize: 13)),
+                    const SizedBox(height: 8),
+                    report.isEmpty ? Text('The report has no text.', style: TextStyle(color: Tokens.label2)) : MessageMarkdown(key: const ValueKey('ticket-report-page'), data: report, scope: null, selectable: true),
+                  ]),
+          );
+        }),
+      );
 }

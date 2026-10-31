@@ -98,7 +98,8 @@ void main() {
   test('asks for activity changes and merges them into whole lists (activity_preview)', () async {
     connection.start();
     await until(() => connection.state.isOnline);
-    expect(daemon.hello?['accepts'], ['activity_changes']);
+    // team_channels: only then do the live events of project channels come (MU2-08, impactanalyse §2).
+    expect(daemon.hello?['accepts'], ['activity_changes', 'team_channels']);
     final got = <List<String>?>[];
     final sub = connection.appends.listen((a) => got.add(a.activity?.map((c) => '${c.callId}:${c.ok}').toList()));
     addTearDown(sub.cancel);

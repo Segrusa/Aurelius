@@ -53,9 +53,13 @@ abstract final class Commands {
       ));
 
   /// A message of the user in the group chat (Team): `@Name` wakes those
-  /// employees, else the CEO answers.
-  static Map<String, dynamic> sendGroupMessage(String text, {List<String> images = const [], List<String> files = const []}) =>
-      groupChatSend(SendGroupMessage(files: files, images: images, text: text));
+  /// employees, else the CEO answers (in a project's [channel]: its dispatcher).
+  static Map<String, dynamic> sendGroupMessage(String text, {List<String> images = const [], List<String> files = const [], String? channel}) =>
+      groupChatSend(SendGroupMessage(channel: channel, files: files, images: images, text: text));
+
+  /// A board member's message in a ticket's discussion (feature `ticket_discussion`).
+  static Map<String, dynamic> postTicketMessage(String ticketId, String text, {List<String> images = const [], List<String> files = const []}) =>
+      ticketPost(ticketId: ticketId, text: text, images: images, files: files);
 
   /// A new conversation of the project. Auto, browser and screen need the Approve right.
   static Map<String, dynamic> startProjectConversation(String projectId, {AgentMode? mode, bool browserAllowed = false, bool screenAllowed = false}) =>

@@ -43,6 +43,8 @@ mod screens {
     pub mod board_members;
     pub mod board;
     pub mod ticket;
+    pub mod discussion;
+    pub mod ticket_discussion;
 }
 
 use gpui_kit::*;

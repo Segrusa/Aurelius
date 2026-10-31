@@ -28,8 +28,9 @@ const fn plain(version: i64, sql: &'static str) -> Migration {
 /// the plain chats (every conversation has a project, task or employee); 16 adds
 /// the audience, webhook and outbox of app keys; 17 the company's group chat
 /// (conversation kind 'group', made by the migration itself); 18 is v0.11's
-/// board (protocol 4): company, users, board columns, tickets, departments gone.
-/// A 14–17 database does not migrate into 18: `fresh_start` imports it.
+/// board (protocol 4): company, users, board columns, tickets, departments gone;
+/// 19 the discussions: a channel per project, a discussion per ticket, and the
+/// board member who wrote a message. A 14–17 database does not migrate into 18: `fresh_start` imports it.
 pub const MIGRATIONS: &[Migration] = &[
     plain(1, include_str!("../../../migrations/0001_schema.sql")),
     plain(2, include_str!("../../../migrations/0002_artifacts.sql")),
@@ -49,6 +50,8 @@ pub const MIGRATIONS: &[Migration] = &[
     plain(16, include_str!("../../../migrations/0016_management_channel.sql")),
     Migration { version: 17, sql: include_str!("../../../migrations/0017_group_chat.sql"), rebuild: true, then: None },
     Migration { version: 18, sql: include_str!("../../../migrations/0018_board.sql"), rebuild: true, then: None },
+    Migration { version: 19, sql: include_str!("../../../migrations/0019_discussions.sql"), rebuild: true, then: None },
+    plain(20, include_str!("../../../migrations/0020_discussion_reads.sql")),
 ];
 
 /// The last schema of protocol 2 (managers per project). The v0.6 import writes

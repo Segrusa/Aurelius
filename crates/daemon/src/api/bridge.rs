@@ -50,6 +50,7 @@ async fn answer(shared: &Arc<Shared>, request: BridgeRequest) -> BridgeOutcome {
             EmployeeTaskOp::ListConversations { .. } => "list_conversations",
             EmployeeTaskOp::ReadConversation { .. } => "read_conversation",
             EmployeeTaskOp::ReadGroupChat { .. } => "read_group_chat",
+            EmployeeTaskOp::ReadDiscussion { .. } => "read_discussion",
             _ => "act",
         })),
         _ => None,
@@ -99,8 +100,10 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         }
         EmployeeTaskOp::ProposeInstructions { employee, instructions, reason, evidence } => EmployeeAction::ProposeInstructions { employee, instructions, reason, evidence },
         EmployeeTaskOp::SetMode { mode, reason } => EmployeeAction::SetMode { mode, reason },
-        EmployeeTaskOp::ReadGroupChat { last } => EmployeeAction::ReadGroupChat { last },
-        EmployeeTaskOp::PostToGroupChat { message } => EmployeeAction::PostToGroupChat { message },
+        EmployeeTaskOp::ReadGroupChat { last, channel } => EmployeeAction::ReadGroupChat { last, channel },
+        EmployeeTaskOp::PostToGroupChat { message, channel } => EmployeeAction::PostToGroupChat { message, channel },
+        EmployeeTaskOp::ReadDiscussion { last } => EmployeeAction::ReadDiscussion { last },
+        EmployeeTaskOp::PostToDiscussion { message } => EmployeeAction::PostToDiscussion { message },
         EmployeeTaskOp::AssignTicket { employee, reason } => EmployeeAction::AssignTicket { employee, reason },
     };
     let switches = matches!(action, EmployeeAction::SetMode { .. });

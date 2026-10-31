@@ -23,6 +23,7 @@ fn create(mode: Option<AgentMode>) -> CreateTicket {
         run: RunSettings { mode, ..Default::default() },
         files: vec![],
         start: false,
+        from_message: None,
     }
 }
 
@@ -147,4 +148,64 @@ fn a_damaged_remembered_user_does_not_fail_the_hello() {
     assert_eq!(hello(serde_json::Value::Null), None);
     let id = aurelius_domain::UserId::new();
     assert_eq!(hello(serde_json::json!(id)), Some(id));
+}
+
+#[test]
+fn discussion_writes_travel_as_method_and_params() {
+    let t = TicketId::new();
+    let post = Command::PostTicketMessage(PostTicketMessage { ticket_id: t, text: "@Ann can you look?".into(), images: vec![], files: vec![] });
+    let json = serde_json::to_value(WriteMethod::Domain(post.clone())).unwrap();
+    assert_eq!(json["method"], "ticket.post");
+    assert_eq!(serde_json::from_value::<WriteMethod>(json).unwrap(), WriteMethod::Domain(post));
+    let retry = Command::RetryTicketSummary(RetryTicketSummary { ticket_id: t });
+    let json = serde_json::to_value(WriteMethod::Domain(retry.clone())).unwrap();
+    assert_eq!(json["method"], "ticket.retry_summary");
+    assert_eq!(serde_json::from_value::<WriteMethod>(json).unwrap(), WriteMethod::Domain(retry));
+    // A post is a chat (like `group_chat.send`); trying the summary again a ticket write.
+    assert_eq!(required(&Call::Write(WriteMethod::Domain(Command::PostTicketMessage(PostTicketMessage { ticket_id: t, text: "x".into(), images: vec![], files: vec![] })))), Needs::Cap(Capability::Chat));
+    assert_eq!(required(&Call::Write(WriteMethod::Domain(Command::RetryTicketSummary(RetryTicketSummary { ticket_id: t })))), Needs::Cap(Capability::TaskControl));
+    // `from_message` is optional and left out when none.
+    let made = serde_json::to_value(create(None)).unwrap();
+    assert!(made.get("from_message").is_none());
+    let mut from = create(None);
+    from.from_message = Some(aurelius_domain::MessageId::new());
+    assert_eq!(serde_json::from_value::<CreateTicket>(serde_json::to_value(&from).unwrap()).unwrap(), from);
+}
+
+#[test]
+fn an_older_client_still_reads_the_group_chat_and_its_views() {
+    // `group_chat.get` without params (protocol 4 before `team_channels`): the general channel.
+    for params in [None, Some(serde_json::Value::Null), Some(serde_json::json!({}))] {
+        let mut request = serde_json::json!({ "protocol": 4, "request_id": 7, "method": "group_chat.get" });
+        if let Some(p) = params {
+            request["params"] = p;
+        }
+        let parsed: Request = serde_json::from_value(request).unwrap();
+        assert!(matches!(parsed.call, Call::Read(Method::GroupChatGet { channel: None })));
+    }
+    let channel = aurelius_domain::ConversationId::new();
+    let parsed: Request = serde_json::from_value(serde_json::json!({ "protocol": 4, "request_id": 8, "method": "group_chat.get", "params": { "channel": channel } })).unwrap();
+    assert!(matches!(parsed.call, Call::Read(Method::GroupChatGet { channel: Some(c) }) if c == channel));
+    let parsed: Request = serde_json::from_value(serde_json::json!({ "protocol": 4, "request_id": 9, "method": "channel.list" })).unwrap();
+    assert!(matches!(parsed.call, Call::Read(Method::ChannelList)));
+    // `group_chat.send` without a channel: the general one; and it is left out on the wire.
+    let send: aurelius_domain::group_chat::SendGroupMessage = serde_json::from_value(serde_json::json!({ "text": "Hi" })).unwrap();
+    assert_eq!(send.channel, None);
+    assert!(serde_json::to_value(&send).unwrap().get("channel").is_none());
+    assert!(crate::rpc::FEATURES.contains(&"ticket_discussion") && crate::rpc::FEATURES.contains(&"team_channels"));
+}
+
+#[test]
+fn a_system_line_is_an_optional_field_never_a_new_role() {
+    use aurelius_domain::views::{SystemLine, SystemLineKind};
+    let mut line = SystemLine::new(SystemLineKind::Moved);
+    line.from = Some("Doing".into());
+    line.to = Some("Review".into());
+    line.by = Some("Aurelius".into());
+    let json = serde_json::to_value(&line).unwrap();
+    assert_eq!(json, serde_json::json!({ "kind": "moved", "from": "Doing", "to": "Review", "by": "Aurelius" }));
+    assert_eq!(serde_json::from_value::<SystemLine>(json).unwrap(), line);
+    // The roles stay user and assistant.
+    let roles = serde_json::to_value(schemars::schema_for!(aurelius_domain::conversation::MessageRole)).unwrap().to_string();
+    assert!(!roles.contains("\"system\""), "{roles}");
 }

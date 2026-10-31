@@ -343,7 +343,7 @@ class AureliusConnection {
       _calls.clear(); // a new session starts with whole lists
       compactingConversations.value = const {};
       final remembered = await _store.boardMember(host.hostId);
-      final body = await call(sessionHello(HelloParams(clientName: clientName, clientVersion: clientVersion, accepts: const ['activity_changes'], userId: remembered)));
+      final body = await call(sessionHello(HelloParams(clientName: clientName, clientVersion: clientVersion, accepts: const ['activity_changes', 'team_channels'], userId: remembered)));
       hello = (body as ResponseBodyHello).value;
       // A board member the server no longer knows (a restore): choose again.
       if (remembered != null && hello.user == null) await _store.setBoardMember(host.hostId, null);

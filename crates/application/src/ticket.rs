@@ -95,6 +95,11 @@ impl Events {
         Ok(())
     }
 
+    /// The system lines of this write in the ticket's discussion (MU2-03), with its events.
+    fn line(&mut self, notices: Vec<EventNotice>) {
+        self.notices.extend(notices);
+    }
+
     /// `ticket.moved` from → to by `by`.
     fn moved(&mut self, tx: &Transaction<'_>, from: ColumnKind, to: ColumnKind, by: Actor) -> Result<(), StorageError> {
         self.push(tx, EventKind::TicketMoved, json!({ "from": from, "to": to, "by": by }))
@@ -186,6 +191,14 @@ impl CommandService {
                         }
                         MoveEffect::Cancel => e.push(tx, EventKind::TicketCancelled, json!({ "by": by }))?,
                     }
+                    if target.kind != state.column {
+                        let what = match effect {
+                            MoveEffect::Start => Some("started it"),
+                            MoveEffect::Cancel => Some("cancelled it"),
+                            MoveEffect::Reorder => None,
+                        };
+                        e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, target.kind, what)?);
+                    }
                     finish_then(tx, state.id, e, |tx| match effect {
                         MoveEffect::Reorder => Ok(vec![]),
                         MoveEffect::Start => ticket_line::started(tx, &st, state.id, user),
@@ -205,6 +218,11 @@ impl CommandService {
                 store::mark_started(tx, state.id)?;
                 e.moved(tx, state.column, ColumnKind::Todo, by)?;
                 e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
+                let what = match cmd.employee_id {
+                    Some(employee) => format!("started it with {} as owner", crate::conversation::discussion::employee_name(tx, employee)?),
+                    None => "started it".to_owned(),
+                };
+                e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Todo, Some(&what))?);
                 if let Some(employee) = cmd.employee_id {
                     store::set_owner(tx, state.id, Some(employee))?;
                     e.push(tx, EventKind::TicketDispatched, json!({ "employee_id": employee, "by": by, "reason": Value::Null }))?;
@@ -223,6 +241,7 @@ impl CommandService {
                             check!(check_employee(tx, employee)?);
                             store::set_owner(tx, state.id, Some(employee))?;
                             e.push(tx, EventKind::TicketDispatched, json!({ "employee_id": employee, "by": by, "reason": reason }))?;
+                            e.line(ticket_line::owner_line(tx, state.id, Some(by), employee, reason.as_deref())?);
                             // In Todo the draft main task goes to that employee now.
                             return finish_then(tx, state.id, e, |tx| ticket_line::dispatched(tx, state.id, employee));
                         }
@@ -249,7 +268,15 @@ impl CommandService {
                     store::set_feedback(tx, state.id, feedback.as_deref())?;
                     e.moved(tx, state.column, ColumnKind::Doing, by)?;
                     e.push(tx, EventKind::TicketPlanApproved, json!({ "decision": cmd.decision, "feedback": feedback.is_some(), "by": by }))?;
-                    finish_then(tx, state.id, e, |tx| plan_review::approve(tx, &st, state.id, user, cmd.decision, feedback.as_deref()))
+                    e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("approved the plan"))?);
+                    finish_then(tx, state.id, e, |tx| {
+                        let mut notices = match &feedback {
+                            Some(text) => feedback_note(tx, &st, state.id, user, &base, text)?,
+                            None => Vec::new(),
+                        };
+                        notices.extend(plan_review::approve(tx, &st, state.id, user, cmd.decision, feedback.as_deref())?);
+                        Ok(notices)
+                    })
                 })
             }
             Command::RevisePlan(cmd) => {
@@ -265,8 +292,13 @@ impl CommandService {
                     store::set_feedback(tx, state.id, Some(&feedback))?;
                     e.moved(tx, state.column, ColumnKind::Doing, by)?;
                     e.push(tx, EventKind::TicketPlanRevised, json!({ "by": by }))?;
+                    e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("sent the plan back"))?);
                     // B2: the feedback goes to the main task's conversation; Plan mode stays.
-                    finish_then(tx, state.id, e, |tx| plan_review::revise(tx, &st, state.id, user, &feedback))
+                    finish_then(tx, state.id, e, |tx| {
+                        let mut notices = feedback_note(tx, &st, state.id, user, &base, &feedback)?;
+                        notices.extend(plan_review::revise(tx, &st, state.id, user, &feedback)?);
+                        Ok(notices)
+                    })
                 })
             }
             Command::AcceptTicket(cmd) => {
@@ -293,6 +325,7 @@ impl CommandService {
                     store::mark_done(tx, state.id)?;
                     e.moved(tx, state.column, ColumnKind::Done, by)?;
                     e.push(tx, EventKind::TicketAccepted, json!({ "note": note, "by": by }))?;
+                    e.line(done_line(tx, state.id, by)?);
                     finish_then(tx, state.id, e, |tx| ticket_line::accept(tx, &st, state.id, user))
                 })
             }
@@ -309,8 +342,13 @@ impl CommandService {
                     store::set_feedback(tx, state.id, Some(&feedback))?;
                     e.moved(tx, state.column, ColumnKind::Doing, by)?;
                     e.push(tx, EventKind::TicketSentBack, json!({ "by": by }))?;
+                    e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("sent it back"))?);
                     // B2: the feedback goes to the main task's conversation.
-                    finish_then(tx, state.id, e, |tx| ticket_line::send_back(tx, &st, state.id, user, &feedback))
+                    finish_then(tx, state.id, e, |tx| {
+                        let mut notices = feedback_note(tx, &st, state.id, user, &base, &feedback)?;
+                        notices.extend(ticket_line::send_back(tx, &st, state.id, user, &feedback)?);
+                        Ok(notices)
+                    })
                 })
             }
             Command::CancelTicket(cmd) => self.commit(command_id, hash, move |tx| {
@@ -320,6 +358,7 @@ impl CommandService {
                 to_column(tx, state.id, ColumnKind::Backlog)?;
                 e.moved(tx, state.column, ColumnKind::Backlog, by)?;
                 e.push(tx, EventKind::TicketCancelled, json!({ "by": by }))?;
+                e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Backlog, Some("cancelled it"))?);
                 finish_then(tx, state.id, e, |tx| ticket_line::cancel(tx, &st, state.id, &command_id.to_string()))
             }),
             Command::ArchiveTicket(cmd) => self.commit(command_id, hash, move |tx| {
@@ -377,6 +416,20 @@ impl CommandService {
             if let Some(owner) = cmd.owner_employee_id {
                 check!(check_employee(tx, owner)?);
             }
+            // "Make ticket" from a chat message (MU2-10 AC1/AC3): it must exist, in a channel, a
+            // ticket's discussion, a chat with an employee, the project assistant or a task;
+            // one that belongs to a project (its channel, a ticket's discussion, a task, its
+            // assistant) only for a ticket of that same project.
+            let source = match cmd.from_message {
+                Some(message) => match crate::conversation::discussion::message_place(tx, message)? {
+                    Some((_, _, Some(project))) if project != cmd.project_id => {
+                        return rejected(DomainError::Ticket("The message belongs to another project: make the ticket in that project.".into()));
+                    }
+                    Some((conversation, label, _)) => Some((message, (conversation, label))),
+                    None => return rejected(DomainError::Ticket("The message to make the ticket from does not exist (any more).".into())),
+                },
+                None => None,
+            };
             if let Some(blob) = &description_blob {
                 blobs::register(tx, blob)?;
             }
@@ -401,12 +454,21 @@ impl CommandService {
             store::set_attachments(tx, id, stored.as_ref())?;
             let mut e = Events::new(&base, "ticket", id.to_string(), Some(cmd.project_id), 0);
             e.push(tx, EventKind::TicketCreated, json!({ "number": number, "created_by_user": user, "by": by }))?;
+            // The discussion starts with a link to the message, and its chat gets "→ #N" (MU2-10 AC3).
+            if let Some((message, (conversation, label))) = &source {
+                e.line(crate::conversation::discussion::created_from(tx, id, number, user, *conversation, *message, label)?);
+            }
             if cmd.start {
                 let todo = company_store::column_of_kind(tx, ColumnKind::Todo)?;
                 store::move_to(tx, id, todo.id, None)?;
                 store::mark_started(tx, id)?;
                 e.moved(tx, ColumnKind::Backlog, ColumnKind::Todo, by)?;
                 e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
+                let what = match cmd.owner_employee_id {
+                    Some(employee) => format!("started it with {} as owner", crate::conversation::discussion::employee_name(tx, employee)?),
+                    None => "started it".to_owned(),
+                };
+                e.line(ticket_line::column_line(tx, id, Some(by), ColumnKind::Backlog, ColumnKind::Todo, Some(&what))?);
             }
             // Every choice of an owner is `ticket.dispatched`, as with Start and Assign.
             if let Some(employee) = cmd.owner_employee_id {
@@ -513,6 +575,36 @@ impl CommandService {
         })
     }
 
+    /// `ticket.retry_summary` (MU2-12 AC4): a board member asks for the summary of a
+    /// ticket on Done again, after it failed or when it is missing. Refused while it
+    /// is there already (never a second item) or still being made; else the ticket's
+    /// extraction is queued once more. The ticket itself does not change.
+    pub(crate) fn retry_ticket_summary(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &ticket::RetryTicketSummary) -> Result<Committed, AppError> {
+        require_board_member(ctx)?;
+        let id = cmd.ticket_id;
+        self.commit(envelope.command_id, hash, move |tx| {
+            let Some(state) = store::state(tx, id)? else { return rejected(DomainError::TicketNotFound(id)) };
+            if state.column != ColumnKind::Done {
+                return rejected(DomainError::Ticket("Only a ticket on Done has a summary to try again.".into()));
+            }
+            if crate::memory::has_ticket_summary(tx, id)? {
+                return rejected(DomainError::Ticket("The summary is in the project's memory already.".into()));
+            }
+            if crate::memory::ticket_summary_pending(tx, id)? {
+                return rejected(DomainError::Ticket("The summary is being made; wait for it.".into()));
+            }
+            let Some(root) = state.root_task_id else { return rejected(DomainError::Ticket("This ticket has no main task to summarize.".into())) };
+            let accepted: Option<String> = tx
+                .query_row("SELECT id FROM events WHERE aggregate_type = 'ticket' AND aggregate_id = ?1 AND type = 'ticket.accepted' ORDER BY seq DESC LIMIT 1", [id.to_string()], |r| r.get(0))
+                .ok();
+            let Some(source) = accepted.and_then(|e| aurelius_domain::EventId::parse(&e).ok()) else {
+                return rejected(DomainError::Ticket("This ticket was not accepted on the board; there is no summary to make.".into()));
+            };
+            crate::memory::schedule_ticket_summary(tx, root, id, source)?;
+            Ok(Ok((CommandResult::TicketChanged { ticket_id: id, column: state.column, version: state.version }, Vec::new())))
+        })
+    }
+
     /// `project.update`: a project's own dispatcher (B5). A board member, as for the company's.
     pub(crate) fn update_project(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &UpdateProject) -> Result<Committed, AppError> {
         let by = Actor::BoardMember { user_id: require_board_member(ctx)? };
@@ -543,6 +635,13 @@ impl CommandService {
     }
 }
 
+/// "‹name› put it on Done" (MU2-06 AC2).
+fn done_line(tx: &Transaction<'_>, ticket: TicketId, by: Actor) -> Result<Vec<EventNotice>, StorageError> {
+    let mut line = aurelius_domain::views::SystemLine::new(aurelius_domain::views::SystemLineKind::Done);
+    line.by = Some(crate::conversation::discussion::actor_name(tx, Some(by))?);
+    crate::conversation::discussion::ticket_line(tx, ticket, line, "")
+}
+
 /// Put a ticket last in the column of `kind`.
 fn to_column(tx: &Transaction<'_>, id: TicketId, kind: ColumnKind) -> Result<(), StorageError> {
     let column = company_store::column_of_kind(tx, kind)?;
@@ -551,6 +650,11 @@ fn to_column(tx: &Transaction<'_>, id: TicketId, kind: ColumnKind) -> Result<(),
 
 /// As `finish`, then the engine's part, which may add events (each the next
 /// version) and move the card; the answer is where the card is after it.
+/// The feedback of a decision, as the board member's message in the ticket's discussion (MU2-05 AC3).
+fn feedback_note(tx: &Transaction<'_>, st: &aurelius_storage::Store, ticket: TicketId, user: UserId, base: &Base, text: &str) -> Result<Vec<EventNotice>, StorageError> {
+    crate::conversation::discussion::decision_feedback(tx, st, ticket, user, &base.meta, &base.command_id, text)
+}
+
 fn finish_then(
     tx: &Transaction<'_>,
     id: TicketId,

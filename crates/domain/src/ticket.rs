@@ -8,7 +8,7 @@
 //! (starting the main task, the dispatcher, report and accept, plan review)
 //! moves cards by itself and is not decided here.
 
-use crate::{BoardColumnId, DomainError, EmployeeId, ProjectId, TaskId, TicketId, UserId, optional_text, require_text};
+use crate::{BoardColumnId, ConversationId, DomainError, EmployeeId, MessageId, ProjectId, TaskId, TicketId, UserId, optional_text, require_text};
 use crate::task::{RunSettings, TaskStatus};
 use crate::views::{MessageFileView, TaskView};
 use serde::{Deserialize, Serialize};
@@ -145,6 +145,10 @@ pub struct TicketView {
     pub started_at_ms: Option<i64>,
     pub done_at_ms: Option<i64>,
     pub archived_at_ms: Option<i64>,
+    /// The ticket's discussion (feature `ticket_discussion`): read it with
+    /// `conversation.get`, write in it with `ticket.post`. Left out by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<ConversationId>,
 }
 
 /// One column with its cards, in order.
@@ -207,6 +211,10 @@ pub struct CreateTicket {
     pub files: Vec<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub start: bool,
+    /// Made from this chat message ("Make ticket", feature `ticket_discussion`):
+    /// the discussion starts with a link to it, and its chat gets a link to the ticket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_message: Option<MessageId>,
 }
 
 /// Change the fields of a ticket. Left out: unchanged. The creator never
@@ -324,6 +332,38 @@ pub struct SendBackTicket {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CancelTicket {
+    pub ticket_id: TicketId,
+}
+
+/// A board member writes in a ticket's discussion (feature `ticket_discussion`).
+/// Without `@Name` it goes to the owner while the ticket is in Todo (with an
+/// owner), Doing or Plan review; else it wakes nobody. `@Name` wakes those
+/// employees. Refused on Done (the discussion is read-only there). Not for apps.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PostTicketMessage {
+    pub ticket_id: TicketId,
+    pub text: String,
+    /// Images that belong to this message (see `SendChatMessage::images`).
+    #[serde(default)]
+    pub images: Vec<String>,
+    /// Files of any type for the employees (host paths, or this device's upload inbox).
+    #[serde(default)]
+    pub files: Vec<String>,
+}
+
+impl PostTicketMessage {
+    /// The text as stored (empty only with files).
+    pub fn validate(&self) -> Result<String, DomainError> {
+        crate::conversation::validate_employee_message(&self.text, &self.images, &self.files)
+    }
+}
+
+/// Try the summary of a ticket on Done again after it failed (`SystemLineKind::SummaryFailed`).
+/// Only a board member; refused when the summary is already there or still being made.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RetryTicketSummary {
     pub ticket_id: TicketId,
 }
 

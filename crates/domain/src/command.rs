@@ -99,6 +99,9 @@ pub enum CommandResult {
     TicketCreated { ticket_id: crate::TicketId, number: u32 },
     /// The answer to every other ticket write: where the ticket is now.
     TicketChanged { ticket_id: crate::TicketId, column: crate::ticket::ColumnKind, version: u64 },
+    /// A message in a ticket's discussion, with the employees it woke (or the
+    /// owner it went to: `run_ids` is empty when the main task already runs and takes it).
+    TicketMessagePosted { ticket_id: crate::TicketId, conversation_id: ConversationId, message_id: MessageId, to: Vec<EmployeeId>, run_ids: Vec<RunId> },
     /// The board's new version (`ticket::board_version`).
     BoardColumnsUpdated { version: u64 },
     CompanyUpdated { version: u64 },

@@ -279,6 +279,8 @@ impl CommandService {
             | Command::UpdateBoardColumns(_)
             | Command::UpdateCompany(_) => self.ticket_command(ctx, &envelope, hash),
             Command::UpdateProject(cmd) => self.update_project(ctx, &envelope, hash, cmd),
+            Command::PostTicketMessage(cmd) => self.post_ticket_message(ctx, &envelope, hash, cmd),
+            Command::RetryTicketSummary(cmd) => self.retry_ticket_summary(ctx, &envelope, hash, cmd),
         };
         COMMAND_METHOD.set("");
         result
@@ -667,3 +669,6 @@ mod run_end_tests;
 
 #[cfg(test)]
 mod ticket_tests;
+
+#[cfg(test)]
+mod discussion_tests;

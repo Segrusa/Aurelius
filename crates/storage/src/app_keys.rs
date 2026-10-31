@@ -139,10 +139,11 @@ pub fn employee_mode(conn: &Connection, employee: aurelius_domain::EmployeeId) -
 }
 
 /// Whether a conversation belongs to a project (a task's or the project
-/// assistant's), not an employee's chat: apps reach only those.
+/// assistant's), not an employee's chat, a channel or a ticket's discussion:
+/// apps reach only those.
 pub fn project_conversation(conn: &Connection, conversation: aurelius_domain::ConversationId) -> Result<bool, StorageError> {
     let found: Option<i64> = conn
-        .query_row("SELECT 1 FROM conversations WHERE id = ?1 AND project_id IS NOT NULL", [conversation.to_string()], |r| r.get(0))
+        .query_row("SELECT 1 FROM conversations WHERE id = ?1 AND project_id IS NOT NULL AND kind IN ('project','task')", [conversation.to_string()], |r| r.get(0))
         .optional()?;
     Ok(found.is_some())
 }

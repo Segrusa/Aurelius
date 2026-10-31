@@ -46,6 +46,7 @@ async fn create(client: &Client, project_id: ProjectId, title: &str, priority: T
             run: Default::default(),
             files: vec![],
             start: false,
+            from_message: None,
         })
         .await
         .unwrap();

@@ -9,6 +9,7 @@ import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/discussion.dart';
 import '../../data/commands.dart';
 import '../../data/company.dart';
 import '../../data/mode_memory.dart';
@@ -424,7 +425,12 @@ class ConversationPage extends StatelessWidget {
                 : BlocProvider(
                     key: ValueKey(conversationId),
                     create: (_) => ChatBloc(context.read<AureliusRepository>(), conversationId: conversationId, employeeId: m.id),
-                    child: ChatView(emptyTitle: 'Write to ${m.name}', emptyDetail: m.instructions),
+                    child: ChatView(
+                      emptyTitle: 'Write to ${m.name}',
+                      emptyDetail: m.instructions,
+                      // A message can become a ticket (MU2-10): in the task's project, if any.
+                      source: TicketSource(from: task != null ? 'Task “${task.title}”' : 'Conversation with ${m.name}', projectId: task?.projectId),
+                    ),
                   ),
           ),
         ],

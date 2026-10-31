@@ -11,7 +11,8 @@
 //! `list_conversations`, `read_conversation`; `set_mode` (only for management in a task whose
 //! mode is theirs to choose, `--set-mode`); `delegate_task`, `message_task`,
 //! `hand_over_task`, `add_idea`, `propose_colleague` and `propose_instructions`; `read_group_chat`
-//! and `post_to_group_chat` (the company's group chat). `--project` (the
+//! and `post_to_group_chat` (a channel of the company's group chat); `read_discussion` and
+//! `post_to_discussion` with `--discussion` (a run under a ticket). `--project` (the
 //! assistant of a project conversation) leaves out `hand_over_task`.
 //! `--triage` (the dispatcher of a ticket choosing its owner) has only
 //! `assign_ticket` and `recall`.
@@ -37,6 +38,8 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
     let set_mode = args.iter().any(|a| a == "--set-mode");
     // The dispatcher of a ticket: only assign_ticket and recall.
     let triage = args.iter().any(|a| a == "--triage");
+    // A run under a ticket, or woken from its discussion: read_discussion and post_to_discussion.
+    let discussion = args.iter().any(|a| a == "--discussion");
     let mut client: Option<BridgeClient> = None;
     let mut screen_granted = false;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
@@ -51,11 +54,11 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
                 "serverInfo": { "name": "aurelius", "version": env!("CARGO_PKG_VERSION") },
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode) } })),
+            "tools/list" => Ok(json!({ "tools": if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion) } })),
             "tools/call" => {
                 let name = msg["params"]["name"].as_str().unwrap_or("").to_owned();
                 let args = msg["params"]["arguments"].clone();
-                let call = if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, project, set_mode, &mut screen_granted, &name, args).await };
+                let call = if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, project, set_mode, discussion, &mut screen_granted, &name, args).await };
                 match call {
                     Some(result) => Ok(result),
                     None => Err(json!({ "code": -32601, "message": "Method not found" })),
@@ -74,7 +77,7 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
 }
 
 /// Every tool this run offers.
-fn tool_definitions(project: bool, set_mode: bool) -> Vec<Value> {
+fn tool_definitions(project: bool, set_mode: bool, discussion: bool) -> Vec<Value> {
     let mut tools = vec![json!({
         "name": "approve",
         "description": "Asks the Aurelius user to allow or deny one action. Only Claude Code calls this.",
@@ -94,6 +97,9 @@ fn tool_definitions(project: bool, set_mode: bool) -> Vec<Value> {
     tools.extend(project_tool_definitions());
     tools.extend(task_tool_definitions().into_iter().filter(|t| !project || t["name"] != "hand_over_task"));
     tools.extend(group_chat_tool_definitions());
+    if discussion {
+        tools.extend(discussion_tool_definitions());
+    }
     tools.push(json!({
         "name": "add_idea",
         "description": "Note an idea for a project that is worth doing later but is not part of the current work (an improvement, a follow-up, a risk to look at). The user sees it in the project's ideas and decides if and when it becomes a task.",
@@ -156,7 +162,8 @@ fn tool_definitions(project: bool, set_mode: bool) -> Vec<Value> {
 }
 
 /// Run one tool; `None` when the tool is unknown.
-async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId, project: bool, set_mode: bool, screen_granted: &mut bool, name: &str, args: Value) -> Option<Value> {
+#[allow(clippy::too_many_arguments)]
+async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId, project: bool, set_mode: bool, discussion: bool, screen_granted: &mut bool, name: &str, args: Value) -> Option<Value> {
     let text = |k: &str| args[k].as_str().unwrap_or("").to_owned();
     let optional = |k: &str| args[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
     let op = match name {
@@ -192,8 +199,10 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
             EmployeeTaskOp::Delegate { employee: text("employee"), title: text("title"), goal: text("goal"), criteria, project: optional("project") }
         }
         "set_mode" if set_mode => EmployeeTaskOp::SetMode { mode: text("mode"), reason: text("reason") },
-        "read_group_chat" => EmployeeTaskOp::ReadGroupChat { last: args["last"].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32) },
-        "post_to_group_chat" => EmployeeTaskOp::PostToGroupChat { message: text("message") },
+        "read_group_chat" => EmployeeTaskOp::ReadGroupChat { last: args["last"].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32), channel: optional("channel") },
+        "post_to_group_chat" => EmployeeTaskOp::PostToGroupChat { message: text("message"), channel: optional("channel") },
+        "read_discussion" if discussion => EmployeeTaskOp::ReadDiscussion { last: args["last"].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32) },
+        "post_to_discussion" if discussion => EmployeeTaskOp::PostToDiscussion { message: text("message") },
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
         "propose_colleague" => EmployeeTaskOp::ProposeColleague {
             name: text("name"),
@@ -427,20 +436,47 @@ fn task_tool_definitions() -> Vec<Value> {
     ]
 }
 
-/// The company's group chat (Team chat): read it, post in it.
+/// The company's group chat (Team chat): read a channel, post in one.
 fn group_chat_tool_definitions() -> Vec<Value> {
+    let channel = json!({ "type": "string", "description": "The channel: General, or a project's name. Default: the channel that brought you in, else your project's, else General." });
     vec![
         json!({
             "name": "read_group_chat",
-            "description": "Read the company's group chat (Team chat), where the user talks with the whole team: its latest messages, oldest first, each with who wrote it.",
+            "description": "Read a channel of the company's group chat (Team chat), where the board members talk with the whole team: its latest messages, oldest first, each with who wrote it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "last": { "type": "integer", "minimum": 1, "maximum": 50, "description": "How many of the latest messages (default and at most 50)." },
+                    "channel": channel
+                }
+            }
+        }),
+        json!({
+            "name": "post_to_group_chat",
+            "description": "Post a short message in a channel of the company's group chat under your name, when the group needs to know something (e.g. a task is done and needs a reviewer). Name a colleague with @Name to wake them: they answer in the same channel. Only the colleagues you name are woken, never yourself, and only a few times in a row after one message of a board member. An answer to a group chat message is posted there by itself; do not post it again.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "message": { "type": "string", "description": "A few sentences at most." }, "channel": channel },
+                "required": ["message"]
+            }
+        }),
+    ]
+}
+
+/// The discussion of the run's ticket: read it, post in it (only with `--discussion`).
+fn discussion_tool_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "read_discussion",
+            "description": "Read the discussion of your ticket, where board members and colleagues talk about it: its latest messages, oldest first, each with who wrote it.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "last": { "type": "integer", "minimum": 1, "maximum": 50, "description": "How many of the latest messages (default and at most 50)." } }
             }
         }),
         json!({
-            "name": "post_to_group_chat",
-            "description": "Post a short message in the company's group chat under your name, when the group needs to know something (e.g. a task is done and needs a reviewer). Name a colleague with @Name to wake them: they answer in the group chat. Only the colleagues you name are woken, never yourself, and only a few times in a row after one message of the user. An answer to a group chat message is posted there by itself; do not post it again.",
+            "name": "post_to_discussion",
+            "description": "Post a short message in the discussion of your ticket under your name: to answer or ask a board member, or to bring in a colleague with @Name (they answer there). The same limits as the group chat apply; a mention past them wakes nobody. A discussion of a ticket on Done can only be read.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "message": { "type": "string", "description": "A few sentences at most." } },
@@ -509,7 +545,7 @@ mod tests {
 
     #[test]
     fn the_project_assistant_cannot_hand_a_task_over() {
-        let names = |project| tool_definitions(project, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |project| tool_definitions(project, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(false).contains(&"hand_over_task".to_owned()));
         assert!(!names(true).contains(&"hand_over_task".to_owned()));
         for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat"] {
@@ -521,13 +557,22 @@ mod tests {
     fn the_dispatcher_has_only_assign_ticket_and_recall() {
         let names: Vec<String> = triage_tool_definitions().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
         assert_eq!(names, ["assign_ticket", "recall"]);
-        assert!(!tool_definitions(false, false).iter().any(|t| t["name"] == "assign_ticket"), "no other run can assign a ticket");
+        assert!(!tool_definitions(false, false, true).iter().any(|t| t["name"] == "assign_ticket"), "no other run can assign a ticket");
     }
 
     #[test]
     fn set_mode_is_offered_only_when_the_daemon_asks_for_it() {
-        let names = |set_mode| tool_definitions(false, set_mode).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |set_mode| tool_definitions(false, set_mode, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(!names(false).contains(&"set_mode".to_owned()));
         assert!(names(true).contains(&"set_mode".to_owned()));
+    }
+
+    #[test]
+    fn the_discussion_tools_are_offered_only_under_a_ticket() {
+        let names = |discussion| tool_definitions(false, false, discussion).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        for tool in ["read_discussion", "post_to_discussion"] {
+            assert!(!names(false).contains(&tool.to_owned()), "{tool}");
+            assert!(names(true).contains(&tool.to_owned()), "{tool}");
+        }
     }
 }

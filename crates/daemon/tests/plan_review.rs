@@ -41,6 +41,7 @@ async fn planned_ticket(client: &Client, project_id: ProjectId, owner: EmployeeI
             run: RunSettings { mode, ..Default::default() },
             files: vec![],
             start: true,
+            from_message: None,
         })
         .await
         .unwrap();
@@ -86,6 +87,12 @@ fn code<T: std::fmt::Debug>(result: Result<T, aurelius_client::ClientError>) -> 
         Err(aurelius_client::ClientError::Protocol(err)) => err.code,
         other => panic!("expected a protocol error, got {other:?}"),
     }
+}
+
+/// The system lines of a ticket's discussion, in words (MU2-03).
+async fn discussion_lines(client: &Client, id: TicketId) -> Vec<(aurelius_domain::views::SystemLineKind, Option<aurelius_domain::TaskId>, String)> {
+    let conversation = client.ticket(id).await.unwrap().ticket.conversation_id.expect("a discussion");
+    client.messages(conversation).await.unwrap().messages.into_iter().filter_map(|m| m.system.map(|s| (s.kind, s.task_id, m.text))).collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -134,6 +141,16 @@ async fn a_tickets_plan_waits_for_the_board_and_is_revised_then_approved() {
     let reported = until(&client, id, ColumnKind::Review, TaskStatus::Review).await;
     assert_eq!(reported.root_task.unwrap().conversation_id, Some(conversation), "the same conversation and session");
     assert_eq!(code(client.ticket_command(Command::ApprovePlan(ApprovePlan { ticket_id: id, decision: PlanApproval::Approve, feedback: None }), None).await), ErrorCode::Validation);
+    // MU2-03: two plans handed in (cards with the main task), sent back once, approved once.
+    let root = client.ticket(id).await.unwrap().root_task.map(|t| t.id);
+    let lines = discussion_lines(&client, id).await;
+    let plans: Vec<_> = lines.iter().filter(|(k, _, _)| *k == aurelius_domain::views::SystemLineKind::Plan).collect();
+    assert_eq!(plans.len(), 2, "{lines:#?}");
+    assert!(plans.iter().all(|(_, task, text)| *task == root && text == "Planner handed in a plan · waiting for a board member"), "{plans:#?}");
+    let texts: Vec<&str> = lines.iter().map(|(_, _, t)| t.as_str()).collect();
+    let at = |want: &str| texts.iter().position(|t| *t == want).unwrap_or_else(|| panic!("no “{want}” in {texts:#?}"));
+    assert!(at("grace sent the plan back · Plan review → Doing") < at("grace approved the plan · Plan review → Doing"));
+    assert!(at("grace approved the plan · Plan review → Doing") < at("Planner handed in the report · Review"));
 
     drop(client);
     common::stop(dir.path(), daemon).await;

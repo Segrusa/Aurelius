@@ -724,6 +724,8 @@ pub const ANNOUNCE_EVERY_MS: i64 = 5_000;
 pub enum TicketTab {
     #[default]
     Ticket,
+    /// The ticket's discussion (AUR-MU-02, ui-ontwerp fase 2 §1).
+    Discussion,
     Activity,
 }
 
@@ -745,6 +747,8 @@ pub enum BoardDialog {
     Reject(TicketId),
     /// Delete (archive) a ticket in Backlog.
     Delete(TicketId),
+    /// "#52 was already created from this message. Create another?" (fase 2 §4).
+    AnotherTicket,
     /// Settings → Board: the columns and the company's dispatcher (§12.1).
     Columns,
 }
@@ -774,6 +778,8 @@ pub enum BoardDo {
     ProjectDispatcher(ProjectId, Option<EmployeeId>),
     /// Settings → Board: the company's dispatcher (`None`: nobody, B5).
     CompanyDispatcher(Option<EmployeeId>),
+    /// "Create ticket…" on a chat message (MU2-10, fase 2 §4).
+    TicketFromMessage(aurelius_domain::MessageId),
 }
 
 /// The New ticket form besides its fields (§10.1).
@@ -795,6 +801,20 @@ pub struct NewTicket {
     pub error: Option<String>,
     /// Empty the fields on the next render (they need the window).
     pub reset: bool,
+    /// Made from this chat message (MU2-10): sent as `from_message`.
+    pub from_message: Option<aurelius_domain::MessageId>,
+    /// Fill the title and description with these on the next render (MU2-10 AC1).
+    pub prefill: Option<crate::screens::discussion::Prefill>,
+}
+
+/// "Create ticket" on a message that already made one: what to ask before the form opens.
+#[derive(Debug, Clone)]
+pub struct AnotherTicket {
+    pub message: aurelius_domain::MessageId,
+    pub project: Option<ProjectId>,
+    pub prefill: crate::screens::discussion::Prefill,
+    /// "#52": the ticket made from it before.
+    pub existing: String,
 }
 
 pub struct Board {
@@ -870,6 +890,33 @@ pub struct Board {
     pub columns_reload: ColumnsReload,
     /// The board changed while it did not show: read it when it shows again.
     pub stale: bool,
+    /// The open ticket's discussion (AUR-MU-02): its conversation and messages, or why they did not load.
+    pub discussion: Option<(ConversationId, Option<Result<Vec<aurelius_protocol::MessageView>, String>>)>,
+    /// How many discussion messages the board member saw per ticket (the tab's count).
+    pub discussion_seen: HashMap<TicketId, usize>,
+    /// The discussion's composer, and the ticket its draft belongs to (kept until another opens).
+    pub composer: Entity<TextareaState>,
+    pub composer_for: Option<TicketId>,
+    /// Empty the composer on the next render (an update has no window).
+    pub composer_clear: bool,
+    /// The discussion's scroll position, and whether the next read follows the
+    /// board member's own post to the bottom.
+    pub discussion_scroll: ScrollHandle,
+    pub discussion_mine: bool,
+    /// A post on its way, and why the last one did not go (the draft stays).
+    pub posting: bool,
+    pub post_error: Option<String>,
+    /// Send back / Pas aan in the discussion without text: say why.
+    pub composer_missing: bool,
+    /// The `@` suggestions' active one, and whether Esc closed them.
+    pub mentions: crate::screens::discussion::MentionPicker,
+    /// "Try again" on a failed summary on its way, and why it did not go (MU2-12 AC4).
+    pub retrying: bool,
+    pub retry_error: Option<String>,
+    /// Reports opened inline in the discussion ("Open report").
+    pub open_reports: HashSet<aurelius_domain::MessageId>,
+    /// Waiting for the board member's answer to "Create another?".
+    pub another: Option<AnotherTicket>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -930,6 +977,8 @@ impl Board {
                 busy: false,
                 error: None,
                 reset: false,
+                from_message: None,
+                prefill: None,
             },
             done_all: false,
             plan_open: false,
@@ -944,6 +993,21 @@ impl Board {
             columns_error: None,
             columns_reload: ColumnsReload::Idle,
             stale: false,
+            discussion: None,
+            discussion_seen: HashMap::new(),
+            composer: cx.new(|cx| TextareaState::new(window, cx).auto_grow(2, 8).submit_on_enter(true).placeholder("Message the discussion · @ to mention")),
+            composer_for: None,
+            composer_clear: false,
+            discussion_scroll: ScrollHandle::new(),
+            discussion_mine: false,
+            posting: false,
+            post_error: None,
+            composer_missing: false,
+            mentions: Default::default(),
+            retrying: false,
+            retry_error: None,
+            open_reports: HashSet::new(),
+            another: None,
         }
     }
 
@@ -956,6 +1020,17 @@ impl Board {
                 cx.notify();
             }),
             cx.observe(&self.form.title, |_, _, cx| cx.notify()),
+            // The discussion's composer: suggestions and warnings follow the text; Enter posts.
+            cx.subscribe_in(&self.composer, window, |this, _, e: &InputEvent, w, cx| match e {
+                InputEvent::PressEnter { shift: false, .. } => this.discussion_post(w, cx),
+                InputEvent::Change => {
+                    this.board.composer_missing = false;
+                    let text = this.board.composer.read(cx).value().to_string();
+                    this.board.mentions.changed(&text);
+                    cx.notify();
+                }
+                _ => {}
+            }),
             cx.subscribe_in(&self.edit_title, window, |this, _, e: &InputEvent, w, cx| if let InputEvent::PressEnter { .. } = e { this.ticket_save_edit(w, cx) }),
             cx.subscribe_in(&self.edit_labels, window, |this, _, e: &InputEvent, w, cx| if let InputEvent::PressEnter { .. } = e { this.ticket_save_edit(w, cx) }),
             cx.subscribe_in(&self.edit_deadline, window, |this, _, e: &InputEvent, w, cx| if let InputEvent::PressEnter { .. } = e { this.ticket_save_edit(w, cx) }),
@@ -1185,6 +1260,9 @@ impl AppView {
         if let (TicketTab::Activity, Panel::Ticket(id)) = (tab, self.panel) {
             let _ = self.requests.send(backend::Request::Board(BoardCall::Activity(id)));
         }
+        if let (TicketTab::Discussion, Panel::Ticket(id)) = (tab, self.panel) {
+            self.discussion_mark_seen(id);
+        }
         cx.notify();
     }
 
@@ -1250,6 +1328,10 @@ impl AppView {
                         {
                             let _ = self.requests.send(backend::Request::Board(BoardCall::Activity(id)));
                         }
+                        // Its discussion follows the ticket (read again with each change: moves write lines there).
+                        if panel {
+                            self.discussion_follow(detail.ticket.conversation_id);
+                        }
                         // A dialog's ticket does not replace the one in the panel.
                         if panel {
                             self.board.detail = Some(detail);
@@ -1272,6 +1354,29 @@ impl AppView {
             BoardUpdate::Activity(id, result) => {
                 if self.panel == Panel::Ticket(id) {
                     self.board.activity = Some((id, result));
+                }
+            }
+            BoardUpdate::Discussion(conversation, result) => self.discussion_loaded(conversation, result),
+            BoardUpdate::Posted { ticket, to } => self.discussion_posted(ticket, to, cx),
+            BoardUpdate::PostFailed { ticket, message } => {
+                self.board.posting = false;
+                if self.board.composer_for == Some(ticket) {
+                    self.board.post_error = Some(message.clone());
+                }
+                self.board_announce(message, cx);
+            }
+            BoardUpdate::SummaryRetried { ticket, failure } => {
+                self.board.retrying = false;
+                let number = self.board.ticket(ticket).map_or(0, |t| t.number);
+                match failure {
+                    None => {
+                        self.board.retry_error = None;
+                        self.notify_user(format!("#{number}: the summary is being made again."), false, cx);
+                    }
+                    Some(why) => {
+                        self.board.retry_error = Some(why.clone());
+                        self.board_announce(why, cx);
+                    }
                 }
             }
             BoardUpdate::GaveUp { ticket, version, gave_up } => {
@@ -1801,6 +1906,7 @@ impl AppView {
             }
             BoardDo::ProjectDispatcher(project, employee) => self.set_project_dispatcher(project, employee, cx),
             BoardDo::CompanyDispatcher(employee) => self.set_company_dispatcher(employee, cx),
+            BoardDo::TicketFromMessage(message) => self.ticket_from_message(message, window, cx),
         }
         cx.notify();
     }
@@ -1861,8 +1967,10 @@ impl AppView {
         self.board_dialog(BoardDialog::NewTicket, window, cx);
     }
 
-    fn board_form_clear(&mut self) {
+    pub(crate) fn board_form_clear(&mut self) {
         let form = &mut self.board.form;
+        form.from_message = None;
+        form.prefill = None;
         form.sent = false;
         form.error = None;
         form.owner = None;

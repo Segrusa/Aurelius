@@ -196,7 +196,7 @@ impl CommandService {
                     notices.extend(explain_failed_start(tx, run_id, blob)?);
                     // Woken by the group chat: the group hears it could not answer.
                     if let Some(conversation) = conv::run_conversation(tx, run_id)? {
-                        notices.extend(crate::conversation::group_chat::mirror_answer(tx, &st, run_id, conversation, "", Some("not started"), &[], None)?);
+                        notices.extend(crate::conversation::discussion::mirror_answer(tx, &st, run_id, conversation, "", Some("not started"), &[], None)?);
                     }
                     // A task's run that never started: the task must not stay "running".
                     notices.extend(crate::task::task_runs::on_run_not_started(tx, &st, run_id)?);
@@ -602,7 +602,7 @@ pub(crate) fn commit_end(tx: &aurelius_storage::Tx<'_>, store: &aurelius_storage
         RunOutcome::Interrupted => Some("interrupted"),
         RunOutcome::Completed => None,
     };
-    notices.extend(crate::conversation::group_chat::mirror_answer(tx, store, run_id, conversation_id, end.reply, group_failure, &kept_files, end.group_mode)?);
+    notices.extend(crate::conversation::discussion::mirror_answer(tx, store, run_id, conversation_id, end.reply, group_failure, &kept_files, end.group_mode)?);
     // The run of a task's conversation: its answer is the task's report.
     let failed = match &end.outcome {
         RunOutcome::Failed(code) => Some(code.as_str()),

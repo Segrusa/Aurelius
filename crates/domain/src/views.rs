@@ -628,6 +628,127 @@ pub struct MessageView {
     /// Left out for other messages and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<crate::autonomy::AgentMode>,
+    /// The board member who wrote a user message in a discussion (a ticket's,
+    /// a channel's; feature `ticket_discussion`). Left out for other messages
+    /// and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author_user: Option<crate::user::UserView>,
+    /// A system line of Aurelius in a discussion (feature `ticket_discussion`):
+    /// what happened, shown as a compact grey line; `text` is its readable form.
+    /// Such a line never wakes anyone. Left out for other messages and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system: Option<SystemLine>,
+}
+
+/// What a system line in a discussion says happened (`MessageView::system`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SystemLineKind {
+    /// `from` gave the task `task_id` to `to`.
+    Delegated,
+    /// The task `task_id` of `from` reported (or failed: the text says so).
+    Reported,
+    /// `by` moved the ticket from the column `from` to `to`.
+    Moved,
+    /// The owner's plan for `task_id` waits for a board member (approve or send back).
+    Plan,
+    /// The ticket is in Review: the report of `task_id` waits for a board member.
+    Review,
+    /// `by` put the ticket on Done.
+    Done,
+    /// The ticket was made from the message `message_id` in `conversation_id`.
+    CreatedFrom,
+    /// In a chat: the ticket `ticket_id` was made from this conversation's message `message_id`.
+    TicketCreated,
+    /// The summary of the ticket went to the project's memory.
+    Summary,
+    /// The summary failed (the text says why); a board member can try again (`ticket.retry_summary`).
+    SummaryFailed,
+    /// A mention woke nobody: a loop limit was reached (`to`: who was not woken).
+    Limit,
+}
+
+/// A system line (`MessageView::system`). Every field but `kind` is optional and
+/// only set where `SystemLineKind` names it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SystemLine {
+    pub kind: SystemLineKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    /// Who did it: a board member's name, an employee's, or "Aurelius".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<crate::TicketId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<ConversationId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<MessageId>,
+}
+
+impl SystemLine {
+    pub fn new(kind: SystemLineKind) -> Self {
+        SystemLine { kind, task_id: None, from: None, to: None, by: None, ticket_id: None, conversation_id: None, message_id: None }
+    }
+
+    /// The line in words, as the server stores it as the message's `text` and the
+    /// clients show it. `ticket`: the number of `ticket_id` (`#N`, MU2-10).
+    pub fn sentence(&self, ticket: Option<u32>) -> String {
+        let or = |v: &Option<String>, d: &str| v.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(d).to_string();
+        let by = or(&self.by, "Aurelius");
+        let number = ticket.map(|n| format!("#{n}"));
+        match self.kind {
+            SystemLineKind::Delegated => format!("{} delegated a task to {}", or(&self.from, "An employee"), or(&self.to, "a colleague")),
+            SystemLineKind::Reported => format!("{} reported", or(&self.from, "A colleague")),
+            SystemLineKind::Moved => match (&self.from, &self.to) {
+                (Some(from), Some(to)) => format!("{by} moved {from} → {to}"),
+                (_, Some(to)) => format!("{by} moved to {to}"),
+                _ => format!("{by} moved the ticket"),
+            },
+            SystemLineKind::Plan => format!("{} handed in a plan · waiting for a board member", or(&self.from, "The owner")),
+            SystemLineKind::Review => format!("{} handed in the report · Review", or(&self.from, "The owner")),
+            SystemLineKind::Done => format!("{by} put it on Done"),
+            SystemLineKind::CreatedFrom => match &self.by {
+                Some(b) => format!("{} created from a message · {b}", number.as_deref().unwrap_or("Ticket")),
+                None => format!("{} created from a message", number.as_deref().unwrap_or("Ticket")),
+            },
+            SystemLineKind::TicketCreated => format!("{by} created {} from a message", number.as_deref().unwrap_or("a ticket")),
+            SystemLineKind::Summary => "Summary saved to project memory".to_string(),
+            SystemLineKind::SummaryFailed => "The summary for project memory failed".to_string(),
+            SystemLineKind::Limit => format!("Limit reached: {} was not woken.", or(&self.to, "nobody")),
+        }
+    }
+}
+
+/// A channel of the Team chat (`channel.list`, feature `team_channels`): the
+/// general one (no project) or one per project.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ChannelView {
+    pub conversation_id: ConversationId,
+    /// None: the general channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    /// "General" or the project's name.
+    pub name: String,
+    /// Messages since the last one read.
+    pub unread: u32,
+    /// Of those, the ones that name a board member with `@Name` (B8: the badge counts these).
+    pub mentions: u32,
+    /// The project is archived: the channel can only be read.
+    pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_ms: Option<i64>,
+}
+
+/// `channel.list`: the general channel first, then one per project by name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ChannelsSnapshot {
+    pub as_of_seq: u64,
+    pub channels: Vec<ChannelView>,
 }
 
 /// A file the user sent to an employee, copied into its work folder.

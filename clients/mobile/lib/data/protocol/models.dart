@@ -1274,6 +1274,74 @@ enum Capability {
   String toJson() => wire;
 }
 
+/// A channel of the Team chat (`channel.list`, feature `team_channels`): the
+/// general one (no project) or one per project.
+final class ChannelView {
+  const ChannelView({
+    required this.archived,
+    required this.conversationId,
+    this.lastActivityMs,
+    required this.mentions,
+    required this.name,
+    this.projectId,
+    required this.unread,
+  });
+
+  /// The project is archived: the channel can only be read.
+  final bool archived;
+  final String conversationId;
+  final int? lastActivityMs;
+  /// Of those, the ones that name a board member with `@Name` (B8: the badge counts these).
+  final int mentions;
+  /// "General" or the project's name.
+  final String name;
+  /// None: the general channel.
+  final String? projectId;
+  /// Messages since the last one read.
+  final int unread;
+
+  factory ChannelView.fromJson(Map<String, dynamic> json) => ChannelView(
+    archived: (json['archived'] as bool),
+    conversationId: (json['conversation_id'] as String),
+    lastActivityMs: (json['last_activity_ms'] == null ? null : (json['last_activity_ms'] as num).toInt()),
+    mentions: (json['mentions'] as num).toInt(),
+    name: (json['name'] as String),
+    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+    unread: (json['unread'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'archived': archived,
+    'conversation_id': conversationId,
+    if (lastActivityMs != null) 'last_activity_ms': lastActivityMs,
+    'mentions': mentions,
+    'name': name,
+    if (projectId != null) 'project_id': projectId,
+    'unread': unread,
+  };
+}
+
+/// `channel.list`: the general channel first, then one per project by name.
+final class ChannelsSnapshot {
+  const ChannelsSnapshot({
+    required this.asOfSeq,
+    required this.channels,
+  });
+
+  final int asOfSeq;
+  final List<ChannelView> channels;
+
+  factory ChannelsSnapshot.fromJson(Map<String, dynamic> json) => ChannelsSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    channels: (json['channels'] as List<dynamic>).map((x0) => ChannelView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'channels': channels.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 /// Pick a variant of a task that waits for the user's choice. `variant: None`
 /// lets the judge's pick stand.
 final class ChooseTaskVariant {
@@ -1385,6 +1453,7 @@ sealed class Command {
           deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
           description: (json['description'] == null ? null : (json['description'] as String)),
           files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+          fromMessage: (json['from_message'] == null ? null : (json['from_message'] as String)),
           labels: (json['labels'] == null ? const [] : (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           ownerEmployeeId: (json['owner_employee_id'] == null ? null : (json['owner_employee_id'] as String)),
           priority: (json['priority'] == null ? null : TicketPriority.fromJson(json['priority'] as String)),
@@ -1421,6 +1490,13 @@ sealed class Command {
         );
       case 'pin_memory':
         return CommandPinMemory(value: PinMemory.fromJson(json as Map<String, dynamic>));
+      case 'post_ticket_message':
+        return CommandPostTicketMessage(
+          files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+          images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+          text: (json['text'] as String),
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'remember':
         return CommandRemember(value: Remember.fromJson(json as Map<String, dynamic>));
       case 'remove_attachment':
@@ -1433,6 +1509,10 @@ sealed class Command {
         return CommandRestoreEmployeeInstructions(value: RestoreEmployeeInstructions.fromJson(json as Map<String, dynamic>));
       case 'retry_reply':
         return CommandRetryReply(value: RetryReply.fromJson(json as Map<String, dynamic>));
+      case 'retry_ticket_summary':
+        return CommandRetryTicketSummary(
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'revise_memory':
         return CommandReviseMemory(value: ReviseMemory.fromJson(json as Map<String, dynamic>));
       case 'revise_plan':
@@ -1806,6 +1886,7 @@ final class CommandCreateTicket extends Command {
     this.deadlineMs,
     this.description,
     this.files = const [],
+    this.fromMessage,
     this.labels = const [],
     this.ownerEmployeeId,
     this.priority,
@@ -1819,6 +1900,9 @@ final class CommandCreateTicket extends Command {
   final String? description;
   /// Files to copy into the project's uploads area, as for a task.
   final List<String> files;
+  /// Made from this chat message ("Make ticket", feature `ticket_discussion`):
+  /// the discussion starts with a link to it, and its chat gets a link to the ticket.
+  final String? fromMessage;
   final List<String> labels;
   /// Chosen now: the dispatcher is skipped when it starts.
   final String? ownerEmployeeId;
@@ -1835,6 +1919,7 @@ final class CommandCreateTicket extends Command {
       if (deadlineMs != null) 'deadline_ms': deadlineMs,
       if (description != null) 'description': description,
       'files': files,
+      if (fromMessage != null) 'from_message': fromMessage,
       'labels': labels,
       if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
       if (priority != null) 'priority': priority?.toJson(),
@@ -2028,6 +2113,35 @@ final class CommandPinMemory extends Command {
     };
 }
 
+/// A board member writes in a ticket's discussion (feature `ticket_discussion`).
+/// Without `@Name` it goes to the owner while the ticket is in Todo (with an
+/// owner), Doing or Plan review; else it wakes nobody. `@Name` wakes those
+/// employees. Refused on Done (the discussion is read-only there). Not for apps.
+final class CommandPostTicketMessage extends Command {
+  const CommandPostTicketMessage({
+    this.files = const [],
+    this.images = const [],
+    required this.text,
+    required this.ticketId,
+  });
+
+  /// Files of any type for the employees (host paths, or this device's upload inbox).
+  final List<String> files;
+  /// Images that belong to this message (see `SendChatMessage::images`).
+  final List<String> images;
+  final String text;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'post_ticket_message',
+      'files': files,
+      'images': images,
+      'text': text,
+      'ticket_id': ticketId,
+    };
+}
+
 final class CommandRemember extends Command {
   const CommandRemember({
     required this.value,
@@ -2109,6 +2223,22 @@ final class CommandRetryReply extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'retry_reply',
       ...value.toJson(),
+    };
+}
+
+/// Try the summary of a ticket on Done again after it failed (`SystemLineKind::SummaryFailed`).
+/// Only a board member; refused when the summary is already there or still being made.
+final class CommandRetryTicketSummary extends Command {
+  const CommandRetryTicketSummary({
+    required this.ticketId,
+  });
+
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'retry_ticket_summary',
+      'ticket_id': ticketId,
     };
 }
 
@@ -2968,6 +3098,14 @@ sealed class CommandResult {
         return CommandResultTicketCreated(
           number: (json['number'] as num).toInt(),
           ticketId: (json['ticket_id'] as String),
+        );
+      case 'ticket_message_posted':
+        return CommandResultTicketMessagePosted(
+          conversationId: (json['conversation_id'] as String),
+          messageId: (json['message_id'] as String),
+          runIds: (json['run_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+          ticketId: (json['ticket_id'] as String),
+          to: (json['to'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
         );
       case 'user_created':
         return CommandResultUserCreated(
@@ -3943,6 +4081,34 @@ final class CommandResultTicketCreated extends CommandResult {
       'type': 'ticket_created',
       'number': number,
       'ticket_id': ticketId,
+    };
+}
+
+/// A message in a ticket's discussion, with the employees it woke (or the
+/// owner it went to: `run_ids` is empty when the main task already runs and takes it).
+final class CommandResultTicketMessagePosted extends CommandResult {
+  const CommandResultTicketMessagePosted({
+    required this.conversationId,
+    required this.messageId,
+    required this.runIds,
+    required this.ticketId,
+    required this.to,
+  });
+
+  final String conversationId;
+  final String messageId;
+  final List<String> runIds;
+  final String ticketId;
+  final List<String> to;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'ticket_message_posted',
+      'conversation_id': conversationId,
+      'message_id': messageId,
+      'run_ids': runIds,
+      'ticket_id': ticketId,
+      'to': to,
     };
 }
 
@@ -8850,6 +9016,7 @@ final class MessageView {
     required this.activity,
     this.approvalId,
     this.author,
+    this.authorUser,
     required this.createdAtMs,
     required this.files,
     required this.id,
@@ -8862,6 +9029,7 @@ final class MessageView {
     this.runId,
     required this.sources,
     required this.status,
+    this.system,
     required this.text,
     this.update,
     required this.uploads,
@@ -8874,6 +9042,10 @@ final class MessageView {
   final String? approvalId;
   /// Persona that answered (e.g. "Marcus"), if any.
   final String? author;
+  /// The board member who wrote a user message in a discussion (a ticket's,
+  /// a channel's; feature `ticket_discussion`). Left out for other messages
+  /// and by older servers.
+  final UserView? authorUser;
   final int createdAtMs;
   /// Files the message mentions, kept with it (open them with `query/file`).
   final List<FileRef> files;
@@ -8896,6 +9068,10 @@ final class MessageView {
   /// Web sources fetched for this answer, cited as [n].
   final List<SourceView> sources;
   final MessageStatus status;
+  /// A system line of Aurelius in a discussion (feature `ticket_discussion`):
+  /// what happened, shown as a compact grey line; `text` is its readable form.
+  /// Such a line never wakes anyone. Left out for other messages and by older servers.
+  final SystemLine? system;
   final String text;
   /// A task update in the task's conversation, not an answer: brief |
   /// finding | question | status. `author` says from whom (a
@@ -8911,6 +9087,7 @@ final class MessageView {
     activity: (json['activity'] as List<dynamic>).map((x0) => ActivityView.fromJson(x0 as Map<String, dynamic>)).toList(),
     approvalId: (json['approval_id'] == null ? null : (json['approval_id'] as String)),
     author: (json['author'] == null ? null : (json['author'] as String)),
+    authorUser: (json['author_user'] == null ? null : UserView.fromJson(json['author_user'] as Map<String, dynamic>)),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     files: (json['files'] as List<dynamic>).map((x0) => FileRef.fromJson(x0 as Map<String, dynamic>)).toList(),
     id: (json['id'] as String),
@@ -8923,6 +9100,7 @@ final class MessageView {
     runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
     sources: (json['sources'] as List<dynamic>).map((x0) => SourceView.fromJson(x0 as Map<String, dynamic>)).toList(),
     status: MessageStatus.fromJson(json['status'] as String),
+    system: (json['system'] == null ? null : SystemLine.fromJson(json['system'] as Map<String, dynamic>)),
     text: (json['text'] as String),
     update: (json['update'] == null ? null : (json['update'] as String)),
     uploads: (json['uploads'] as List<dynamic>).map((x0) => MessageFileView.fromJson(x0 as Map<String, dynamic>)).toList(),
@@ -8933,6 +9111,7 @@ final class MessageView {
     'activity': activity.map((x0) => x0.toJson()).toList(),
     if (approvalId != null) 'approval_id': approvalId,
     if (author != null) 'author': author,
+    if (authorUser != null) 'author_user': authorUser?.toJson(),
     'created_at_ms': createdAtMs,
     'files': files.map((x0) => x0.toJson()).toList(),
     'id': id,
@@ -8945,6 +9124,7 @@ final class MessageView {
     if (runId != null) 'run_id': runId,
     'sources': sources.map((x0) => x0.toJson()).toList(),
     'status': status.toJson(),
+    if (system != null) 'system': system?.toJson(),
     'text': text,
     if (update != null) 'update': update,
     'uploads': uploads.map((x0) => x0.toJson()).toList(),
@@ -9077,6 +9257,8 @@ sealed class Method {
         }
       case 'browser.get':
         return const MethodBrowserGet();
+      case 'channel.list':
+        return const MethodChannelList();
       case 'company.get':
         return const MethodCompanyGet();
       case 'connection.detect_runtime':
@@ -9150,7 +9332,12 @@ sealed class Method {
         );
         }
       case 'group_chat.get':
-        return const MethodGroupChatGet();
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGroupChatGet(
+          channel: (src['channel'] == null ? null : (src['channel'] as String)),
+        );
+        }
       case 'idea.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -9612,6 +9799,17 @@ final class MethodBrowserGet extends Method {
     };
 }
 
+/// The channels of the Team chat (feature `team_channels`): the general
+/// one first, then one per project (archived projects too: read-only).
+final class MethodChannelList extends Method {
+  const MethodChannelList();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'channel.list',
+    };
+}
+
 /// The company in one read: employees, the org chart setting and the
 /// management team (roots).
 final class MethodCompanyGet extends Method {
@@ -9810,12 +10008,21 @@ final class MethodGitGetStatus extends Method {
 /// The company's group chat (Team chat): the user and every employee. Its
 /// messages and settings, as `conversation.get` answers them; an employee's
 /// messages carry its name as `author`. Write with `group_chat.send`.
+/// `channel` (feature `team_channels`): a project's channel from
+/// `channel.list`; none: the general channel, the one older servers have.
 final class MethodGroupChatGet extends Method {
-  const MethodGroupChatGet();
+  const MethodGroupChatGet({
+    this.channel,
+  });
+
+  final String? channel;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'group_chat.get',
+      'params': <String, dynamic>{
+      if (channel != null) 'channel': channel,
+    },
     };
 }
 
@@ -12122,6 +12329,8 @@ sealed class ResponseBody {
         return ResponseBodyBoard(value: BoardView.fromJson(json['value'] as Map<String, dynamic>));
       case 'browser':
         return ResponseBodyBrowser(value: BrowserSetting.fromJson(json['value'] as Map<String, dynamic>));
+      case 'channels':
+        return ResponseBodyChannels(value: ChannelsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'company':
         return ResponseBodyCompany(value: CompanySnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'connections':
@@ -12457,6 +12666,20 @@ final class ResponseBodyBrowser extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'browser',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyChannels extends ResponseBody {
+  const ResponseBodyChannels({
+    required this.value,
+  });
+
+  final ChannelsSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'channels',
       'value': value.toJson(),
     };
 }
@@ -13681,11 +13904,14 @@ final class SendEmployeeMessage {
 /// A message of the user in the group chat (`group_chat.send`).
 final class SendGroupMessage {
   const SendGroupMessage({
+    this.channel,
     this.files = const [],
     this.images = const [],
     required this.text,
   });
 
+  /// The channel (feature `team_channels`): a project's, or none for the general one.
+  final String? channel;
   /// Files of any type for the employees (host paths, or this device's upload inbox).
   final List<String> files;
   /// Images that belong to this message (see `SendChatMessage::images`).
@@ -13693,12 +13919,14 @@ final class SendGroupMessage {
   final String text;
 
   factory SendGroupMessage.fromJson(Map<String, dynamic> json) => SendGroupMessage(
+    channel: (json['channel'] == null ? null : (json['channel'] as String)),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     text: (json['text'] as String),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (channel != null) 'channel': channel,
     'files': files,
     'images': images,
     'text': text,
@@ -14841,6 +15069,90 @@ final class SubtaskUsage {
   };
 }
 
+/// A system line (`MessageView::system`). Every field but `kind` is optional and
+/// only set where `SystemLineKind` names it.
+final class SystemLine {
+  const SystemLine({
+    this.by,
+    this.conversationId,
+    this.from,
+    required this.kind,
+    this.messageId,
+    this.taskId,
+    this.ticketId,
+    this.to,
+  });
+
+  /// Who did it: a board member's name, an employee's, or "Aurelius".
+  final String? by;
+  final String? conversationId;
+  final String? from;
+  final SystemLineKind kind;
+  final String? messageId;
+  final String? taskId;
+  final String? ticketId;
+  final String? to;
+
+  factory SystemLine.fromJson(Map<String, dynamic> json) => SystemLine(
+    by: (json['by'] == null ? null : (json['by'] as String)),
+    conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
+    from: (json['from'] == null ? null : (json['from'] as String)),
+    kind: SystemLineKind.fromJson(json['kind'] as String),
+    messageId: (json['message_id'] == null ? null : (json['message_id'] as String)),
+    taskId: (json['task_id'] == null ? null : (json['task_id'] as String)),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+    to: (json['to'] == null ? null : (json['to'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (by != null) 'by': by,
+    if (conversationId != null) 'conversation_id': conversationId,
+    if (from != null) 'from': from,
+    'kind': kind.toJson(),
+    if (messageId != null) 'message_id': messageId,
+    if (taskId != null) 'task_id': taskId,
+    if (ticketId != null) 'ticket_id': ticketId,
+    if (to != null) 'to': to,
+  };
+}
+
+/// What a system line in a discussion says happened (`MessageView::system`).
+enum SystemLineKind {
+  /// The ticket was made from the message `message_id` in `conversation_id`.
+  createdFrom('created_from'),
+  /// `from` gave the task `task_id` to `to`.
+  delegated('delegated'),
+  /// `by` put the ticket on Done.
+  done('done'),
+  /// A mention woke nobody: a loop limit was reached (`to`: who was not woken).
+  limit('limit'),
+  /// `by` moved the ticket from the column `from` to `to`.
+  moved('moved'),
+  /// The owner's plan for `task_id` waits for a board member (approve or send back).
+  plan('plan'),
+  /// The task `task_id` of `from` reported (or failed: the text says so).
+  reported('reported'),
+  /// The ticket is in Review: the report of `task_id` waits for a board member.
+  review('review'),
+  /// The summary of the ticket went to the project's memory.
+  summary('summary'),
+  /// The summary failed (the text says why); a board member can try again (`ticket.retry_summary`).
+  summaryFailed('summary_failed'),
+  /// In a chat: the ticket `ticket_id` was made from this conversation's message `message_id`.
+  ticketCreated('ticket_created');
+
+  const SystemLineKind(this.wire);
+
+  final String wire;
+
+  static SystemLineKind fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown SystemLineKind value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 final class TailscaleStatus {
   const TailscaleStatus({
     this.dnsName,
@@ -15603,6 +15915,7 @@ final class TicketView {
     required this.attachments,
     required this.column,
     required this.columnId,
+    this.conversationId,
     required this.createdAtMs,
     required this.createdByUser,
     required this.createdByUsername,
@@ -15633,6 +15946,9 @@ final class TicketView {
   final List<MessageFileView> attachments;
   final ColumnKind column;
   final String columnId;
+  /// The ticket's discussion (feature `ticket_discussion`): read it with
+  /// `conversation.get`, write in it with `ticket.post`. Left out by older servers.
+  final String? conversationId;
   final int createdAtMs;
   /// The board member who made it; never changes.
   final String createdByUser;
@@ -15671,6 +15987,7 @@ final class TicketView {
     attachments: (json['attachments'] as List<dynamic>).map((x0) => MessageFileView.fromJson(x0 as Map<String, dynamic>)).toList(),
     column: ColumnKind.fromJson(json['column'] as String),
     columnId: (json['column_id'] as String),
+    conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     createdByUser: (json['created_by_user'] as String),
     createdByUsername: (json['created_by_username'] as String),
@@ -15701,6 +16018,7 @@ final class TicketView {
     'attachments': attachments.map((x0) => x0.toJson()).toList(),
     'column': column.toJson(),
     'column_id': columnId,
+    if (conversationId != null) 'conversation_id': conversationId,
     'created_at_ms': createdAtMs,
     'created_by_user': createdByUser,
     'created_by_username': createdByUsername,

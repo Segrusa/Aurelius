@@ -69,6 +69,7 @@ fn ticket(project_id: ProjectId, title: &str) -> Command {
         run: Default::default(),
         files: vec![],
         start: false,
+        from_message: None,
     })
 }
 

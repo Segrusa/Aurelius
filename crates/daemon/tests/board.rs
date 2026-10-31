@@ -126,6 +126,7 @@ async fn ticket(client: &Client, project_id: ProjectId, title: &str, description
             run: aurelius_domain::task::RunSettings { mode: Some(aurelius_domain::autonomy::AgentMode::Auto), ..Default::default() },
             files: vec![],
             start,
+            from_message: None,
         })
         .await
         .unwrap();
@@ -159,6 +160,12 @@ fn code<T: std::fmt::Debug>(result: Result<T, aurelius_client::ClientError>) -> 
         Err(aurelius_client::ClientError::Protocol(err)) => err.code,
         other => panic!("expected a protocol error, got {other:?}"),
     }
+}
+
+/// The system lines of a ticket's discussion, in words (MU2-03).
+async fn discussion_lines(client: &Client, id: TicketId) -> Vec<(aurelius_domain::views::SystemLineKind, Option<aurelius_domain::TaskId>, String)> {
+    let conversation = client.ticket(id).await.unwrap().ticket.conversation_id.expect("a discussion");
+    client.messages(conversation).await.unwrap().messages.into_iter().filter_map(|m| m.system.map(|s| (s.kind, s.task_id, m.text))).collect()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -207,6 +214,11 @@ async fn a_ticket_is_worked_reported_sent_back_and_accepted() {
         )
         .unwrap();
     assert_eq!(reason, "accepted");
+    // MU2-03 / MU2-06 AC2: sent back to Doing and put on Done, by the board member, once each.
+    let texts: Vec<String> = discussion_lines(&client, id).await.into_iter().map(|(_, _, t)| t).collect();
+    assert_eq!(texts.iter().filter(|t| *t == "grace sent it back · Review → Doing").count(), 1, "{texts:#?}");
+    assert_eq!(texts.iter().filter(|t| *t == "grace put it on Done").count(), 1, "{texts:#?}");
+    assert_eq!(texts.iter().filter(|t| t.ends_with("handed in the report · Review")).count(), 2, "{texts:#?}");
 
     drop(client);
     common::stop(dir.path(), daemon).await;
@@ -240,6 +252,10 @@ async fn a_failed_main_task_stays_in_doing_and_starts_again() {
     let cancelled = client.ticket(other).await.unwrap();
     assert_eq!((cancelled.ticket.column, cancelled.root_task.map(|t| t.status)), (ColumnKind::Backlog, Some(TaskStatus::Cancelled)));
     assert_eq!(waiting.tasks.len(), 1);
+    // MU2-03: a failed main task says so where the card stays, and a cancel says who.
+    let texts: Vec<String> = discussion_lines(&client, id).await.into_iter().map(|(_, _, t)| t).collect();
+    assert_eq!(texts.iter().filter(|t| *t == "Builder could not finish the main task · Start makes a new one").count(), 2, "{texts:#?}");
+    assert!(discussion_lines(&client, other).await.iter().any(|(_, _, t)| t == "grace cancelled it · Todo → Backlog"));
 
     drop(client);
     common::stop(dir.path(), daemon).await;

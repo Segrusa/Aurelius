@@ -20,7 +20,9 @@ pub(super) fn tool_profile(shared: &Arc<Shared>, plan: &ChatRunPlan) -> ToolProf
                     // The project assistant gives work to employees but cannot hand a task over.
                     let bridge = if plan.project_assistant { with_flag(bridge, "--project") } else { bridge };
                     // Management that chooses the mode of its task gets the set_mode tool.
-                    if plan.management_mode { with_flag(bridge, "--set-mode") } else { bridge }
+                    let bridge = if plan.management_mode { with_flag(bridge, "--set-mode") } else { bridge };
+                    // A run under a ticket, or woken from its discussion, reads and posts there.
+                    if plan.discussion { with_flag(bridge, "--discussion") } else { bridge }
                 },
                 browser: plan.browser,
                 browser_session: plan.browser_session.clone(),

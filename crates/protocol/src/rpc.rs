@@ -245,6 +245,16 @@ pub mod feature {
     /// every mode but Plan: `auto_allow.get_setting` / `auto_allow.set_enabled`
     /// (`AutoAllowSetting`, on by default, Approve right).
     pub const AUTO_ALLOW: &str = "auto_allow";
+    /// One discussion per ticket (protocol 4, additive): `TicketView::conversation_id`
+    /// (read with `conversation.get`), the write `ticket.post`, `MessageView::author_user`
+    /// and `MessageView::system` (system lines, never a new `MessageRole`),
+    /// `ticket.create { from_message }` and `ticket.retry_summary`. A discussion
+    /// of a ticket on Done is read-only.
+    pub const TICKET_DISCUSSION: &str = "ticket_discussion";
+    /// Channels in the Team chat: `channel.list`, `group_chat.get { channel }`,
+    /// `group_chat.send { channel }`. Live events of project channels go only to
+    /// connections whose `HelloParams::accepts` names `team_channels`.
+    pub const TEAM_CHANNELS: &str = "team_channels";
 }
 
 /// Every feature this build has.
@@ -270,6 +280,8 @@ pub const FEATURES: &[&str] = &[
     feature::COMPACT_STATUS,
     feature::MANAGEMENT_CHOOSES_MODE,
     feature::AUTO_ALLOW,
+    feature::TICKET_DISCUSSION,
+    feature::TEAM_CHANNELS,
 ];
 
 /// Daemon → client.
@@ -319,6 +331,7 @@ pub enum ResponseBody {
     Ticket(aurelius_domain::ticket::TicketDetail),
     Tickets(aurelius_domain::ticket::TicketsSnapshot),
     Users(aurelius_domain::user::UsersSnapshot),
+    Channels(aurelius_domain::views::ChannelsSnapshot),
     WhoAmI(aurelius_domain::user::WhoAmI),
     ProjectConversations(ProjectConversationsSnapshot),
     Approvals(ApprovalsSnapshot),

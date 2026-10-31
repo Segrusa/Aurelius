@@ -106,11 +106,26 @@ pub enum EmployeeTaskOp {
     /// Management chooses the mode of its own task conversation (`auto` or `plan`), with a reason
     /// that is shown in the thread. Only management, only without an open plan approval.
     SetMode { mode: String, #[serde(default)] reason: String },
-    /// The latest `last` messages of the company's group chat (default and most 50).
-    ReadGroupChat { #[serde(default, skip_serializing_if = "Option::is_none")] last: Option<u32> },
-    /// Post in the group chat under the employee's name; `@Name` wakes that colleague
-    /// (never the poster, at most `group_chat::MAX_HOPS` hops after the user's message).
-    PostToGroupChat { message: String },
+    /// The latest `last` messages of a channel of the Team chat (default and most 50).
+    /// `channel`: `General`, a project's name or a channel id; none: the channel that
+    /// woke the run, else its project's, else the general one.
+    ReadGroupChat {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel: Option<String>,
+    },
+    /// Post in a channel under the employee's name; `@Name` wakes that colleague
+    /// (never the poster, at most `group_chat::MAX_HOPS` hops after a board member's message).
+    PostToGroupChat {
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel: Option<String>,
+    },
+    /// The latest `last` messages of the discussion of the run's ticket (`--discussion` only).
+    ReadDiscussion { #[serde(default, skip_serializing_if = "Option::is_none")] last: Option<u32> },
+    /// Post in the discussion of the run's ticket; `@Name` wakes as in a channel (`--discussion` only).
+    PostToDiscussion { message: String },
     /// The dispatcher of a ticket chooses its owner (the bridge's `assign_ticket`, `--triage` only).
     AssignTicket { employee: String, #[serde(default)] reason: String },
 }

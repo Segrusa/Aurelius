@@ -118,6 +118,7 @@ async fn started(client: &Client, project_id: ProjectId, title: &str) -> TicketI
             run: Default::default(),
             files: vec![],
             start: true,
+            from_message: None,
         })
         .await
         .unwrap();
@@ -149,6 +150,12 @@ fn dispatcher_runs(root: &std::path::Path, task: aurelius_domain::TaskId) -> Vec
     stmt.query_map([task.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap()
 }
 
+/// The system lines of a ticket's discussion, in words (MU2-03).
+async fn discussion_lines(client: &Client, id: TicketId) -> Vec<(aurelius_domain::views::SystemLineKind, Option<aurelius_domain::TaskId>, String)> {
+    let conversation = client.ticket(id).await.unwrap().ticket.conversation_id.expect("a discussion");
+    client.messages(conversation).await.unwrap().messages.into_iter().filter_map(|m| m.system.map(|s| (s.kind, s.task_id, m.text))).collect()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_dispatcher_chooses_an_owner_and_the_work_starts() {
     let b = board(vec![Some("Builder")]).await;
@@ -174,8 +181,14 @@ async fn the_dispatcher_chooses_an_owner_and_the_work_starts() {
     assert_eq!(*turns, 3);
     assert!(prompt.contains("CSV export") && prompt.contains("- Builder (Backend Developer)") && prompt.contains("Orion (you)") && prompt.contains("[open tasks: 0]"), "{prompt}");
     assert!(answer.as_ref().unwrap().0);
-    let runs = dispatcher_runs(&b.root, detail.root_task.unwrap().id);
+    let root = detail.root_task.unwrap().id;
+    let runs = dispatcher_runs(&b.root, root);
     assert_eq!(runs, [("succeeded".to_string(), Some(orion.to_string()))]);
+    // MU2-03: the dispatcher's choice with its reason, linked to the main task; once.
+    let lines = discussion_lines(&b.client, id).await;
+    let chose: Vec<_> = lines.iter().filter(|(_, _, t)| t.starts_with("Orion chose")).collect();
+    assert_eq!(chose.len(), 1, "{lines:#?}");
+    assert_eq!((chose[0].0, chose[0].1, chose[0].2.as_str()), (aurelius_domain::views::SystemLineKind::Delegated, Some(root), "Orion chose Builder as owner: Builder knows this part"));
 
     drop(b.client);
     common::stop(&b.root, b.daemon).await;
@@ -209,6 +222,7 @@ async fn without_a_dispatcher_the_ticket_waits_for_a_board_member() {
     let needs = events(&b.root, id, "ticket.updated");
     assert_eq!((needs[0]["needs"].as_str(), needs[0]["reason"].as_str()), (Some("owner"), Some("no_dispatcher")));
     assert!(b.runtime.seen.lock().unwrap().is_empty(), "no dispatcher run");
+    assert!(discussion_lines(&b.client, id).await.iter().any(|(_, _, t)| t == "Nobody chose an owner: there is no active dispatcher. Choose one on the card."));
 
     // An archived dispatcher counts as none (B5).
     company_dispatcher(&b.client, Some(orion)).await;
@@ -219,7 +233,8 @@ async fn without_a_dispatcher_the_ticket_waits_for_a_board_member() {
     assert!(b.runtime.seen.lock().unwrap().is_empty());
 
     // The board member chooses (MU1-10 AC4): the work starts.
-    b.client.ticket_command(Command::AssignTicket(AssignTicket { ticket_id: id, employee_id: Some(builder), reason: None }), None).await.unwrap();
+    b.client.ticket_command(Command::AssignTicket(AssignTicket { ticket_id: id, employee_id: Some(builder), reason: Some("knows the export".into()) }), None).await.unwrap();
+    assert!(discussion_lines(&b.client, id).await.iter().any(|(_, _, t)| t == "grace chose Builder as owner: knows the export"), "a board member's choice");
     // (Builder is the only active employee now, so management: its task starts in Plan and stops in Plan review.)
     let worked = until(&b.client, id, |d| d.root_task.as_ref().is_some_and(|t| t.employee_id == Some(builder) && t.status != TaskStatus::Draft && t.status != TaskStatus::Queued)).await;
     assert_ne!(worked.ticket.column, ColumnKind::Todo);

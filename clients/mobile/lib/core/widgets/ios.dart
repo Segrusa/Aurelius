@@ -504,11 +504,14 @@ class TabScaffold extends StatelessWidget {
 
 /// One item of [GlassTabBar].
 class GlassTab {
-  const GlassTab(this.icon, this.label, {this.badge = 0});
+  const GlassTab(this.icon, this.label, {this.badge = 0, this.dot = false});
 
   final IconData icon;
   final String label;
   final int badge;
+
+  /// Something unread without a count (the Team tab, B8): a small dot when [badge] is 0.
+  final bool dot;
 }
 
 /// The floating Liquid Glass tab bar, over a fade of the page behind it.
@@ -582,8 +585,9 @@ class _TabFace extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Badge(
-          isLabelVisible: tab.badge > 0,
-          label: Text('${tab.badge}'),
+          isLabelVisible: tab.badge > 0 || tab.dot,
+          smallSize: 8,
+          label: tab.badge > 0 ? Text('${tab.badge}') : null,
           backgroundColor: Tokens.red,
           textColor: Colors.white,
           child: Icon(tab.icon, size: 24, color: color),

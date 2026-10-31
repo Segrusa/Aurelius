@@ -14,6 +14,7 @@ import '../core/widgets/widgets.dart' show toast;
 import '../data/aurelius_repository.dart';
 import '../features/board/board_page.dart';
 import '../features/board/board_settings_page.dart';
+import '../data/discussion.dart';
 import '../features/board/new_ticket_page.dart';
 import '../features/board/ticket_page.dart';
 import '../features/ideas/ideas_page.dart';
@@ -90,14 +91,15 @@ class AppRouter {
       GoRoute(
         parentNavigatorKey: _root,
         path: '/board/new',
-        pageBuilder: (context, state) => routePage(state, NewTicketPage(projectId: state.uri.queryParameters['project'])),
+        pageBuilder: (context, state) => routePage(state, NewTicketPage(projectId: state.uri.queryParameters['project'], draft: state.extra is TicketDraft ? state.extra as TicketDraft : null)),
       ),
       GoRoute(
         parentNavigatorKey: _root,
         path: '/ticket/:tid',
-        pageBuilder: (context, state) => routePage(state, TicketPage(ticketId: state.pathParameters['tid']!)),
+        pageBuilder: (context, state) => routePage(state, TicketPage(ticketId: state.pathParameters['tid']!, discussion: state.uri.queryParameters['tab'] == 'discussion')),
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'plan', pageBuilder: (context, state) => routePage(state, TicketPlanPage(ticketId: state.pathParameters['tid']!))),
+          GoRoute(parentNavigatorKey: _root, path: 'report', pageBuilder: (context, state) => routePage(state, TicketReportPage(ticketId: state.pathParameters['tid']!))),
         ],
       ),
       GoRoute(

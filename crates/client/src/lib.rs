@@ -140,6 +140,16 @@ pub struct Client {
     terminals: Terminals,
     loads: LoadRoute,
     powers: PowerRoute,
+    /// The client features of the hello (`aurelius_protocol::client_feature`),
+    /// said again when the client says hello again (`identify`).
+    accepts: Vec<String>,
+}
+
+/// The client features a hello names: `activity_changes` always, plus `extra`.
+fn accepted(extra: &[&str]) -> Vec<String> {
+    let mut accepts = vec![aurelius_protocol::client_feature::ACTIVITY_CHANGES.to_owned()];
+    accepts.extend(extra.iter().filter(|f| !accepts.iter().any(|a| a == *f)).map(|f| (*f).to_owned()).collect::<Vec<_>>());
+    accepts
 }
 
 fn empty_hello() -> HelloResult {
@@ -190,17 +200,22 @@ fn incompatible(server: Option<u16>, message: Option<&str>) -> ClientError {
 }
 
 impl Client {
-    /// Connect to the server in `target` and handshake.
+    /// Connect to the server in `target` and handshake. `accepts`: the client
+    /// features it names in its hello besides `activity_changes`
+    /// (`aurelius_protocol::client_feature`, e.g. `TEAM_CHANNELS` for the live
+    /// messages of the projects' channels).
     pub async fn open(
         target: &Target,
         client_name: &str,
         events: mpsc::UnboundedSender<Event>,
         streams: Option<mpsc::UnboundedSender<StreamDelta>>,
+        accepts: &[&str],
     ) -> Result<Self, ClientError> {
+        let accepts = accepted(accepts);
         match target {
-            Target::Local { root, spawn: true } => connect_or_spawn_with_streams(root, client_name, events, streams).await,
-            Target::Local { root, spawn: false } => Self::connect_with_streams(&aurelius_host::endpoint(root), client_name, events, streams).await,
-            Target::Remote(server) => Self::connect_remote(server, client_name, events, streams).await,
+            Target::Local { root, spawn: true } => spawn_and_connect(root, client_name, events, streams, accepts).await,
+            Target::Local { root, spawn: false } => Self::start(transport::pipe(&aurelius_host::endpoint(root)).await?, None, client_name, events, streams, accepts).await,
+            Target::Remote(server) => Self::open_remote(server, client_name, events, streams, accepts).await,
         }
     }
 
@@ -217,7 +232,7 @@ impl Client {
         streams: Option<mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<Self, ClientError> {
         let duplex = transport::pipe(endpoint).await?;
-        Self::start(duplex, None, client_name, events, streams).await
+        Self::start(duplex, None, client_name, events, streams, accepted(&[])).await
     }
 
     /// A server on another computer: a session token, then the WebSocket.
@@ -229,11 +244,21 @@ impl Client {
         events: mpsc::UnboundedSender<Event>,
         streams: Option<mpsc::UnboundedSender<StreamDelta>>,
     ) -> Result<Self, ClientError> {
+        Self::open_remote(server, client_name, events, streams, accepted(&[])).await
+    }
+
+    async fn open_remote(
+        server: &RemoteServer,
+        client_name: &str,
+        events: mpsc::UnboundedSender<Event>,
+        streams: Option<mpsc::UnboundedSender<StreamDelta>>,
+        accepts: Vec<String>,
+    ) -> Result<Self, ClientError> {
         let http = remote::http();
         let token = remote::session(&http, server).await?;
         let duplex = transport::websocket(&server.url, &token).await?;
         let link = RemoteLink { http, server: server.clone(), token: tokio::sync::Mutex::new(token) };
-        let client = Self::start(duplex, Some(link), client_name, events, streams).await?;
+        let client = Self::start(duplex, Some(link), client_name, events, streams, accepts).await?;
         if client.hello.host_id != server.host_id {
             return Err(ClientError::WrongServer(format!("{} now answers as another Aurelius server. Pair this computer again.", server.url)));
         }
@@ -252,7 +277,7 @@ impl Client {
     pub async fn connect_app(endpoint: &Endpoint, app_key: &str, client_name: &str) -> Result<Self, ClientError> {
         let duplex = transport::pipe(endpoint).await?;
         let (events, _) = mpsc::unbounded_channel();
-        let client = Self::start_as(duplex, None, client_name, Some(app_key.to_owned()), events, None).await?;
+        let client = Self::start_as(duplex, None, client_name, Some(app_key.to_owned()), events, None, accepted(&[])).await?;
         client.require_app()
     }
 
@@ -264,7 +289,7 @@ impl Client {
             other => other,
         })?;
         let (events, _) = mpsc::unbounded_channel();
-        let client = Self::start_as(duplex, None, client_name, None, events, None).await?;
+        let client = Self::start_as(duplex, None, client_name, None, events, None, accepted(&[])).await?;
         client.require_app()
     }
 
@@ -273,7 +298,7 @@ impl Client {
     pub async fn over_channels(outgoing: mpsc::Sender<Request>, incoming: mpsc::Receiver<ServerMessage>, client_name: &str) -> Result<Self, ClientError> {
         let (events, _) = mpsc::unbounded_channel();
         let duplex = transport::Duplex { outgoing, incoming, revoked: Arc::default() };
-        Self::start_as(duplex, None, client_name, None, events, None).await
+        Self::start_as(duplex, None, client_name, None, events, None, accepted(&[])).await
     }
 
     /// The app this session acts for; an error when the server did not take the key.
@@ -290,8 +315,9 @@ impl Client {
         client_name: &str,
         events: mpsc::UnboundedSender<Event>,
         streams: Option<mpsc::UnboundedSender<StreamDelta>>,
+        accepts: Vec<String>,
     ) -> Result<Self, ClientError> {
-        Self::start_as(duplex, remote, client_name, None, events, streams).await
+        Self::start_as(duplex, remote, client_name, None, events, streams, accepts).await
     }
 
     async fn start_as(
@@ -301,6 +327,7 @@ impl Client {
         app_key: Option<String>,
         events: mpsc::UnboundedSender<Event>,
         streams: Option<mpsc::UnboundedSender<StreamDelta>>,
+        accepts: Vec<String>,
     ) -> Result<Self, ClientError> {
         let transport::Duplex { outgoing, mut incoming, revoked } = duplex;
         let pending: Pending = Arc::default();
@@ -372,9 +399,9 @@ impl Client {
             pending_reader.lock().unwrap().clear();
         });
 
-        let mut client = Self { outgoing, pending, next_id: AtomicU64::new(1), hello: empty_hello(), remote, revoked, terminals, loads, powers };
+        let mut client = Self { outgoing, pending, next_id: AtomicU64::new(1), hello: empty_hello(), remote, revoked, terminals, loads, powers, accepts: accepts.clone() };
         let hello = client
-            .call(Method::SessionHello(HelloParams { client_name: client_name.into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key, accepts: vec![aurelius_protocol::client_feature::ACTIVITY_CHANGES.into()], user_id: None }))
+            .call(Method::SessionHello(HelloParams { client_name: client_name.into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key, accepts, user_id: None }))
             .await;
         match hello {
             Ok(ResponseBody::Hello(result)) => {
@@ -666,7 +693,17 @@ impl Client {
 
     /// The company's group chat (Team chat): the user and every employee.
     pub async fn group_chat(&self) -> Result<MessagesSnapshot, ClientError> {
-        self.read(Method::GroupChatGet, body!(Messages)).await
+        self.read(Method::GroupChatGet { channel: None }, body!(Messages)).await
+    }
+
+    /// One channel of the Team chat (feature `team_channels`); reading it marks it read.
+    pub async fn channel_messages(&self, channel: aurelius_domain::ConversationId) -> Result<MessagesSnapshot, ClientError> {
+        self.read(Method::GroupChatGet { channel: Some(channel) }, body!(Messages)).await
+    }
+
+    /// The Team chat's channels (feature `team_channels`): General first, then one per project.
+    pub async fn channels(&self) -> Result<aurelius_domain::views::ChannelsSnapshot, ClientError> {
+        self.read(Method::ChannelList, body!(Channels)).await
     }
 
     /// The company in one read: employees, the org chart setting and the roots.
@@ -900,7 +937,7 @@ impl Client {
     /// Say hello again with the board member this client remembers for the server;
     /// it is active when it still exists (`HelloResult::user`).
     pub async fn identify(&self, user_id: aurelius_domain::UserId) -> Result<HelloResult, ClientError> {
-        let params = HelloParams { client_name: "aurelius".into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key: None, accepts: vec![aurelius_protocol::client_feature::ACTIVITY_CHANGES.into()], user_id: Some(user_id) };
+        let params = HelloParams { client_name: "aurelius".into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key: None, accepts: self.accepts.clone(), user_id: Some(user_id) };
         self.read(Method::SessionHello(params), body!(Hello)).await
     }
 
@@ -1429,8 +1466,19 @@ pub async fn connect_or_spawn_with_streams(
     events: mpsc::UnboundedSender<Event>,
     streams: Option<mpsc::UnboundedSender<StreamDelta>>,
 ) -> Result<Client, ClientError> {
+    spawn_and_connect(root, client_name, events, streams, accepted(&[])).await
+}
+
+async fn spawn_and_connect(
+    root: &Path,
+    client_name: &str,
+    events: mpsc::UnboundedSender<Event>,
+    streams: Option<mpsc::UnboundedSender<StreamDelta>>,
+    accepts: Vec<String>,
+) -> Result<Client, ClientError> {
     let endpoint = aurelius_host::endpoint(root);
-    if let Ok(client) = Client::connect_with_streams(&endpoint, client_name, events.clone(), streams.clone()).await {
+    let connect = || async { Client::start(transport::pipe(&endpoint).await?, None, client_name, events.clone(), streams.clone(), accepts.clone()).await };
+    if let Ok(client) = connect().await {
         return Ok(client);
     }
     let daemon = daemon_path().map_err(|e| ClientError::Unreachable(e.to_string()))?;
@@ -1438,7 +1486,7 @@ pub async fn connect_or_spawn_with_streams(
     let mut last = None;
     for _ in 0..50 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        match Client::connect_with_streams(&endpoint, client_name, events.clone(), streams.clone()).await {
+        match connect().await {
             Ok(client) => return Ok(client),
             Err(err) => last = Some(err),
         }

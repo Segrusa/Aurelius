@@ -40,15 +40,17 @@ fn json_or_null<T: serde::Serialize>(value: &T, empty: bool) -> Result<Option<St
 }
 
 /// Insert a ticket at the bottom of its column with the next number of the
-/// company; returns the number. Version 1.
+/// company, with its discussion (`discussions::ticket_conversation`); returns
+/// the number. Version 1.
 pub fn insert(tx: &Transaction<'_>, ticket: &NewTicket<'_>) -> Result<u32, StorageError> {
     let number: i64 = tx.query_row("SELECT COALESCE(MAX(number), 0) + 1 FROM tickets", [], |r| r.get(0))?;
     let position = next_position(tx, ticket.column_id)?;
     let now = now_ms();
+    let discussion = crate::discussions::insert_ticket_discussion(tx, ticket.project_id, &crate::discussions::ticket_discussion_title(number as u32, ticket.title))?;
     tx.execute(
         "INSERT INTO tickets(id, company_id, project_id, number, title, description_blob_id, column_id, position, priority, created_by_user,
-                             owner_employee_id, run_json, labels_json, deadline_ms, version, created_at_ms, updated_at_ms)
-         VALUES (?1, (SELECT id FROM company), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14)",
+                             owner_employee_id, run_json, labels_json, deadline_ms, version, created_at_ms, updated_at_ms, conversation_id)
+         VALUES (?1, (SELECT id FROM company), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14, ?15)",
         params![
             ticket.id.to_string(),
             ticket.project_id.to_string(),
@@ -64,6 +66,7 @@ pub fn insert(tx: &Transaction<'_>, ticket: &NewTicket<'_>) -> Result<u32, Stora
             json_or_null(&ticket.labels, ticket.labels.is_empty())?,
             ticket.deadline_ms,
             now,
+            discussion.to_string(),
         ],
     )?;
     Ok(number as u32)
@@ -159,6 +162,12 @@ pub fn update_fields(tx: &Transaction<'_>, id: TicketId, fields: &TicketFields<'
     let id = id.to_string();
     if let Some(title) = fields.title {
         tx.execute("UPDATE tickets SET title = ?2 WHERE id = ?1", params![id, title])?;
+        // Its discussion follows the title.
+        tx.execute(
+            "UPDATE conversations SET title = '#' || (SELECT number FROM tickets WHERE id = ?1) || ' ' || ?2
+             WHERE id = (SELECT conversation_id FROM tickets WHERE id = ?1)",
+            params![id, title],
+        )?;
     }
     if let Some(blob) = fields.description_blob {
         tx.execute("UPDATE tickets SET description_blob_id = ?2 WHERE id = ?1", params![id, blob])?;
@@ -259,7 +268,7 @@ pub struct TicketFilter {
 
 const SELECT: &str = "SELECT k.id, k.number, k.project_id, p.name, k.title, db.storage_key, k.column_id, c.kind, k.position, k.priority,
         k.created_by_user, u.username, k.owner_employee_id, e.name, k.run_json, k.labels_json, k.deadline_ms, k.root_task_id, t.status,
-        k.review_feedback, k.version, k.created_at_ms, k.updated_at_ms, k.started_at_ms, k.done_at_ms, k.archived_at_ms, k.attachments_json
+        k.review_feedback, k.version, k.created_at_ms, k.updated_at_ms, k.started_at_ms, k.done_at_ms, k.archived_at_ms, k.attachments_json, k.conversation_id
      FROM tickets k
      JOIN projects p ON p.id = k.project_id
      JOIN board_columns c ON c.id = k.column_id
@@ -316,6 +325,7 @@ pub fn list(conn: &Connection, filter: &TicketFilter, read_blob: &dyn Fn(&str) -
                     started_at_ms: r.get(23)?,
                     done_at_ms: r.get(24)?,
                     archived_at_ms: r.get(25)?,
+                    conversation_id: r.get::<_, Option<String>>(27)?.and_then(|c| aurelius_domain::ConversationId::parse(&c).ok()),
                 },
                 description,
             ))

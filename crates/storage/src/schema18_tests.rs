@@ -40,8 +40,8 @@ fn the_released_migrations_are_unchanged() {
     for (m, sum) in migrate::MIGRATIONS.iter().zip(RELEASED) {
         assert_eq!(migrate::checksum(m.sql), sum, "migration {} changed", m.version);
     }
-    let last = migrate::MIGRATIONS.last().unwrap();
-    assert_eq!((last.version, last.rebuild), (18, true));
+    let board = migrate::MIGRATIONS.iter().find(|m| m.version == 18).unwrap();
+    assert!(board.rebuild);
     assert_eq!(migrate::LAST_PROTOCOL_2_VERSION, 13);
 }
 
@@ -83,7 +83,7 @@ fn a_new_database_has_one_company_with_six_columns() {
 #[test]
 fn a_ticket_needs_its_board_member() {
     let dir = tempfile::tempdir().unwrap();
-    drop(Store::open(dir.path()).unwrap());
+    drop(Store::open_until(dir.path(), 18).unwrap());
     let conn = db(dir.path());
     let company: String = conn.query_row("SELECT id FROM company", [], |r| r.get(0)).unwrap();
     let backlog: String = conn.query_row("SELECT id FROM board_columns WHERE kind = 'backlog'", [], |r| r.get(0)).unwrap();
