@@ -47,6 +47,7 @@ mod screens {
     pub mod ticket;
     pub mod discussion;
     pub mod team_feed;
+    pub mod threads;
     pub mod ticket_discussion;
     pub mod vault;
     pub mod guidelines;
