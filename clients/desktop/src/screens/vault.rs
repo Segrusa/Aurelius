@@ -127,6 +127,15 @@ pub fn text_back(now: &str, held: &str) -> String {
     }
 }
 
+/// The composer's text after Cancel, once the window shows `place`, where the held
+/// message was sent from (AUR-CHAT-001 R2 D-M1): the composer still holds the channel
+/// it came from, so that text first stays with that channel's draft, and the held
+/// text goes back into `place`'s own draft.
+pub fn held_back_in(drafts: &mut crate::screens::discussion::Drafts, place: crate::screens::discussion::DraftPlace, composer: &str, held: &str) -> String {
+    let now = drafts.moved(place, composer).unwrap_or_else(|| composer.to_string());
+    text_back(&now, held)
+}
+
 /// The images and files of a held message, back beside the composer (those still there, once each).
 pub fn attachments_back(command: &aurelius_domain::Command) -> (Vec<std::path::PathBuf>, Vec<std::path::PathBuf>) {
     use aurelius_domain::Command;
@@ -1188,7 +1197,9 @@ impl AppView {
                 HeldIn::Ticket | HeldIn::Feedback(_) | HeldIn::Plan | HeldIn::Form => {}
             }
         }
-        let text = text_back(&self.composer.read(cx).value(), hold.text());
+        let now = self.composer.read(cx).value().to_string();
+        let place = self.draft_place();
+        let text = held_back_in(&mut self.drafts, place, &now, hold.text());
         self.composer.update(cx, |i, cx| i.set_value(text, window, cx));
         let (images, files) = attachments_back(&hold.command);
         for image in images {
@@ -1906,6 +1917,26 @@ mod tests {
         assert_eq!(text_back("", "held"), "held");
         assert_eq!(text_back("typed since", "held"), "typed since\n\nheld", "nothing is lost");
         assert!(HELD_BODY.contains("«secret:KEY»") && !HELD_BODY.contains('‹'));
+    }
+
+    /// AUR-CHAT-001 R2 D-M1: sent in #a, the user went to #b before the hold came; Cancel goes
+    /// back to #a before the composer (still showing #b) is read, as `vault_hold_cancel` does.
+    #[test]
+    fn a_held_message_cancelled_after_switching_channels_comes_back_in_its_own_channel() {
+        use crate::screens::discussion::{DraftPlace, Drafts};
+        use aurelius_domain::ConversationId;
+        let (a, b) = (DraftPlace::Channel(Some(ConversationId::new())), DraftPlace::Channel(Some(ConversationId::new())));
+        let mut drafts = Drafts::default();
+        assert_eq!(drafts.moved(a, ""), None, "the composer starts in #a");
+        assert_eq!(drafts.moved(b, ""), Some(String::new()), "sent in #a, then over to #b");
+        let typed_in_b = "typed in b";
+        let in_a = held_back_in(&mut drafts, a, typed_in_b, "token sk-123");
+        assert_eq!(in_a, "token sk-123", "the held text is back in #a's composer, without #b's text");
+        assert_eq!(drafts.at(), Some(a), "render has nothing left to swap");
+        assert_eq!(drafts.moved(b, &in_a).as_deref(), Some(typed_in_b), "#b keeps only its own draft");
+        assert_eq!(drafts.moved(a, typed_in_b).as_deref(), Some("token sk-123"), "#a keeps the held text");
+        // Cancel in the channel it was sent from: the text typed since stays above the held text.
+        assert_eq!(held_back_in(&mut drafts, a, "since", "held"), "since\n\nheld");
     }
 
     /// AUR-MU-04-D3: the other text commands' Cancel. Feedback goes back to its field; the New ticket

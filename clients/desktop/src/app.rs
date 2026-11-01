@@ -4716,6 +4716,26 @@ impl AppView {
         Place { screen: self.screen }
     }
 
+    /// Where the main composer's text belongs now: the Team chat's channel, or the other pages.
+    pub fn draft_place(&self) -> crate::screens::discussion::DraftPlace {
+        match self.screen {
+            Page::GroupChat => crate::screens::discussion::DraftPlace::Channel(self.channel),
+            _ => crate::screens::discussion::DraftPlace::Elsewhere,
+        }
+    }
+
+    /// The composer's text stays with the channel (or page) it was typed in (Q1 o2):
+    /// on each render, and before anything reads the composer after a navigation (R2 D-M1).
+    pub fn settle_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let place = self.draft_place();
+        if self.drafts.at() != Some(place) {
+            let text = self.composer.read(cx).value().to_string();
+            if let Some(draft) = self.drafts.moved(place, &text) {
+                self.composer.update(cx, |input, cx| input.set_value(draft, window, cx));
+            }
+        }
+    }
+
     /// Remember every change of place (called on each render), so ← and →
     /// work like a browser whatever caused the change.
     fn track_place(&mut self) {
@@ -6984,14 +7004,7 @@ impl Render for AppView {
         if let Some(text) = self.pending_placeholder.take() {
             self.composer.update(cx, |input, cx| input.set_placeholder(text, window, cx));
         }
-        // The composer's text stays with the channel (or page) it was typed in (Q1 o2).
-        let place = if self.screen == Page::GroupChat { crate::screens::discussion::DraftPlace::Channel(self.channel) } else { crate::screens::discussion::DraftPlace::Elsewhere };
-        if self.drafts.at() != Some(place) {
-            let text = self.composer.read(cx).value().to_string();
-            if let Some(draft) = self.drafts.moved(place, &text) {
-                self.composer.update(cx, |input, cx| input.set_value(draft, window, cx));
-            }
-        }
+        self.settle_draft(window, cx);
         if let Some(text) = self.pending_notice.take() {
             self.notify_user(text, true, cx);
         }
