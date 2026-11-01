@@ -626,6 +626,47 @@ pub fn assignees(detail: &aurelius_domain::ticket::TicketDetail) -> Vec<String> 
 /// Assignees shown by name before the rest fold into "+n" (ui-ontwerp §3).
 pub const ASSIGNEES_SHOWN: usize = 2;
 
+// ---- Drafts -----------------------------------------------------------------------
+
+/// Where the main composer's text belongs (AUR-CHAT-001 Q1 o2): a Team chat channel
+/// (none: #general), or the other pages, which share it as before.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DraftPlace {
+    Channel(Option<aurelius_domain::ConversationId>),
+    Elsewhere,
+}
+
+/// The composer's drafts per place: a draft stays in the channel it was typed in, also
+/// when that channel closes and the Team chat goes back to #general.
+#[derive(Default, Debug)]
+pub struct Drafts {
+    at: Option<DraftPlace>,
+    kept: std::collections::HashMap<DraftPlace, String>,
+}
+
+impl Drafts {
+    /// Where the composer's text is from.
+    pub fn at(&self) -> Option<DraftPlace> {
+        self.at
+    }
+
+    /// The composer, holding `text`, now shows `to`: `text` stays with the place it was
+    /// typed in, and the composer gets `to`'s draft (empty without one). None when
+    /// the composer keeps its text: the same place, or the first place it shows.
+    pub fn moved(&mut self, to: DraftPlace, text: &str) -> Option<String> {
+        let from = self.at.replace(to)?;
+        if from == to {
+            return None;
+        }
+        if text.trim().is_empty() {
+            self.kept.remove(&from);
+        } else {
+            self.kept.insert(from, text.to_string());
+        }
+        Some(self.kept.remove(&to).unwrap_or_default())
+    }
+}
+
 // ---- A ticket from a message -----------------------------------------------------------
 
 /// Longest title the form fills in from a message.
@@ -924,6 +965,30 @@ mod tests {
         // A closed ticket's channel keeps its read-only text.
         let done = ticket_channel(12, true, 100, 0, 0);
         assert_eq!(ticket_channel_hint(&done, Some(&doing)), "#12 is Done · read-only.");
+    }
+
+    /// Q1 o2: switching channels keeps each draft with its own channel; a draft typed in a
+    /// channel that closes (the Team chat goes back to #general) never moves to #general.
+    #[test]
+    fn switching_channels_keeps_each_draft_with_its_own_channel() {
+        let (one, two) = (Some(ConversationId::new()), Some(ConversationId::new()));
+        let mut drafts = Drafts::default();
+        assert_eq!(drafts.moved(DraftPlace::Channel(one), ""), None, "the first place keeps the composer as it is");
+        assert_eq!(drafts.moved(DraftPlace::Channel(one), "half"), None, "same channel");
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for #1"), Some(String::new()), "#2 starts empty");
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), "for #2"), Some(String::new()), "#general has its own");
+        assert_eq!(drafts.moved(DraftPlace::Channel(one), "for general"), Some("for #1".into()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for #1"), Some("for #2".into()));
+        // #2 closes while its draft is typed: the Team chat goes to #general without it.
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), "for #2, more"), Some("for general".into()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for general"), Some("for #2, more".into()), "still #2's");
+        // Sent (the composer empty): nothing is kept for it.
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), ""), Some("for general".into()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for general"), Some(String::new()));
+        // The other pages share one draft, as before, apart from the channels'.
+        assert_eq!(drafts.moved(DraftPlace::Elsewhere, "  "), Some(String::new()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), "to Forge"), Some("for general".into()));
+        assert_eq!(drafts.moved(DraftPlace::Elsewhere, "for general"), Some("to Forge".into()));
     }
 
     #[test]

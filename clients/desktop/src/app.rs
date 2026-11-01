@@ -1057,6 +1057,8 @@ pub struct AppView {
     pub channel_divider: Option<(ConversationId, usize, Option<u32>)>,
     /// The first message after the "New" divider in the open channel (it stays there while more come).
     pub channel_new_at: Option<MessageId>,
+    /// The composer's drafts per Team chat channel (and one for the other pages).
+    pub drafts: crate::screens::discussion::Drafts,
     /// The archived projects' channels are unfolded.
     pub channels_archived_open: bool,
     /// "Show more" was chosen under Tickets / under Archived (AUR-CHAT-001, O-5).
@@ -1583,6 +1585,7 @@ impl AppView {
             channel_refused: None,
             group_mentions: Default::default(),
             channels_followed: false,
+            drafts: Default::default(),
             subagents_open: false,
             subagents: None,
             subagents_stepped: false,
@@ -6980,6 +6983,14 @@ impl Render for AppView {
         self.sync_artifact_webview();
         if let Some(text) = self.pending_placeholder.take() {
             self.composer.update(cx, |input, cx| input.set_placeholder(text, window, cx));
+        }
+        // The composer's text stays with the channel (or page) it was typed in (Q1 o2).
+        let place = if self.screen == Page::GroupChat { crate::screens::discussion::DraftPlace::Channel(self.channel) } else { crate::screens::discussion::DraftPlace::Elsewhere };
+        if self.drafts.at() != Some(place) {
+            let text = self.composer.read(cx).value().to_string();
+            if let Some(draft) = self.drafts.moved(place, &text) {
+                self.composer.update(cx, |input, cx| input.set_value(draft, window, cx));
+            }
         }
         if let Some(text) = self.pending_notice.take() {
             self.notify_user(text, true, cx);
