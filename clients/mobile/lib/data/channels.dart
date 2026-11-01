@@ -89,6 +89,12 @@ String channelReadOnlyNote(ChannelView c) {
 /// The composer's hint in a channel (§4): "Message #42-login-per… · @ to mention".
 String channelHint(ChannelView c) => 'Message ${channelLabel(c)} · @ to mention';
 
+/// A thread screen's title (AUR-CHAT-002 §5): "Thread · #42-login-per…".
+String threadTitle(ChannelView c) => 'Thread · ${channelLabel(c)}';
+
+/// The composer's hint in a thread (§5).
+const threadHint = 'Reply… · @ to mention';
+
 /// The day separator's label (§2): "Today", "Yesterday", else "Mon 27 Oct",
 /// with the year when it is not this year.
 String dayLabel(DateTime day, DateTime now) {

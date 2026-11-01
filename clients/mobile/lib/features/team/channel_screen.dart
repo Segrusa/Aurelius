@@ -16,6 +16,7 @@ import 'channel_list.dart';
 import 'channel_ticket_bloc.dart';
 import 'channels_bloc.dart';
 import 'team_page.dart';
+import 'thread_screen.dart';
 
 /// One channel of the Slack-style Team chat (AUR-CHAT-001 §2–§4, §6): its
 /// header, the flat message list and the composer, or the read-only bar when
@@ -40,6 +41,20 @@ class ChannelScreen extends StatelessWidget {
     return true;
   }
 
+  /// Pushes the thread of [root] (AUR-CHAT-002 §5); [context] is under the
+  /// channel's [ChatBloc], which learns who replied and reads the root's
+  /// counters again when the thread closes.
+  void _openThread(BuildContext context, ChannelView live, MessageView root) {
+    final bloc = context.read<ChatBloc>();
+    void seen(ThreadSnapshot thread) {
+      if (!bloc.isClosed) bloc.add(ChatThreadSeen(root.id, threadRepliers(thread.replies)));
+    }
+
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ThreadScreen(channel: live, root: root, onRead: seen))).then((_) {
+      if (!bloc.isClosed) bloc.add(const ChatRefreshed());
+    });
+  }
+
   void _readChannels(BuildContext context) {
     if (!context.mounted) return;
     try {
@@ -57,6 +72,10 @@ class ChannelScreen extends StatelessWidget {
     final general = live.projectId == null && !isTicketChannel(live);
     final company = context.read<CompanyBloc>();
     final label = channelLabel(live);
+    // Threads and reactions only when the server has them (AUR-CHAT-002); otherwise as in phase 1.
+    final link = context.read<AureliusRepository>().linkState;
+    final threads = link.has(chatThreadsFeature);
+    final reactions = link.has(chatReactionsFeature);
     Widget page = Scaffold(
       appBar: ChannelAppBar(channel: live),
       body: BlocProvider(
@@ -101,6 +120,9 @@ class ChannelScreen extends StatelessWidget {
                 readThrough: readThrough,
                 closedNote: channelReadOnlyNote(live),
                 openChannel: (linked) => _openLinked(context, linked),
+                threads: threads,
+                reactions: reactions,
+                openThread: threads ? (inner, root) => _openThread(inner, live, root) : null,
               ),
               source: TicketSource(from: 'Team chat · $label', projectId: live.projectId),
             ),
