@@ -109,7 +109,12 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
     _connection = AureliusConnection(host: widget.host, store: context.read<HostStore>(), api: context.read<GatewayApi>())..start();
     _repository = AureliusRepository(_connection);
     _boardMember = ValueNotifier(_connection.state.boardMemberStep);
-    _link = _connection.states.listen((s) => _boardMember.value = s.boardMemberStep);
+    final hosts = context.read<HostsBloc>();
+    _link = _connection.states.listen((s) {
+      _boardMember.value = s.boardMemberStep;
+      // The connection stored the server's new name: the paired PCs show it too.
+      if (s.hostName != null && s.hostName != hosts.state.active?.name) hosts.add(const HostsChanged());
+    });
     _router = AppRouter(widget.host, boardMember: _boardMember);
     _push = context.read<PushService>()..attach(_repository, _router);
     WidgetsBinding.instance.addObserver(this);

@@ -38,6 +38,7 @@ class LinkState extends Equatable {
     this.mustChangePassword = false,
     this.claudeLogin,
     this.signedOut,
+    this.hostName,
   });
 
   final LinkStatus status;
@@ -68,6 +69,14 @@ class LinkState extends Equatable {
   /// password, disabled): "You were signed out on this device." until seen.
   final SignOutReason? signedOut;
 
+  /// The server's name as it last said (hello, `server.get_name`); null
+  /// before the first hello. The same as the connection's `Host.name`.
+  final String? hostName;
+
+  /// A board member may rename the server here (SN-01 AC5): the server has
+  /// the feature, this phone is signed in and has the Owner right.
+  bool get canRenameServer => has(serverNameFeature) && user != null && can('owner');
+
   BoardMemberStep get boardMemberStep => switch ((boardMembersExist, user)) {
         (_, UserView()) => mustChangePassword ? BoardMemberStep.changePassword : BoardMemberStep.ready,
         (null, _) => BoardMemberStep.unknown,
@@ -87,6 +96,7 @@ class LinkState extends Equatable {
     List<String>? capabilities,
     String? daemonVersion,
     List<String>? features,
+    String? hostName,
   }) =>
       LinkState(
         status: status ?? this.status,
@@ -101,6 +111,7 @@ class LinkState extends Equatable {
         mustChangePassword: mustChangePassword,
         claudeLogin: claudeLogin,
         signedOut: signedOut,
+        hostName: hostName ?? this.hostName,
       );
 
   /// The same link with what the server said about the session's board member.
@@ -117,6 +128,7 @@ class LinkState extends Equatable {
         mustChangePassword: user != null && mustChangePassword,
         claudeLogin: user == null ? null : claudeLogin,
         signedOut: user == null ? signedOut : null,
+        hostName: hostName,
       );
 
   /// The same link with [login] as the own Claude login.
@@ -143,8 +155,12 @@ class LinkState extends Equatable {
         claudeLogin?.linkId,
         claudeLogin?.checkedAtMs,
         signedOut,
+        hostName,
       ];
 }
+
+/// `HelloResult.features`: the server's name can be read and set (SN-01).
+const serverNameFeature = 'server_name';
 
 /// The write was not delivered and will not be retried automatically.
 /// Resend with the same [idempotencyKey] to apply it at most once.
@@ -215,19 +231,22 @@ class _Pending {
 /// reconnect with backoff and an outbox of unconfirmed writes.
 class AureliusConnection {
   AureliusConnection({
-    required this.host,
+    required Host host,
     required HostStore store,
     GatewayApi? api,
     SocketFactory? connect,
     this.clientName = 'aurelius-mobile',
     this.clientVersion = '0.7.0',
     String? deviceName,
-  })  : _store = store, // ignore: prefer_initializing_formals
+  })  : _host = host, // ignore: prefer_initializing_formals
+        _store = store, // ignore: prefer_initializing_formals
         deviceName = deviceName ?? (Platform.isIOS ? 'iPhone' : Platform.isAndroid ? 'Android phone' : 'Phone'),
         api = api ?? GatewayApi(),
         _connect = connect ?? _connectSocket;
 
-  final Host host;
+  /// The host this connection talks to, under the name the server last said.
+  Host get host => _host;
+  Host _host;
   final GatewayApi api;
   final HostStore _store;
   final SocketFactory _connect;
@@ -248,6 +267,7 @@ class AureliusConnection {
   final _loads = StreamController<LoadSnapshot>.broadcast();
   final _powers = StreamController<PowerState>.broadcast();
   final _prompts = StreamController<ClaudeLoginPrompt>.broadcast();
+  final _serverNames = StreamController<ServerNameView>.broadcast();
   final Map<int, Completer<ResponseBody>> _waiting = {};
   final List<_Pending> _outbox = [];
 
@@ -281,6 +301,9 @@ class AureliusConnection {
   /// (`claude_login_prompt`). Never logged or kept: the link and the code
   /// live in the Connect sheet only.
   Stream<ClaudeLoginPrompt> get claudeLoginPrompts => _prompts.stream;
+
+  /// Each `server.get_name` answer: the first read and every `server.renamed`.
+  Stream<ServerNameView> get serverNames => _serverNames.stream;
 
   void _emit(LinkState next) {
     if (_disposed || next == _state) return;
@@ -317,6 +340,7 @@ class AureliusConnection {
     await _loads.close();
     await _powers.close();
     await _prompts.close();
+    await _serverNames.close();
   }
 
   Future<void> _run() async {
@@ -431,6 +455,8 @@ class AureliusConnection {
     // without one they follow the sign-in (or the new password).
     _subscribed = false;
     if (hello.user != null && !(hello.mustChangePassword ?? false)) await _subscribe();
+    // Every hello brings the server's name; a rename while away lands here (SN-02 AC2).
+    await _rename(hello.hostName);
     final now = DateTime.now().millisecondsSinceEpoch;
     _emit(LinkState(
       status: LinkStatus.online,
@@ -443,6 +469,7 @@ class AureliusConnection {
       mustChangePassword: hello.user != null && (hello.mustChangePassword ?? false),
       claudeLogin: hello.user == null ? null : hello.claudeLogin,
       signedOut: hello.user == null ? _signedOutNotice : null,
+      hostName: _host.name,
     ));
     if (hello.user != null) _signedOutNotice = null;
     _flushOutbox();
@@ -521,6 +548,8 @@ class AureliusConnection {
         // The server forgets what it sent on these, so the next update is whole again.
         if (message.value.kind.wire.startsWith('message.') || message.value.kind.wire.startsWith('run.')) _calls.clear();
         if (message.value.kind == EventKind.claudeLoginUpdated && _state.user != null) unawaited(refreshClaudeLogin().catchError((Object _) => _state.claudeLogin));
+        // The next hello brings the name anyway when this read fails.
+        if (message.value.kind == EventKind.serverRenamed && _state.has(serverNameFeature)) unawaited(refreshServerName().then((_) {}, onError: (Object _) {}));
         _events.add(message.value);
         if (_state.isOnline) _emit(_state.copyWith(status: LinkStatus.online, lastOnlineMs: DateTime.now().millisecondsSinceEpoch, message: _state.message));
       case ServerMessageStreamAppend():
@@ -713,6 +742,29 @@ class AureliusConnection {
     final login = (body as ResponseBodyClaudeLogin).value;
     _emit(_state.withClaudeLogin(login));
     return login;
+  }
+
+  /// The server's name, asked again (`server.get_name`; only with the
+  /// feature `server_name`). It becomes [host]'s name, here and in the host
+  /// store, and goes to [serverNames].
+  Future<ServerNameView> refreshServerName() async {
+    final view = (await call(serverGetName()) as ResponseBodyServerName).value;
+    await applyServerName(view.name);
+    if (!_serverNames.isClosed) _serverNames.add(view);
+    return view;
+  }
+
+  /// [name] as the server's name (a `server.set_name` receipt, a read).
+  Future<void> applyServerName(String name) async {
+    await _rename(name);
+    if (_state.hostName != _host.name) _emit(_state.copyWith(status: _state.status, message: _state.message, retryAtMs: _state.retryAtMs, hostName: _host.name));
+  }
+
+  /// [name] becomes [host]'s name and the stored one, when it differs.
+  Future<void> _rename(String name) async {
+    if (name.trim().isEmpty || name == _host.name || _disposed) return;
+    _host = _host.withName(name);
+    await _store.rename(_host.hostId, name);
   }
 
   /// [login] as the own Claude login (an answer that carries it).

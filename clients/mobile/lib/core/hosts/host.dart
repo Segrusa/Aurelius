@@ -25,7 +25,8 @@ class Host extends Equatable {
 
   final String hostId;
 
-  /// The PC's name, e.g. `my-pc`.
+  /// The server's name as it last said (`HelloResult.host_name`): the name a
+  /// board member chose, else the computer's, e.g. `my-pc`.
   final String name;
 
   /// Gateway base URL, e.g. `https://my-pc.tail1234.ts.net:8443`.
@@ -46,6 +47,9 @@ class Host extends Equatable {
     final base = Uri.parse(url);
     return base.replace(scheme: base.scheme == 'https' ? 'wss' : 'ws', path: '/v1/ws');
   }
+
+  /// The same host under the server's [name] (`server.renamed`, a hello).
+  Host withName(String name) => Host(hostId: hostId, name: name, url: url, clientId: clientId, environment: environment, pairedAtMs: pairedAtMs);
 
   Map<String, dynamic> toJson() => {
         'host_id': hostId,

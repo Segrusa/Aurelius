@@ -32,6 +32,12 @@ class HostForgotten extends HostsEvent {
   final String hostId;
 }
 
+/// The store changed under the bloc: a host got the server's new name
+/// (`server.renamed` or a hello, SN-02).
+class HostsChanged extends HostsEvent {
+  const HostsChanged();
+}
+
 class HostsState extends Equatable {
   const HostsState({this.loading = true, this.hosts = const [], this.activeId});
 
@@ -55,6 +61,7 @@ class HostsState extends Equatable {
 class HostsBloc extends Bloc<HostsEvent, HostsState> {
   HostsBloc(this._store) : super(const HostsState()) {
     on<HostsStarted>((event, emit) async => emit(await _load()));
+    on<HostsChanged>((event, emit) async => emit(await _load()));
     on<HostPaired>((event, emit) async {
       await _store.save(event.host, event.deviceSecret);
       emit(await _load());
