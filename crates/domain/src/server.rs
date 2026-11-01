@@ -63,11 +63,17 @@ pub fn valid_server_name(name: &str) -> Result<Option<String>, DomainError> {
     if trimmed.chars().count() > SERVER_NAME_MAX {
         return Err(DomainError::TooLong { field: "name".into(), max: SERVER_NAME_MAX });
     }
-    // U+2028/U+2029 break a line without being control characters.
-    if trimmed.chars().any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}')) {
-        return Err(DomainError::ServerName("The server's name cannot contain line breaks or control characters.".into()));
+    if trimmed.chars().any(refused_char) {
+        return Err(DomainError::ServerName("The server's name cannot contain line breaks, control or invisible characters.".into()));
     }
     Ok(Some(trimmed.to_owned()))
+}
+
+/// Control characters, line breaks that are not (U+2028/U+2029), and the
+/// invisible and bidi format characters: a name of only those looks empty, a
+/// bidi override turns the shown name around.
+fn refused_char(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{2028}' | '\u{2029}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
 #[cfg(test)]
@@ -98,6 +104,13 @@ mod tests {
     #[test]
     fn line_breaks_and_control_characters_are_refused() {
         for name in ["Kan\ntoor", "Kan\rtoor", "Kan\u{7}toor", "Kan\u{2028}toor", "Kan\u{85}toor", "Kan\ttoor"] {
+            assert!(matches!(valid_server_name(name), Err(DomainError::ServerName(_))), "{name:?}");
+        }
+    }
+
+    #[test]
+    fn invisible_and_bidi_characters_are_refused() {
+        for name in ["\u{200B}", "\u{202E}gnp.exe", "a\u{2066}b", "\u{FEFF}", "Kan\u{200D}toor"] {
             assert!(matches!(valid_server_name(name), Err(DomainError::ServerName(_))), "{name:?}");
         }
     }

@@ -764,7 +764,10 @@ class AureliusConnection {
   Future<void> _rename(String name) async {
     if (name.trim().isEmpty || name == _host.name || _disposed) return;
     _host = _host.withName(name);
-    await _store.rename(_host.hostId, name);
+    // The name is only shown: a store that cannot write it must not fail the hello.
+    try {
+      await _store.rename(_host.hostId, name);
+    } catch (_) {}
   }
 
   /// [login] as the own Claude login (an answer that carries it).

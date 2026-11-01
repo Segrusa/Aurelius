@@ -30,6 +30,15 @@ void main() {
     setUp(() => daemon = FakeDaemon()..features = const [serverNameFeature]);
     tearDown(() => connection.dispose());
 
+    test('a store that cannot keep the name does not stop the hello', () async {
+      final failing = _FailingRenameStore();
+      await failing.save(testHost, 'secret');
+      daemon.chosenName = 'Office';
+      connection = AureliusConnection(host: testHost, store: failing, api: FakeApi(), connect: daemon.connect)..start();
+      await until(() => connection.state.isOnline);
+      expect(connection.host.name, 'Office', reason: 'shown, though not kept');
+    });
+
     test("a hello with another name overwrites the stored one, matched on host_id (AC2)", () async {
       daemon.chosenName = 'Office';
       await connect(signedIn: false);
@@ -122,4 +131,10 @@ void main() {
       expect(linkOf(capabilities: const ['read', 'chat', 'task_control', 'approve']).canRenameServer, isFalse);
     });
   });
+}
+
+/// A store whose [rename] fails, as SharedPreferences can.
+class _FailingRenameStore extends MemoryHostStore {
+  @override
+  Future<void> rename(String hostId, String name) async => throw StateError('disk full');
 }
