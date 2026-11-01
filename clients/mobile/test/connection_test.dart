@@ -100,8 +100,9 @@ void main() {
     await until(() => connection.state.isOnline);
     // team_channels: only then do the live events of project channels come (MU2-08, impactanalyse §2);
     // server_name: only then does server.renamed come (SN-02 AC3);
-    // ticket_channels: only then does channel.list list ticket channels (AUR-CHAT-001).
-    expect(daemon.hello?['accepts'], ['activity_changes', 'team_channels', 'server_name', 'ticket_channels']);
+    // ticket_channels: only then does channel.list list ticket channels (AUR-CHAT-001);
+    // chat_threads / chat_reactions: only then do thread streams and message.reacted come (AUR-CHAT-002).
+    expect(daemon.hello?['accepts'], ['activity_changes', 'team_channels', 'server_name', 'ticket_channels', 'chat_threads', 'chat_reactions']);
     final got = <List<String>?>[];
     final sub = connection.appends.listen((a) => got.add(a.activity?.map((c) => '${c.callId}:${c.ok}').toList()));
     addTearDown(sub.cancel);
@@ -129,5 +130,43 @@ void main() {
       null,
       ['c:null'],
     ]);
+  });
+
+  test("a thread's stream keeps its thread_parent when its activity is merged (AUR-CHAT-002)", () async {
+    connection.start();
+    await until(() => connection.state.isOnline);
+    final got = <String?>[];
+    final sub = connection.appends.listen((a) => got.add(a.threadParent));
+    addTearDown(sub.cancel);
+    void append({bool changes = false}) => daemon.current!.push({
+          'type': 'stream_append',
+          'run_id': 'r',
+          'conversation_id': 'c',
+          'message_id': 'm',
+          'offset': 0,
+          'text': '',
+          'activity': [
+            {'call_id': 'a', 'tool': 'Bash', 'input': {'command': 'ls'}, 'offset': 0},
+          ],
+          if (changes) 'activity_changes': true,
+          'thread_parent': 'root-1',
+        });
+    append();
+    append(changes: true);
+    await until(() => got.length == 2);
+    expect(got, ['root-1', 'root-1']);
+  });
+
+  test('an event kind this app does not know is dropped; the next one still comes (AUR-CHAT-002)', () async {
+    connection.start();
+    await until(() => connection.state.isOnline);
+    final got = <String>[];
+    final sub = connection.events.listen((e) => got.add(e.kind.wire));
+    addTearDown(sub.cancel);
+    daemon.current!.push({'type': 'event', 'seq': 11, 'kind': 'message.something_new', 'aggregate_id': 'c', 'at_ms': 0});
+    daemon.current!.push({'type': 'event', 'seq': 12, 'kind': 'message.reacted', 'aggregate_id': 'c', 'at_ms': 0});
+    await until(() => got.isNotEmpty);
+    expect(got, ['message.reacted']);
+    expect(connection.state.isOnline, isTrue);
   });
 }
