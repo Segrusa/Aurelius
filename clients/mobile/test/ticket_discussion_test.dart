@@ -313,6 +313,15 @@ void main() {
       expect(paramsOf(write), {'ticket_id': 'k1', 'feedback': 'Add a test for the cost.'});
     });
 
+    testWidgets('Testing: a word goes to the owner as in Review, without Send back or Done (ticket #5)', (tester) async {
+      await open(tester, discussed(column: ColumnKind.testing, rootTaskStatus: TaskStatus.review), const []);
+      expect(find.text('Message Forge (owner) · @ to mention someone else'), findsOneWidget);
+      expect(find.byKey(const ValueKey('discussion-send-back')), findsNothing);
+      expect(find.byKey(const ValueKey('discussion-done')), findsNothing);
+      await send(tester, 'Which suite fails?');
+      expect(writesOf(repo).single['method'], 'ticket.post');
+    });
+
     testWidgets('Review: the report card opens the report (ui-ontwerp §2 "Report ›")', (tester) async {
       await open(tester, discussed(column: ColumnKind.review), [lineOf('s1', SystemLineKind.review, 'Forge reported.', taskId: 'root', from: 'Forge')]);
       await tester.tap(find.text('Report ›'));

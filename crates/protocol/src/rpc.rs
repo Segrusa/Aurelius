@@ -273,6 +273,11 @@ pub mod feature {
     /// `group_chat.send { channel }`. Live events of project channels go only to
     /// connections whose `HelloParams::accepts` names `team_channels`.
     pub const TEAM_CHANNELS: &str = "team_channels";
+    /// The Testing column (protocol 5, additive): `ColumnKind::Testing` between
+    /// Plan review and Review, the company tester (`company.update { tester }`,
+    /// `CompanyView::tester_employee_id`) and the event `ticket.tested`. A client
+    /// shows Testing and the tester picker only when the server has this.
+    pub const BOARD_TESTING: &str = "board_testing";
     /// The vault (protocol 5, additive): `vault.list`, `vault.reveal`,
     /// `vault.audit`, `vault.key_export`, the writes `vault.create`,
     /// `vault.update`, `vault.archive`, the events `vault.item_created` /
@@ -332,6 +337,7 @@ pub const FEATURES: &[&str] = &[
     feature::TEAM_CHANNELS,
     feature::VAULT,
     feature::GUIDELINES,
+    feature::BOARD_TESTING,
     feature::SERVER_NAME,
     feature::TICKET_ADD_FILES,
 ];

@@ -136,7 +136,7 @@ class _TicketViewState extends State<_TicketView> {
     final owner = ticket.ownerName ?? employeeName(company, ticket.ownerEmployeeId);
     final dispatcher = dispatcherName(company, ticket.projectId);
     final expired = link.claudeLogin?.status == ClaudeLoginStatus.expired;
-    final line = state.line(owner: owner, dispatcher: dispatcher, login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired);
+    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired);
     final segment = conversation == null && _segment == _Segment.discussion ? _Segment.ticket : _segment;
     final scaffold = Scaffold(
       appBar: GlassAppBar(
@@ -276,6 +276,7 @@ class _TicketViewState extends State<_TicketView> {
         ColumnKind.todo => 'Todo',
         ColumnKind.doing => 'Doing',
         ColumnKind.planReview => 'Plan review',
+        ColumnKind.testing => 'Testing',
         ColumnKind.review => 'Review',
         ColumnKind.done => 'Done',
       };
@@ -355,6 +356,12 @@ class _TicketViewState extends State<_TicketView> {
       if (state == TicketState.waitingForYou) _Notice(attention: true, title: '◆ Waiting for your approval', body: 'Answer it in the Inbox.', action: ('Open Inbox', () => context.go('/inbox'))),
       if (state == TicketState.planReview)
         _Notice(attention: true, title: '◆ A plan waits for you', body: 'Approve it, or send it back with what needs to change.', action: ('Review plan', () => _reviewPlan(ticket))),
+      if (state == TicketState.testing)
+        _Notice(
+          key: const ValueKey('ticket-testing'),
+          title: '${testerName(company) ?? 'The tester'} is testing',
+          body: 'The full test suite runs once. Green goes on to Review; red goes back to Doing with the failures for the owner.',
+        ),
       if (state == TicketState.review) ...[
         GroupHeader('Report', caps: true, info: 'Only a board member decides. Done merges, pushes and deploys nothing.'),
         InsetGroup(padding: const EdgeInsets.all(16), children: [
@@ -606,7 +613,8 @@ class _ActionBar extends StatelessWidget {
             OutlinedButton(key: const ValueKey('bar-backlog'), onPressed: on(() => backToBacklog(context, ticket)), child: const Text('Back to Backlog')),
             FilledButton(key: const ValueKey('bar-use-my-login'), onPressed: on(() => _runOnMyLogin(context, ticket)), child: const Text('Run on my login')),
           ],
-        TicketState.waitingForLimit => [
+        // The tester moves it on (ticket #5): only a cancel, no Done or Send back.
+        TicketState.waitingForLimit || TicketState.testing => [
             OutlinedButton(key: const ValueKey('bar-backlog'), onPressed: on(() => backToBacklog(context, ticket)), child: const Text('Back to Backlog')),
           ],
         TicketState.working || TicketState.waitingForYou => [

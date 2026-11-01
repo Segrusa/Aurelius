@@ -38,7 +38,7 @@ fn phase_4_migrations_are_unchanged_and_23_is_additive() {
         assert_eq!(migrate::checksum(m.sql), sum, "migration {version} changed");
     }
     let m23 = migrate::MIGRATIONS.iter().find(|m| m.version == 23).unwrap();
-    assert_eq!((m23.rebuild, m23.then.is_some()), (false, false));
+    assert_eq!((m23.version, m23.rebuild, m23.then.is_some()), (23, false, false));
 }
 
 #[test]
@@ -95,9 +95,9 @@ fn a_phase_4_database_migrates_without_losing_anything() {
     let before = snapshot(&db(dir.path()));
     assert!(before.iter().any(|r| r.starts_with("vault_items:")) && before.iter().any(|r| r.starts_with("runs:")));
 
-    drop(Store::open(dir.path()).unwrap());
+    drop(Store::open_until(dir.path(), 23).unwrap());
     let conn = db(dir.path());
-    assert_eq!(conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get::<_, i64>(0)).unwrap(), migrate::supported_version());
+    assert_eq!(conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get::<_, i64>(0)).unwrap(), 23);
     assert!(strings(&conn, "SELECT \"table\" FROM pragma_foreign_key_check").is_empty());
     assert_eq!(snapshot(&conn), before);
     for table in TABLES {

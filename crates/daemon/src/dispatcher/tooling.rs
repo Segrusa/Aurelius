@@ -22,7 +22,9 @@ pub(super) fn tool_profile(shared: &Arc<Shared>, plan: &ChatRunPlan) -> ToolProf
                     // Management that chooses the mode of its task gets the set_mode tool.
                     let bridge = if plan.management_mode { with_flag(bridge, "--set-mode") } else { bridge };
                     // A run under a ticket, or woken from its discussion, reads and posts there.
-                    if plan.discussion { with_flag(bridge, "--discussion") } else { bridge }
+                    let bridge = if plan.discussion { with_flag(bridge, "--discussion") } else { bridge };
+                    // A ticket's test task gives its verdict (the daemon checks every call).
+                    if plan.testing { with_flag(bridge, "--testing") } else { bridge }
                 },
                 browser: plan.browser,
                 browser_session: plan.browser_session.clone(),

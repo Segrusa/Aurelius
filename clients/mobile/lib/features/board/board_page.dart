@@ -328,7 +328,7 @@ class _BoardPageState extends State<BoardPage> {
     final index = columns.indexWhere((c) => c.column.kind == opening).clamp(0, columns.length - 1);
     _pages ??= PageController(initialPage: index);
     return Column(children: [
-      // Six chips: all built (a lazy list would leave some out for screen readers).
+      // Every column's chip: all built (a lazy list would leave some out for screen readers).
       SingleChildScrollView(
         key: const ValueKey('board-chips'),
         scrollDirection: Axis.horizontal,

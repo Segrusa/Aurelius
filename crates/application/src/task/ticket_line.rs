@@ -10,9 +10,12 @@
 //! | Todo        | Draft (no owner yet) or Queued             |
 //! | Doing       | Running, Waiting (not for a plan), Failed  |
 //! | Plan review | Waiting(`plan_review`)                     |
+//! | Testing     | Review, while the tester's test task runs  |
 //! | Review      | Review                                     |
 //! | Done        | Succeeded (only through `ticket.accept`)   |
 //!
+//! A main task that reports goes to Testing instead of Review when the company
+//! has an active tester (`testing`); the tester's verdict moves the card on.
 //! A failed main task keeps the card in Doing (B6): Start makes a new main task,
 //! the old one stays linked through its `ticket_id`. Delegations below the main
 //! task (they have a parent) never move the card and stay as they are (§3.5).
@@ -185,8 +188,11 @@ fn worked_by(tx: &Tx<'_>, task: TaskId) -> Result<Option<Actor>, StorageError> {
 
 /// The hook of `task_line::set_status`: the card of a main task follows its status.
 pub(crate) fn on_status(tx: &Tx<'_>, task: TaskId, status: TaskStatus, waiting_reason: Option<&str>) -> Result<Vec<EventNotice>, StorageError> {
-    let Some((ticket, project, column)) = root_of(tx, task)? else { return Ok(vec![]) };
+    // Not a main task: a ticket's test task that ended may still have to move its card.
+    let Some((ticket, project, column)) = root_of(tx, task)? else { return crate::task::testing::on_ended(tx, task, status) };
     let Some(to) = column_for(status, waiting_reason) else { return Ok(vec![]) };
+    // A report goes to Testing first when the company has a tester.
+    let to = if to == ColumnKind::Review { crate::task::testing::column_after_report(tx)? } else { to };
     if status == TaskStatus::Failed && to == column {
         return failed_in_place(tx, task, ticket);
     }
@@ -205,6 +211,8 @@ pub(crate) fn on_status(tx: &Tx<'_>, task: TaskId, status: TaskStatus, waiting_r
     let what = match (status, column) {
         (TaskStatus::Failed, _) => Some("could not finish the main task"),
         (TaskStatus::Running, ColumnKind::Todo) => Some("started working"),
+        (TaskStatus::Running, ColumnKind::Testing) => Some("works on it after the failed tests"),
+        (TaskStatus::Review, _) => Some("reported"),
         _ => None,
     };
     if !matches!(to, ColumnKind::PlanReview | ColumnKind::Review) {
@@ -244,14 +252,24 @@ pub(crate) fn on_employee(tx: &Tx<'_>, task: TaskId, employee: Option<EmployeeId
 }
 
 /// The main task reported (it is in Review now, the card too): the board member
-/// accepts it or sends it back. Nothing else follows until then (§3.3).
-pub(crate) fn reported(tx: &Tx<'_>, task: TaskId) -> Result<Vec<EventNotice>, StorageError> {
-    let Some((ticket, project, _)) = root_of(tx, task)? else { return Ok(vec![]) };
-    let by = worked_by(tx, task)?;
-    let mut notices = vec![ticket_event(tx, ticket, project, EventKind::TicketReview, by, json!({ "task_id": task }))?];
-    // The final report → Review (MU2-03): a card with the main task, for a board member.
+/// accepts it or sends it back. Nothing else follows until then (§3.3). With a
+/// tester the card is in Testing instead, and the tester tests it first (`testing`).
+pub(crate) fn reported(tx: &Tx<'_>, st: &Store, task: TaskId) -> Result<Vec<EventNotice>, StorageError> {
+    let Some((ticket, project, column)) = root_of(tx, task)? else { return Ok(vec![]) };
+    if column == ColumnKind::Testing {
+        let report = report_text(tx, st, task)?;
+        return crate::task::testing::start(tx, st, task, ticket, project, &report);
+    }
+    review_lines(tx, ticket, project, task)
+}
+
+/// The card of the main task `root` is in Review: `ticket.review` and the
+/// Review line (MU2-03), a card with the main task for a board member.
+pub(crate) fn review_lines(tx: &Tx<'_>, ticket: TicketId, project: ProjectId, root: TaskId) -> Result<Vec<EventNotice>, StorageError> {
+    let by = worked_by(tx, root)?;
+    let mut notices = vec![ticket_event(tx, ticket, project, EventKind::TicketReview, by, json!({ "task_id": root }))?];
     let mut line = SystemLine::new(SystemLineKind::Review);
-    (line.from, line.task_id) = (Some(crate::conversation::discussion::actor_name(tx, by)?), Some(task));
+    (line.from, line.task_id) = (Some(crate::conversation::discussion::actor_name(tx, by)?), Some(root));
     notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, "")?);
     Ok(notices)
 }
@@ -347,10 +365,15 @@ fn username(tx: &Tx<'_>, user: UserId) -> Result<String, StorageError> {
 /// (send back, plan decided): Waiting/Review → Queued → Running and a run of the
 /// same session answers it, as `continue_when_done` does.
 pub(crate) fn resume_with(tx: &Tx<'_>, st: &Store, task: TaskId, user: UserId, text: &str, reason: &str) -> Result<Vec<EventNotice>, StorageError> {
+    let from = username(tx, user)?;
+    resume_as(tx, st, task, &from, text, reason)
+}
+
+/// `resume_with` with `text` from `from` (a board member's name, or the tester's).
+pub(crate) fn resume_as(tx: &Tx<'_>, st: &Store, task: TaskId, from: &str, text: &str, reason: &str) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = task_store::load_task(tx, task)? else { return Ok(vec![]) };
     let Some((conversation, _)) = task_store::task_conversation(tx, task)? else { return Ok(vec![]) };
-    let from = username(tx, user)?;
-    let (message, posted) = thread::post_returning(tx, st, conversation, task, Speaker::Update { kind: "message", from: &from }, text)?;
+    let (message, posted) = thread::post_returning(tx, st, conversation, task, Speaker::Update { kind: "message", from }, text)?;
     let mut notices = vec![posted];
     notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
     notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);

@@ -13,7 +13,8 @@
 //! `hand_over_task`, `add_idea`, `propose_colleague`, `propose_instructions` and `propose_guideline`;
 //! `list_guidelines` and `read_guideline` (reading the guidelines, information only); `read_group_chat`
 //! and `post_to_group_chat` (a channel of the company's group chat); `read_discussion` and
-//! `post_to_discussion` with `--discussion` (a run under a ticket). `--project` (the
+//! `post_to_discussion` with `--discussion` (a run under a ticket); `report_test_result`
+//! with `--testing` (a ticket's test task in the Testing column). `--project` (the
 //! assistant of a project conversation) leaves out `hand_over_task`, `propose_guideline`,
 //! `list_guidelines` and `read_guideline`.
 //! `--triage` (the dispatcher of a ticket choosing its owner) has only
@@ -42,6 +43,8 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
     let triage = args.iter().any(|a| a == "--triage");
     // A run under a ticket, or woken from its discussion: read_discussion and post_to_discussion.
     let discussion = args.iter().any(|a| a == "--discussion");
+    // A ticket's test task: report_test_result.
+    let testing = args.iter().any(|a| a == "--testing");
     let mut client: Option<BridgeClient> = None;
     let mut screen_granted = false;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
@@ -56,11 +59,11 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
                 "serverInfo": { "name": "aurelius", "version": env!("CARGO_PKG_VERSION") },
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion) } })),
+            "tools/list" => Ok(json!({ "tools": if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing) } })),
             "tools/call" => {
                 let name = msg["params"]["name"].as_str().unwrap_or("").to_owned();
                 let args = msg["params"]["arguments"].clone();
-                let call = if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, project, set_mode, discussion, &mut screen_granted, &name, args).await };
+                let call = if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing }, &mut screen_granted, &name, args).await };
                 match call {
                     Some(result) => Ok(result),
                     None => Err(json!({ "code": -32601, "message": "Method not found" })),
@@ -78,8 +81,33 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The optional tools a run offers (its flags).
+#[derive(Debug, Clone, Copy)]
+struct Offered {
+    project: bool,
+    set_mode: bool,
+    discussion: bool,
+    testing: bool,
+}
+
+/// The verdict tool of a ticket's test task (`--testing`).
+fn testing_tool_definition() -> Value {
+    json!({
+        "name": "report_test_result",
+        "description": "Give the verdict of the full test suite for the ticket in Testing, once, when the suite has finished. passed true: no new failures, the card goes to Review. passed false: the summary goes to the owner, who fixes it and reports again. Only the test task of a ticket in Testing can call this.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "passed": { "type": "boolean", "description": "true when there is no new failure compared with the known baseline failures." },
+                "summary": { "type": "string", "description": "N passed, N failed, N ignored; every new failure by name with its first lines; the known failures; the log path." }
+            },
+            "required": ["passed", "summary"]
+        }
+    })
+}
+
 /// Every tool this run offers.
-fn tool_definitions(project: bool, set_mode: bool, discussion: bool) -> Vec<Value> {
+fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bool) -> Vec<Value> {
     let mut tools = vec![json!({
         "name": "approve",
         "description": "Asks the Aurelius user to allow or deny one action. Only Claude Code calls this.",
@@ -102,6 +130,9 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool) -> Vec<Valu
     tools.extend(vault_tool_definitions());
     if discussion {
         tools.extend(discussion_tool_definitions());
+    }
+    if testing {
+        tools.push(testing_tool_definition());
     }
     tools.push(json!({
         "name": "add_idea",
@@ -201,7 +232,8 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool) -> Vec<Valu
 
 /// Run one tool; `None` when the tool is unknown.
 #[allow(clippy::too_many_arguments)]
-async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId, project: bool, set_mode: bool, discussion: bool, screen_granted: &mut bool, name: &str, args: Value) -> Option<Value> {
+async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId, offered: Offered, screen_granted: &mut bool, name: &str, args: Value) -> Option<Value> {
+    let Offered { project, set_mode, discussion, testing } = offered;
     let text = |k: &str| args[k].as_str().unwrap_or("").to_owned();
     let optional = |k: &str| args[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
     let op = match name {
@@ -267,6 +299,11 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         },
         "list_guidelines" if !project => EmployeeTaskOp::ListGuidelines {},
         "read_guideline" if !project => EmployeeTaskOp::ReadGuideline { guideline: text("guideline") },
+        // A missing `passed` is no verdict: never read as green or red.
+        "report_test_result" if testing => match args["passed"].as_bool() {
+            Some(passed) => EmployeeTaskOp::ReportTestResult { passed, summary: text("summary") },
+            None => return Some(reply(false, "Give passed (true or false) and the summary.".into())),
+        },
         _ => return None,
     };
     Some(act_call(client, root, run_id, op).await)
@@ -615,7 +652,7 @@ mod tests {
 
     #[test]
     fn the_project_assistant_cannot_hand_a_task_over() {
-        let names = |project| tool_definitions(project, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |project| tool_definitions(project, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(false).contains(&"hand_over_task".to_owned()));
         assert!(!names(true).contains(&"hand_over_task".to_owned()));
         for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat", "vault_list", "vault_read"] {
@@ -626,7 +663,7 @@ mod tests {
     /// SEC0 E10/E12: the employee's tool, not the project assistant's or the dispatcher's, and no links to choose.
     #[test]
     fn propose_guideline_is_an_employees_tool_without_links() {
-        let find = |project| tool_definitions(project, false, false).into_iter().find(|t| t["name"] == "propose_guideline");
+        let find = |project| tool_definitions(project, false, false, false).into_iter().find(|t| t["name"] == "propose_guideline");
         let tool = find(false).expect("an employee proposes guidelines");
         assert!(find(true).is_none(), "the project assistant has no block of its own");
         assert!(!triage_tool_definitions().iter().any(|t| t["name"] == "propose_guideline"), "the dispatcher does not propose");
@@ -644,16 +681,16 @@ mod tests {
     #[test]
     fn the_guideline_reading_tools_are_an_employees_and_say_no_rule_and_no_rights() {
         for name in ["list_guidelines", "read_guideline"] {
-            let find = |project| tool_definitions(project, false, false).into_iter().find(|t| t["name"] == name);
+            let find = |project| tool_definitions(project, false, false, false).into_iter().find(|t| t["name"] == name);
             let tool = find(false).unwrap_or_else(|| panic!("an employee has {name}"));
             assert!(find(true).is_none(), "the project assistant has no {name}");
             assert!(!triage_tool_definitions().iter().any(|t| t["name"] == name), "the dispatcher has no {name}");
             let says = tool["description"].as_str().unwrap();
             assert!(says.contains("not a rule for this run") && says.contains("guidelines never give rights"), "{name}: {says}");
         }
-        let read = tool_definitions(false, false, false).into_iter().find(|t| t["name"] == "read_guideline").unwrap();
+        let read = tool_definitions(false, false, false, false).into_iter().find(|t| t["name"] == "read_guideline").unwrap();
         assert_eq!(read["inputSchema"]["required"], json!(["guideline"]));
-        let list = tool_definitions(false, false, false).into_iter().find(|t| t["name"] == "list_guidelines").unwrap();
+        let list = tool_definitions(false, false, false, false).into_iter().find(|t| t["name"] == "list_guidelines").unwrap();
         assert!(list["inputSchema"]["properties"].as_object().unwrap().is_empty());
     }
 
@@ -661,22 +698,32 @@ mod tests {
     fn the_dispatcher_has_only_assign_ticket_and_recall() {
         let names: Vec<String> = triage_tool_definitions().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
         assert_eq!(names, ["assign_ticket", "recall"]);
-        assert!(!tool_definitions(false, false, true).iter().any(|t| t["name"] == "assign_ticket"), "no other run can assign a ticket");
+        assert!(!tool_definitions(false, false, true, false).iter().any(|t| t["name"] == "assign_ticket"), "no other run can assign a ticket");
     }
 
     #[test]
     fn set_mode_is_offered_only_when_the_daemon_asks_for_it() {
-        let names = |set_mode| tool_definitions(false, set_mode, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |set_mode| tool_definitions(false, set_mode, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(!names(false).contains(&"set_mode".to_owned()));
         assert!(names(true).contains(&"set_mode".to_owned()));
     }
 
     #[test]
     fn the_discussion_tools_are_offered_only_under_a_ticket() {
-        let names = |discussion| tool_definitions(false, false, discussion).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |discussion| tool_definitions(false, false, discussion, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         for tool in ["read_discussion", "post_to_discussion"] {
             assert!(!names(false).contains(&tool.to_owned()), "{tool}");
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
         }
+    }
+
+    #[test]
+    fn report_test_result_is_offered_only_to_a_tickets_test_task() {
+        let find = |testing| tool_definitions(false, false, true, testing).into_iter().find(|t| t["name"] == "report_test_result");
+        assert!(find(false).is_none(), "no other run gives a verdict");
+        assert!(!triage_tool_definitions().iter().any(|t| t["name"] == "report_test_result"));
+        let tool = find(true).expect("the test task gives its verdict");
+        assert_eq!(tool["inputSchema"]["required"], json!(["passed", "summary"]));
+        assert_eq!(tool["inputSchema"]["properties"]["passed"]["type"], "boolean");
     }
 }

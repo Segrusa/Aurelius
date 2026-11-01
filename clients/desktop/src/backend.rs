@@ -97,6 +97,8 @@ pub struct ServerInfo {
     pub vault: bool,
     /// The guideline library, its links and proposals (feature `guidelines`).
     pub guidelines: bool,
+    /// The Testing column and the company's tester (feature `board_testing`).
+    pub board_testing: bool,
     /// An existing ticket takes more files (feature `ticket_add_files`, `UpdateTicket::add_files`).
     pub ticket_add_files: bool,
 }
@@ -1725,6 +1727,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 ticket_discussion: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_DISCUSSION),
                 vault: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::VAULT),
                 guidelines: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::GUIDELINES),
+                board_testing: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::BOARD_TESTING),
                 ticket_add_files: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_ADD_FILES),
             },
         }));
@@ -4701,7 +4704,7 @@ mod tests {
             })
             .await;
 
-            // The empty board: the six columns in order (MU1-05 AC1, MU1-19 AC4).
+            // The empty board: the seven columns in order (MU1-05 AC1, MU1-19 AC4, ticket #5).
             let empty = load(&mut app, None).await;
             assert_eq!(empty.columns.iter().map(|c| c.column.kind).collect::<Vec<_>>(), ColumnKind::ALL);
             assert!(empty.columns.iter().all(|c| c.tickets.is_empty()));

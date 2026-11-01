@@ -170,13 +170,17 @@ event_kinds! {
     TicketPlanRevised => "ticket.plan_revised",
     // The main task reported; waits for a board member.
     TicketReview => "ticket.review",
+    // The tester ran the full test suite of a card in Testing (feature `board_testing`):
+    // `metadata.passed` (green: on to Review; red: back to Doing) and `metadata.task_id`
+    // (the test task).
+    TicketTested => "ticket.tested",
     TicketAccepted => "ticket.accepted",
     TicketSentBack => "ticket.sent_back",
     TicketCancelled => "ticket.cancelled",
     TicketArchived => "ticket.archived",
     // Names or order of the columns; the aggregate is the company.
     BoardColumnsUpdated => "board.columns_updated",
-    // Name or dispatcher of the company.
+    // Name, dispatcher or tester of the company.
     CompanyUpdated => "company.updated",
     // A new board member: `metadata.created_user_id`, `metadata.username`. As in every
     // event, `metadata.user_id` is the board member who made it (none in the

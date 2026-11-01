@@ -174,7 +174,7 @@ class CompanyState extends Equatable {
       );
 
   @override
-  List<Object?> get props => [loading, projects, employees, proposals, tasks, followOrgChart, company?.dispatcherEmployeeId, company?.version, notice, createdProjectId, lastResult, order];
+  List<Object?> get props => [loading, projects, employees, proposals, tasks, followOrgChart, company?.dispatcherEmployeeId, company?.testerEmployeeId, company?.version, notice, createdProjectId, lastResult, order];
 }
 
 /// The company: employees, projects and their tasks, what waits

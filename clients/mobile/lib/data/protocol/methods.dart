@@ -56,7 +56,7 @@ abstract final class Methods {
   /// Restore at the next start (the service stops now); work stays paused until resumed.
   static const String backupRestore = 'backup.restore';
   static const String backupResume = 'backup.resume';
-  /// Rename the columns and set their order (B3): all six, left to right.
+  /// Rename the columns and set their order (B3): all of them, left to right.
   /// `expected_version` is the board's (`board_version`: the columns change
   /// together); the answer gives the new one.
   static const String boardColumnsUpdate = 'board.columns_update';
@@ -398,7 +398,8 @@ abstract final class Methods {
   static const String ticketList = 'ticket.list';
   /// Drag a card. Within its column: only the order. To Todo: start it. To
   /// Backlog: cancel it. Done only through `ticket.accept`, and Review back to
-  /// Doing only through `ticket.send_back`; other moves follow the work and are refused.
+  /// Doing only through `ticket.send_back`; out of Testing only to Backlog (cancel);
+  /// other moves follow the work and are refused.
   /// The place is relative to a neighbour, so it means the same on a board
   /// filtered by project as on the whole board. A move within the same column
   /// also gives `ticket.moved` (with `from` = `to`). A card put above itself in
@@ -407,7 +408,7 @@ abstract final class Methods {
   static const String ticketMove = 'ticket.move';
   /// A board member writes in a ticket's discussion (feature `ticket_discussion`).
   /// Without `@Name` it goes to the owner while the ticket is in Todo (with an
-  /// owner), Doing, Plan review or Review; else it wakes nobody. `@Name` wakes those
+  /// owner), Doing, Plan review, Testing or Review; else it wakes nobody. `@Name` wakes those
   /// employees. Refused on Done (the discussion is read-only there). Not for apps.
   static const String ticketPost = 'ticket.post';
   /// Try the summary of a ticket on Done again after it failed (`SystemLineKind::SummaryFailed`).
@@ -1814,7 +1815,7 @@ Map<String, dynamic> attachmentRemove(RemoveAttachment params) => <String, dynam
   'params': params.toJson(),
 };
 
-/// Rename the columns and set their order (B3): all six, left to right.
+/// Rename the columns and set their order (B3): all of them, left to right.
 /// `expected_version` is the board's (`board_version`: the columns change
 /// together); the answer gives the new one.
 Map<String, dynamic> boardColumnsUpdate({required List<BoardColumnEdit> columns}) => <String, dynamic>{
@@ -2292,7 +2293,8 @@ Map<String, dynamic> ticketCreate({bool? confirmSecret, int? deadlineMs, String?
 
 /// Drag a card. Within its column: only the order. To Todo: start it. To
 /// Backlog: cancel it. Done only through `ticket.accept`, and Review back to
-/// Doing only through `ticket.send_back`; other moves follow the work and are refused.
+/// Doing only through `ticket.send_back`; out of Testing only to Backlog (cancel);
+/// other moves follow the work and are refused.
 /// The place is relative to a neighbour, so it means the same on a board
 /// filtered by project as on the whole board. A move within the same column
 /// also gives `ticket.moved` (with `from` = `to`). A card put above itself in
@@ -2309,7 +2311,7 @@ Map<String, dynamic> ticketMove({String? beforeTicketId, required String columnI
 
 /// A board member writes in a ticket's discussion (feature `ticket_discussion`).
 /// Without `@Name` it goes to the owner while the ticket is in Todo (with an
-/// owner), Doing, Plan review or Review; else it wakes nobody. `@Name` wakes those
+/// owner), Doing, Plan review, Testing or Review; else it wakes nobody. `@Name` wakes those
 /// employees. Refused on Done (the discussion is read-only there). Not for apps.
 Map<String, dynamic> ticketPost({bool? confirmSecret, List<String> files = const [], List<String> images = const [], required String text, required String ticketId}) => <String, dynamic>{
   'method': Methods.ticketPost,

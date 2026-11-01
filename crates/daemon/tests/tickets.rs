@@ -78,7 +78,7 @@ async fn a_board_member_fills_and_works_the_board() {
     let atlas = project(&client, "Atlas").await;
     let hermes = project(&client, "Hermes").await;
 
-    // MU1-19 AC4: an empty board with the six columns.
+    // MU1-19 AC4: an empty board with the seven columns (Testing since migration 25).
     let board = client.board(None).await.unwrap();
     assert_eq!(board.columns.iter().map(|c| c.column.kind).collect::<Vec<_>>(), ColumnKind::ALL);
     assert!(board.columns.iter().all(|c| c.tickets.is_empty()));
@@ -147,7 +147,7 @@ async fn the_dispatcher_is_set_for_the_company_and_per_project() {
     let atlas = project(&client, "Atlas").await;
 
     // company.update is a board member's write (protocol 5: nothing without a session); project.update is not a ticket write.
-    let set_company = Command::UpdateCompany(UpdateCompany { name: Some("Segrusa".into()), dispatcher: Some(SetDispatcher { employee_id: Some(orion) }) });
+    let set_company = Command::UpdateCompany(UpdateCompany { name: Some("Segrusa".into()), dispatcher: Some(SetDispatcher { employee_id: Some(orion) }), tester: None });
     assert_eq!(code(common::connect_anonymous(dir.path()).await.ticket_command(set_company.clone(), None).await), ErrorCode::Unauthenticated);
     client.ticket_command(set_company, None).await.unwrap();
     let company = client.company().await.unwrap().company;

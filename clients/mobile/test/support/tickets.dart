@@ -34,6 +34,8 @@ const testUser = UserView(id: 'u-1', username: 'ada', createdAtMs: 0);
 /// The test board member's own Claude login, connected (a login not read yet counts as missing, R3 m5).
 const testLogin = ClaudeLoginView(userId: 'u-1', status: ClaudeLoginStatus.linked, background: false);
 const onlineLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], boardMembersExist: true, user: testUser, claudeLogin: testLogin);
+/// [onlineLink] on a server with the Testing column and the tester (ticket #5).
+const testingLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], features: ['board_testing'], boardMembersExist: true, user: testUser, claudeLogin: testLogin);
 const offlineLink = LinkState(status: LinkStatus.offline, boardMembersExist: true, user: testUser, claudeLogin: testLogin);
 
 /// The six columns in their default order (MU1-05 AC1).
@@ -46,10 +48,21 @@ const defaultColumns = [
   (ColumnKind.done, 'Done'),
 ];
 
+/// The seven columns of a server with `board_testing` (ticket #5), Testing between Plan review and Review.
+const testingColumns = [
+  (ColumnKind.backlog, 'Backlog'),
+  (ColumnKind.todo, 'Todo'),
+  (ColumnKind.doing, 'Doing'),
+  (ColumnKind.planReview, 'Plan review'),
+  (ColumnKind.testing, 'Testing'),
+  (ColumnKind.review, 'Review'),
+  (ColumnKind.done, 'Done'),
+];
+
 String columnIdOf(ColumnKind kind) => 'col-${kind.wire}';
 
 BoardColumnView columnOf(ColumnKind kind, {String? name, int position = 0, int version = 1}) =>
-    BoardColumnView(id: columnIdOf(kind), kind: kind, name: name ?? defaultColumns.firstWhere((c) => c.$1 == kind).$2, position: position, version: version);
+    BoardColumnView(id: columnIdOf(kind), kind: kind, name: name ?? testingColumns.firstWhere((c) => c.$1 == kind).$2, position: position, version: version);
 
 TicketView ticketOf({
   String id = 'k1',
@@ -109,12 +122,12 @@ TicketView ticketOf({
     );
 
 /// A board with [tickets] in their columns (in the given order) and the six
-/// columns at [versions] (by kind; 1 when left out).
-BoardView boardOf(List<TicketView> tickets, {String? projectId, Map<ColumnKind, String> names = const {}, Map<ColumnKind, int> versions = const {}}) => BoardView(
+/// columns (seven with [testing]) at [versions] (by kind; 1 when left out).
+BoardView boardOf(List<TicketView> tickets, {String? projectId, Map<ColumnKind, String> names = const {}, Map<ColumnKind, int> versions = const {}, bool testing = false}) => BoardView(
       asOfSeq: 1,
       projectId: projectId,
       columns: [
-        for (final (i, (kind, _)) in defaultColumns.indexed)
+        for (final (i, (kind, _)) in (testing ? testingColumns : defaultColumns).indexed)
           BoardColumnCards(column: columnOf(kind, name: names[kind], position: i, version: versions[kind] ?? 1), tickets: [for (final t in tickets) if (t.column == kind) t]),
       ],
     );
@@ -127,19 +140,19 @@ final forge = employeeOf(id: 'forge', name: 'Forge', role: 'Backend Developer', 
 
 /// A company with Orion (the company's dispatcher unless [dispatcher] says
 /// otherwise) and Forge, one project and [tasks].
-CompanyState companyWith({String? dispatcher = 'orion', String? projectDispatcher, List<TaskView> tasks = const [], List<EmployeeSummary>? employees, List<ProjectSummary>? projects}) => CompanyState(
+CompanyState companyWith({String? dispatcher = 'orion', String? tester, String? projectDispatcher, List<TaskView> tasks = const [], List<EmployeeSummary>? employees, List<ProjectSummary>? projects}) => CompanyState(
       loading: false,
-      company: CompanyView(id: 'c', name: 'Aurelius', version: 4, dispatcherEmployeeId: dispatcher),
+      company: CompanyView(id: 'c', name: 'Aurelius', version: 4, dispatcherEmployeeId: dispatcher, testerEmployeeId: tester),
       employees: employees ?? [orion, forge],
       projects: projects ?? [ProjectSummary(createdAtMs: 0, id: 'p1', name: 'Atlas', status: ProjectStatus.active, version: 2, employeesActive: 0, dispatcherEmployeeId: projectDispatcher)],
       tasks: tasks,
     );
 
 /// A repository that answers the board reads; every write succeeds.
-MockRepository boardRepository({BoardView? board, TicketDetail? detail, List<TimelineCard> activity = const [], MessagesSnapshot? messages, List<JobSummary> jobs = const []}) {
+MockRepository boardRepository({BoardView? board, TicketDetail? detail, List<TimelineCard> activity = const [], MessagesSnapshot? messages, List<JobSummary> jobs = const [], LinkState link = onlineLink}) {
   final repo = MockRepository();
   when(() => repo.host).thenReturn(const Host(hostId: 'h', name: 'desktop', url: 'http://x', clientId: 'c', environment: 'dev', pairedAtMs: 0));
-  when(() => repo.linkState).thenReturn(onlineLink);
+  when(() => repo.linkState).thenReturn(link);
   when(() => repo.online).thenAnswer((_) => const Stream.empty());
   when(() => repo.changes).thenAnswer((_) => const Stream.empty());
   when(() => repo.boardChanges).thenAnswer((_) => const Stream.empty());
@@ -154,13 +167,14 @@ MockRepository boardRepository({BoardView? board, TicketDetail? detail, List<Tim
   return repo;
 }
 
-/// [page] under a router that also knows the pages a ticket leads to (as text).
-Future<GoRouter> pumpBoardPage(WidgetTester tester, MockRepository repo, Widget page, {CompanyState? company, MockCompanyBloc? companyBloc, LinkState link = onlineLink, Size size = const Size(390, 844)}) async {
+/// [page] under a router that also knows the pages a ticket leads to (as text);
+/// [companyStates] are what the company bloc emits after [company].
+Future<GoRouter> pumpBoardPage(WidgetTester tester, MockRepository repo, Widget page, {CompanyState? company, Stream<CompanyState> companyStates = const Stream.empty(), MockCompanyBloc? companyBloc, LinkState link = onlineLink, Size size = const Size(390, 844)}) async {
   tester.view.physicalSize = size * 3;
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
   companyBloc ??= MockCompanyBloc();
-  whenListen(companyBloc, const Stream<CompanyState>.empty(), initialState: company ?? companyWith());
+  whenListen(companyBloc, companyStates, initialState: company ?? companyWith());
   final connection = MockConnectionBloc();
   whenListen(connection, const Stream<LinkState>.empty(), initialState: link);
   // A ticket's discussion is a chat (Phase 2): it asks the Inbox and the runtime too.

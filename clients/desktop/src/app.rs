@@ -2360,6 +2360,11 @@ impl AppView {
         matches!(&self.connection, Connection::Online { server, .. } if server.ticket_discussion)
     }
 
+    /// The board has its Testing column and the company a tester (feature `board_testing`).
+    pub fn board_testing_supported(&self) -> bool {
+        matches!(&self.connection, Connection::Online { server, .. } if server.board_testing)
+    }
+
     /// An existing ticket takes more files, so a paste into its title or description attaches
     /// them (feature `ticket_add_files`).
     pub fn ticket_add_files_supported(&self) -> bool {

@@ -72,23 +72,25 @@ fn titles_in(f: &Fixture, kind: ColumnKind) -> Vec<String> {
 }
 
 #[test]
-fn the_board_has_six_fixed_columns_and_one_company() {
+fn the_board_has_seven_fixed_columns_and_one_company() {
     let f = fixture();
     let columns = f.store.read(company::columns).unwrap();
     assert_eq!(columns.iter().map(|c| c.kind).collect::<Vec<_>>(), ColumnKind::ALL);
-    assert_eq!(columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Backlog", "Todo", "Doing", "Plan review", "Review", "Done"]);
+    assert_eq!(columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Backlog", "Todo", "Doing", "Plan review", "Testing", "Review", "Done"]);
     let company = f.store.read(company::get).unwrap();
-    assert_eq!((company.name.as_str(), company.dispatcher_employee_id), ("Company", None));
+    assert_eq!((company.name.as_str(), company.dispatcher_employee_id, company.tester_employee_id), ("Company", None, None));
 
     // Renamed and reordered: the kinds stay, the order follows the list.
     let mut order: Vec<_> = columns.iter().rev().map(|c| (c.id, format!("{}!", c.name))).collect();
-    order.swap(0, 5);
+    order.swap(0, 6);
     f.store.write(move |tx| company::update_columns(tx, &order)).unwrap();
     let after = f.store.read(company::columns).unwrap();
     assert_eq!(after[0].kind, ColumnKind::Backlog);
     assert_eq!(after[1].kind, ColumnKind::Review);
     assert_eq!(after[1].name, "Review!");
-    assert!(after.iter().all(|c| c.version == 2));
+    // Each column counts one up (migration 25 already moved Review and Done one place right).
+    assert!(after.iter().all(|a| columns.iter().any(|c| c.id == a.id && a.version == c.version + 1)));
+    assert_eq!(columns.iter().map(|c| c.version).collect::<Vec<_>>(), [1, 1, 1, 1, 2, 2, 2]);
 }
 
 #[test]
@@ -154,7 +156,7 @@ fn move_to_keeps_an_exact_order_and_the_board_filters_per_project() {
     assert_eq!(titles_in(&f, ColumnKind::Backlog), ["C"]);
 
     let atlas = f.store.read(|conn| tickets::board(conn, Some(f.atlas), &read_blob)).unwrap();
-    assert_eq!(atlas.len(), 6);
+    assert_eq!(atlas.len(), 7);
     assert!(atlas[0].tickets.is_empty(), "C is Hermes'");
     assert_eq!(atlas[1].tickets.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), ["B", "A"]);
     let all = f.store.read(|conn| tickets::board(conn, None, &read_blob)).unwrap();
@@ -245,7 +247,7 @@ fn the_dispatcher_is_the_projects_else_the_companys_while_active() {
         .unwrap();
     let atlas = f.atlas;
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), None, "B5: none yet");
-    f.store.write(move |tx| company::update(tx, Some("Segrusa"), Some(Some(orion)))).unwrap();
+    f.store.write(move |tx| company::update(tx, Some("Segrusa"), Some(Some(orion)), None)).unwrap();
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), Some(orion));
     let version = f.store.write(move |tx| company::set_project_dispatcher(tx, atlas, Some(forge))).unwrap();
     assert_eq!(version, 2);
@@ -258,6 +260,42 @@ fn the_dispatcher_is_the_projects_else_the_companys_while_active() {
     assert_eq!(projects.iter().find(|p| p.id == atlas).unwrap().dispatcher_employee_id, Some(forge));
     f.store.write(move |tx| company::set_project_dispatcher(tx, atlas, None).map(drop)).unwrap();
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), Some(orion), "without its own, the company's");
+}
+
+/// Ticket #5: a `ticket.tested` card says in `detail` whether the tests
+/// passed, which is all the clients read to word "Tests passed/failed".
+#[test]
+fn a_tested_card_says_passed_or_failed_in_its_detail() {
+    let f = fixture();
+    let (ticket, _) = add(&f, f.atlas, "Tested");
+    let project = f.atlas;
+    f.store
+        .write(move |tx| {
+            for (version, passed) in [(1, false), (2, true)] {
+                events::append(
+                    tx,
+                    events::NewEvent {
+                        aggregate_type: "ticket",
+                        aggregate_id: ticket.to_string(),
+                        aggregate_version: version,
+                        event_type: "ticket.tested",
+                        project_id: Some(project),
+                        actor_kind: aurelius_domain::ActorKind::Employee,
+                        actor_id: None,
+                        correlation_id: ticket.to_string(),
+                        causation_id: None,
+                        payload_blob_id: None,
+                        metadata: serde_json::json!({ "passed": passed, "task_id": TaskId::new().to_string() }),
+                        dedupe_key: aurelius_domain::EventId::new().to_string(),
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    let (cards, _) = f.store.read(|c| crate::timeline::cards(c, None, Some(&ticket.to_string()), None, 50, true)).unwrap();
+    let lines: Vec<(&str, &str)> = cards.iter().filter(|c| c.label == "TESTING").map(|c| (c.title.as_str(), c.detail.as_str())).collect();
+    assert_eq!(lines, [("Tests passed", "passed"), ("Tests failed", "failed")], "newest first");
 }
 
 /// A ticket's Activity (`timeline.list` on its id): the board member's writes

@@ -186,6 +186,13 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
             "You".into(),
         ),
         "employee.proposal_decided" => ("decision", "DECISION", format!("You {} the colleague {}", if m["approved"].as_bool() == Some(true) { "approved" } else { "turned down" }, s(&m["subject"])), s(&m["note"]), "You".into()),
+        // Ticket #5: the clients word the line from `detail` ("passed"/"failed").
+        "ticket.tested" => {
+            let passed = m["passed"].as_bool() == Some(true);
+            let tester = lookup(conn, "SELECT m.name FROM tasks t JOIN employees m ON m.id = t.employee_id WHERE t.id = ?1", &s(&m["task_id"])).unwrap_or_else(|| "Tester".into());
+            let (title, detail) = if passed { ("Tests passed", "passed") } else { ("Tests failed", "failed") };
+            ("outcome", "TESTING", title.into(), detail.into(), tester)
+        }
         // Files added to a ticket (feature `ticket_add_files`): their names, never where they are kept.
         "ticket.updated" if m["files_added"].is_array() => {
             let names: Vec<String> = m["files_added"].as_array().into_iter().flatten().map(s).collect();

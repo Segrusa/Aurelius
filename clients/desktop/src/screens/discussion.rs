@@ -288,10 +288,10 @@ pub fn writable(t: &TicketView) -> bool {
 }
 
 /// Whom a post without `@` reaches (B3, P-21): the owner while the ticket is in
-/// Todo with an owner, Doing, Plan review or Review and not archived; else nobody.
-/// The same rule as the server's `owner_answers`.
+/// Todo with an owner, Doing, Plan review, Testing or Review and not archived; else
+/// nobody. The same rule as the server's `owner_answers`.
 pub fn reaches_owner(t: &TicketView) -> bool {
-    t.owner_employee_id.is_some() && t.archived_at_ms.is_none() && matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Review)
+    t.owner_employee_id.is_some() && t.archived_at_ms.is_none() && matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Testing | ColumnKind::Review)
 }
 
 /// What the read-only footer says (B7): Done with how the summary went, or archived.
@@ -752,6 +752,16 @@ mod tests {
         assert!(!reaches_owner(&ticket(ColumnKind::Doing, false)));
         assert!(!writable(&ticket(ColumnKind::Done, true)), "MU2-01 AC3: read-only on Done");
         assert!(writable(&ticket(ColumnKind::Review, true)));
+    }
+
+    #[test]
+    fn a_post_without_at_reaches_the_owner_while_the_tester_runs_the_tests() {
+        let testing = ticket(ColumnKind::Testing, true);
+        assert!(reaches_owner(&testing), "ticket #5: as in Review");
+        assert_eq!(composer_hint(&testing), "Message Forge (owner) · @ to mention someone else");
+        assert!(writable(&testing));
+        let owner = testing.owner_employee_id.unwrap();
+        assert_eq!(reached(Some(&testing), &[owner]), (true, vec![]));
     }
 
     #[test]

@@ -72,11 +72,12 @@ pub fn drop_effect(from: ColumnKind, to: ColumnKind, choosing: bool) -> Drop {
         (a, b) if a == b => Drop::Reorder,
         (Backlog, Todo) => Drop::Start,
         (Todo, Backlog) => Drop::BackToBacklog { confirm: choosing },
-        (Doing | Review, Backlog) => Drop::BackToBacklog { confirm: true },
+        (Doing | Testing | Review, Backlog) => Drop::BackToBacklog { confirm: true },
         (PlanReview, Backlog) => Drop::Reject,
         (PlanReview, Doing) => Drop::PlanDialog,
         (Review, Doing) => Drop::SendBack,
         (Review, Done) => Drop::MarkDone,
+        (Testing, _) | (_, Testing) => Drop::Refused("Testing moves on by itself when the tests have run."),
         (Backlog, _) => Drop::Refused("Start first."),
         (_, Done) => Drop::Refused("Only from Review."),
         (_, Review) => Drop::Refused("The owner hands it in."),
@@ -281,9 +282,52 @@ pub fn empty_text(kind: ColumnKind) -> &'static str {
         ColumnKind::Todo => "Started tickets wait here for an owner.",
         ColumnKind::Doing => "Nothing in progress.",
         ColumnKind::PlanReview => "Only tickets in Plan mode stop here, with their plan.",
+        ColumnKind::Testing => "Nothing being tested.",
         ColumnKind::Review => "Nothing to review.",
         ColumnKind::Done => "Closed tickets appear here.",
     }
+}
+
+/// Whether the board shows a column: Testing only on a server with `board_testing`
+/// (ticket #5; an older server never sends it, nor a card in it).
+pub fn column_shown(kind: ColumnKind, testing: bool) -> bool {
+    kind != ColumnKind::Testing || testing
+}
+
+/// The test task of a ticket in Testing: the tester's task on it, the running one
+/// before a finished one, the newest first. None when the tester or its task is unknown.
+pub fn test_task<'a>(tasks: impl IntoIterator<Item = &'a aurelius_protocol::TaskView>, ticket: TicketId, tester: Option<EmployeeId>) -> Option<&'a aurelius_protocol::TaskView> {
+    let tester = tester?;
+    tasks.into_iter().filter(|x| x.ticket_id == Some(ticket) && x.employee_id == Some(tester)).max_by_key(|x| (!x.status.is_terminal(), x.created_at_ms))
+}
+
+/// What a card in Testing says (ticket #5): it is being tested, and by whom.
+pub fn testing_line(tester: Option<&str>) -> String {
+    match tester {
+        Some(name) => format!("Being tested by {name}"),
+        None => "Being tested".into(),
+    }
+}
+
+/// The ticket panel's line in Testing (ticket #5).
+pub fn testing_note(tester: Option<&str>) -> String {
+    format!("◆ Testing · {} runs the full test suite. Green goes on to Review; red back to Doing.", tester.unwrap_or("The tester"))
+}
+
+/// The tester picker's empty choice (ticket #5).
+pub const NO_TESTER: &str = "None: no Testing step";
+
+/// What the toast says once the company's tester is set.
+pub fn tester_set_text(name: Option<&str>) -> String {
+    match name {
+        Some(name) => format!("{name} is the company's tester. Reported tickets go to Testing first."),
+        None => "No tester: reported tickets go from Doing straight to Review.".into(),
+    }
+}
+
+/// `company.update` that only sets the tester: the name and the dispatcher stay.
+pub fn company_tester_command(employee: Option<EmployeeId>) -> aurelius_domain::company::UpdateCompany {
+    aurelius_domain::company::UpdateCompany { name: None, dispatcher: None, tester: Some(aurelius_domain::company::SetTester { employee_id: employee }) }
 }
 
 const DAY_MS: i64 = 86_400_000;
@@ -589,6 +633,12 @@ pub fn activity_text(card: &TimelineCard) -> String {
         "ticket.plan_approved" => format!("{who} approved the plan"),
         "ticket.plan_revised" => format!("{who} sent the plan back"),
         "ticket.review" => "A report was handed in".into(),
+        // Ticket #5: the server words it ("Tests passed" / "Tests failed"); a bare event says only that they ran.
+        "ticket.tested" => match card.detail.as_str() {
+            "passed" => "Tests passed".into(),
+            "failed" => "Tests failed".into(),
+            _ => "The tests ran".into(),
+        },
         "ticket.sent_back" => format!("{who} sent it back to Doing"),
         "ticket.accepted" => format!("{who} marked it as Done"),
         "ticket.cancelled" => format!("{who} put it back in Backlog"),
@@ -615,7 +665,7 @@ fn is_event_name(text: &str) -> bool {
 /// The second line of an Activity row: the card's detail, unless it only names
 /// the kind ("ticket", "conversation": what the server puts there for an event it does not word).
 pub fn activity_detail(card: &TimelineCard) -> Option<&str> {
-    Some(card.detail.as_str()).filter(|d| !d.is_empty() && !(card.kind == "activity" && is_event_name(d)))
+    Some(card.detail.as_str()).filter(|d| !d.is_empty() && !(card.kind == "activity" && is_event_name(d)) && !(card.title == "ticket.tested" && matches!(*d, "passed" | "failed")))
 }
 
 /// Which feedback the Doing bar shows (§7.3), from the newest of the ticket's
@@ -837,6 +887,8 @@ pub enum BoardDo {
     ProjectDispatcher(ProjectId, Option<EmployeeId>),
     /// Settings → Board: the company's dispatcher (`None`: nobody, B5).
     CompanyDispatcher(Option<EmployeeId>),
+    /// Settings → Company and Board: the company's tester (`None`: no Testing step, ticket #5).
+    CompanyTester(Option<EmployeeId>),
     /// "Create ticket…" on a chat message (MU2-10, fase 2 §4).
     TicketFromMessage(aurelius_domain::MessageId),
 }
@@ -1615,8 +1667,10 @@ impl AppView {
     pub fn board_grid(&self, cx: &App) -> Grid {
         let Some(view) = &self.board.view else { return Vec::new() };
         let query = self.board.find.read(cx).value().to_string();
+        let testing = self.board_testing_supported();
         view.columns
             .iter()
+            .filter(|column| column_shown(column.column.kind, testing))
             .map(|column| {
                 let (cards, _) = shown_cards(column, self.board.owner, self.board.creator.user(self.active_member().map(|u| u.id)), &query, |t| self.ticket_needs(t).is_some(), self.board.needs_only, self.board.done_all);
                 (column.column.kind, cards.into_iter().map(|t| t.id).collect())
@@ -1775,6 +1829,20 @@ impl AppView {
 
     pub fn employee_name(&self, id: EmployeeId) -> Option<String> {
         self.managers.iter().find(|m| m.id == id).map(|m| m.name.clone())
+    }
+
+    /// The company's tester (feature `board_testing`); none: no Testing step.
+    pub fn company_tester(&self) -> Option<EmployeeId> {
+        self.company.as_ref().and_then(|c| c.company.tester_employee_id)
+    }
+
+    /// Who tests a ticket in Testing, by name, and its test task among `tasks`
+    /// when it is there (ticket #5).
+    pub fn ticket_testing<'a>(&self, t: &TicketView, tasks: impl IntoIterator<Item = &'a aurelius_protocol::TaskView>) -> (Option<String>, Option<&'a aurelius_protocol::TaskView>) {
+        let tester = self.company_tester();
+        let task = test_task(tasks, t.id, tester);
+        let name = task.and_then(|x| x.employee_name.clone()).or_else(|| tester.and_then(|e| self.employee_name(e)));
+        (name, task)
     }
 
     /// The dispatcher of a project's started tickets.
@@ -1949,9 +2017,10 @@ impl AppView {
     /// The columns a card may go to with "Move to…" (the others with their reason).
     pub fn ticket_move_menu(&self, t: &TicketView) -> MenuItems {
         let choosing = self.ticket_choosing(t);
+        let testing = self.board_testing_supported();
         ColumnKind::ALL
             .into_iter()
-            .filter(|k| *k != t.column)
+            .filter(|k| *k != t.column && column_shown(*k, testing))
             .map(|k| {
                 let name = format!("Move to {}", self.board.column_name(k));
                 match drop_effect(t.column, k, choosing) {
@@ -2038,6 +2107,7 @@ impl AppView {
             }
             BoardDo::ProjectDispatcher(project, employee) => self.set_project_dispatcher(project, employee, cx),
             BoardDo::CompanyDispatcher(employee) => self.set_company_dispatcher(employee, cx),
+            BoardDo::CompanyTester(employee) => self.set_company_tester(employee, cx),
             BoardDo::TicketFromMessage(message) => self.ticket_from_message(message, window, cx),
         }
         cx.notify();
@@ -2059,7 +2129,16 @@ impl AppView {
             Some(name) => format!("{name} is the company's dispatcher."),
             None => "No company dispatcher: started tickets wait in Todo for an owner.".into(),
         };
-        let command = Command::UpdateCompany(aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(ticket::SetDispatcher { employee_id: employee }) });
+        let command = Command::UpdateCompany(aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(ticket::SetDispatcher { employee_id: employee }), tester: None });
+        let _ = self.requests.send(backend::Request::Board(BoardCall::Write { command, expected_version: None, done: Some(done) }));
+        cx.notify();
+    }
+
+    /// Ticket #5: who runs the full test suite before Review (`None`: no Testing step).
+    /// A refusal (an engine that cannot test yet) comes back as a toast.
+    pub fn set_company_tester(&mut self, employee: Option<EmployeeId>, cx: &mut Context<Self>) {
+        let done = tester_set_text(employee.and_then(|e| self.employee_name(e)).as_deref());
+        let command = Command::UpdateCompany(company_tester_command(employee));
         let _ = self.requests.send(backend::Request::Board(BoardCall::Write { command, expected_version: None, done: Some(done) }));
         cx.notify();
     }
@@ -2327,11 +2406,13 @@ impl AppView {
         let locked = self.project_board().is_some();
         let filtered = (self.board_filter().is_some() && !locked) || self.board.owner != OwnerFilter::Anyone || self.board.creator != CreatorFilter::Anyone || !query.trim().is_empty() || self.board.needs_only;
         let loading = self.board.view.is_none();
+        let testing = self.board_testing_supported();
         // Before the first answer: the default columns with skeleton cards (§3.3).
         let columns: Vec<BoardColumnCards> = match &self.board.view {
-            Some(v) => v.columns.clone(),
+            Some(v) => v.columns.iter().filter(|c| column_shown(c.column.kind, testing)).cloned().collect(),
             None => ColumnKind::ALL
                 .iter()
+                .filter(|k| column_shown(**k, testing))
                 .enumerate()
                 .map(|(i, k)| BoardColumnCards { column: ticket::BoardColumnView { id: aurelius_domain::BoardColumnId::new(), kind: *k, name: ticket::column_title(*k).into(), position: i as u32, version: 0 }, tickets: vec![] })
                 .collect(),
@@ -2491,6 +2572,7 @@ impl AppView {
         // Its Claude login or its quota (ui-ontwerp §5) before anything else the card says.
         let wait = self.ticket_wait(t).filter(|_| matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Review));
         let me = self.active_member().map(|u| u.id);
+        let tester = (t.column == ColumnKind::Testing).then(|| self.ticket_testing(t, &self.tasks).0).flatten();
         let status: Option<AnyElement> = match t.column {
             _ if wait.is_some() => wait.clone().map(|text| div().id(("card-wait", key)).text_size(px(11.5)).text_color(c(if needs == Some(Needs::ConnectLogin) { theme::ACCENT_TEXT } else { theme::TEXT_2 })).child(text).into_any_element()),
             ColumnKind::Todo if failed => None,
@@ -2504,6 +2586,15 @@ impl AppView {
             ),
             ColumnKind::Todo if t.owner_employee_id.is_some() => Some(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(format!("Queued for {}", owner.clone().unwrap_or_default())).into_any_element()),
             ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Review => root.map(|r| ui::task_mark(self.task_mark(r), ("card-mark", key)).into_any_element()),
+            // Ticket #5: the tester runs the full test suite; the card moves on by itself.
+            ColumnKind::Testing => Some(
+                h().gap(px(6.))
+                    .text_size(px(11.5))
+                    .text_color(c(theme::TEXT_2))
+                    .child(ui::pulse_dot(("card-testing", key), 6., theme::ACCENT))
+                    .child(testing_line(tester.as_deref()))
+                    .into_any_element(),
+            ),
             _ => None,
         };
         let deadline = t.deadline_ms.map(|d| deadline_text(d, ui::now_ms(), done, offset));
@@ -2512,6 +2603,7 @@ impl AppView {
             (None, ColumnKind::Todo) if choosing => Some("the dispatcher is choosing".to_string()),
             (None, ColumnKind::Todo) if t.owner_employee_id.is_some() => Some("queued".to_string()),
             (None, ColumnKind::Doing) => Some("working".to_string()),
+            (None, ColumnKind::Testing) => Some(testing_line(tester.as_deref()).replacen("Being", "being", 1)),
             (None, ColumnKind::Done) => Some("done".to_string()),
             _ => None,
         };
@@ -2645,6 +2737,7 @@ pub(crate) mod tests {
     use super::{
         BoardColumnCards, BoardDialog, CreatorFilter, ColumnsReload, DAY_MS, DONE_SHOWN, DoneCheck, dialog_reads, done_check, expected_version_for, newest_version, board_changed, board_scope, load_now, load_on_show, plan_to_read, default_columns, Grid, Step, TimelineCard, activity_detail, activity_text, feedback_label, mode_text, card_label, focus_step, held_step, held_target, moved_elsewhere, moves_announcement, pick_up, Dispatcher, Drop, HIGH, Needs, OwnerFilter, PRIORITIES, before_for, choosing, dispatcher_gave_up, dispatcher_stopped, forget_unknown, gave_up_to_read, owner_unknown, columns_edit, days_from_civil, deadline_input, deadline_text, dispatcher_of, drop_effect, empty_text, feedback_ready, move_column,
         board_keys_live, needs_you, new_ticket_problems, parse_deadline, pasted_add_files, parse_labels, priority_label, priority_mark, shown_cards, theme, ticket,
+        NO_TESTER, column_shown, company_tester_command, test_task, tester_set_text, testing_line, testing_note,
     };
     use aurelius_domain::task::TaskStatus;
     use aurelius_domain::ticket::{ColumnKind, TicketPriority, TicketView};
@@ -3365,7 +3458,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn columns_are_renamed_and_moved_all_six_together() {
+    fn columns_are_renamed_and_moved_all_together() {
         let mut columns: Vec<ticket::BoardColumnView> = ColumnKind::ALL
             .iter()
             .enumerate()
@@ -3375,10 +3468,116 @@ pub(crate) mod tests {
         assert!(!move_column(&mut columns, 1, true), "already the first");
         columns[2].name = " Building ".into();
         let edit = columns_edit(&columns);
-        assert_eq!(edit.columns.len(), 6, "B3: all six, none added or dropped");
+        assert_eq!(edit.columns.len(), ColumnKind::ALL.len(), "B3: all of them, none added or dropped");
         assert_eq!(edit.columns[0].column_id, columns[1].id);
         assert_eq!(edit.columns[2].name, "Building");
         assert!(edit.decide(&columns).is_ok(), "the server takes it");
+    }
+
+    /// Ticket #5: an older server has no Testing column; the board never shows one for it.
+    #[test]
+    fn the_testing_column_shows_only_on_a_server_with_board_testing() {
+        let shown = |testing: bool| ColumnKind::ALL.into_iter().filter(|k| column_shown(*k, testing)).collect::<Vec<_>>();
+        assert_eq!(shown(true), ColumnKind::ALL, "seven columns, Testing between Plan review and Review");
+        assert_eq!(shown(true)[4], ColumnKind::Testing);
+        assert!(!shown(false).contains(&ColumnKind::Testing));
+        assert_eq!(shown(false).len(), 6, "the other six stay");
+    }
+
+    /// Ticket #5, as `decide_move`: out of Testing only to Backlog (cancel, asked first);
+    /// nothing is dragged into it.
+    #[test]
+    fn a_card_leaves_testing_only_for_backlog_and_nothing_is_dragged_into_it() {
+        use ColumnKind::*;
+        assert_eq!(drop_effect(Testing, Backlog, false), Drop::BackToBacklog { confirm: true }, "it stops the tests: asked");
+        assert_eq!(drop_effect(Testing, Testing, false), Drop::Reorder);
+        for to in [Todo, Doing, PlanReview, Review] {
+            assert_eq!(drop_effect(Testing, to, false), Drop::Refused("Testing moves on by itself when the tests have run."), "Testing → {to:?}");
+        }
+        assert!(!drop_effect(Testing, Done, false).allowed());
+        for from in [Backlog, Todo, Doing, PlanReview, Review, Done] {
+            assert!(!drop_effect(from, Testing, false).allowed(), "{from:?} → Testing");
+            assert!(ticket::decide_move(from, Testing).is_err(), "the server refuses it too");
+        }
+        assert!(ticket::decide_move(Testing, Backlog).is_ok());
+    }
+
+    #[test]
+    fn a_card_in_testing_says_it_is_being_tested_and_by_whom() {
+        assert_eq!(testing_line(Some("Pulse")), "Being tested by Pulse");
+        assert_eq!(testing_line(None), "Being tested");
+        assert_eq!(testing_note(Some("Pulse")), "◆ Testing · Pulse runs the full test suite. Green goes on to Review; red back to Doing.");
+        assert!(testing_note(None).starts_with("◆ Testing · The tester runs"));
+        let t = card(5, ColumnKind::Testing);
+        assert_eq!(needs_you(&t, false, 0), None, "nobody decides in Testing: the tests do");
+    }
+
+    #[test]
+    fn the_test_task_is_the_testers_task_on_the_ticket_the_running_one_first() {
+        let t = card(5, ColumnKind::Testing);
+        let pulse = EmployeeId::new();
+        let on = |status: TaskStatus, employee: Option<EmployeeId>, created: i64, ticket: Option<TicketId>| {
+            let mut x = crate::screens::tasks::tests::task(t.project_id, employee, status, created);
+            x.created_at_ms = created;
+            x.ticket_id = ticket;
+            x
+        };
+        let earlier = on(TaskStatus::Failed, Some(pulse), 1, Some(t.id));
+        let running = on(TaskStatus::Running, Some(pulse), 2, Some(t.id));
+        let owner = on(TaskStatus::Review, Some(EmployeeId::new()), 3, Some(t.id));
+        let elsewhere = on(TaskStatus::Running, Some(pulse), 4, Some(TicketId::new()));
+        let tasks = [earlier.clone(), running.clone(), owner, elsewhere];
+        assert_eq!(test_task(&tasks, t.id, Some(pulse)).map(|x| x.id), Some(running.id), "the run in progress, not the earlier one");
+        assert_eq!(test_task(&tasks[..1], t.id, Some(pulse)).map(|x| x.id), Some(earlier.id), "else the newest finished one");
+        assert_eq!(test_task(&tasks, t.id, None), None, "no tester: no test task");
+        assert_eq!(test_task(&tasks[2..3], t.id, Some(pulse)), None, "the owner's task is not the test");
+    }
+
+    /// Ticket #5: `ticket.tested` reads as words, never as the event's name.
+    #[test]
+    fn tests_passed_or_failed_read_as_words_never_as_the_event() {
+        let tested = |detail: &str| TimelineCard { detail: detail.into(), ..timeline("ticket.tested", "employee") };
+        assert_eq!(activity_text(&tested("passed")), "Tests passed");
+        assert_eq!(activity_text(&tested("failed")), "Tests failed");
+        assert_eq!(activity_text(&tested("ticket")), "The tests ran", "a server that does not word it");
+        assert_eq!(activity_detail(&TimelineCard { kind: "outcome".into(), ..tested("passed") }), None, "the result is not said twice");
+        // A server that words the line itself: shown as it is.
+        let worded = TimelineCard { kind: "outcome".into(), detail: "3 tests failed in storage".into(), ..timeline("Tests failed", "employee") };
+        assert_eq!(activity_text(&worded), "Tests failed");
+        assert_eq!(activity_detail(&worded), Some("3 tests failed in storage"));
+    }
+
+    /// Settings: the tester picker sends only the tester, so the name and the dispatcher stay.
+    #[test]
+    fn the_tester_picker_sets_only_the_tester_and_none_means_no_testing_step() {
+        let pulse = EmployeeId::new();
+        let set = company_tester_command(Some(pulse));
+        assert_eq!((set.name, set.dispatcher), (None, None));
+        assert_eq!(set.tester.and_then(|t| t.employee_id), Some(pulse));
+        let none = company_tester_command(None);
+        assert_eq!(none.tester, Some(aurelius_domain::company::SetTester { employee_id: None }), "None is sent, not left out");
+        assert_eq!(serde_json::to_value(&none).unwrap(), serde_json::json!({ "name": null, "dispatcher": null, "tester": { "employee_id": null } }));
+        assert_eq!(NO_TESTER, "None: no Testing step");
+        assert_eq!(tester_set_text(Some("Pulse")), "Pulse is the company's tester. Reported tickets go to Testing first.");
+        assert_eq!(tester_set_text(None), "No tester: reported tickets go from Doing straight to Review.");
+    }
+
+    /// The column editor (B3) with seven columns: Testing renames, moves and restores like the rest.
+    #[test]
+    fn the_column_editor_renames_moves_and_restores_seven_columns() {
+        let mut columns: Vec<ticket::BoardColumnView> = ColumnKind::ALL.iter().rev().enumerate().map(|(i, k)| ticket::BoardColumnView { position: i as u32, ..column(*k) }).collect();
+        let testing = columns.iter().position(|c| c.kind == ColumnKind::Testing).unwrap();
+        columns[testing].name = "QA".into();
+        assert!(move_column(&mut columns, testing, false), "Testing to the right");
+        let edit = columns_edit(&columns);
+        assert_eq!(edit.columns.len(), 7);
+        assert!(edit.columns.iter().any(|c| c.column_id == columns[testing].id && c.name == "QA"));
+        assert!(edit.decide(&columns).is_ok(), "the server takes all seven");
+        default_columns(&mut columns);
+        columns.sort_by_key(|c| c.position);
+        assert_eq!(columns.iter().map(|c| c.kind).collect::<Vec<_>>(), ColumnKind::ALL, "Restore defaults puts Testing back between Plan review and Review");
+        assert_eq!(columns[4].name, "Testing");
+        assert_eq!(columns_edit(&columns).columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Backlog", "Todo", "Doing", "Plan review", "Testing", "Review", "Done"]);
     }
 
     #[test]

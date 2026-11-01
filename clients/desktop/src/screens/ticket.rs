@@ -472,6 +472,18 @@ impl AppView {
                     .child(back(cx))
             }
             ColumnKind::PlanReview => bar.child(line("◆ Plan review · only a board member decides.".into(), theme::ACCENT_TEXT)).when(root_id.is_some(), |el| el.child(open_conversation(cx))),
+            // Ticket #5: the tester decides by running the tests; a board member can only cancel.
+            ColumnKind::Testing => {
+                let tasks = self.board.detail_of(id).map(|d| d.tasks.clone()).unwrap_or_default();
+                let (tester, task) = self.ticket_testing(t, &tasks);
+                let test_task = task.map(|x| x.id);
+                bar.child(line(crate::screens::board::testing_note(tester.as_deref()), theme::TEXT_2))
+                    .when_some(test_task, |el, task_id| {
+                        el.child(ui::button("ticket-test-task", "Open test task", ButtonKind::Outline, None).h(px(28.)).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket_task(task_id, w, cx))))
+                    })
+                    .when(root_id.is_some(), |el| el.child(open_conversation(cx)))
+                    .child(back(cx))
+            }
             ColumnKind::Review => bar.child(line("◆ Review · only a board member decides.".into(), theme::ACCENT_TEXT)).when(root_id.is_some(), |el| el.child(open_conversation(cx))).child(back(cx)),
             ColumnKind::Done => {
                 // MU2-12: how the summary went, from the discussion; a failure can be tried again (AC4).
@@ -1095,10 +1107,42 @@ impl AppView {
             })
             .child(div().pt(px(8.)).child(ui::eyebrow("DISPATCHER")))
             .child(h().gap(px(10.)).child(div().text_size(px(12.5)).child("Default dispatcher")).child(dispatcher))
-            .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Chooses an owner for tickets that start without one. Projects can set their own in Project settings."));
+            .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Chooses an owner for tickets that start without one. Projects can set their own in Project settings."))
+            .children(self.render_tester_picker(online, cx));
         let ready = online && count > 0;
         let save = dim(ui::button("board-columns-save", "Save columns", ButtonKind::Primary, None), ready).when(ready, |el| el.on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.board_columns_save(cx))));
         (body.into_any_element(), vec![save.into_any_element()])
+    }
+}
+
+impl AppView {
+    /// Ticket #5: the company's tester, beside the dispatcher (Settings › Board) and in
+    /// Settings → Company. Only on a server with `board_testing`.
+    pub fn render_tester_picker(&mut self, online: bool, cx: &mut Context<Self>) -> Option<Div> {
+        if !self.board_testing_supported() {
+            return None;
+        }
+        let tester = self.company_tester();
+        let name = tester.map(|e| self.employee_name(e).unwrap_or_else(|| "An employee who left".into())).unwrap_or_else(|| crate::screens::board::NO_TESTER.into());
+        let open = self.overlay == Overlay::Menu && self.menu.as_ref().is_some_and(|m| m.field == Some("board-company-tester"));
+        let picker = ui::dropdown_trigger("board-company-tester", 28., tester.is_some(), open)
+            .max_w(px(260.))
+            .child(div().min_w_0().truncate().child(name))
+            .child(ui::caret())
+            .child(ui::track_bounds(self.dropdown_bounds.clone(), "board-company-tester"))
+            .when(online, |el| {
+                el.on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                    let mut items: MenuItems = vec![menu_entry(crate::screens::board::NO_TESTER, BoardDo::CompanyTester(None), tester.is_none(), None), None];
+                    items.extend(this.employee_choices().into_iter().map(|(e, name)| menu_entry(name, BoardDo::CompanyTester(Some(e)), tester == Some(e), None)));
+                    this.open_dropdown("board-company-tester", items, w, cx);
+                }))
+            });
+        Some(
+            v().gap(px(6.))
+                .child(div().pt(px(8.)).child(ui::eyebrow("TESTER")))
+                .child(h().gap(px(10.)).child(div().text_size(px(12.5)).child("Tester")).child(picker))
+                .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Runs the full test suite once when the owner reports, in the Testing column. Green goes on to Review; red goes back to Doing with the failures.")),
+        )
     }
 }
 
@@ -1117,6 +1161,7 @@ pub fn column_role(kind: ColumnKind) -> &'static str {
         ColumnKind::Todo => "Dispatch",
         ColumnKind::Doing => "Work",
         ColumnKind::PlanReview => "Plan gate",
+        ColumnKind::Testing => "Test gate",
         ColumnKind::Review => "Review gate",
         ColumnKind::Done => "Closed",
     }
@@ -1153,6 +1198,6 @@ mod tests {
 
     #[test]
     fn every_column_shows_its_fixed_role() {
-        assert_eq!(ColumnKind::ALL.map(column_role), ["Start", "Dispatch", "Work", "Plan gate", "Review gate", "Closed"]);
+        assert_eq!(ColumnKind::ALL.map(column_role), ["Start", "Dispatch", "Work", "Plan gate", "Test gate", "Review gate", "Closed"]);
     }
 }

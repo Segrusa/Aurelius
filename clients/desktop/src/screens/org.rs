@@ -346,11 +346,12 @@ impl AppView {
             .into_any_element()
     }
 
-    /// Settings → Company: management's mode, the management team and the default models.
+    /// Settings → Company: management's mode, the management team, the tester and the default models.
     pub fn render_company_settings(&mut self, page: Div, cx: &mut Context<Self>) -> Div {
         let header = h().px(px(22.)).py(px(14.)).border_b_1().border_color(c(theme::BORDER)).child(self.settings_title(cx));
         let team: Vec<String> = crate::screens::dashboard::roots(&self.managers).iter().filter_map(|id| self.managers.iter().find(|m| m.id == *id)).map(|m| m.name.clone()).collect();
         let line = |text: String| div().text_size(px(12.5)).line_height(px(18.)).text_color(c(theme::TEXT_2)).child(text);
+        let online = self.board_online();
         let body = v().id("company-settings-body").flex_1().min_h_0().overflow_y_scrollbar().p(px(22.)).gap(px(16.))
             .when(self.management_mode_supported() && self.may_approve(), |el| {
                 el.when_some(self.management_mode, |el, on| {
@@ -366,6 +367,7 @@ impl AppView {
                     .child(line(if team.is_empty() { "Nobody yet.".into() } else { team.join(", ") })),
             )
             .child(self.render_members_section(cx))
+            .children(self.render_tester_picker(online, cx))
             .child(self.render_background_login(cx))
             .child(self.employee_default_model_section(cx))
             .child(

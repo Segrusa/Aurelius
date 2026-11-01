@@ -48,7 +48,8 @@ fn the_released_migrations_are_unchanged() {
 #[test]
 fn a_new_database_has_one_company_with_six_columns() {
     let dir = tempfile::tempdir().unwrap();
-    drop(Store::open(dir.path()).unwrap());
+    // Schema 18's own board; migration 25 adds Testing (schema25_tests).
+    drop(Store::open_until(dir.path(), 18).unwrap());
     let conn = db(dir.path());
     let (company, scope_kind, name, dispatcher): (String, String, String, Option<String>) = conn
         .query_row(

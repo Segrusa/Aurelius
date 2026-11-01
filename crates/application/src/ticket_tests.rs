@@ -141,7 +141,7 @@ fn every_ticket_board_and_company_write_needs_a_board_member() {
         Command::CancelTicket(ticket::CancelTicket { ticket_id: ticket }),
         Command::ArchiveTicket(ticket::ArchiveTicket { ticket_id: ticket }),
         Command::UpdateBoardColumns(ticket::UpdateBoardColumns { columns: vec![] }),
-        Command::UpdateCompany(UpdateCompany { name: Some("Acme".into()), dispatcher: None }),
+        Command::UpdateCompany(UpdateCompany { name: Some("Acme".into()), dispatcher: None, tester: None }),
         Command::UpdateProject(UpdateProject { project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: None }) }),
     ];
     for command in commands {
@@ -352,11 +352,11 @@ fn columns_can_only_be_renamed_and_reordered() {
     let s = setup();
     let columns = s.service.store().read(company_store::columns).unwrap();
     let mut edits: Vec<ticket::BoardColumnEdit> = columns.iter().map(|c| ticket::BoardColumnEdit { column_id: c.id, name: c.name.clone() }).collect();
-    edits.swap(4, 5);
+    edits.swap(5, 6);
     edits[0].name = "Ideas".into();
     run(&s, Command::UpdateBoardColumns(ticket::UpdateBoardColumns { columns: edits.clone() })).unwrap();
     let after = s.service.store().read(company_store::columns).unwrap();
-    assert_eq!(after.iter().map(|c| c.kind).collect::<Vec<_>>(), [ColumnKind::Backlog, ColumnKind::Todo, ColumnKind::Doing, ColumnKind::PlanReview, ColumnKind::Done, ColumnKind::Review]);
+    assert_eq!(after.iter().map(|c| c.kind).collect::<Vec<_>>(), [ColumnKind::Backlog, ColumnKind::Todo, ColumnKind::Doing, ColumnKind::PlanReview, ColumnKind::Testing, ColumnKind::Done, ColumnKind::Review]);
     assert_eq!(after[0].name, "Ideas");
     edits.pop();
     assert_eq!(run(&s, Command::UpdateBoardColumns(ticket::UpdateBoardColumns { columns: edits })).unwrap_err().code, ErrorCode::Validation, "B3: none dropped");
@@ -372,7 +372,7 @@ fn the_dispatcher_is_set_on_the_company_and_per_project() {
     let orion = employee(&s, "Orion", "active");
     let forge = employee(&s, "Forge", "active");
     let gone = employee(&s, "Gone", "archived");
-    let set = |name: Option<&str>, who: Option<Option<EmployeeId>>| Command::UpdateCompany(UpdateCompany { name: name.map(str::to_owned), dispatcher: who.map(|employee_id| SetDispatcher { employee_id }) });
+    let set = |name: Option<&str>, who: Option<Option<EmployeeId>>| Command::UpdateCompany(UpdateCompany { name: name.map(str::to_owned), dispatcher: who.map(|employee_id| SetDispatcher { employee_id }), tester: None });
     assert_eq!(run(&s, set(None, Some(Some(gone)))).unwrap_err().code, ErrorCode::Validation);
     assert!(matches!(run(&s, set(Some("Acme"), Some(Some(orion)))).unwrap(), CommandResult::CompanyUpdated { version: 2 }));
     let company = s.service.store().read(company_store::get).unwrap();
@@ -405,6 +405,46 @@ fn the_dispatcher_is_set_on_the_company_and_per_project() {
         .unwrap();
     let by: serde_json::Value = serde_json::from_str(&by).unwrap();
     assert_eq!(by["by"], serde_json::json!({ "kind": "board_member", "user_id": s.user }));
+}
+
+#[test]
+fn the_tester_is_an_active_employee_set_by_a_board_member_with_an_event_and_a_receipt() {
+    let s = setup();
+    let pulse = employee(&s, "Pulse", "active");
+    let resting = employee(&s, "Resting", "paused");
+    let gone = employee(&s, "Gone", "archived");
+    let set = |who: Option<EmployeeId>| Command::UpdateCompany(UpdateCompany { name: None, dispatcher: None, tester: Some(aurelius_domain::company::SetTester { employee_id: who }) });
+    // As for the dispatcher: unknown and archived are refused; a paused one too (it would never test).
+    assert_eq!(run(&s, set(Some(EmployeeId::new()))).unwrap_err().code, ErrorCode::NotFound);
+    assert_eq!(run(&s, set(Some(gone))).unwrap_err().code, ErrorCode::Validation);
+    let paused = run(&s, set(Some(resting))).unwrap_err();
+    assert_eq!((paused.code, paused.message.as_str()), (ErrorCode::Validation, crate::ticket::TESTER_NOT_ACTIVE));
+    assert_eq!(run_as(&s, None, set(Some(pulse)), None).unwrap_err().code, ErrorCode::BoardMemberRequired);
+    assert_eq!(s.service.store().read(company_store::get).unwrap().version, 1, "nothing changed yet");
+
+    // Set: one event, the version counts up once; the same command again is its receipt.
+    let command_id = CommandId::new();
+    let once = || s.service.execute(&ctx(Some(s.user)), CommandEnvelope { command_id, expected_version: None, command: set(Some(pulse)) }).unwrap().receipt.result;
+    let first = once();
+    assert!(matches!(first, CommandResult::CompanyUpdated { version: 2 }), "{first:?}");
+    assert_eq!(once(), first, "replayed from its receipt");
+    let company = s.service.store().read(company_store::get).unwrap();
+    assert_eq!((company.version, company.tester_employee_id, company.dispatcher_employee_id), (2, Some(pulse), None));
+    assert_eq!(s.service.store().read(company_store::active_tester).unwrap(), Some(pulse));
+    let meta: String = s
+        .service
+        .store()
+        .read(|c| Ok(c.query_row("SELECT metadata_json FROM events WHERE type = 'company.updated' ORDER BY seq DESC LIMIT 1", [], |r| r.get(0))?))
+        .unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&meta).unwrap();
+    assert_eq!(meta["tester_employee_id"], serde_json::json!(pulse));
+    assert_eq!(meta["by"], serde_json::json!({ "kind": "board_member", "user_id": s.user }));
+    let events: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM events WHERE type = 'company.updated'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(events, 1);
+
+    // Cleared: no tester, so no Testing step.
+    run(&s, set(None)).unwrap();
+    assert_eq!(s.service.store().read(company_store::get).unwrap().tester_employee_id, None);
 }
 
 #[test]
@@ -579,7 +619,7 @@ fn columns_update_checks_the_board_version_and_records_names_and_order() {
     let err = update(&edits, Some(version)).unwrap_err();
     assert_eq!(err.code, ErrorCode::VersionConflict);
     assert_eq!(s.service.store().read(company_store::columns).unwrap()[0].name, "Ideas");
-    edits.swap(4, 5);
+    edits.swap(5, 6);
     assert_eq!(update(&edits, None).unwrap(), CommandResult::BoardColumnsUpdated { version: version + 2 }, "no version: last one wins");
     let meta: Vec<serde_json::Value> = s
         .service
@@ -595,8 +635,8 @@ fn columns_update_checks_the_board_version_and_records_names_and_order() {
         .collect();
     let last = &meta[1]["columns"];
     let names: Vec<&str> = last.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["Inbox", "Todo", "Doing", "Plan review", "Done", "Review"]);
-    assert_eq!((last[4]["kind"].clone(), last[4]["position"].clone()), (serde_json::json!("done"), serde_json::json!(4)));
+    assert_eq!(names, ["Inbox", "Todo", "Doing", "Plan review", "Testing", "Done", "Review"]);
+    assert_eq!((last[5]["kind"].clone(), last[5]["position"].clone()), (serde_json::json!("done"), serde_json::json!(5)));
 }
 
 #[test]
@@ -680,7 +720,7 @@ fn b5_sees_a_new_start_after_a_cancel_in_the_tickets_activity() {
     run(&s, Command::CancelTicket(ticket::CancelTicket { ticket_id: id })).unwrap();
     assert!(!dispatcher_gave_up(&s, id), "back in Backlog");
     let orion = employee(&s, "Orion", "active");
-    run(&s, Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id: Some(orion) }) })).unwrap();
+    run(&s, Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id: Some(orion) }), tester: None })).unwrap();
     run(&s, Command::StartTicket(ticket::StartTicket { ticket_id: id, employee_id: None })).unwrap();
     assert_eq!(view(&s, id).column, ColumnKind::Todo);
     assert!(!dispatcher_gave_up(&s, id), "the new start is newer than the old needs-owner");
@@ -694,7 +734,7 @@ fn a_dispatchers_run_left_open_ends_when_its_job_is_claimed_again() {
     // Trace M3 m2: the daemon stopped during the dispatcher's run; claimed again, that run is over.
     let s = setup();
     let orion = employee(&s, "Orion", "active");
-    run(&s, Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id: Some(orion) }) })).unwrap();
+    run(&s, Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id: Some(orion) }), tester: None })).unwrap();
     let id = new_ticket(&s, "Interrupted");
     run(&s, Command::StartTicket(ticket::StartTicket { ticket_id: id, employee_id: None })).unwrap();
     let root = view(&s, id).root_task_id.unwrap();
