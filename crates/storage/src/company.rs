@@ -1,5 +1,5 @@
-//! The company row (migration 18: exactly one), its dispatcher, the board's six
-//! columns and a project's own dispatcher.
+//! The company row (migration 18: exactly one), its dispatcher and tester, the
+//! board's seven columns and a project's own dispatcher.
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::{
@@ -15,8 +15,8 @@ fn employee(text: Option<String>) -> Option<EmployeeId> {
 
 /// The company. Every database at schema 18 has exactly one.
 pub fn get(conn: &Connection) -> Result<CompanyView, StorageError> {
-    conn.query_row("SELECT id, name, dispatcher_employee_id, version FROM company", [], |r| {
-        Ok(CompanyView { id: r.get(0)?, name: r.get(1)?, dispatcher_employee_id: employee(r.get(2)?), tester_employee_id: None, version: r.get::<_, i64>(3)? as u64 })
+    conn.query_row("SELECT id, name, dispatcher_employee_id, version, tester_employee_id FROM company", [], |r| {
+        Ok(CompanyView { id: r.get(0)?, name: r.get(1)?, dispatcher_employee_id: employee(r.get(2)?), tester_employee_id: employee(r.get(4)?), version: r.get::<_, i64>(3)? as u64 })
     })
     .optional()?
     .ok_or_else(|| StorageError::Rejected("there is no company".into()))
@@ -35,6 +35,24 @@ pub fn update(tx: &Transaction<'_>, name: Option<&str>, dispatcher: Option<Optio
         params![current.id, name.unwrap_or(&current.name), dispatcher.map(|d| d.to_string()), version as i64, now_ms()],
     )?;
     Ok(version)
+}
+
+/// Choose (or clear) the company's tester; returns the company's new version.
+pub fn set_tester(tx: &Transaction<'_>, tester: Option<EmployeeId>) -> Result<u64, StorageError> {
+    let current = get(tx)?;
+    let version = current.version + 1;
+    tx.execute(
+        "UPDATE company SET tester_employee_id = ?2, version = ?3, updated_at_ms = ?4 WHERE id = ?1",
+        params![current.id, tester.map(|t| t.to_string()), version as i64, now_ms()],
+    )?;
+    Ok(version)
+}
+
+/// The company's tester while it is an active employee; none without one (or
+/// when it is paused or archived): then there is no Testing step.
+pub fn active_tester(conn: &Connection) -> Result<Option<EmployeeId>, StorageError> {
+    let Some(tester) = get(conn)?.tester_employee_id else { return Ok(None) };
+    Ok((employee_status(conn, tester)?.as_deref() == Some("active")).then_some(tester))
 }
 
 /// The "company login": the board member whose Claude login runs the

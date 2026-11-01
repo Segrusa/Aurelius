@@ -72,25 +72,25 @@ fn titles_in(f: &Fixture, kind: ColumnKind) -> Vec<String> {
 }
 
 #[test]
-fn the_board_has_six_fixed_columns_and_one_company() {
+fn the_board_has_seven_fixed_columns_and_one_company() {
     let f = fixture();
     let columns = f.store.read(company::columns).unwrap();
-    // Testing is on the wire (AUR-T5-P); its column comes with the migration of AUR-T5-F.
-    let stored: Vec<ColumnKind> = ColumnKind::ALL.into_iter().filter(|k| *k != ColumnKind::Testing).collect();
-    assert_eq!(columns.iter().map(|c| c.kind).collect::<Vec<_>>(), stored);
-    assert_eq!(columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Backlog", "Todo", "Doing", "Plan review", "Review", "Done"]);
+    assert_eq!(columns.iter().map(|c| c.kind).collect::<Vec<_>>(), ColumnKind::ALL);
+    assert_eq!(columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Backlog", "Todo", "Doing", "Plan review", "Testing", "Review", "Done"]);
     let company = f.store.read(company::get).unwrap();
-    assert_eq!((company.name.as_str(), company.dispatcher_employee_id), ("Company", None));
+    assert_eq!((company.name.as_str(), company.dispatcher_employee_id, company.tester_employee_id), ("Company", None, None));
 
     // Renamed and reordered: the kinds stay, the order follows the list.
     let mut order: Vec<_> = columns.iter().rev().map(|c| (c.id, format!("{}!", c.name))).collect();
-    order.swap(0, 5);
+    order.swap(0, 6);
     f.store.write(move |tx| company::update_columns(tx, &order)).unwrap();
     let after = f.store.read(company::columns).unwrap();
     assert_eq!(after[0].kind, ColumnKind::Backlog);
     assert_eq!(after[1].kind, ColumnKind::Review);
     assert_eq!(after[1].name, "Review!");
-    assert!(after.iter().all(|c| c.version == 2));
+    // Each column counts one up (migration 25 already moved Review and Done one place right).
+    assert!(after.iter().all(|a| columns.iter().any(|c| c.id == a.id && a.version == c.version + 1)));
+    assert_eq!(columns.iter().map(|c| c.version).collect::<Vec<_>>(), [1, 1, 1, 1, 2, 2, 2]);
 }
 
 #[test]
@@ -156,7 +156,7 @@ fn move_to_keeps_an_exact_order_and_the_board_filters_per_project() {
     assert_eq!(titles_in(&f, ColumnKind::Backlog), ["C"]);
 
     let atlas = f.store.read(|conn| tickets::board(conn, Some(f.atlas), &read_blob)).unwrap();
-    assert_eq!(atlas.len(), 6);
+    assert_eq!(atlas.len(), 7);
     assert!(atlas[0].tickets.is_empty(), "C is Hermes'");
     assert_eq!(atlas[1].tickets.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(), ["B", "A"]);
     let all = f.store.read(|conn| tickets::board(conn, None, &read_blob)).unwrap();

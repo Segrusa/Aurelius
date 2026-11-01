@@ -78,11 +78,9 @@ async fn a_board_member_fills_and_works_the_board() {
     let atlas = project(&client, "Atlas").await;
     let hermes = project(&client, "Hermes").await;
 
-    // MU1-19 AC4: an empty board with the six columns.
+    // MU1-19 AC4: an empty board with the seven columns (Testing since migration 25).
     let board = client.board(None).await.unwrap();
-    // Testing is on the wire (AUR-T5-P); its column comes with the migration of AUR-T5-F.
-    let stored: Vec<ColumnKind> = ColumnKind::ALL.into_iter().filter(|k| *k != ColumnKind::Testing).collect();
-    assert_eq!(board.columns.iter().map(|c| c.column.kind).collect::<Vec<_>>(), stored);
+    assert_eq!(board.columns.iter().map(|c| c.column.kind).collect::<Vec<_>>(), ColumnKind::ALL);
     assert!(board.columns.iter().all(|c| c.tickets.is_empty()));
 
     let (login, one) = create(&client, atlas, "Login", TicketPriority::High).await;

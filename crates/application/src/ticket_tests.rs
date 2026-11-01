@@ -351,11 +351,11 @@ fn columns_can_only_be_renamed_and_reordered() {
     let s = setup();
     let columns = s.service.store().read(company_store::columns).unwrap();
     let mut edits: Vec<ticket::BoardColumnEdit> = columns.iter().map(|c| ticket::BoardColumnEdit { column_id: c.id, name: c.name.clone() }).collect();
-    edits.swap(4, 5);
+    edits.swap(5, 6);
     edits[0].name = "Ideas".into();
     run(&s, Command::UpdateBoardColumns(ticket::UpdateBoardColumns { columns: edits.clone() })).unwrap();
     let after = s.service.store().read(company_store::columns).unwrap();
-    assert_eq!(after.iter().map(|c| c.kind).collect::<Vec<_>>(), [ColumnKind::Backlog, ColumnKind::Todo, ColumnKind::Doing, ColumnKind::PlanReview, ColumnKind::Done, ColumnKind::Review]);
+    assert_eq!(after.iter().map(|c| c.kind).collect::<Vec<_>>(), [ColumnKind::Backlog, ColumnKind::Todo, ColumnKind::Doing, ColumnKind::PlanReview, ColumnKind::Testing, ColumnKind::Done, ColumnKind::Review]);
     assert_eq!(after[0].name, "Ideas");
     edits.pop();
     assert_eq!(run(&s, Command::UpdateBoardColumns(ticket::UpdateBoardColumns { columns: edits })).unwrap_err().code, ErrorCode::Validation, "B3: none dropped");
@@ -592,7 +592,7 @@ fn columns_update_checks_the_board_version_and_records_names_and_order() {
     let err = update(&edits, Some(version)).unwrap_err();
     assert_eq!(err.code, ErrorCode::VersionConflict);
     assert_eq!(s.service.store().read(company_store::columns).unwrap()[0].name, "Ideas");
-    edits.swap(4, 5);
+    edits.swap(5, 6);
     assert_eq!(update(&edits, None).unwrap(), CommandResult::BoardColumnsUpdated { version: version + 2 }, "no version: last one wins");
     let meta: Vec<serde_json::Value> = s
         .service
@@ -608,8 +608,8 @@ fn columns_update_checks_the_board_version_and_records_names_and_order() {
         .collect();
     let last = &meta[1]["columns"];
     let names: Vec<&str> = last.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["Inbox", "Todo", "Doing", "Plan review", "Done", "Review"]);
-    assert_eq!((last[4]["kind"].clone(), last[4]["position"].clone()), (serde_json::json!("done"), serde_json::json!(4)));
+    assert_eq!(names, ["Inbox", "Todo", "Doing", "Plan review", "Testing", "Done", "Review"]);
+    assert_eq!((last[5]["kind"].clone(), last[5]["position"].clone()), (serde_json::json!("done"), serde_json::json!(5)));
 }
 
 #[test]

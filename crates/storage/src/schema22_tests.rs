@@ -83,10 +83,11 @@ fn a_phase_3_database_migrates_without_losing_anything() {
     let before = snapshot(&db(dir.path()));
     assert!(before.iter().any(|r| r.starts_with("tickets:")) && before.iter().any(|r| r.starts_with("user_sessions:")));
 
-    let store = Store::open(dir.path()).unwrap();
+    // Up to 22 only: later migrations add columns to the company and tickets (25).
+    let store = Store::open_until(dir.path(), 22).unwrap();
     {
         let conn = db(dir.path());
-        assert_eq!(conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get::<_, i64>(0)).unwrap(), migrate::supported_version());
+        assert_eq!(conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get::<_, i64>(0)).unwrap(), 22);
         assert!(strings(&conn, "SELECT \"table\" FROM pragma_foreign_key_check").is_empty());
         assert_eq!(snapshot(&conn), before);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM vault_items", [], |r| r.get::<_, i64>(0)).unwrap(), 0);

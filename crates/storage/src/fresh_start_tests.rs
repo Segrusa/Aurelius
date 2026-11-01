@@ -199,7 +199,7 @@ fn the_fresh_start_sets_the_old_workspace_aside_and_imports_it() {
             // The company keeps the old global scope; Orion dispatches.
             let (scope, dispatcher): (String, Option<String>) = c.query_row("SELECT scope_id, dispatcher_employee_id FROM company", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
             assert_eq!((scope.as_str(), dispatcher.as_deref()), (OLD_GLOBAL, Some(ORION)));
-            assert_eq!(one::<i64>(c, "SELECT COUNT(*) FROM board_columns"), 6);
+            assert_eq!(one::<i64>(c, "SELECT COUNT(*) FROM board_columns"), 7);
             assert_eq!(one::<i64>(c, "SELECT COUNT(*) FROM users"), 0, "no users: every client starts in the onboarding");
 
             // Memory: department memory is company memory now, the duplicate superseded.

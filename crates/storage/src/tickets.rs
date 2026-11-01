@@ -249,6 +249,24 @@ pub fn set_root_task(tx: &Transaction<'_>, id: TicketId, task: Option<TaskId>) -
     Ok(())
 }
 
+/// The ticket's latest test sub-task (the engine sets it when the card goes to Testing).
+pub fn set_test_task(tx: &Transaction<'_>, id: TicketId, task: Option<TaskId>) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET test_task_id = ?2 WHERE id = ?1", params![id.to_string(), task.map(|t| t.to_string())])?;
+    Ok(())
+}
+
+/// The ticket's latest test sub-task, if it ever had one.
+pub fn test_task(conn: &Connection, id: TicketId) -> Result<Option<TaskId>, StorageError> {
+    let task: Option<String> = conn.query_row("SELECT test_task_id FROM tickets WHERE id = ?1", [id.to_string()], |r| r.get(0)).optional()?.flatten();
+    Ok(task.and_then(|t| TaskId::parse(&t).ok()))
+}
+
+/// The ticket whose latest test sub-task `task` is, if it is one (ended or not).
+pub fn tested_by(conn: &Connection, task: TaskId) -> Result<Option<TicketId>, StorageError> {
+    let id: Option<String> = conn.query_row("SELECT id FROM tickets WHERE test_task_id = ?1", [task.to_string()], |r| r.get(0)).optional()?;
+    Ok(id.and_then(|i| TicketId::parse(&i).ok()))
+}
+
 pub fn attachments_of(conn: &Connection, id: TicketId) -> Result<Option<TaskAttachments>, StorageError> {
     let json: Option<String> = conn.query_row("SELECT attachments_json FROM tickets WHERE id = ?1", [id.to_string()], |r| r.get(0)).optional()?.flatten();
     Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
