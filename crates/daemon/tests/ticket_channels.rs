@@ -8,12 +8,12 @@ mod common;
 
 use aurelius_client::Client;
 use aurelius_domain::employee::CreateEmployee;
-use aurelius_domain::group_chat::{ReactToMessage, SendGroupMessage};
+use aurelius_domain::group_chat::SendGroupMessage;
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::task::TaskStatus;
 use aurelius_domain::ticket::*;
 use aurelius_domain::views::{ChannelKind, ChannelView, MessageView, SystemLineKind, system_action};
-use aurelius_domain::{AppError, Command, CommandId, CommandResult, ConversationId, EmployeeId, ErrorCode, MessageId, ProjectId, TicketId};
+use aurelius_domain::{AppError, Command, CommandId, CommandResult, ConversationId, EmployeeId, ErrorCode, ProjectId, TicketId};
 use aurelius_host::ipc::{self, BoxStream, read_frame, write_frame};
 use aurelius_protocol::{HelloParams, Method, Outcome, Receipt, Request, ResponseBody, ServerMessage, WriteMethod, WriteResult, client_feature};
 use common::*;
@@ -340,25 +340,5 @@ async fn the_creator_the_owner_and_the_assignee_are_members_and_a_new_assignee_j
     assert_eq!((theirs[0].member, theirs[0].member_count), (false, Some(4)), "bob is not in it, and still sees it");
 
     drop((alex, grace));
-    stop(dir.path(), daemon).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn threads_and_reactions_are_refused_until_phase_2() {
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = start(dir.path()).await;
-    let client = connect(dir.path()).await;
-    let id = ticket(&client, project(&client, "Atlas").await, "Threads", None, false).await;
-    let mut new = raw(dir.path(), BOARD_MEMBER, NEW).await;
-    let reply = Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: id, text: "A reply".into(), images: vec![], files: vec![], thread_parent: Some(MessageId::new()) });
-    let refused = write(&mut new, reply).await.unwrap_err();
-    assert_eq!(refused.code, ErrorCode::Validation);
-    assert!(refused.message.contains("not supported"), "{}", refused.message);
-    let react = Command::ReactToMessage(ReactToMessage { message_id: MessageId::new(), emoji: "👍".into(), on: true });
-    let refused = write(&mut new, react).await.unwrap_err();
-    assert_eq!(refused.code, ErrorCode::Validation);
-    assert!(refused.message.contains("not supported"), "{}", refused.message);
-
-    drop(client);
     stop(dir.path(), daemon).await;
 }

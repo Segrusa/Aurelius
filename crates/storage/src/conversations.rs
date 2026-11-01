@@ -110,9 +110,10 @@ pub fn latest_group_messages(conn: &Connection, group: ConversationId, before: O
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// How many of those messages the group chat has.
+/// How many of those messages the group chat has (not the replies in its threads).
 pub fn group_message_count(conn: &Connection, group: ConversationId) -> Result<u32, StorageError> {
-    Ok(conn.query_row(&format!("SELECT COUNT(*) {GROUP_MESSAGES}"), [group.to_string()], |r| r.get(0))?)
+    let own = if has_thread_column(conn)? { " AND m.thread_parent_id IS NULL" } else { "" };
+    Ok(conn.query_row(&format!("SELECT COUNT(*) {GROUP_MESSAGES}{own}"), [group.to_string()], |r| r.get(0))?)
 }
 
 /// How many posts woke colleagues (`woke` in their meta): of run `run`, and of
@@ -554,7 +555,7 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
 }
 
 /// Whether `messages` has `thread_parent_id` (schema 26).
-fn has_thread_column(conn: &Connection) -> Result<bool, StorageError> {
+pub(crate) fn has_thread_column(conn: &Connection) -> Result<bool, StorageError> {
     Ok(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'thread_parent_id'", [], |r| r.get::<_, i64>(0))? > 0)
 }
 

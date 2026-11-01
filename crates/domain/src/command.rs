@@ -301,4 +301,13 @@ pub enum CommandResult {
         name: String,
         version: u64,
     },
+    /// `message.react` (feature `chat_reactions`): the reaction is as asked now.
+    /// `changed` is false when it already was (on twice, off when not there).
+    MessageReacted {
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        emoji: String,
+        on: bool,
+        changed: bool,
+    },
 }

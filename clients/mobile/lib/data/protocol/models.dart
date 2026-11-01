@@ -2542,7 +2542,7 @@ final class CommandPostTicketMessage extends Command {
   final List<String> images;
   final String text;
   /// A reply in the thread of this message of the discussion (feature
-  /// `chat_threads`, not advertised yet: the server refuses it until then).
+  /// `chat_threads`): a message of the same discussion that is not itself a reply.
   final String? threadParent;
   final String ticketId;
 
@@ -3557,6 +3557,14 @@ sealed class CommandResult {
         return CommandResultMemoryStored(
           memoryId: (json['memory_id'] as String),
         );
+      case 'message_reacted':
+        return CommandResultMessageReacted(
+          changed: (json['changed'] as bool),
+          conversationId: (json['conversation_id'] as String),
+          emoji: (json['emoji'] as String),
+          messageId: (json['message_id'] as String),
+          on: (json['on'] as bool),
+        );
       case 'project_conversation_started':
         return CommandResultProjectConversationStarted(
           conversationId: (json['conversation_id'] as String),
@@ -4253,6 +4261,34 @@ final class CommandResultMemoryStored extends CommandResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'memory_stored',
       'memory_id': memoryId,
+    };
+}
+
+/// `message.react` (feature `chat_reactions`): the reaction is as asked now.
+/// `changed` is false when it already was (on twice, off when not there).
+final class CommandResultMessageReacted extends CommandResult {
+  const CommandResultMessageReacted({
+    required this.changed,
+    required this.conversationId,
+    required this.emoji,
+    required this.messageId,
+    required this.on,
+  });
+
+  final bool changed;
+  final String conversationId;
+  final String emoji;
+  final String messageId;
+  final bool on;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'message_reacted',
+      'changed': changed,
+      'conversation_id': conversationId,
+      'emoji': emoji,
+      'message_id': messageId,
+      'on': on,
     };
 }
 
@@ -14132,8 +14168,8 @@ final class PushStatus {
 }
 
 /// A board member adds (`on`) or takes back their reaction with `emoji` on a
-/// message of a channel (`message.react`, feature `chat_reactions`, not advertised
-/// yet: the server refuses it until then).
+/// message of a channel or a ticket's discussion that is not closed
+/// (`message.react`, feature `chat_reactions`). Idempotent: on twice is on once.
 final class ReactToMessage {
   const ReactToMessage({
     required this.emoji,
@@ -16471,7 +16507,7 @@ final class SendGroupMessage {
   final List<String> images;
   final String text;
   /// A reply in the thread of this message of the channel (feature
-  /// `chat_threads`, not advertised yet: the server refuses it until then).
+  /// `chat_threads`): a message of the same channel that is not itself a reply.
   final String? threadParent;
 
   factory SendGroupMessage.fromJson(Map<String, dynamic> json) => SendGroupMessage(

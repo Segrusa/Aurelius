@@ -385,16 +385,29 @@ pub struct DiscussionLine {
 
 /// The latest `limit` messages employees read in a channel or ticket discussion
 /// (the same as `conversations::latest_group_messages`, with the board member),
-/// before `before` when given, newest first.
+/// before `before` when given, newest first. Not the replies in its threads.
 pub fn latest_messages(conn: &Connection, conversation: ConversationId, before: Option<MessageId>, limit: u32) -> Result<Vec<DiscussionLine>, StorageError> {
-    let mut stmt = conn.prepare(
+    latest_in(conn, conversation, None, before, limit)
+}
+
+/// `latest_messages` of the channel itself (`thread` none), or of the thread of
+/// `thread`: its root and its replies.
+pub fn latest_in(conn: &Connection, conversation: ConversationId, thread: Option<MessageId>, before: Option<MessageId>, limit: u32) -> Result<Vec<DiscussionLine>, StorageError> {
+    // Each filter names ?4 (the root, or NULL), so the statement always takes every parameter.
+    let only = match (crate::conversations::has_thread_column(conn)?, thread) {
+        (true, None) => "?4 IS NULL AND m.thread_parent_id IS NULL",
+        (true, Some(_)) => "(m.id = ?4 OR m.thread_parent_id = ?4)",
+        (false, None) => "?4 IS NULL",
+        (false, Some(_)) => "m.id = ?4",
+    };
+    let mut stmt = conn.prepare(&format!(
         "SELECT m.id, CASE WHEN m.role = 'user' THEN NULL ELSE COALESCE(json_extract(m.meta_json, '$.from'), 'Aurelius') END,
                 u.id, u.username, b.storage_key
          FROM messages m JOIN blobs b ON b.id = m.content_blob_id LEFT JOIN users u ON u.id = m.author_user_id
-         WHERE m.conversation_id = ?1 AND m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group')
-           AND (?2 IS NULL OR m.ordinal < (SELECT ordinal FROM messages WHERE id = ?2)) ORDER BY m.ordinal DESC LIMIT ?3",
-    )?;
-    let rows = stmt.query_map(params![conversation.to_string(), before.map(|m| m.to_string()), limit], |r| {
+         WHERE m.conversation_id = ?1 AND m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group') AND {only}
+           AND (?2 IS NULL OR m.ordinal < (SELECT ordinal FROM messages WHERE id = ?2)) ORDER BY m.ordinal DESC LIMIT ?3"
+    ))?;
+    let rows = stmt.query_map(params![conversation.to_string(), before.map(|m| m.to_string()), limit, thread.map(|t| t.to_string())], |r| {
         let user = match (r.get::<_, Option<String>>(2)?, r.get::<_, Option<String>>(3)?) {
             (Some(id), Some(name)) => Some((parse(UserId::parse(&id))?, name)),
             _ => None,

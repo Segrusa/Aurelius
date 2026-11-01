@@ -39,10 +39,12 @@ use aurelius_storage::conversations::{self as conv, GroupRun, NewMessage};
 use aurelius_storage::{StorageError, Store, Tx, blobs, employees};
 use rusqlite::OptionalExtension;
 
-/// Why `message.react` is refused: reactions are phase 2 (feature `chat_reactions`, not advertised yet).
-pub(crate) const REACTIONS_NOT_YET: &str = "Reactions are not supported by this server yet.";
-/// Why a reply in a thread is refused: threads are phase 2 (feature `chat_threads`, not advertised yet).
-pub(crate) const THREADS_NOT_YET: &str = "Replies in a thread are not supported by this server yet.";
+/// Why a reply is refused whose `thread_parent` is not a message of the discussion.
+const THREAD_NOT_HERE: &str = "The message this replies to is not in this channel.";
+/// Why a reply to a reply is refused: a thread has one level (no nested threads).
+const THREAD_NESTED: &str = "This message is a reply itself: answer in the thread of the message it replies to.";
+/// Why a reaction is refused on a message that is in no channel or ticket's discussion.
+const REACTION_NOT_HERE: &str = "Only a message of a channel or a ticket's discussion can get a reaction.";
 
 /// The ticket a discussion belongs to, as the engine needs it.
 #[derive(Debug, Clone)]
@@ -252,8 +254,10 @@ fn addressees(conn: &rusqlite::Connection, d: &Discussion, text: &str, author: O
 /// The latest `limit` messages of a discussion before `before` (all when none),
 /// oldest first, each as one JSON object `{"from", "text"}` (text cut at
 /// `chars`): its newlines stay inside the quotes, so no message can pass for another.
-pub(crate) fn discussion_json(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, id: ConversationId, before: Option<MessageId>, limit: u32, chars: usize) -> Result<Vec<String>, StorageError> {
-    let rows = aurelius_storage::discussions::latest_messages(conn, id, before, limit)?;
+/// `thread`: those of that thread (its root first) instead of the channel's own.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn discussion_json(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, id: ConversationId, thread: Option<MessageId>, before: Option<MessageId>, limit: u32, chars: usize) -> Result<Vec<String>, StorageError> {
+    let rows = aurelius_storage::discussions::latest_in(conn, id, thread, before, limit)?;
     Ok(rows
         .into_iter()
         .rev()
@@ -272,11 +276,11 @@ pub(crate) fn discussion_json(conn: &rusqlite::Connection, read: &dyn Fn(&str) -
         .collect())
 }
 
-/// The context of the latest messages of `id` before `before` (all when none),
-/// as a JSON list (empty when there are none): what a woken employee, or a run
-/// under a ticket at its start, gets with it.
-pub(crate) fn context_text(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, id: ConversationId, before: Option<MessageId>) -> Result<String, StorageError> {
-    let lines = discussion_json(conn, read, id, before, CONTEXT_MESSAGES as u32, CONTEXT_CHARS)?;
+/// The context of the latest messages of `id` (of its `thread`, when given)
+/// before `before` (all when none), as a JSON list (empty when there are none):
+/// what a woken employee, or a run under a ticket at its start, gets with it.
+pub(crate) fn context_text(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, id: ConversationId, thread: Option<MessageId>, before: Option<MessageId>) -> Result<String, StorageError> {
+    let lines = discussion_json(conn, read, id, thread, before, CONTEXT_MESSAGES as u32, CONTEXT_CHARS)?;
     Ok(if lines.is_empty() { String::new() } else { format!("[\n{}\n]", lines.join(",\n")) })
 }
 
@@ -297,9 +301,9 @@ fn nobody_answers(d: &Discussion, paused: &[String]) -> String {
 
 /// A message in a discussion: an update (`kind`: an employee's, or a note of
 /// Aurelius) with `from` as author, under `message` (the id it was streamed
-/// under, for an answer).
+/// under, for an answer), in the thread of `thread` when given.
 #[allow(clippy::too_many_arguments)]
-fn post_in(tx: &Tx<'_>, store: &Store, id: ConversationId, message: MessageId, kind: &str, from: &str, text: &str, extra: serde_json::Value) -> Result<EventNotice, StorageError> {
+fn post_in(tx: &Tx<'_>, store: &Store, id: ConversationId, thread: Option<MessageId>, message: MessageId, kind: &str, from: &str, text: &str, extra: serde_json::Value) -> Result<EventNotice, StorageError> {
     let blob = store.blobs().put(text.as_bytes(), "text/markdown; charset=utf-8")?;
     blobs::register(tx, &blob)?;
     let (event, notice) = emit(tx, Ev {
@@ -318,14 +322,10 @@ fn post_in(tx: &Tx<'_>, store: &Store, id: ConversationId, message: MessageId, k
         m.extend(e.clone());
     }
     conv::insert_update(tx, message, id, &blob.id.to_string(), event, &meta)?;
+    if let Some(root) = thread {
+        aurelius_storage::threads::set_thread_parent(tx, message, root)?;
+    }
     Ok(notice)
-}
-
-/// A system line of Aurelius in a discussion (`MessageView::system`): never a
-/// message employees read as one of the discussion's, and it wakes nobody. Its
-/// text is the line in words (`SystemLine::sentence`), with the ticket's number.
-pub(crate) fn post_system(tx: &Tx<'_>, id: ConversationId, line: &SystemLine) -> Result<EventNotice, StorageError> {
-    system_line(tx, id, line, None)
 }
 
 /// A system line with its own words (`text`; none: `SystemLine::sentence`) in
@@ -333,6 +333,11 @@ pub(crate) fn post_system(tx: &Tx<'_>, id: ConversationId, line: &SystemLine) ->
 /// nobody and is never part of what a woken employee reads (`latest_messages`
 /// takes only messages); a discussion on Done takes it too (B7 is for people and tools).
 pub(crate) fn system_line(tx: &Tx<'_>, id: ConversationId, line: &SystemLine, text: Option<&str>) -> Result<EventNotice, StorageError> {
+    system_line_in(tx, id, None, line, text)
+}
+
+/// `system_line`, in the thread of `thread` when given (a hint for a reply there).
+fn system_line_in(tx: &Tx<'_>, id: ConversationId, thread: Option<MessageId>, line: &SystemLine, text: Option<&str>) -> Result<EventNotice, StorageError> {
     let text = match text.map(str::trim).filter(|t| !t.is_empty()) {
         Some(text) => text.to_owned(),
         None => {
@@ -357,6 +362,9 @@ pub(crate) fn system_line(tx: &Tx<'_>, id: ConversationId, line: &SystemLine, te
         dedupe: format!("system-line:{message}"),
     })?;
     conv::insert_update(tx, message, id, &blob.id.to_string(), event, &serde_json::json!({ "kind": "status", "from": "Aurelius", "system": line }))?;
+    if let Some(root) = thread {
+        aurelius_storage::threads::set_thread_parent(tx, message, root)?;
+    }
     Ok(notice)
 }
 
@@ -443,11 +451,11 @@ pub(crate) fn created_from(tx: &Tx<'_>, ticket: TicketId, number: u32, user: Use
     Ok(notices)
 }
 
-/// "Limit reached: X was not woken." for a mention the loop limits refused.
-fn limit_line(tx: &Tx<'_>, id: ConversationId, names: &str) -> Result<EventNotice, StorageError> {
+/// "Limit reached: X was not woken." for a mention the loop limits refused (in its thread).
+fn limit_line(tx: &Tx<'_>, id: ConversationId, thread: Option<MessageId>, names: &str) -> Result<EventNotice, StorageError> {
     let mut line = SystemLine::new(SystemLineKind::Limit);
     line.to = Some(names.to_owned());
-    post_system(tx, id, &line)
+    system_line_in(tx, id, thread, &line, None)
 }
 
 /// What a message brings along for the employees: its images (shown to
@@ -472,6 +480,8 @@ struct Wake<'a> {
     hop: u32,
     /// The board member of hop 0, whose Claude login the woken runs use.
     login: Option<UserId>,
+    /// The message was a reply in the thread of this one: the answer goes there too.
+    thread: Option<MessageId>,
 }
 
 /// Wake `employee` for the message `w`: the message and the latest messages of
@@ -484,6 +494,9 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     if let Some(heading) = d.heading() {
         body.push_str(&heading);
         body.push_str("\n\n");
+    }
+    if w.thread.is_some() {
+        body.push_str(&format!("This is a reply in a thread of {} (the context below is that thread, its first message first).\n\n", d.label()));
     }
     if !shared.files.is_empty() {
         body.push_str(&format!("{from} shared these files in {}: {}\n\n", d.label(), shared.files.join(", ")));
@@ -507,13 +520,14 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
             t.number
         ));
     }
-    body.push_str(&format!("\n\n---\n{name}: your answer is posted in {} under your name. Keep it short.", d.label()));
+    let place = if w.thread.is_some() { format!("that thread of {}", d.label()) } else { d.label() };
+    body.push_str(&format!("\n\n---\n{name}: your answer is posted in {place} under your name. Keep it short."));
     let (update, posted) = crate::task::task_threads::post_note(tx, store, chat, crate::task::task_threads::Speaker::Update { kind: GROUP_KIND, from }, &body)?;
     // The images of the message come along, so the employee sees them (see `run::plan`).
     if !shared.images.is_empty() {
         conv::set_message_files(tx, update, shared.images)?;
     }
-    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login, thread_parent: None };
+    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login, thread_parent: w.thread };
     let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
     Ok(Some((run, std::iter::once(posted).chain(queued).collect())))
 }
@@ -531,7 +545,11 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
 /// it, unlike an answer in the task's own conversation, so a sequential owner
 /// never jumps its line). `None`: it does not get there, the main task has ended
 /// (e.g. failed in Doing, B6: Start makes a new one), with the hint for the discussion.
-fn to_owner(tx: &Tx<'_>, store: &Store, t: &TicketPlace, from: &str, text: &str) -> Result<Option<Vec<EventNotice>>, StorageError> {
+///
+/// A reply in a thread says so, and the update keeps the discussion and the
+/// thread (`thread_parent` in its meta): what the owner posts with
+/// `post_to_discussion` after it goes into that thread (`run_thread`).
+fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &str, text: &str, thread: Option<MessageId>) -> Result<Option<Vec<EventNotice>>, StorageError> {
     use aurelius_domain::task::TaskStatus;
     let Some(root) = t.root_task else { return Ok(Some(vec![])) };
     let Some(row) = aurelius_storage::tasks::load_task(tx, root)? else { return Ok(Some(vec![])) };
@@ -542,12 +560,14 @@ fn to_owner(tx: &Tx<'_>, store: &Store, t: &TicketPlace, from: &str, text: &str)
     if row.status == TaskStatus::Draft {
         return Ok(Some(vec![]));
     }
+    let place = if thread.is_some() { "a thread in the discussion" } else { "the discussion" };
     let body = format!(
-        "{}\n\n---\nFrom the discussion of ticket #{}. Answer the board member there with post_to_discussion.",
+        "{}\n\n---\nFrom {place} of ticket #{}. Answer the board member there with post_to_discussion.",
         text.trim(),
         t.number
     );
-    let (message, posted) = crate::task::task_threads::post_returning(tx, store, conversation, root, crate::task::task_threads::Speaker::Update { kind: "message", from }, &body)?;
+    let extra = serde_json::json!({ "discussion": d.id, "thread_parent": thread });
+    let (message, posted) = crate::task::task_threads::post_returning_with(tx, store, conversation, root, crate::task::task_threads::Speaker::Update { kind: "message", from }, &body, extra)?;
     let mut notices = vec![posted];
     if !matches!(row.status, TaskStatus::Running | TaskStatus::Review) {
         return Ok(Some(notices));
@@ -573,9 +593,10 @@ fn main_task_ended(tx: &Tx<'_>, t: &TicketPlace) -> Result<String, StorageError>
 }
 
 /// A line of Aurelius that tells the board member why a message reached nobody
-/// (or not the owner): a system line (`Limit`, without `to`; it wakes nobody).
-fn nobody_line(tx: &Tx<'_>, id: ConversationId, text: &str) -> Result<EventNotice, StorageError> {
-    system_line(tx, id, &SystemLine::new(SystemLineKind::Limit), Some(text))
+/// (or not the owner): a system line (`Limit`, without `to`; it wakes nobody),
+/// in the thread of the message when it was a reply.
+fn nobody_line(tx: &Tx<'_>, id: ConversationId, thread: Option<MessageId>, text: &str) -> Result<EventNotice, StorageError> {
+    system_line_in(tx, id, thread, &SystemLine::new(SystemLineKind::Limit), Some(text))
 }
 
 /// The answer of a run a discussion woke, copied there as the employee's
@@ -602,7 +623,7 @@ pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation
         (text, Some("interrupted")) => format!("{}\n\n(interrupted)", group::shortened(text, crate::task::task_threads::MAX_POST)),
         (text, Some(code)) => format!("{}\n\n(interrupted: {code})", group::shortened(text, crate::task::task_threads::MAX_POST)),
     };
-    let notice = post_in(tx, store, marking.conversation_id, marking.message_id, GROUP_KIND, &name, &text, serde_json::json!({ "run_id": run, "hop": marking.hop, "mode": mode }))?;
+    let notice = post_in(tx, store, marking.conversation_id, marking.thread_parent, marking.message_id, GROUP_KIND, &name, &text, serde_json::json!({ "run_id": run, "hop": marking.hop, "mode": mode }))?;
     if !files.is_empty() {
         conv::set_message_files(tx, marking.message_id, files)?;
     }
@@ -625,9 +646,6 @@ impl CommandService {
     /// message is stored, and the employees it names (or the one B3 names) each
     /// answer from their own main chat.
     pub(crate) fn send_group_message(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &group::SendGroupMessage) -> Result<Committed, AppError> {
-        if cmd.thread_parent.is_some() {
-            return Err(AppError::new(ErrorCode::Validation, THREADS_NOT_YET));
-        }
         let text = cmd.validate().map_err(domain_error)?;
         let discussion = self
             .store
@@ -641,15 +659,12 @@ impl CommandService {
         if discussion.ticket().is_some() {
             crate::ticket::require_board_member(ctx)?;
         }
-        self.send_in(ctx, envelope, hash, discussion, text, &cmd.images, &cmd.files, |d, s| CommandResult::GroupMessageSent { conversation_id: d.id, message_id: s.0, to: s.1.to, run_ids: s.1.run_ids })
+        self.send_in(ctx, envelope, hash, (discussion, cmd.thread_parent), text, &cmd.images, &cmd.files, |d, s| CommandResult::GroupMessageSent { conversation_id: d.id, message_id: s.0, to: s.1.to, run_ids: s.1.run_ids })
     }
 
     /// A board member writes in a ticket's discussion (`ticket.post`).
     pub(crate) fn post_ticket_message(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &aurelius_domain::ticket::PostTicketMessage) -> Result<Committed, AppError> {
         crate::ticket::require_board_member(ctx)?;
-        if cmd.thread_parent.is_some() {
-            return Err(AppError::new(ErrorCode::Validation, THREADS_NOT_YET));
-        }
         let text = cmd.validate().map_err(domain_error)?;
         let ticket = cmd.ticket_id;
         let discussion = self
@@ -657,7 +672,7 @@ impl CommandService {
             .read(|c| of_ticket(c, ticket))
             .map_err(storage_error)?
             .ok_or_else(|| AppError::new(ErrorCode::NotFound, format!("Ticket {ticket} has no discussion.")))?;
-        self.send_in(ctx, envelope, hash, discussion, text, &cmd.images, &cmd.files, move |d, s| CommandResult::TicketMessagePosted { ticket_id: ticket, conversation_id: d.id, message_id: s.0, to: s.1.to, run_ids: s.1.run_ids })
+        self.send_in(ctx, envelope, hash, (discussion, cmd.thread_parent), text, &cmd.images, &cmd.files, move |d, s| CommandResult::TicketMessagePosted { ticket_id: ticket, conversation_id: d.id, message_id: s.0, to: s.1.to, run_ids: s.1.run_ids })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -666,12 +681,13 @@ impl CommandService {
         ctx: &CommandContext,
         envelope: &CommandEnvelope,
         hash: String,
-        discussion: Discussion,
+        (discussion, thread): (Discussion, Option<MessageId>),
         text: String,
         images: &[String],
         files: &[String],
         result: impl FnOnce(&Discussion, (MessageId, Sent)) -> CommandResult + Send + 'static,
     ) -> Result<Committed, AppError> {
+        // A closed channel refuses a reply as it refuses a message (`channel_archived`).
         if let Some(why) = discussion.read_only() {
             return Err(AppError::new(ErrorCode::ChannelArchived, why));
         }
@@ -686,7 +702,7 @@ impl CommandService {
             std::fs::create_dir_all(&folder).map_err(|e| AppError::new(ErrorCode::Internal, format!("Could not make the discussion's folder: {e}")))?;
             crate::conversation::message_uploads::copy(&folder, &sources)?
         };
-        let committed = self.commit_message(ctx, envelope, hash, discussion, text, images, &folder, uploads.clone(), result);
+        let committed = self.commit_message(ctx, envelope, hash, (discussion, thread), text, images, &folder, uploads.clone(), result);
         if !uploads.is_empty() && committed.as_ref().map_or(true, |c| c.receipt.replayed) {
             crate::conversation::message_uploads::remove(&folder, &uploads);
         }
@@ -699,7 +715,7 @@ impl CommandService {
         ctx: &CommandContext,
         envelope: &CommandEnvelope,
         hash: String,
-        discussion: Discussion,
+        (discussion, thread): (Discussion, Option<MessageId>),
         text: String,
         images: Vec<crate::conversation::message_images::PreparedImage>,
         folder: &std::path::Path,
@@ -719,6 +735,11 @@ impl CommandService {
             let Some(d) = load(tx, discussion.id)? else { return Ok(Err(AppError::new(ErrorCode::NotFound, "This discussion no longer exists."))) };
             if let Some(why) = d.read_only() {
                 return Ok(Err(AppError::new(ErrorCode::ChannelArchived, why)));
+            }
+            if let Some(parent) = thread
+                && let Err(err) = thread_root(tx, &d, parent)?
+            {
+                return Ok(Err(err));
             }
             let correlation = command_id.to_string();
             blobs::register(tx, &text_blob)?;
@@ -743,12 +764,15 @@ impl CommandService {
                 run_id: None,
                 reply_to: None,
             }, user)?;
+            if let Some(root) = thread {
+                aurelius_storage::threads::set_thread_parent(tx, message_id, root)?;
+            }
             crate::conversation::message_images::keep(tx, message_id, &images)?;
             conv::set_message_uploads(tx, message_id, &uploads)?;
             let kept: Vec<aurelius_domain::views::FileRef> = images.iter().map(|i| i.file.clone()).collect();
             let mut notices = vec![n];
             let from = board_name(tx, user)?;
-            let sent = board_message(tx, &store, &meta, &correlation, &d, message_id, (from, user), &text, Shared { images: &kept, files: files.clone() }, &mut notices)?;
+            let sent = board_message(tx, &store, &meta, &correlation, (&d, thread), message_id, (from, user), &text, Shared { images: &kept, files: files.clone() }, &mut notices)?;
             Ok(Ok((result(&d, (message_id, sent)), notices)))
         })
     }
@@ -786,6 +810,42 @@ pub(crate) fn decision_feedback(tx: &Tx<'_>, store: &Store, ticket: TicketId, us
     Ok(vec![notice])
 }
 
+/// The thread a reply to `parent` goes into in `d`: `parent` itself, when it is
+/// a message of `d` that is not a reply (one level of threads). Validation
+/// otherwise, for every client (no new error code).
+fn thread_root(conn: &rusqlite::Connection, d: &Discussion, parent: MessageId) -> Result<Result<MessageId, AppError>, StorageError> {
+    Ok(match aurelius_storage::threads::place(conn, parent)? {
+        Some(p) if p.conversation_id == d.id && p.thread_parent.is_none() => Ok(parent),
+        Some(p) if p.conversation_id == d.id => Err(AppError::new(ErrorCode::Validation, THREAD_NESTED)),
+        _ => Err(AppError::new(ErrorCode::Validation, THREAD_NOT_HERE)),
+    })
+}
+
+/// The thread of `d` an employee's post during `run` goes into: the one its run
+/// was woken in (`GroupRun::thread_parent`); for a run in a ticket's main task,
+/// the thread of the latest board member's message that reached it from `d`
+/// (`to_owner`); else none, the channel itself.
+fn run_thread(conn: &rusqlite::Connection, run: RunId, d: &Discussion) -> Result<Option<MessageId>, StorageError> {
+    if let Some(marking) = conv::group_run(conn, run)?.filter(|g| g.conversation_id == d.id) {
+        return Ok(marking.thread_parent);
+    }
+    if d.ticket().is_none() {
+        return Ok(None);
+    }
+    let latest: Option<Option<String>> = conn
+        .query_row(
+            "SELECT json_extract(m.meta_json, '$.thread_parent') FROM messages m
+             WHERE m.conversation_id = (SELECT conversation_id FROM runs WHERE id = ?1) AND json_extract(m.meta_json, '$.discussion') = ?2
+             ORDER BY m.ordinal DESC LIMIT 1",
+            [run.to_string(), d.id.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(root) = latest.flatten().and_then(|r| MessageId::parse(&r).ok()) else { return Ok(None) };
+    // Only a thread that is (still) one of `d`.
+    Ok(thread_root(conn, d, root)?.ok())
+}
+
 /// The username of the board member who wrote a message, if the connection had one.
 fn board_name(conn: &rusqlite::Connection, user: Option<UserId>) -> Result<Option<String>, StorageError> {
     Ok(match user {
@@ -794,15 +854,16 @@ fn board_name(conn: &rusqlite::Connection, user: Option<UserId>) -> Result<Optio
     })
 }
 
-/// Route a board member's message in `d` (already stored as `message`): wake
-/// those it names (or the one B3 names), or give it to the ticket's owner.
+/// Route a board member's message in `d` (already stored as `message`; a reply
+/// in the thread of `thread` when given): wake those it names (or the one B3
+/// names), or give it to the ticket's owner. Their answers go where it is.
 #[allow(clippy::too_many_arguments)]
-fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, d: &Discussion, message: MessageId, (user, login): (Option<String>, Option<UserId>), text: &str, shared: Shared<'_>, notices: &mut Vec<EventNotice>) -> Result<Sent, StorageError> {
+fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, (d, thread): (&Discussion, Option<MessageId>), message: MessageId, (user, login): (Option<String>, Option<UserId>), text: &str, shared: Shared<'_>, notices: &mut Vec<EventNotice>) -> Result<Sent, StorageError> {
     let named = addressees(tx, d, text, None)?;
     let mut sent = Sent { to: Vec::new(), run_ids: Vec::new() };
     let mut ended = None;
     if let (Some((owner, _)), Some(t)) = (named.owner, d.ticket()) {
-        match to_owner(tx, store, t, user.as_deref().unwrap_or(OWNER), text)? {
+        match to_owner(tx, store, d, t, user.as_deref().unwrap_or(OWNER), text, thread)? {
             Some(n) => {
                 notices.extend(n);
                 sent.to.push(owner);
@@ -811,7 +872,7 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
         }
     }
     let read = reader(store);
-    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, context: context_text(tx, &read, d.id, Some(message))?, hop: 0, login };
+    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, context: context_text(tx, &read, d.id, thread, Some(message))?, hop: 0, login, thread };
     for (employee, name) in &named.awake {
         if let Some((run, n)) = wake(tx, store, meta, correlation, (*employee, name), &w)? {
             sent.to.push(*employee);
@@ -821,9 +882,9 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
     }
     // The owner's main task ended, or nobody answers: the board member hears why, in the discussion.
     if let Some(hint) = ended {
-        notices.push(nobody_line(tx, d.id, &hint)?);
+        notices.push(nobody_line(tx, d.id, thread, &hint)?);
     } else if sent.to.is_empty() {
-        notices.push(nobody_line(tx, d.id, &nobody_answers(d, &named.paused))?);
+        notices.push(nobody_line(tx, d.id, thread, &nobody_answers(d, &named.paused))?);
     }
     Ok(sent)
 }
@@ -970,15 +1031,17 @@ pub(crate) fn post_from_run(tx: &Tx<'_>, store: &Store, run: RunId, d: &Discussi
     };
     let woke = if refused.is_none() { named.awake.len() } else { 0 };
     let posted = MessageId::new();
-    let mut notices = vec![post_in(tx, store, d.id, posted, GROUP_KIND, &name, text, serde_json::json!({ "run_id": run, "hop": hop, "employee_id": me, "woke": woke }))?];
+    // An answer to a reply in a thread goes into that thread.
+    let thread = run_thread(tx, run, d)?;
+    let mut notices = vec![post_in(tx, store, d.id, thread, posted, GROUP_KIND, &name, text, serde_json::json!({ "run_id": run, "hop": hop, "employee_id": me, "woke": woke }))?];
     let paused = match named.paused.as_slice() {
         [] => String::new(),
         [one] => format!(" {one} is paused and will not answer."),
         many => format!(" {} are paused and will not answer.", many.join(", ")),
     };
-    let posted_in = format!("Posted in {label}.");
+    let posted_in = if thread.is_some() { format!("Posted in the thread in {label}.") } else { format!("Posted in {label}.") };
     if let Some(refused) = refused {
-        notices.push(limit_line(tx, d.id, &names)?);
+        notices.push(limit_line(tx, d.id, thread, &names)?);
         return Ok((true, format!("{posted_in} Limit reached: {refused}{paused}"), notices));
     }
     if named.awake.is_empty() {
@@ -988,7 +1051,7 @@ pub(crate) fn post_from_run(tx: &Tx<'_>, store: &Store, run: RunId, d: &Discussi
     let read = reader(store);
     // The login of hop 0 goes on with every colleague it wakes (its own run's).
     let login = crate::run::login::of_run(tx, run)?;
-    let w = Wake { discussion: d, from: &name, board: None, text, shared: Shared::default(), context: context_text(tx, &read, d.id, Some(posted))?, hop, login };
+    let w = Wake { discussion: d, from: &name, board: None, text, shared: Shared::default(), context: context_text(tx, &read, d.id, thread, Some(posted))?, hop, login, thread };
     let mut woken = Vec::new();
     for (employee, colleague) in &named.awake {
         if let Some((_, n)) = wake(tx, store, &meta, &run.to_string(), (*employee, colleague), &w)? {
@@ -1003,7 +1066,7 @@ pub(crate) fn post_from_run(tx: &Tx<'_>, store: &Store, run: RunId, d: &Discussi
 /// discussion (default and most 50), oldest first, one JSON object per message.
 pub(crate) fn read_text(conn: &rusqlite::Connection, store: &Store, d: &Discussion, last: Option<u32>) -> Result<String, StorageError> {
     let read = reader(store);
-    let lines = discussion_json(conn, &read, d.id, None, last.unwrap_or(50).clamp(1, 50), 2_000)?;
+    let lines = discussion_json(conn, &read, d.id, None, None, last.unwrap_or(50).clamp(1, 50), 2_000)?;
     let label = d.label();
     let mut head = label[..1].to_uppercase();
     head.push_str(&label[1..]);
@@ -1016,6 +1079,48 @@ pub(crate) fn read_text(conn: &rusqlite::Connection, store: &Store, d: &Discussi
 }
 
 impl CommandService {
+    /// A board member adds or takes back a reaction (`message.react`, feature
+    /// `chat_reactions`): only on a message of a channel or a ticket's discussion
+    /// that is not closed (`channel_archived`, `validation` for an older client).
+    /// Idempotent: nothing changes, and no event, when it already is as asked.
+    /// A change is one `message.reacted` event on the discussion.
+    pub(crate) fn react_to_message(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &group::ReactToMessage) -> Result<Committed, AppError> {
+        let user = crate::ticket::require_board_member(ctx)?;
+        let emoji = cmd.validate().map_err(domain_error)?;
+        let (message, on) = (cmd.message_id, cmd.on);
+        let meta = ctx.metadata();
+        let actor = ctx.principal_id.to_string();
+        let command_id = envelope.command_id;
+        self.commit(command_id, hash, move |tx| {
+            let Some(place) = aurelius_storage::threads::place(tx, message)? else { return Ok(Err(AppError::new(ErrorCode::NotFound, "This message does not exist."))) };
+            let Some(d) = load(tx, place.conversation_id)? else { return Ok(Err(AppError::new(ErrorCode::Validation, REACTION_NOT_HERE))) };
+            if let Some(why) = d.read_only() {
+                return Ok(Err(AppError::new(ErrorCode::ChannelArchived, why)));
+            }
+            let changed = aurelius_storage::threads::react(tx, message, user, &emoji, on)?;
+            let mut notices = Vec::new();
+            if changed {
+                let mut metadata = meta.clone();
+                if let Some(m) = metadata.as_object_mut() {
+                    m.extend([("message_id".to_owned(), serde_json::json!(message)), ("emoji".to_owned(), serde_json::json!(emoji)), ("on".to_owned(), serde_json::json!(on))]);
+                }
+                let (_, notice) = emit(tx, Ev {
+                    aggregate_type: "conversation",
+                    aggregate_id: d.id.to_string(),
+                    event_type: "message.reacted",
+                    actor: ActorKind::User,
+                    actor_id: Some(actor.clone()),
+                    correlation: command_id.to_string(),
+                    payload: None,
+                    metadata,
+                    dedupe: format!("cmd:{command_id}:reacted"),
+                })?;
+                notices.push(notice);
+            }
+            Ok(Ok((CommandResult::MessageReacted { conversation_id: d.id, message_id: message, emoji, on, changed }, notices)))
+        })
+    }
+
     /// A notice of the server to every board member: a system line in the
     /// general channel of the Team chat (a vault key export, a vault name runs
     /// may no longer have). Nothing when there is no Team chat (yet).

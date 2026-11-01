@@ -49,7 +49,7 @@ pub struct SendGroupMessage {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub confirm_secret: bool,
     /// A reply in the thread of this message of the channel (feature
-    /// `chat_threads`, not advertised yet: the server refuses it until then).
+    /// `chat_threads`): a message of the same channel that is not itself a reply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_parent: Option<MessageId>,
 }
@@ -58,8 +58,8 @@ pub struct SendGroupMessage {
 pub const REACTION_EMOJI_MAX: usize = 64;
 
 /// A board member adds (`on`) or takes back their reaction with `emoji` on a
-/// message of a channel (`message.react`, feature `chat_reactions`, not advertised
-/// yet: the server refuses it until then).
+/// message of a channel or a ticket's discussion that is not closed
+/// (`message.react`, feature `chat_reactions`). Idempotent: on twice is on once.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ReactToMessage {
     pub message_id: MessageId,
