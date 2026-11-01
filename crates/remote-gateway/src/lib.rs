@@ -358,12 +358,18 @@ impl Hub {
         ))
     }
 
+    /// The server's name as clients see it (SN-01): the chosen one, else the computer's.
+    pub(crate) async fn server_name(&self) -> String {
+        let store = self.inner.store.clone();
+        tokio::task::spawn_blocking(move || aurelius_host::server_name(&store).name).await.unwrap_or_else(|_| aurelius_host::host_name())
+    }
+
     pub async fn pairing_start(&self) -> Result<PairingCode, ProtocolError> {
         if !self.enabled() {
             return Err(validation("Turn on remote access first."));
         }
         let url = self.phone_url().await?;
-        let host_name = aurelius_host::host_name();
+        let host_name = self.server_name().await;
         let (code, expires_at_ms) = self.inner.pairings.lock().unwrap().new_code();
         let payload = aurelius_protocol::remote::PairingPayload {
             v: 1,

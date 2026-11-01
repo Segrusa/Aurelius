@@ -292,6 +292,18 @@ pub fn host_name() -> String {
         .unwrap_or_else(|| "this computer".into())
 }
 
+/// The server's name as clients see it (feature `server_name`): the one a board
+/// member chose, else `host_name()`. Blocking (one row); read from the database
+/// every time, so a restored backup brings its name back at once (E5). Falls
+/// back to the computer's name when the database cannot be read.
+pub fn server_name(store: &aurelius_storage::Store) -> aurelius_domain::server::ServerNameView {
+    let stored = store.read(aurelius_storage::server_name::get).unwrap_or_else(|err| {
+        tracing::warn!(error = %err, "could not read the server's name; using the computer's name");
+        Default::default()
+    });
+    aurelius_domain::server::ServerNameView::of(stored.chosen, host_name(), stored.version)
+}
+
 /// Where a folder picker on another computer starts: the projects folder,
 /// home, and (Windows) every drive.
 pub fn fs_roots() -> Vec<(String, PathBuf)> {

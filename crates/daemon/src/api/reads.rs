@@ -42,6 +42,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         | Method::GuidelineStarterSet
         | Method::RunGuidelines { .. } => guidelines(shared, method).await,
         Method::ServerGetHealth => health(shared).await,
+        Method::ServerGetName => Ok(ResponseBody::ServerName(super::server_name(shared).await)),
         Method::ProjectList => projects(shared).await,
         Method::JobList => jobs(shared).await,
         Method::ConversationGet { conversation_id } => {

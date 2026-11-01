@@ -95,12 +95,13 @@ async fn pair_poll(State(hub): State<Hub>, Path(id): Path<String>) -> Response {
         };
         match state {
             PairState::Approved { client_id, secret } => {
+                let host_name = hub.server_name().await;
                 return Json(json!({
                     "status": "approved",
                     "client_id": client_id,
                     "device_secret": secret,
                     "host_id": hub.inner.host_id,
-                    "host_name": aurelius_host::host_name(),
+                    "host_name": host_name,
                     "environment": hub.inner.environment,
                 }))
                 .into_response();
