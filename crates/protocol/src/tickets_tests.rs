@@ -32,7 +32,7 @@ fn writes() -> Vec<Command> {
     let t = TicketId::new();
     vec![
         Command::CreateTicket(create(None)),
-        Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: vec![] }),
+        Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }),
         Command::MoveTicket(MoveTicket { ticket_id: t, column_id: BoardColumnId::new(), before_ticket_id: None }),
         Command::StartTicket(StartTicket { ticket_id: t, employee_id: None }),
         Command::AssignTicket(AssignTicket { ticket_id: t, employee_id: Some(EmployeeId::new()), reason: None }),
@@ -202,7 +202,7 @@ fn files_added_to_a_ticket_ride_on_ticket_update_with_the_same_rights() {
     }))
     .unwrap();
     let Call::Write(WriteMethod::Domain(Command::UpdateTicket(update))) = &parsed.call else { panic!("ticket.update") };
-    assert_eq!(update.add_files, vec!["/inbox/shot.png".to_string()]);
+    assert_eq!(update.add_files, Some(vec!["/inbox/shot.png".to_string()]));
     assert_eq!(required(&parsed.call), Needs::Cap(Capability::TaskControl));
     let plain = Call::Write(WriteMethod::Domain(writes().remove(1)));
     assert_eq!(crate::app::required(&parsed.call), crate::app::required(&plain), "apps get what they get for any ticket.update");

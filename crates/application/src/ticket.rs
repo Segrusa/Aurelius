@@ -532,7 +532,7 @@ impl CommandService {
         };
         let labels = cmd.labels.as_deref().map(ticket::valid_labels).transpose().map_err(domain_error)?;
         let deadline = if cmd.clear_deadline { Some(None) } else { ticket::valid_deadline(cmd.deadline_ms).map_err(domain_error)?.map(Some) };
-        if title.is_none() && description.is_none() && cmd.priority.is_none() && labels.is_none() && deadline.is_none() && cmd.run.is_none() && cmd.add_files.is_empty() {
+        if title.is_none() && description.is_none() && cmd.priority.is_none() && labels.is_none() && deadline.is_none() && cmd.run.is_none() && cmd.add_files.as_deref().unwrap_or_default().is_empty() {
             return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
         }
         let description_blob = match description.as_ref().and_then(|d| d.as_deref()) {
@@ -620,7 +620,8 @@ impl CommandService {
     /// count against what the ticket has, the copies next to its files (so a
     /// ticket keeps one folder). Gives the attachments it had and the new copies.
     fn add_ticket_files(&self, cmd: &ticket::UpdateTicket) -> Result<(Option<task_store::TaskAttachments>, Option<task_store::TaskAttachments>), AppError> {
-        if cmd.add_files.is_empty() {
+        let files = cmd.add_files.as_deref().unwrap_or_default();
+        if files.is_empty() {
             return Ok((None, None));
         }
         let id = cmd.ticket_id;
@@ -630,9 +631,9 @@ impl CommandService {
             .map_err(storage_error)?;
         let state = state.ok_or_else(|| domain_error(DomainError::TicketNotFound(id)))?;
         let kept = before.as_ref().map_or(0, |a| a.files.len());
-        ticket::check_file_count(kept + cmd.add_files.len()).map_err(domain_error)?;
+        ticket::check_file_count(kept + files.len()).map_err(domain_error)?;
         let folder = before.as_ref().map(|a| std::path::PathBuf::from(&a.folder));
-        let added = self.attach_files(state.project_id, None, &cmd.add_files, folder.as_deref())?;
+        let added = self.attach_files(state.project_id, None, files, folder.as_deref())?;
         Ok((before, added))
     }
 

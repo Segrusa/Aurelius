@@ -130,7 +130,7 @@ fn every_ticket_board_and_company_write_needs_a_board_member() {
     let ticket = new_ticket(&s, "Mine");
     let commands = [
         Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: s.project, title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None }),
-        Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: ticket, title: Some("y".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: vec![] }),
+        Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: ticket, title: Some("y".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }),
         Command::MoveTicket(ticket::MoveTicket { ticket_id: ticket, column_id: column(&s, ColumnKind::Todo), before_ticket_id: None }),
         Command::StartTicket(ticket::StartTicket { ticket_id: ticket, employee_id: None }),
         Command::AssignTicket(ticket::AssignTicket { ticket_id: ticket, employee_id: Some(EmployeeId::new()), reason: None }),
@@ -303,7 +303,7 @@ fn plan_review_and_review_are_decided_by_buttons_with_feedback() {
         .collect();
     assert_eq!(said, [("Smaller steps".to_string(), Some(s.user)), ("Add a test".to_string(), Some(s.user))], "no message for an approval without feedback");
     // Done is read-only: no update, no move, no cancel.
-    let err = run(&s, Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("New".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: vec![] })).unwrap_err();
+    let err = run(&s, Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("New".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None })).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation);
     assert!(run(&s, Command::CancelTicket(ticket::CancelTicket { ticket_id: id })).is_err());
     // But it can leave the board.
@@ -326,7 +326,7 @@ fn update_changes_fields_but_never_the_author_and_checks_the_version() {
         deadline_ms: Some(42),
         clear_deadline: false,
         run: None,
-        add_files: vec![],
+        add_files: None,
     };
     let err = run_as(&s, Some(s.user), Command::UpdateTicket(update(Some("Final"), None)), Some(7)).unwrap_err();
     assert_eq!(err.code, ErrorCode::VersionConflict);
@@ -343,7 +343,7 @@ fn update_changes_fields_but_never_the_author_and_checks_the_version() {
         .unwrap();
     run_as(&s, Some(other), Command::UpdateTicket(update(None, Some(TicketPriority::High))), None).unwrap();
     assert_eq!(view(&s, id).created_by_user, s.user);
-    let nothing = ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: vec![] };
+    let nothing = ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None };
     assert_eq!(run(&s, Command::UpdateTicket(nothing)).unwrap_err().code, ErrorCode::Validation);
 }
 
@@ -557,7 +557,7 @@ fn a_deadline_must_be_a_real_moment() {
     assert_eq!(run(&s, Command::CreateTicket(create.clone())).unwrap_err().code, ErrorCode::Validation);
     create.deadline_ms = Some(1_800_000_000_000);
     let CommandResult::TicketCreated { ticket_id: id, .. } = run(&s, Command::CreateTicket(create)).unwrap() else { panic!() };
-    let update = |deadline_ms| ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms, clear_deadline: false, run: None, add_files: vec![] };
+    let update = |deadline_ms| ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms, clear_deadline: false, run: None, add_files: None };
     for bad in [0, -1, ticket::DEADLINE_MAX_MS + 1] {
         assert_eq!(run(&s, Command::UpdateTicket(update(Some(bad)))).unwrap_err().code, ErrorCode::Validation, "{bad}");
     }
@@ -779,7 +779,7 @@ fn add_files(id: TicketId, files: &[String]) -> Command {
         deadline_ms: None,
         clear_deadline: false,
         run: None,
-        add_files: files.to_vec(),
+        add_files: Some(files.to_vec()),
     })
 }
 

@@ -266,8 +266,10 @@ pub struct UpdateTicket {
     /// Files to add to the ticket's attachments, as `CreateTicket::files`
     /// (feature `ticket_add_files`): the ones it has stay, and a main task
     /// that still works gets them too. At most `ATTACHMENTS_MAX` in all.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub add_files: Vec<String>,
+    /// Optional rather than a list with a default, so a client leaves it out
+    /// unless it adds files: older servers refuse fields they do not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub add_files: Option<Vec<String>>,
     /// A board member confirmed that the text may hold a vault secret's value
     /// (after `looks_like_secret`, B10): it is stored with the value redacted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -638,7 +640,7 @@ mod tests {
         assert!(matches!(check_file_count(ATTACHMENTS_MAX + 1), Err(DomainError::File(m)) if m.starts_with("Too many files")));
         let id = TicketId::new();
         let old: UpdateTicket = serde_json::from_value(serde_json::json!({ "ticket_id": id, "title": "x" })).unwrap();
-        assert!(old.add_files.is_empty());
+        assert!(old.add_files.is_none());
         assert!(serde_json::to_value(&old).unwrap().get("add_files").is_none(), "an update without files looks as before");
     }
 
