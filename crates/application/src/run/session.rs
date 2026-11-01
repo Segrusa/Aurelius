@@ -776,6 +776,10 @@ mod tests {
             mode: None,
             author_user: None,
             system: None,
+            thread_parent: None,
+            thread_reply_count: None,
+            thread_last_reply_ms: None,
+            reactions: Vec::new(),
         };
         let before = item(&m);
         m.files.push(aurelius_domain::views::FileRef { id: "f".into(), name: "r.md".into(), media_type: "text/markdown".into(), size: 1 });

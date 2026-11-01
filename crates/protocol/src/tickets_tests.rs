@@ -136,7 +136,7 @@ fn a_move_with_the_old_position_is_refused_on_the_wire() {
 #[test]
 fn discussion_writes_travel_as_method_and_params() {
     let t = TicketId::new();
-    let post = Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: t, text: "@Ann can you look?".into(), images: vec![], files: vec![] });
+    let post = Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: t, text: "@Ann can you look?".into(), images: vec![], files: vec![], thread_parent: None });
     let json = serde_json::to_value(WriteMethod::Domain(post.clone())).unwrap();
     assert_eq!(json["method"], "ticket.post");
     assert_eq!(serde_json::from_value::<WriteMethod>(json).unwrap(), WriteMethod::Domain(post));
@@ -145,7 +145,7 @@ fn discussion_writes_travel_as_method_and_params() {
     assert_eq!(json["method"], "ticket.retry_summary");
     assert_eq!(serde_json::from_value::<WriteMethod>(json).unwrap(), WriteMethod::Domain(retry));
     // A post is a chat (like `group_chat.send`); trying the summary again a ticket write.
-    assert_eq!(required(&Call::Write(WriteMethod::Domain(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: t, text: "x".into(), images: vec![], files: vec![] })))), Needs::Cap(Capability::Chat));
+    assert_eq!(required(&Call::Write(WriteMethod::Domain(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: t, text: "x".into(), images: vec![], files: vec![], thread_parent: None })))), Needs::Cap(Capability::Chat));
     assert_eq!(required(&Call::Write(WriteMethod::Domain(Command::RetryTicketSummary(RetryTicketSummary { ticket_id: t })))), Needs::Cap(Capability::TaskControl));
     // `from_message` is optional and left out when none.
     let made = serde_json::to_value(create(None)).unwrap();

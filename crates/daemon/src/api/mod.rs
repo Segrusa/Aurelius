@@ -291,6 +291,8 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
     // The hello said this client merges tool-use changes in live updates.
     let mut activity_changes = false;
     let mut team_channels = false;
+    // The hello said this client shows ticket channels and knows `channel_archived`.
+    let mut ticket_channels = false;
     let mut server_name_events = false;
     // The tries of `user.login` on this connection, and its new board members (S5-3).
     let mut attempts = users::Attempts::default();
@@ -362,6 +364,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             Call::Read(Method::SessionHello(params)) => {
                 activity_changes = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::ACTIVITY_CHANGES);
                 team_channels = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::TEAM_CHANNELS);
+                ticket_channels = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::TICKET_CHANNELS);
                 server_name_events = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::SERVER_NAME);
                 match authenticate(&shared, &mut peer, params.app_key).await {
                     Ok(()) => match users::hello_session(&shared, &mut peer, &end_tx, params.session_token).await {
@@ -421,6 +424,9 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
                 None if shared.terminals.exists(&terminal_id) => Ok(ResponseBody::TerminalDone),
                 None => Err(ProtocolError::new(ErrorCode::NotFound, "This terminal has ended.")),
             },
+            // Ticket channels only for a client that shows them (feature `ticket_channels`).
+            Call::Read(Method::ChannelList) => reads::channels(&shared, peer.user.filter(|_| peer.app.is_none()), ticket_channels, None).await,
+            Call::Read(Method::ChannelSearch { query }) => reads::channels(&shared, peer.user.filter(|_| peer.app.is_none()), ticket_channels, Some(query)).await,
             // The board member reading a discussion marks it read for themselves (not an app).
             Call::Read(method) => match (reads::handle(&shared, method, peer.user.filter(|_| peer.app.is_none())).await, peer.app.as_ref().filter(|a| a.audience == AppAudience::Management)) {
                 // What a management app reads is cut down to the management (and its own work).
@@ -443,6 +449,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             terminals.clear();
             shared.claude_links.cancel_conn(peer.conn);
         }
+        let outcome = if ticket_channels { outcome } else { outcome.map_err(for_older_client) };
         if respond(&out_tx, request_id, outcome).await.is_err() {
             break;
         }
@@ -453,6 +460,16 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
     if let Some(task) = forwarder {
         task.abort();
     }
+}
+
+/// An error as a client without `ticket_channels` reads it: it cannot parse an
+/// error code it does not know (the frame would be dropped, or end its
+/// connection), so `channel_archived` goes to it as `validation`, with the same message.
+fn for_older_client(mut err: ProtocolError) -> ProtocolError {
+    if err.code == ErrorCode::ChannelArchived {
+        err.code = ErrorCode::Validation;
+    }
+    err
 }
 
 async fn respond(out_tx: &mpsc::Sender<ServerMessage>, request_id: u64, outcome: Result<ResponseBody, ProtocolError>) -> Result<(), ()> {

@@ -339,7 +339,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
     assert!(answer.text.contains("The token is «secret:CANARY_TOKEN», as asked."), "split over two deltas: {}", answer.text);
 
     // B10: a board member pastes it, confirmed, in the general channel.
-    let paste = aurelius_domain::group_chat::SendGroupMessage { text: format!("the key: {CANARY}"), images: vec![], files: vec![], channel: None, confirm_secret: false };
+    let paste = aurelius_domain::group_chat::SendGroupMessage { text: format!("the key: {CANARY}"), images: vec![], files: vec![], channel: None, confirm_secret: false, thread_parent: None };
     assert!(client.send_group_message(paste.clone()).await.is_err());
     client.send_group_message(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: true, ..paste }).await.unwrap();
 
@@ -360,7 +360,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
     };
     let CommandResult::TicketCreated { ticket_id, .. } = client.create_ticket(ticket).await.unwrap().result else { panic!() };
     // B10 on the discussion and on a task's title: refused with the name; the post confirmed, kept redacted.
-    let post = |confirm_secret| Command::PostTicketMessage(PostTicketMessage { ticket_id, text: format!("use {CANARY}"), images: vec![], files: vec![], confirm_secret });
+    let post = |confirm_secret| Command::PostTicketMessage(PostTicketMessage { ticket_id, text: format!("use {CANARY}"), images: vec![], files: vec![], confirm_secret, thread_parent: None });
     let refused = client.ticket_command(post(false), None).await.unwrap_err();
     assert!(matches!(&refused, aurelius_client::ClientError::Protocol(e) if e.code == aurelius_domain::ErrorCode::LooksLikeSecret), "{refused:?}");
     client.ticket_command(post(true), None).await.unwrap();

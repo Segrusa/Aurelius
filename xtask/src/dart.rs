@@ -23,6 +23,11 @@ const RESERVED: &[&str] = &[
     "toJson", "fromJson", "hashCode", "runtimeType", "toString", "noSuchMethod",
 ];
 
+/// Enums whose Rust side has `#[serde(other)] Unknown`: the schema does not say
+/// so, and such an enum must read a value of a newer server as `unknown`
+/// instead of throwing, like the server's own clients do.
+const UNKNOWN_FALLBACK: &[&str] = &["ChannelKind"];
+
 /// Members of every Dart enum, plus the `wire` field of the generated ones.
 const ENUM_MEMBERS: &[&str] = &["values", "index", "name", "wire"];
 
@@ -360,7 +365,12 @@ fn emit_enum(out: &mut String, e: &Enum) {
     w!(out);
     w!(out, "  static {} fromJson(String value) => values.firstWhere(", e.name);
     w!(out, "        (e) => e.wire == value,");
-    w!(out, "        orElse: () => throw FormatException('Unknown {} value: $value'),", e.name);
+    if UNKNOWN_FALLBACK.contains(&e.name.as_str()) {
+        assert!(e.values.iter().any(|(wire, _)| wire == "unknown"), "{}: a fallback enum needs the value `unknown`", e.name);
+        w!(out, "        orElse: () => {}.unknown,", e.name);
+    } else {
+        w!(out, "        orElse: () => throw FormatException('Unknown {} value: $value'),", e.name);
+    }
     w!(out, "      );");
     w!(out);
     w!(out, "  String toJson() => wire;");

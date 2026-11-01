@@ -129,7 +129,7 @@ fn the_block_comes_after_the_identity_with_the_set_of_the_run() {
 
     // Woken in the project's channel: the project is the channel's.
     let channel = s.service.store().read(|c| aurelius_storage::discussions::channel(c, Some(s.project))).unwrap().unwrap();
-    let CommandResult::GroupMessageSent { run_ids, .. } = exec(&s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "@Ann how is it going?".into(), images: vec![], files: vec![], channel: Some(channel) })) else { panic!() };
+    let CommandResult::GroupMessageSent { run_ids, .. } = exec(&s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "@Ann how is it going?".into(), images: vec![], files: vec![], channel: Some(channel), thread_parent: None })) else { panic!() };
     let woken = plan(&s, run_ids[0]);
     assert_eq!(titles_in(woken.system.as_deref().unwrap()), vec!["Own rule", "Project rule"]);
 

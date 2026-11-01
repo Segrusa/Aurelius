@@ -30,7 +30,7 @@ async fn hire(client: &Client, name: &str, role: &str, reports_to: Option<Employ
 }
 
 async fn send(client: &Client, text: &str) -> (Vec<EmployeeId>, Vec<RunId>) {
-    let send = SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel: None };
+    let send = SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel: None, thread_parent: None };
     let CommandResult::GroupMessageSent { to, run_ids, .. } = client.execute(envelope(Command::SendGroupMessage(send), None)).await.unwrap().result else { panic!("not sent") };
     (to, run_ids)
 }

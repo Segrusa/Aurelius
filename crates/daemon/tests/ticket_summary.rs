@@ -236,7 +236,7 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     // main task answers it and reports again, the ticket stays in Review; then Done.
     let runs = |root: &std::path::Path| -> i64 { common::db(root).query_row("SELECT COUNT(*) FROM runs WHERE conversation_id = ?1", [main.conversation_id.unwrap().to_string()], |r| r.get(0)).unwrap() };
     let before = runs(dir.path());
-    let posted = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: id, text: "Keep the old file name.".into(), images: vec![], files: vec![] }), None).await;
+    let posted = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: id, text: "Keep the old file name.".into(), images: vec![], files: vec![], thread_parent: None }), None).await;
     assert!(posted.is_ok(), "{posted:?}");
     // The post queued the owner's run in the same commit.
     assert_eq!(runs(dir.path()), before + 1, "a run of the main task answers it");
@@ -298,7 +298,7 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     // Never waking: no run of an employee came from the discussion (the board member's word in Review woke nobody either).
     assert_eq!(group_runs(dir.path(), done.ticket.conversation_id.unwrap()), 0);
     // B7: closed for people, also for a retry of the summary that is there already.
-    let closed = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: id, text: "One more thing".into(), images: vec![], files: vec![] }), None).await;
+    let closed = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: id, text: "One more thing".into(), images: vec![], files: vec![], thread_parent: None }), None).await;
     assert_eq!(code(closed), ErrorCode::Validation);
     assert_eq!(code(client.ticket_command(Command::RetryTicketSummary(RetryTicketSummary { ticket_id: id }), None).await), ErrorCode::Validation);
     assert_eq!(ticket_summaries(&client, atlas).await.len(), 1);

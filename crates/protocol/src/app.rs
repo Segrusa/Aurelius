@@ -64,7 +64,7 @@ pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
             | Method::GuidelineStarterSet
             | Method::RunGuidelines { .. } => Err(NOT_FOR_APPS),
             // The group chat is the user's own conversation with the team, like an employee's chat.
-            Method::GroupChatGet { .. } | Method::ChannelList => Err(NOT_FOR_APPS),
+            Method::GroupChatGet { .. } | Method::ChannelList | Method::ChannelSearch { .. } => Err(NOT_FOR_APPS),
             // The vault is the board members' and the runs' (B5): an app reads nothing of it.
             Method::VaultList { .. } | Method::VaultReveal { .. } | Method::VaultAudit { .. } | Method::VaultKeyExport(_) => Err(NOT_FOR_APPS),
             _ => Err(NOT_FOR_APPS),
@@ -108,7 +108,7 @@ fn command_needs(command: &Command) -> Result<Vec<AppScope>, &'static str> {
         Command::DecideApproval(_) | Command::AnswerQuestion(_) | Command::DecidePlan(_) => Ok(vec![Approve]),
         // A discussion is the board members' and the employees' (like the group chat);
         // the summary again is a board member's.
-        Command::SendGroupMessage(_) | Command::PostTicketMessage(_) | Command::RetryTicketSummary(_) => Err(NOT_FOR_APPS),
+        Command::SendGroupMessage(_) | Command::PostTicketMessage(_) | Command::ReactToMessage(_) | Command::RetryTicketSummary(_) => Err(NOT_FOR_APPS),
         // The review gate is a board member's, never an app's (any audience).
         Command::AcceptTicket(_) | Command::SendBackTicket(_) => Err(REVIEW_GATE),
         // Guidelines go into every run: only a board member changes them (B5).
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn apps_never_reach_the_group_chat() {
-        let send = exec(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: "Hi".into(), images: vec![], files: vec![], channel: None }));
+        let send = exec(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: "Hi".into(), images: vec![], files: vec![], channel: None, thread_parent: None }));
         assert_eq!(required(&send), Err(NOT_FOR_APPS));
         assert_eq!(required(&Call::Read(Method::GroupChatGet { channel: None })), Err(NOT_FOR_APPS));
         assert_eq!(required(&Call::Read(Method::ChannelList)), Err(NOT_FOR_APPS));
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn apps_never_reach_a_ticket_discussion() {
         let ticket = aurelius_domain::TicketId::new();
-        let post = exec(Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket, text: "Hi".into(), images: vec![], files: vec![] }));
+        let post = exec(Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket, text: "Hi".into(), images: vec![], files: vec![], thread_parent: None }));
         assert_eq!(required(&post), Err(NOT_FOR_APPS));
         let retry = exec(Command::RetryTicketSummary(aurelius_domain::ticket::RetryTicketSummary { ticket_id: ticket }));
         assert_eq!(required(&retry), Err(NOT_FOR_APPS));

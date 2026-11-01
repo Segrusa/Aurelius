@@ -238,7 +238,7 @@ async fn a_report_goes_to_testing_and_a_green_verdict_of_the_test_task_to_review
 
     // A word to the owner while the tests run: the owner answers, the card stays in Testing,
     // the main task in Review (it never waits for its test task), and nothing is tested twice.
-    let post = PostTicketMessage { confirm_secret: false, ticket_id: id, text: "Which branch is it on?".into(), images: vec![], files: vec![] };
+    let post = PostTicketMessage { confirm_secret: false, ticket_id: id, text: "Which branch is it on?".into(), images: vec![], files: vec![], thread_parent: None };
     client.ticket_command(Command::PostTicketMessage(post), None).await.unwrap();
     let conversation = main.conversation_id.unwrap().to_string();
     for _ in 0..800 {

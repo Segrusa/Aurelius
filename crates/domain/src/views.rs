@@ -638,6 +638,34 @@ pub struct MessageView {
     /// Such a line never wakes anyone. Left out for other messages and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemLine>,
+    /// A reply in a thread (feature `chat_threads`, not advertised yet): the
+    /// message it answers. Left out for a message of the channel itself and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_parent: Option<MessageId>,
+    /// A message that starts a thread (feature `chat_threads`): how many replies it has.
+    /// Left out when it has none and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_reply_count: Option<u32>,
+    /// A message that starts a thread (feature `chat_threads`): when its latest reply was written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_last_reply_ms: Option<i64>,
+    /// The reactions on the message (feature `chat_reactions`, not advertised
+    /// yet), one entry per emoji. Left out when there are none and by older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<ReactionView>,
+}
+
+/// One emoji on a message (`MessageView::reactions`, feature `chat_reactions`):
+/// how many reacted with it, whether the reader did, and who.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ReactionView {
+    pub emoji: String,
+    pub count: u32,
+    /// The board member who reads the message reacted with it.
+    pub mine: bool,
+    /// The names of who reacted (board members' usernames, employees' names), oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by: Vec<String>,
 }
 
 /// What a system line in a discussion says happened (`MessageView::system`).
@@ -688,9 +716,43 @@ pub struct SystemLine {
     pub conversation_id: Option<ConversationId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_id: Option<MessageId>,
+    /// What exactly happened within `kind` (feature `ticket_channels`), one of
+    /// `system_action`: e.g. `opened` or `closed` on a ticket's line in General,
+    /// `approved` on a `plan` line. A client that knows none of them shows `text`,
+    /// which stays the readable sentence. A string, not an enum, so a new action
+    /// never breaks an older client. Left out by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    /// The ticket's channel (its discussion) the line links to (feature
+    /// `ticket_channels`), e.g. on the line in General when a ticket opens or closes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<ConversationId>,
+}
+
+/// The values of `SystemLine::action` (feature `ticket_channels`).
+pub mod system_action {
+    /// A ticket was made (its channel opened); in General, with the channel's link.
+    pub const OPENED: &str = "opened";
+    /// The ticket went to Done or was archived: its channel is read-only now.
+    pub const CLOSED: &str = "closed";
+    /// The ticket left Done or was restored: its channel can be written in again.
+    pub const REOPENED: &str = "reopened";
+    /// A board member approved the owner's plan or accepted the report.
+    pub const APPROVED: &str = "approved";
+    /// A board member sent the ticket back (a plan or a report).
+    pub const SENT_BACK: &str = "sent_back";
+    /// A board member asked the owner to adjust the plan.
+    pub const ADJUSTED: &str = "adjusted";
+    /// The test run of the Testing column was green.
+    pub const TESTED_PASSED: &str = "tested_passed";
+    /// The test run of the Testing column was red.
+    pub const TESTED_FAILED: &str = "tested_failed";
+    /// Someone joined the channel (`by`: who).
+    pub const JOINED: &str = "joined";
 }
 
 impl SystemLine {
+    /// A line of `kind` with every other field empty.
     pub fn new(kind: SystemLineKind) -> Self {
         SystemLine {
             kind,
@@ -701,7 +763,15 @@ impl SystemLine {
             ticket_id: None,
             conversation_id: None,
             message_id: None,
+            action: None,
+            channel_id: None,
         }
+    }
+
+    /// The same line with this action (one of `system_action`).
+    pub fn with_action(mut self, action: &str) -> Self {
+        self.action = Some(action.to_owned());
+        self
     }
 
     /// The line in words, as the server stores it as the message's `text` and the
@@ -760,8 +830,61 @@ impl SystemLine {
     }
 }
 
+/// What a channel is (`ChannelView::kind`, feature `ticket_channels`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelKind {
+    /// The general channel (no project).
+    #[default]
+    General,
+    /// A project's channel.
+    Project,
+    /// A ticket's channel: its discussion.
+    Ticket,
+    /// A kind of a newer server this client does not know.
+    #[serde(other)]
+    Unknown,
+}
+
+impl ChannelKind {
+    /// Whether this is the default (`General`), which the JSON leaves out.
+    pub fn is_general(&self) -> bool {
+        *self == ChannelKind::General
+    }
+}
+
+/// The longest slug of a ticket's title in its channel's name (`ticket_channel_name`).
+pub const TICKET_CHANNEL_SLUG_MAX: usize = 32;
+
+/// The name of a ticket's channel: `#<number>-<slug>`, the slug being the title
+/// in lowercase ASCII words joined by `-` (any other character separates words),
+/// at most `TICKET_CHANNEL_SLUG_MAX` characters, cut after a whole word (a first
+/// word that alone is too long is cut). Computed when read, never stored, so a
+/// renamed ticket's channel follows. Only `#<number>` without an ASCII letter or digit.
+pub fn ticket_channel_name(number: u32, title: &str) -> String {
+    let mut slug = String::new();
+    for word in title.split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()) {
+        let word = word.to_ascii_lowercase();
+        let extra = if slug.is_empty() { word.len() } else { word.len() + 1 };
+        if slug.len() + extra <= TICKET_CHANNEL_SLUG_MAX {
+            if !slug.is_empty() {
+                slug.push('-');
+            }
+            slug.push_str(&word);
+            continue;
+        }
+        if slug.is_empty() {
+            // ASCII only, so every index is a character boundary.
+            slug.push_str(&word[..TICKET_CHANNEL_SLUG_MAX]);
+        }
+        break;
+    }
+    if slug.is_empty() { format!("#{number}") } else { format!("#{number}-{slug}") }
+}
+
 /// A channel of the Team chat (`channel.list`, feature `team_channels`): the
-/// general one (no project) or one per project.
+/// general one (no project), one per project, and (feature `ticket_channels`,
+/// only for a connection that accepts it) one per ticket.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChannelView {
     pub conversation_id: ConversationId,
@@ -774,10 +897,34 @@ pub struct ChannelView {
     pub unread: u32,
     /// Of those, the ones that name a board member with `@Name` (B8: the badge counts these).
     pub mentions: u32,
-    /// The project is archived: the channel can only be read.
+    /// The channel can only be read: its project is archived, or (a ticket's
+    /// channel) the ticket is on Done or archived.
     pub archived: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_activity_ms: Option<i64>,
+    /// What the channel is (feature `ticket_channels`); left out for General and by older servers.
+    #[serde(default, skip_serializing_if = "ChannelKind::is_general")]
+    pub kind: ChannelKind,
+    /// A ticket's channel: the ticket.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<crate::TicketId>,
+    /// A ticket's channel: the ticket's number (`#N`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_number: Option<u32>,
+    /// A ticket's channel: the kind of the column the ticket is in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_column: Option<crate::ticket::ColumnKind>,
+    /// The board member who reads the list is a member of the channel (a
+    /// ticket's channel: its creator, owner, the Owner, or who joined later).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub member: bool,
+    /// How many board members and employees are members (a ticket's channel).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_count: Option<u32>,
+    /// The highest message ordinal the reader had read before this read (the
+    /// line "New messages" goes after it); none: never read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_through: Option<u32>,
 }
 
 /// `channel.list`: the general channel first, then one per project by name.
@@ -1320,4 +1467,43 @@ pub struct ProposalsSnapshot {
     pub as_of_seq: u64,
     /// Pending first, then the latest decisions.
     pub proposals: Vec<ProposalView>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_ticket_channel_is_named_by_number_and_a_lowercase_slug() {
+        assert_eq!(ticket_channel_name(12, "Fix the Login page!"), "#12-fix-the-login-page");
+        assert_eq!(ticket_channel_name(3, "  API: v2 / rate-limits  "), "#3-api-v2-rate-limits");
+    }
+
+    #[test]
+    fn a_long_title_is_cut_after_the_last_whole_word_that_fits() {
+        let name = ticket_channel_name(7, "Migrate the payments service to the new queue and retry");
+        assert_eq!(name, "#7-migrate-the-payments-service-to");
+        let slug = name.split_once('-').map(|(_, s)| s).unwrap_or_default();
+        assert!(slug.len() <= TICKET_CHANNEL_SLUG_MAX);
+        // Exactly the limit is kept whole.
+        let exact = "a".repeat(TICKET_CHANNEL_SLUG_MAX);
+        assert_eq!(ticket_channel_name(1, &exact), format!("#1-{exact}"));
+    }
+
+    #[test]
+    fn a_first_word_longer_than_the_limit_is_cut_at_the_limit() {
+        let word = "x".repeat(TICKET_CHANNEL_SLUG_MAX + 10);
+        assert_eq!(ticket_channel_name(5, &word), format!("#5-{}", "x".repeat(TICKET_CHANNEL_SLUG_MAX)));
+    }
+
+    #[test]
+    fn a_title_without_ascii_letters_or_digits_gives_only_the_number() {
+        assert_eq!(ticket_channel_name(9, "Überprüfung → ✓"), "#9-berpr-fung");
+        assert_eq!(ticket_channel_name(9, "→ ✓ …"), "#9");
+    }
+
+    #[test]
+    fn a_renamed_ticket_gives_the_new_name() {
+        assert_ne!(ticket_channel_name(4, "Old title"), ticket_channel_name(4, "New title"));
+    }
 }

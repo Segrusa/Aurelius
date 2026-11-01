@@ -235,7 +235,7 @@ fn an_escalation_runs_on_the_escalated_tasks_login() {
 #[test]
 fn runs_the_team_chat_wakes_use_the_login_of_hop_0_at_every_hop() {
     let s = setup();
-    let CommandResult::GroupMessageSent { run_ids, .. } = exec(&s, s.robin, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "@Ada what do you think?".into(), images: vec![], files: vec![], channel: None })) else { panic!() };
+    let CommandResult::GroupMessageSent { run_ids, .. } = exec(&s, s.robin, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "@Ada what do you think?".into(), images: vec![], files: vec![], channel: None, thread_parent: None })) else { panic!() };
     let hop0 = run_ids[0];
     assert_eq!(login_of(&s, hop0), Some(s.robin));
     let woken = |employee: EmployeeId| -> RunId {

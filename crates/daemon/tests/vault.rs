@@ -278,7 +278,7 @@ async fn a_pasted_secret_is_named_and_with_confirmation_stored_redacted() {
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     client.vault_create(create(VaultKind::Secret, "Canary", "CANARY_TOKEN", B10_VALUE)).await.unwrap();
-    let send = |confirm| aurelius_domain::group_chat::SendGroupMessage { text: format!("here: {B10_VALUE}"), images: vec![], files: vec![], channel: None, confirm_secret: confirm };
+    let send = |confirm| aurelius_domain::group_chat::SendGroupMessage { text: format!("here: {B10_VALUE}"), images: vec![], files: vec![], channel: None, confirm_secret: confirm, thread_parent: None };
     let err = client.send_group_message(send(false)).await.unwrap_err();
     let aurelius_client::ClientError::Protocol(err) = err else { panic!() };
     assert_eq!((err.code, err.matched_items.clone()), (ErrorCode::LooksLikeSecret, vec!["Canary".to_owned()]), "the item's name");
@@ -432,7 +432,7 @@ async fn a_key_readable_only_after_the_start_fills_the_redactor() {
     let (conversation, message, _) = send_new(&client, "print them").await;
     assert_eq!(answer(&client, conversation, message).await, "old «secret:LATE_TOKEN» new «secret:LATE_TOKEN»");
     for value in [LATE_OLD, LATE_NEW] {
-        let paste = aurelius_domain::group_chat::SendGroupMessage { text: format!("here: {value}"), images: vec![], files: vec![], channel: None, confirm_secret: false };
+        let paste = aurelius_domain::group_chat::SendGroupMessage { text: format!("here: {value}"), images: vec![], files: vec![], channel: None, confirm_secret: false, thread_parent: None };
         let aurelius_client::ClientError::Protocol(err) = client.send_group_message(paste).await.unwrap_err() else { panic!() };
         assert_eq!((err.code, err.matched_items), (ErrorCode::LooksLikeSecret, vec!["Late".to_owned()]), "{value}");
     }

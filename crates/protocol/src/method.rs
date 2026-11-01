@@ -48,6 +48,13 @@ pub enum Method {
     /// one first, then one per project (archived projects too: read-only).
     #[serde(rename = "channel.list")]
     ChannelList,
+    /// The channels whose name or ticket number matches `query` (feature
+    /// `ticket_channels`), in the order of `channel.list`, archived ones too: a
+    /// closed ticket's channel stays findable. `#12` and `12` match ticket 12;
+    /// other text matches the name, case not counting. A connection that does not
+    /// accept `ticket_channels` gets no ticket channels here either.
+    #[serde(rename = "channel.search")]
+    ChannelSearch { query: String },
     /// The company in one read: employees, the org chart setting and the
     /// management team (roots).
     #[serde(rename = "company.get")]
@@ -546,6 +553,11 @@ pub mod client_feature {
     /// such a connection gets it, so an older client never reads an event kind
     /// it does not know (SN-02 AC3).
     pub const SERVER_NAME: &str = "server_name";
+    /// The client shows ticket channels (feature `ticket_channels`): only such a
+    /// connection gets them in `channel.list` and `channel.search`, and gets the
+    /// error code `channel_archived`, so an older client sees the list of before
+    /// and never reads a code it does not know.
+    pub const TICKET_CHANNELS: &str = "ticket_channels";
 }
 
 impl std::fmt::Debug for HelloParams {

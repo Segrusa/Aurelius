@@ -142,7 +142,7 @@ impl AppView {
         }
         self.board.posting = true;
         self.board.post_error = None;
-        let command = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: id, text, images: vec![], files: vec![] });
+        let command = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: id, text, images: vec![], files: vec![], thread_parent: None });
         let _ = self.requests.send(backend::Request::Board(BoardCall::Write { command, expected_version: None, done: None }));
         cx.notify();
     }

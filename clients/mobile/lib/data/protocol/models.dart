@@ -1301,49 +1301,111 @@ enum Capability {
   String toJson() => wire;
 }
 
+/// What a channel is (`ChannelView::kind`, feature `ticket_channels`).
+enum ChannelKind {
+  /// The general channel (no project).
+  general('general'),
+  /// A project's channel.
+  project('project'),
+  /// A ticket's channel: its discussion.
+  ticket('ticket'),
+  /// A kind of a newer server this client does not know.
+  unknown('unknown');
+
+  const ChannelKind(this.wire);
+
+  final String wire;
+
+  static ChannelKind fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => ChannelKind.unknown,
+      );
+
+  String toJson() => wire;
+}
+
 /// A channel of the Team chat (`channel.list`, feature `team_channels`): the
-/// general one (no project) or one per project.
+/// general one (no project), one per project, and (feature `ticket_channels`,
+/// only for a connection that accepts it) one per ticket.
 final class ChannelView {
   const ChannelView({
     required this.archived,
     required this.conversationId,
+    this.kind,
     this.lastActivityMs,
+    this.member,
+    this.memberCount,
     required this.mentions,
     required this.name,
     this.projectId,
+    this.readThrough,
+    this.ticketColumn,
+    this.ticketId,
+    this.ticketNumber,
     required this.unread,
   });
 
-  /// The project is archived: the channel can only be read.
+  /// The channel can only be read: its project is archived, or (a ticket's
+  /// channel) the ticket is on Done or archived.
   final bool archived;
   final String conversationId;
+  /// What the channel is (feature `ticket_channels`); left out for General and by older servers.
+  final ChannelKind? kind;
   final int? lastActivityMs;
+  /// The board member who reads the list is a member of the channel (a
+  /// ticket's channel: its creator, owner, the Owner, or who joined later).
+  final bool? member;
+  /// How many board members and employees are members (a ticket's channel).
+  final int? memberCount;
   /// Of those, the ones that name a board member with `@Name` (B8: the badge counts these).
   final int mentions;
   /// "General" or the project's name.
   final String name;
   /// None: the general channel.
   final String? projectId;
+  /// The highest message ordinal the reader had read before this read (the
+  /// line "New messages" goes after it); none: never read.
+  final int? readThrough;
+  /// A ticket's channel: the kind of the column the ticket is in.
+  final ColumnKind? ticketColumn;
+  /// A ticket's channel: the ticket.
+  final String? ticketId;
+  /// A ticket's channel: the ticket's number (`#N`).
+  final int? ticketNumber;
   /// Messages since the last one read.
   final int unread;
 
   factory ChannelView.fromJson(Map<String, dynamic> json) => ChannelView(
     archived: (json['archived'] as bool),
     conversationId: (json['conversation_id'] as String),
+    kind: (json['kind'] == null ? null : ChannelKind.fromJson(json['kind'] as String)),
     lastActivityMs: (json['last_activity_ms'] == null ? null : (json['last_activity_ms'] as num).toInt()),
+    member: (json['member'] == null ? null : (json['member'] as bool)),
+    memberCount: (json['member_count'] == null ? null : (json['member_count'] as num).toInt()),
     mentions: (json['mentions'] as num).toInt(),
     name: (json['name'] as String),
     projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+    readThrough: (json['read_through'] == null ? null : (json['read_through'] as num).toInt()),
+    ticketColumn: (json['ticket_column'] == null ? null : ColumnKind.fromJson(json['ticket_column'] as String)),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+    ticketNumber: (json['ticket_number'] == null ? null : (json['ticket_number'] as num).toInt()),
     unread: (json['unread'] as num).toInt(),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'archived': archived,
     'conversation_id': conversationId,
+    if (kind != null) 'kind': kind?.toJson(),
     if (lastActivityMs != null) 'last_activity_ms': lastActivityMs,
+    if (member != null) 'member': member,
+    if (memberCount != null) 'member_count': memberCount,
     'mentions': mentions,
     'name': name,
     if (projectId != null) 'project_id': projectId,
+    if (readThrough != null) 'read_through': readThrough,
+    if (ticketColumn != null) 'ticket_column': ticketColumn?.toJson(),
+    if (ticketId != null) 'ticket_id': ticketId,
+    if (ticketNumber != null) 'ticket_number': ticketNumber,
     'unread': unread,
   };
 }
@@ -1683,8 +1745,11 @@ sealed class Command {
           files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           text: (json['text'] as String),
+          threadParent: (json['thread_parent'] == null ? null : (json['thread_parent'] as String)),
           ticketId: (json['ticket_id'] as String),
         );
+      case 'react_to_message':
+        return CommandReactToMessage(value: ReactToMessage.fromJson(json as Map<String, dynamic>));
       case 'remember':
         return CommandRemember(value: Remember.fromJson(json as Map<String, dynamic>));
       case 'remove_attachment':
@@ -2460,6 +2525,7 @@ final class CommandPostTicketMessage extends Command {
     this.files = const [],
     this.images = const [],
     required this.text,
+    this.threadParent,
     required this.ticketId,
   });
 
@@ -2471,6 +2537,9 @@ final class CommandPostTicketMessage extends Command {
   /// Images that belong to this message (see `SendChatMessage::images`).
   final List<String> images;
   final String text;
+  /// A reply in the thread of this message of the discussion (feature
+  /// `chat_threads`, not advertised yet: the server refuses it until then).
+  final String? threadParent;
   final String ticketId;
 
   @override
@@ -2480,7 +2549,22 @@ final class CommandPostTicketMessage extends Command {
       'files': files,
       'images': images,
       'text': text,
+      if (threadParent != null) 'thread_parent': threadParent,
       'ticket_id': ticketId,
+    };
+}
+
+final class CommandReactToMessage extends Command {
+  const CommandReactToMessage({
+    required this.value,
+  });
+
+  final ReactToMessage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'react_to_message',
+      ...value.toJson(),
     };
 }
 
@@ -5923,6 +6007,12 @@ enum ErrorCode {
   /// connection (a session: `user.login`, the first `user.create`, or
   /// `HelloParams::session_token`). The second lock behind `unauthenticated`.
   boardMemberRequired('board_member_required'),
+  /// A write in a channel that can only be read (feature `ticket_channels`):
+  /// its ticket is on Done or archived, or its project is archived. Only a
+  /// connection whose `HelloParams::accepts` names `ticket_channels` gets this
+  /// code; any other gets `validation` with the same message, since an older
+  /// client cannot read a code it does not know.
+  channelArchived('channel_archived'),
   /// The caller lacks the right for this method.
   forbidden('forbidden'),
   frameTooLarge('frame_too_large'),
@@ -10536,6 +10626,7 @@ final class MessageView {
     required this.ordinal,
     this.producedBy,
     required this.queued,
+    this.reactions = const [],
     this.replyTo,
     required this.role,
     this.runId,
@@ -10543,6 +10634,9 @@ final class MessageView {
     required this.status,
     this.system,
     required this.text,
+    this.threadLastReplyMs,
+    this.threadParent,
+    this.threadReplyCount,
     this.update,
     required this.uploads,
     this.usage,
@@ -10572,6 +10666,9 @@ final class MessageView {
   /// answer running in its conversation. Such a message can be deleted
   /// (`DeleteQueuedMessage`) or sent now (`SendQueuedNow`). Left out when false.
   final bool queued;
+  /// The reactions on the message (feature `chat_reactions`, not advertised
+  /// yet), one entry per emoji. Left out when there are none and by older servers.
+  final List<ReactionView> reactions;
   /// For retried answers: the user message this answers again.
   final String? replyTo;
   final MessageRole role;
@@ -10585,6 +10682,14 @@ final class MessageView {
   /// Such a line never wakes anyone. Left out for other messages and by older servers.
   final SystemLine? system;
   final String text;
+  /// A message that starts a thread (feature `chat_threads`): when its latest reply was written.
+  final int? threadLastReplyMs;
+  /// A reply in a thread (feature `chat_threads`, not advertised yet): the
+  /// message it answers. Left out for a message of the channel itself and by older servers.
+  final String? threadParent;
+  /// A message that starts a thread (feature `chat_threads`): how many replies it has.
+  /// Left out when it has none and by older servers.
+  final int? threadReplyCount;
   /// A task update in the task's conversation, not an answer: brief |
   /// finding | question | status. `author` says from whom (a
   /// subagent, a colleague).
@@ -10607,6 +10712,7 @@ final class MessageView {
     ordinal: (json['ordinal'] as num).toInt(),
     producedBy: (json['produced_by'] == null ? null : (json['produced_by'] as String)),
     queued: (json['queued'] as bool),
+    reactions: (json['reactions'] == null ? const [] : (json['reactions'] as List<dynamic>).map((x0) => ReactionView.fromJson(x0 as Map<String, dynamic>)).toList()),
     replyTo: (json['reply_to'] == null ? null : (json['reply_to'] as String)),
     role: MessageRole.fromJson(json['role'] as String),
     runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
@@ -10614,6 +10720,9 @@ final class MessageView {
     status: MessageStatus.fromJson(json['status'] as String),
     system: (json['system'] == null ? null : SystemLine.fromJson(json['system'] as Map<String, dynamic>)),
     text: (json['text'] as String),
+    threadLastReplyMs: (json['thread_last_reply_ms'] == null ? null : (json['thread_last_reply_ms'] as num).toInt()),
+    threadParent: (json['thread_parent'] == null ? null : (json['thread_parent'] as String)),
+    threadReplyCount: (json['thread_reply_count'] == null ? null : (json['thread_reply_count'] as num).toInt()),
     update: (json['update'] == null ? null : (json['update'] as String)),
     uploads: (json['uploads'] as List<dynamic>).map((x0) => MessageFileView.fromJson(x0 as Map<String, dynamic>)).toList(),
     usage: (json['usage'] == null ? null : TokenUsage.fromJson(json['usage'] as Map<String, dynamic>)),
@@ -10631,6 +10740,7 @@ final class MessageView {
     'ordinal': ordinal,
     if (producedBy != null) 'produced_by': producedBy,
     'queued': queued,
+    'reactions': reactions.map((x0) => x0.toJson()).toList(),
     if (replyTo != null) 'reply_to': replyTo,
     'role': role.toJson(),
     if (runId != null) 'run_id': runId,
@@ -10638,6 +10748,9 @@ final class MessageView {
     'status': status.toJson(),
     if (system != null) 'system': system?.toJson(),
     'text': text,
+    if (threadLastReplyMs != null) 'thread_last_reply_ms': threadLastReplyMs,
+    if (threadParent != null) 'thread_parent': threadParent,
+    if (threadReplyCount != null) 'thread_reply_count': threadReplyCount,
     if (update != null) 'update': update,
     'uploads': uploads.map((x0) => x0.toJson()).toList(),
     if (usage != null) 'usage': usage?.toJson(),
@@ -10771,6 +10884,13 @@ sealed class Method {
         return const MethodBrowserGet();
       case 'channel.list':
         return const MethodChannelList();
+      case 'channel.search':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodChannelSearch(
+          query: (src['query'] as String),
+        );
+        }
       case 'claude_login.input':
         return MethodClaudeLoginInput(params: ClaudeLoginInputParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'claude_login.status':
@@ -11415,6 +11535,27 @@ final class MethodChannelList extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'channel.list',
+    };
+}
+
+/// The channels whose name or ticket number matches `query` (feature
+/// `ticket_channels`), in the order of `channel.list`, archived ones too: a
+/// closed ticket's channel stays findable. `#12` and `12` match ticket 12;
+/// other text matches the name, case not counting. A connection that does not
+/// accept `ticket_channels` gets no ticket channels here either.
+final class MethodChannelSearch extends Method {
+  const MethodChannelSearch({
+    required this.query,
+  });
+
+  final String query;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'channel.search',
+      'params': <String, dynamic>{
+      'query': query,
+    },
     };
 }
 
@@ -13934,6 +14075,65 @@ final class PushStatus {
   };
 }
 
+/// A board member adds (`on`) or takes back their reaction with `emoji` on a
+/// message of a channel (`message.react`, feature `chat_reactions`, not advertised
+/// yet: the server refuses it until then).
+final class ReactToMessage {
+  const ReactToMessage({
+    required this.emoji,
+    required this.messageId,
+    required this.on,
+  });
+
+  final String emoji;
+  final String messageId;
+  final bool on;
+
+  factory ReactToMessage.fromJson(Map<String, dynamic> json) => ReactToMessage(
+    emoji: (json['emoji'] as String),
+    messageId: (json['message_id'] as String),
+    on: (json['on'] as bool),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'emoji': emoji,
+    'message_id': messageId,
+    'on': on,
+  };
+}
+
+/// One emoji on a message (`MessageView::reactions`, feature `chat_reactions`):
+/// how many reacted with it, whether the reader did, and who.
+final class ReactionView {
+  const ReactionView({
+    this.by = const [],
+    required this.count,
+    required this.emoji,
+    required this.mine,
+  });
+
+  /// The names of who reacted (board members' usernames, employees' names), oldest first.
+  final List<String> by;
+  final int count;
+  final String emoji;
+  /// The board member who reads the message reacted with it.
+  final bool mine;
+
+  factory ReactionView.fromJson(Map<String, dynamic> json) => ReactionView(
+    by: (json['by'] == null ? const [] : (json['by'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    count: (json['count'] as num).toInt(),
+    emoji: (json['emoji'] as String),
+    mine: (json['mine'] as bool),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'by': by,
+    'count': count,
+    'emoji': emoji,
+    'mine': mine,
+  };
+}
+
 /// The answer to every write.
 final class Receipt {
   const Receipt({
@@ -16184,6 +16384,7 @@ final class SendGroupMessage {
     this.files = const [],
     this.images = const [],
     required this.text,
+    this.threadParent,
   });
 
   /// The channel (feature `team_channels`): a project's, or none for the general one.
@@ -16196,6 +16397,9 @@ final class SendGroupMessage {
   /// Images that belong to this message (see `SendChatMessage::images`).
   final List<String> images;
   final String text;
+  /// A reply in the thread of this message of the channel (feature
+  /// `chat_threads`, not advertised yet: the server refuses it until then).
+  final String? threadParent;
 
   factory SendGroupMessage.fromJson(Map<String, dynamic> json) => SendGroupMessage(
     channel: (json['channel'] == null ? null : (json['channel'] as String)),
@@ -16203,6 +16407,7 @@ final class SendGroupMessage {
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     text: (json['text'] as String),
+    threadParent: (json['thread_parent'] == null ? null : (json['thread_parent'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -16211,6 +16416,7 @@ final class SendGroupMessage {
     'files': files,
     'images': images,
     'text': text,
+    if (threadParent != null) 'thread_parent': threadParent,
   };
 }
 
@@ -17639,7 +17845,9 @@ final class SubtaskUsage {
 /// only set where `SystemLineKind` names it.
 final class SystemLine {
   const SystemLine({
+    this.action,
     this.by,
+    this.channelId,
     this.conversationId,
     this.from,
     required this.kind,
@@ -17649,8 +17857,17 @@ final class SystemLine {
     this.to,
   });
 
+  /// What exactly happened within `kind` (feature `ticket_channels`), one of
+  /// `system_action`: e.g. `opened` or `closed` on a ticket's line in General,
+  /// `approved` on a `plan` line. A client that knows none of them shows `text`,
+  /// which stays the readable sentence. A string, not an enum, so a new action
+  /// never breaks an older client. Left out by older servers.
+  final String? action;
   /// Who did it: a board member's name, an employee's, or "Aurelius".
   final String? by;
+  /// The ticket's channel (its discussion) the line links to (feature
+  /// `ticket_channels`), e.g. on the line in General when a ticket opens or closes.
+  final String? channelId;
   final String? conversationId;
   final String? from;
   final SystemLineKind kind;
@@ -17660,7 +17877,9 @@ final class SystemLine {
   final String? to;
 
   factory SystemLine.fromJson(Map<String, dynamic> json) => SystemLine(
+    action: (json['action'] == null ? null : (json['action'] as String)),
     by: (json['by'] == null ? null : (json['by'] as String)),
+    channelId: (json['channel_id'] == null ? null : (json['channel_id'] as String)),
     conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
     from: (json['from'] == null ? null : (json['from'] as String)),
     kind: SystemLineKind.fromJson(json['kind'] as String),
@@ -17671,7 +17890,9 @@ final class SystemLine {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (action != null) 'action': action,
     if (by != null) 'by': by,
+    if (channelId != null) 'channel_id': channelId,
     if (conversationId != null) 'conversation_id': conversationId,
     if (from != null) 'from': from,
     'kind': kind.toJson(),

@@ -2058,7 +2058,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SendManager { employee_id, text, conversation_id, images, files, interrupt } => {
             envelope(Command::SendEmployeeMessage(employee::SendEmployeeMessage { confirm_secret: false, employee_id, text, conversation_id, images, files, interrupt }), None)
         }
-        Request::SendGroup { text, images, files, channel } => envelope(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text, images, files, channel }), None),
+        Request::SendGroup { text, images, files, channel } => envelope(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text, images, files, channel, thread_parent: None }), None),
         Request::DecideApproval { approval_id, action_digest, approve, always_allow } => {
             envelope(Command::DecideApproval(approval::DecideApproval { approval_id, action_digest, approve, always_allow }), None)
         }
@@ -4876,7 +4876,7 @@ mod tests {
             let discussion = ticket.conversation_id.expect("every ticket has its discussion");
 
             // MU2-02 / MU2-04: a post with a mention; in Backlog with no owner it wakes nobody.
-            let post = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket.id, text: "@marie can you look?".into(), images: vec![], files: vec![] });
+            let post = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket.id, text: "@marie can you look?".into(), images: vec![], files: vec![], thread_parent: None });
             app.requests.send(Request::Board(BoardCall::Write { command: post, expected_version: None, done: None })).unwrap();
             let to = next(&mut app, |u| match u {
                 Update::Board(BoardUpdate::Posted { ticket: t, to }) if t == ticket.id => Some(to),
@@ -5364,7 +5364,7 @@ mod tests {
     #[test]
     fn a_discussion_write_that_cannot_go_answers_the_discussion() {
         let ticket = aurelius_domain::TicketId::new();
-        let post = BoardCall::Write { command: Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket, text: "Hi".into(), images: vec![], files: vec![] }), expected_version: None, done: None };
+        let post = BoardCall::Write { command: Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket, text: "Hi".into(), images: vec![], files: vec![], thread_parent: None }), expected_version: None, done: None };
         assert!(matches!(post.refused("offline".into()), BoardUpdate::PostFailed { ticket: t, .. } if t == ticket), "the Sending… state ends, the draft stays");
         let retry = BoardCall::Write { command: Command::RetryTicketSummary(aurelius_domain::ticket::RetryTicketSummary { ticket_id: ticket }), expected_version: None, done: None };
         assert!(matches!(retry.refused("offline".into()), BoardUpdate::SummaryRetried { failure: Some(_), .. }));
@@ -5392,7 +5392,7 @@ mod tests {
         let export = Request::Vault(VaultCall::KeyExport { password: Password::new("Tr0ub4dor&3-zebra-alex".into()) });
         let shown = Update::Vault(VaultUpdate::Value { item_id, purpose: aurelius_domain::vault::RevealPurpose::Show, result: Ok(Revealed::new(FAKE.into())) });
         let key = Update::Vault(VaultUpdate::Key(Ok(KeyFile { key_id: "k1".into(), key: Revealed::new("aurelius-vault-key:v1:dev:k1:c2stdGVzdC1GQUtFLTAwMDA".into()) })));
-        let post = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: format!("the token is {FAKE}"), images: vec![], files: vec![], channel: None });
+        let post = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: format!("the token is {FAKE}"), images: vec![], files: vec![], channel: None, thread_parent: None });
         let held = Update::LooksLikeSecret(SecretHold::new(vec!["GitHub token".into()], confirmed(&post).unwrap()));
         for printed in [format!("{create:?}"), format!("{update:?}"), format!("{export:?}"), format!("{shown:?}"), format!("{key:?}"), format!("{held:?}")] {
             assert!(!printed.contains("FAKE") && !printed.contains("c2st") && !printed.contains("Tr0ub4dor"), "{printed}");
@@ -5405,9 +5405,9 @@ mod tests {
     #[test]
     fn a_held_message_goes_again_confirmed() {
         use aurelius_domain::error::{AppError, ErrorCode};
-        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: "Hi Robin".into(), images: vec![], files: vec![], channel: None });
+        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: "Hi Robin".into(), images: vec![], files: vec![], channel: None, thread_parent: None });
         let chat = Command::SendEmployeeMessage(employee::SendEmployeeMessage { confirm_secret: false, employee_id: EmployeeId::new(), text: "Hi Forge".into(), conversation_id: ConversationId::new(), images: vec![], files: vec![], interrupt: false });
-        let post = Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: false, ticket_id: aurelius_domain::TicketId::new(), text: "Hi Alex".into(), images: vec![], files: vec![] });
+        let post = Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: false, ticket_id: aurelius_domain::TicketId::new(), text: "Hi Alex".into(), images: vec![], files: vec![], thread_parent: None });
         for command in [&group, &chat, &post] {
             let flag = match confirmed(command).expect("a message B10 checks") {
                 Command::SendGroupMessage(m) => m.confirm_secret,

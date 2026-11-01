@@ -171,6 +171,7 @@ pub enum Command {
     DecideGuidelineProposal(guideline::DecideGuidelineProposal),
     AddStarterGuidelines(guideline::AddStarterGuidelines),
     SetServerName(server::SetServerName),
+    ReactToMessage(group_chat::ReactToMessage),
 }
 
 /// `(type, method)` for every command: the tag in the JSON of a `Command` and
@@ -268,6 +269,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("decide_guideline_proposal", "guideline.decide_proposal"),
     ("add_starter_guidelines", "guideline.add_starter_set"),
     ("set_server_name", "server.set_name"),
+    ("react_to_message", "message.react"),
 ];
 
 impl Command {

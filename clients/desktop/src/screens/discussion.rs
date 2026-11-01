@@ -576,6 +576,10 @@ mod tests {
             mode: None,
             author_user: None,
             system: None,
+            thread_parent: None,
+            thread_reply_count: None,
+            thread_last_reply_ms: None,
+            reactions: Vec::new(),
         }
     }
 
@@ -863,7 +867,7 @@ mod tests {
     }
 
     fn channel(name: &str, project: bool, archived: bool, unread: u32, mentions: u32) -> ChannelView {
-        ChannelView { conversation_id: ConversationId::new(), project_id: project.then(aurelius_domain::ProjectId::new), name: name.into(), unread, mentions, archived, last_activity_ms: None }
+        ChannelView { conversation_id: ConversationId::new(), project_id: project.then(aurelius_domain::ProjectId::new), name: name.into(), unread, mentions, archived, last_activity_ms: None, kind: Default::default(), ticket_id: None, ticket_number: None, ticket_column: None, member: false, member_count: None, read_through: None }
     }
 
     #[test]

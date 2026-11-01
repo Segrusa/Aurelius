@@ -4,7 +4,7 @@
 //! author. Who answers: the employees named with `@Name`, else the top of the
 //! org chart. An employee answers from its own main chat; the answer is copied here.
 
-use crate::{EmployeeId, conversation::validate_employee_message, DomainError};
+use crate::{EmployeeId, MessageId, conversation::validate_employee_message, DomainError};
 use serde::{Deserialize, Serialize};
 
 /// The `MessageView::update` kind of an employee's message in the group chat,
@@ -48,6 +48,37 @@ pub struct SendGroupMessage {
     /// (after `looks_like_secret`, B10): it is stored with the value redacted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub confirm_secret: bool,
+    /// A reply in the thread of this message of the channel (feature
+    /// `chat_threads`, not advertised yet: the server refuses it until then).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_parent: Option<MessageId>,
+}
+
+/// The longest emoji of a reaction (bytes of UTF-8): one emoji with its modifiers.
+pub const REACTION_EMOJI_MAX: usize = 64;
+
+/// A board member adds (`on`) or takes back their reaction with `emoji` on a
+/// message of a channel (`message.react`, feature `chat_reactions`, not advertised
+/// yet: the server refuses it until then).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ReactToMessage {
+    pub message_id: MessageId,
+    pub emoji: String,
+    pub on: bool,
+}
+
+impl ReactToMessage {
+    /// The emoji as stored: trimmed, not empty, at most `REACTION_EMOJI_MAX` bytes.
+    pub fn validate(&self) -> Result<String, DomainError> {
+        let emoji = self.emoji.trim();
+        if emoji.is_empty() {
+            return Err(DomainError::Required { field: "emoji".into() });
+        }
+        if emoji.len() > REACTION_EMOJI_MAX {
+            return Err(DomainError::TooLong { field: "emoji".into(), max: REACTION_EMOJI_MAX });
+        }
+        Ok(emoji.to_owned())
+    }
 }
 
 impl SendGroupMessage {
@@ -111,8 +142,8 @@ mod tests {
 
     #[test]
     fn a_message_needs_text_or_files() {
-        assert!(SendGroupMessage { confirm_secret: false, text: "  ".into(), images: vec![], files: vec![], channel: None }.validate().is_err());
-        assert_eq!(SendGroupMessage { confirm_secret: false, text: " Hi ".into(), images: vec![], files: vec![], channel: None }.validate().unwrap(), "Hi");
+        assert!(SendGroupMessage { confirm_secret: false, text: "  ".into(), images: vec![], files: vec![], channel: None, thread_parent: None }.validate().is_err());
+        assert_eq!(SendGroupMessage { confirm_secret: false, text: " Hi ".into(), images: vec![], files: vec![], channel: None, thread_parent: None }.validate().unwrap(), "Hi");
         assert_eq!(shortened("abcdef", 3), "abc…");
         assert_eq!(shortened(" ab ", 3), "ab");
     }

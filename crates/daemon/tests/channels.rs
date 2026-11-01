@@ -38,7 +38,7 @@ async fn aggregates(stream: &mut BoxStream, then: impl std::future::Future<Outpu
 }
 
 async fn send(client: &aurelius_client::Client, channel: Option<ConversationId>, text: &str) {
-    let send = SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel };
+    let send = SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel, thread_parent: None };
     let result = client.execute(envelope(Command::SendGroupMessage(send), None)).await.unwrap().result;
     assert!(matches!(result, CommandResult::GroupMessageSent { .. }), "{result:?}");
 }

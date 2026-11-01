@@ -301,6 +301,25 @@ pub mod feature {
     /// connections whose `HelloParams::accepts` names `server_name`. The hello's
     /// `host_name`, the pairing text and the pairing poll give the chosen name.
     pub const SERVER_NAME: &str = "server_name";
+    /// A channel per ticket (protocol 5, additive; AUR-CHAT-001): the ticket's
+    /// discussion is its channel, `#<number>-<slug>` (`ticket_channel_name`).
+    /// `channel.list` names ticket channels only to connections whose
+    /// `HelloParams::accepts` names `ticket_channels` (any other sees the list of
+    /// before), with `ChannelView::kind`, `ticket_id`, `ticket_number`,
+    /// `ticket_column`, `member`, `member_count` and `read_through`; a closed
+    /// ticket's channel is `archived`. The read `channel.search { query }`; the
+    /// writes `group_chat.send { channel }` to a ticket's channel; the error code
+    /// `channel_archived` (only to such connections); `SystemLine::action` and
+    /// `SystemLine::channel_id`, with one line in General when a ticket opens and
+    /// one when it closes.
+    pub const TICKET_CHANNELS: &str = "ticket_channels";
+    /// Threads in channels (phase 2, defined but not advertised yet):
+    /// `thread_parent` on `group_chat.send` / `ticket.post`, and
+    /// `MessageView::thread_parent`, `thread_reply_count`, `thread_last_reply_ms`.
+    pub const CHAT_THREADS: &str = "chat_threads";
+    /// Reactions on messages (phase 2, defined but not advertised yet): the
+    /// write `message.react` and `MessageView::reactions`.
+    pub const CHAT_REACTIONS: &str = "chat_reactions";
 }
 
 /// Every feature this build has.
@@ -328,6 +347,7 @@ pub const FEATURES: &[&str] = &[
     feature::AUTO_ALLOW,
     feature::TICKET_DISCUSSION,
     feature::TEAM_CHANNELS,
+    feature::TICKET_CHANNELS,
     feature::VAULT,
     feature::GUIDELINES,
     feature::BOARD_TESTING,

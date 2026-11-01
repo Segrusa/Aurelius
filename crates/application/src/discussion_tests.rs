@@ -70,14 +70,14 @@ fn channel(s: &Setup, project: ProjectId) -> ConversationId {
 }
 
 fn send(s: &Setup, channel: Option<ConversationId>, text: &str) -> Result<(Vec<EmployeeId>, Vec<RunId>), AppError> {
-    match exec(s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel }))? {
+    match exec(s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel, thread_parent: None }))? {
         CommandResult::GroupMessageSent { to, run_ids, .. } => Ok((to, run_ids)),
         other => panic!("{other:?}"),
     }
 }
 
 fn post(s: &Setup, ticket: TicketId, text: &str) -> Result<(Vec<EmployeeId>, Vec<RunId>), AppError> {
-    match exec(s, Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket, text: text.into(), images: vec![], files: vec![] }))? {
+    match exec(s, Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket, text: text.into(), images: vec![], files: vec![], thread_parent: None }))? {
         CommandResult::TicketMessagePosted { to, run_ids, .. } => Ok((to, run_ids)),
         other => panic!("{other:?}"),
     }
@@ -454,7 +454,7 @@ fn a_ticket_on_done_and_an_archived_projects_channel_are_read_only() {
 fn ticket_post_needs_a_board_member_and_an_existing_ticket() {
     let s = setup();
     let t = new_ticket(&s, "Login", None);
-    let command = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: t, text: "x".into(), images: vec![], files: vec![] });
+    let command = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: t, text: "x".into(), images: vec![], files: vec![], thread_parent: None });
     let Err(err) = s.service.execute(&ctx(None), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command }) else { panic!("posted without a board member") };
     assert_eq!(err.code, ErrorCode::BoardMemberRequired);
     assert_eq!(post(&s, TicketId::new(), "x").unwrap_err().code, ErrorCode::NotFound);
@@ -462,7 +462,7 @@ fn ticket_post_needs_a_board_member_and_an_existing_ticket() {
 
 /// The message `send` stored in a channel: its id.
 fn sent_message(s: &Setup, channel: Option<ConversationId>, text: &str) -> aurelius_domain::MessageId {
-    match exec(s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel })).unwrap() {
+    match exec(s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel, thread_parent: None })).unwrap() {
         CommandResult::GroupMessageSent { message_id, .. } => message_id,
         other => panic!("{other:?}"),
     }

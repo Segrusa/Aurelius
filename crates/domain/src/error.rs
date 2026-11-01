@@ -64,6 +64,12 @@ pub enum ErrorCode {
     /// `guideline.create` / `update` / `restore` / an approval: another guideline
     /// that is not archived has this title (case does not count).
     GuidelineTitleTaken,
+    /// A write in a channel that can only be read (feature `ticket_channels`):
+    /// its ticket is on Done or archived, or its project is archived. Only a
+    /// connection whose `HelloParams::accepts` names `ticket_channels` gets this
+    /// code; any other gets `validation` with the same message, since an older
+    /// client cannot read a code it does not know.
+    ChannelArchived,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, thiserror::Error)]

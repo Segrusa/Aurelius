@@ -273,7 +273,7 @@ async fn a_group_chat_answer_of_the_ceo_is_not_the_apps_reply() {
     let (_, secret, _) = key_with_webhook(&owner, "Marcus", AppAudience::Management, &receiver.url).await;
     let marcus = app(dir.path(), &secret).await;
 
-    owner.execute(envelope(Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "Hallo team".into(), images: vec![], files: vec![], channel: None }), None)).await.unwrap();
+    owner.execute(envelope(Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "Hallo team".into(), images: vec![], files: vec![], channel: None, thread_parent: None }), None)).await.unwrap();
     marcus
         .execute(envelope(Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id: c.jean.0, text: "Question from the app".into(), conversation_id: c.jean.1, images: vec![], files: vec![], interrupt: false }), None))
         .await

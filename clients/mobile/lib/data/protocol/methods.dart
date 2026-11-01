@@ -70,6 +70,12 @@ abstract final class Methods {
   /// The channels of the Team chat (feature `team_channels`): the general
   /// one first, then one per project (archived projects too: read-only).
   static const String channelList = 'channel.list';
+  /// The channels whose name or ticket number matches `query` (feature
+  /// `ticket_channels`), in the order of `channel.list`, archived ones too: a
+  /// closed ticket's channel stays findable. `#12` and `12` match ticket 12;
+  /// other text matches the name, case not counting. A connection that does not
+  /// accept `ticket_channels` gets no ticket channels here either.
+  static const String channelSearch = 'channel.search';
   static const String chatRetry = 'chat.retry';
   static const String chatSend = 'chat.send';
   /// Stop a running link of the session's own login. Answers `ClaudeLogin`.
@@ -244,6 +250,7 @@ abstract final class Methods {
   static const String memoryPin = 'memory.pin';
   static const String memoryRemember = 'memory.remember';
   static const String memoryRevise = 'memory.revise';
+  static const String messageReact = 'message.react';
   /// A new note in a project; answers `Note`.
   static const String noteCreate = 'note.create';
   static const String noteDelete = 'note.delete';
@@ -624,6 +631,18 @@ Map<String, dynamic> browserGet() => <String, dynamic>{
 /// one first, then one per project (archived projects too: read-only).
 Map<String, dynamic> channelList() => <String, dynamic>{
   'method': Methods.channelList,
+};
+
+/// The channels whose name or ticket number matches `query` (feature
+/// `ticket_channels`), in the order of `channel.list`, archived ones too: a
+/// closed ticket's channel stays findable. `#12` and `12` match ticket 12;
+/// other text matches the name, case not counting. A connection that does not
+/// accept `ticket_channels` gets no ticket channels here either.
+Map<String, dynamic> channelSearch({required String query}) => <String, dynamic>{
+  'method': Methods.channelSearch,
+  'params': <String, dynamic>{
+    'query': query,
+  },
 };
 
 /// What a running `claude_login.link` asks for: the code Claude showed after
@@ -2101,6 +2120,11 @@ Map<String, dynamic> memoryRevise(ReviseMemory params) => <String, dynamic>{
   'params': params.toJson(),
 };
 
+Map<String, dynamic> messageReact(ReactToMessage params) => <String, dynamic>{
+  'method': Methods.messageReact,
+  'params': params.toJson(),
+};
+
 Map<String, dynamic> projectCreate(CreateProject params) => <String, dynamic>{
   'method': Methods.projectCreate,
   'params': params.toJson(),
@@ -2313,13 +2337,14 @@ Map<String, dynamic> ticketMove({String? beforeTicketId, required String columnI
 /// Without `@Name` it goes to the owner while the ticket is in Todo (with an
 /// owner), Doing, Plan review, Testing or Review; else it wakes nobody. `@Name` wakes those
 /// employees. Refused on Done (the discussion is read-only there). Not for apps.
-Map<String, dynamic> ticketPost({bool? confirmSecret, List<String> files = const [], List<String> images = const [], required String text, required String ticketId}) => <String, dynamic>{
+Map<String, dynamic> ticketPost({bool? confirmSecret, List<String> files = const [], List<String> images = const [], required String text, String? threadParent, required String ticketId}) => <String, dynamic>{
   'method': Methods.ticketPost,
   'params': <String, dynamic>{
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'files': files,
     'images': images,
     'text': text,
+    if (threadParent != null) 'thread_parent': threadParent,
     'ticket_id': ticketId,
   },
 };

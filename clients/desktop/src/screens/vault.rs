@@ -1899,9 +1899,9 @@ mod tests {
         assert_eq!(held_in(&chat), HeldIn::Chat(conversation));
         assert_eq!(attachments_back(&chat), (vec![std::path::PathBuf::from("/tmp/shot.png")], vec![std::path::PathBuf::from("/tmp/notes.txt")]));
         let channel = Some(ConversationId::new());
-        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: true, text: "x".into(), images: vec![], files: vec![], channel });
+        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: true, text: "x".into(), images: vec![], files: vec![], channel, thread_parent: None });
         assert_eq!(held_in(&group), HeldIn::Channel(channel));
-        let post = Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: true, ticket_id: aurelius_domain::TicketId::new(), text: "x".into(), images: vec![], files: vec![] });
+        let post = Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: true, ticket_id: aurelius_domain::TicketId::new(), text: "x".into(), images: vec![], files: vec![], thread_parent: None });
         assert_eq!(held_in(&post), HeldIn::Ticket);
         assert_eq!(text_back("", "held"), "held");
         assert_eq!(text_back("typed since", "held"), "typed since\n\nheld", "nothing is lost");

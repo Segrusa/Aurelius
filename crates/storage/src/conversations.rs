@@ -495,6 +495,10 @@ pub fn list_messages(
             mode: mode.and_then(|m| serde_json::from_value(serde_json::Value::String(m)).ok()),
             author_user: None,
             system: system.and_then(|s| serde_json::from_str(&s).ok()),
+            thread_parent: None,
+            thread_reply_count: None,
+            thread_last_reply_ms: None,
+            reactions: Vec::new(),
         });
     }
     // The board members who wrote in a discussion (schema 19).

@@ -23,6 +23,8 @@ pub mod views;
 pub mod write;
 
 #[cfg(test)]
+mod channels_tests;
+#[cfg(test)]
 mod guidelines_tests;
 #[cfg(test)]
 mod sessions_tests;

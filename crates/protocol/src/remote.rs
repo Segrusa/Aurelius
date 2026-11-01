@@ -57,6 +57,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::EmployeeChat { .. }
         | Method::GroupChatGet { .. }
         | Method::ChannelList
+        | Method::ChannelSearch { .. }
         | Method::CompanyGet
         | Method::ProjectConversationList { .. }
         | Method::ApprovalList
@@ -252,6 +253,7 @@ fn command_needs(command: &Command) -> Needs {
         | Command::SendEmployeeMessage(_)
         | Command::SendGroupMessage(_)
         | Command::PostTicketMessage(_)
+        | Command::ReactToMessage(_)
         | Command::StartProjectConversation(_)
         | Command::SendProjectMessage(_)
         | Command::ShareMessage(_)
@@ -718,7 +720,7 @@ mod tests {
             assert_eq!(required(&read(method)), cap(Capability::Read));
         }
         // Writing in the group chat is chatting.
-        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: "Hi".into(), images: vec![], files: vec![], channel: None });
+        let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text: "Hi".into(), images: vec![], files: vec![], channel: None, thread_parent: None });
         assert_eq!(required(&exec(group)), cap(Capability::Chat));
     }
 

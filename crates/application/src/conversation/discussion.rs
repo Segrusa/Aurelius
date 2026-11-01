@@ -39,6 +39,11 @@ use aurelius_storage::conversations::{self as conv, GroupRun, NewMessage};
 use aurelius_storage::{StorageError, Store, Tx, blobs, employees};
 use rusqlite::OptionalExtension;
 
+/// Why `message.react` is refused: reactions are phase 2 (feature `chat_reactions`, not advertised yet).
+pub(crate) const REACTIONS_NOT_YET: &str = "Reactions are not supported by this server yet.";
+/// Why a reply in a thread is refused: threads are phase 2 (feature `chat_threads`, not advertised yet).
+pub(crate) const THREADS_NOT_YET: &str = "Replies in a thread are not supported by this server yet.";
+
 /// The ticket a discussion belongs to, as the engine needs it.
 #[derive(Debug, Clone)]
 pub(crate) struct TicketPlace {
@@ -615,6 +620,9 @@ impl CommandService {
     /// message is stored, and the employees it names (or the one B3 names) each
     /// answer from their own main chat.
     pub(crate) fn send_group_message(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &group::SendGroupMessage) -> Result<Committed, AppError> {
+        if cmd.thread_parent.is_some() {
+            return Err(AppError::new(ErrorCode::Validation, THREADS_NOT_YET));
+        }
         let text = cmd.validate().map_err(domain_error)?;
         let discussion = self
             .store
@@ -630,6 +638,9 @@ impl CommandService {
     /// A board member writes in a ticket's discussion (`ticket.post`).
     pub(crate) fn post_ticket_message(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &aurelius_domain::ticket::PostTicketMessage) -> Result<Committed, AppError> {
         crate::ticket::require_board_member(ctx)?;
+        if cmd.thread_parent.is_some() {
+            return Err(AppError::new(ErrorCode::Validation, THREADS_NOT_YET));
+        }
         let text = cmd.validate().map_err(domain_error)?;
         let ticket = cmd.ticket_id;
         let discussion = self

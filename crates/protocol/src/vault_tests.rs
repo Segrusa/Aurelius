@@ -133,7 +133,7 @@ fn devices_need_read_to_list_task_control_to_change_and_owner_to_export_the_key(
 
 #[test]
 fn confirm_secret_is_left_out_until_set() {
-    let ticket = aurelius_domain::ticket::PostTicketMessage { ticket_id: aurelius_domain::TicketId::new(), text: "hi".into(), images: vec![], files: vec![], confirm_secret: false };
+    let ticket = aurelius_domain::ticket::PostTicketMessage { ticket_id: aurelius_domain::TicketId::new(), text: "hi".into(), images: vec![], files: vec![], confirm_secret: false, thread_parent: None };
     let json = serde_json::to_value(&ticket).unwrap();
     assert!(json.get("confirm_secret").is_none(), "the request hash of older clients' writes stays the same");
     let parsed: aurelius_domain::group_chat::SendGroupMessage = serde_json::from_value(serde_json::json!({ "text": "hi", "confirm_secret": true })).unwrap();
