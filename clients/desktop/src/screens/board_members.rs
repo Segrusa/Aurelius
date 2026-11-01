@@ -283,6 +283,9 @@ pub struct Drafts {
     pub discussion_for: Option<aurelius_domain::TicketId>,
     pub feedback: String,
     pub feedback_for: Option<aurelius_domain::TicketId>,
+    /// The thread panel's composer, with the thread it belongs to (AUR-CHAT-002).
+    pub thread: String,
+    pub thread_for: Option<aurelius_domain::MessageId>,
 }
 
 /// Another board member on this window (or none, signed out): `shown`, the drafts
@@ -512,6 +515,8 @@ impl AppView {
             discussion_for: self.board.composer_for,
             feedback: self.board.feedback.read(cx).value().to_string(),
             feedback_for: self.board.feedback_for,
+            thread: self.thread.composer.read(cx).value().to_string(),
+            thread_for: self.thread.composer_for,
         }
     }
 
@@ -526,6 +531,8 @@ impl AppView {
         self.board.composer_clear = false;
         self.board.feedback.update(cx, |input, cx| input.set_value(d.feedback, window, cx));
         self.board.feedback_for = d.feedback_for;
+        self.thread.composer.update(cx, |input, cx| input.set_value(d.thread, window, cx));
+        self.thread.composer_for = d.thread_for;
         // `chat` is the draft of the place the channels' drafts were left at.
         self.drafts = d.channels;
         self.settle_draft(window, cx);
@@ -1335,6 +1342,19 @@ mod tests {
         let shown = swap_drafts(&mut kept, Some(alex), Some(robin), Drafts::default());
         assert_eq!(shown, robins);
         assert!(kept.is_empty(), "an emptied draft is not kept");
+    }
+
+    /// AUR-CHAT-002: a reply typed in a thread stays with its board member and its thread.
+    #[test]
+    fn a_thread_reply_draft_goes_with_its_board_member() {
+        let (alex, robin) = (UserId::new(), UserId::new());
+        let root = aurelius_domain::MessageId::new();
+        let mut kept = std::collections::HashMap::new();
+        let typed = Drafts { thread: "Alex's half reply".into(), thread_for: Some(root), ..Drafts::default() };
+        let shown = swap_drafts(&mut kept, Some(alex), Some(robin), typed.clone());
+        assert_eq!((shown.thread.as_str(), shown.thread_for), ("", None), "Robin never sees Alex's reply");
+        let shown = swap_drafts(&mut kept, Some(robin), Some(alex), shown);
+        assert_eq!(shown, typed);
     }
 
     /// AUR-CHAT-001 R2 D-M2: Alex typed in #3 and went to #general; Robin signs in on this

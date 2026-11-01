@@ -42,7 +42,7 @@ pub fn with_role(name: &str, role: Option<&str>) -> String {
 /// An employee's answer streaming into the group chat before it is a message there
 /// (its text and steps come from the stream); marked as a group post like it will be.
 /// Its run is what its Stop stops and what its approvals wait on; `mode` is the one it started in.
-fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<String>, mode: Option<aurelius_domain::autonomy::AgentMode>) -> aurelius_protocol::MessageView {
+pub(crate) fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<String>, mode: Option<aurelius_domain::autonomy::AgentMode>) -> aurelius_protocol::MessageView {
     aurelius_protocol::MessageView {
         id,
         ordinal: 0,
@@ -285,13 +285,13 @@ impl AppView {
             } else {
                 self.message_cell(m.id, full, cx)
             };
-            // Right-click: "Create ticket…" (fase 2 §4), as the hover action does.
+            // Right-click: "Create ticket…" (fase 2 §4), and React… / Reply in thread (ui-ontwerp §5), as the hover actions do.
             let row = v().w_full().child(el);
-            let row = if self.make_ticket_action_allowed(m) {
-                let message = m.id;
+            let row = if !self.message_menu(m, Point::default()).is_empty() {
+                let message = m.clone();
                 row.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, w, cx| {
                     cx.stop_propagation();
-                    let items = vec![crate::screens::board::menu_entry("Create ticket…", crate::screens::board::BoardDo::TicketFromMessage(message), false, None)];
+                    let items = this.message_menu(&message, e.position);
                     this.open_menu(e.position, items, w, cx);
                 }))
             } else {
@@ -399,7 +399,7 @@ impl AppView {
     }
 
     /// One message of the open conversation.
-    fn render_message(&self, m: &aurelius_protocol::MessageView, author: &SharedString, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_message(&self, m: &aurelius_protocol::MessageView, author: &SharedString, cx: &mut Context<Self>) -> AnyElement {
         let all = self.messages.as_ref().map_or(&[][..], |s| &s.messages[..]);
         let group = self.screen == crate::app::Page::GroupChat;
         // The same author's message just before (ui-ontwerp §2): no header of its own.
@@ -651,7 +651,10 @@ impl AppView {
                 })))
         });
         let mut actions: Vec<AnyElement> = Vec::new();
-        actions.extend(self.message_ticket_pill(m.id, cx));
+        // The feed row places the pill itself.
+        if !group {
+            actions.extend(self.message_ticket_pill(m.id, cx));
+        }
         actions.extend((m.status != MessageStatus::Partial).then(|| self.make_ticket_action(m, cx)).flatten());
         actions.extend(trace.map(IntoElement::into_any_element));
         actions.extend(copy.map(IntoElement::into_any_element));
@@ -707,14 +710,28 @@ impl AppView {
     /// One row of the feed: monogram, name, what they are and the time over the body,
     /// which aligns with the name; a grouped row only the body, its time and actions
     /// in the gutter on hover. A message naming the reader: "@ you", an ACCENT bar and
-    /// the halo behind the row.
+    /// the halo behind the row. With threads or reactions (ui-ontwerp §5) the actions
+    /// sit in a bar at the top right (hover, keyboard focus), the reactions and the
+    /// thread line under the text.
     #[allow(clippy::too_many_arguments)]
     fn feed_row(&self, m: &aurelius_protocol::MessageView, who: &crate::screens::discussion::Author, grouped: bool, mentions_me: bool, tags: AnyElement, actions: Vec<AnyElement>, content: Vec<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
         let clock = feed::clock(m.created_at_ms, aurelius_host::utc_offset_minutes_at(m.created_at_ms));
         let label = format!("{}, {}, {}{}", who.name, who.kind, ui::fmt_when(m.created_at_ms), if mentions_me { ", mentions you" } else { "" });
         let hover = SharedString::from(format!("feed-{}", m.id));
         let kind = if who.human { "· board member".to_string() } else { format!("— {}", who.kind) };
-        let row = v().id(SharedString::from(format!("feed-row-{}", m.id))).group(hover.clone()).role(Role::Article).aria_label(label).w_full().gap(px(4.)).rounded(px(4.))
+        let pill = self.message_ticket_pill(m.id, cx);
+        let toolbar = self.row_toolbar_on();
+        let (actions, bar) = if toolbar {
+            (pill.into_iter().collect::<Vec<_>>(), Some(self.row_toolbar(m, hover.clone(), actions, cx)))
+        } else {
+            (pill.into_iter().chain(actions).collect(), None)
+        };
+        let mut content = content;
+        if toolbar {
+            content.extend(self.reactions_row(m, cx));
+            content.extend(self.thread_summary(m, cx));
+        }
+        let row = v().id(SharedString::from(format!("feed-row-{}", m.id))).group(hover.clone()).role(Role::Article).aria_label(label).w_full().relative().gap(px(4.)).rounded(px(4.))
             .when(mentions_me, |el| el.pl(px(8.)).py(px(4.)).border_l_2().border_color(c(theme::ACCENT)).bg(c(theme::ACCENT_HALO)));
         if grouped {
             return row
@@ -722,8 +739,9 @@ impl AppView {
                     h().items_start()
                         .child(div().w(px(28.)).flex_none().pt(px(3.)).text_size(px(10.5)).text_color(c(theme::MUTED)).opacity(0.).group_hover(hover.clone(), |s| s.opacity(1.)).child(clock))
                         .child(v().flex_1().min_w_0().gap(px(6.)).children(content))
-                        .child(h().flex_none().gap(px(2.)).opacity(0.).group_hover(hover, |s| s.opacity(1.)).children(actions)),
+                        .child(h().flex_none().gap(px(2.)).when(!toolbar, |el| el.opacity(0.).group_hover(hover, |s| s.opacity(1.))).children(actions)),
                 )
+                .children(bar)
                 .into_any_element();
         }
         row.child(
@@ -738,6 +756,7 @@ impl AppView {
                 .child(div().text_size(px(11.)).text_color(c(theme::TEXT_2)).child(clock)),
         )
         .child(v().pl(px(28.)).gap(px(6.)).children(content))
+        .children(bar)
         .into_any_element()
     }
 
@@ -771,8 +790,8 @@ impl AppView {
                     .into_any_element(),
             );
         }
+        // The feed row places the "→ #52" pill itself.
         let mut actions: Vec<AnyElement> = Vec::new();
-        actions.extend(self.message_ticket_pill(m.id, cx));
         actions.extend(self.make_ticket_action(m, cx));
         if !m.text.trim().is_empty() {
             actions.push(self.copy_button(format!("msg-{}", m.id), m.text.clone(), cx).into_any_element());
@@ -842,7 +861,7 @@ fn text_of(m: &aurelius_protocol::MessageView, live: &std::collections::HashMap<
 }
 
 /// A line across the feed with a label in the middle: a day, or "New messages".
-fn feed_separator(id: SharedString, label: SharedString, line: u32, text: u32) -> Stateful<Div> {
+pub(crate) fn feed_separator(id: SharedString, label: SharedString, line: u32, text: u32) -> Stateful<Div> {
     h().id(id.clone()).role(Role::Note).aria_label(label.clone()).w_full().gap(px(10.)).text_size(px(11.)).text_color(c(text))
         .child(div().flex_1().h(px(1.)).bg(c(line)))
         .child(label)

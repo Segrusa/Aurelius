@@ -28,6 +28,9 @@ actions!(
         Back,
         InfoToggle,
         InfoClose,
+        MessageActions,
+        RowNext,
+        RowPrev,
         FocusComposer,
         TogglePreview,
         Quit,
@@ -196,6 +199,9 @@ pub const PLAN_REVIEW: &str = "PlanReview";
 pub const MENU: &str = "ItemMenu";
 /// A focused info icon: Enter and Space open its popover, Esc closes it.
 pub const INFO: &str = "InfoIcon";
+/// A Team chat message's action bar with the keyboard focus (Tab): Enter and Space
+/// open its actions as a menu (AUR-CHAT-002, ui-ontwerp §5).
+pub const MESSAGE_ROW: &str = "MessageRow";
 /// The folder browser (on this computer or the server's).
 pub const FOLDERS: &str = "ServerFolder";
 /// The Board page (inside `NAV`): its cards move with the keyboard (ui-ontwerp §15).
@@ -418,6 +424,13 @@ fn overlay_bindings() -> Vec<KeyBinding> {
         key("enter", InfoToggle, Some(INFO)),
         key("space", InfoToggle, Some(INFO)),
         key("escape", InfoClose, Some(INFO)),
+        key("enter", MessageActions, Some(MESSAGE_ROW)),
+        key("space", MessageActions, Some(MESSAGE_ROW)),
+        // The Team chat's feed and thread: Tab / Shift+Tab walk the messages' action bars.
+        key("tab", RowNext, Some(NAV)),
+        key("shift-tab", RowPrev, Some(NAV)),
+        key("tab", RowNext, Some(MESSAGE_ROW)),
+        key("shift-tab", RowPrev, Some(MESSAGE_ROW)),
         key("escape", Back, Some(MENU)),
         key("l", SettingsLoginStart, Some(SETTINGS)),
         key("r", SettingsRestore, Some(SETTINGS)),
