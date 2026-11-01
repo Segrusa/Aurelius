@@ -513,11 +513,15 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 }
                 let discussion = ticket_discussion.is_some()
                     || conv::group_run(conn, run_id)?.is_some_and(|g| crate::conversation::discussion::load(conn, g.conversation_id).ok().flatten().is_some_and(|d| d.ticket().is_some()));
-                // The Testing column (ticket #5): the ticket's test task gives its verdict.
+                // The Testing column (ticket #5): with a tester the full suite runs once, in the
+                // ticket's test task; every other task of the ticket runs targeted tests only.
                 let testing = match own_task {
                     Some(task) => crate::task::testing::role(conn, task)?,
                     None => crate::task::testing::TestingRole::Outside,
                 };
+                if let Some(note) = testing.note() {
+                    tail.push(note.to_string());
+                }
                 let testing = testing == crate::task::testing::TestingRole::Tester;
 
                 // Context Builder: permitted scopes first, then retrieval.

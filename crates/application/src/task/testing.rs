@@ -34,6 +34,10 @@ pub const TEST_SUMMARY_MAX: usize = 8_000;
 /// What a run is told when it may not give a verdict.
 pub const NOT_THE_TEST_TASK: &str = "Only the open test task of a ticket in Testing can report a test result.";
 
+/// What every run of a ticket's task is told while the company has a tester
+/// (the run's system text, its tail), other than the test task itself.
+pub const TARGETED_TESTS_ONLY: &str = "Do not run the full test suite: the Testing column runs it once after you report. Run only targeted tests for what you changed (cargo test -p <crate> <filter>, gen-dart --check). If you review work on this ticket, do not run the suite again either: use the Testing result in the ticket's discussion.";
+
 /// How a run's task stands to the Testing column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestingRole {
@@ -43,6 +47,16 @@ pub enum TestingRole {
     Worker,
     /// The ticket's test task: it runs the suite once and gives the verdict.
     Tester,
+}
+
+impl TestingRole {
+    /// The line for the run's system text, if any.
+    pub fn note(self) -> Option<&'static str> {
+        match self {
+            Self::Worker => Some(TARGETED_TESTS_ONLY),
+            Self::Outside | Self::Tester => None,
+        }
+    }
 }
 
 /// How the task of a run stands to the Testing column.
@@ -226,6 +240,15 @@ mod tests {
         }
         assert!(test_goal(5, "  ").contains("report is empty"));
         assert_eq!(test_title(5), "Test ticket #5");
+    }
+
+    #[test]
+    fn only_work_on_a_ticket_is_told_to_run_targeted_tests_only() {
+        assert_eq!(TestingRole::Worker.note(), Some(TARGETED_TESTS_ONLY));
+        assert_eq!((TestingRole::Outside.note(), TestingRole::Tester.note()), (None, None));
+        for needed in ["Do not run the full test suite", "cargo test -p <crate> <filter>", "gen-dart --check", "use the Testing result in the ticket's discussion"] {
+            assert!(TARGETED_TESTS_ONLY.contains(needed), "{needed}");
+        }
     }
 
     #[test]

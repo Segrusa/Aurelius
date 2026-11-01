@@ -7,7 +7,7 @@
 
 mod common;
 
-use aurelius_application::task::testing::NOT_THE_TEST_TASK;
+use aurelius_application::task::testing::{NOT_THE_TEST_TASK, TARGETED_TESTS_ONLY};
 use aurelius_client::{Client, bridge::BridgeClient};
 use aurelius_domain::company::{SetTester, UpdateCompany};
 use aurelius_domain::employee::CreateEmployee;
@@ -232,6 +232,9 @@ async fn a_report_goes_to_testing_and_a_green_verdict_of_the_test_task_to_review
     assert!(!gates.systems_of("report_test_result").is_empty(), "the tester's run started");
     let tasks_of_ticket: i64 = common::db(dir.path()).query_row("SELECT COUNT(*) FROM tasks WHERE ticket_id = ?1", [id.to_string()], |r| r.get(0)).unwrap();
     assert_eq!(tasks_of_ticket, 2, "the test task carries the ticket");
+    // The main task's work was told to run targeted tests only; the tester was not.
+    assert!(gates.systems_of("HOLD-MAIN").iter().all(|s| s.contains(TARGETED_TESTS_ONLY)));
+    assert!(gates.systems_of("report_test_result").iter().all(|s| !s.contains(TARGETED_TESTS_ONLY)));
 
     // A word to the owner while the tests run: the owner answers, the card stays in Testing,
     // the main task in Review (it never waits for its test task), and nothing is tested twice.
@@ -381,12 +384,14 @@ async fn a_test_task_that_ends_without_a_verdict_never_leaves_the_card_in_testin
     assert!(could_not(&lines(&client, silent).await, "the tester finished without a verdict"));
     assert!(verdicts(dir.path(), silent).is_empty());
 
-    // Without a tester everything is as before: straight to Review, no test task.
+    // Without a tester everything is as before: straight to Review, no test task, no note.
     set_tester(&client, None).await;
     let plain = ticket(&client, atlas, "Plain", "NO-TESTER five.", builder).await;
     let review = until(&client, plain, ColumnKind::Review, TaskStatus::Review).await;
     assert_eq!(review.tasks.len(), 1);
     assert_eq!(moves(dir.path(), plain), ["todo", "doing", "review"]);
+    let systems = gates.systems_of("NO-TESTER");
+    assert!(!systems.is_empty() && systems.iter().all(|s| !s.contains("Do not run the full test suite")));
 
     drop(client);
     common::stop(dir.path(), daemon).await;
