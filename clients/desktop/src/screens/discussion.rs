@@ -525,6 +525,15 @@ pub fn badge(channels: &[ChannelView]) -> (u32, bool) {
     (channels.iter().map(|c| c.mentions).sum(), channels.iter().any(|c| c.unread > 0))
 }
 
+/// The open channel counts as read (AUR-CHAT-001 Q1): the sidebar badge has no unread
+/// or mentions of it, also from a list read just before the channel was.
+pub fn mark_read(channels: &mut [ChannelView], open: aurelius_domain::ConversationId) {
+    for c in channels.iter_mut().filter(|c| c.conversation_id == open) {
+        c.unread = 0;
+        c.mentions = 0;
+    }
+}
+
 /// The channel Alt+↑/↓ goes to among the `visible` ones (ui-ontwerp §1: Channels →
 /// Tickets → Archived while unfolded); the list's ends stop it.
 pub fn step_channel(visible: &[aurelius_domain::ConversationId], current: Option<aurelius_domain::ConversationId>, down: bool) -> Option<aurelius_domain::ConversationId> {
@@ -991,6 +1000,21 @@ mod tests {
         assert_eq!(badge(&[channel("General", false, false, 0, 0)]), (0, false));
         assert_eq!(channel_hint(Some(&list[3])), "Message #Aurelius · @ to mention");
         assert_eq!(channel_hint(Some(&list[1])), "This project is archived · read-only.", "MU2-08 AC2");
+    }
+
+    /// Q1 minor: reading the only channel with a mention clears the sidebar's "@1" at
+    /// once, and the open channel keeps adding nothing while a list says otherwise.
+    #[test]
+    fn reading_a_channel_clears_its_part_of_the_sidebar_badge() {
+        let mut list = vec![channel("General", false, false, 0, 0), channel("Aurelius", true, false, 2, 1), ticket_channel(3, false, 100, 4, 0)];
+        assert_eq!(badge(&list), (1, true));
+        let aurelius = list[1].conversation_id;
+        mark_read(&mut list, aurelius);
+        assert_eq!(badge(&list), (0, true), "the mention is read; #3 stays unread");
+        assert_eq!((list[2].unread, list[2].mentions), (4, 0), "another channel keeps its counts");
+        let three = list[2].conversation_id;
+        mark_read(&mut list, three);
+        assert_eq!(badge(&list), (0, false), "nothing unread: no dot");
     }
 
     #[test]

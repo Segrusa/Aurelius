@@ -2167,6 +2167,9 @@ impl AppView {
                 if self.screen == Page::GroupChat && self.open_conversation.is_none() {
                     self.open_conversation = Some(conversation);
                 }
+                if self.screen == Page::GroupChat {
+                    self.channel_read(conversation);
+                }
             }
             Update::GroupChatFailed(why) => {
                 self.group_error = Some(why);

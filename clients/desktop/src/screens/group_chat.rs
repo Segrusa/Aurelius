@@ -57,6 +57,18 @@ impl AppView {
             let _ = self.requests.send(crate::backend::Request::Board(crate::backend::BoardCall::Ticket(ticket)));
         }
         self.channels = channels.filter(|list| !list.is_empty());
+        // The channel shown is being read: it adds nothing to the sidebar badge.
+        if let (Some(list), Some(open), crate::app::Page::GroupChat) = (self.channels.as_mut(), self.group_conversation, self.screen) {
+            d::mark_read(list, open);
+        }
+    }
+
+    /// The Team chat read a channel (`group_chat.get` marks it read on the server): it is
+    /// read here at once, and the list is read again for the other channels' counts.
+    pub fn channel_read(&mut self, conversation: ConversationId) {
+        let Some(list) = self.channels.as_mut() else { return };
+        d::mark_read(list, conversation);
+        let _ = self.requests.send(crate::backend::Request::LoadChannels);
     }
 
     /// `channel.search` answered for `query` (none: the server could not search; then
