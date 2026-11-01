@@ -69,6 +69,7 @@ fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<S
         thread_reply_count: None,
         thread_last_reply_ms: None,
         thread_unread: None,
+        thread_repliers: Vec::new(),
         reactions: Vec::new(),
     }
 }

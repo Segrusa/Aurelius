@@ -586,6 +586,9 @@ pub struct ProjectConversationsSnapshot {
     pub conversations: Vec<ProjectConversationSummary>,
 }
 
+/// How many of a thread's repliers its root names (`MessageView::thread_repliers`).
+pub const THREAD_REPLIERS_MAX: usize = 3;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MessageView {
     pub id: MessageId,
@@ -657,6 +660,13 @@ pub struct MessageView {
     /// Left out when none are unread, for an app, and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_unread: Option<u32>,
+    /// A message that starts a thread (feature `chat_threads`): who replied, so
+    /// a client can show them under the root. The names (board members'
+    /// usernames, employees' names, as in `ReactionView::by`) of at most
+    /// `THREAD_REPLIERS_MAX` (3) distinct repliers, most recent first. Left out when
+    /// it has no replies and by older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub thread_repliers: Vec<String>,
     /// The reactions on the message (feature `chat_reactions`), one entry per
     /// emoji, in the order each emoji was first used. Left out when there are
     /// none and by older servers.
