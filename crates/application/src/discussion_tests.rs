@@ -754,3 +754,25 @@ fn a_ticket_from_a_message_of_another_projects_channel_or_discussion_is_refused(
     let general = sent_message(&s, None, "Everyone needs a logo");
     assert!(ticket_from(&s, Some(general), Some(s.user)).is_ok());
 }
+
+#[test]
+fn a_ticket_channel_cannot_be_deleted_and_keeps_its_messages() {
+    // Trace R1 M1: for kind 'ticket' archived_at_ms means "closed", so a delete would erase
+    // the history and leave a channel that sync later "reopens".
+    let s = setup();
+    let t = new_ticket(&s, "Login", None);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    post(&s, t, "keep me").unwrap();
+    let delete = || exec(&s, Command::DeleteConversation(aurelius_domain::conversation::DeleteConversation { conversation_id: d }));
+    let err = delete().unwrap_err();
+    assert_eq!(err.code, ErrorCode::Validation);
+    assert_eq!(err.message, "A ticket's channel cannot be deleted; archive the ticket instead.");
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::discussions::archived_at(c, d)).unwrap(), None);
+    assert!(messages(&s, d).iter().any(|m| m.text == "keep me"), "the message text stays");
+    let listed = s.service.store().read(aurelius_storage::discussions::ticket_channels).unwrap();
+    assert!(!listed[0].archived, "listed as open, not as archived");
+    // A closed channel is refused with the same words, not as "not found".
+    s.service.store().write(move |tx| aurelius_storage::discussions::set_ticket_channel_archived(tx, d, Some(1))).unwrap();
+    assert_eq!(delete().unwrap_err().message, "A ticket's channel cannot be deleted; archive the ticket instead.");
+    assert!(messages(&s, d).iter().any(|m| m.text == "keep me"));
+}
