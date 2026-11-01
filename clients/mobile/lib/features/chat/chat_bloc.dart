@@ -33,6 +33,12 @@ class ChatShown extends ChatEvent {
   final bool visible;
 }
 
+/// The channel can be written in again (AUR-CHAT-001 §8 Reopen): its
+/// ticket left Done, so `channel_archived` no longer holds.
+class ChatReopened extends ChatEvent {
+  const ChatReopened();
+}
+
 class _AppendReceived extends ChatEvent {
   const _AppendReceived(this.append);
 
@@ -278,6 +284,7 @@ class ChatState extends Equatable {
     this.progress = const {},
     this.boardMembers = const [],
     this.secretCheck,
+    this.closed = false,
   });
 
   final bool loading;
@@ -329,6 +336,11 @@ class ChatState extends Equatable {
   /// member's choice (B10): a one-off, like [notice].
   final String? secretCheck;
 
+  /// A write here was refused with `channel_archived` (feature
+  /// `ticket_channels`): the channel can only be read, the read-only bar
+  /// shows in place of the composer until [ChatReopened].
+  final bool closed;
+
   /// The run that is streaming now, if any.
   MessageView? get streaming {
     for (final m in messages.reversed) {
@@ -371,6 +383,7 @@ class ChatState extends Equatable {
     Map<String, RunProgress>? progress,
     List<String>? boardMembers,
     String? secretCheck,
+    bool? closed,
   }) =>
       ChatState(
         loading: loading ?? this.loading,
@@ -393,10 +406,11 @@ class ChatState extends Equatable {
         progress: progress ?? this.progress,
         boardMembers: boardMembers ?? this.boardMembers,
         secretCheck: secretCheck,
+        closed: closed ?? this.closed,
       );
 
   @override
-  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers, secretCheck];
+  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers, secretCheck, closed];
 }
 
 /// One conversation: an employee's task conversation when [employeeId] is set
@@ -473,6 +487,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
           emit(state.copyWith(notice: e.mode == ShareMode.memory ? 'Proposed as memory.' : 'Shared as context.'));
         }));
     on<ChatNoticeShown>((e, emit) => emit(state.copyWith()));
+    on<ChatReopened>((e, emit) => emit(state.copyWith(closed: false)));
     on<ChatShown>((e, emit) {
       _shown = e.visible;
       if (_shown && _stale) {
@@ -789,6 +804,13 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       if (e.looksLikeSecret) {
         // B10: nothing was stored; the board member chooses (only the names are shown).
         emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asSecret(e.matchedItems) : u).toList(), secretCheck: unsent.localId));
+        return;
+      }
+      // A closed channel (its ticket on Done or archived): the read-only bar
+      // says so, never the error itself (AUR-CHAT-001 §8). The text stays to copy.
+      if (e.code == ErrorCode.channelArchived) {
+        emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asFailed(true) : u).toList(), closed: true));
+        onRead?.call();
         return;
       }
       // A server without the discussion engine (`unknown_method`): kept, to try again after an update.

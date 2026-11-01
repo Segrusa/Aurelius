@@ -6,17 +6,21 @@ import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/channels.dart';
 import '../../data/discussion.dart';
 import '../../data/views.dart';
 import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
+import 'channel_list.dart';
+import 'channel_screen.dart';
 import 'channels_bloc.dart';
 
 /// The company's group chat (Team): the user and every employee. `@Name`
 /// asks those employees; without one the head of the company answers. With a
 /// server of Phase 2 it has channels (MU2-08): General and one per project,
-/// picked from a pill at the top (ui-ontwerp Fase 2 §3).
+/// picked from a pill at the top (ui-ontwerp Fase 2 §3). With a server of
+/// `ticket_channels` it opens on the channel list instead (AUR-CHAT-001 §6).
 class TeamPage extends StatefulWidget {
   const TeamPage({super.key});
 
@@ -56,6 +60,7 @@ class _TeamPageState extends State<TeamPage> {
   Widget build(BuildContext context) {
     final company = context.read<CompanyBloc>();
     final channels = _channels(context);
+    if (channels.tickets) return const _ChannelHome();
     final open = channels.supported ? (channels.byId(_channel) ?? channels.general) : null;
     // A channel that went away (its project deleted): back to General.
     final channel = open?.projectId == null ? null : open!.conversationId;
@@ -112,6 +117,60 @@ class _TeamPageState extends State<TeamPage> {
             ),
           ),
         ),
+      ]),
+    );
+  }
+}
+
+/// The Team tab with a channel per ticket (AUR-CHAT-001 §6): the channel list
+/// first, a tap pushes the channel with its own back button; from
+/// [channelSplitWidth] the list ([channelListWidth]) and the channel stand side
+/// by side, General open at first.
+class _ChannelHome extends StatefulWidget {
+  const _ChannelHome();
+
+  @override
+  State<_ChannelHome> createState() => _ChannelHomeState();
+}
+
+class _ChannelHomeState extends State<_ChannelHome> {
+  /// Side by side: the open channel, and its read_through when it was opened.
+  ChannelView? _open;
+  int? _readThrough;
+
+  void _show(ChannelView c, {required bool wide}) {
+    // Taken now: opening the channel marks it read (§2 "New messages").
+    final readThrough = c.readThrough;
+    if (wide) {
+      setState(() {
+        _open = c;
+        _readThrough = readThrough;
+      });
+      return;
+    }
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ChannelScreen(channel: c, readThrough: readThrough))).then((_) {
+      if (mounted) context.read<ChannelsBloc>().add(const ChannelsRefreshed());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= channelSplitWidth;
+    final list = ChannelList(selected: wide ? _open?.conversationId : null, onOpen: (c) => _show(c, wide: wide));
+    if (!wide) return Scaffold(appBar: GlassAppBar(title: const Text('Team')), body: list);
+    final channels = context.watch<ChannelsBloc>().state;
+    final open = _open ?? channels.general;
+    // General opens by itself: its read_through is the one of the first list.
+    if (_open == null && open != null) {
+      _open = open;
+      _readThrough = open.readThrough;
+    }
+    return Scaffold(
+      appBar: GlassAppBar(title: const Text('Team')),
+      body: Row(children: [
+        SizedBox(width: channelListWidth, child: list),
+        VerticalDivider(width: 1, thickness: 1, color: Tokens.border),
+        Expanded(child: open == null ? const SizedBox.shrink() : ChannelScreen(key: ValueKey('channel-${open.conversationId}'), channel: open, readThrough: _readThrough)),
       ]),
     );
   }

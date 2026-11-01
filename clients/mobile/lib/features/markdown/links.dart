@@ -9,6 +9,7 @@ import '../../data/markdown_paths.dart';
 import '../../data/views.dart';
 import '../chat/chat_view.dart' show markdownStyle;
 import 'markdown_page.dart';
+import 'mention_markdown.dart';
 import 'mermaid.dart';
 
 /// Tells a link handler that this activation is a long-press: it copies
@@ -107,16 +108,20 @@ class MessageMarkdown extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = styleSheet ?? markdownStyle(context);
     final mermaid = diagrams ? mermaidMarkdown(style, selectable: selectable) : null;
+    // The Slack-style Team chat marks its @names (AUR-CHAT-001 §2).
+    final mentions = MentionScope.maybeOf(context);
     return LinkGestures(
       builder: (context, copied) => MarkdownBody(
         // MarkdownBody only parses again when text or style change, so a
-        // finished answer needs a new one to draw its diagrams.
-        key: ValueKey(diagrams),
+        // finished answer needs a new one to draw its diagrams, and one whose
+        // names became known one to mark them.
+        key: ValueKey((diagrams, mentions?.me, mentions?.known.length)),
         data: linkMarkdownPaths(data),
         selectable: selectable,
         styleSheet: style,
         blockSyntaxes: mermaid?.blockSyntaxes,
-        builders: mermaid?.builders ?? const {},
+        inlineSyntaxes: mentions == null ? null : [MentionSyntax(mentions)],
+        builders: {...?mermaid?.builders, if (mentions != null) 'mention': MentionBuilder()},
         onTapLink: markdownLinkTap(context, scope, from: from, copied: copied),
       ),
     );
