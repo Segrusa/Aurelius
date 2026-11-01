@@ -561,6 +561,42 @@ pub fn channel_hint(c: Option<&ChannelView>) -> String {
     }
 }
 
+/// The composer's placeholder in a ticket's channel (P-21): the owner while a post
+/// without `@` reaches them, else the channel's name. `t` is the ticket once read.
+pub fn ticket_channel_hint(c: &ChannelView, t: Option<&TicketView>) -> String {
+    match t.filter(|_| !c.archived).and_then(owner_answers) {
+        Some(owner) => format!("Message {owner} (owner)… · @ to mention"),
+        None => channel_hint(Some(c)),
+    }
+}
+
+/// The owner who answers a post without `@` in the ticket's discussion (P-21).
+fn owner_answers(t: &TicketView) -> Option<&str> {
+    t.owner_name.as_deref().filter(|_| reaches_owner(t))
+}
+
+/// Who a post without `@` reaches in a ticket's channel, for its empty state and the
+/// row under the composer (not General's "Titan answers"); before the ticket is read, none.
+fn without_name(t: Option<&TicketView>) -> String {
+    match t.map(owner_answers) {
+        Some(Some(owner)) => format!("; without a name, {owner} (owner) answers"),
+        Some(None) => "; without a name, no one is woken".into(),
+        None => " about this ticket".into(),
+    }
+}
+
+/// A ticket channel's empty state (ui-ontwerp §3): its heading and who answers.
+pub const TICKET_CHANNEL_EMPTY: &str = "Discuss the ticket here.";
+
+pub fn ticket_channel_empty(t: Option<&TicketView>) -> String {
+    format!("Write @Name to ask an employee{}.", without_name(t))
+}
+
+/// The row under a ticket channel's composer: who answers.
+pub fn ticket_channel_row(t: Option<&TicketView>) -> String {
+    format!("@Name asks that employee{}.", without_name(t))
+}
+
 /// The bar instead of the composer in a read-only channel (ui-ontwerp §3): a closed
 /// ticket's ("#42 is Done · read-only.") or an archived project's.
 pub fn read_only_bar(c: &ChannelView) -> String {
@@ -865,6 +901,29 @@ mod tests {
         assert!(!reaches_owner(&ticket(ColumnKind::Doing, false)));
         assert!(!writable(&ticket(ColumnKind::Done, true)), "MU2-01 AC3: read-only on Done");
         assert!(writable(&ticket(ColumnKind::Review, true)));
+    }
+
+    /// Q1 minor: a ticket's channel says its owner answers a post without `@`, not
+    /// General's "Titan answers"; nobody once the ticket is out of the owner's columns.
+    #[test]
+    fn a_ticket_channel_names_its_owner_in_the_empty_state_and_under_the_composer() {
+        let ch = ticket_channel(42, false, 100, 0, 0);
+        let doing = ticket(ColumnKind::Doing, true);
+        assert_eq!(ticket_channel_hint(&ch, Some(&doing)), "Message Forge (owner)… · @ to mention");
+        assert_eq!(ticket_channel_empty(Some(&doing)), "Write @Name to ask an employee; without a name, Forge (owner) answers.");
+        assert_eq!(ticket_channel_row(Some(&doing)), "@Name asks that employee; without a name, Forge (owner) answers.");
+        let backlog = ticket(ColumnKind::Backlog, true);
+        assert_eq!(ticket_channel_hint(&ch, Some(&backlog)), "Message #42-login-per-board-member · @ to mention");
+        assert_eq!(ticket_channel_row(Some(&backlog)), "@Name asks that employee; without a name, no one is woken.");
+        // Before `ticket.get` answered: nobody is named.
+        assert_eq!(ticket_channel_hint(&ch, None), "Message #42-login-per-board-member · @ to mention");
+        assert_eq!(ticket_channel_empty(None), "Write @Name to ask an employee about this ticket.");
+        for text in [ticket_channel_empty(Some(&doing)), ticket_channel_row(None), ticket_channel_hint(&ch, Some(&doing))] {
+            assert!(!text.contains("Titan"), "{text}");
+        }
+        // A closed ticket's channel keeps its read-only text.
+        let done = ticket_channel(12, true, 100, 0, 0);
+        assert_eq!(ticket_channel_hint(&done, Some(&doing)), "#12 is Done · read-only.");
     }
 
     #[test]
