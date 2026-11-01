@@ -9,12 +9,13 @@ use aurelius_client::{Client, bridge::BridgeClient, envelope};
 use aurelius_domain::{
     ClientId, Command, CommandId, ConversationId, EventKind,
     approval::{ApprovalStatus, DecideApproval},
-    conversation::SendChatMessage,
+    conversation::{DeleteConversation, SendChatMessage},
     files::AttachFile,
     employee::{CreateEmployee, SendEmployeeMessage},
     project::CreateProject,
     remote::Capability,
     task::CreateTask,
+    ticket::CreateTicket,
 };
 use aurelius_protocol::{
     CommandResult, ErrorCode, HelloParams, HelloResult, HostResult, HostWrite, Method, Outcome, PROTOCOL_MAJOR, Request, ResponseBody, ServerMessage, ShutdownWhen, WriteMethod, WriteResult,
@@ -716,6 +717,45 @@ async fn a_phone_that_is_not_an_owner_may_not_shut_the_pc_down() {
     assert!(forbidden(host(&mut socket, 3, HostWrite::PowerCancel).await));
     assert!(forbidden(call(&mut socket, 4, Method::PowerGet).await));
     assert_eq!(desktop.query_power().await.unwrap().pending, None, "nothing was requested");
+
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_phone_with_chat_rights_cannot_delete_a_tickets_channel() {
+    // Trace R1 M1: the remote path reaches the same refusal as the desktop.
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_remote(dir.path()).await;
+    let desktop = connect(dir.path()).await;
+    let (phone, _) = pair(&desktop).await;
+    let mut socket = phone.socket(&phone.session().await.unwrap()).await.unwrap();
+    assert!(hello(&mut socket).await.capabilities.contains(&Capability::Chat));
+    let created = desktop.execute(envelope(Command::CreateProject(CreateProject { name: "Orbit".into(), description: None, folder: None }), None)).await.unwrap();
+    let CommandResult::ProjectCreated { project_id, .. } = created.result else { panic!("{:?}", created.result) };
+    let create = CreateTicket {
+        confirm_secret: false,
+        project_id,
+        title: "Login".into(),
+        description: None,
+        priority: Default::default(),
+        labels: vec![],
+        deadline_ms: None,
+        owner_employee_id: None,
+        run: Default::default(),
+        files: vec![],
+        start: false,
+        from_message: None,
+    };
+    let CommandResult::TicketCreated { ticket_id, .. } = desktop.create_ticket(create).await.unwrap().result else { panic!("no ticket") };
+    let channel = desktop.ticket(ticket_id).await.unwrap().ticket.conversation_id.expect("a channel");
+    match command(&mut socket, 2, Command::DeleteConversation(DeleteConversation { conversation_id: channel })).await {
+        Outcome::Error(e) => {
+            assert_eq!(e.code, ErrorCode::Validation);
+            assert_eq!(e.message, "A ticket's channel cannot be deleted; archive the ticket instead.");
+        }
+        other => panic!("deleted a ticket's channel: {other:?}"),
+    }
+    assert_eq!(desktop.ticket(ticket_id).await.unwrap().ticket.conversation_id, Some(channel));
 
     stop(dir.path(), daemon).await;
 }

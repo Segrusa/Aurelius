@@ -754,3 +754,40 @@ fn a_ticket_from_a_message_of_another_projects_channel_or_discussion_is_refused(
     let general = sent_message(&s, None, "Everyone needs a logo");
     assert!(ticket_from(&s, Some(general), Some(s.user)).is_ok());
 }
+
+#[test]
+fn a_ticket_channel_cannot_be_deleted_and_keeps_its_messages() {
+    // Trace R1 M1: for kind 'ticket' archived_at_ms means "closed", so a delete would erase
+    // the history and leave a channel that sync later "reopens".
+    let s = setup();
+    let t = new_ticket(&s, "Login", None);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    post(&s, t, "keep me").unwrap();
+    let delete = || exec(&s, Command::DeleteConversation(aurelius_domain::conversation::DeleteConversation { conversation_id: d }));
+    let err = delete().unwrap_err();
+    assert_eq!(err.code, ErrorCode::Validation);
+    assert_eq!(err.message, "A ticket's channel cannot be deleted; archive the ticket instead.");
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::discussions::archived_at(c, d)).unwrap(), None);
+    assert!(messages(&s, d).iter().any(|m| m.text == "keep me"), "the message text stays");
+    let listed = s.service.store().read(aurelius_storage::discussions::ticket_channels).unwrap();
+    assert!(!listed[0].archived, "listed as open, not as archived");
+    // A closed channel is refused with the same words, not as "not found".
+    s.service.store().write(move |tx| aurelius_storage::discussions::set_ticket_channel_archived(tx, d, Some(1))).unwrap();
+    assert_eq!(delete().unwrap_err().message, "A ticket's channel cannot be deleted; archive the ticket instead.");
+    assert!(messages(&s, d).iter().any(|m| m.text == "keep me"));
+}
+
+#[test]
+fn a_post_in_a_ticket_channel_through_group_chat_send_needs_a_board_member() {
+    // Trace R1 m2: group_chat.send reaches a ticket's channel too, behind the same gate as ticket.post.
+    let s = setup();
+    let t = new_ticket(&s, "Login", None);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    let command = Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "no one signed in".into(), images: vec![], files: vec![], channel: Some(d), thread_parent: None });
+    let Err(err) = s.service.execute(&ctx(None), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command }) else { panic!("posted in a ticket's channel without a board member") };
+    assert_eq!(err.code, ErrorCode::BoardMemberRequired);
+    assert!(!messages(&s, d).iter().any(|m| m.text == "no one signed in"), "nothing was stored");
+    // A board member may.
+    send(&s, Some(d), "signed in").unwrap();
+    assert!(messages(&s, d).iter().any(|m| m.text == "signed in"));
+}

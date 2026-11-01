@@ -12,7 +12,7 @@ use aurelius_client::ClientError;
 use aurelius_domain::conversation::{MessageRole, MessageStatus};
 use aurelius_domain::error::ErrorCode;
 use aurelius_domain::ticket::{ColumnKind, TicketView};
-use aurelius_domain::views::{ChannelView, SystemLine, SystemLineKind};
+use aurelius_domain::views::{ChannelKind, ChannelView, SystemLine, SystemLineKind};
 use aurelius_domain::{EmployeeId, MessageId, TicketId};
 use aurelius_protocol::MessageView;
 
@@ -410,32 +410,104 @@ pub fn posted_text(woken: &[String], owner_took_it: bool) -> String {
 
 // ---- Channels ---------------------------------------------------------------------
 
-/// The channel list as shown (ui-ontwerp §3): general first, then the active
-/// projects by name, then the archived ones (read-only, folded away).
-pub fn ordered(channels: &[ChannelView]) -> (Option<&ChannelView>, Vec<&ChannelView>, Vec<&ChannelView>) {
-    let general = channels.iter().find(|c| c.project_id.is_none());
-    let mut projects: Vec<&ChannelView> = channels.iter().filter(|c| c.project_id.is_some() && !c.archived).collect();
+/// Rows a section of the channel list shows before its "Show more" (ui-ontwerp §1, O-5).
+pub const SHOW_MORE_AFTER: usize = 15;
+
+/// What a channel is, also on a server without `ticket_channels` (which leaves
+/// `kind` out, so it reads as General): a ticket's, else no project = general,
+/// else a project's (an unknown kind of a newer server too).
+pub fn kind_of(c: &ChannelView) -> ChannelKind {
+    match c.kind {
+        ChannelKind::Ticket => ChannelKind::Ticket,
+        _ if c.project_id.is_none() => ChannelKind::General,
+        _ => ChannelKind::Project,
+    }
+}
+
+/// The channel list in its sections (ui-ontwerp §1).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Sections<'a> {
+    /// `# general`, first under CHANNELS.
+    pub general: Option<&'a ChannelView>,
+    /// The active projects' channels A–Z, under CHANNELS after general.
+    pub projects: Vec<&'a ChannelView>,
+    /// The open tickets' channels, newest activity first (same moment: the higher number first).
+    pub tickets: Vec<&'a ChannelView>,
+    /// Archived projects A–Z, then closed tickets newest first: read-only, folded away.
+    pub archived: Vec<&'a ChannelView>,
+}
+
+fn by_activity(a: &&ChannelView, b: &&ChannelView) -> std::cmp::Ordering {
+    (b.last_activity_ms, b.ticket_number).cmp(&(a.last_activity_ms, a.ticket_number))
+}
+
+pub fn sections(channels: &[ChannelView]) -> Sections<'_> {
+    let general = channels.iter().find(|c| kind_of(c) == ChannelKind::General);
+    let of = |kind: ChannelKind, archived: bool| channels.iter().filter(move |c| kind_of(c) == kind && c.archived == archived);
+    let mut projects: Vec<&ChannelView> = of(ChannelKind::Project, false).collect();
     projects.sort_by_key(|c| c.name.to_lowercase());
-    let mut archived: Vec<&ChannelView> = channels.iter().filter(|c| c.project_id.is_some() && c.archived).collect();
+    let mut tickets: Vec<&ChannelView> = of(ChannelKind::Ticket, false).collect();
+    tickets.sort_by(by_activity);
+    let mut archived: Vec<&ChannelView> = of(ChannelKind::Project, true).collect();
     archived.sort_by_key(|c| c.name.to_lowercase());
-    (general, projects, archived)
+    let mut closed: Vec<&ChannelView> = of(ChannelKind::Ticket, true).collect();
+    closed.sort_by(by_activity);
+    archived.extend(closed);
+    Sections { general, projects, tickets, archived }
 }
 
-/// "# general", "# aurelius": a channel's name as the list shows it.
+/// `list` in the order of `frozen` (the order shown when the pointer came over the
+/// list), the ones not in it after, as they were: a row never jumps under the click.
+pub fn keep_order<'a>(mut list: Vec<&'a ChannelView>, frozen: &[aurelius_domain::ConversationId]) -> Vec<&'a ChannelView> {
+    list.sort_by_key(|c| frozen.iter().position(|f| *f == c.conversation_id).unwrap_or(usize::MAX));
+    list
+}
+
+/// How many of a section's `len` rows show: all once expanded or when few enough.
+pub fn shown(len: usize, expanded: bool) -> usize {
+    if expanded { len } else { len.min(SHOW_MORE_AFTER) }
+}
+
+/// The channels in the order the list shows them, the ones a reader can reach:
+/// the archived ones only while unfolded, a section's rows up to its "Show more".
+pub fn visible(s: &Sections, tickets_all: bool, archived_open: bool, archived_all: bool) -> Vec<aurelius_domain::ConversationId> {
+    let tickets = s.tickets.iter().take(shown(s.tickets.len(), tickets_all));
+    let archived = s.archived.iter().take(if archived_open { shown(s.archived.len(), archived_all) } else { 0 });
+    s.general.into_iter().chain(s.projects.iter().copied()).chain(tickets.copied()).chain(archived.copied()).map(|c| c.conversation_id).collect()
+}
+
+/// A channel's name without the `#`: "general", "aurelius", "42-login-per-board-member".
+fn bare_name(c: &ChannelView) -> String {
+    match kind_of(c) {
+        ChannelKind::General => "general".into(),
+        // The server names it `#<number>-<slug>`.
+        ChannelKind::Ticket => c.name.trim_start_matches('#').to_string(),
+        _ => c.name.clone(),
+    }
+}
+
+/// "# general", "# aurelius", "# 42-login-per-board-member": a channel's name as the list shows it.
 pub fn channel_title(c: &ChannelView) -> String {
-    let name = if c.project_id.is_none() { "general".to_string() } else { c.name.clone() };
-    format!("# {name}")
+    format!("# {}", bare_name(c))
 }
 
-/// Ctrl+K "Go to #…" (ui-ontwerp §3): "Go to #general", "Go to #aurelius".
+/// Ctrl+K "Go to #…" (ui-ontwerp §3): "Go to #general", "Go to #42-login".
 pub fn go_to_channel_label(c: &ChannelView) -> String {
-    format!("Go to {}", channel_title(c).replace("# ", "#"))
+    format!("Go to #{}", bare_name(c))
 }
 
-/// What a screen reader hears for a channel (ui-ontwerp §5): "aurelius, 3 unread, 1 mention".
+/// What a screen reader hears for a channel (ui-ontwerp §5): "aurelius, 3 unread, 1 mention",
+/// "Ticket 42, login-per-board-member, 5 unread".
 pub fn channel_label(c: &ChannelView) -> String {
-    let name = if c.project_id.is_none() { "general" } else { c.name.as_str() };
-    let mut parts = vec![name.to_string()];
+    let name = bare_name(c);
+    let name = match (kind_of(c), c.ticket_number) {
+        (ChannelKind::Ticket, Some(n)) => {
+            let slug = name.strip_prefix(&n.to_string()).map(|s| s.trim_start_matches('-')).unwrap_or(&name);
+            if slug.is_empty() { format!("Ticket {n}") } else { format!("Ticket {n}, {slug}") }
+        }
+        _ => name,
+    };
+    let mut parts = vec![name];
     if c.unread > 0 {
         parts.push(format!("{} unread", c.unread));
     }
@@ -453,16 +525,24 @@ pub fn badge(channels: &[ChannelView]) -> (u32, bool) {
     (channels.iter().map(|c| c.mentions).sum(), channels.iter().any(|c| c.unread > 0))
 }
 
-/// The channel Alt+↑/↓ goes to, in the order of the list (the archived ones last).
-pub fn step_channel(channels: &[ChannelView], current: Option<aurelius_domain::ConversationId>, down: bool) -> Option<aurelius_domain::ConversationId> {
-    let (general, projects, archived) = ordered(channels);
-    let all: Vec<aurelius_domain::ConversationId> = general.into_iter().chain(projects).chain(archived).map(|c| c.conversation_id).collect();
-    if all.is_empty() {
+/// The open channel counts as read (AUR-CHAT-001 Q1): the sidebar badge has no unread
+/// or mentions of it, also from a list read just before the channel was.
+pub fn mark_read(channels: &mut [ChannelView], open: aurelius_domain::ConversationId) {
+    for c in channels.iter_mut().filter(|c| c.conversation_id == open) {
+        c.unread = 0;
+        c.mentions = 0;
+    }
+}
+
+/// The channel Alt+↑/↓ goes to among the `visible` ones (ui-ontwerp §1: Channels →
+/// Tickets → Archived while unfolded); the list's ends stop it.
+pub fn step_channel(visible: &[aurelius_domain::ConversationId], current: Option<aurelius_domain::ConversationId>, down: bool) -> Option<aurelius_domain::ConversationId> {
+    if visible.is_empty() {
         return None;
     }
-    let at = current.and_then(|c| all.iter().position(|x| *x == c)).unwrap_or(0);
-    let next = if down { (at + 1).min(all.len() - 1) } else { at.saturating_sub(1) };
-    Some(all[next])
+    let at = current.and_then(|c| visible.iter().position(|x| *x == c)).unwrap_or(0);
+    let next = if down { (at + 1).min(visible.len() - 1) } else { at.saturating_sub(1) };
+    Some(visible[next])
 }
 
 /// Where the "New" divider goes when a channel opens with `unread` new messages
@@ -472,12 +552,118 @@ pub fn new_divider(total: usize, unread: u32) -> Option<usize> {
     (unread > 0 && unread <= total).then(|| total - unread)
 }
 
-/// The composer's placeholder in a channel (ui-ontwerp §3).
+/// The composer's placeholder in a channel (ui-ontwerp §4).
 pub fn channel_hint(c: Option<&ChannelView>) -> String {
     match c {
-        Some(c) if c.archived => "This project is archived: its channel is read-only.".into(),
-        Some(c) => format!("Message {} · @ to mention", channel_title(c).replace("# ", "#")),
+        Some(c) if c.archived => read_only_bar(c),
+        Some(c) => format!("Message #{} · @ to mention", bare_name(c)),
         None => "Message the team · @ to mention".into(),
+    }
+}
+
+/// The composer's placeholder in a ticket's channel (P-21): the owner while a post
+/// without `@` reaches them, else the channel's name. `t` is the ticket once read.
+pub fn ticket_channel_hint(c: &ChannelView, t: Option<&TicketView>) -> String {
+    match t.filter(|_| !c.archived).and_then(owner_answers) {
+        Some(owner) => format!("Message {owner} (owner)… · @ to mention"),
+        None => channel_hint(Some(c)),
+    }
+}
+
+/// The owner who answers a post without `@` in the ticket's discussion (P-21).
+fn owner_answers(t: &TicketView) -> Option<&str> {
+    t.owner_name.as_deref().filter(|_| reaches_owner(t))
+}
+
+/// Who a post without `@` reaches in a ticket's channel, for its empty state and the
+/// row under the composer (not General's "Titan answers"); before the ticket is read, none.
+fn without_name(t: Option<&TicketView>) -> String {
+    match t.map(owner_answers) {
+        Some(Some(owner)) => format!("; without a name, {owner} (owner) answers"),
+        Some(None) => "; without a name, no one is woken".into(),
+        None => " about this ticket".into(),
+    }
+}
+
+/// A ticket channel's empty state (ui-ontwerp §3): its heading and who answers.
+pub const TICKET_CHANNEL_EMPTY: &str = "Discuss the ticket here.";
+
+pub fn ticket_channel_empty(t: Option<&TicketView>) -> String {
+    format!("Write @Name to ask an employee{}.", without_name(t))
+}
+
+/// The row under a ticket channel's composer: who answers.
+pub fn ticket_channel_row(t: Option<&TicketView>) -> String {
+    format!("@Name asks that employee{}.", without_name(t))
+}
+
+/// The bar instead of the composer in a read-only channel (ui-ontwerp §3): a closed
+/// ticket's ("#42 is Done · read-only.") or an archived project's.
+pub fn read_only_bar(c: &ChannelView) -> String {
+    match (kind_of(c), c.ticket_number) {
+        (ChannelKind::Ticket, number) => {
+            let number = number.map_or_else(|| "This ticket".to_string(), |n| format!("#{n}"));
+            if c.ticket_column == Some(ColumnKind::Done) { format!("{number} is Done · read-only.") } else { format!("{number} is archived · read-only.") }
+        }
+        _ => "This project is archived · read-only.".into(),
+    }
+}
+
+/// The people on a ticket for its channel's header (ui-ontwerp §3): the owner first,
+/// then the employees of its other tasks (delegations, the tester), each once.
+pub fn assignees(detail: &aurelius_domain::ticket::TicketDetail) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let owner = detail.ticket.owner_name.clone().or_else(|| detail.root_task.as_ref().and_then(|t| t.employee_name.clone()));
+    for name in owner.into_iter().chain(detail.tasks.iter().filter_map(|t| t.employee_name.clone())) {
+        let name = name.trim().to_string();
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// Assignees shown by name before the rest fold into "+n" (ui-ontwerp §3).
+pub const ASSIGNEES_SHOWN: usize = 2;
+
+// ---- Drafts -----------------------------------------------------------------------
+
+/// Where the main composer's text belongs (AUR-CHAT-001 Q1 o2): a Team chat channel
+/// (none: #general), or the other pages, which share it as before.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DraftPlace {
+    Channel(Option<aurelius_domain::ConversationId>),
+    Elsewhere,
+}
+
+/// The composer's drafts per place: a draft stays in the channel it was typed in, also
+/// when that channel closes and the Team chat goes back to #general.
+#[derive(Default, Debug)]
+pub struct Drafts {
+    at: Option<DraftPlace>,
+    kept: std::collections::HashMap<DraftPlace, String>,
+}
+
+impl Drafts {
+    /// Where the composer's text is from.
+    pub fn at(&self) -> Option<DraftPlace> {
+        self.at
+    }
+
+    /// The composer, holding `text`, now shows `to`: `text` stays with the place it was
+    /// typed in, and the composer gets `to`'s draft (empty without one). None when
+    /// the composer keeps its text: the same place, or the first place it shows.
+    pub fn moved(&mut self, to: DraftPlace, text: &str) -> Option<String> {
+        let from = self.at.replace(to)?;
+        if from == to {
+            return None;
+        }
+        if text.trim().is_empty() {
+            self.kept.remove(&from);
+        } else {
+            self.kept.insert(from, text.to_string());
+        }
+        Some(self.kept.remove(&to).unwrap_or_default())
     }
 }
 
@@ -758,6 +944,53 @@ mod tests {
         assert!(writable(&ticket(ColumnKind::Review, true)));
     }
 
+    /// Q1 minor: a ticket's channel says its owner answers a post without `@`, not
+    /// General's "Titan answers"; nobody once the ticket is out of the owner's columns.
+    #[test]
+    fn a_ticket_channel_names_its_owner_in_the_empty_state_and_under_the_composer() {
+        let ch = ticket_channel(42, false, 100, 0, 0);
+        let doing = ticket(ColumnKind::Doing, true);
+        assert_eq!(ticket_channel_hint(&ch, Some(&doing)), "Message Forge (owner)… · @ to mention");
+        assert_eq!(ticket_channel_empty(Some(&doing)), "Write @Name to ask an employee; without a name, Forge (owner) answers.");
+        assert_eq!(ticket_channel_row(Some(&doing)), "@Name asks that employee; without a name, Forge (owner) answers.");
+        let backlog = ticket(ColumnKind::Backlog, true);
+        assert_eq!(ticket_channel_hint(&ch, Some(&backlog)), "Message #42-login-per-board-member · @ to mention");
+        assert_eq!(ticket_channel_row(Some(&backlog)), "@Name asks that employee; without a name, no one is woken.");
+        // Before `ticket.get` answered: nobody is named.
+        assert_eq!(ticket_channel_hint(&ch, None), "Message #42-login-per-board-member · @ to mention");
+        assert_eq!(ticket_channel_empty(None), "Write @Name to ask an employee about this ticket.");
+        for text in [ticket_channel_empty(Some(&doing)), ticket_channel_row(None), ticket_channel_hint(&ch, Some(&doing))] {
+            assert!(!text.contains("Titan"), "{text}");
+        }
+        // A closed ticket's channel keeps its read-only text.
+        let done = ticket_channel(12, true, 100, 0, 0);
+        assert_eq!(ticket_channel_hint(&done, Some(&doing)), "#12 is Done · read-only.");
+    }
+
+    /// Q1 o2: switching channels keeps each draft with its own channel; a draft typed in a
+    /// channel that closes (the Team chat goes back to #general) never moves to #general.
+    #[test]
+    fn switching_channels_keeps_each_draft_with_its_own_channel() {
+        let (one, two) = (Some(ConversationId::new()), Some(ConversationId::new()));
+        let mut drafts = Drafts::default();
+        assert_eq!(drafts.moved(DraftPlace::Channel(one), ""), None, "the first place keeps the composer as it is");
+        assert_eq!(drafts.moved(DraftPlace::Channel(one), "half"), None, "same channel");
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for #1"), Some(String::new()), "#2 starts empty");
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), "for #2"), Some(String::new()), "#general has its own");
+        assert_eq!(drafts.moved(DraftPlace::Channel(one), "for general"), Some("for #1".into()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for #1"), Some("for #2".into()));
+        // #2 closes while its draft is typed: the Team chat goes to #general without it.
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), "for #2, more"), Some("for general".into()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for general"), Some("for #2, more".into()), "still #2's");
+        // Sent (the composer empty): nothing is kept for it.
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), ""), Some("for general".into()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for general"), Some(String::new()));
+        // The other pages share one draft, as before, apart from the channels'.
+        assert_eq!(drafts.moved(DraftPlace::Elsewhere, "  "), Some(String::new()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), "to Forge"), Some("for general".into()));
+        assert_eq!(drafts.moved(DraftPlace::Elsewhere, "for general"), Some("to Forge".into()));
+    }
+
     #[test]
     fn a_post_without_at_reaches_the_owner_while_the_tester_runs_the_tests() {
         let testing = ticket(ColumnKind::Testing, true);
@@ -870,13 +1103,19 @@ mod tests {
         ChannelView { conversation_id: ConversationId::new(), project_id: project.then(aurelius_domain::ProjectId::new), name: name.into(), unread, mentions, archived, last_activity_ms: None, kind: Default::default(), ticket_id: None, ticket_number: None, ticket_column: None, member: false, member_count: None, read_through: None }
     }
 
+    fn ticket_channel(number: u32, archived: bool, last: i64, unread: u32, mentions: u32) -> ChannelView {
+        let name = aurelius_domain::views::ticket_channel_name(number, "Login per board member");
+        ChannelView { kind: ChannelKind::Ticket, ticket_id: Some(TicketId::new()), ticket_number: Some(number), ticket_column: Some(if archived { ColumnKind::Done } else { ColumnKind::Review }), last_activity_ms: Some(last), ..channel(&name, true, archived, unread, mentions) }
+    }
+
     #[test]
     fn channels_are_general_then_projects_by_name_then_archived() {
         let list = vec![channel("web", true, false, 0, 0), channel("old", true, true, 0, 0), channel("General", false, false, 0, 0), channel("Aurelius", true, false, 3, 1)];
-        let (general, projects, archived) = ordered(&list);
-        assert_eq!(general.map(channel_title).as_deref(), Some("# general"));
-        assert_eq!(projects.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Aurelius", "web"]);
-        assert_eq!(archived.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["old"]);
+        let s = sections(&list);
+        assert_eq!(s.general.map(channel_title).as_deref(), Some("# general"));
+        assert_eq!(s.projects.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Aurelius", "web"]);
+        assert_eq!(s.archived.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["old"]);
+        assert!(s.tickets.is_empty(), "a server without ticket channels: the list of before");
         assert_eq!(channel_label(&list[3]), "Aurelius, 3 unread, 1 mention");
         assert_eq!(channel_label(&list[1]), "old, archived, read-only");
         assert_eq!(badge(&list), (1, true), "B8: mentions count, a dot for unread");
@@ -884,22 +1123,95 @@ mod tests {
         assert_eq!(go_to_channel_label(&list[3]), "Go to #Aurelius");
         assert_eq!(badge(&[channel("General", false, false, 0, 0)]), (0, false));
         assert_eq!(channel_hint(Some(&list[3])), "Message #Aurelius · @ to mention");
-        assert!(channel_hint(Some(&list[1])).contains("read-only"), "MU2-08 AC2");
+        assert_eq!(channel_hint(Some(&list[1])), "This project is archived · read-only.", "MU2-08 AC2");
+    }
+
+    /// Q1 minor: reading the only channel with a mention clears the sidebar's "@1" at
+    /// once, and the open channel keeps adding nothing while a list says otherwise.
+    #[test]
+    fn reading_a_channel_clears_its_part_of_the_sidebar_badge() {
+        let mut list = vec![channel("General", false, false, 0, 0), channel("Aurelius", true, false, 2, 1), ticket_channel(3, false, 100, 4, 0)];
+        assert_eq!(badge(&list), (1, true));
+        let aurelius = list[1].conversation_id;
+        mark_read(&mut list, aurelius);
+        assert_eq!(badge(&list), (0, true), "the mention is read; #3 stays unread");
+        assert_eq!((list[2].unread, list[2].mentions), (4, 0), "another channel keeps its counts");
+        let three = list[2].conversation_id;
+        mark_read(&mut list, three);
+        assert_eq!(badge(&list), (0, false), "nothing unread: no dot");
+    }
+
+    #[test]
+    fn open_tickets_are_their_own_section_newest_activity_first_and_closed_ones_are_archived() {
+        let list = vec![channel("General", false, false, 0, 0), ticket_channel(42, false, 100, 5, 0), ticket_channel(52, false, 300, 0, 1), ticket_channel(47, false, 100, 0, 0), ticket_channel(12, true, 900, 0, 0), channel("old", true, true, 0, 0)];
+        let s = sections(&list);
+        assert_eq!(s.tickets.iter().map(|c| c.ticket_number).collect::<Vec<_>>(), [Some(52), Some(47), Some(42)], "same moment: the higher number first");
+        assert!(s.projects.is_empty(), "a ticket channel has a project but is no project channel");
+        assert_eq!(s.archived.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["old", "#12-login-per-board-member"], "archived projects, then closed tickets");
+        assert_eq!(channel_title(&list[1]), "# 42-login-per-board-member");
+        assert_eq!(go_to_channel_label(&list[1]), "Go to #42-login-per-board-member");
+        assert_eq!(channel_label(&list[1]), "Ticket 42, login-per-board-member, 5 unread");
+        assert_eq!(channel_hint(Some(&list[1])), "Message #42-login-per-board-member · @ to mention");
+        assert_eq!(channel_hint(Some(&list[4])), "#12 is Done · read-only.");
+        let archived = ChannelView { ticket_column: Some(ColumnKind::Doing), ..list[4].clone() };
+        assert_eq!(read_only_bar(&archived), "#12 is archived · read-only.");
+        // A kind of a newer server is listed with the channels, never lost.
+        let newer = ChannelView { kind: ChannelKind::Unknown, ..channel("huddle", true, false, 0, 0) };
+        assert_eq!(kind_of(&newer), ChannelKind::Project);
+    }
+
+    #[test]
+    fn tickets_and_archived_show_fifteen_rows_before_show_more() {
+        let list: Vec<ChannelView> = (1..=20).map(|n| ticket_channel(n, false, i64::from(n), 0, 0)).chain((21..=40).map(|n| ticket_channel(n, true, i64::from(n), 0, 0))).collect();
+        let s = sections(&list);
+        assert_eq!(SHOW_MORE_AFTER, 15);
+        assert_eq!((shown(20, false), shown(20, true), shown(3, false)), (15, 20, 3));
+        assert_eq!(visible(&s, false, false, false).len(), 15, "archived folded away");
+        assert_eq!(visible(&s, true, false, false).len(), 20);
+        assert_eq!(visible(&s, false, true, false).len(), 30);
+        assert_eq!(visible(&s, true, true, true).len(), 40);
+    }
+
+    #[test]
+    fn the_ticket_order_stays_put_while_the_pointer_is_over_the_list() {
+        let list = vec![ticket_channel(1, false, 10, 0, 0), ticket_channel(2, false, 20, 0, 0), ticket_channel(3, false, 30, 0, 0)];
+        let frozen = [list[0].conversation_id, list[1].conversation_id];
+        let kept = keep_order(sections(&list).tickets, &frozen);
+        assert_eq!(kept.iter().map(|c| c.ticket_number).collect::<Vec<_>>(), [Some(1), Some(2), Some(3)], "a newly active one goes below");
     }
 
     #[test]
     fn alt_arrows_walk_the_list_and_stop_at_its_ends() {
-        let list = vec![channel("b", true, false, 0, 0), channel("General", false, false, 0, 0), channel("a", true, false, 0, 0)];
-        let (g, a, b) = (list[1].conversation_id, list[2].conversation_id, list[0].conversation_id);
-        assert_eq!(step_channel(&list, Some(g), true), Some(a));
-        assert_eq!(step_channel(&list, Some(a), true), Some(b));
-        assert_eq!(step_channel(&list, Some(b), true), Some(b), "the end");
-        assert_eq!(step_channel(&list, Some(g), false), Some(g));
-        assert_eq!(step_channel(&list, None, true), Some(a), "none open: from general");
+        let list = vec![channel("b", true, false, 0, 0), channel("General", false, false, 0, 0), channel("a", true, false, 0, 0), ticket_channel(7, false, 1, 0, 0), channel("old", true, true, 0, 0)];
+        let (g, a, b, t, old) = (list[1].conversation_id, list[2].conversation_id, list[0].conversation_id, list[3].conversation_id, list[4].conversation_id);
+        let folded = visible(&sections(&list), false, false, false);
+        assert_eq!(step_channel(&folded, Some(g), true), Some(a));
+        assert_eq!(step_channel(&folded, Some(a), true), Some(b));
+        assert_eq!(step_channel(&folded, Some(b), true), Some(t), "Channels, then Tickets");
+        assert_eq!(step_channel(&folded, Some(t), true), Some(t), "the end: Archived is folded away");
+        assert_eq!(step_channel(&visible(&sections(&list), false, true, false), Some(t), true), Some(old));
+        assert_eq!(step_channel(&folded, Some(g), false), Some(g));
+        assert_eq!(step_channel(&folded, None, true), Some(a), "none open: from general");
         assert_eq!(step_channel(&[], None, true), None);
         assert_eq!(new_divider(10, 3), Some(7));
         assert_eq!(new_divider(10, 0), None);
         assert_eq!(new_divider(2, 5), None, "more unread than shown: no divider");
+    }
+
+    #[test]
+    fn a_ticket_channels_header_names_the_owner_first_then_the_other_employees_once() {
+        use crate::screens::tasks::tests::task;
+        let t = ticket(ColumnKind::Doing, true);
+        let staffed = |name: &str| {
+            let mut task = task(t.project_id, None, aurelius_domain::task::TaskStatus::Running, 0);
+            task.employee_name = Some(name.into());
+            task
+        };
+        let owner = t.owner_name.clone().unwrap_or_default();
+        let detail = aurelius_domain::ticket::TicketDetail { as_of_seq: 1, ticket: t.clone(), root_task: Some(staffed(&owner)), tasks: vec![staffed(&owner), staffed("Schema"), staffed("Schema"), staffed("Pulse")] };
+        assert_eq!(assignees(&detail), [owner.as_str(), "Schema", "Pulse"]);
+        let unowned = aurelius_domain::ticket::TicketDetail { ticket: ticket(ColumnKind::Backlog, false), root_task: None, tasks: vec![], ..detail };
+        assert!(assignees(&unowned).is_empty());
     }
 
     #[test]

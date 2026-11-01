@@ -325,9 +325,11 @@ impl CommandService {
         let meta = ctx.metadata();
         let store = self.store.clone();
         let committed = self.commit(command_id, hash, move |tx| {
-            let kind: Option<String> = tx.query_row("SELECT kind FROM conversations WHERE id = ?1 AND archived_at_ms IS NULL", [id.to_string()], |r| r.get(0)).ok();
+            // A ticket's channel is refused whether open or closed: for kind 'ticket' archived_at_ms means "closed", not "deleted".
+            let kind: Option<String> = tx.query_row("SELECT kind FROM conversations WHERE id = ?1 AND (archived_at_ms IS NULL OR kind = 'ticket')", [id.to_string()], |r| r.get(0)).ok();
             match kind.as_deref() {
                 None => return Ok(Err(domain_error(DomainError::ConversationNotFound(id)))),
+                Some("ticket") => return Ok(Err(domain_error(DomainError::Memory("A ticket's channel cannot be deleted; archive the ticket instead.".into())))),
                 Some("employee") if conv::is_main_employee_conversation(tx, id)? => {
                     return Ok(Err(domain_error(DomainError::Memory("This is the employee's main conversation; archive the employee instead.".into()))));
                 }

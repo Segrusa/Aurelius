@@ -145,7 +145,9 @@ pub fn has_members(conn: &Connection) -> Result<bool, StorageError> {
 /// Who is in a channel: a board member or an employee.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Member {
+    /// A board member: the ticket's creator, the Owner, or who joined later.
     User(UserId),
+    /// An employee: the ticket's owner or its main task's employee.
     Employee(EmployeeId),
 }
 
@@ -188,8 +190,8 @@ pub fn members(conn: &Connection, conversation: ConversationId) -> Result<Vec<Me
 /// disabled. Board members have no roles; the one who set the server up owns it.
 pub fn owners(conn: &Connection) -> Result<Vec<UserId>, StorageError> {
     let mut stmt = conn.prepare("SELECT id FROM users WHERE created_by_user IS NULL AND disabled_at_ms IS NULL ORDER BY created_at_ms, id")?;
-    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-    Ok(rows.filter_map(|r| r.ok().and_then(|id| UserId::parse(&id).ok())).collect())
+    let rows = stmt.query_map([], |r| parse(UserId::parse(&r.get::<_, String>(0)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// When the channel `conversation` was archived (a closed ticket's); none: open.
@@ -207,14 +209,21 @@ pub fn set_ticket_channel_archived(tx: &Transaction<'_>, conversation: Conversat
 /// A ticket's channel, as `channel.list` shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TicketChannel {
+    /// The ticket's discussion, which is its channel.
     pub conversation_id: ConversationId,
+    /// The project the ticket belongs to.
     pub project_id: ProjectId,
+    /// The ticket whose channel this is.
     pub ticket_id: TicketId,
+    /// The ticket's number (`#N`), for the channel's name and search.
     pub number: u32,
+    /// The ticket's whole title: the name's slug is cut, search reads all of it.
     pub title: String,
+    /// The kind of the column the ticket is in.
     pub column: aurelius_domain::ticket::ColumnKind,
     /// Closed (the ticket is on Done or archived): read-only.
     pub archived: bool,
+    /// How many board members and employees are members (0 before schema 26).
     pub member_count: u32,
 }
 
