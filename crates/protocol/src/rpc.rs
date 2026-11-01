@@ -291,8 +291,10 @@ pub mod feature {
     /// context items with section `guideline`.
     pub const GUIDELINES: &str = "guidelines";
     /// `ticket.update { add_files }` (protocol 5, additive): files added to an
-    /// existing ticket, as `files` on `ticket.create`; a main task that still
-    /// works gets them too. It gives `ticket.updated`, and the timeline says who
+    /// existing ticket, as `files` on `ticket.create`. A main task that still
+    /// works gets them too, as an update in its conversation that names them
+    /// (with a run if it is Running), or through its brief if it has not opened
+    /// its conversation yet. It gives `ticket.updated`, and the timeline says who
     /// added how many files, with their names only.
     pub const TICKET_ADD_FILES: &str = "ticket_add_files";
 }

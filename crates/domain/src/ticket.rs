@@ -264,8 +264,11 @@ pub struct UpdateTicket {
     #[serde(default)]
     pub run: Option<RunSettings>,
     /// Files to add to the ticket's attachments, as `CreateTicket::files`
-    /// (feature `ticket_add_files`): the ones it has stay, and a main task
-    /// that still works gets them too. At most `ATTACHMENTS_MAX` in all.
+    /// (feature `ticket_add_files`): the ones it has stay. A main task that
+    /// still works gets them too: once its conversation is open, as an update
+    /// there that names them, and a Running one gets a run that reads it (a live
+    /// run is not interrupted); before that, through its brief. At most
+    /// `ATTACHMENTS_MAX` in all.
     /// Optional rather than a list with a default, so a client leaves it out
     /// unless it adds files: older servers refuse fields they do not know.
     #[serde(default, skip_serializing_if = "Option::is_none")]
