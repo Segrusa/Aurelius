@@ -31,13 +31,13 @@ bool mainTaskEnded(TicketView ticket) => switch (ticket.rootTaskStatus) {
     };
 
 /// Who gets a message without `@Name` in [ticket]'s discussion (B3, P-21): the
-/// owner while it is in Todo with an owner, Doing or Plan review, not archived
+/// owner while it is in Todo with an owner, Doing, Plan review or Review, not archived
 /// and with a main task that still works; otherwise nobody.
 String? discussionAddressee(TicketView ticket, {String? owner}) {
   if (ticket.archivedAtMs != null || mainTaskEnded(ticket)) return null;
   return switch (ticket.column) {
     ColumnKind.todo when ticket.ownerEmployeeId != null => owner ?? ticket.ownerName ?? 'the owner',
-    ColumnKind.doing || ColumnKind.planReview => owner ?? ticket.ownerName ?? 'the owner',
+    ColumnKind.doing || ColumnKind.planReview || ColumnKind.review => owner ?? ticket.ownerName ?? 'the owner',
     _ => null,
   };
 }
