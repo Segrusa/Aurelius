@@ -292,7 +292,8 @@ pub mod feature {
     pub const GUIDELINES: &str = "guidelines";
     /// The server's name (protocol 5, additive; docs/product/servernaam): the
     /// read `server.get_name`, the write `server.set_name` (board members only;
-    /// never apps; remote: owner) and the event `server.renamed`. The hello's
+    /// never apps; remote: owner) and the event `server.renamed`, only to
+    /// connections whose `HelloParams::accepts` names `server_name`. The hello's
     /// `host_name`, the pairing text and the pairing poll give the chosen name.
     pub const SERVER_NAME: &str = "server_name";
 }
