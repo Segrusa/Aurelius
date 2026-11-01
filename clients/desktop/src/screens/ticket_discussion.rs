@@ -290,7 +290,8 @@ impl AppView {
             d::Discussion::Ready(m) => m.as_slice(),
             _ => &[],
         };
-        let live = self.streams.get(&conversation).map(|s| (s.message_id, self.run_author(s.run_id), s.text.clone()));
+        // Not an answer that goes into a thread: the thread shows that one (AUR-CHAT-002).
+        let live = self.streams.get(&conversation).filter(|s| crate::screens::threads::in_channel(s)).map(|s| (s.message_id, self.run_author(s.run_id), s.text.clone()));
         let answering = live.as_ref().and_then(|(id, who, _)| d::answering(messages, Some((id, who.clone()))));
         let streamed = live.and_then(|(_, _, text)| answering.as_ref().map(|_| text)).filter(|t| !t.trim().is_empty());
         let body = v().id("ticket-body").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.board.discussion_scroll).px(px(18.)).py(px(14.)).gap(px(12.))

@@ -161,6 +161,12 @@ pub fn stream_to(thread_parent: Option<MessageId>, open_thread: Option<MessageId
     }
 }
 
+/// A stream a view of the channel itself (the ticket's Discussion tab) shows: not an
+/// answer that goes into a thread.
+pub fn in_channel(stream: &aurelius_protocol::StreamDelta) -> bool {
+    stream.thread_parent.is_none()
+}
+
 // ---- Reactions -------------------------------------------------------------------
 
 /// A click on `emoji` (a pill or the picker): `on` adds the reader's reaction, off
@@ -435,6 +441,13 @@ mod tests {
         assert_eq!(stream_to(Some(root), Some(root)), StreamTo::Thread);
         assert_eq!(stream_to(Some(other), Some(root)), StreamTo::Elsewhere);
         assert_eq!(stream_to(Some(root), None), StreamTo::Elsewhere);
+    }
+
+    #[test]
+    fn a_thread_answer_is_not_a_stream_of_the_channel() {
+        let delta = aurelius_protocol::StreamDelta { run_id: aurelius_domain::RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "On it".into(), activity: vec![], progress: None, activity_changes: false, mode: None, thread_parent: None };
+        assert!(in_channel(&delta));
+        assert!(!in_channel(&aurelius_protocol::StreamDelta { thread_parent: Some(MessageId::new()), ..delta }));
     }
 
     #[test]
