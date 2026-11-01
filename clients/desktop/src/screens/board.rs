@@ -1201,6 +1201,25 @@ impl ColumnsReload {
     }
 }
 
+/// The project the board shows: on a project's Board tab that project, else the
+/// Board page's own filter (`chosen`); none when that project is gone.
+pub fn board_scope(screen: crate::app::Page, chosen: Option<ProjectId>, known: impl Fn(ProjectId) -> bool) -> Option<ProjectId> {
+    let page = match screen {
+        crate::app::Page::Project(crate::app::ProjectRef::Real(id), crate::app::Tab::Board) => Some(id),
+        _ => None,
+    };
+    page.or(chosen).filter(|p| known(*p))
+}
+
+/// Whether the board page reads the board as it draws: nothing on its way and
+/// no board (or a stale one) yet, or the board read is another scope's.
+pub fn load_on_show(asked: Option<Option<ProjectId>>, current: bool, stale: bool, scope: Option<ProjectId>) -> bool {
+    match asked {
+        None => !current || stale,
+        Some(a) => !current && a != scope,
+    }
+}
+
 /// Whether a `board.get` goes now: not while one with the same filter is on its way (D-m3).
 pub fn load_now(asked: Option<Option<ProjectId>>, project: Option<ProjectId>) -> bool {
     asked != Some(project)
@@ -1246,9 +1265,16 @@ impl AppView {
         matches!(self.connection, backend::Connection::Online { .. })
     }
 
-    /// The project filter in use: none when its project is gone.
+    /// The project whose page shows its Board tab: the board there is that
+    /// project's only, whatever the Board page's own filter is.
+    pub fn project_board(&self) -> Option<ProjectId> {
+        board_scope(self.screen, None, |_| true)
+    }
+
+    /// The project filter in use: the project page's, else the Board page's;
+    /// none when its project is gone.
     pub fn board_filter(&self) -> Option<ProjectId> {
-        self.board.project.filter(|p| self.projects.iter().any(|x| x.id == *p))
+        board_scope(self.screen, self.board.project, |p| self.projects.iter().any(|x| x.id == p))
     }
 
     /// Ask the server for the board under the current filter.
@@ -1290,7 +1316,7 @@ impl AppView {
 
     /// Whether the board or a ticket shows (and so reloads on a change).
     pub fn board_watched(&self) -> bool {
-        self.screen == crate::app::Page::Board || matches!(self.panel, Panel::Ticket(_)) || self.board.dialog.is_some()
+        self.screen == crate::app::Page::Board || self.project_board().is_some() || matches!(self.panel, Panel::Ticket(_)) || self.board.dialog.is_some()
     }
 
     /// Read again the board and the open ticket.
@@ -2070,7 +2096,7 @@ impl AppView {
             self.board.form.error = None;
             // The board's project, else the last one used, else the first.
             let known = |p: &ProjectId| self.projects.iter().any(|x| x.id == *p);
-            self.board.form.project = self.board.project.filter(known).or(self.board.form.project.filter(known)).or_else(|| self.projects.first().map(|p| p.id));
+            self.board.form.project = self.board_filter().filter(known).or(self.board.form.project.filter(known)).or_else(|| self.projects.first().map(|p| p.id));
         }
         self.board_dialog(BoardDialog::NewTicket, window, cx);
     }
@@ -2114,10 +2140,17 @@ impl AppView {
     // ---- The page -----------------------------------------------------------
 
     pub fn render_board(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let current = self.board.view.as_ref().is_some_and(|v| v.project_id == self.board_filter());
-        if self.board.asked.is_none() && self.board_online() && self.board.error.is_none() && (!current || std::mem::take(&mut self.board.stale)) {
+        let scope = self.board_filter();
+        // Between the Board page and a project's Board tab: never show the other one's cards.
+        if self.board.view.as_ref().is_some_and(|v| v.project_id != scope) {
+            self.board.view = None;
+        }
+        let current = self.board.view.is_some();
+        if self.board_online() && self.board.error.is_none() && load_on_show(self.board.asked, current, self.board.stale, scope) {
+            self.board.stale = false;
             self.board_load();
         }
+        let locked = self.project_board().is_some();
         let serif = ui::serif(cx);
         let online = self.board_online();
         let needs = self.board_needs_count();
@@ -2151,11 +2184,12 @@ impl AppView {
                 .child(
                     v().flex_1()
                         .min_w(px(160.))
-                        .child(div().font_family(serif).text_size(px(26.)).child("Board"))
+                        // In a project the project bar above already names it.
+                        .when(!locked, |el| el.child(div().font_family(serif).text_size(px(26.)).child("Board")))
                         .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(format!("{total} tickets · {needs} need you"))),
                 )
-                .child(picker("board-project", format!("Project: {}", project.clone().unwrap_or_else(|| "All projects".into())), project.is_some(), cx))
-                .when(project.is_some(), |el| {
+                .when(!locked, |el| el.child(picker("board-project", format!("Project: {}", project.clone().unwrap_or_else(|| "All projects".into())), project.is_some(), cx)))
+                .when(!locked && project.is_some(), |el| {
                     el.child(ui::icon_button("board-project-clear").aria_label("Clear the project filter").tooltip(ui::tip("Clear filter", None)).child("×").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.set_board_project(None, cx))))
                 })
                 .child(picker("board-owner", owner, self.board.owner != OwnerFilter::Anyone, cx))
@@ -2248,7 +2282,9 @@ impl AppView {
     fn render_columns(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let online = self.board_online();
         let query = self.board.find.read(cx).value().to_string();
-        let filtered = self.board.project.is_some() || self.board.owner != OwnerFilter::Anyone || self.board.creator != CreatorFilter::Anyone || !query.trim().is_empty() || self.board.needs_only;
+        // A project's own board is not filtered: its empty state is "No tickets yet".
+        let locked = self.project_board().is_some();
+        let filtered = (self.board_filter().is_some() && !locked) || self.board.owner != OwnerFilter::Anyone || self.board.creator != CreatorFilter::Anyone || !query.trim().is_empty() || self.board.needs_only;
         let loading = self.board.view.is_none();
         // Before the first answer: the default columns with skeleton cards (§3.3).
         let columns: Vec<BoardColumnCards> = match &self.board.view {
@@ -2264,7 +2300,7 @@ impl AppView {
             Panel::Ticket(id) => Some(id),
             _ => None,
         };
-        let filter_project = self.board.project;
+        let filter_project = self.board_filter();
         let held = self.board.held;
         let mut shown_any = false;
         let mut lanes: Vec<AnyElement> = Vec::new();
@@ -2379,14 +2415,18 @@ impl AppView {
             .min_h_0()
             .w_full()
             .when(no_match, |el| {
-                let name = self.board.project.and_then(|id| self.projects.iter().find(|p| p.id == id)).map_or_else(|| "these filters".to_string(), |p| p.name.clone());
+                let name = self.board_filter().filter(|_| !locked).and_then(|id| self.projects.iter().find(|p| p.id == id)).map_or_else(|| "these filters".to_string(), |p| p.name.clone());
                 el.child(h().px(px(24.)).pb(px(8.)).gap(px(10.)).text_size(px(12.5)).text_color(c(theme::TEXT_2)).child(format!("No tickets in {name}.")).child(
-                    div().id("board-clear-filter").cursor_pointer().text_color(c(theme::ACCENT_TEXT)).child("Clear filter").on_click(cx.listener(|this, _: &ClickEvent, w, cx| {
+                    div().id("board-clear-filter").cursor_pointer().text_color(c(theme::ACCENT_TEXT)).child("Clear filter").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
                         this.board.owner = OwnerFilter::Anyone;
                         this.board.creator = CreatorFilter::Anyone;
                         this.board.needs_only = false;
                         this.board.find.update(cx, |i, cx| i.set_value("", w, cx));
-                        this.set_board_project(None, cx);
+                        if locked {
+                            cx.notify();
+                        } else {
+                            this.set_board_project(None, cx);
+                        }
                     })),
                 ))
             })
@@ -2562,7 +2602,7 @@ impl AppView {
 pub(crate) mod tests {
     // Not `super::*`: gpui's `test` attribute would shadow the standard one.
     use super::{
-        BoardColumnCards, BoardDialog, CreatorFilter, ColumnsReload, DAY_MS, DONE_SHOWN, DoneCheck, dialog_reads, done_check, expected_version_for, newest_version, board_changed, load_now, plan_to_read, default_columns, Grid, Step, TimelineCard, activity_detail, activity_text, feedback_label, mode_text, card_label, focus_step, held_step, held_target, moved_elsewhere, moves_announcement, pick_up, Dispatcher, Drop, HIGH, Needs, OwnerFilter, PRIORITIES, before_for, choosing, dispatcher_gave_up, dispatcher_stopped, forget_unknown, gave_up_to_read, owner_unknown, columns_edit, days_from_civil, deadline_input, deadline_text, dispatcher_of, drop_effect, empty_text, feedback_ready, move_column,
+        BoardColumnCards, BoardDialog, CreatorFilter, ColumnsReload, DAY_MS, DONE_SHOWN, DoneCheck, dialog_reads, done_check, expected_version_for, newest_version, board_changed, board_scope, load_now, load_on_show, plan_to_read, default_columns, Grid, Step, TimelineCard, activity_detail, activity_text, feedback_label, mode_text, card_label, focus_step, held_step, held_target, moved_elsewhere, moves_announcement, pick_up, Dispatcher, Drop, HIGH, Needs, OwnerFilter, PRIORITIES, before_for, choosing, dispatcher_gave_up, dispatcher_stopped, forget_unknown, gave_up_to_read, owner_unknown, columns_edit, days_from_civil, deadline_input, deadline_text, dispatcher_of, drop_effect, empty_text, feedback_ready, move_column,
         board_keys_live, needs_you, new_ticket_problems, parse_deadline, parse_labels, priority_label, priority_mark, shown_cards, theme, ticket,
     };
     use aurelius_domain::task::TaskStatus;
@@ -2936,6 +2976,34 @@ pub(crate) mod tests {
         assert!(load_now(None, project), "nothing on its way");
         assert!(!load_now(Some(project), project), "the same filter: wait, then once more");
         assert!(load_now(Some(None), project), "another filter goes at once");
+    }
+
+    /// Ticket #4: a project's Board tab shows that project only, whatever the Board page's filter.
+    #[test]
+    fn a_project_board_tab_shows_its_own_project_and_the_board_page_keeps_its_filter() {
+        use crate::app::{Page, ProjectRef, Tab};
+        let (here, chosen) = (ProjectId::new(), ProjectId::new());
+        let all = |_| true;
+        assert_eq!(board_scope(Page::Project(ProjectRef::Real(here), Tab::Board), Some(chosen), all), Some(here));
+        assert_eq!(board_scope(Page::Project(ProjectRef::Real(here), Tab::Board), None, all), Some(here));
+        assert_eq!(board_scope(Page::Board, Some(chosen), all), Some(chosen), "the Board page's own filter");
+        assert_eq!(board_scope(Page::Board, None, all), None);
+        assert_eq!(board_scope(Page::Project(ProjectRef::Real(here), Tab::Tasks), Some(chosen), all), Some(chosen), "only the Board tab fixes the project");
+        assert_eq!(board_scope(Page::Project(ProjectRef::Sample(0), Tab::Board), None, all), None, "a sample has no board");
+        assert_eq!(board_scope(Page::Project(ProjectRef::Real(here), Tab::Board), None, |p| p != here), None, "a project that is gone");
+    }
+
+    /// Ticket #4: going between the Board page and a project's Board tab reads the
+    /// new scope at once, also while the other scope's read is on its way.
+    #[test]
+    fn the_board_reads_again_when_its_scope_changes() {
+        let here = Some(ProjectId::new());
+        assert!(load_on_show(None, false, false, here), "nothing read yet");
+        assert!(!load_on_show(None, true, false, here), "already shown");
+        assert!(load_on_show(None, true, true, here), "stale");
+        assert!(!load_on_show(Some(here), false, false, here), "this scope's read is on its way");
+        assert!(load_on_show(Some(None), false, false, here), "only the other scope's read is on its way");
+        assert!(!load_on_show(Some(None), true, false, here), "the board shown is this scope's");
     }
 
     /// §6, cell by cell: what a board member's drop does.
