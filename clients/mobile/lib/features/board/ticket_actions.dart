@@ -63,6 +63,10 @@ String? employeeName(CompanyState company, String? id) => id == null ? null : co
 String? dispatcherName(CompanyState company, String projectId) =>
     employeeName(company, effectiveDispatcher(company.project(projectId), company.company?.dispatcherEmployeeId, company.employees));
 
+/// Who runs the tests of a card in Testing, by name (the company's tester,
+/// ticket #5); null when there is none or it is unknown.
+String? testerName(CompanyState company) => employeeName(company, company.company?.testerEmployeeId);
+
 /// Why nobody chooses owners for [projectId]'s tickets when a dispatcher is
 /// chosen but not active ("Vesta is archived"); null otherwise. Nobody takes
 /// over (B5 strict).

@@ -12,11 +12,12 @@ import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import 'ticket_actions.dart';
 
-/// `/settings/board` (§12.1, MU1-06; §12.2 for the company): the six columns —
-/// rename (not empty, unique) and reorder, each with its fixed role that never
-/// follows the name (AC4) and no way to remove it (AC2, B3) — and the
-/// company's default dispatcher. Every change is saved at once with the
-/// board's version, so a change made elsewhere meanwhile is refused.
+/// `/settings/board` (§12.1, MU1-06; §12.2 for the company): the columns (six,
+/// seven with Testing) — rename (not empty, unique) and reorder, each with its
+/// fixed role that never follows the name (AC4) and no way to remove it (AC2,
+/// B3) — the company's default dispatcher and, with `board_testing`, its
+/// tester (ticket #5). Every change is saved at once with the board's version,
+/// so a change made elsewhere meanwhile is refused.
 class BoardSettingsPage extends StatefulWidget {
   const BoardSettingsPage({super.key});
 
@@ -50,7 +51,7 @@ class _BoardSettingsPageState extends State<BoardSettingsPage> {
     }
   }
 
-  /// Save the six columns in [columns]' order and names.
+  /// Save every column in [columns]' order and names.
   Future<void> _save(List<BoardColumnView> columns, {required String done}) async {
     final before = _columns;
     setState(() {
@@ -122,11 +123,52 @@ class _BoardSettingsPageState extends State<BoardSettingsPage> {
         );
   }
 
+  /// The tester (ticket #5): who runs the full test suite once for a card in
+  /// Testing; None leaves the Testing step out. A refusal comes as the bloc's notice.
+  Future<void> _pickTester(CompanyState company) async {
+    final active = company.employees.where((e) => e.status == LifecycleStatus.active).toList()..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final current = company.company?.testerEmployeeId;
+    final picked = await showModalBottomSheet<(String?,)>(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.7),
+          child: ListView(shrinkWrap: true, children: [
+            Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: Eyebrow('Tester')),
+            ListTile(
+              key: const ValueKey('tester-none'),
+              title: const Text('None: no Testing step'),
+              subtitle: const Text('Reported tickets go straight to Review.'),
+              trailing: current == null ? Icon(Icons.check, color: Tokens.accentText) : null,
+              onTap: () => Navigator.pop(sheet, (null,)),
+            ),
+            for (final e in active)
+              ListTile(key: ValueKey('tester-${e.id}'), title: Text(e.name), subtitle: Text(e.role), trailing: current == e.id ? Icon(Icons.check, color: Tokens.accentText) : null, onTap: () => Navigator.pop(sheet, (e.id,))),
+          ]),
+        ),
+      ),
+    );
+    if (picked == null || picked.$1 == current || !mounted) return;
+    final name = employeeName(company, picked.$1);
+    context.read<CompanyBloc>().send(
+          companyUpdate(UpdateCompany(tester: SetTester(employeeId: picked.$1))),
+          expectedVersion: company.company?.version,
+          retry: false,
+          done: name == null ? 'No tester: reported tickets go straight to Review.' : '$name tests reported tickets before Review.',
+        );
+  }
+
   @override
   Widget build(BuildContext context) {
     final company = context.watch<CompanyBloc>().state;
     final online = context.select<ConnectionBloc, bool>((b) => b.state.isOnline);
+    final testing = context.select<ConnectionBloc, bool>((b) => b.state.has(boardTestingFeature));
     final columns = _columns;
+    final tester = testerName(company);
+    final testerArchived = company.company?.testerEmployeeId != null && company.employee(company.company!.testerEmployeeId!)?.status != LifecycleStatus.active;
     final dispatcher = employeeName(company, company.company?.dispatcherEmployeeId);
     final archived = company.company?.dispatcherEmployeeId != null && company.employee(company.company!.dispatcherEmployeeId!)?.status != LifecycleStatus.active;
     return BlocListener<CompanyBloc, CompanyState>(
@@ -163,7 +205,7 @@ class _BoardSettingsPageState extends State<BoardSettingsPage> {
                                 message: 'This column has a role in the workflow and cannot be removed.',
                                 child: ListTile(
                                   title: Text(c.name),
-                                  subtitle: Text([c.kind.role, if (c.kind == ColumnKind.planReview) 'Used only in Plan mode'].join(' · '), style: TextStyle(color: Tokens.label2)),
+                                  subtitle: Text([c.kind.role, if (c.kind == ColumnKind.planReview) 'Used only in Plan mode', if (c.kind == ColumnKind.testing) 'Used only with a tester'].join(' · '), style: TextStyle(color: Tokens.label2)),
                                   onTap: online && !_saving ? () => _rename(c) : null,
                                   trailing: ReorderableDragStartListener(index: i, child: const Icon(Icons.drag_handle, semanticLabel: 'Reorder')),
                                 ),
@@ -192,6 +234,29 @@ class _BoardSettingsPageState extends State<BoardSettingsPage> {
                       style: TextStyle(color: archived ? Tokens.warning : Tokens.label2, fontSize: 13),
                     ),
                   ),
+                  if (testing) ...[
+                    const GroupHeader('Tester', caps: true),
+                    InsetGroup(children: [
+                      GroupRow(
+                        key: const ValueKey('company-tester'),
+                        leading: const IconTile(CupertinoIcons.checkmark_seal),
+                        title: 'Tester',
+                        value: tester ?? 'None',
+                        onTap: online ? () => _pickTester(company) : null,
+                      ),
+                    ]),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(32, 8, 32, 0),
+                      child: Text(
+                        testerArchived
+                            ? '$tester is archived. Choose another tester, or None.'
+                            : tester == null
+                                ? 'None: no Testing step. Reported tickets go straight to Review.'
+                                : 'Runs the full test suite once for every reported ticket. Green goes on to Review; red goes back to Doing.',
+                        style: TextStyle(color: testerArchived ? Tokens.warning : Tokens.label2, fontSize: 13),
+                      ),
+                    ),
+                  ],
                 ],
               ),
       ),
