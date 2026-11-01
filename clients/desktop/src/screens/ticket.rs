@@ -203,6 +203,7 @@ impl AppView {
         }
         self.board.editing = Some(field);
         self.board.edit_error = None;
+        self.board.edit_files.clear();
         cx.notify();
     }
 
@@ -232,6 +233,8 @@ impl AppView {
                 }
             },
         }
+        let files: Vec<String> = self.board.edit_files.drain(..).map(|(p, _)| p.display().to_string()).collect();
+        update.add_files = Some(files).filter(|f| !f.is_empty());
         self.board.editing = None;
         self.board.edit_error = None;
         self.ticket_update(update, cx);
@@ -241,6 +244,7 @@ impl AppView {
     pub fn ticket_cancel_edit(&mut self, cx: &mut Context<Self>) {
         self.board.editing = None;
         self.board.edit_error = None;
+        self.board.edit_files.clear();
         cx.notify();
     }
 
@@ -597,7 +601,9 @@ impl AppView {
         let open_edit = editable(t.column) && can;
 
         let title: AnyElement = if editing == Some(EditField::Title) {
-            self.inline_edit(ui::input(&self.board.edit_title).into_any_element(), "ticket-title", cx)
+            let paste = cx.weak_entity();
+            let field = ui::input(&self.board.edit_title).on_paste(move |item: &ClipboardItem, _: &mut Window, cx: &mut App| paste.update(cx, |this, cx| this.ticket_paste_files(item, cx)).unwrap_or(false));
+            self.inline_edit(field.into_any_element(), "ticket-title", cx)
         } else {
             h().id("ticket-title")
                 .gap(px(8.))
@@ -635,7 +641,9 @@ impl AppView {
             _ => None,
         };
         let description: AnyElement = if editing == Some(EditField::Description) {
-            self.inline_edit(Textarea::new(&self.board.edit_description).py(px(7.)).line_height(px(20.)).into_any_element(), "ticket-description", cx)
+            let paste = cx.weak_entity();
+            let field = Textarea::new(&self.board.edit_description).py(px(7.)).line_height(px(20.)).on_paste(move |item: &ClipboardItem, _: &mut Window, cx: &mut App| paste.update(cx, |this, cx| this.ticket_paste_files(item, cx)).unwrap_or(false));
+            self.inline_edit(field.into_any_element(), "ticket-description", cx)
         } else {
             match t.description.clone().filter(|d| !d.trim().is_empty()) {
                 Some(text) => gpui_kit::component::text::TextView::markdown(SharedString::from(format!("ticket-md-{id}-{}", t.version)), text).selectable(true).on_link_click(self.markdown_link_handler(false, cx)).into_any_element(),
@@ -731,8 +739,23 @@ impl AppView {
 
     /// A field being edited with its Save and Cancel.
     fn inline_edit(&self, field: AnyElement, key: &'static str, cx: &mut Context<Self>) -> AnyElement {
+        // Files pasted into the title or description, added on Save.
+        let chips = self.board.edit_files.iter().enumerate().map(|(i, (path, size))| {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            h().id(("ticket-edit-file", i)).gap(px(6.)).px(px(9.)).py(px(4.)).rounded(px(6.)).border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE)).text_size(px(12.))
+                .child(div().text_color(c(theme::ACCENT_TEXT)).child("▤"))
+                .child(div().max_w(px(220.)).truncate().child(name.clone()))
+                .child(div().text_color(c(theme::TEXT_2)).child(crate::app::file_size(*size)))
+                .child(div().id(("ticket-edit-file-x", i)).role(Role::Button).aria_label(format!("Remove {name}")).cursor_pointer().child("×").on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if i < this.board.edit_files.len() {
+                        this.board.edit_files.remove(i);
+                    }
+                    cx.notify();
+                })))
+        });
         v().gap(px(6.))
             .child(field)
+            .when(!self.board.edit_files.is_empty(), |el| el.child(h().flex_wrap().gap(px(6.)).children(chips)))
             .child(
                 h().gap(px(8.))
                     .child(ui::button(SharedString::from(format!("{key}-save")), "Save", ButtonKind::Primary, None).h(px(26.)).on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.ticket_save_edit(w, cx))))

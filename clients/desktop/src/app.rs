@@ -2347,6 +2347,12 @@ impl AppView {
         matches!(&self.connection, Connection::Online { server, .. } if server.ticket_discussion)
     }
 
+    /// An existing ticket takes more files, so a paste into its title or description attaches
+    /// them (feature `ticket_add_files`).
+    pub fn ticket_add_files_supported(&self) -> bool {
+        matches!(&self.connection, Connection::Online { server, .. } if server.ticket_add_files)
+    }
+
     /// The server can auto-allow safe read-only tools (feature `auto_allow`).
     pub fn auto_allow_supported(&self) -> bool {
         matches!(&self.connection, Connection::Online { server, .. } if server.auto_allow)

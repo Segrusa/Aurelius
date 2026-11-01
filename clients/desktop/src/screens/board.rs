@@ -945,6 +945,8 @@ pub struct Board {
     pub edit_deadline: Entity<InputState>,
     pub editing: Option<EditField>,
     pub edit_error: Option<String>,
+    /// Files pasted into the title or description being edited (path, size), added on Save.
+    pub edit_files: Vec<(std::path::PathBuf, u64)>,
     /// Settings → Board: the columns being edited, with a name field each.
     pub columns: Vec<(ticket::BoardColumnView, Entity<InputState>)>,
     pub columns_error: Option<String>,
@@ -1051,6 +1053,7 @@ impl Board {
             edit_deadline: input("2026-11-03 or 2026-11-03 17:00", window, cx),
             editing: None,
             edit_error: None,
+            edit_files: Vec::new(),
             columns: Vec::new(),
             columns_error: None,
             columns_reload: ColumnsReload::Idle,
@@ -2120,6 +2123,24 @@ impl AppView {
         }
         let (took, found) = self.pasted_files(item, |p| p.is_file(), cx);
         self.board_add_files(found, cx);
+        took
+    }
+
+    /// A paste into the title or description of an open ticket being edited: a copied image or
+    /// copied files wait beside the field and are added to the ticket on Save. Only when the
+    /// server takes files on an existing ticket; anything else is pasted as text.
+    pub fn ticket_paste_files(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
+        let Panel::Ticket(id) = self.panel else { return false };
+        if !matches!(self.board.editing, Some(EditField::Title | EditField::Description)) || !self.ticket_add_files_supported() {
+            return false;
+        }
+        let kept = self.board.ticket(id).map_or(0, |t| t.attachments.len());
+        let (took, found) = self.pasted_files(item, |p| p.is_file(), cx);
+        let problems = crate::app::take_files(&mut self.board.edit_files, found, kept);
+        if !problems.is_empty() {
+            self.board.edit_error = Some(problems.join(" "));
+        }
+        cx.notify();
         took
     }
 
