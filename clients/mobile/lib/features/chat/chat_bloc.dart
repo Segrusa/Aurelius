@@ -10,6 +10,7 @@ import '../../core/bloc/transformers.dart';
 import '../../core/net/connection.dart';
 import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/channels.dart' show reactedLocally;
 import '../../data/commands.dart';
 import '../../data/discussion.dart';
 import '../../data/mode_memory.dart';
@@ -37,6 +38,25 @@ class ChatShown extends ChatEvent {
 /// ticket left Done, so `channel_archived` no longer holds.
 class ChatReopened extends ChatEvent {
   const ChatReopened();
+}
+
+/// The board member's own reaction [emoji] on [messageId], added ([on]) or
+/// taken back (feature `chat_reactions`): shown at once, undone when refused.
+class ChatReacted extends ChatEvent {
+  const ChatReacted(this.messageId, this.emoji, {required this.on});
+
+  final String messageId;
+  final String emoji;
+  final bool on;
+}
+
+/// A thread of this channel was read (feature `chat_threads`): who replied in
+/// it, for the monograms under its root (the root's counters do not say).
+class ChatThreadSeen extends ChatEvent {
+  const ChatThreadSeen(this.rootId, this.repliers);
+
+  final String rootId;
+  final List<String> repliers;
 }
 
 class _AppendReceived extends ChatEvent {
@@ -285,6 +305,7 @@ class ChatState extends Equatable {
     this.boardMembers = const [],
     this.secretCheck,
     this.closed = false,
+    this.repliers = const {},
   });
 
   final bool loading;
@@ -341,6 +362,9 @@ class ChatState extends Equatable {
   /// shows in place of the composer until [ChatReopened].
   final bool closed;
 
+  /// Who replied in the threads read here, by root (see [ChatThreadSeen]).
+  final Map<String, List<String>> repliers;
+
   /// The run that is streaming now, if any.
   MessageView? get streaming {
     for (final m in messages.reversed) {
@@ -384,6 +408,7 @@ class ChatState extends Equatable {
     List<String>? boardMembers,
     String? secretCheck,
     bool? closed,
+    Map<String, List<String>>? repliers,
   }) =>
       ChatState(
         loading: loading ?? this.loading,
@@ -407,10 +432,11 @@ class ChatState extends Equatable {
         boardMembers: boardMembers ?? this.boardMembers,
         secretCheck: secretCheck,
         closed: closed ?? this.closed,
+        repliers: repliers ?? this.repliers,
       );
 
   @override
-  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers, secretCheck, closed];
+  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers, secretCheck, closed, repliers];
 }
 
 /// One conversation: an employee's task conversation when [employeeId] is set
@@ -424,6 +450,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         channel = null,
         channelTicket = null,
         ticketId = null,
+        threadRoot = null,
+        onThread = null,
         runAuthor = null,
         onRead = null,
         liveTimeout = Duration.zero,
@@ -443,6 +471,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       : employeeId = null,
         projectId = null,
         ticketId = null,
+        threadRoot = null,
+        onThread = null,
         group = true,
         super(const ChatState()) {
     _init(true);
@@ -456,9 +486,25 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         projectId = null,
         channel = null,
         channelTicket = null,
+        threadRoot = null,
+        onThread = null,
         onRead = null,
         group = true,
         super(ChatState(conversationId: conversationId)) {
+    _init(true);
+  }
+
+  /// One thread of a Team chat channel (feature `chat_threads`, AUR-CHAT-002
+  /// §5): the message [threadRoot] and its replies (`thread.read`, which marks
+  /// the thread read), written with `group_chat.send { channel, thread_parent }`.
+  /// It works as the channel: answers stream into it under their name, and
+  /// only the ones of this thread. [onThread] hears each read of it.
+  ChatBloc.thread(this._repository, {required String this.threadRoot, this.channel, this.channelTicket, this.runAuthor, this.liveTimeout = const Duration(seconds: 3), this.onRead, this.onThread})
+      : employeeId = null,
+        projectId = null,
+        ticketId = null,
+        group = true,
+        super(const ChatState()) {
     _init(true);
   }
 
@@ -491,6 +537,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         }));
     on<ChatNoticeShown>((e, emit) => emit(state.copyWith()));
     on<ChatReopened>((e, emit) => emit(state.copyWith(closed: false)));
+    on<ChatReacted>(_react, transformer: sequential());
+    on<ChatThreadSeen>((e, emit) => emit(state.copyWith(repliers: {...state.repliers, e.rootId: e.repliers})));
     on<ChatShown>((e, emit) {
       _shown = e.visible;
       if (_shown && _stale) {
@@ -502,7 +550,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     _subs = [
       _repository.online.listen((_) => _changed()),
       _repository.chatChanges.where((e) => e.aggregateId == state.conversationId || e.isRun).listen((_) => _changed()),
-      _repository.appends.where((a) => a.conversationId == state.conversationId).listen((a) => add(_AppendReceived(a))),
+      // An answer streaming into a thread goes to that thread's screen, never into the channel (AUR-CHAT-002).
+      _repository.appends.where((a) => a.conversationId == state.conversationId && a.threadParent == threadRoot).listen((a) => add(_AppendReceived(a))),
       // A ticket's channel is its discussion: its lines and employees' posts
       // come as `task.posted` on the conversation, a move as the ticket's own event.
       if (channelTicket case final ticket?)
@@ -529,6 +578,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final String? ticketId;
 
   bool get discussion => ticketId != null;
+
+  /// The message whose thread this is; null for every other chat.
+  final String? threadRoot;
+
+  /// See [ChatBloc.thread].
+  final void Function(ThreadSnapshot thread)? onThread;
 
   /// See [ChatBloc.group].
   final void Function()? onRead;
@@ -608,6 +663,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (id == null && !group) return;
     // Trying again after it failed: loading shows again.
     if (group && state.loadError != null && state.messages.isEmpty) emit(state.copyWith(loading: true));
+    if (threadRoot != null) return _refreshThread(threadRoot!, emit);
     try {
       final snapshot = discussion ? await _repository.messages(id!) : group ? await _repository.groupChat(channel: channel) : await _repository.messages(id!);
       final messages = _deleting.isEmpty ? snapshot.messages : snapshot.messages.where((m) => !_deleting.contains(m.id)).toList();
@@ -637,6 +693,34 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       // Anything else (an answer this app cannot read) stops the loading too.
       if (!group) rethrow;
       emit(state.copyWith(loading: false, loadError: '${discussion ? 'The discussion' : 'The Team chat'} could not be loaded: $e'));
+    }
+  }
+
+  /// A thread's read: its root on top, then its replies. The PC says whether
+  /// its channel is closed (`read_only`): then nothing in it can be written.
+  Future<void> _refreshThread(String root, Emitter<ChatState> emit) async {
+    if (state.loadError != null && state.messages.isEmpty) emit(state.copyWith(loading: true));
+    try {
+      final thread = await _repository.thread(root);
+      final messages = [thread.root, ...thread.replies];
+      emit(state.copyWith(
+        loading: false,
+        conversationId: thread.conversationId,
+        messages: [...messages, ..._stillLive(messages)],
+        unsent: state.unsent.where((u) => !u.delivered).toList(),
+        closed: thread.readOnly ?? false,
+        clearLoadError: true,
+        boardMembers: !_membersRead ? await _boardMembers() : null,
+      ));
+      onThread?.call(thread);
+      onRead?.call();
+    } on DisconnectedException catch (e) {
+      emit(state.copyWith(loading: false, loadError: state.conversationId == null ? e.message : null));
+    } on ProtocolException catch (e) {
+      final shown = 'The thread could not be loaded: ${e.shown}';
+      emit(state.copyWith(loading: false, notice: shown, loadError: shown));
+    } catch (e) {
+      emit(state.copyWith(loading: false, loadError: 'The thread could not be loaded: $e'));
     }
   }
 
@@ -771,9 +855,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     final files = [for (final f in unsent.files) f.path];
     final fresh = !group && employeeId == null && state.conversationId == null;
     final command = discussion
-        ? Commands.postTicketMessage(ticketId!, unsent.text, images: images, files: files, confirmSecret: unsent.confirmSecret)
+        ? Commands.postTicketMessage(ticketId!, unsent.text, images: images, files: files, confirmSecret: unsent.confirmSecret, threadParent: threadRoot)
         : group
-        ? Commands.sendGroupMessage(unsent.text, images: images, files: files, channel: channel, confirmSecret: unsent.confirmSecret)
+        ? Commands.sendGroupMessage(unsent.text, images: images, files: files, channel: channel, confirmSecret: unsent.confirmSecret, threadParent: threadRoot)
         : employeeId != null
         ? Commands.sendEmployeeMessage(employeeId!, unsent.text, conversationId: state.conversationId!, images: images, files: files, interrupt: unsent.interrupt, confirmSecret: unsent.confirmSecret)
         : Commands.sendProjectMessage(
@@ -825,6 +909,32 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       }
       // A server without the discussion engine (`unknown_method`): kept, to try again after an update.
       emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asFailed(true) : u).toList(), notice: discussion ? discussionPostFailure(e) : e.message));
+    }
+  }
+
+  /// The reaction shows at once; refused, it goes back. A closed channel
+  /// (`channel_archived`) turns read-only, as a refused send does.
+  Future<void> _react(ChatReacted event, Emitter<ChatState> emit) async {
+    final before = state.messages.where((m) => m.id == event.messageId).firstOrNull;
+    if (before == null) return;
+    final me = _repository.linkState.user?.username;
+    void put(List<ReactionView> reactions, {String? notice, bool? closed}) => emit(state.copyWith(
+          messages: [for (final m in state.messages) m.id == event.messageId ? m.withReactions(reactions) : m],
+          notice: notice,
+          closed: closed,
+        ));
+    put(reactedLocally(before.reactions, event.emoji, on: event.on, me: me));
+    try {
+      await _repository.write(Commands.react(event.messageId, event.emoji, on: event.on), retry: false);
+    } on NotSentException catch (e) {
+      put(before.reactions, notice: e.toString());
+    } on ProtocolException catch (e) {
+      if (e.code == ErrorCode.channelArchived) {
+        put(before.reactions, closed: true);
+        onRead?.call();
+        return;
+      }
+      put(before.reactions, notice: e.message);
     }
   }
 

@@ -174,6 +174,10 @@ class AureliusRepository {
   /// `ticket_channels`) a ticket's; none: General.
   Future<MessagesSnapshot> groupChat({String? channel}) async => (await _ask<ResponseBodyMessages>(groupChatGet(channel: channel))).value;
 
+  /// One thread of a channel (feature `chat_threads`): the message [messageId]
+  /// and its replies. Reading it marks the thread read for the board member.
+  Future<ThreadSnapshot> thread(String messageId) async => (await _ask<ResponseBodyThread>(threadRead(messageId: messageId))).value;
+
   /// The Team chat's channels (feature `team_channels`): General first, then one per project.
   Future<List<ChannelView>> channels() async => (await _ask<ResponseBodyChannels>(channelList())).value.channels;
 
