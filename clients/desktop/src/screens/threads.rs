@@ -97,20 +97,11 @@ pub fn thread_label(m: &MessageView, offset_minutes: i64, today: i64) -> String 
     label
 }
 
-/// Who replied in a thread, newest first and each once, at most `REPLY_MONOGRAMS`:
-/// the names for the monograms beside the thread line, with whether it is a board member.
-pub fn repliers(replies: &[MessageView]) -> Vec<(String, bool)> {
-    let mut found: Vec<(String, bool)> = Vec::new();
-    for m in replies.iter().rev().filter(|m| m.system.is_none()) {
-        let who = crate::screens::discussion::author(m, |_| None);
-        if !found.iter().any(|(name, _)| *name == who.name) {
-            found.push((who.name, who.human));
-        }
-        if found.len() == REPLY_MONOGRAMS {
-            break;
-        }
-    }
-    found
+/// Who replied under `root` (the server's `thread_repliers`, newest first, at most
+/// `REPLY_MONOGRAMS`): the names for the monograms beside the thread line, with whether
+/// it is a board member (a name that is none of `employees`).
+pub fn repliers(root: &MessageView, employees: &[&str]) -> Vec<(String, bool)> {
+    root.thread_repliers.iter().take(REPLY_MONOGRAMS).map(|name| (name.clone(), !employees.contains(&name.as_str()))).collect()
 }
 
 /// The panel's title (ui-ontwerp §5): "Thread · #42-login-per-board-member".
@@ -278,6 +269,7 @@ mod tests {
             thread_reply_count: None,
             thread_last_reply_ms: None,
             thread_unread: None,
+            thread_repliers: vec![],
             reactions: vec![],
         }
     }
@@ -366,24 +358,10 @@ mod tests {
     }
 
     #[test]
-    fn repliers_are_the_newest_three_each_once() {
-        let by = |name: &str| MessageView { author: Some(name.into()), ..msg("r") };
-        let replies = [by("Forge"), by("Schema"), by("Forge"), by("Titan"), by("Pulse")];
-        let names: Vec<String> = repliers(&replies).into_iter().map(|(n, _)| n).collect();
-        assert_eq!(names, ["Pulse", "Titan", "Forge"]);
-        let member = MessageView {
-            role: MessageRole::User,
-            author: None,
-            author_user: Some(aurelius_domain::user::UserView {
-                id: aurelius_domain::UserId::new(),
-                username: "alexandra".into(),
-                created_at_ms: 0,
-                created_by_user: None,
-                disabled_at_ms: None,
-            }),
-            ..msg("r")
-        };
-        assert_eq!(repliers(&[member]), [("alexandra".to_string(), true)]);
+    fn repliers_are_the_servers_newest_three_members_told_apart() {
+        let root = MessageView { thread_repliers: vec!["Pulse".into(), "alexandra".into(), "Forge".into(), "Titan".into()], ..msg("root") };
+        assert_eq!(repliers(&root, &["Forge", "Pulse", "Titan"]), [("Pulse".to_string(), false), ("alexandra".to_string(), true), ("Forge".to_string(), false)]);
+        assert!(repliers(&msg("no replies"), &["Forge"]).is_empty());
     }
 
     #[test]

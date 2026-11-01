@@ -44,8 +44,6 @@ pub struct ThreadPanel {
     pub followed: Option<MessageId>,
     /// Answers streaming into the shown thread, before they are replies.
     pub live: Vec<GroupLive>,
-    /// Who replied in the threads read here (the channel's list does not say).
-    pub repliers: HashMap<MessageId, Vec<(String, bool)>>,
     pub scroll: ScrollHandle,
     /// Each message row's action bar, reachable with Tab (ui-ontwerp §5: also on keyboard focus).
     pub row_focus: std::cell::RefCell<HashMap<MessageId, FocusHandle>>,
@@ -61,7 +59,6 @@ impl ThreadPanel {
             mentions: d::MentionPicker::default(),
             followed: None,
             live: Vec::new(),
-            repliers: HashMap::new(),
             scroll: ScrollHandle::new(),
             row_focus: Default::default(),
         }
@@ -157,7 +154,6 @@ impl AppView {
         }
         match result {
             Ok(snapshot) => {
-                self.thread.repliers.insert(root, threads::repliers(&snapshot.replies));
                 if let Some(channel) = self.messages.as_mut().filter(|s| s.conversation_id == snapshot.conversation_id) {
                     threads::mark_thread_read(&mut channel.messages, &snapshot);
                 }
@@ -427,7 +423,8 @@ impl AppView {
         let line = threads::thread_line(m, offset, today)?;
         let unread = threads::unread(m);
         let id = m.id;
-        let people = self.thread.repliers.get(&id).cloned().unwrap_or_default();
+        let employees: Vec<&str> = self.managers.iter().map(|m| m.name.as_str()).collect();
+        let people = threads::repliers(m, &employees);
         Some(
             h().id(SharedString::from(format!("thread-{id}"))).role(Role::Link).aria_label(threads::thread_label(m, offset, today)).gap(px(6.)).pt(px(2.)).cursor_pointer()
                 .children(people.iter().map(|(name, human)| if *human { ui::member_monogram(name, 16., cx) } else { ui::monogram(name, 16., cx) }))
