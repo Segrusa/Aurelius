@@ -18,7 +18,7 @@ use aurelius_domain::{
 use aurelius_storage::{
     Tx as Transaction, StorageError, blobs, company as company_store,
     events::{self, NewEvent},
-    queries, tickets as store,
+    queries, tasks as task_store, tickets as store,
 };
 use crate::task::{plan_review, ticket_line};
 use serde_json::{Value, json};
@@ -532,21 +532,53 @@ impl CommandService {
         };
         let labels = cmd.labels.as_deref().map(ticket::valid_labels).transpose().map_err(domain_error)?;
         let deadline = if cmd.clear_deadline { Some(None) } else { ticket::valid_deadline(cmd.deadline_ms).map_err(domain_error)?.map(Some) };
-        if title.is_none() && description.is_none() && cmd.priority.is_none() && labels.is_none() && deadline.is_none() && cmd.run.is_none() {
+        if title.is_none() && description.is_none() && cmd.priority.is_none() && labels.is_none() && deadline.is_none() && cmd.run.is_none() && cmd.add_files.as_deref().unwrap_or_default().is_empty() {
             return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
         }
         let description_blob = match description.as_ref().and_then(|d| d.as_deref()) {
             Some(text) => Some(self.store().blobs().put(text.as_bytes(), "text/markdown; charset=utf-8").map_err(storage_error)?),
             None => None,
         };
+        let (before, added) = self.add_ticket_files(&cmd)?;
+        let new_files = added.clone();
         let expected = envelope.expected_version;
-        self.commit(envelope.command_id, hash, move |tx| {
+        let st = self.store().clone();
+        let committed = self.commit(envelope.command_id, hash, move |tx| {
             let state = check!(load(tx, cmd.ticket_id, expected)?);
             if state.column == ColumnKind::Done {
                 return rejected(DomainError::Ticket("A ticket in Done is closed; it can no longer change.".into()));
             }
             if cmd.run.is_some() && state.root_status == Some(aurelius_domain::task::TaskStatus::Running) {
                 return rejected(DomainError::Ticket("Mode and model change only while the main task does not run.".into()));
+            }
+            let mut files_added: Vec<String> = Vec::new();
+            let mut told: Vec<EventNotice> = Vec::new();
+            if let Some(new) = &new_files {
+                // Counted and copied against what the ticket had before the transaction.
+                if store::attachments_of(tx, state.id)? != before {
+                    return rejected(DomainError::File("The ticket's files changed meanwhile; reload it and try again.".into()));
+                }
+                let mut all = before.clone().unwrap_or_else(|| task_store::TaskAttachments { folder: new.folder.clone(), files: Vec::new() });
+                all.files.extend(new.files.iter().cloned());
+                store::set_attachments(tx, state.id, Some(&all))?;
+                // A main task that still works gets them too, and is told in its
+                // conversation (`ticket_line::files_added`); a finished one keeps its own.
+                if let (Some(root), Some(status)) = (state.root_task_id, state.root_status)
+                    && !status.is_terminal()
+                {
+                    let mut task_files = task_store::attachments_of(tx, root)?;
+                    match task_files.as_mut() {
+                        Some(t) if t.folder == new.folder => t.files.extend(new.files.iter().cloned()),
+                        // The main task copies the ticket's folder when it starts, so this does not
+                        // happen; if it does, its row keeps its own files (their paths are relative to
+                        // its folder), and the update in its conversation still names the new ones.
+                        Some(_) => {}
+                        None => task_files = Some(new.clone()),
+                    }
+                    task_store::set_attachments(tx, root, task_files.as_ref())?;
+                    told = ticket_line::files_added(tx, &st, root, new)?;
+                }
+                files_added = new.files.iter().map(|f| f.name.clone()).collect();
             }
             if let Some(blob) = &description_blob {
                 blobs::register(tx, blob)?;
@@ -572,14 +604,44 @@ impl CommandService {
                 ("labels", labels.is_some()),
                 ("deadline", deadline.is_some()),
                 ("run", cmd.run.is_some()),
+                ("files", !files_added.is_empty()),
             ]
             .into_iter()
             .filter_map(|(name, given)| given.then_some(name))
             .collect();
             let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
-            e.push(tx, EventKind::TicketUpdated, json!({ "changed": changed, "by": by }))?;
-            finish(tx, state.id, state.column, e)
-        })
+            let mut extra = json!({ "changed": changed, "by": by });
+            // Only the names of the new files, never where they are kept.
+            if !files_added.is_empty() {
+                extra["files_added"] = json!(files_added);
+            }
+            e.push(tx, EventKind::TicketUpdated, extra)?;
+            finish_then(tx, state.id, e, |_| Ok(told))
+        });
+        // Copies of a command that failed or was only replayed are not kept.
+        self.discard_unused(&added, committed.as_ref().map_or(true, |c| c.receipt.replayed));
+        committed
+    }
+
+    /// Check and copy `add_files` of a ticket update before its transaction: the
+    /// count against what the ticket has, the copies next to its files (so a
+    /// ticket keeps one folder). Gives the attachments it had and the new copies.
+    fn add_ticket_files(&self, cmd: &ticket::UpdateTicket) -> Result<(Option<task_store::TaskAttachments>, Option<task_store::TaskAttachments>), AppError> {
+        let files = cmd.add_files.as_deref().unwrap_or_default();
+        if files.is_empty() {
+            return Ok((None, None));
+        }
+        let id = cmd.ticket_id;
+        let (state, before) = self
+            .store()
+            .read(|c| Ok((store::state(c, id)?, store::attachments_of(c, id)?)))
+            .map_err(storage_error)?;
+        let state = state.ok_or_else(|| domain_error(DomainError::TicketNotFound(id)))?;
+        let kept = before.as_ref().map_or(0, |a| a.files.len());
+        ticket::check_file_count(kept + files.len()).map_err(domain_error)?;
+        let folder = before.as_ref().map(|a| std::path::PathBuf::from(&a.folder));
+        let added = self.attach_files(state.project_id, None, files, folder.as_deref())?;
+        Ok((before, added))
     }
 
     fn update_company(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: UpdateCompany, by: Actor) -> Result<Committed, AppError> {

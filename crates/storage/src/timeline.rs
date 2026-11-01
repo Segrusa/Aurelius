@@ -54,7 +54,14 @@ fn is_meaningful(event_type: &str) -> bool {
 const ACCOUNT_WRITES: &[&str] = &["session.revoke", "user.set_password"];
 
 fn meaningful(row: &Row) -> bool {
-    is_meaningful(&row.event_type) || (row.event_type == "host.write" && row.metadata["method"].as_str().is_some_and(|m| ACCOUNT_WRITES.contains(&m)))
+    is_meaningful(&row.event_type)
+        || (row.event_type == "host.write" && row.metadata["method"].as_str().is_some_and(|m| ACCOUNT_WRITES.contains(&m)))
+        || (row.event_type == "ticket.updated" && row.metadata["files_added"].is_array())
+}
+
+/// "added 1 file" / "added 3 files".
+fn added_files(count: usize) -> String {
+    if count == 1 { "added 1 file".into() } else { format!("added {count} files") }
 }
 
 struct Row {
@@ -179,6 +186,13 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
             "You".into(),
         ),
         "employee.proposal_decided" => ("decision", "DECISION", format!("You {} the colleague {}", if m["approved"].as_bool() == Some(true) { "approved" } else { "turned down" }, s(&m["subject"])), s(&m["note"]), "You".into()),
+        // Files added to a ticket (feature `ticket_add_files`): their names, never where they are kept.
+        "ticket.updated" if m["files_added"].is_array() => {
+            let names: Vec<String> = m["files_added"].as_array().into_iter().flatten().map(s).collect();
+            let by = board_member(conn, &m["by"]["user_id"]);
+            let number = lookup(conn, "SELECT CAST(number AS TEXT) FROM tickets WHERE id = ?1", &row.aggregate_id).map(|n| format!(" to #{n}")).unwrap_or_default();
+            ("minor", "ATTACHMENT", format!("{by} {}{number}", added_files(names.len())), names.join(", "), by)
+        }
         "attachment.added" => ("minor", "ATTACHMENT", format!("Attachment {}", s(&m["name"])), String::new(), "You".into()),
         // Accounts: always with the name of the board member who did it.
         "host.write" if m["method"].as_str() == Some("session.revoke") => {

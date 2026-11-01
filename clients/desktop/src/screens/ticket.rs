@@ -9,7 +9,7 @@
 
 use crate::app::{AppView, MenuItems, Overlay, Panel};
 use crate::backend::{self, BoardCall};
-use crate::screens::board::{BoardDialog, BoardDo, Dispatcher, DoneCheck, EditField, done_check, Needs, PRIORITIES, TicketTab, activity_detail, activity_text, deadline_input, feedback_label, mode_text, deadline_text, empty_update, feedback_ready, menu_entry, move_column, new_ticket_problems, parse_deadline, parse_labels, priority_label};
+use crate::screens::board::{BoardDialog, BoardDo, Dispatcher, DoneCheck, EditField, done_check, Needs, PRIORITIES, TicketTab, activity_detail, activity_text, deadline_input, feedback_label, mode_text, deadline_text, empty_update, pasted_add_files, feedback_ready, menu_entry, move_column, new_ticket_problems, parse_deadline, parse_labels, priority_label};
 use crate::theme::{self, c};
 use crate::ui::{self, ButtonKind, h, v};
 use aurelius_domain::task::TaskStatus;
@@ -203,6 +203,7 @@ impl AppView {
         }
         self.board.editing = Some(field);
         self.board.edit_error = None;
+        self.board.edit_files.clear();
         cx.notify();
     }
 
@@ -232,6 +233,7 @@ impl AppView {
                 }
             },
         }
+        update.add_files = pasted_add_files(std::mem::take(&mut self.board.edit_files));
         self.board.editing = None;
         self.board.edit_error = None;
         self.ticket_update(update, cx);
@@ -241,6 +243,7 @@ impl AppView {
     pub fn ticket_cancel_edit(&mut self, cx: &mut Context<Self>) {
         self.board.editing = None;
         self.board.edit_error = None;
+        self.board.edit_files.clear();
         cx.notify();
     }
 
@@ -597,7 +600,9 @@ impl AppView {
         let open_edit = editable(t.column) && can;
 
         let title: AnyElement = if editing == Some(EditField::Title) {
-            self.inline_edit(ui::input(&self.board.edit_title).into_any_element(), "ticket-title", cx)
+            let paste = cx.weak_entity();
+            let field = ui::input(&self.board.edit_title).on_paste(move |item: &ClipboardItem, _: &mut Window, cx: &mut App| paste.update(cx, |this, cx| this.ticket_paste_files(item, cx)).unwrap_or(false));
+            self.inline_edit(field.into_any_element(), "ticket-title", cx)
         } else {
             h().id("ticket-title")
                 .gap(px(8.))
@@ -635,7 +640,9 @@ impl AppView {
             _ => None,
         };
         let description: AnyElement = if editing == Some(EditField::Description) {
-            self.inline_edit(Textarea::new(&self.board.edit_description).py(px(7.)).line_height(px(20.)).into_any_element(), "ticket-description", cx)
+            let paste = cx.weak_entity();
+            let field = Textarea::new(&self.board.edit_description).py(px(7.)).line_height(px(20.)).on_paste(move |item: &ClipboardItem, _: &mut Window, cx: &mut App| paste.update(cx, |this, cx| this.ticket_paste_files(item, cx)).unwrap_or(false));
+            self.inline_edit(field.into_any_element(), "ticket-description", cx)
         } else {
             match t.description.clone().filter(|d| !d.trim().is_empty()) {
                 Some(text) => gpui_kit::component::text::TextView::markdown(SharedString::from(format!("ticket-md-{id}-{}", t.version)), text).selectable(true).on_link_click(self.markdown_link_handler(false, cx)).into_any_element(),
@@ -731,8 +738,23 @@ impl AppView {
 
     /// A field being edited with its Save and Cancel.
     fn inline_edit(&self, field: AnyElement, key: &'static str, cx: &mut Context<Self>) -> AnyElement {
+        // Files pasted into the title or description, added on Save.
+        let chips = self.board.edit_files.iter().enumerate().map(|(i, (path, size))| {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            h().id(("ticket-edit-file", i)).gap(px(6.)).px(px(9.)).py(px(4.)).rounded(px(6.)).border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE)).text_size(px(12.))
+                .child(div().text_color(c(theme::ACCENT_TEXT)).child("▤"))
+                .child(div().max_w(px(220.)).truncate().child(name.clone()))
+                .child(div().text_color(c(theme::TEXT_2)).child(crate::app::file_size(*size)))
+                .child(div().id(("ticket-edit-file-x", i)).role(Role::Button).aria_label(format!("Remove {name}")).cursor_pointer().child("×").on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    if i < this.board.edit_files.len() {
+                        this.board.edit_files.remove(i);
+                    }
+                    cx.notify();
+                })))
+        });
         v().gap(px(6.))
             .child(field)
+            .when(!self.board.edit_files.is_empty(), |el| el.child(h().flex_wrap().gap(px(6.)).children(chips)))
             .child(
                 h().gap(px(8.))
                     .child(ui::button(SharedString::from(format!("{key}-save")), "Save", ButtonKind::Primary, None).h(px(26.)).on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.ticket_save_edit(w, cx))))
@@ -987,9 +1009,12 @@ impl AppView {
             .child(self.board_picker("ticket-form-owner", format!("Owner: {owner}"), has_owner, !busy, None, cx))
             .child(self.board_picker("ticket-form-mode", format!("Mode: {}", mode_label(mode)), mode.is_some(), !busy, None, cx))
             .child(self.board_picker("ticket-form-model", format!("Model: {model}"), has_model, !busy, None, cx));
+        let paste = |this: WeakEntity<Self>| move |item: &ClipboardItem, _: &mut Window, cx: &mut App| this.update(cx, |this, cx| this.board_paste_files(item, cx)).unwrap_or(false);
+        let title = ui::input(&title_input).on_paste(paste(cx.weak_entity()));
+        let description = Textarea::new(&description).py(px(7.)).line_height(px(20.)).on_paste(paste(cx.weak_entity()));
         let body = v().gap(px(12.))
-            .child(field("Title *", v().gap(px(3.)).child(ui::input(&title_input)).children(counter).into_any_element(), title_problem))
-            .child(field("Description", Textarea::new(&description).py(px(7.)).line_height(px(20.)).into_any_element(), None))
+            .child(field("Title *", v().gap(px(3.)).child(title).children(counter).into_any_element(), title_problem))
+            .child(field("Description", description.into_any_element(), None))
             .child(pickers)
             .children(project_problem.filter(|_| sent).map(|p| div().text_size(px(12.)).text_color(c(theme::NEGATIVE)).child(p)))
             .when(mode == Some(aurelius_domain::autonomy::AgentMode::Plan), |el| el.child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Stops in Plan review with a plan before anything changes.")))
@@ -1026,7 +1051,7 @@ impl AppView {
         });
         let add = dim(ui::button("ticket-form-attach", "Add files…", ButtonKind::Outline, Some(ui::kbd("secondary-o", cx))).h(px(28.)), !busy).when(!busy, |el| el.on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.board_pick_files(cx))));
         v().gap(px(6.))
-            .child(h().gap(px(8.)).child(div().flex_1().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(ui::label_with_info("Attachments", "Pick files or drop them on this dialog. At most 8, 25 MB each; the owner finds them in its work folder."))).child(add))
+            .child(h().gap(px(8.)).child(div().flex_1().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(ui::label_with_info("Attachments", "Pick files, paste a screenshot into the title or description, or drop files on this dialog. At most 8, 25 MB each; the owner finds them in its work folder."))).child(add))
             .when(!self.board.form.files.is_empty(), |el| el.child(h().flex_wrap().gap(px(6.)).children(chips)))
             .into_any_element()
     }

@@ -178,10 +178,65 @@ async fn start_with_an_owner_then_update_the_fields() {
     assert_ne!(ticket.column, ColumnKind::Backlog);
     assert_eq!((ticket.owner_employee_id, ticket.owner_name.as_deref()), (Some(forge), Some("Forge")));
     // Update: the fields change while the engine works (its moves give the ticket new versions, so none is expected here).
-    let rename = Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("Owned, renamed".into()), description: None, priority: Some(TicketPriority::Low), labels: None, deadline_ms: None, clear_deadline: true, run: None });
+    let rename = Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("Owned, renamed".into()), description: None, priority: Some(TicketPriority::Low), labels: None, deadline_ms: None, clear_deadline: true, run: None, add_files: None });
     client.ticket_command(rename, None).await.unwrap();
     let ticket = client.ticket(id).await.unwrap().ticket;
     assert_eq!((ticket.title.as_str(), ticket.priority, ticket.deadline_ms), ("Owned, renamed", TicketPriority::Low, None));
+    drop(client);
+    common::stop(dir.path(), daemon).await;
+}
+
+/// Ticket #3: a screenshot pasted while editing an existing ticket is attached
+/// through `ticket.update { add_files }`, next to the files it has, and shows in
+/// the event and the timeline by its name only.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_board_member_adds_files_to_an_existing_ticket() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = common::start(dir.path()).await;
+    let (client, mut events) = common::connect_events_as(dir.path(), "grace").await;
+    client.subscribe(0).await.unwrap();
+    assert!(client.supports(aurelius_protocol::feature::TICKET_ADD_FILES));
+    let atlas = project(&client, "Atlas").await;
+    let folder = std::path::PathBuf::from(client.projects().await.unwrap().projects.into_iter().find(|p| p.id == atlas).unwrap().folder.expect("folder"));
+    let uploads = folder.join(".aurelius").join("uploads");
+    let (shot, log) = (dir.path().join("shot.png"), dir.path().join("log.txt"));
+    std::fs::write(&shot, b"png").unwrap();
+    std::fs::write(&log, b"log").unwrap();
+    let path = |p: &std::path::Path| p.display().to_string();
+    let made = client
+        .create_ticket(CreateTicket {
+            confirm_secret: false,
+            project_id: atlas,
+            title: "Paste".into(),
+            description: None,
+            priority: TicketPriority::Normal,
+            labels: vec![],
+            deadline_ms: None,
+            owner_employee_id: None,
+            run: Default::default(),
+            files: vec![path(&shot)],
+            start: false,
+            from_message: None,
+        })
+        .await
+        .unwrap();
+    let CommandResult::TicketCreated { ticket_id: id, .. } = made.result else { panic!("{:?}", made.result) };
+    let add = |files: Vec<String>| UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: Some(files) };
+
+    client.update_ticket(add(vec![path(&log)]), None).await.unwrap();
+    let ticket = client.ticket(id).await.unwrap().ticket;
+    assert_eq!(ticket.attachments.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), vec!["shot.png", "log.txt"], "the first file stays");
+    let updated = next_ticket_event(&mut events, EventKind::TicketUpdated).await;
+    assert_eq!(updated.aggregate_id, id.to_string(), "clients refetch the ticket on ticket.updated");
+    let page = client.timeline(aurelius_protocol::TimelineQuery { project_id: Some(atlas), correlation_id: None, before_seq: None, limit: 20, activity: false }).await.unwrap();
+    assert!(page.cards.iter().any(|c| c.title == "grace added 1 file to #1" && c.detail == "log.txt"), "{:?}", page.cards.iter().map(|c| &c.title).collect::<Vec<_>>());
+
+    // More than 8 in all: refused, and no copy stays behind.
+    let in_folder = || std::fs::read_dir(&uploads).unwrap().count();
+    let before = in_folder();
+    assert_eq!(code(client.update_ticket(add(vec![path(&log); ATTACHMENTS_MAX - 1]), None).await), ErrorCode::Validation);
+    assert_eq!(in_folder(), before);
+    assert_eq!(client.ticket(id).await.unwrap().ticket.attachments.len(), 2);
     drop(client);
     common::stop(dir.path(), daemon).await;
 }

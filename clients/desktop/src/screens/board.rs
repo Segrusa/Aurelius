@@ -945,6 +945,8 @@ pub struct Board {
     pub edit_deadline: Entity<InputState>,
     pub editing: Option<EditField>,
     pub edit_error: Option<String>,
+    /// Files pasted into the title or description being edited (path, size), added on Save.
+    pub edit_files: Vec<(std::path::PathBuf, u64)>,
     /// Settings → Board: the columns being edited, with a name field each.
     pub columns: Vec<(ticket::BoardColumnView, Entity<InputState>)>,
     pub columns_error: Option<String>,
@@ -1051,6 +1053,7 @@ impl Board {
             edit_deadline: input("2026-11-03 or 2026-11-03 17:00", window, cx),
             editing: None,
             edit_error: None,
+            edit_files: Vec::new(),
             columns: Vec::new(),
             columns_error: None,
             columns_reload: ColumnsReload::Idle,
@@ -1255,7 +1258,14 @@ pub fn expected_version_for(command: &Command, version: Option<u64>) -> Option<u
 
 /// An update that changes nothing but the ticket it names.
 pub fn empty_update(ticket_id: TicketId) -> ticket::UpdateTicket {
-    ticket::UpdateTicket { confirm_secret: false, ticket_id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }
+    ticket::UpdateTicket { confirm_secret: false, ticket_id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }
+}
+
+/// The files pasted while editing a ticket's title or description, as `add_files`:
+/// left out when there are none, so an update without files still goes to an
+/// older server (ticket #3).
+pub fn pasted_add_files(files: Vec<(std::path::PathBuf, u64)>) -> Option<Vec<String>> {
+    Some(files.into_iter().map(|(p, _)| p.display().to_string()).collect::<Vec<_>>()).filter(|f| !f.is_empty())
 }
 
 // ---- Behaviour --------------------------------------------------------------
@@ -1789,6 +1799,7 @@ impl AppView {
             self.board.activity = None;
             self.board.editing = None;
             self.board.edit_error = None;
+            self.board.edit_files.clear();
         }
         if self.board.feedback_for != Some(id) {
             self.board.feedback_for = Some(id);
@@ -2135,6 +2146,36 @@ impl AppView {
             self.notify_user(problems.join(" "), true, cx);
         }
         cx.notify();
+    }
+
+    /// A paste into the New ticket title or description: a copied image (a screenshot) or
+    /// copied files are attached to the ticket. Returns whether it took the paste; anything
+    /// else is pasted as text.
+    pub fn board_paste_files(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
+        if self.board.dialog != Some(BoardDialog::NewTicket) || self.board.form.busy {
+            return false;
+        }
+        let (took, found) = self.pasted_files(item, |p| p.is_file(), cx);
+        self.board_add_files(found, cx);
+        took
+    }
+
+    /// A paste into the title or description of an open ticket being edited: a copied image or
+    /// copied files wait beside the field and are added to the ticket on Save. Only when the
+    /// server takes files on an existing ticket; anything else is pasted as text.
+    pub fn ticket_paste_files(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
+        let Panel::Ticket(id) = self.panel else { return false };
+        if !matches!(self.board.editing, Some(EditField::Title | EditField::Description)) || !self.ticket_add_files_supported() {
+            return false;
+        }
+        let kept = self.board.ticket(id).map_or(0, |t| t.attachments.len());
+        let (took, found) = self.pasted_files(item, |p| p.is_file(), cx);
+        let problems = crate::app::take_files(&mut self.board.edit_files, found, kept);
+        if !problems.is_empty() {
+            self.board.edit_error = Some(problems.join(" "));
+        }
+        cx.notify();
+        took
     }
 
     // ---- The page -----------------------------------------------------------
@@ -2603,11 +2644,18 @@ pub(crate) mod tests {
     // Not `super::*`: gpui's `test` attribute would shadow the standard one.
     use super::{
         BoardColumnCards, BoardDialog, CreatorFilter, ColumnsReload, DAY_MS, DONE_SHOWN, DoneCheck, dialog_reads, done_check, expected_version_for, newest_version, board_changed, board_scope, load_now, load_on_show, plan_to_read, default_columns, Grid, Step, TimelineCard, activity_detail, activity_text, feedback_label, mode_text, card_label, focus_step, held_step, held_target, moved_elsewhere, moves_announcement, pick_up, Dispatcher, Drop, HIGH, Needs, OwnerFilter, PRIORITIES, before_for, choosing, dispatcher_gave_up, dispatcher_stopped, forget_unknown, gave_up_to_read, owner_unknown, columns_edit, days_from_civil, deadline_input, deadline_text, dispatcher_of, drop_effect, empty_text, feedback_ready, move_column,
-        board_keys_live, needs_you, new_ticket_problems, parse_deadline, parse_labels, priority_label, priority_mark, shown_cards, theme, ticket,
+        board_keys_live, needs_you, new_ticket_problems, parse_deadline, pasted_add_files, parse_labels, priority_label, priority_mark, shown_cards, theme, ticket,
     };
     use aurelius_domain::task::TaskStatus;
     use aurelius_domain::ticket::{ColumnKind, TicketPriority, TicketView};
     use aurelius_domain::{EmployeeId, ProjectId, TicketId};
+
+    #[test]
+    fn pasted_files_go_as_add_files_and_none_leaves_the_field_out() {
+        assert_eq!(pasted_add_files(Vec::new()), None, "an older server refuses an unknown field");
+        let files = vec![(std::path::PathBuf::from("/tmp/a.png"), 4), (std::path::PathBuf::from("/tmp/b.pdf"), 9)];
+        assert_eq!(pasted_add_files(files), Some(vec!["/tmp/a.png".to_string(), "/tmp/b.pdf".to_string()]));
+    }
 
     pub(crate) fn card(number: u32, column: ColumnKind) -> TicketView {
         serde_json::from_value(serde_json::json!({

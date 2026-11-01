@@ -1116,6 +1116,15 @@ impl Client {
         self.execute(envelope(Command::CreateTicket(ticket), None)).await
     }
 
+    /// Change a ticket, adding files from this computer (staged like `stage_file`;
+    /// feature `ticket_add_files`).
+    pub async fn update_ticket(&self, mut ticket: aurelius_domain::ticket::UpdateTicket, expected_version: Option<u64>) -> Result<CommandReceipt, ClientError> {
+        for path in ticket.add_files.iter_mut().flatten() {
+            *path = self.stage_file(Path::new(path.as_str())).await?;
+        }
+        self.execute(envelope(Command::UpdateTicket(ticket), expected_version)).await
+    }
+
     /// Any other ticket, board or company write (`Command::MoveTicket`, …) under a fresh key.
     pub async fn ticket_command(&self, command: Command, expected_version: Option<u64>) -> Result<CommandReceipt, ClientError> {
         self.execute(envelope(command, expected_version)).await

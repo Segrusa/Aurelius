@@ -296,6 +296,13 @@ pub mod feature {
     /// connections whose `HelloParams::accepts` names `server_name`. The hello's
     /// `host_name`, the pairing text and the pairing poll give the chosen name.
     pub const SERVER_NAME: &str = "server_name";
+    /// `ticket.update { add_files }` (protocol 5, additive): files added to an
+    /// existing ticket, as `files` on `ticket.create`. A main task that still
+    /// works gets them too, as an update in its conversation that names them
+    /// (with a run if it is Running), or through its brief if it has not opened
+    /// its conversation yet. It gives `ticket.updated`, and the timeline says who
+    /// added how many files, with their names only.
+    pub const TICKET_ADD_FILES: &str = "ticket_add_files";
 }
 
 /// Every feature this build has.
@@ -326,6 +333,7 @@ pub const FEATURES: &[&str] = &[
     feature::VAULT,
     feature::GUIDELINES,
     feature::SERVER_NAME,
+    feature::TICKET_ADD_FILES,
 ];
 
 /// Daemon → client.
