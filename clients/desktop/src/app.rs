@@ -2350,6 +2350,11 @@ impl AppView {
         matches!(&self.connection, Connection::Online { server, .. } if server.ticket_discussion)
     }
 
+    /// The board has its Testing column and the company a tester (feature `board_testing`).
+    pub fn board_testing_supported(&self) -> bool {
+        matches!(&self.connection, Connection::Online { server, .. } if server.board_testing)
+    }
+
     /// The server can auto-allow safe read-only tools (feature `auto_allow`).
     pub fn auto_allow_supported(&self) -> bool {
         matches!(&self.connection, Connection::Online { server, .. } if server.auto_allow)

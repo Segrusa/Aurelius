@@ -92,6 +92,8 @@ pub struct ServerInfo {
     pub vault: bool,
     /// The guideline library, its links and proposals (feature `guidelines`).
     pub guidelines: bool,
+    /// The Testing column and the company's tester (feature `board_testing`).
+    pub board_testing: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -1659,6 +1661,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 ticket_discussion: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_DISCUSSION),
                 vault: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::VAULT),
                 guidelines: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::GUIDELINES),
+                board_testing: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::BOARD_TESTING),
             },
         }));
 
