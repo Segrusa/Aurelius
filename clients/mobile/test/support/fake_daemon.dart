@@ -146,6 +146,20 @@ class FakeDaemon {
   /// Ticket ids `ticket.use_my_login` was asked for.
   final List<String> usedMyLogin = [];
 
+  /// What hello says: the rights of this connection and the server's features.
+  List<String> capabilities = const ['read', 'chat', 'task_control', 'approve'];
+  List<String> features = const [];
+
+  /// The server's name (feature `server_name`): the computer's, and the one a
+  /// board member chose; hello's `host_name` is the chosen one, else the computer's.
+  String computerName = 'my-pc';
+  String? chosenName;
+  int nameVersion = 0;
+  String get hostName => chosenName ?? computerName;
+
+  /// How many times `server.get_name` was asked.
+  int nameReads = 0;
+
   void addUser(String id, String username, String password) {
     users.add({'id': id, 'username': username, 'created_at_ms': users.length});
     passwords[id] = password;
@@ -250,12 +264,13 @@ class FakeDaemon {
         reply('hello', {
           ..._whoami(socket),
           'host_id': 'host-1',
-          'host_name': 'my-pc',
+          'host_name': hostName,
           'daemon_version': '0.7.0',
           'os': 'windows',
           'remote': true,
           'protocol': helloProtocol,
-          'capabilities': ['read', 'chat', 'task_control', 'approve'],
+          'capabilities': capabilities,
+          'features': features,
           'environment': environment,
           if (socket.user != null) 'claude_login': claudeView(socket.user!),
         });
@@ -270,6 +285,24 @@ class FakeDaemon {
         subscribes++;
         socket.subscribed = true;
         reply('subscribed', {'replayed_through_seq': 10});
+      case 'server.get_name':
+        nameReads++;
+        reply('server_name', {'name': hostName, 'chosen': ?chosenName, 'computer_name': computerName, 'version': nameVersion});
+      case 'server.set_name':
+        if (socket.user == null) return fail('board_member_required', 'A board member is needed for this.');
+        if (!capabilities.contains('owner')) return fail('forbidden', 'This needs the Owner right.');
+        final name = (params!['name'] as String).trim();
+        if (name.length > 40) return fail('validation', 'The server name has at most 40 characters.');
+        if (name.contains(RegExp(r'[\x00-\x1f\x7f]'))) return fail('validation', 'The server name cannot hold line breaks or control characters.');
+        final next = name.isEmpty ? null : name;
+        if (next != chosenName) {
+          chosenName = next;
+          nameVersion++;
+          for (final s in sockets) {
+            event(s, 'server.renamed', seq: 30 + nameVersion);
+          }
+        }
+        receipt({'kind': 'command', 'value': {'type': 'server_name_set', 'name': hostName, 'version': nameVersion}});
       case 'user.list':
         reply('users', {'users': users});
       case 'user.whoami':

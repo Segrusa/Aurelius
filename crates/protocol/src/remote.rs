@@ -49,6 +49,7 @@ fn method_needs(method: &Method) -> Needs {
     match method {
         Method::SessionHello(_)
         | Method::ServerGetHealth
+        | Method::ServerGetName
         | Method::ProjectList
         | Method::JobList
         | Method::ConversationGet { .. }
@@ -358,6 +359,8 @@ fn command_needs(command: &Command) -> Needs {
         | Command::SetRunDefaults(_)
         | Command::SetProjectFolder(_)
         | Command::SetEmployeeFolder(_) => Needs::Owner,
+        // The server's name is a host setting, like the other settings of the server (A-04).
+        Command::SetServerName(_) => Needs::Owner,
     }
 }
 
@@ -528,6 +531,16 @@ mod tests {
         assert_eq!(required(&read(Method::RunGetTrace { run_id: aurelius_domain::RunId::new() })), cap(Capability::Read));
         assert_eq!(required(&read(Method::ArtifactList { conversation_id: None, task_id: None, project_id: None })), cap(Capability::Read));
         assert_eq!(required(&read(Method::ArtifactGetContent { url: "https://claude.ai/artifact/x".into(), version: None })), cap(Capability::Read));
+    }
+
+    #[test]
+    fn renaming_the_server_needs_an_owner_and_reading_its_name_read() {
+        let rename = exec(Command::SetServerName(aurelius_domain::server::SetServerName { name: "Kantoor".into() }));
+        assert_eq!(required(&rename), Needs::Owner);
+        let phone = [Capability::Read, Capability::Chat, Capability::Approve, Capability::TaskControl];
+        assert!(!grants(&phone, required(&rename)), "a phone without Owner cannot rename the server");
+        assert!(grants(&[Capability::Owner], required(&rename)));
+        assert_eq!(required(&read(Method::ServerGetName)), cap(Capability::Read));
     }
 
     #[test]

@@ -35,6 +35,8 @@ pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
     match call {
         Call::Read(method) => match method {
             Method::SessionHello(_) | Method::ServerGetHealth | Method::UserWhoami => Ok(vec![]),
+            // The hello already names the server; its source and the computer's name are Settings'.
+            Method::ServerGetName => Err(NOT_FOR_APPS),
             // An app has no board member: it may see who they are, never create or become one.
             Method::UserList => Ok(vec![Read]),
             Method::UserLogin(_) | Method::UserLogout | Method::SessionList { .. } | Method::ClaudeLoginStatus | Method::ClaudeLoginInput(_) => Err(NOT_FOR_APPS),
@@ -119,6 +121,8 @@ fn command_needs(command: &Command) -> Result<Vec<AppScope>, &'static str> {
         | Command::UnlinkGuideline(_)
         | Command::DecideGuidelineProposal(_)
         | Command::AddStarterGuidelines(_) => Err(NOT_FOR_APPS),
+        // The server's name is a board member's setting of the server (A-04).
+        Command::SetServerName(_) => Err(NOT_FOR_APPS),
         Command::CreateTicket(t) if !t.files.is_empty() => Err(NO_FILES),
         // An app has no board member: the server answers `board_member_required`.
         Command::CreateTicket(_)
@@ -335,5 +339,13 @@ mod tests {
         assert!(!may(&AppScope::ALL, &exec(Command::CreateProject(CreateProject { name: "x".into(), description: None, folder: None }))));
         assert!(!may(&AppScope::ALL, &Call::Write(WriteMethod::Host(HostWrite::NotificationDismissAll))));
         assert!(!may(&AppScope::ALL, &Call::Write(WriteMethod::Host(HostWrite::AppKeyRevoke { key_id: aurelius_domain::AppKeyId::new() }))));
+    }
+
+    #[test]
+    fn apps_never_read_or_change_the_servers_name() {
+        let rename = exec(Command::SetServerName(aurelius_domain::server::SetServerName { name: "Kantoor".into() }));
+        assert_eq!(required(&rename), Err(NOT_FOR_APPS));
+        assert_eq!(required(&Call::Read(Method::ServerGetName)), Err(NOT_FOR_APPS));
+        assert!(allowed_for(&AppScope::ALL, AppAudience::Management, &rename).is_err());
     }
 }

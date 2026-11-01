@@ -18,6 +18,8 @@ import '../hosts/hosts_bloc.dart';
 import '../load/load_widgets.dart';
 import '../power/power_widgets.dart';
 import '../runtime/runtime_bloc.dart';
+import '../server_name/server_name_bloc.dart';
+import '../server_name/server_name_section.dart';
 import 'app_keys_section.dart';
 import 'auto_allow_section.dart';
 import 'mcp_section.dart';
@@ -112,6 +114,8 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
         ),
+        // Lazy: a server without the feature is never asked its name (SN-02 AC4).
+        BlocProvider(create: (_) => ServerNameBloc(repository)..add(const ServerNameRefreshed()), child: ServerNameSection(link: link)),
         const GroupHeader('Models', caps: true),
         BlocBuilder<RuntimeBloc, RuntimeState>(
           builder: (context, runtime) => InsetGroup(

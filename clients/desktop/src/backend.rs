@@ -48,7 +48,12 @@ pub fn update_needed(err: &aurelius_client::ClientError) -> bool {
 /// The server this window talks to.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ServerInfo {
+    /// The name the server gives (its chosen name, else its computer's name); follows `server.renamed`.
     pub host_name: String,
+    /// The server's id (from the hello): `servers.json` is matched on it.
+    pub host_id: Option<aurelius_domain::HostId>,
+    /// The server's name can be read and chosen (feature `server_name`).
+    pub server_name: bool,
     /// Over the network (another computer); folders and files are on the server.
     pub remote: bool,
     /// This connection may change load limits (the Approve right; always on the local server).
@@ -399,6 +404,8 @@ pub enum Request {
     Vault(VaultCall),
     /// The guidelines (feature `guidelines`; see [`GuidelineCall`]).
     Guidelines(GuidelineCall),
+    /// The server's name (feature `server_name`; see [`ServerNameCall`]).
+    ServerName(ServerNameCall),
     /// A message `looks_like_secret` held back, sent again after "Send anyway" (B10):
     /// its `confirm_secret` is set, so the server stores it with the value redacted.
     SendConfirmed(Command),
@@ -444,6 +451,53 @@ pub struct AuditAsk {
     pub all: bool,
     pub item_id: Option<aurelius_domain::VaultItemId>,
 }
+
+/// The server's name (feature `server_name`, docs/product/servernaam). Never
+/// kept for a reconnect: Settings reads it again once online.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerNameCall {
+    /// `server.get_name`.
+    Load,
+    /// `server.set_name`; empty puts the computer's name back.
+    Set(String),
+}
+
+impl ServerNameCall {
+    /// What the window hears when the call cannot go.
+    pub fn refused(&self, message: String) -> ServerNameUpdate {
+        match self {
+            ServerNameCall::Load => ServerNameUpdate::Loaded(Err(message)),
+            ServerNameCall::Set(_) => ServerNameUpdate::Saved(Err(message)),
+        }
+    }
+}
+
+/// What the window hears about the server's name.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ServerNameUpdate {
+    /// `server.get_name` answered, after a read or a `server.renamed` event.
+    Loaded(Result<aurelius_domain::server::ServerNameView, String>),
+    /// `server.set_name` answered with the name clients show now, or why not.
+    Saved(Result<String, String>),
+}
+
+/// Why the server's name could not be read or chosen, in words for Settings.
+pub fn server_name_failure(err: &ClientError) -> String {
+    use aurelius_domain::error::ErrorCode;
+    match err {
+        ClientError::Protocol(p) if p.code == ErrorCode::BoardMemberRequired => BOARD_MEMBER_REQUIRED.into(),
+        ClientError::Protocol(p) if p.code == ErrorCode::Forbidden => SERVER_NAME_FORBIDDEN.into(),
+        ClientError::Protocol(p) if p.code == ErrorCode::UnknownMethod => SERVER_NAME_NOT_BUILT.into(),
+        // Validation and the rest: the server's own words.
+        ClientError::Protocol(p) => p.message.clone(),
+        e if ends(e) => "The connection dropped before the server answered. Settings reloads with what the server has.".into(),
+        ClientError::TimedOut(_) => "The server did not answer in time.".into(),
+        e => e.to_string(),
+    }
+}
+
+pub const SERVER_NAME_FORBIDDEN: &str = "Changing the server's name needs the owner right on this server.";
+pub const SERVER_NAME_NOT_BUILT: &str = "This server cannot change its name yet. Update the server.";
 
 /// The vault's reads and writes (feature `vault`). None is kept for a reconnect:
 /// a value or a password does not wait in an outbox, and the screen reloads.
@@ -1472,6 +1526,8 @@ pub enum Update {
     Board(BoardUpdate),
     Vault(VaultUpdate),
     Guidelines(GuidelineUpdate),
+    /// The server's name was read, chosen or refused.
+    ServerName(ServerNameUpdate),
     /// A message held back by `looks_like_secret` (B10): ask "Send anyway?".
     LooksLikeSecret(SecretHold),
 }
@@ -1509,6 +1565,7 @@ async fn idle(requests: &mut mpsc::UnboundedReceiver<Request>, updates: &mpsc::U
             Request::Board(call) if call.is_write() => Update::Board(call.refused(text.into())),
             Request::Vault(call) => Update::Vault(call.refused(text.into())),
             Request::Guidelines(call) => Update::Guidelines(call.refused(GuidelineFailure::said(text))),
+            Request::ServerName(call) => Update::ServerName(call.refused(text.into())),
             _ => Update::Error(text.into()),
         });
     }
@@ -1604,6 +1661,10 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                             Some(Request::Guidelines(call)) => {
                                 let _ = updates.send(Update::Guidelines(call.refused(GuidelineFailure::said("Not connected to the server. Try again when it is back."))));
                             }
+                            // Nor the server's name: Settings reads it again once online.
+                            Some(Request::ServerName(call)) => {
+                                let _ = updates.send(Update::ServerName(call.refused("Not connected to the server. Try again when it is back.".into())));
+                            }
                             Some(other) => match me {
                                 Some(by) => if let Some(env) = to_envelope(other) { outbox.push_back((by, env)) },
                                 // Signed out: nobody's write to keep (the gate refuses it too).
@@ -1638,6 +1699,8 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
             daemon_version: client.hello.daemon_version.clone(),
             server: ServerInfo {
                 host_name: client.hello.host_name.clone(),
+                host_id: Some(client.hello.host_id),
+                server_name: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::SERVER_NAME),
                 remote: client.is_remote(),
                 approve: !client.is_remote() || has(aurelius_domain::remote::Capability::Approve) || has(aurelius_domain::remote::Capability::Owner),
                 owner: !client.is_remote() || has(aurelius_domain::remote::Capability::Owner),
@@ -1905,6 +1968,7 @@ fn held_read(request: &Request) -> bool {
         Request::Board(call) => !call.is_write(),
         Request::Vault(call) => call.is_list(),
         Request::Guidelines(call) => call.is_read(),
+        Request::ServerName(call) => *call == ServerNameCall::Load,
         Request::AppKeys(call) => matches!(call, AppKeyCall::List),
         Request::Plugins(call) => matches!(call, PluginsCall::List | PluginsCall::Available | PluginsCall::ManagerGet(_) | PluginsCall::ProjectGet(_)),
         Request::Backups(call) => matches!(call, BackupsCall::List),
@@ -1927,6 +1991,7 @@ fn refuse_at_gate(request: Request, updates: &mpsc::UnboundedSender<Update>) {
         Request::Board(call) => Update::Board(call.refused(BOARD_MEMBER_REQUIRED.into())),
         Request::Vault(call) => Update::Vault(call.refused(BOARD_MEMBER_REQUIRED.into())),
         Request::Guidelines(call) => Update::Guidelines(call.refused(GuidelineFailure::said(BOARD_MEMBER_REQUIRED))),
+        Request::ServerName(call) => Update::ServerName(call.refused(BOARD_MEMBER_REQUIRED.into())),
         Request::AppKeys(_) => Update::AppKeys(AppKeyUpdate::Failed(BOARD_MEMBER_REQUIRED.into())),
         _ => Update::Error(BOARD_MEMBER_REQUIRED.into()),
     });
@@ -2052,7 +2117,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SetEmployeeFolder { employee_id, path } => envelope(Command::SetEmployeeFolder(employee::SetEmployeeFolder { employee_id, path }), None),
         Request::SetProjectFolder { project_id, path } => envelope(Command::SetProjectFolder(project::SetProjectFolder { project_id, path }), None),
         Request::LoadUsage | Request::LoadUsageHours(_) | Request::LoadSubscription(_) | Request::CheckUpdate(_) | Request::InstallUpdate | Request::InstallAppUpdate | Request::RestartServer | Request::Power(_) | Request::AppKeys(_) | Request::Plugins(_) | Request::LoadServerLoad | Request::SetLoadLimits(_) | Request::LoadBrowser | Request::SetBrowser(_) | Request::SetBrowserBackend(_) | Request::LoadArtifactSetting | Request::SetArtifactsEnabled(_) | Request::LoadUsageTotals { .. } | Request::LoadTraceSetting | Request::SetTraceEnabled(_) | Request::LoadTrace(_) | Request::LoadInstructionVersions(_) | Request::LoadAutoAllow | Request::SetAutoAllow(_) | Request::LoadManagementMode | Request::SetManagementMode(_) | Request::LoadMcp | Request::SetMcp(_) | Request::McpAdd(_) | Request::McpRemove(_) | Request::McpAuth(_) | Request::LoadMcpAlwaysAllow | Request::McpAlwaysAllowRemove(_) | Request::Backups(_) | Request::ExportProject(_) | Request::Remote(_) => return None,
-        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode | Request::BoardMembers(_) | Request::Claude(_) | Request::Board(_) | Request::Vault(_) | Request::Guidelines(_) => return None,
+        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode | Request::BoardMembers(_) | Request::Claude(_) | Request::Board(_) | Request::Vault(_) | Request::Guidelines(_) | Request::ServerName(_) => return None,
         Request::SendConfirmed(command) => envelope(command, None),
     })
 }
@@ -2141,6 +2206,8 @@ async fn session(
     mut held: VecDeque<Request>,
     me: aurelius_domain::UserId,
 ) -> Result<Ended, Disconnected> {
+    // The server's name in this session's messages; `server.renamed` changes it.
+    let mut host_name = client.hello.host_name.clone();
     // Snapshot first, then subscribe from its cursor.
     let (as_of, mut jobs_running) = refresh(client, updates).await?;
     refresh_board_members(client, updates).await?;
@@ -2270,7 +2337,7 @@ async fn session(
                             let _ = updates.send(Update::Backups(snap));
                             if restart && client.is_remote() {
                                 // The server restarts itself and restores; this window reconnects.
-                                let _ = updates.send(Update::Info(format!("{} is restoring the backup and restarts; reconnecting…", client.hello.host_name)));
+                                let _ = updates.send(Update::Info(format!("{host_name} is restoring the backup and restarts; reconnecting…")));
                             } else if restart {
                                 // The service restores the backup when it starts again.
                                 let _ = updates.send(Update::RestartForUpdate);
@@ -2316,7 +2383,7 @@ async fn session(
                     match client.export_project(project_id).await {
                         Ok((markdown, _)) => {
                             let folder = std::path::Path::new(&markdown).parent().map(|p| p.display().to_string()).unwrap_or_default();
-                            let on = if client.is_remote() { format!(" on {}", client.hello.host_name) } else { String::new() };
+                            let on = if client.is_remote() { format!(" on {host_name}") } else { String::new() };
                             let _ = updates.send(Update::Info(format!("Exported (Markdown + JSON) to {folder}{on}")));
                         }
                         Err(e) if ends(&e) => return Err(e.into()),
@@ -2346,7 +2413,7 @@ async fn session(
                 if let Request::AddClaudeCode = request {
                     let path = client.detect_runtime().await?;
                     let Some(runtime_path) = path else {
-                        let place = if client.is_remote() { client.hello.host_name.clone() } else { "this computer".into() };
+                        let place = if client.is_remote() { host_name.clone() } else { "this computer".into() };
                         let _ = updates.send(Update::Error(format!("Claude Code was not found on {place}. Install it there (claude.com/code) and try again.")));
                         continue;
                     };
@@ -2377,10 +2444,10 @@ async fn session(
                     match client.apply_update().await {
                         // The server updated itself and restarts; this app stays and reconnects.
                         Ok(_) | Err(ClientError::Disconnected) => {
-                            let _ = updates.send(Update::Info(format!("{} is updated and restarts; reconnecting…", client.hello.host_name)));
+                            let _ = updates.send(Update::Info(format!("{host_name} is updated and restarts; reconnecting…")));
                         }
                         Err(e) if e.is_disconnect() => {
-                            let _ = updates.send(Update::Info(format!("{} is updated and restarts; reconnecting…", client.hello.host_name)));
+                            let _ = updates.send(Update::Info(format!("{host_name} is updated and restarts; reconnecting…")));
                         }
                         Err(e) => {
                             let _ = updates.send(Update::Error(e.to_string()));
@@ -2417,10 +2484,10 @@ async fn session(
                     match client.restart_server().await {
                         // The server answers, then goes down; the reconnect loop takes over.
                         Ok(_) | Err(ClientError::Disconnected) => {
-                            let _ = updates.send(Update::Info(format!("{} restarts; reconnecting…", client.hello.host_name)));
+                            let _ = updates.send(Update::Info(format!("{host_name} restarts; reconnecting…")));
                         }
                         Err(e) if e.is_disconnect() => {
-                            let _ = updates.send(Update::Info(format!("{} restarts; reconnecting…", client.hello.host_name)));
+                            let _ = updates.send(Update::Info(format!("{host_name} restarts; reconnecting…")));
                         }
                         Err(e) if e.is_final() => return Err(e.into()),
                         Err(e) => {
@@ -2766,6 +2833,12 @@ async fn session(
                     guidelines(client, call, updates).await?;
                     continue;
                 }
+                if let Request::ServerName(call) = request {
+                    if let Some(name) = server_name(client, call, updates).await? {
+                        host_name = name;
+                    }
+                    continue;
+                }
                 if let Request::Board(call) = request {
                     if let BoardCall::Discussion(conversation) = call {
                         *open_discussion = conversation;
@@ -2904,6 +2977,7 @@ async fn session(
                 let mut claude = false;
                 let mut vault = false;
                 let mut guidelines = false;
+                let mut renamed = false;
                 for e in std::iter::once(first).chain(std::iter::from_fn(|| events.try_recv().ok())) {
                     // 'Always allow' on an approval adds its tool to the always-allowed list.
                     approval |= e.kind.area() == "approval";
@@ -2928,6 +3002,8 @@ async fn session(
                         vault = true;
                     } else if e.kind.area() == "guideline" {
                         guidelines = true;
+                    } else if e.kind == aurelius_domain::EventKind::ServerRenamed {
+                        renamed = true;
                     } else if is_artifact(&e) { artifact = true } else if is_chat(&e) { chat = true } else { other = true }
                     task |= e.kind.area() == "task";
                     users |= e.kind.area() == "user";
@@ -2949,6 +3025,12 @@ async fn session(
                 if guidelines {
                     // The library, a link or a proposal changed (also on another device): the window reads again what shows.
                     let _ = updates.send(Update::Guidelines(GuidelineUpdate::Changed));
+                }
+                if renamed && client.hello.features.iter().any(|f| f == aurelius_protocol::feature::SERVER_NAME) {
+                    // A board member chose a name (also on another device): every place shows it, without reconnecting (SN-02 AC1).
+                    if let Some(name) = server_name(client, ServerNameCall::Load, updates).await? {
+                        host_name = name;
+                    }
                 }
                 if users {
                     // Another window made or disabled a board member.
@@ -3451,6 +3533,39 @@ async fn vault(client: &Client, call: VaultCall, updates: &mpsc::UnboundedSender
     match lost {
         Some(e) => Err(e.into()),
         None => Ok(()),
+    }
+}
+
+/// The server's name: read it or choose it. Answers the name clients show now
+/// when the server gave one, for this session's own messages.
+async fn server_name(client: &Client, call: ServerNameCall, updates: &mpsc::UnboundedSender<Update>) -> Result<Option<String>, Disconnected> {
+    let asked = call.clone();
+    let result = match call {
+        ServerNameCall::Load => client.server_name().await.map(|view| ServerNameUpdate::Loaded(Ok(view))),
+        ServerNameCall::Set(name) => {
+            let command = Command::SetServerName(aurelius_domain::server::SetServerName { name });
+            client.execute(envelope(command, None)).await.and_then(|receipt| match receipt.result {
+                CommandResult::ServerNameSet { name, .. } => Ok(ServerNameUpdate::Saved(Ok(name))),
+                _ => Err(ClientError::UnexpectedResponse),
+            })
+        }
+    };
+    let (answer, lost) = match result {
+        Ok(answer) => (answer, None),
+        Err(e) => {
+            let answer = asked.refused(server_name_failure(&e));
+            (answer, ends(&e).then_some(e))
+        }
+    };
+    let name = match &answer {
+        ServerNameUpdate::Loaded(Ok(view)) => Some(view.name.clone()),
+        ServerNameUpdate::Saved(Ok(name)) => Some(name.clone()),
+        _ => None,
+    };
+    let _ = updates.send(Update::ServerName(answer));
+    match lost {
+        Some(e) => Err(e.into()),
+        None => Ok(name),
     }
 }
 
@@ -5387,6 +5502,137 @@ mod tests {
         assert!(to_envelope(Request::Vault(VaultCall::Archive(item))).is_none(), "never in the outbox");
         assert!(matches!(VaultCall::Archive(item).refused("offline".into()), VaultUpdate::Archived(i, Err(_)) if i == item));
         assert!(matches!(VaultCall::KeyExport { password: Password::new("pw".into()) }.refused("offline".into()), VaultUpdate::Key(Err(_))));
+    }
+
+    /// The server's name in the user's words; it never waits in the outbox, and
+    /// without a session only its read waits for the sign-in.
+    #[test]
+    fn the_server_name_says_why_and_keeps_nothing_for_later() {
+        use aurelius_domain::error::{AppError, ErrorCode};
+        let say = |code, message: &str| server_name_failure(&ClientError::Protocol(AppError::new(code, message)));
+        assert_eq!(say(ErrorCode::BoardMemberRequired, "x"), BOARD_MEMBER_REQUIRED);
+        assert_eq!(say(ErrorCode::Forbidden, "x"), SERVER_NAME_FORBIDDEN);
+        assert_eq!(say(ErrorCode::UnknownMethod, "x"), SERVER_NAME_NOT_BUILT);
+        assert_eq!(say(ErrorCode::Validation, "name is too long (max 40)"), "name is too long (max 40)", "the server's own text");
+        assert!(held_read(&Request::ServerName(ServerNameCall::Load)));
+        assert!(!held_read(&Request::ServerName(ServerNameCall::Set("Kantoor".into()))));
+        assert!(to_envelope(Request::ServerName(ServerNameCall::Set("Kantoor".into()))).is_none(), "never in the outbox");
+        assert_eq!(ServerNameCall::Set("x".into()).refused("offline".into()), ServerNameUpdate::Saved(Err("offline".into())));
+        assert_eq!(ServerNameCall::Load.refused("offline".into()), ServerNameUpdate::Loaded(Err("offline".into())));
+    }
+
+    /// The server's name through this app's backend against a daemon of this branch
+    /// (feature `server_name`): read, choose, refuse, put the default back, and another
+    /// window that follows `server.renamed` without reconnecting (SN-02 AC1).
+    mod server_name_against_a_daemon {
+        use super::super::*;
+
+        async fn next<T>(what: &str, handle: &mut Handle, mut pick: impl FnMut(Update) -> Option<T>) -> T {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    if let Some(found) = pick(handle.updates.recv().await.expect("the backend runs")) {
+                        return found;
+                    }
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("no update: {what}"))
+        }
+
+        async fn daemon(root: &std::path::Path) -> tokio::task::JoinHandle<anyhow::Result<()>> {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let handle = tokio::spawn(aurelius_daemon::run(root.to_path_buf(), Some(tx)));
+            tokio::time::timeout(Duration::from_secs(20), rx).await.expect("daemon ready").expect("ready signal");
+            handle
+        }
+
+        async fn stop(root: &std::path::Path, handle: tokio::task::JoinHandle<anyhow::Result<()>>) {
+            aurelius_client::bridge::shutdown_daemon(root).await.expect("shutdown");
+            tokio::time::timeout(Duration::from_secs(20), handle).await.expect("daemon stops").expect("join").expect("clean stop");
+        }
+
+        async fn online(handle: &mut Handle) -> ServerInfo {
+            next("online", handle, |u| match u {
+                Update::Connection(Connection::Online { server, .. }) => Some(server),
+                _ => None,
+            })
+            .await
+        }
+
+        async fn saved(handle: &mut Handle, name: &str) -> Result<String, String> {
+            handle.requests.send(Request::ServerName(ServerNameCall::Set(name.into()))).unwrap();
+            next("saved", handle, |u| match u {
+                Update::ServerName(ServerNameUpdate::Saved(result)) => Some(result),
+                _ => None,
+            })
+            .await
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_board_member_renames_the_server_and_another_window_follows_live() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let server = daemon(&root).await;
+            let target = || Some(Target::Local { root: root.clone(), spawn: false });
+            let (tokens, store) = super::memory_tokens();
+
+            let mut alex = start(target(), tokens);
+            let info = online(&mut alex).await;
+            assert!(info.server_name && info.owner && !info.remote, "this daemon has the feature and the local window the owner right");
+            assert!(info.host_id.is_some());
+            alex.requests.send(Request::BoardMembers(UserCall::Create { username: "alex".into(), password: Password::new("Tr0ub4dor&3-zebra-alex".into()) })).unwrap();
+            next("alex signed in", &mut alex, |u| matches!(u, Update::Who(w) if w.user.is_some()).then_some(())).await;
+            alex.requests.send(Request::ServerName(ServerNameCall::Load)).unwrap();
+            let before = next("the name read", &mut alex, |u| match u {
+                Update::ServerName(ServerNameUpdate::Loaded(r)) => Some(r.expect("read")),
+                _ => None,
+            })
+            .await;
+            assert_eq!((before.name.as_str(), before.chosen.as_deref()), (info.host_name.as_str(), None), "the computer's name, as in the hello");
+
+            // A second window of the same board member (the same session).
+            let mut other = start(target(), Tokens::new("local".into(), store));
+            // Who comes before Online.
+            next("the other window signed in", &mut other, |u| matches!(u, Update::Who(w) if w.user.is_some()).then_some(())).await;
+            // Its session subscribes after its first loads: wait until it hears events.
+            alex.requests.send(Request::CreateProject { name: "ping".into(), description: None, folder: None }).unwrap();
+            next("the other window hears events", &mut other, |u| matches!(u, Update::Projects(p) if p.iter().any(|p| p.name == "ping")).then_some(())).await;
+
+            assert_eq!(saved(&mut alex, "  Kantoor ").await.as_deref(), Ok("Kantoor"));
+            let live = next("the other window follows the rename", &mut other, |u| match u {
+                Update::Connection(_) => panic!("the other window reconnected"),
+                Update::ServerName(ServerNameUpdate::Loaded(r)) => Some(r.expect("read after server.renamed")),
+                _ => None,
+            })
+            .await;
+            assert_eq!((live.name.as_str(), live.chosen.as_deref(), live.computer_name.as_str()), ("Kantoor", Some("Kantoor"), before.computer_name.as_str()));
+
+            // Refused with the server's reason; the name stays.
+            let too_long = saved(&mut alex, &"x".repeat(41)).await.unwrap_err();
+            assert!(too_long.contains("40"), "{too_long}");
+            let broken = saved(&mut alex, "Kan\ntoor").await.unwrap_err();
+            assert!(!broken.is_empty());
+
+            // A new connection's hello has the chosen name (SN-02 AC2).
+            let mut third = start(target(), super::memory_tokens().0);
+            next("a window without a session", &mut third, |u| matches!(u, Update::Who(w) if w.user.is_none()).then_some(())).await;
+            assert_eq!(online(&mut third).await.host_name, "Kantoor");
+            // Without a session the write is refused at the gate.
+            assert_eq!(saved(&mut third, "Thuis").await, Err(BOARD_MEMBER_REQUIRED.into()));
+            drop(third);
+
+            // Empty puts the computer's name back.
+            assert_eq!(saved(&mut alex, "   ").await, Ok(before.computer_name.clone()));
+            let back = next("the other window follows the default", &mut other, |u| match u {
+                Update::ServerName(ServerNameUpdate::Loaded(r)) => r.ok().filter(|v| v.chosen.is_none()),
+                _ => None,
+            })
+            .await;
+            assert_eq!(back.name, before.computer_name);
+            drop(other);
+            drop(alex);
+            stop(&root, server).await;
+        }
     }
 
     /// The vault through this app's backend against a daemon of this branch (protocol 5,

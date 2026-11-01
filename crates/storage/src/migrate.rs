@@ -60,6 +60,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 21, sql: include_str!("../../../migrations/0021_multi_user_sessions.sql"), rebuild: true, then: None },
     plain(22, include_str!("../../../migrations/0022_vault.sql")),
     plain(23, include_str!("../../../migrations/0023_guidelines.sql")),
+    plain(24, include_str!("../../../migrations/0024_server_name.sql")),
 ];
 
 /// The last schema of protocol 2 (managers per project). The v0.6 import writes

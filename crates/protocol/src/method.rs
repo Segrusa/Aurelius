@@ -16,6 +16,9 @@ pub enum Method {
     SessionHello(HelloParams),
     #[serde(rename = "server.get_health")]
     ServerGetHealth,
+    /// The server's name, its source and the computer's name (feature `server_name`).
+    #[serde(rename = "server.get_name")]
+    ServerGetName,
 
     #[serde(rename = "project.list")]
     ProjectList,
@@ -539,6 +542,10 @@ pub mod client_feature {
     /// only such a connection gets the live events of project channels, so an
     /// older client never shows them in its one Team chat.
     pub const TEAM_CHANNELS: &str = "team_channels";
+    /// The client knows the event `server.renamed` (feature `server_name`): only
+    /// such a connection gets it, so an older client never reads an event kind
+    /// it does not know (SN-02 AC3).
+    pub const SERVER_NAME: &str = "server_name";
 }
 
 impl std::fmt::Debug for HelloParams {

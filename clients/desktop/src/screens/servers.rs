@@ -125,7 +125,13 @@ impl AppView {
     pub fn server_rows(&self) -> Vec<ServerRow> {
         let mut rows = Vec::new();
         if backend::local_service_available() {
-            rows.push(ServerRow { host_id: None, name: "This computer".into(), detail: "the background service here".into() });
+            // E3: the label stays, the server's name is its detail (live while it is in use).
+            let live = match &self.connection {
+                backend::Connection::Online { server, .. } if !server.remote => Some(server.host_name.as_str()),
+                _ => None,
+            };
+            let detail = local_detail(live.or(self.servers.local_name.as_deref()));
+            rows.push(ServerRow { host_id: None, name: "This computer".into(), detail });
         }
         for s in &self.servers.servers {
             let env = if s.environment == "dev" { " · dev" } else { "" };
@@ -901,6 +907,14 @@ pub fn folders_in_use(paths: impl IntoIterator<Item = String>) -> Vec<DirEntryVi
         .collect()
 }
 
+/// The detail of the "This computer" row: the server's name when known (E3).
+pub fn local_detail(name: Option<&str>) -> String {
+    match name.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(name) => format!("{name} · the background service here"),
+        None => "the background service here".into(),
+    }
+}
+
 /// The rows that contain `filter` (any case).
 pub fn filter_rows(rows: Vec<DirEntryView>, filter: &str) -> Vec<DirEntryView> {
     let needle = filter.trim().to_lowercase();
@@ -912,8 +926,15 @@ pub fn filter_rows(rows: Vec<DirEntryView>, filter: &str) -> Vec<DirEntryView> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FolderBrowser, FolderPurpose, NO_PARENT, Overlay, crumbs, folders_in_use, typed_path};
+    use super::{FolderBrowser, FolderPurpose, NO_PARENT, Overlay, crumbs, folders_in_use, local_detail, typed_path};
     use aurelius_protocol::{DirEntryView, DirListing};
+
+    #[test]
+    fn this_computer_keeps_its_label_with_the_servers_name_as_detail() {
+        assert_eq!(local_detail(Some("Kantoor")), "Kantoor · the background service here");
+        assert_eq!(local_detail(Some("  ")), "the background service here");
+        assert_eq!(local_detail(None), "the background service here");
+    }
 
     fn entry(name: &str) -> DirEntryView {
         DirEntryView { name: name.into(), path: format!("/x/{name}") }

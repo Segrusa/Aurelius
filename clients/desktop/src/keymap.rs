@@ -147,6 +147,7 @@ actions!(
         SettingsPushKey,
         SettingsPushTest,
         SettingsCopyPairing,
+        SettingsRenameServer,
         OpenServers,
         FolderNext,
         FolderPrev,
@@ -428,6 +429,7 @@ fn overlay_bindings() -> Vec<KeyBinding> {
         key("a", SettingsPushKey, Some(SETTINGS)),
         key("t", SettingsPushTest, Some(SETTINGS)),
         key("y", SettingsCopyPairing, Some(SETTINGS)),
+        key("f2", SettingsRenameServer, Some(SETTINGS)),
         // Folder browser: letters type into its filter, so no single-letter keys here.
         key("down", FolderNext, Some(FOLDERS)),
         key("up", FolderPrev, Some(FOLDERS)),

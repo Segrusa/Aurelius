@@ -431,3 +431,65 @@ async fn creating_a_project_delivers_a_typed_event_and_replay_returns_it() {
     }
     stop(&root, daemon).await;
 }
+
+/// Subscribe after `after_seq`: the kinds of the replayed events, then of the
+/// live ones until the stream is quiet for half a second.
+async fn subscribe_kinds(stream: &mut BoxStream, after_seq: u64) -> Vec<EventKind> {
+    write_frame(stream, &Request::read(1, Method::EventSubscribe { after_seq })).await.unwrap();
+    let mut got = Vec::new();
+    loop {
+        match read_frame::<ServerMessage, _>(stream).await.expect("a frame this client can read").expect("the connection stays open") {
+            ServerMessage::Event(e) => got.push(e.kind),
+            ServerMessage::Response { request_id: 1, outcome } => {
+                assert!(matches!(outcome, Outcome::Ok(ResponseBody::Subscribed { .. })), "{outcome:?}");
+                break;
+            }
+            _ => {}
+        }
+    }
+    got.extend(kinds(stream).await);
+    got
+}
+
+/// The kinds of the events on `stream` until it is quiet for half a second.
+async fn kinds(stream: &mut BoxStream) -> Vec<EventKind> {
+    let mut got = Vec::new();
+    while let Ok(frame) = tokio::time::timeout(Duration::from_millis(500), read_frame::<ServerMessage, _>(stream)).await {
+        if let ServerMessage::Event(e) = frame.expect("a frame this client can read").expect("the connection stays open") {
+            got.push(e.kind);
+        }
+    }
+    got
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_that_does_not_accept_server_name_never_gets_server_renamed() {
+    let (_dir, root) = tempdir();
+    let daemon = start(&root).await;
+    let writer = connect(&root).await;
+    let base = writer.health().await.unwrap().last_seq;
+    let rename = |name: &str| Command::SetServerName(aurelius_domain::server::SetServerName { name: name.into() });
+    writer.execute(envelope(create("Before"), None)).await.unwrap();
+    writer.execute(envelope(rename("Kantoor"), None)).await.unwrap();
+
+    // An older client: no `server_name` in its hello's accepts (replay, then live).
+    let mut old = raw(&root).await;
+    let replayed = subscribe_kinds(&mut old, base).await;
+    assert!(replayed.contains(&EventKind::ProjectCreated) && !replayed.contains(&EventKind::ServerRenamed), "{replayed:?}");
+    writer.execute(envelope(rename("Thuis"), None)).await.unwrap();
+    writer.execute(envelope(create("After"), None)).await.unwrap();
+    let seen = kinds(&mut old).await;
+    assert!(!seen.contains(&EventKind::ServerRenamed), "{seen:?}");
+    assert!(seen.contains(&EventKind::ProjectCreated), "it keeps getting the others: {seen:?}");
+    assert!(matches!(ask(&mut old, &Request::read(2, Method::ServerGetHealth)).await, Outcome::Ok(ResponseBody::Health(_))), "and keeps working");
+
+    // A client that accepts it gets both changes.
+    let token = common::sign_in(&root, &common::connect_anonymous(&root).await, common::BOARD_MEMBER).await.session_token;
+    let mut new = ipc::connect(&aurelius_host::endpoint(&root)).await.unwrap();
+    let accepts = vec![aurelius_protocol::client_feature::SERVER_NAME.to_owned()];
+    let hello = Request::read(0, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts, session_token: Some(token) }));
+    assert!(matches!(ask(&mut new, &hello).await, Outcome::Ok(ResponseBody::Hello(h)) if h.host_name == "Thuis"));
+    let seen = subscribe_kinds(&mut new, base).await;
+    assert_eq!(seen.iter().filter(|k| **k == EventKind::ServerRenamed).count(), 2, "{seen:?}");
+    stop(&root, daemon).await;
+}

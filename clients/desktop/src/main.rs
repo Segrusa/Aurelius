@@ -30,6 +30,7 @@ mod screens {
     pub mod always_allow;
     pub mod app_keys;
     pub mod servers;
+    pub mod server_name;
     pub mod overlays;
     pub mod approval_plan;
     pub mod approval;
