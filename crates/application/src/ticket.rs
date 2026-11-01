@@ -23,8 +23,8 @@ use aurelius_storage::{
 use crate::task::{plan_review, ticket_line};
 use serde_json::{Value, json};
 
-/// Why `company.update { tester }` is refused until the Testing engine is built.
-pub(crate) const TESTER_NOT_YET: &str = "Setting a tester is not supported yet: the Testing step is not built on this server.";
+/// Why a paused or archived employee cannot be the tester: nobody would run the tests.
+pub(crate) const TESTER_NOT_ACTIVE: &str = "The tester must be an active employee.";
 
 /// The board member of the connection, or `board_member_required`.
 pub(crate) fn require_board_member(ctx: &CommandContext) -> Result<UserId, AppError> {
@@ -586,13 +586,10 @@ impl CommandService {
     }
 
     fn update_company(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: UpdateCompany, by: Actor) -> Result<Committed, AppError> {
-        // The wire of the tester is frozen (AUR-T5-P); storing it comes with the Testing engine (AUR-T5-F).
-        if cmd.tester.is_some() {
-            return Err(AppError::new(aurelius_domain::ErrorCode::Validation, TESTER_NOT_YET));
-        }
         let name = cmd.valid_name().map_err(domain_error)?;
         let dispatcher = cmd.dispatcher.map(|d| d.employee_id);
-        if name.is_none() && dispatcher.is_none() {
+        let tester = cmd.tester.map(|t| t.employee_id);
+        if name.is_none() && dispatcher.is_none() && tester.is_none() {
             return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
         }
         let expected = envelope.expected_version;
@@ -600,13 +597,20 @@ impl CommandService {
             if let Some(Some(employee)) = dispatcher {
                 check!(check_employee(tx, employee)?);
             }
+            // The tester runs the suite as soon as a card reports: it must be at work now.
+            if let Some(Some(employee)) = tester {
+                check!(check_employee(tx, employee)?);
+                if company_store::employee_status(tx, employee)?.as_deref() != Some(LifecycleStatus::Active.as_str()) {
+                    return Ok(Err(AppError::new(aurelius_domain::ErrorCode::Validation, TESTER_NOT_ACTIVE)));
+                }
+            }
             let company = company_store::get(tx)?;
             if let Some(expected) = expected {
                 if expected != company.version {
                     return rejected(DomainError::VersionConflict { expected, actual: company.version });
                 }
             }
-            let version = company_store::update(tx, name.as_deref(), dispatcher)?;
+            let version = company_store::update(tx, name.as_deref(), dispatcher, tester)?;
             let previous = aurelius_storage::conversations::next_version(tx, "company", &company.id)? - 1;
             let mut e = Events::new(&base, "company", company.id, None, previous);
             let mut extra = json!({ "by": by });
@@ -615,6 +619,9 @@ impl CommandService {
             }
             if let Some(choice) = dispatcher {
                 extra["dispatcher_employee_id"] = json!(choice);
+            }
+            if let Some(choice) = tester {
+                extra["tester_employee_id"] = json!(choice);
             }
             e.push(tx, EventKind::CompanyUpdated, extra)?;
             Ok(Ok((CommandResult::CompanyUpdated { version }, e.notices)))

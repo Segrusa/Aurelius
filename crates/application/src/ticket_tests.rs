@@ -407,17 +407,43 @@ fn the_dispatcher_is_set_on_the_company_and_per_project() {
 }
 
 #[test]
-fn a_tester_is_refused_until_the_testing_step_is_built_and_changes_nothing() {
+fn the_tester_is_an_active_employee_set_by_a_board_member_with_an_event_and_a_receipt() {
     let s = setup();
     let pulse = employee(&s, "Pulse", "active");
-    let set = |name: Option<&str>| Command::UpdateCompany(UpdateCompany { name: name.map(str::to_owned), dispatcher: None, tester: Some(aurelius_domain::company::SetTester { employee_id: Some(pulse) }) });
-    for command in [set(None), set(Some("Acme"))] {
-        let refused = run(&s, command).unwrap_err();
-        assert_eq!((refused.code, refused.message.as_str()), (ErrorCode::Validation, crate::ticket::TESTER_NOT_YET));
-    }
+    let resting = employee(&s, "Resting", "paused");
+    let gone = employee(&s, "Gone", "archived");
+    let set = |who: Option<EmployeeId>| Command::UpdateCompany(UpdateCompany { name: None, dispatcher: None, tester: Some(aurelius_domain::company::SetTester { employee_id: who }) });
+    // As for the dispatcher: unknown and archived are refused; a paused one too (it would never test).
+    assert_eq!(run(&s, set(Some(EmployeeId::new()))).unwrap_err().code, ErrorCode::NotFound);
+    assert_eq!(run(&s, set(Some(gone))).unwrap_err().code, ErrorCode::Validation);
+    let paused = run(&s, set(Some(resting))).unwrap_err();
+    assert_eq!((paused.code, paused.message.as_str()), (ErrorCode::Validation, crate::ticket::TESTER_NOT_ACTIVE));
+    assert_eq!(run_as(&s, None, set(Some(pulse)), None).unwrap_err().code, ErrorCode::BoardMemberRequired);
+    assert_eq!(s.service.store().read(company_store::get).unwrap().version, 1, "nothing changed yet");
+
+    // Set: one event, the version counts up once; the same command again is its receipt.
+    let command_id = CommandId::new();
+    let once = || s.service.execute(&ctx(Some(s.user)), CommandEnvelope { command_id, expected_version: None, command: set(Some(pulse)) }).unwrap().receipt.result;
+    let first = once();
+    assert!(matches!(first, CommandResult::CompanyUpdated { version: 2 }), "{first:?}");
+    assert_eq!(once(), first, "replayed from its receipt");
     let company = s.service.store().read(company_store::get).unwrap();
-    assert_eq!((company.version, company.tester_employee_id), (1, None));
-    assert_ne!(company.name, "Acme");
+    assert_eq!((company.version, company.tester_employee_id, company.dispatcher_employee_id), (2, Some(pulse), None));
+    assert_eq!(s.service.store().read(company_store::active_tester).unwrap(), Some(pulse));
+    let meta: String = s
+        .service
+        .store()
+        .read(|c| Ok(c.query_row("SELECT metadata_json FROM events WHERE type = 'company.updated' ORDER BY seq DESC LIMIT 1", [], |r| r.get(0))?))
+        .unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&meta).unwrap();
+    assert_eq!(meta["tester_employee_id"], serde_json::json!(pulse));
+    assert_eq!(meta["by"], serde_json::json!({ "kind": "board_member", "user_id": s.user }));
+    let events: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM events WHERE type = 'company.updated'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(events, 1);
+
+    // Cleared: no tester, so no Testing step.
+    run(&s, set(None)).unwrap();
+    assert_eq!(s.service.store().read(company_store::get).unwrap().tester_employee_id, None);
 }
 
 #[test]

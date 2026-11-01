@@ -22,30 +22,23 @@ pub fn get(conn: &Connection) -> Result<CompanyView, StorageError> {
     .ok_or_else(|| StorageError::Rejected("there is no company".into()))
 }
 
-/// Change the name and/or the dispatcher (`Some(None)` clears it); returns the new version.
-pub fn update(tx: &Transaction<'_>, name: Option<&str>, dispatcher: Option<Option<EmployeeId>>) -> Result<u64, StorageError> {
+/// Change the name, the dispatcher and/or the tester (`Some(None)` clears
+/// one) in one step; returns the new version.
+pub fn update(tx: &Transaction<'_>, name: Option<&str>, dispatcher: Option<Option<EmployeeId>>, tester: Option<Option<EmployeeId>>) -> Result<u64, StorageError> {
     let current = get(tx)?;
     let version = current.version + 1;
-    let dispatcher = match dispatcher {
-        Some(choice) => choice,
-        None => current.dispatcher_employee_id,
-    };
+    let dispatcher = dispatcher.unwrap_or(current.dispatcher_employee_id);
+    let tester = tester.unwrap_or(current.tester_employee_id);
     tx.execute(
-        "UPDATE company SET name = ?2, dispatcher_employee_id = ?3, version = ?4, updated_at_ms = ?5 WHERE id = ?1",
-        params![current.id, name.unwrap_or(&current.name), dispatcher.map(|d| d.to_string()), version as i64, now_ms()],
+        "UPDATE company SET name = ?2, dispatcher_employee_id = ?3, tester_employee_id = ?4, version = ?5, updated_at_ms = ?6 WHERE id = ?1",
+        params![current.id, name.unwrap_or(&current.name), dispatcher.map(|d| d.to_string()), tester.map(|t| t.to_string()), version as i64, now_ms()],
     )?;
     Ok(version)
 }
 
 /// Choose (or clear) the company's tester; returns the company's new version.
 pub fn set_tester(tx: &Transaction<'_>, tester: Option<EmployeeId>) -> Result<u64, StorageError> {
-    let current = get(tx)?;
-    let version = current.version + 1;
-    tx.execute(
-        "UPDATE company SET tester_employee_id = ?2, version = ?3, updated_at_ms = ?4 WHERE id = ?1",
-        params![current.id, tester.map(|t| t.to_string()), version as i64, now_ms()],
-    )?;
-    Ok(version)
+    update(tx, None, None, Some(tester))
 }
 
 /// The company's tester while it is an active employee; none without one (or

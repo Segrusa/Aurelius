@@ -247,7 +247,7 @@ fn the_dispatcher_is_the_projects_else_the_companys_while_active() {
         .unwrap();
     let atlas = f.atlas;
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), None, "B5: none yet");
-    f.store.write(move |tx| company::update(tx, Some("Segrusa"), Some(Some(orion)))).unwrap();
+    f.store.write(move |tx| company::update(tx, Some("Segrusa"), Some(Some(orion)), None)).unwrap();
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), Some(orion));
     let version = f.store.write(move |tx| company::set_project_dispatcher(tx, atlas, Some(forge))).unwrap();
     assert_eq!(version, 2);
