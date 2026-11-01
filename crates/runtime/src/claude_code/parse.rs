@@ -710,6 +710,15 @@ mod tests {
     }
 
     #[test]
+    fn the_bridge_vault_tools_are_part_of_a_work_profile() {
+        let bridge = crate::ApprovalBridge { program: "x".into(), args: vec![] };
+        let p = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        // The bridge offers these in every run (AUR-MU-04).
+        let init = r#"{"type":"system","subtype":"init","tools":["Bash","mcp__aurelius__approve","mcp__aurelius__vault_list","mcp__aurelius__vault_read"],"mcp_servers":[{"name":"aurelius"}]}"#;
+        assert!(StreamState::for_profile(&p).feed(init).is_ok());
+    }
+
+    #[test]
     fn artifacts_add_their_tools_only_when_on() {
         let bridge = || crate::ApprovalBridge { program: "x".into(), args: vec![] };
         let profile = |artifacts| ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts };
