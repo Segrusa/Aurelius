@@ -1236,7 +1236,7 @@ pub fn expected_version_for(command: &Command, version: Option<u64>) -> Option<u
 
 /// An update that changes nothing but the ticket it names.
 pub fn empty_update(ticket_id: TicketId) -> ticket::UpdateTicket {
-    ticket::UpdateTicket { confirm_secret: false, ticket_id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }
+    ticket::UpdateTicket { confirm_secret: false, ticket_id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }
 }
 
 // ---- Behaviour --------------------------------------------------------------

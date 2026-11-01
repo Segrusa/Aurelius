@@ -32,7 +32,7 @@ fn writes() -> Vec<Command> {
     let t = TicketId::new();
     vec![
         Command::CreateTicket(create(None)),
-        Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }),
+        Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }),
         Command::MoveTicket(MoveTicket { ticket_id: t, column_id: BoardColumnId::new(), before_ticket_id: None }),
         Command::StartTicket(StartTicket { ticket_id: t, employee_id: None }),
         Command::AssignTicket(AssignTicket { ticket_id: t, employee_id: Some(EmployeeId::new()), reason: None }),
@@ -191,4 +191,19 @@ fn a_system_line_is_an_optional_field_never_a_new_role() {
     // The roles stay user and assistant.
     let roles = serde_json::to_value(schemars::schema_for!(aurelius_domain::conversation::MessageRole)).unwrap().to_string();
     assert!(!roles.contains("\"system\""), "{roles}");
+}
+
+#[test]
+fn files_added_to_a_ticket_ride_on_ticket_update_with_the_same_rights() {
+    assert!(crate::rpc::FEATURES.contains(&crate::rpc::feature::TICKET_ADD_FILES));
+    let parsed: Request = serde_json::from_value(serde_json::json!({
+        "protocol": 5, "request_id": 1, "idempotency_key": CommandId::new(), "method": "ticket.update",
+        "params": { "ticket_id": TicketId::new(), "add_files": ["/inbox/shot.png"] }
+    }))
+    .unwrap();
+    let Call::Write(WriteMethod::Domain(Command::UpdateTicket(update))) = &parsed.call else { panic!("ticket.update") };
+    assert_eq!(update.add_files, Some(vec!["/inbox/shot.png".to_string()]));
+    assert_eq!(required(&parsed.call), Needs::Cap(Capability::TaskControl));
+    let plain = Call::Write(WriteMethod::Domain(writes().remove(1)));
+    assert_eq!(crate::app::required(&parsed.call), crate::app::required(&plain), "apps get what they get for any ticket.update");
 }
