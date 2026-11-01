@@ -884,7 +884,10 @@ pub fn ticket_channel_name(number: u32, title: &str) -> String {
 
 /// A channel of the Team chat (`channel.list`, feature `team_channels`): the
 /// general one (no project), one per project, and (feature `ticket_channels`,
-/// only for a connection that accepts it) one per ticket.
+/// only for a connection that accepts it) one per ticket. A closed ticket's
+/// channel (ticket on Done or archived) reports `unread` and `mentions` 0, so old
+/// closed tickets never light up the Team badge; an archived project's channel
+/// still counts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ChannelView {
     pub conversation_id: ConversationId,
@@ -893,7 +896,7 @@ pub struct ChannelView {
     pub project_id: Option<ProjectId>,
     /// "General" or the project's name.
     pub name: String,
-    /// Messages since the last one read.
+    /// Messages since the last one read; 0 for a closed ticket's channel.
     pub unread: u32,
     /// Of those, the ones that name a board member with `@Name` (B8: the badge counts these).
     pub mentions: u32,

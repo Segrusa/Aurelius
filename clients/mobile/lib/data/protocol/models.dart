@@ -1326,7 +1326,10 @@ enum ChannelKind {
 
 /// A channel of the Team chat (`channel.list`, feature `team_channels`): the
 /// general one (no project), one per project, and (feature `ticket_channels`,
-/// only for a connection that accepts it) one per ticket.
+/// only for a connection that accepts it) one per ticket. A closed ticket's
+/// channel (ticket on Done or archived) reports `unread` and `mentions` 0, so old
+/// closed tickets never light up the Team badge; an archived project's channel
+/// still counts.
 final class ChannelView {
   const ChannelView({
     required this.archived,
@@ -1372,7 +1375,7 @@ final class ChannelView {
   final String? ticketId;
   /// A ticket's channel: the ticket's number (`#N`).
   final int? ticketNumber;
-  /// Messages since the last one read.
+  /// Messages since the last one read; 0 for a closed ticket's channel.
   final int unread;
 
   factory ChannelView.fromJson(Map<String, dynamic> json) => ChannelView(

@@ -831,7 +831,8 @@ pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domai
                     }
                     let (unread, mentions, read_through, member) = match &reader {
                         Some((user, username)) => {
-                            let (unread, mentions) = discussions::unread(c, *user, username, t.conversation_id, &read_text)?;
+                            // A closed ticket's channel counts toward no badge (archived project channels still do).
+                            let (unread, mentions) = if t.archived { (0, 0) } else { discussions::unread(c, *user, username, t.conversation_id, &read_text)? };
                             let member = discussions::members(c, t.conversation_id)?.contains(&Member::User(*user));
                             (unread, mentions, discussions::read_through(c, *user, t.conversation_id)?, member)
                         }
