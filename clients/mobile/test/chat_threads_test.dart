@@ -11,7 +11,7 @@ const _lena = UserView(id: 'u-2', username: 'lena', createdAtMs: 0);
 final _now = DateTime(2026, 11, 1, 12);
 int _ms(DateTime at) => at.millisecondsSinceEpoch;
 
-MessageView _post(String id, {UserView? by, String? author, int at = 0, String? threadParent, int? replies, int? lastMs, SystemLine? system, String? update, MessageStatus status = MessageStatus.complete, List<ReactionView> reactions = const []}) => MessageView(
+MessageView _post(String id, {UserView? by, String? author, int at = 0, String? threadParent, int? replies, int? lastMs, List<String> repliers = const [], SystemLine? system, String? update, MessageStatus status = MessageStatus.complete, List<ReactionView> reactions = const []}) => MessageView(
       activity: const [],
       author: author,
       authorUser: by,
@@ -28,6 +28,7 @@ MessageView _post(String id, {UserView? by, String? author, int at = 0, String? 
       text: 'text',
       threadLastReplyMs: lastMs,
       threadParent: threadParent,
+      threadRepliers: repliers,
       threadReplyCount: replies,
       update: by != null || system != null ? null : update,
       uploads: const [],
@@ -67,16 +68,18 @@ void main() {
       expect(threadLine(_post('m1', by: _ada, replies: 2), _now), '↳ 2 replies');
     });
 
-    test('the repliers are the latest first, each once, at most three', () {
-      final replies = [
-        _post('r1', by: _lena, threadParent: 'm1'),
-        _post('r2', author: 'Forge', threadParent: 'm1'),
-        _post('r3', by: _lena, threadParent: 'm1'),
-        _post('r4', author: 'Orion', threadParent: 'm1'),
-        _post('r5', by: _ada, threadParent: 'm1'),
-      ];
-      expect(threadRepliers(replies), ['ada', 'Orion', 'lena']);
-      expect(threadRepliers(const []), isEmpty);
+    test("the repliers are the root's own, in its order, at most three; a name that is no employee is a board member", () {
+      const employees = ['Orion', 'Forge'];
+      final root = _post('m1', by: _ada, replies: 5, repliers: const ['ada', 'Orion', 'lena', 'Forge']);
+      expect(threadRepliers(root, employees), [('ada', true), ('Orion', false), ('lena', true)]);
+      expect(threadRepliers(_post('m2', by: _ada, replies: 1, repliers: const ['Forge']), employees), [('Forge', false)]);
+      expect(threadRepliers(_post('m3', by: _ada, replies: 2), employees), isEmpty, reason: 'an older server sends no repliers: no monograms');
+      expect(threadRepliers(_post('m4', by: _ada, replies: 1, repliers: const ['Pulse']), const []), [('Pulse', true)], reason: 'a name the company does not know counts as a board member');
+    });
+
+    test("a reaction keeps the root's repliers", () {
+      final root = _post('m1', by: _ada, replies: 2, repliers: const ['lena', 'Forge']);
+      expect(root.withReactions(const [ReactionView(emoji: '✓', count: 1, mine: true, by: ['ada'])]).threadRepliers, ['lena', 'Forge']);
     });
 
     test('the thread screen is titled after its channel', () {

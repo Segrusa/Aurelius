@@ -42,15 +42,11 @@ class ChannelScreen extends StatelessWidget {
   }
 
   /// Pushes the thread of [root] (AUR-CHAT-002 §5); [context] is under the
-  /// channel's [ChatBloc], which learns who replied and reads the root's
-  /// counters again when the thread closes.
+  /// channel's [ChatBloc], which reads the root's counters and repliers again
+  /// when the thread closes.
   void _openThread(BuildContext context, ChannelView live, MessageView root) {
     final bloc = context.read<ChatBloc>();
-    void seen(ThreadSnapshot thread) {
-      if (!bloc.isClosed) bloc.add(ChatThreadSeen(root.id, threadRepliers(thread.replies)));
-    }
-
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ThreadScreen(channel: live, root: root, onRead: seen))).then((_) {
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ThreadScreen(channel: live, root: root))).then((_) {
       if (!bloc.isClosed) bloc.add(const ChatRefreshed());
     });
   }

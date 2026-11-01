@@ -228,6 +228,7 @@ extension MessageViewState on MessageView {
         text: text,
         threadLastReplyMs: threadLastReplyMs,
         threadParent: threadParent,
+        threadRepliers: threadRepliers,
         threadReplyCount: threadReplyCount,
         threadUnread: threadUnread,
         update: update,

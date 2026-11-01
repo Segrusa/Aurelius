@@ -50,15 +50,6 @@ class ChatReacted extends ChatEvent {
   final bool on;
 }
 
-/// A thread of this channel was read (feature `chat_threads`): who replied in
-/// it, for the monograms under its root (the root's counters do not say).
-class ChatThreadSeen extends ChatEvent {
-  const ChatThreadSeen(this.rootId, this.repliers);
-
-  final String rootId;
-  final List<String> repliers;
-}
-
 class _AppendReceived extends ChatEvent {
   const _AppendReceived(this.append);
 
@@ -305,7 +296,6 @@ class ChatState extends Equatable {
     this.boardMembers = const [],
     this.secretCheck,
     this.closed = false,
-    this.repliers = const {},
   });
 
   final bool loading;
@@ -362,9 +352,6 @@ class ChatState extends Equatable {
   /// shows in place of the composer until [ChatReopened].
   final bool closed;
 
-  /// Who replied in the threads read here, by root (see [ChatThreadSeen]).
-  final Map<String, List<String>> repliers;
-
   /// The run that is streaming now, if any.
   MessageView? get streaming {
     for (final m in messages.reversed) {
@@ -408,7 +395,6 @@ class ChatState extends Equatable {
     List<String>? boardMembers,
     String? secretCheck,
     bool? closed,
-    Map<String, List<String>>? repliers,
   }) =>
       ChatState(
         loading: loading ?? this.loading,
@@ -432,11 +418,10 @@ class ChatState extends Equatable {
         boardMembers: boardMembers ?? this.boardMembers,
         secretCheck: secretCheck,
         closed: closed ?? this.closed,
-        repliers: repliers ?? this.repliers,
       );
 
   @override
-  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers, secretCheck, closed, repliers];
+  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers, secretCheck, closed];
 }
 
 /// One conversation: an employee's task conversation when [employeeId] is set
@@ -451,7 +436,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         channelTicket = null,
         ticketId = null,
         threadRoot = null,
-        onThread = null,
         runAuthor = null,
         onRead = null,
         liveTimeout = Duration.zero,
@@ -472,7 +456,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         projectId = null,
         ticketId = null,
         threadRoot = null,
-        onThread = null,
         group = true,
         super(const ChatState()) {
     _init(true);
@@ -487,7 +470,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         channel = null,
         channelTicket = null,
         threadRoot = null,
-        onThread = null,
         onRead = null,
         group = true,
         super(ChatState(conversationId: conversationId)) {
@@ -498,8 +480,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// §5): the message [threadRoot] and its replies (`thread.read`, which marks
   /// the thread read), written with `group_chat.send { channel, thread_parent }`.
   /// It works as the channel: answers stream into it under their name, and
-  /// only the ones of this thread. [onThread] hears each read of it.
-  ChatBloc.thread(this._repository, {required String this.threadRoot, this.channel, this.channelTicket, this.runAuthor, this.liveTimeout = const Duration(seconds: 3), this.onRead, this.onThread})
+  /// only the ones of this thread.
+  ChatBloc.thread(this._repository, {required String this.threadRoot, this.channel, this.channelTicket, this.runAuthor, this.liveTimeout = const Duration(seconds: 3), this.onRead})
       : employeeId = null,
         projectId = null,
         ticketId = null,
@@ -538,7 +520,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<ChatNoticeShown>((e, emit) => emit(state.copyWith()));
     on<ChatReopened>((e, emit) => emit(state.copyWith(closed: false)));
     on<ChatReacted>(_react, transformer: sequential());
-    on<ChatThreadSeen>((e, emit) => emit(state.copyWith(repliers: {...state.repliers, e.rootId: e.repliers})));
     on<ChatShown>((e, emit) {
       _shown = e.visible;
       if (_shown && _stale) {
@@ -581,9 +562,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   /// The message whose thread this is; null for every other chat.
   final String? threadRoot;
-
-  /// See [ChatBloc.thread].
-  final void Function(ThreadSnapshot thread)? onThread;
 
   /// See [ChatBloc.group].
   final void Function()? onRead;
@@ -712,7 +690,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         clearLoadError: true,
         boardMembers: !_membersRead ? await _boardMembers() : null,
       ));
-      onThread?.call(thread);
       onRead?.call();
     } on DisconnectedException catch (e) {
       emit(state.copyWith(loading: false, loadError: state.conversationId == null ? e.message : null));

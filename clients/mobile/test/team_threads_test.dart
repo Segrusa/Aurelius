@@ -77,7 +77,7 @@ int _today(int minutes) {
   return start.add(Duration(minutes: minutes)).millisecondsSinceEpoch;
 }
 
-MessageView _msg(String id, String text, {UserView? by, String? author, required int at, int ordinal = 0, String? threadParent, int? replies, int? lastMs, int? unread, List<ReactionView> reactions = const []}) => MessageView(
+MessageView _msg(String id, String text, {UserView? by, String? author, required int at, int ordinal = 0, String? threadParent, int? replies, int? lastMs, int? unread, List<String> repliers = const [], List<ReactionView> reactions = const []}) => MessageView(
       activity: const [],
       author: author,
       authorUser: by,
@@ -94,6 +94,7 @@ MessageView _msg(String id, String text, {UserView? by, String? author, required
       text: text,
       threadLastReplyMs: lastMs,
       threadParent: threadParent,
+      threadRepliers: repliers,
       threadReplyCount: replies,
       threadUnread: unread,
       update: by != null ? null : 'group',
@@ -103,7 +104,7 @@ MessageView _msg(String id, String text, {UserView? by, String? author, required
 const _tick = ReactionView(emoji: '✓', count: 2, mine: true, by: ['ada', 'lena']);
 const _eyes = ReactionView(emoji: '👀', count: 1, mine: false, by: ['Forge']);
 
-final _root = _msg('m1', 'Please keep the argon2 params configurable.', by: _lena, at: _today(0), ordinal: 1, replies: 3, lastMs: _today(5), unread: 2, reactions: const [_tick, _eyes]);
+final _root = _msg('m1', 'Please keep the argon2 params configurable.', by: _lena, at: _today(0), ordinal: 1, replies: 3, lastMs: _today(5), unread: 2, repliers: const ['Orion', 'lena', 'Forge'], reactions: const [_tick, _eyes]);
 final _plain = _msg('m2', 'Done. The cost is in config.', author: 'Forge', at: _today(10), ordinal: 2);
 final _replies = [
   _msg('r1', 'Which ones exactly?', author: 'Forge', at: _today(2), ordinal: 3, threadParent: 'm1'),
@@ -320,7 +321,18 @@ void main() {
       expect(find.text('Reply… · @ to mention'), findsOneWidget);
     });
 
-    testWidgets('back in the channel the line shows who replied and the counters are read again', (tester) async {
+    testWidgets("the line shows who replied from the root's repliers, before the thread was ever opened", (tester) async {
+      await pump(tester);
+      await open(tester, 'c-42');
+      final monograms = find.descendant(of: find.byKey(const ValueKey('thread-line-m1')), matching: find.byType(Monogram));
+      expect(monograms, findsNWidgets(3), reason: 'Orion, lena and Forge, the latest first');
+      final shown = tester.widgetList<Monogram>(monograms).toList();
+      expect([for (final m in shown) m.letter], ['O', 'L', 'F']);
+      expect([for (final m in shown) m.member], [false, true, false], reason: 'lena is no employee, so a board member');
+      verifyNever(() => repo.thread('m1'));
+    });
+
+    testWidgets('back in the channel the counters are read again', (tester) async {
       await pump(tester);
       await open(tester, 'c-42');
       await openThread(tester);
@@ -328,8 +340,7 @@ void main() {
       Navigator.of(tester.element(find.byKey(const ValueKey('thread-title')))).pop();
       await board.settleBoard(tester);
       verify(() => repo.groupChat(channel: 'c-42')).called(greaterThan(0));
-      final monograms = find.descendant(of: find.byKey(const ValueKey('thread-line-m1')), matching: find.byType(Monogram));
-      expect(monograms, findsNWidgets(3), reason: 'Orion, lena and Forge, the latest first');
+      expect(find.byKey(const ValueKey('thread-line-m1')), findsOneWidget);
     });
 
     testWidgets("a reply's event reads the open thread again; its answer streams into the thread", (tester) async {

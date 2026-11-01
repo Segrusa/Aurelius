@@ -448,7 +448,8 @@ class _MessagesState extends State<_Messages> {
   Widget _channelList(ChatState state, ChannelChatOptions channel, List<ApprovalView> approvals, List<String> mainChats) {
     final company = context.watch<CompanyBloc>().state;
     final me = _me;
-    final known = [for (final p in mentionables(company)) p.$1, ...state.boardMembers];
+    final employees = [for (final p in mentionables(company)) p.$1];
+    final known = [...employees, ...state.boardMembers];
     final source = widget.config.source;
     final made = source == null ? const <String, TicketRef>{} : ticketsFromMessages(state.messages);
     final lastSummary = state.messages.where((m) => m.system?.kind == SystemLineKind.summary || m.system?.kind == SystemLineKind.summaryFailed).lastOrNull?.id;
@@ -475,7 +476,7 @@ class _MessagesState extends State<_Messages> {
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         child,
         if (reactions) ReactionsRow(message: m, writable: writable, onToggle: (emoji, on) => bloc.add(ChatReacted(m.id, emoji, on: on)), onPick: () => _react(context, bloc, m)),
-        if (line != null) ThreadLine(root: m, label: line, repliers: state.repliers[m.id] ?? const [], onTap: () => openThread!(context, m)),
+        if (line != null) ThreadLine(root: m, label: line, repliers: threadRepliers(m, employees), onTap: () => openThread!(context, m)),
       ]);
     }
 
@@ -805,15 +806,16 @@ class ReactionsRow extends StatelessWidget {
 }
 
 /// The line under a thread's root in its channel (§5): "↳ 3 replies · last
-/// 11:02" in ACCENT_TEXT, the monograms of up to three who replied (known once
-/// the thread was read here), and a marker while replies are unread. A tap
-/// opens the thread.
+/// 11:02" in ACCENT_TEXT, the monograms of up to three who replied (the
+/// server's `thread_repliers`; a board member's is outlined, as on the
+/// desktop), and a marker while replies are unread. A tap opens the thread.
 class ThreadLine extends StatelessWidget {
   const ThreadLine({super.key, required this.root, required this.label, this.repliers = const [], required this.onTap});
 
   final MessageView root;
   final String label;
-  final List<String> repliers;
+  /// Who replied, the latest first, with whether each is a board member (see [threadRepliers]).
+  final List<(String, bool)> repliers;
   final VoidCallback onTap;
 
   @override
@@ -829,8 +831,8 @@ class ThreadLine extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 36),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            for (final name in repliers.take(threadMonogramMax))
-              Padding(padding: const EdgeInsets.only(right: 3), child: Monogram(name.characters.first.toUpperCase(), size: 16)),
+            for (final (name, member) in repliers.take(threadMonogramMax))
+              Padding(padding: const EdgeInsets.only(right: 3), child: Monogram(name.characters.first.toUpperCase(), size: 16, member: member)),
             if (repliers.isNotEmpty) const SizedBox(width: 3),
             Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Tokens.accentText))),
             if (unread > 0)

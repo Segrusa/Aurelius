@@ -305,17 +305,15 @@ String? threadLine(MessageView root, DateTime now) {
   return '↳ $replies · last $when';
 }
 
-/// Who wrote a thread's replies, the latest first, each once and at most
-/// [threadMonogramMax] (§5). [me] names a reply of the reader without a user.
-List<String> threadRepliers(List<MessageView> replies, {String? me}) {
-  final out = <String>[];
-  for (final r in replies.reversed) {
-    final name = r.isUser ? (r.authorUser?.username ?? me) : r.author?.trim();
-    if (name == null || name.isEmpty || out.contains(name)) continue;
-    out.add(name);
-    if (out.length == threadMonogramMax) break;
-  }
-  return out;
+/// Who replied under [root] (the server's `thread_repliers`, the latest
+/// first), at most [threadMonogramMax] (§5): each name with whether it is a
+/// board member, which is any name that is none of [employees] (as on the
+/// desktop).
+List<(String, bool)> threadRepliers(MessageView root, Iterable<String> employees) {
+  final known = employees.toSet();
+  return [
+    for (final name in root.threadRepliers.where((n) => n.trim().isNotEmpty).take(threadMonogramMax)) (name, !known.contains(name)),
+  ];
 }
 
 /// [reactions] after the reader's own [emoji] went [on] or off (§5), as the

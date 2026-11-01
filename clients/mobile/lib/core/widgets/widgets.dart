@@ -88,20 +88,25 @@ class EmptyState extends StatelessWidget {
 }
 
 /// An employee's letter in a filled circle; the accent tint while working.
+/// A [member] (a board member) gets an outlined circle instead, as on the
+/// desktop.
 class Monogram extends StatelessWidget {
-  const Monogram(this.letter, {super.key, this.size = 36, this.active = false});
+  const Monogram(this.letter, {super.key, this.size = 36, this.active = false, this.member = false});
 
   final String letter;
   final double size;
   final bool active;
+  final bool member;
 
   @override
   Widget build(BuildContext context) => Container(
         width: size,
         height: size,
         alignment: Alignment.center,
-        decoration: BoxDecoration(shape: BoxShape.circle, color: active ? Tokens.accentTint : Tokens.fill),
-        child: Text(letter, style: TextStyle(fontSize: size * 0.43, fontWeight: FontWeight.w600, color: active ? Tokens.accent : Tokens.label)),
+        decoration: member
+            ? BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Tokens.text2))
+            : BoxDecoration(shape: BoxShape.circle, color: active ? Tokens.accentTint : Tokens.fill),
+        child: Text(letter, style: TextStyle(fontSize: size * 0.43, fontWeight: FontWeight.w600, color: active ? Tokens.accent : (member ? Tokens.text2 : Tokens.label))),
       );
 }
 

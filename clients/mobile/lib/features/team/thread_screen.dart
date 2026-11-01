@@ -17,14 +17,12 @@ import 'team_page.dart';
 /// `chat_threads`): its own pushed screen "Thread · #channel" with the root
 /// message on top, its replies and a composer that replies in the thread
 /// (`thread_parent`). Read-only when its channel is closed (`read_only`).
-/// [onRead] hears each read of the thread (who replied, for the channel's line).
 class ThreadScreen extends StatelessWidget {
-  const ThreadScreen({super.key, required this.channel, required this.root, this.onRead});
+  const ThreadScreen({super.key, required this.channel, required this.root});
 
   /// The channel as it was when the thread opened; the list's newer view of it wins.
   final ChannelView channel;
   final MessageView root;
-  final void Function(ThreadSnapshot thread)? onRead;
 
   void _readChannels(BuildContext context) {
     if (!context.mounted) return;
@@ -55,7 +53,6 @@ class ThreadScreen extends StatelessWidget {
           channel: general ? null : id,
           channelTicket: ticketId,
           onRead: () => _readChannels(context),
-          onThread: onRead,
         ),
         child: BlocListener<ChannelsBloc, ChannelsState>(
           // The ticket left Done (or the project came back): replying works again.
