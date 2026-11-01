@@ -202,8 +202,8 @@ void main() {
       expect(shape(SystemLineKind.ticketCreated, action: 'opened').shape, '+');
       expect(shape(SystemLineKind.moved, action: 'reopened').shape, '↺');
       expect(shape(SystemLineKind.plan, action: 'approved').shape, '✓');
-      expect(shape(SystemLineKind.plan, action: 'adjusted').shape, '↩\uFE0E');
-      expect(shape(SystemLineKind.review, action: 'sent_back').shape, '↩\uFE0E');
+      expect(shape(SystemLineKind.plan, action: 'adjusted').shape, '↶');
+      expect(shape(SystemLineKind.review, action: 'sent_back').shape, '↶');
       expect(shape(SystemLineKind.moved, action: 'tested_passed'), (shape: '✓', negative: false));
       expect(shape(SystemLineKind.moved, action: 'tested_failed'), (shape: '✕', negative: true));
     });
@@ -212,17 +212,32 @@ void main() {
       expect(shape(SystemLineKind.moved).shape, '→');
       expect(shape(SystemLineKind.done).shape, '→');
       expect(shape(SystemLineKind.moved, action: 'something_new').shape, '→');
-      expect(shape(SystemLineKind.summaryFailed), (shape: '⚠\uFE0E', negative: true));
+      expect(shape(SystemLineKind.summaryFailed), (shape: '!', negative: true));
     });
 
-    test('a glyph that also has a colour emoji form is drawn as text', () {
-      for (final s in [shape(SystemLineKind.plan, action: 'adjusted'), shape(SystemLineKind.reported, text: 'Forge reported'), shape(SystemLineKind.summaryFailed), shape(SystemLineKind.limit)]) {
-        expect(s.shape, endsWith('\uFE0E'), reason: s.shape);
+    test('no shape uses a glyph that has an emoji form', () {
+      const actions = [null, 'opened', 'joined', 'closed', 'reopened', 'approved', 'tested_passed', 'adjusted', 'sent_back', 'tested_failed'];
+      for (final kind in SystemLineKind.values) {
+        for (final action in actions) {
+          for (final text in ['Forge reported', 'Forge failed']) {
+            final s = shape(kind, action: action, text: text).shape;
+            for (final rune in s.runes) {
+              expect(_hasEmojiForm(rune), isFalse, reason: '$kind/$action: U+${rune.toRadixString(16).toUpperCase()} in "$s"');
+            }
+          }
+        }
+      }
+      expect(shape(SystemLineKind.limit).shape, '‖');
+    });
+
+    test('the emoji guard knows the glyphs it replaced', () {
+      for (final glyph in ['↩', '⏸', '▶', '⚠', '\uFE0F', '\uFE0E', '😀']) {
+        expect(_hasEmojiForm(glyph.runes.single), isTrue, reason: glyph);
       }
     });
 
     test('a reported run result is a run line, and a failed one is negative', () {
-      expect(shape(SystemLineKind.reported, text: 'Forge reported on task 12'), (shape: '▶\uFE0E', negative: false));
+      expect(shape(SystemLineKind.reported, text: 'Forge reported on task 12'), (shape: '►', negative: false));
       expect(shape(SystemLineKind.reported, text: 'Forge failed task 12'), (shape: '✕', negative: true));
     });
 
@@ -275,3 +290,28 @@ void main() {
     });
   });
 }
+
+/// Code points below U+1F000 with an emoji form (Unicode emoji-data.txt,
+/// `Emoji=Yes`, plus the variation selectors), as `[first, last]` ranges.
+/// The colour emoji fallback font draws these in colour even after U+FE0E.
+const _emojiRanges = [
+  [0x00A9, 0x00A9], [0x00AE, 0x00AE], [0x203C, 0x203C], [0x2049, 0x2049], [0x2122, 0x2122], [0x2139, 0x2139],
+  [0x2194, 0x2199], [0x21A9, 0x21AA], [0x231A, 0x231B], [0x2328, 0x2328], [0x23CF, 0x23CF], [0x23E9, 0x23F3],
+  [0x23F8, 0x23FA], [0x24C2, 0x24C2], [0x25AA, 0x25AB], [0x25B6, 0x25B6], [0x25C0, 0x25C0], [0x25FB, 0x25FE],
+  [0x2600, 0x2604], [0x260E, 0x260E], [0x2611, 0x2611], [0x2614, 0x2615], [0x2618, 0x2618], [0x261D, 0x261D],
+  [0x2620, 0x2620], [0x2622, 0x2623], [0x2626, 0x2626], [0x262A, 0x262A], [0x262E, 0x262F], [0x2638, 0x263A],
+  [0x2640, 0x2640], [0x2642, 0x2642], [0x2648, 0x2653], [0x265F, 0x2660], [0x2663, 0x2663], [0x2665, 0x2666],
+  [0x2668, 0x2668], [0x267B, 0x267B], [0x267E, 0x267F], [0x2692, 0x2697], [0x2699, 0x2699], [0x269B, 0x269C],
+  [0x26A0, 0x26A1], [0x26A7, 0x26A7], [0x26AA, 0x26AB], [0x26B0, 0x26B1], [0x26BD, 0x26BE], [0x26C4, 0x26C5],
+  [0x26C8, 0x26C8], [0x26CE, 0x26CF], [0x26D1, 0x26D1], [0x26D3, 0x26D4], [0x26E9, 0x26EA], [0x26F0, 0x26F5],
+  [0x26F7, 0x26FA], [0x26FD, 0x26FD], [0x2702, 0x2702], [0x2705, 0x2705], [0x2708, 0x270D], [0x270F, 0x270F],
+  [0x2712, 0x2712], [0x2714, 0x2714], [0x2716, 0x2716], [0x271D, 0x271D], [0x2721, 0x2721], [0x2728, 0x2728],
+  [0x2733, 0x2734], [0x2744, 0x2744], [0x2747, 0x2747], [0x274C, 0x274C], [0x274E, 0x274E], [0x2753, 0x2755],
+  [0x2757, 0x2757], [0x2763, 0x2764], [0x2795, 0x2797], [0x27A1, 0x27A1], [0x27B0, 0x27B0], [0x27BF, 0x27BF],
+  [0x2934, 0x2935], [0x2B05, 0x2B07], [0x2B1B, 0x2B1C], [0x2B50, 0x2B50], [0x2B55, 0x2B55], [0x3030, 0x3030],
+  [0x303D, 0x303D], [0x3297, 0x3297], [0x3299, 0x3299], [0xFE0E, 0xFE0F],
+];
+
+/// Whether [rune] can be drawn as a colour emoji: one of [_emojiRanges], or
+/// anything from U+1F000 on (the emoji planes).
+bool _hasEmojiForm(int rune) => rune >= 0x1F000 || _emojiRanges.any((r) => r[0] <= rune && rune <= r[1]);
