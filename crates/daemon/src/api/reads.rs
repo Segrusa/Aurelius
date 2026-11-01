@@ -782,8 +782,8 @@ async fn guidelines(shared: &Arc<Shared>, method: Method) -> Result<ResponseBody
 
 /// `channel.list` and `channel.search { query }`: General, the project channels
 /// and (`ticket_channels`: the connection accepts them) the ticket channels,
-/// open ones first, newest ticket first. A query keeps the channels whose name or
-/// ticket number matches it. A connection without `ticket_channels` gets exactly
+/// open ones first, newest ticket first. A query keeps the channels whose name,
+/// ticket title or ticket number matches it. A connection without `ticket_channels` gets exactly
 /// the list of before: no ticket channels and none of the new fields.
 pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, ticket_channels: bool, query: Option<String>) -> Result<ResponseBody, ProtocolError> {
     use aurelius_domain::views::{ChannelKind, ChannelView, ChannelsSnapshot, ticket_channel_name};
@@ -801,12 +801,15 @@ pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domai
             let last = |id: ConversationId| c.query_row("SELECT MAX(created_at_ms) FROM messages WHERE conversation_id = ?1", [id.to_string()], |r| r.get::<_, Option<i64>>(0));
             let mut channels = Vec::new();
             for ch in discussions::channels(c)? {
+                let name = if ch.project_id.is_none() { "General".to_owned() } else { ch.name };
+                if !query.as_deref().is_none_or(|q| channel_matches(&name, None, None, q)) {
+                    continue;
+                }
                 let (unread, mentions) = match &reader {
                     Some((user, username)) => discussions::unread(c, *user, username, ch.conversation_id, &read_text)?,
                     None => (0, 0),
                 };
                 let kind = if ch.project_id.is_none() { ChannelKind::General } else { ChannelKind::Project };
-                let name = if ch.project_id.is_none() { "General".to_owned() } else { ch.name };
                 let read_through = match &reader {
                     Some((user, _)) => discussions::read_through(c, *user, ch.conversation_id)?,
                     None => None,
@@ -822,6 +825,10 @@ pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domai
                 // Open channels first; within each, the newest ticket first (as listed).
                 tickets.sort_by_key(|t| t.archived);
                 for t in tickets {
+                    let name = ticket_channel_name(t.number, &t.title);
+                    if !query.as_deref().is_none_or(|q| channel_matches(&name, Some(&t.title), Some(t.number), q)) {
+                        continue;
+                    }
                     let (unread, mentions, read_through, member) = match &reader {
                         Some((user, username)) => {
                             let (unread, mentions) = discussions::unread(c, *user, username, t.conversation_id, &read_text)?;
@@ -831,7 +838,7 @@ pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domai
                         None => (0, 0, None, false),
                     };
                     channels.push(ChannelView {
-                        conversation_id: t.conversation_id, project_id: Some(t.project_id), name: ticket_channel_name(t.number, &t.title), unread, mentions,
+                        conversation_id: t.conversation_id, project_id: Some(t.project_id), name, unread, mentions,
                         archived: t.archived, last_activity_ms: last(t.conversation_id)?, kind: ChannelKind::Ticket, ticket_id: Some(t.ticket_id),
                         ticket_number: Some(t.number), ticket_column: Some(t.column), member, member_count: Some(t.member_count), read_through,
                     });
@@ -841,7 +848,7 @@ pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domai
         })
     })
     .await?;
-    let channels = snapshot.channels.into_iter().filter(|ch| query.as_deref().is_none_or(|q| channel_matches(ch, q)));
+    let channels = snapshot.channels.into_iter();
     let channels = if ticket_channels { channels.collect() } else { channels.map(as_before).collect() };
     Ok(ResponseBody::Channels(ChannelsSnapshot { channels, ..snapshot }))
 }
@@ -852,18 +859,50 @@ fn as_before(channel: aurelius_domain::views::ChannelView) -> aurelius_domain::v
     aurelius_domain::views::ChannelView { kind: Default::default(), ticket_id: None, ticket_number: None, ticket_column: None, member: false, member_count: None, read_through: None, ..channel }
 }
 
-/// Whether `query` finds `channel` (`channel.search`): `#12` or `12` its ticket
-/// number, other text its name (case not counting). An empty query finds all.
-fn channel_matches(channel: &aurelius_domain::views::ChannelView, query: &str) -> bool {
+/// Whether `query` finds a channel (`channel.search`): `#12` or `12` its ticket
+/// number, other text its name or its ticket's whole title (case not counting,
+/// and a space the same as the `-` between the words of a name, so "fix the"
+/// finds `#12-fix-the-login` and words past the name's cut are still found).
+/// An empty query finds all.
+fn channel_matches(name: &str, title: Option<&str>, number: Option<u32>, query: &str) -> bool {
     let query = query.trim();
     if query.is_empty() {
         return true;
     }
-    let number = query.strip_prefix('#').unwrap_or(query);
-    if let (Ok(n), Some(own)) = (number.parse::<u32>(), channel.ticket_number)
+    let digits = query.strip_prefix('#').unwrap_or(query);
+    if let (Ok(n), Some(own)) = (digits.parse::<u32>(), number)
         && n == own
     {
         return true;
     }
-    channel.name.to_lowercase().contains(&query.to_lowercase())
+    let query = search_words(query);
+    search_words(name).contains(&query) || title.is_some_and(|t| search_words(t).contains(&query))
+}
+
+/// `text` in lowercase with every run of spaces and `-` as one space, for `channel_matches`.
+fn search_words(text: &str) -> String {
+    text.to_lowercase().split(|c: char| c.is_whitespace() || c == '-').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod channel_search_tests {
+    use super::channel_matches;
+
+    #[test]
+    fn several_words_find_a_ticket_channel_by_its_name_or_its_whole_title() {
+        let title = "Fix the login page after the password reset fails on Safari";
+        let name = aurelius_domain::views::ticket_channel_name(12, title);
+        assert_eq!(name, "#12-fix-the-login-page-after-the");
+        assert!(channel_matches(&name, Some(title), Some(12), "fix the"));
+        assert!(channel_matches(&name, Some(title), Some(12), "Login  Page"));
+        assert!(channel_matches(&name, Some(title), Some(12), "fix-the-login"));
+        // Past the 32-character cut of the name: only the title has these words.
+        assert!(channel_matches(&name, Some(title), Some(12), "password reset fails"));
+        assert!(channel_matches(&name, Some(title), Some(12), "ON SAFARI"));
+        assert!(!channel_matches(&name, None, Some(12), "password reset"));
+        assert!(!channel_matches(&name, Some(title), Some(12), "reset the password"));
+        assert!(channel_matches(&name, Some(title), Some(12), "#12"));
+        assert!(!channel_matches("General", None, None, "fix the"));
+        assert!(channel_matches("General", None, None, "  "));
+    }
 }

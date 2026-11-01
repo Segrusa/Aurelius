@@ -258,6 +258,31 @@ async fn a_closed_channel_refuses_writes_with_channel_archived_and_stays_listed_
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn channel_search_finds_a_ticket_channel_by_several_words_of_its_title_also_past_the_names_cut() {
+    // Trace R1 m3: spaces in the query match the `-` of the name, and the whole title counts.
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let atlas = project(&client, "Atlas").await;
+    let id = ticket(&client, atlas, "Fix the login page after the password reset fails on Safari", None, false).await;
+    ticket(&client, atlas, "Reset the logo", None, false).await;
+    let channel = channel_of(&client, id).await;
+
+    let mut new = raw(dir.path(), BOARD_MEMBER, NEW).await;
+    let found = |c: Vec<ChannelView>| c.into_iter().map(|c| (c.conversation_id, c.name)).collect::<Vec<_>>();
+    let only_mine = [(channel, "#1-fix-the-login-page-after-the".to_owned())];
+    for query in ["fix the", "Login Page", "fix-the-login", "password reset fails", "ON SAFARI"] {
+        assert_eq!(found(list(&mut new, Method::ChannelSearch { query: query.into() }).await), only_mine, "{query}");
+    }
+    assert!(list(&mut new, Method::ChannelSearch { query: "reset the password".into() }).await.is_empty());
+    // Both titles have "reset"; General and the project channel have neither.
+    assert_eq!(list(&mut new, Method::ChannelSearch { query: "reset".into() }).await.len(), 2);
+
+    drop(client);
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_creator_the_owner_and_the_assignee_are_members_and_a_new_assignee_joins() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
