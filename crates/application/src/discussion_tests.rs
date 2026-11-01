@@ -776,3 +776,18 @@ fn a_ticket_channel_cannot_be_deleted_and_keeps_its_messages() {
     assert_eq!(delete().unwrap_err().message, "A ticket's channel cannot be deleted; archive the ticket instead.");
     assert!(messages(&s, d).iter().any(|m| m.text == "keep me"));
 }
+
+#[test]
+fn a_post_in_a_ticket_channel_through_group_chat_send_needs_a_board_member() {
+    // Trace R1 m2: group_chat.send reaches a ticket's channel too, behind the same gate as ticket.post.
+    let s = setup();
+    let t = new_ticket(&s, "Login", None);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    let command = Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "no one signed in".into(), images: vec![], files: vec![], channel: Some(d), thread_parent: None });
+    let Err(err) = s.service.execute(&ctx(None), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command }) else { panic!("posted in a ticket's channel without a board member") };
+    assert_eq!(err.code, ErrorCode::BoardMemberRequired);
+    assert!(!messages(&s, d).iter().any(|m| m.text == "no one signed in"), "nothing was stored");
+    // A board member may.
+    send(&s, Some(d), "signed in").unwrap();
+    assert!(messages(&s, d).iter().any(|m| m.text == "signed in"));
+}
