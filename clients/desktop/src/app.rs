@@ -163,6 +163,20 @@ pub fn panel_beside(panel: Panel, screen: Page) -> bool {
     }
 }
 
+/// The Team chat's message list as last laid out: with the panel beside it, and at its end.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ListLaid {
+    pub beside: bool,
+    pub at_end: bool,
+}
+
+/// Whether the Team chat's message list goes back to its end (AUR-CHAT-001 Q2 N2): the
+/// panel beside it opened or closed, so the list changed width and reflowed, and it was
+/// at its end before; then your next message stays in view. `was` is None off the Team chat.
+pub fn stay_at_end(was: Option<ListLaid>, beside: bool) -> bool {
+    matches!(was, Some(ListLaid { beside: before, at_end: true }) if before != beside)
+}
+
 /// The main composer's placeholder once a panel opens: the panel's employee, or the
 /// channel's beside the Team chat (the composer there still writes in the channel).
 pub fn panel_placeholder(screen: Page, manager: Option<String>, channel: impl FnOnce() -> String) -> String {
@@ -1059,6 +1073,8 @@ pub struct AppView {
     pub channel_new_at: Option<MessageId>,
     /// The composer's drafts per Team chat channel (and one for the other pages).
     pub drafts: crate::screens::discussion::Drafts,
+    /// The Team chat's message list as last rendered (`stay_at_end`).
+    pub list_laid: Option<ListLaid>,
     /// The archived projects' channels are unfolded.
     pub channels_archived_open: bool,
     /// "Show more" was chosen under Tickets / under Archived (AUR-CHAT-001, O-5).
@@ -1586,6 +1602,7 @@ impl AppView {
             group_mentions: Default::default(),
             channels_followed: false,
             drafts: Default::default(),
+            list_laid: None,
             subagents_open: false,
             subagents: None,
             subagents_stepped: false,
@@ -2730,6 +2747,18 @@ impl AppView {
     fn follow_bottom(&self, cx: &mut Context<Self>) {
         self.scroll.scroll_to_bottom();
         cx.notify();
+    }
+
+    /// The Team chat's list stays at its end when the panel beside it opens or closes (Q2 N2).
+    fn keep_list_at_end(&mut self, cx: &mut Context<Self>) {
+        let laid = (self.screen == Page::GroupChat).then(|| ListLaid { beside: self.panel_shown(), at_end: self.near_bottom() });
+        if let Some(now) = laid
+            && stay_at_end(self.list_laid, now.beside)
+        {
+            // It reflows over a few frames, like a conversation that just opened.
+            self.settle_bottom(cx);
+        }
+        self.list_laid = laid;
     }
 
     /// Keep the view at the bottom for a moment after a conversation opens:
@@ -7005,6 +7034,7 @@ impl Render for AppView {
             self.composer.update(cx, |input, cx| input.set_placeholder(text, window, cx));
         }
         self.settle_draft(window, cx);
+        self.keep_list_at_end(cx);
         if let Some(text) = self.pending_notice.take() {
             self.notify_user(text, true, cx);
         }
@@ -7841,6 +7871,19 @@ mod tests {
         assert!(!panel_beside(Panel::None, Page::GroupChat));
         assert_eq!(panel_placeholder(Page::Board, Some("Forge".into()), || unreachable!()), "Message Forge…");
         assert_eq!(panel_placeholder(Page::Board, None, || unreachable!()), "Reply…");
+    }
+
+    /// AUR-CHAT-001 Q2 N2: Open ticket beside a channel that was at its end keeps it there.
+    #[test]
+    fn the_team_chat_stays_at_its_end_when_the_ticket_panel_opens_beside_it() {
+        use super::{ListLaid, stay_at_end};
+        let laid = |beside, at_end| Some(ListLaid { beside, at_end });
+        assert!(stay_at_end(laid(false, true), true), "the panel opened: back to the end");
+        assert!(stay_at_end(laid(true, true), false), "the panel closed: back to the end");
+        assert!(!stay_at_end(laid(false, false), true), "scrolled up to read: it stays there");
+        assert!(!stay_at_end(laid(true, true), true), "same width: nothing to do");
+        assert!(!stay_at_end(laid(false, true), false));
+        assert!(!stay_at_end(None, true), "coming from another page: the channel's own opening scrolls");
     }
 
     #[test]
