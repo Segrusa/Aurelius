@@ -146,6 +146,7 @@ impl Peer {
                 Command::AddIdea(idea) => idea.files.iter().collect(),
                 Command::UpdateIdea(idea) => idea.add_files.iter().collect(),
                 Command::CreateTicket(ticket) => ticket.files.iter().collect(),
+                Command::UpdateTicket(ticket) => ticket.add_files.iter().collect(),
                 _ => Vec::new(),
             };
             if !files.iter().all(|path| inside(path)) {

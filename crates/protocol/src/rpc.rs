@@ -290,6 +290,11 @@ pub mod feature {
     /// `guideline_too_large` (`AppError::too_large`) and `guideline_title_taken`;
     /// context items with section `guideline`.
     pub const GUIDELINES: &str = "guidelines";
+    /// `ticket.update { add_files }` (protocol 5, additive): files added to an
+    /// existing ticket, as `files` on `ticket.create`; a main task that still
+    /// works gets them too. It gives `ticket.updated`, and the timeline says who
+    /// added how many files, with their names only.
+    pub const TICKET_ADD_FILES: &str = "ticket_add_files";
 }
 
 /// Every feature this build has.
@@ -319,6 +324,7 @@ pub const FEATURES: &[&str] = &[
     feature::TEAM_CHANNELS,
     feature::VAULT,
     feature::GUIDELINES,
+    feature::TICKET_ADD_FILES,
 ];
 
 /// Daemon → client.
