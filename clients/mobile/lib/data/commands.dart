@@ -56,12 +56,18 @@ abstract final class Commands {
 
   /// A message of the user in the group chat (Team): `@Name` wakes those
   /// employees, else the CEO answers (in a project's [channel]: its dispatcher).
-  static Map<String, dynamic> sendGroupMessage(String text, {List<String> images = const [], List<String> files = const [], String? channel, bool confirmSecret = false}) =>
-      groupChatSend(SendGroupMessage(channel: channel, confirmSecret: confirmSecret ? true : null, files: files, images: images, text: text));
+  /// With [threadParent] (feature `chat_threads`) a reply in that message's thread.
+  static Map<String, dynamic> sendGroupMessage(String text, {List<String> images = const [], List<String> files = const [], String? channel, bool confirmSecret = false, String? threadParent}) =>
+      groupChatSend(SendGroupMessage(channel: channel, confirmSecret: confirmSecret ? true : null, files: files, images: images, text: text, threadParent: threadParent));
 
   /// A board member's message in a ticket's discussion (feature `ticket_discussion`).
-  static Map<String, dynamic> postTicketMessage(String ticketId, String text, {List<String> images = const [], List<String> files = const [], bool confirmSecret = false}) =>
-      ticketPost(confirmSecret: confirmSecret ? true : null, ticketId: ticketId, text: text, images: images, files: files);
+  /// With [threadParent] (feature `chat_threads`) a reply in that message's thread.
+  static Map<String, dynamic> postTicketMessage(String ticketId, String text, {List<String> images = const [], List<String> files = const [], bool confirmSecret = false, String? threadParent}) =>
+      ticketPost(confirmSecret: confirmSecret ? true : null, ticketId: ticketId, text: text, images: images, files: files, threadParent: threadParent);
+
+  /// The board member's reaction [emoji] on a channel's message, added ([on]) or
+  /// taken back (feature `chat_reactions`). Idempotent on the PC.
+  static Map<String, dynamic> react(String messageId, String emoji, {required bool on}) => messageReact(ReactToMessage(emoji: emoji, messageId: messageId, on: on));
 
   /// A new conversation of the project. Auto, browser and screen need the Approve right.
   static Map<String, dynamic> startProjectConversation(String projectId, {AgentMode? mode, bool browserAllowed = false, bool screenAllowed = false}) =>

@@ -12,6 +12,20 @@ import 'views.dart';
 /// in `HelloParams.accepts`, `channel.search`, the code `channel_archived`).
 const ticketChannelsFeature = 'ticket_channels';
 
+/// Threads in channels (`thread.read`, `thread_parent` on a send, the root's
+/// counters): AUR-CHAT-002. Without it a channel is as in phase 1.
+const chatThreadsFeature = 'chat_threads';
+
+/// Reactions on a channel's messages (`message.react`, `MessageView.reactions`,
+/// the event `message.reacted`): AUR-CHAT-002.
+const chatReactionsFeature = 'chat_reactions';
+
+/// The fixed reactions of the picker (§5): no emoji library, exactly these.
+const reactionChoices = ['✓', '👀', '👍', '🎉', '❓', '❗', '🙏', '🚀'];
+
+/// How many reply monograms a thread's line under its root shows (§5).
+const threadMonogramMax = 3;
+
 /// How many rows Tickets and Archived show before "Show more" (§8 O-5).
 const channelSectionMax = 15;
 
@@ -74,6 +88,12 @@ String channelReadOnlyNote(ChannelView c) {
 
 /// The composer's hint in a channel (§4): "Message #42-login-per… · @ to mention".
 String channelHint(ChannelView c) => 'Message ${channelLabel(c)} · @ to mention';
+
+/// A thread screen's title (AUR-CHAT-002 §5): "Thread · #42-login-per…".
+String threadTitle(ChannelView c) => 'Thread · ${channelLabel(c)}';
+
+/// The composer's hint in a thread (§5).
+const threadHint = 'Reply… · @ to mention';
 
 /// The day separator's label (§2): "Today", "Yesterday", else "Mon 27 Oct",
 /// with the year when it is not this year.
@@ -266,3 +286,65 @@ List<String> ticketAssignees(TicketDetail detail) {
 /// The assignees as the header's line says them (§3): at most two names,
 /// then "+n" for the rest.
 String assigneesLine(List<String> names) => names.length <= 2 ? names.join(', ') : '${names.take(2).join(', ')} +${names.length - 2}';
+
+/// A message that can start a thread (§5): a message of the channel itself
+/// (never a reply: no nested threads) that someone wrote and that is done.
+bool canStartThread(MessageView m) =>
+    m.threadParent == null && m.system == null && !m.isStreaming && (m.isUser || m.update == null || m.update == 'group');
+
+/// The line under a thread's root (§5): "↳ 3 replies · last 11:02" (an older
+/// day: "last 27 Oct"); null when it has no replies.
+String? threadLine(MessageView root, DateTime now) {
+  final count = root.threadReplyCount ?? 0;
+  if (count <= 0) return null;
+  final replies = count == 1 ? '1 reply' : '$count replies';
+  final lastMs = root.threadLastReplyMs;
+  if (lastMs == null) return '↳ $replies';
+  final last = DateTime.fromMillisecondsSinceEpoch(lastMs);
+  final when = DateUtils.isSameDay(last, now) ? DateFormat.Hm().format(last) : DateFormat(last.year == now.year ? 'd MMM' : 'd MMM y').format(last);
+  return '↳ $replies · last $when';
+}
+
+/// Who replied under [root] (the server's `thread_repliers`, the latest
+/// first), at most [threadMonogramMax] (§5): each name with whether it is a
+/// board member, which is any name that is none of [employees] (as on the
+/// desktop).
+List<(String, bool)> threadRepliers(MessageView root, Iterable<String> employees) {
+  final known = employees.toSet();
+  return [
+    for (final name in root.threadRepliers.where((n) => n.trim().isNotEmpty).take(threadMonogramMax)) (name, !known.contains(name)),
+  ];
+}
+
+/// [reactions] after the reader's own [emoji] went [on] or off (§5), as the
+/// PC will have them: shown at once, the next read confirms it. [me] joins or
+/// leaves `by`; an emoji nobody has any more goes.
+List<ReactionView> reactedLocally(List<ReactionView> reactions, String emoji, {required bool on, String? me}) {
+  final at = reactions.indexWhere((r) => r.emoji == emoji);
+  if (at < 0) {
+    if (!on) return reactions;
+    return [...reactions, ReactionView(emoji: emoji, count: 1, mine: true, by: [?me])];
+  }
+  final r = reactions[at];
+  if (r.mine == on) return reactions;
+  final count = r.count + (on ? 1 : -1);
+  final by = on ? [...r.by, ?me] : [for (final b in r.by) if (b != me) b];
+  final out = [...reactions];
+  if (count <= 0) {
+    out.removeAt(at);
+  } else {
+    out[at] = ReactionView(emoji: emoji, count: count, mine: on, by: by);
+  }
+  return out;
+}
+
+/// Who reacted with [r] (§5, a long press on its pill): "✓ · Alexandra, Forge".
+String reactionWho(ReactionView r) {
+  final names = r.by.where((b) => b.trim().isNotEmpty).toList();
+  if (names.isEmpty) return '${r.emoji} · ${r.count == 1 ? '1 reaction' : '${r.count} reactions'}';
+  final rest = r.count - names.length;
+  return '${r.emoji} · ${names.join(', ')}${rest > 0 ? ' +$rest' : ''}';
+}
+
+/// A reaction pill's label for screen readers: "✓, 2 reactions, including yours".
+String reactionSemantics(ReactionView r) => '${r.emoji}, ${r.count == 1 ? '1 reaction' : '${r.count} reactions'}${r.mine ? ', including yours' : ''}';

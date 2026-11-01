@@ -98,6 +98,7 @@ extension EventKinds on Event {
         EventKind.messageAssistantCommitted ||
         EventKind.messageDeleted ||
         EventKind.messageInterrupted ||
+        EventKind.messageReacted ||
         EventKind.messageSentNow ||
         EventKind.messageUserCommitted ||
         EventKind.runCancelRequested ||

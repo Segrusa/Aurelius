@@ -132,7 +132,7 @@ class ChatView extends StatefulWidget {
 
 /// How a channel of the Slack-style Team chat shows (AUR-CHAT-001 §2–§4).
 class ChannelChatOptions {
-  const ChannelChatOptions({this.readThrough, required this.closedNote, this.openChannel});
+  const ChannelChatOptions({this.readThrough, required this.closedNote, this.openChannel, this.threads = false, this.reactions = false, this.openThread, this.thread = false});
 
   /// The reader's last read message before the channel opened (`ChannelView.read_through`):
   /// "New messages" goes after it, and stays there while the channel is open.
@@ -144,6 +144,20 @@ class ChannelChatOptions {
   /// Opens the channel a line links to (the "opened" and "closed" lines in
   /// General); false when it cannot, and the line opens its ticket instead.
   final bool Function(String conversationId)? openChannel;
+
+  /// The server has threads (feature `chat_threads`, AUR-CHAT-002 §5): the
+  /// line under a root, and "Reply in thread" on a long press.
+  final bool threads;
+
+  /// The server has reactions (feature `chat_reactions`, §5): the pills under
+  /// a message, and "React" on a long press.
+  final bool reactions;
+
+  /// Opens the thread of [root] (its own screen); [context] is under the channel's [ChatBloc].
+  final void Function(BuildContext context, MessageView root)? openThread;
+
+  /// This list is one thread: its root on top, then "n replies" and the replies.
+  final bool thread;
 }
 
 class _ChatViewState extends State<ChatView> {
@@ -434,7 +448,8 @@ class _MessagesState extends State<_Messages> {
   Widget _channelList(ChatState state, ChannelChatOptions channel, List<ApprovalView> approvals, List<String> mainChats) {
     final company = context.watch<CompanyBloc>().state;
     final me = _me;
-    final known = [for (final p in mentionables(company)) p.$1, ...state.boardMembers];
+    final employees = [for (final p in mentionables(company)) p.$1];
+    final known = [...employees, ...state.boardMembers];
     final source = widget.config.source;
     final made = source == null ? const <String, TicketRef>{} : ticketsFromMessages(state.messages);
     final lastSummary = state.messages.where((m) => m.system?.kind == SystemLineKind.summary || m.system?.kind == SystemLineKind.summaryFailed).lastOrNull?.id;
@@ -443,6 +458,28 @@ class _MessagesState extends State<_Messages> {
         if (mainChats.contains(a.conversationId) && !state.messages.any((m) => m.isStreaming && m.runId == a.runId)) a,
     ];
     bool named(MessageView m) => authorOf(m) != me && mentionsName(m.text, me);
+    // Nothing is written in a closed channel: no React, no Reply (§3, §5).
+    final writable = widget.config.composer && !state.closed;
+    final bloc = context.read<ChatBloc>();
+    final openThread = channel.threads && !channel.thread ? channel.openThread : null;
+    ChannelMessageActions? actions(MessageView m) {
+      if (!writable || m.isStreaming) return null;
+      final react = channel.reactions ? () => _react(context, bloc, m) : null;
+      final reply = openThread != null && canStartThread(m) ? () => openThread(context, m) : null;
+      return react == null && reply == null ? null : ChannelMessageActions(react: react, reply: reply);
+    }
+
+    Widget extras(MessageView m, Widget child) {
+      final reactions = channel.reactions && m.reactions.isNotEmpty;
+      final line = openThread == null ? null : threadLine(m, DateTime.now());
+      if (!reactions && line == null) return child;
+      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child,
+        if (reactions) ReactionsRow(message: m, writable: writable, onToggle: (emoji, on) => bloc.add(ChatReacted(m.id, emoji, on: on)), onPick: () => _react(context, bloc, m)),
+        if (line != null) ThreadLine(root: m, label: line, repliers: threadRepliers(m, employees), onTap: () => openThread!(context, m)),
+      ]);
+    }
+
     Widget row(MessageView m, bool grouped) {
       if (m.system != null) {
         return SystemLineView(message: m, ticketId: context.read<ChatBloc>().ticketId, taskProjectId: widget.config.taskProjectId, summarized: m.id != lastSummary, compact: true, openChannel: channel.openChannel);
@@ -458,19 +495,29 @@ class _MessagesState extends State<_Messages> {
         atMs: m.createdAtMs,
         grouped: grouped,
         own: named(m),
-        child: m.isUser
-            ? _UserBubble(id: m.id, text: m.text, files: m.files, uploads: m.uploads, queuedId: m.queued ? m.id : null, message: m, source: source, ticket: made[m.id], flat: true)
-            : _AssistantMessage(message: m, group: true, flat: true, grouped: grouped, source: source, ticket: made[m.id], blocking: m.isStreaming ? approvals.where((a) => a.runId == m.runId).firstOrNull : null),
+        child: extras(
+          m,
+          m.isUser
+              ? _UserBubble(id: m.id, text: m.text, files: m.files, uploads: m.uploads, queuedId: m.queued ? m.id : null, message: m, source: source, ticket: made[m.id], flat: true, actions: actions(m))
+              : _AssistantMessage(message: m, group: true, flat: true, grouped: grouped, source: source, ticket: made[m.id], blocking: m.isStreaming ? approvals.where((a) => a.runId == m.runId).firstOrNull : null, actions: actions(m)),
+        ),
       );
     }
 
+    final rows = channelRows(state.messages, readThrough: channel.readThrough, me: me, now: DateTime.now());
+    // A thread: "n replies" between the root and its replies (§5).
+    final rootAt = channel.thread ? rows.indexWhere((r) => r is MessageRow) : -1;
+
     final items = <FollowItem>[
-      for (final r in channelRows(state.messages, readThrough: channel.readThrough, me: me, now: DateTime.now()))
+      for (final (i, r) in rows.indexed) ...[
         switch (r) {
           DayRow(:final label, :final day) => FollowItem('day-${day.millisecondsSinceEpoch}', _DaySeparator(label: label)),
           NewMessagesRow() => const FollowItem('new-messages', _NewMessagesLine()),
-          MessageRow(:final message, :final grouped) => FollowItem(message.id, row(message, grouped)),
+          // A thread's reply never joins its root's header.
+          MessageRow(:final message, :final grouped) => FollowItem(message.id, row(message, grouped && i != rootAt + 1)),
         },
+        if (i == rootAt) FollowItem('thread-replies', _DaySeparator(key: const Key('thread-replies'), label: state.messages.length == 2 ? '1 reply' : '${state.messages.length - 1} replies')),
+      ],
       for (final a in asks) FollowItem('ask-${a.id}', _GroupAsk(approval: a)),
       for (final u in state.unsent)
         FollowItem(
@@ -490,6 +537,15 @@ class _MessagesState extends State<_Messages> {
         resetKey: state.conversationId,
       ),
     );
+  }
+
+  /// React (§5): the picker of the fixed reactions; a pick turns yours on, or off when it was on.
+  static Future<void> _react(BuildContext context, ChatBloc bloc, MessageView m) async {
+    final emoji = await showReactionPicker(context, mine: {for (final r in m.reactions) if (r.mine) r.emoji});
+    if (emoji == null) return;
+    final current = bloc.state.messages.where((x) => x.id == m.id).firstOrNull ?? m;
+    final mine = current.reactions.any((r) => r.emoji == emoji && r.mine);
+    bloc.add(ChatReacted(m.id, emoji, on: !mine));
   }
 
   /// "Version 2 of 3" for retried answers to the same user message.
@@ -546,7 +602,7 @@ class _SystemLine extends StatelessWidget {
 
 /// The line between two days of a channel (AUR-CHAT-001 §2): a centred eyebrow between 1 px lines.
 class _DaySeparator extends StatelessWidget {
-  const _DaySeparator({required this.label});
+  const _DaySeparator({super.key, required this.label});
 
   final String label;
 
@@ -627,6 +683,168 @@ class _ChannelMessage extends StatelessWidget {
             ]),
           ),
         ]),
+      ),
+    );
+  }
+}
+
+/// What a long press on a channel's message offers beyond Copy and Create
+/// ticket (AUR-CHAT-002 §5); null each when the server lacks the feature or
+/// the channel is closed.
+class ChannelMessageActions {
+  const ChannelMessageActions({this.react, this.reply});
+
+  /// Opens the reaction picker.
+  final VoidCallback? react;
+
+  /// Opens the message's thread to reply in it.
+  final VoidCallback? reply;
+}
+
+/// The picker of the fixed reactions (§5): one tap picks one; [mine] are
+/// marked, a pick of one of them takes it back.
+Future<String?> showReactionPicker(BuildContext context, {Set<String> mine = const {}}) => showModalBottomSheet<String>(
+      context: context,
+      builder: (sheet) => SafeArea(
+        child: Padding(
+          key: const Key('reaction-picker'),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final emoji in reactionChoices)
+                Semantics(
+                  button: true,
+                  selected: mine.contains(emoji),
+                  label: mine.contains(emoji) ? '$emoji, yours' : emoji,
+                  excludeSemantics: true,
+                  child: InkWell(
+                    key: ValueKey('reaction-pick-$emoji'),
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: () => Navigator.pop(sheet, emoji),
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: mine.contains(emoji) ? Tokens.accentHalo : Tokens.surface2,
+                        border: Border.all(color: mine.contains(emoji) ? Tokens.accent : Colors.transparent),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(emoji, style: TextStyle(fontSize: 22, color: Tokens.text)),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+/// The reactions under a message (§5): a pill per emoji with its count, yours
+/// with the ACCENT_HALO background and an ACCENT border. A tap turns yours on
+/// or off and the last pill opens the picker, while the channel is [writable];
+/// a long press says who reacted.
+class ReactionsRow extends StatelessWidget {
+  const ReactionsRow({super.key, required this.message, required this.writable, required this.onToggle, required this.onPick});
+
+  final MessageView message;
+  final bool writable;
+  final void Function(String emoji, bool on) onToggle;
+  final VoidCallback onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget pill({Key? key, required Widget child, bool mine = false, VoidCallback? onTap, VoidCallback? onLongPress}) => GestureDetector(
+          key: key,
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          onLongPress: onLongPress,
+          // The pill stays small; its tap area is at least 32 pt high.
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: mine ? Tokens.accentHalo : Tokens.surface2,
+                border: Border.all(color: mine ? Tokens.accent : Colors.transparent),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: child,
+            ),
+          ),
+        );
+    return Padding(
+      key: ValueKey('reactions-${message.id}'),
+      padding: const EdgeInsets.only(top: 2),
+      child: Wrap(spacing: 6, children: [
+        for (final r in message.reactions)
+          Semantics(
+            button: writable,
+            label: reactionSemantics(r),
+            excludeSemantics: true,
+            child: pill(
+              key: ValueKey('reaction-${message.id}-${r.emoji}'),
+              mine: r.mine,
+              onTap: writable ? () => onToggle(r.emoji, !r.mine) : null,
+              onLongPress: () => toast(context, reactionWho(r)),
+              child: Text('${r.emoji} ${r.count}', style: TextStyle(fontSize: 11.5, color: r.mine ? Tokens.accentText : Tokens.text2, fontWeight: r.mine ? FontWeight.w600 : null)),
+            ),
+          ),
+        if (writable)
+          Semantics(
+            button: true,
+            label: 'Add a reaction',
+            excludeSemantics: true,
+            child: pill(key: ValueKey('reaction-add-${message.id}'), onTap: onPick, child: Icon(Icons.add_reaction_outlined, size: 14, color: Tokens.text2)),
+          ),
+      ]),
+    );
+  }
+}
+
+/// The line under a thread's root in its channel (§5): "↳ 3 replies · last
+/// 11:02" in ACCENT_TEXT, the monograms of up to three who replied (the
+/// server's `thread_repliers`; a board member's is outlined, as on the
+/// desktop), and a marker while replies are unread. A tap opens the thread.
+class ThreadLine extends StatelessWidget {
+  const ThreadLine({super.key, required this.root, required this.label, this.repliers = const [], required this.onTap});
+
+  final MessageView root;
+  final String label;
+  /// Who replied, the latest first, with whether each is a board member (see [threadRepliers]).
+  final List<(String, bool)> repliers;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final unread = root.threadUnread ?? 0;
+    return Semantics(
+      button: true,
+      label: '${label.replaceFirst('↳ ', '')}${unread > 0 ? ', $unread unread' : ''}. Open the thread',
+      excludeSemantics: true,
+      child: InkWell(
+        key: ValueKey('thread-line-${root.id}'),
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 36),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            for (final (name, member) in repliers.take(threadMonogramMax))
+              Padding(padding: const EdgeInsets.only(right: 3), child: Monogram(name.characters.first.toUpperCase(), size: 16, member: member)),
+            if (repliers.isNotEmpty) const SizedBox(width: 3),
+            Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Tokens.accentText))),
+            if (unread > 0)
+              Container(
+                key: ValueKey('thread-unread-${root.id}'),
+                margin: const EdgeInsets.only(left: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(color: Tokens.accent, borderRadius: BorderRadius.circular(8)),
+                child: Text('$unread new', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white)),
+              ),
+          ]),
+        ),
       ),
     );
   }
@@ -735,7 +953,10 @@ class _TaskUpdate extends StatelessWidget {
 }
 
 class _UserBubble extends StatelessWidget {
-  const _UserBubble({required this.id, required this.text, this.files = const [], this.uploads = const [], this.unsent, this.queuedId, this.message, this.author, this.mentioned = false, this.source, this.ticket, this.flat = false});
+  const _UserBubble({required this.id, required this.text, this.files = const [], this.uploads = const [], this.unsent, this.queuedId, this.message, this.author, this.mentioned = false, this.source, this.ticket, this.flat = false, this.actions});
+
+  /// In a channel with threads or reactions: React and Reply in thread on a long press.
+  final ChannelMessageActions? actions;
 
   /// In a channel row of the Slack-style Team chat: left-aligned Markdown, no bubble (the row has the header).
   final bool flat;
@@ -771,13 +992,17 @@ class _UserBubble extends StatelessWidget {
 
   void _longPress(BuildContext context) async {
     final ticketable = source != null && message != null;
-    if (queuedId == null && !ticketable) {
+    final react = actions?.react;
+    final reply = actions?.reply;
+    if (queuedId == null && !ticketable && react == null && reply == null) {
       Clipboard.setData(ClipboardData(text: text));
       toast(context, 'Copied.');
       return;
     }
     final bloc = context.read<ChatBloc>();
     final choice = await showGlassMenu<String>(context, [
+      if (react != null) const GlassMenuItem('react', 'React'),
+      if (reply != null) const GlassMenuItem('reply', 'Reply in thread'),
       if (queuedId != null) const GlassMenuItem('now', 'Send now'),
       const GlassMenuItem('copy', 'Copy'),
       if (ticketable) const GlassMenuItem('ticket', 'Create ticket'),
@@ -785,6 +1010,10 @@ class _UserBubble extends StatelessWidget {
     ]);
     if (!context.mounted) return;
     switch (choice) {
+      case 'react':
+        react!();
+      case 'reply':
+        reply!();
       case 'ticket':
         await createTicketFrom(context, message!, source!, already: ticket);
       case 'now':
@@ -922,7 +1151,10 @@ class _UserBubble extends StatelessWidget {
 }
 
 class _AssistantMessage extends StatelessWidget {
-  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket, this.flat = false, this.grouped = false});
+  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket, this.flat = false, this.grouped = false, this.actions});
+
+  /// In a channel with threads or reactions: React and Reply in thread on a long press.
+  final ChannelMessageActions? actions;
 
   /// In a channel row of the Slack-style Team chat: the row has the name and time.
   final bool flat;
@@ -964,6 +1196,26 @@ class _AssistantMessage extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (actions?.react case final react?)
+              ListTile(
+                key: const Key('message-react'),
+                leading: const Icon(Icons.add_reaction_outlined),
+                title: const Text('React'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  react();
+                },
+              ),
+            if (actions?.reply case final reply?)
+              ListTile(
+                key: const Key('message-reply-thread'),
+                leading: const Icon(Icons.subdirectory_arrow_right),
+                title: const Text('Reply in thread'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  reply();
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.copy),
               title: const Text('Copy'),
