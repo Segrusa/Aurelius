@@ -2111,6 +2111,18 @@ impl AppView {
         cx.notify();
     }
 
+    /// A paste into the New ticket title or description: a copied image (a screenshot) or
+    /// copied files are attached to the ticket. Returns whether it took the paste; anything
+    /// else is pasted as text.
+    pub fn board_paste_files(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
+        if self.board.dialog != Some(BoardDialog::NewTicket) || self.board.form.busy {
+            return false;
+        }
+        let (took, found) = self.pasted_files(item, |p| p.is_file(), cx);
+        self.board_add_files(found, cx);
+        took
+    }
+
     // ---- The page -----------------------------------------------------------
 
     pub fn render_board(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

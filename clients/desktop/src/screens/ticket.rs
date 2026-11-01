@@ -987,9 +987,12 @@ impl AppView {
             .child(self.board_picker("ticket-form-owner", format!("Owner: {owner}"), has_owner, !busy, None, cx))
             .child(self.board_picker("ticket-form-mode", format!("Mode: {}", mode_label(mode)), mode.is_some(), !busy, None, cx))
             .child(self.board_picker("ticket-form-model", format!("Model: {model}"), has_model, !busy, None, cx));
+        let paste = |this: WeakEntity<Self>| move |item: &ClipboardItem, _: &mut Window, cx: &mut App| this.update(cx, |this, cx| this.board_paste_files(item, cx)).unwrap_or(false);
+        let title = ui::input(&title_input).on_paste(paste(cx.weak_entity()));
+        let description = Textarea::new(&description).py(px(7.)).line_height(px(20.)).on_paste(paste(cx.weak_entity()));
         let body = v().gap(px(12.))
-            .child(field("Title *", v().gap(px(3.)).child(ui::input(&title_input)).children(counter).into_any_element(), title_problem))
-            .child(field("Description", Textarea::new(&description).py(px(7.)).line_height(px(20.)).into_any_element(), None))
+            .child(field("Title *", v().gap(px(3.)).child(title).children(counter).into_any_element(), title_problem))
+            .child(field("Description", description.into_any_element(), None))
             .child(pickers)
             .children(project_problem.filter(|_| sent).map(|p| div().text_size(px(12.)).text_color(c(theme::NEGATIVE)).child(p)))
             .when(mode == Some(aurelius_domain::autonomy::AgentMode::Plan), |el| el.child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Stops in Plan review with a plan before anything changes.")))
@@ -1026,7 +1029,7 @@ impl AppView {
         });
         let add = dim(ui::button("ticket-form-attach", "Add files…", ButtonKind::Outline, Some(ui::kbd("secondary-o", cx))).h(px(28.)), !busy).when(!busy, |el| el.on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.board_pick_files(cx))));
         v().gap(px(6.))
-            .child(h().gap(px(8.)).child(div().flex_1().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(ui::label_with_info("Attachments", "Pick files or drop them on this dialog. At most 8, 25 MB each; the owner finds them in its work folder."))).child(add))
+            .child(h().gap(px(8.)).child(div().flex_1().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(ui::label_with_info("Attachments", "Pick files, paste a screenshot into the title or description, or drop files on this dialog. At most 8, 25 MB each; the owner finds them in its work folder."))).child(add))
             .when(!self.board.form.files.is_empty(), |el| el.child(h().flex_wrap().gap(px(6.)).children(chips)))
             .into_any_element()
     }
