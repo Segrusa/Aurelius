@@ -104,6 +104,12 @@ pub struct ServerInfo {
     pub ticket_channels: bool,
     /// An existing ticket takes more files (feature `ticket_add_files`, `UpdateTicket::add_files`).
     pub ticket_add_files: bool,
+    /// Threads in channels: `thread.read`, replies with `thread_parent` and their
+    /// counters on a message (feature `chat_threads`, AUR-CHAT-002).
+    pub chat_threads: bool,
+    /// Reactions on channel messages: `message.react` and the event `message.reacted`
+    /// (feature `chat_reactions`, AUR-CHAT-002).
+    pub chat_reactions: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -260,6 +266,15 @@ pub enum Request {
     SendManager { employee_id: EmployeeId, text: String, conversation_id: ConversationId, images: Vec<String>, files: Vec<String>, interrupt: bool },
     /// A message in the group chat (`group_chat.send`), in a channel (none: the general one).
     SendGroup { text: String, images: Vec<String>, files: Vec<String>, channel: Option<ConversationId> },
+    /// A reply in the thread of `thread_parent`, a message of `channel` (none: the general
+    /// one): `group_chat.send` with `thread_parent` (feature `chat_threads`).
+    SendThreadReply { text: String, channel: Option<ConversationId>, thread_parent: MessageId },
+    /// Add (`on`) or take back the board member's reaction on a channel message
+    /// (`message.react`, feature `chat_reactions`).
+    React { message_id: MessageId, emoji: String, on: bool },
+    /// The thread panel shows the thread of this message (none: closed): it is read
+    /// now (`thread.read`) and again on every chat event; answered with `Update::Thread`.
+    FollowThread(Option<MessageId>),
     /// `always_allow`: approve and allow this MCP tool from now on (only for `always_allow_eligible` approvals).
     DecideApproval { approval_id: ApprovalId, action_digest: String, approve: bool, always_allow: bool },
     AnswerQuestion { approval_id: ApprovalId, answers: std::collections::BTreeMap<String, String> },
@@ -1505,6 +1520,8 @@ pub enum Update {
     ChannelSearch(String, Option<Vec<aurelius_domain::views::ChannelView>>),
     /// A post in this channel (none: general) was refused with `channel_archived`: it is read-only now.
     ChannelArchived(Option<ConversationId>),
+    /// `thread.read` answered for the followed thread of `root` (an error: why it did not load).
+    Thread { root: MessageId, result: Result<aurelius_domain::views::ThreadSnapshot, String> },
     Stream(StreamDelta),
     EmployeeCreated(EmployeeId),
     Info(String),
@@ -1603,13 +1620,16 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
     // A ticket's discussion in the panel, and whether the Team chat shows its channels (AUR-MU-02).
     let mut open_discussion: Option<ConversationId> = None;
     let mut channels_shown = false;
+    // The thread the Team chat's thread panel shows (AUR-CHAT-002).
+    let mut open_thread: Option<MessageId> = None;
     let mut backoff = Duration::from_millis(250);
 
     loop {
         let _ = updates.send(Update::Connection(Connection::Connecting));
         let (events_tx, mut events) = mpsc::unbounded_channel();
         let (streams_tx, mut streams) = mpsc::unbounded_channel();
-        let client = match Client::open(&target, "aurelius-desktop", events_tx, Some(streams_tx), &[aurelius_protocol::client_feature::TEAM_CHANNELS, aurelius_protocol::client_feature::TICKET_CHANNELS]).await {
+        let accepts = [aurelius_protocol::client_feature::TEAM_CHANNELS, aurelius_protocol::client_feature::TICKET_CHANNELS, aurelius_protocol::client_feature::CHAT_THREADS, aurelius_protocol::client_feature::CHAT_REACTIONS];
+        let client = match Client::open(&target, "aurelius-desktop", events_tx, Some(streams_tx), &accepts).await {
             Ok(client) => client,
             // Before `is_final`, which an update-needed error also is.
             Err(err) if update_needed(&err) => {
@@ -1635,6 +1655,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                             // Its id is known once connected; the window asks again then.
                             Some(Request::OpenGroupChat(_) | Request::LoadChannels | Request::SearchChannels(_)) => {}
                             Some(Request::FollowChannels(on)) => channels_shown = on,
+                            Some(Request::FollowThread(root)) => open_thread = root,
                             Some(Request::LoadMemory(project_id)) => open_memory = Some(project_id),
                             Some(Request::LoadIdeas(project_id)) => open_ideas = Some(project_id),
                             Some(Request::SendManager { ref images, .. } | Request::SendGroup { ref images, .. }) if remote_target && !images.is_empty() => {
@@ -1740,6 +1761,8 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 board_testing: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::BOARD_TESTING),
                 ticket_channels: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_CHANNELS),
                 ticket_add_files: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_ADD_FILES),
+                chat_threads: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::CHAT_THREADS),
+                chat_reactions: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::CHAT_REACTIONS),
             },
         }));
 
@@ -1758,7 +1781,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
             }
             let Some(user) = who.user.as_ref().map(|u| u.id) else { continue };
             me = Some(user);
-            match session(&client, &mut requests, &mut events, &mut streams, &updates, &mut outbox, &mut open_conversation, &mut open_memory, &mut open_ideas, &tokens, &mut open_discussion, &mut channels_shown, &mut pushes, held, user).await {
+            match session(&client, &mut requests, &mut events, &mut streams, &updates, &mut outbox, &mut open_conversation, &mut open_memory, &mut open_ideas, &tokens, &mut open_discussion, &mut channels_shown, &mut open_thread, &mut pushes, held, user).await {
                 Ok(Ended::Closed) => return, // UI dropped the request channel: window closed
                 Ok(Ended::SignedOut) => {
                     who = aurelius_domain::user::WhoAmI { board_members_exist: true, user: None, must_change_password: false };
@@ -1991,7 +2014,7 @@ fn held_read(request: &Request) -> bool {
         Request::Plugins(call) => matches!(call, PluginsCall::List | PluginsCall::Available | PluginsCall::ManagerGet(_) | PluginsCall::ProjectGet(_)),
         Request::Backups(call) => matches!(call, BackupsCall::List),
         Request::Remote(call) => matches!(call, RemoteCall::Status),
-        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::SearchChannels(_) | Request::FollowChannels(_) => true,
+        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::SearchChannels(_) | Request::FollowChannels(_) | Request::FollowThread(_) => true,
         Request::LoadMemory(_) | Request::LoadMemoryContext { .. } | Request::LoadIdeas(_) | Request::LoadContext(_) | Request::LoadScreenshot(_) | Request::LoadFullActivity(..) => true,
         Request::LoadFile(_) | Request::LoadUpload(_) | Request::LoadUploadThumb(_) | Request::LoadSubagents(_) | Request::LoadPreviewMessages(_) | Request::LoadMarkdownFile(..) | Request::LoadArtifactContent { .. } => true,
         Request::LoadUsage | Request::LoadUsageHours(_) | Request::LoadSubscription(_) | Request::CheckUpdate(_) | Request::LoadServerLoad | Request::LoadBrowser | Request::LoadArtifactSetting => true,
@@ -2049,7 +2072,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SendQueuedNow { conversation_id, message_id } => {
             envelope(Command::SendQueuedNow(conversation::SendQueuedNow { conversation_id, message_id }), None)
         }
-        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::SearchChannels(_) | Request::FollowChannels(_) => return None,
+        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::SearchChannels(_) | Request::FollowChannels(_) | Request::FollowThread(_) => return None,
         Request::CreateEmployee { name, role, title, reports_to, instructions, folder } => {
             envelope(Command::CreateEmployee(employee::CreateEmployee { name, role, title, reports_to, instructions, folder }), None)
         }
@@ -2074,6 +2097,10 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
             envelope(Command::SendEmployeeMessage(employee::SendEmployeeMessage { confirm_secret: false, employee_id, text, conversation_id, images, files, interrupt }), None)
         }
         Request::SendGroup { text, images, files, channel } => envelope(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text, images, files, channel, thread_parent: None }), None),
+        Request::SendThreadReply { text, channel, thread_parent } => {
+            envelope(Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: false, text, images: vec![], files: vec![], channel, thread_parent: Some(thread_parent) }), None)
+        }
+        Request::React { message_id, emoji, on } => envelope(Command::ReactToMessage(aurelius_domain::group_chat::ReactToMessage { message_id, emoji, on }), None),
         Request::DecideApproval { approval_id, action_digest, approve, always_allow } => {
             envelope(Command::DecideApproval(approval::DecideApproval { approval_id, action_digest, approve, always_allow }), None)
         }
@@ -2225,6 +2252,7 @@ async fn session(
     tokens: &Tokens,
     open_discussion: &mut Option<ConversationId>,
     channels_shown: &mut bool,
+    open_thread: &mut Option<MessageId>,
     pushes: &mut mpsc::UnboundedReceiver<aurelius_client::SessionPush>,
     mut held: VecDeque<Request>,
     me: aurelius_domain::UserId,
@@ -2236,6 +2264,7 @@ async fn session(
     refresh_board_members(client, updates).await?;
     claude_login(client, ClaudeCall::Status, updates).await?;
     refresh_messages(client, updates, *open_conversation).await?;
+    refresh_thread(client, updates, *open_thread).await?;
     refresh_memory(client, updates, *open_memory).await?;
     refresh_ideas(client, updates, *open_ideas).await?;
     refresh_schedules(client, updates).await?;
@@ -2335,6 +2364,11 @@ async fn session(
                     if on {
                         send_channels(client, updates).await?;
                     }
+                    continue;
+                }
+                if let Request::FollowThread(root) = request {
+                    *open_thread = root;
+                    refresh_thread(client, updates, root).await?;
                     continue;
                 }
                 if let Request::LoadMemory(project_id) = request {
@@ -3107,6 +3141,8 @@ async fn session(
                 }
                 if chat {
                     refresh_messages(client, updates, *open_conversation).await?;
+                    // A reply or a reaction in the open thread (AUR-CHAT-002).
+                    refresh_thread(client, updates, *open_thread).await?;
                     // A ticket's discussion and the channels' counts follow their messages (AUR-MU-02).
                     if let Some(conversation) = *open_discussion {
                         board(client, BoardCall::Discussion(Some(conversation)), updates).await?;
@@ -3723,6 +3759,22 @@ async fn send_channels(client: &Client, updates: &mpsc::UnboundedSender<Update>)
         Err(e) if ends(&e) => return Err(e.into()),
         Err(_) => {
             let _ = updates.send(Update::Channels(None));
+        }
+    }
+    Ok(())
+}
+
+/// The thread the panel shows (`thread.read`, feature `chat_threads`), when one is open.
+/// Reading it marks it read for this board member, which is right: it shows.
+async fn refresh_thread(client: &Client, updates: &mpsc::UnboundedSender<Update>, root: Option<MessageId>) -> Result<(), Disconnected> {
+    let Some(root) = root else { return Ok(()) };
+    match client.thread(root).await {
+        Ok(snapshot) => {
+            let _ = updates.send(Update::Thread { root, result: Ok(snapshot) });
+        }
+        Err(e) if ends(&e) => return Err(e.into()),
+        Err(e) => {
+            let _ = updates.send(Update::Thread { root, result: Err(e.to_string()) });
         }
     }
     Ok(())

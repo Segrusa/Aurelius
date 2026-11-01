@@ -64,7 +64,7 @@ pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
             | Method::GuidelineStarterSet
             | Method::RunGuidelines { .. } => Err(NOT_FOR_APPS),
             // The group chat is the user's own conversation with the team, like an employee's chat.
-            Method::GroupChatGet { .. } | Method::ChannelList | Method::ChannelSearch { .. } => Err(NOT_FOR_APPS),
+            Method::GroupChatGet { .. } | Method::ChannelList | Method::ChannelSearch { .. } | Method::ThreadRead { .. } => Err(NOT_FOR_APPS),
             // The vault is the board members' and the runs' (B5): an app reads nothing of it.
             Method::VaultList { .. } | Method::VaultReveal { .. } | Method::VaultAudit { .. } | Method::VaultKeyExport(_) => Err(NOT_FOR_APPS),
             _ => Err(NOT_FOR_APPS),

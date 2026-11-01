@@ -110,9 +110,10 @@ pub fn latest_group_messages(conn: &Connection, group: ConversationId, before: O
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// How many of those messages the group chat has.
+/// How many of those messages the group chat has (not the replies in its threads).
 pub fn group_message_count(conn: &Connection, group: ConversationId) -> Result<u32, StorageError> {
-    Ok(conn.query_row(&format!("SELECT COUNT(*) {GROUP_MESSAGES}"), [group.to_string()], |r| r.get(0))?)
+    let own = if has_thread_column(conn)? { " AND m.thread_parent_id IS NULL" } else { "" };
+    Ok(conn.query_row(&format!("SELECT COUNT(*) {GROUP_MESSAGES}{own}"), [group.to_string()], |r| r.get(0))?)
 }
 
 /// How many posts woke colleagues (`woke` in their meta): of run `run`, and of
@@ -140,6 +141,10 @@ pub struct GroupRun {
     /// run woken from it, at any hop, runs on their Claude login.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub login_user: Option<UserId>,
+    /// The thread its answer goes into (its root in `conversation_id`): it was
+    /// woken by a reply there (feature `chat_threads`). None: the channel itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_parent: Option<MessageId>,
 }
 
 /// The conversation a run answers in.
@@ -425,22 +430,43 @@ pub fn owner_of(conn: &Connection, conversation: ConversationId) -> Result<(Opti
     Ok((employee.and_then(|e| aurelius_domain::EmployeeId::parse(&e).ok()), project.and_then(|p| aurelius_domain::ProjectId::parse(&p).ok())))
 }
 
-/// All messages of a conversation in order. `read_blob` resolves content.
+/// All messages of a conversation in order, without the replies in its threads
+/// (`thread.read` has those). `read_blob` resolves content.
 pub fn list_messages(
     conn: &Connection,
     conversation: ConversationId,
     read_blob: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Vec<MessageView>, StorageError> {
-    let mut stmt = conn.prepare(
+    messages_of(conn, conversation, None, read_blob)
+}
+
+/// The thread of `root` in `conversation`: the root first, then its replies in order.
+pub fn list_thread(conn: &Connection, conversation: ConversationId, root: MessageId, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<MessageView>, StorageError> {
+    messages_of(conn, conversation, Some(root), read_blob)
+}
+
+/// The messages of `conversation` in order: those of the conversation itself
+/// (`thread` none), or the root `thread` and its replies.
+fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<MessageId>, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<MessageView>, StorageError> {
+    // A store before schema 26 has no threads.
+    let threads = has_thread_column(conn)?;
+    // Each filter names ?2 (the root, or NULL), so the statement always takes both parameters.
+    let (parent, only) = match (threads, thread) {
+        (true, None) => ("m.thread_parent_id", "?2 IS NULL AND m.thread_parent_id IS NULL"),
+        (true, Some(_)) => ("m.thread_parent_id", "(m.id = ?2 OR m.thread_parent_id = ?2)"),
+        (false, None) => ("NULL", "?2 IS NULL"),
+        (false, Some(_)) => ("NULL", "m.id = ?2"),
+    };
+    let mut stmt = conn.prepare(&format!(
         "SELECT m.id, m.ordinal, m.role, m.status, b.storage_key, m.created_at_ms, m.run_id, m.reply_to_id,
                 c.display_name, r.model_id, json_extract(r.resolved_config_json, '$.persona_name'),
                 json_extract(m.meta_json, '$.kind'), json_extract(m.meta_json, '$.from'), json_extract(m.meta_json, '$.approval_id'), json_extract(m.meta_json, '$.files'), json_extract(m.meta_json, '$.uploads'),
-                json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system')
+                json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system'), {parent}
          FROM messages m LEFT JOIN blobs b ON b.id = m.content_blob_id
          LEFT JOIN runs r ON r.id = m.run_id LEFT JOIN connections c ON c.id = r.connection_id
-         WHERE m.conversation_id = ?1 ORDER BY m.ordinal",
-    )?;
-    let rows = stmt.query_map([conversation.to_string()], |r| {
+         WHERE m.conversation_id = ?1 AND {only} ORDER BY m.ordinal"
+    ))?;
+    let rows = stmt.query_map(params![conversation.to_string(), thread.map(|t| t.to_string())], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, i64>(1)?,
@@ -460,11 +486,12 @@ pub fn list_messages(
             r.get::<_, Option<String>>(15)?,
             r.get::<_, Option<String>>(16)?,
             r.get::<_, Option<String>>(17)?,
+            r.get::<_, Option<String>>(18)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode, system) = row?;
+        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode, system, parent) = row?;
         let produced_by = match (connection, model.filter(|m| !m.is_empty())) {
             (Some(c), Some(m)) => Some(format!("{c} · {m}")),
             (Some(c), None) => Some(format!("{c} · default model")),
@@ -495,9 +522,11 @@ pub fn list_messages(
             mode: mode.and_then(|m| serde_json::from_value(serde_json::Value::String(m)).ok()),
             author_user: None,
             system: system.and_then(|s| serde_json::from_str(&s).ok()),
-            thread_parent: None,
+            thread_parent: parent.and_then(|p| MessageId::parse(&p).ok()),
             thread_reply_count: None,
             thread_last_reply_ms: None,
+            thread_unread: None,
+            thread_repliers: Vec::new(),
             reactions: Vec::new(),
         });
     }
@@ -524,6 +553,11 @@ pub fn list_messages(
         message.activity = activity_for_message(conn, message.id)?;
     }
     Ok(out)
+}
+
+/// Whether `messages` has `thread_parent_id` (schema 26).
+pub(crate) fn has_thread_column(conn: &Connection) -> Result<bool, StorageError> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'thread_parent_id'", [], |r| r.get::<_, i64>(0))? > 0)
 }
 
 /// Tool use during one answer, in order.

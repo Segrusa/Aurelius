@@ -149,6 +149,8 @@ pub enum Panel {
     Task(aurelius_domain::TaskId),
     /// A ticket of the board (`screens/ticket.rs`).
     Ticket(aurelius_domain::TicketId),
+    /// A thread of a Team chat channel: its root message (`screens/thread_panel.rs`).
+    Thread(MessageId),
 }
 
 /// Whether `panel` shows beside `screen`: not beside a page with a conversation of its own
@@ -157,7 +159,9 @@ pub enum Panel {
 pub fn panel_beside(panel: Panel, screen: Page) -> bool {
     match (panel, screen) {
         (Panel::None, _) => false,
-        (Panel::Ticket(_), Page::GroupChat) => true,
+        (Panel::Ticket(_) | Panel::Thread(_), Page::GroupChat) => true,
+        // A thread belongs to the Team chat's channel: nowhere else.
+        (Panel::Thread(_), _) => false,
         (_, Page::Employee(..) | Page::GroupChat) => false,
         _ => true,
     }
@@ -758,6 +762,8 @@ pub enum MenuDo {
     Task(TaskChoice),
     /// A board or ticket action (`screens/board.rs`).
     Board(crate::screens::board::BoardDo),
+    /// An action on a Team chat message: react, reply in thread (`screens/thread_panel.rs`).
+    Chat(crate::screens::thread_panel::ChatDo),
 }
 
 /// New task dialog: a value picked from one of its dropdowns (`None`: as the manager / off).
@@ -966,6 +972,8 @@ pub struct AppView {
     pub claude: crate::screens::account::Claude,
     /// The board, the open ticket and their dialogs.
     pub board: crate::screens::board::Board,
+    /// The Team chat's thread panel and its composer (AUR-CHAT-002).
+    pub thread: crate::screens::thread_panel::ThreadPanel,
     pub adding_server: bool,
     pub server_input: Entity<InputState>,
     /// Settings → Server & PC: the server's name and its field (feature `server_name`).
@@ -1444,6 +1452,8 @@ impl AppView {
         subscriptions.extend(claude.subscriptions(window, cx));
         let board = crate::screens::board::Board::new(window, cx);
         subscriptions.extend(board.subscriptions(window, cx));
+        let thread = crate::screens::thread_panel::ThreadPanel::new(window, cx);
+        subscriptions.extend(thread.subscriptions(window, cx));
         let vault = crate::screens::vault::Vault::new(window, cx);
         subscriptions.extend(vault.subscriptions(window, cx));
         let guidelines = crate::screens::guidelines::Guidelines::new(window, cx);
@@ -1478,6 +1488,7 @@ impl AppView {
             members,
             claude,
             board,
+            thread,
             vault,
             guidelines,
             folded: folded_load(&ui_prefs()),
@@ -1848,6 +1859,7 @@ impl AppView {
                 // gone once its run no longer works and no delta came for a moment.
                 let managers = &self.managers;
                 self.group_live.retain(|l| l.at.elapsed() < Duration::from_secs(3) || managers.iter().any(|m| m.agents.iter().any(|a| a.run_id == Some(l.run))));
+                self.thread.live.retain(|l| l.at.elapsed() < Duration::from_secs(3) || managers.iter().any(|m| m.agents.iter().any(|a| a.run_id == Some(l.run))));
                 for i in 0..self.group_live.len() {
                     if self.group_live[i].author.is_none() {
                         self.group_live[i].author = self.run_author(self.group_live[i].run);
@@ -2168,6 +2180,9 @@ impl AppView {
                         }
                     }
                     self.message_cache.get_mut().retain(&snapshot.messages);
+                    // The action bars of messages that left (the thread's keep theirs).
+                    let kept: std::collections::HashSet<MessageId> = snapshot.messages.iter().map(|m| m.id).chain(self.thread.snapshot.iter().flat_map(|s| s.replies.iter().map(|r| r.id))).collect();
+                    self.thread.row_focus.get_mut().retain(|id, _| kept.contains(id));
                     // A streamed group answer is a message now.
                     self.group_live.retain(|l| !snapshot.messages.iter().any(|m| m.id == l.message));
                     // No answer running: the totals are final for now (again after each answer ends).
@@ -2197,6 +2212,7 @@ impl AppView {
             Update::Channels(channels) => self.channels_loaded(channels),
             Update::ChannelSearch(query, found) => self.channels_found(query, found, cx),
             Update::ChannelArchived(channel) => self.channel_archived(channel),
+            Update::Thread { root, result } => self.thread_loaded(root, result),
             Update::Stream(delta) => {
                 if stream_stepped(self.streams.get(&delta.conversation_id), &delta) && self.chip_conversation() == Some(delta.conversation_id) {
                     self.subagents_stepped = true;
@@ -2215,7 +2231,14 @@ impl AppView {
                     return;
                 }
                 self.stream_repaint_app |= shown;
-                if open {
+                // An answer in a thread streams into the thread panel, never into the channel (AUR-CHAT-002).
+                let to = crate::screens::threads::stream_to(delta.thread_parent, self.thread_root());
+                if open && to == crate::screens::threads::StreamTo::Thread {
+                    self.thread_streamed(&delta);
+                    // The panel is outside the conversation pane: AppView repaints.
+                    self.stream_repaint_app = true;
+                }
+                if open && to == crate::screens::threads::StreamTo::Channel {
                     // An employee's answer streams into the group chat under the id it gets there once done.
                     if Some(conversation) == self.group_conversation && !self.messages.as_ref().is_some_and(|s| s.messages.iter().any(|m| m.id == delta.message_id)) {
                         let at = std::time::Instant::now();
@@ -5154,6 +5177,7 @@ impl AppView {
                 });
             }
             MenuDo::Board(run) => self.board_do(run, window, cx),
+            MenuDo::Chat(run) => self.chat_do(run, window, cx),
             MenuDo::Task(choice) => match choice {
                 TaskChoice::Manager(m) => self.pending_task_manager = m,
                 TaskChoice::GiveManager(m) => self.give_manager = Some(m),
@@ -5863,7 +5887,7 @@ impl AppView {
         let id = match self.panel {
             Panel::Task(_) => self.panel_task()?.employee_id?,
             Panel::Chat(c) => self.managers.iter().find(|m| m.conversation_id == c || m.conversations.iter().any(|t| t.id == c))?.id,
-            Panel::None | Panel::Ticket(_) => return None,
+            Panel::None | Panel::Ticket(_) | Panel::Thread(_) => return None,
         };
         self.managers.iter().find(|m| m.id == id)
     }
@@ -7008,6 +7032,8 @@ impl Render for AppView {
             self.channels_followed = team_chat;
             let _ = self.requests.send(backend::Request::FollowChannels(team_chat));
         }
+        // The same for the thread panel's thread: followed only while it shows.
+        self.follow_thread();
         if let Some(project) = self.window_project {
             // Whatever led elsewhere (Back, Chat, an archive), a project window stays on its project.
             // Employees work company-wide: their pages may open in a project window too.
@@ -7052,7 +7078,10 @@ impl Render for AppView {
         // page, which shows its own conversation).
         let panel = (member_step.is_none() && self.panel_shown()).then(|| {
             let panel = self.render_panel(window, cx);
-            self.resizable("right_panel", 460., crate::resize::Edge::Left, panel, cx)
+            match self.panel {
+                Panel::Thread(_) => self.resizable("thread_panel", crate::screens::threads::THREAD_PANEL_WIDTH, crate::resize::Edge::Left, panel, cx),
+                _ => self.resizable("right_panel", 460., crate::resize::Edge::Left, panel, cx),
+            }
         });
         let body: AnyElement = h()
             .flex_1()
@@ -8111,7 +8140,7 @@ mod tests {
         use aurelius_domain::MessageId;
         use aurelius_protocol::{ActivityView, StreamDelta};
         let step = |call: &str, ok: Option<bool>| ActivityView { call_id: call.into(), tool: "Read".into(), input: serde_json::Value::Null, output: None, ok, offset: 0, truncated: false, output_bytes: None };
-        let first = StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "Look".into(), activity: vec![step("agent", None)], progress: None, activity_changes: false, mode: None };
+        let first = StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "Look".into(), activity: vec![step("agent", None)], progress: None, activity_changes: false, mode: None, thread_parent: None };
         assert!(stream_stepped(None, &first), "the first delta of a conversation counts");
         let more_text = StreamDelta { text: "Looking at it".into(), ..first.clone() };
         assert!(!stream_stepped(Some(&first), &more_text), "text alone is no step");

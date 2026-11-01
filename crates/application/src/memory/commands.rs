@@ -1033,7 +1033,7 @@ fn ticket_sources(conn: &rusqlite::Connection, ticket: TicketId, root: TaskId, r
         crate::conversation::discussion::of_ticket(conn, ticket)?,
         event_of("SELECT id FROM events WHERE aggregate_type = 'ticket' AND aggregate_id = ?1 AND type = 'ticket.accepted' ORDER BY seq DESC LIMIT 1", &ticket.to_string())?,
     ) {
-        let lines = crate::conversation::discussion::discussion_json(conn, read, d.id, None, TICKET_DISCUSSION_MESSAGES, TICKET_DISCUSSION_CHARS)?;
+        let lines = crate::conversation::discussion::discussion_json(conn, read, d.id, None, None, TICKET_DISCUSSION_MESSAGES, TICKET_DISCUSSION_CHARS)?;
         if !lines.is_empty() {
             out.push((event, format!("Discussion of the ticket (oldest first, one JSON object per message):\n[\n{}\n]", lines.join(",\n"))));
         }

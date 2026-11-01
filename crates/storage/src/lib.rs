@@ -14,6 +14,7 @@ pub mod blobs;
 pub mod heartbeats;
 pub mod conversations;
 pub mod discussions;
+pub mod threads;
 pub mod conversation_sessions;
 pub mod employees;
 pub mod company_convert;
@@ -237,5 +238,9 @@ mod schema24_tests;
 mod schema25_tests;
 #[cfg(test)]
 mod schema26_tests;
+#[cfg(test)]
+mod schema27_tests;
+#[cfg(test)]
+mod threads_tests;
 #[cfg(test)]
 mod guidelines_tests;

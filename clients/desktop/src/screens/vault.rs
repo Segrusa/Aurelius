@@ -96,6 +96,8 @@ pub enum HeldIn {
     Chat(aurelius_domain::ConversationId),
     /// The Team chat: a project's channel, or the general one.
     Channel(Option<aurelius_domain::ConversationId>),
+    /// A reply in a thread of the Team chat: back in the thread panel's composer.
+    Thread(aurelius_domain::MessageId),
     /// A ticket's discussion or the New ticket form, or a ticket's field: its draft stays where it was.
     Ticket,
     /// The feedback of Pas aan or Send back: back in the ticket's feedback field.
@@ -110,7 +112,10 @@ pub fn held_in(command: &aurelius_domain::Command) -> HeldIn {
     use aurelius_domain::Command;
     match command {
         Command::SendEmployeeMessage(m) => HeldIn::Chat(m.conversation_id),
-        Command::SendGroupMessage(m) => HeldIn::Channel(m.channel),
+        Command::SendGroupMessage(m) => match m.thread_parent {
+            Some(root) => HeldIn::Thread(root),
+            None => HeldIn::Channel(m.channel),
+        },
         Command::PostTicketMessage(_) | Command::CreateTicket(_) | Command::UpdateTicket(_) | Command::AcceptTicket(_) => HeldIn::Ticket,
         Command::RevisePlan(c) => HeldIn::Feedback(c.ticket_id),
         Command::SendBackTicket(c) => HeldIn::Feedback(c.ticket_id),
@@ -1182,6 +1187,13 @@ impl AppView {
                 self.plan_input.update(cx, |i, cx| i.set_value(text, window, cx));
                 return;
             }
+            HeldIn::Thread(root) => {
+                // The thread panel is where it was sent from (the hold dialog kept it there).
+                let now = if self.thread.composer_for == Some(root) { self.thread.composer.read(cx).value().to_string() } else { String::new() };
+                self.thread.composer_for = Some(root);
+                self.thread.composer.update(cx, |i, cx| i.set_value(text_back(&now, hold.text()), window, cx));
+                return;
+            }
             HeldIn::Chat(_) | HeldIn::Channel(_) => {}
         }
         if self.composer_in() != Some(place) {
@@ -1194,7 +1206,7 @@ impl AppView {
                         None => self.go_nav(crate::app::NavItem::Chat, window, cx),
                     }
                 }
-                HeldIn::Ticket | HeldIn::Feedback(_) | HeldIn::Plan | HeldIn::Form => {}
+                HeldIn::Ticket | HeldIn::Feedback(_) | HeldIn::Plan | HeldIn::Form | HeldIn::Thread(_) => {}
             }
         }
         let now = self.composer.read(cx).value().to_string();
@@ -1912,6 +1924,10 @@ mod tests {
         let channel = Some(ConversationId::new());
         let group = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: true, text: "x".into(), images: vec![], files: vec![], channel, thread_parent: None });
         assert_eq!(held_in(&group), HeldIn::Channel(channel));
+        // A thread reply (AUR-CHAT-002) goes back into the thread panel, not the channel's composer.
+        let root = aurelius_domain::MessageId::new();
+        let reply = Command::SendGroupMessage(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: true, text: "x".into(), images: vec![], files: vec![], channel, thread_parent: Some(root) });
+        assert_eq!(held_in(&reply), HeldIn::Thread(root));
         let post = Command::PostTicketMessage(aurelius_domain::ticket::PostTicketMessage { confirm_secret: true, ticket_id: aurelius_domain::TicketId::new(), text: "x".into(), images: vec![], files: vec![], thread_parent: None });
         assert_eq!(held_in(&post), HeldIn::Ticket);
         assert_eq!(text_back("", "held"), "held");

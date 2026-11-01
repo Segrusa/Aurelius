@@ -348,6 +348,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     progress: progress(&shared, plan.run_id),
                     activity_changes: false,
                     mode: None,
+                    thread_parent: None,
                 });
             }
             RuntimeEvent::TextDelta(delta) => {
@@ -366,6 +367,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     progress: progress(&shared, plan.run_id),
                     activity_changes: false,
                     mode: None,
+                    thread_parent: None,
                 });
                 if last_checkpoint.elapsed() >= CHECKPOINT_EVERY {
                     last_checkpoint = tokio::time::Instant::now();
@@ -414,6 +416,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     progress: progress(&shared, plan.run_id),
                     activity_changes: false,
                     mode: None,
+                    thread_parent: None,
                 });
             }
             RuntimeEvent::ArtifactPublished { url, title, version, path } => {
@@ -559,14 +562,15 @@ fn send_progress(shared: &Shared, plan: &ChatRunPlan) {
         progress: progress(shared, plan.run_id),
         activity_changes: false,
         mode: None,
+        thread_parent: None,
     });
 }
 
 /// Send a stream update; a run the group chat woke streams there too, under the
-/// id its answer gets in the group (`GroupRun::message_id`).
+/// id its answer gets in the group (`GroupRun::message_id`), in its thread if it answers in one.
 fn stream(shared: &Shared, plan: &ChatRunPlan, delta: StreamDelta) {
     if let Some(group) = plan.group {
-        let _ = shared.streams.send(StreamDelta { conversation_id: group.conversation_id, message_id: group.message_id, mode: group.mode, ..delta.clone() });
+        let _ = shared.streams.send(StreamDelta { conversation_id: group.conversation_id, message_id: group.message_id, mode: group.mode, thread_parent: group.thread_parent, ..delta.clone() });
     }
     let _ = shared.streams.send(delta);
 }

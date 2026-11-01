@@ -55,6 +55,14 @@ pub enum Method {
     /// accept `ticket_channels` gets no ticket channels here either.
     #[serde(rename = "channel.search")]
     ChannelSearch { query: String },
+    /// One thread of a channel (feature `chat_threads`): `message_id` is the
+    /// message that starts it (a message of a channel or a ticket's discussion
+    /// that is not itself a reply), answered with the message and its replies,
+    /// oldest first (`ThreadSnapshot`). The board member who reads it has read
+    /// the thread (its `thread_unread` goes to none); reading the channel never
+    /// does. A message without replies is a thread of none.
+    #[serde(rename = "thread.read")]
+    ThreadRead { message_id: MessageId },
     /// The company in one read: employees, the org chart setting and the
     /// management team (roots).
     #[serde(rename = "company.get")]
@@ -558,6 +566,15 @@ pub mod client_feature {
     /// error code `channel_archived`, so an older client sees the list of before
     /// and never reads a code it does not know.
     pub const TICKET_CHANNELS: &str = "ticket_channels";
+    /// The client shows threads (feature `chat_threads`): only such a connection
+    /// gets the live text of an answer streaming into a thread
+    /// (`StreamDelta::thread_parent`), so an older client never shows a reply
+    /// in the channel's own list, even for a moment.
+    pub const CHAT_THREADS: &str = "chat_threads";
+    /// The client shows reactions (feature `chat_reactions`): only such a
+    /// connection gets the event `message.reacted`, so an older client never
+    /// reads an event kind it does not know.
+    pub const CHAT_REACTIONS: &str = "chat_reactions";
 }
 
 impl std::fmt::Debug for HelloParams {

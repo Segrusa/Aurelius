@@ -152,6 +152,10 @@ impl AppView {
             return None;
         }
         self.channel = channel;
+        // A thread belongs to the channel it is in: it closes with it.
+        if matches!(self.panel, crate::app::Panel::Thread(_)) {
+            self.panel = crate::app::Panel::None;
+        }
         // Taken from the list before the channel is read: reading it marks it read.
         self.channel_divider = (target.unread > 0).then_some((conversation, target.unread as usize, target.read_through));
         self.channel_new_at = None;
@@ -530,6 +534,8 @@ impl AppView {
                 .track_scroll(&self.scroll)
                 .track_focus(&self.focus)
                 .key_context(NAV)
+                // Tab walks the messages' action bars (ui-ontwerp §5: actions on keyboard focus).
+                .when(self.row_toolbar_on(), |el| el.on_action(|_: &RowNext, w, cx| w.focus_next(cx)).on_action(|_: &RowPrev, w, cx| w.focus_prev(cx)))
                 .flex()
                 .flex_col()
                 .items_center()

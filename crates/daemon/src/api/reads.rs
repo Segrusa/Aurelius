@@ -46,7 +46,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::ProjectList => projects(shared).await,
         Method::JobList => jobs(shared).await,
         Method::ConversationGet { conversation_id } => {
-            let body = messages(shared, conversation_id).await?;
+            let body = messages(shared, conversation_id, reader).await?;
             mark_read(shared, reader, conversation_id).await;
             Ok(body)
         }
@@ -55,7 +55,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let store = shared.store().clone();
             let chat = storage_task(move || store.read(|c| aurelius_storage::employees::main_chat(c, employee_id))).await?;
             match chat {
-                Some(conversation_id) => messages(shared, conversation_id).await,
+                Some(conversation_id) => messages(shared, conversation_id, reader).await,
                 None => Err(ProtocolError::new(ErrorCode::NotFound, format!("employee {employee_id} does not exist"))),
             }
         }
@@ -74,7 +74,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             .await?;
             match (found, channel) {
                 (Some(conversation_id), _) => {
-                    let body = messages(shared, conversation_id).await?;
+                    let body = messages(shared, conversation_id, reader).await?;
                     mark_read(shared, reader, conversation_id).await;
                     Ok(body)
                 }
@@ -84,6 +84,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         }
         Method::ChannelList => channels(shared, reader, false, None).await,
         Method::ChannelSearch { query } => channels(shared, reader, false, Some(query)).await,
+        Method::ThreadRead { message_id } => thread(shared, reader, message_id).await,
         Method::CompanyGet => company(shared).await,
         Method::BoardGet { project_id } => board(shared, project_id).await,
         Method::UserList => {
@@ -401,14 +402,17 @@ async fn mark_read(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>
 
 /// Messages plus the live text of runs still streaming, so a reconnecting
 /// client sees everything produced so far. Tool use comes shortened
-/// (`activity.get` has a call whole), so hundreds of calls stay small.
-async fn messages(shared: &Arc<Shared>, conversation_id: ConversationId) -> Result<ResponseBody, ProtocolError> {
+/// (`activity.get` has a call whole), so hundreds of calls stay small. The
+/// threads' counters and the reactions are as `reader` sees them (feature
+/// `chat_threads` / `chat_reactions`); the replies are only in `thread.read`.
+async fn messages(shared: &Arc<Shared>, conversation_id: ConversationId, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
     let store = shared.store().clone();
     let (as_of_seq, mut messages) = storage_task(move || {
         store.read(|c| {
             let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
             let as_of_seq = queries::last_seq(c)?;
             let mut messages = aurelius_storage::conversations::list_messages(c, conversation_id, &read_blob)?;
+            aurelius_storage::threads::decorate(c, conversation_id, reader, &mut messages)?;
             for message in messages.iter_mut() {
                 message.activity = std::mem::take(&mut message.activity).into_iter().map(aurelius_domain::activity::preview).collect();
             }
@@ -778,6 +782,47 @@ async fn guidelines(shared: &Arc<Shared>, method: Method) -> Result<ResponseBody
         }
         _ => Err(internal("not a guideline read")),
     }
+}
+
+/// `thread.read { message_id }`: the thread `message_id` starts (a message of a
+/// channel or a ticket's discussion that is not itself a reply), its replies
+/// oldest first. The reader's `thread_unread` is as it was before; then the
+/// thread counts as read for them (not for an app).
+async fn thread(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, root: aurelius_domain::MessageId) -> Result<ResponseBody, ProtocolError> {
+    use aurelius_storage::threads;
+    let store = shared.store().clone();
+    let found = storage_task(move || {
+        store.read(|c| {
+            let Some(place) = threads::place(c, root)? else { return Ok(Err((ErrorCode::NotFound, "This message does not exist."))) };
+            let Some(read_only) = threads::discussion_closed(c, place.conversation_id)? else {
+                return Ok(Err((ErrorCode::Validation, "Only a message of a channel has a thread.")));
+            };
+            if place.thread_parent.is_some() {
+                return Ok(Err((ErrorCode::Validation, "This message is a reply: read the thread of the message it answers.")));
+            }
+            let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+            let as_of_seq = queries::last_seq(c)?;
+            let mut messages = aurelius_storage::conversations::list_thread(c, place.conversation_id, root, &read_blob)?;
+            threads::decorate(c, place.conversation_id, reader, &mut messages)?;
+            for message in messages.iter_mut() {
+                message.activity = std::mem::take(&mut message.activity).into_iter().map(aurelius_domain::activity::preview).collect();
+            }
+            Ok(Ok((as_of_seq, place.conversation_id, messages, read_only)))
+        })
+    })
+    .await?;
+    let (as_of_seq, conversation_id, mut messages, read_only) = found.map_err(|(code, why)| ProtocolError::new(code, why))?;
+    if messages.first().is_none_or(|m| m.id != root) {
+        return Err(internal("a thread without its root"));
+    }
+    let root_view = messages.remove(0);
+    if let Some(user) = reader {
+        let store = shared.store().clone();
+        if let Err(err) = storage_task(move || store.write(move |tx| threads::mark_read(tx, user, root))).await {
+            tracing::warn!(error = %err.message, %root, "could not mark the thread read");
+        }
+    }
+    Ok(ResponseBody::Thread(aurelius_domain::views::ThreadSnapshot { as_of_seq, conversation_id, root: root_view, replies: messages, read_only }))
 }
 
 /// `channel.list` and `channel.search { query }`: General, the project channels

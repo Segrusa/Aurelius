@@ -379,6 +379,8 @@ impl AppView {
     pub fn signed_in_reload(&mut self) {
         self.board_refresh();
         let _ = self.requests_handle().send(backend::Request::LoadChannels);
+        // The open thread is read again as this board member (their reactions and read marks).
+        self.thread.followed = None;
         if self.screen == Page::Settings && self.settings_tab == ACCOUNT_TAB {
             self.enter_account_tab();
         }

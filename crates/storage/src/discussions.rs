@@ -285,7 +285,7 @@ pub const READS_SCHEMA: i64 = 20;
 
 /// The messages that count for unread: the discussion's own (a board member's,
 /// an employee's post or answer), not Aurelius's notes and system lines.
-const COUNTED: &str = "m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group')";
+pub(crate) const COUNTED: &str = "m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group')";
 
 /// `user` read the discussion `conversation` (a channel or a ticket's
 /// discussion) up to its latest message. It never goes back; nothing for
@@ -314,6 +314,10 @@ const MENTION_SCAN: u32 = 500;
 /// What `user` (`username`) has not read yet in `conversation`: the messages of
 /// others since the last one read, and how many of those name them with
 /// `@username` (case does not matter). `read_text` reads a message's text by its storage key.
+///
+/// The replies in its threads (schema 27) are not among the unread: a thread
+/// has its own (`MessageView::thread_unread`). But a reply of another that names
+/// them and that they have not read in its thread counts among the mentions.
 pub fn unread(conn: &Connection, user: UserId, username: &str, conversation: ConversationId, read_text: &dyn Fn(&str) -> Option<String>) -> Result<(u32, u32), StorageError> {
     if !has_reads(conn)? {
         return Ok((0, 0));
@@ -322,13 +326,18 @@ pub fn unread(conn: &Connection, user: UserId, username: &str, conversation: Con
         .query_row("SELECT read_through FROM discussion_reads WHERE user_id = ?1 AND conversation_id = ?2", [user.to_string(), conversation.to_string()], |r| r.get(0))
         .optional()?
         .unwrap_or(0);
-    let filter = format!("m.conversation_id = ?1 AND m.ordinal > ?2 AND (m.author_user_id IS NULL OR m.author_user_id <> ?3) AND {COUNTED}");
+    let threads = crate::threads::has_threads(conn)?;
+    let own = if threads { " AND m.thread_parent_id IS NULL" } else { "" };
+    let filter = format!("m.conversation_id = ?1 AND m.ordinal > ?2 AND (m.author_user_id IS NULL OR m.author_user_id <> ?3) AND {COUNTED}{own}");
     let unread: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM messages m WHERE {filter}"), params![conversation.to_string(), through, user.to_string()], |r| r.get(0))?;
-    if unread == 0 {
-        return Ok((0, 0));
+    let mut keys = Vec::new();
+    if unread > 0 {
+        let mut stmt = conn.prepare(&format!("SELECT b.storage_key FROM messages m JOIN blobs b ON b.id = m.content_blob_id WHERE {filter} ORDER BY m.ordinal DESC LIMIT ?4"))?;
+        keys = stmt.query_map(params![conversation.to_string(), through, user.to_string(), MENTION_SCAN], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
     }
-    let mut stmt = conn.prepare(&format!("SELECT b.storage_key FROM messages m JOIN blobs b ON b.id = m.content_blob_id WHERE {filter} ORDER BY m.ordinal DESC LIMIT ?4"))?;
-    let keys = stmt.query_map(params![conversation.to_string(), through, user.to_string(), MENTION_SCAN], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    if threads {
+        keys.extend(crate::threads::unread_reply_keys(conn, conversation, user, MENTION_SCAN)?);
+    }
     let mentions = keys.iter().filter_map(|k| read_text(k)).filter(|text| mentions(text, username)).count();
     Ok((unread as u32, mentions as u32))
 }
@@ -376,16 +385,29 @@ pub struct DiscussionLine {
 
 /// The latest `limit` messages employees read in a channel or ticket discussion
 /// (the same as `conversations::latest_group_messages`, with the board member),
-/// before `before` when given, newest first.
+/// before `before` when given, newest first. Not the replies in its threads.
 pub fn latest_messages(conn: &Connection, conversation: ConversationId, before: Option<MessageId>, limit: u32) -> Result<Vec<DiscussionLine>, StorageError> {
-    let mut stmt = conn.prepare(
+    latest_in(conn, conversation, None, before, limit)
+}
+
+/// `latest_messages` of the channel itself (`thread` none), or of the thread of
+/// `thread`: its root and its replies.
+pub fn latest_in(conn: &Connection, conversation: ConversationId, thread: Option<MessageId>, before: Option<MessageId>, limit: u32) -> Result<Vec<DiscussionLine>, StorageError> {
+    // Each filter names ?4 (the root, or NULL), so the statement always takes every parameter.
+    let only = match (crate::conversations::has_thread_column(conn)?, thread) {
+        (true, None) => "?4 IS NULL AND m.thread_parent_id IS NULL",
+        (true, Some(_)) => "(m.id = ?4 OR m.thread_parent_id = ?4)",
+        (false, None) => "?4 IS NULL",
+        (false, Some(_)) => "m.id = ?4",
+    };
+    let mut stmt = conn.prepare(&format!(
         "SELECT m.id, CASE WHEN m.role = 'user' THEN NULL ELSE COALESCE(json_extract(m.meta_json, '$.from'), 'Aurelius') END,
                 u.id, u.username, b.storage_key
          FROM messages m JOIN blobs b ON b.id = m.content_blob_id LEFT JOIN users u ON u.id = m.author_user_id
-         WHERE m.conversation_id = ?1 AND m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group')
-           AND (?2 IS NULL OR m.ordinal < (SELECT ordinal FROM messages WHERE id = ?2)) ORDER BY m.ordinal DESC LIMIT ?3",
-    )?;
-    let rows = stmt.query_map(params![conversation.to_string(), before.map(|m| m.to_string()), limit], |r| {
+         WHERE m.conversation_id = ?1 AND m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group') AND {only}
+           AND (?2 IS NULL OR m.ordinal < (SELECT ordinal FROM messages WHERE id = ?2)) ORDER BY m.ordinal DESC LIMIT ?3"
+    ))?;
+    let rows = stmt.query_map(params![conversation.to_string(), before.map(|m| m.to_string()), limit, thread.map(|t| t.to_string())], |r| {
         let user = match (r.get::<_, Option<String>>(2)?, r.get::<_, Option<String>>(3)?) {
             (Some(id), Some(name)) => Some((parse(UserId::parse(&id))?, name)),
             _ => None,

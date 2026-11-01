@@ -290,11 +290,9 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
     // Terminals this session shows; dropping one detaches (the shell keeps running).
     let mut terminals: HashMap<String, aurelius_host::terminal::Attachment> = HashMap::new();
     // The hello said this client merges tool-use changes in live updates.
-    let mut activity_changes = false;
-    let mut team_channels = false;
+    let mut accepts = subscription::Accepts::default();
     // The hello said this client shows ticket channels and knows `channel_archived`.
     let mut ticket_channels = false;
-    let mut server_name_events = false;
     // The tries of `user.login` on this connection, and its new board members (S5-3).
     let mut attempts = users::Attempts::default();
     let mut creates = users::Attempts::default();
@@ -363,10 +361,8 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             },
             Call::Write(write) => writes::execute(&shared, &mut peer, request_id, request.idempotency_key, request.expected_version, write).await,
             Call::Read(Method::SessionHello(params)) => {
-                activity_changes = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::ACTIVITY_CHANGES);
-                team_channels = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::TEAM_CHANNELS);
+                accepts = subscription::Accepts::of(&params.accepts);
                 ticket_channels = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::TICKET_CHANNELS);
-                server_name_events = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::SERVER_NAME);
                 match authenticate(&shared, &mut peer, params.app_key).await {
                     Ok(()) => match users::hello_session(&shared, &mut peer, &end_tx, params.session_token).await {
                         Ok(who) => {
@@ -388,7 +384,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             // The password is checked again and counted like a sign-in (E9).
             Call::Read(Method::VaultKeyExport(params)) => vault::key_export(&shared, &peer, &mut attempts, params).await,
             Call::Read(method @ (Method::VaultList { .. } | Method::VaultReveal { .. } | Method::VaultAudit { .. })) => vault::read(&shared, &peer, method).await,
-            Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, activity_changes, team_channels, server_name_events, out_tx.clone()).await {
+            Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, accepts, out_tx.clone()).await {
                 Ok((body, task)) => {
                     if let Some(old) = forwarder.replace(task) {
                         old.abort();

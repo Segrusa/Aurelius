@@ -308,8 +308,7 @@ impl CommandService {
             | Command::DecideGuidelineProposal(_)
             | Command::AddStarterGuidelines(_) => self.guideline_command(ctx, &envelope, hash),
             Command::SetServerName(cmd) => self.set_server_name(ctx, &envelope, hash, cmd),
-            // Phase 2 of AUR-CHAT-001: the shape is frozen, the feature is not advertised yet.
-            Command::ReactToMessage(_) => Err(AppError::new(ErrorCode::Validation, crate::conversation::discussion::REACTIONS_NOT_YET)),
+            Command::ReactToMessage(cmd) => self.react_to_message(ctx, &envelope, hash, cmd),
         };
         COMMAND_METHOD.set("");
         result

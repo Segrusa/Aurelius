@@ -60,6 +60,12 @@ pub(crate) fn post_returning(tx: &Tx<'_>, blobs_store: &Store, conversation: Con
     post_with(tx, blobs_store, conversation, Some(task), speaker, text, text, serde_json::json!({}))
 }
 
+/// `post_returning` with more for the update's meta (`extra`), e.g. the
+/// discussion and thread a board member's message came from.
+pub(crate) fn post_returning_with(tx: &Tx<'_>, blobs_store: &Store, conversation: ConversationId, task: TaskId, speaker: Speaker<'_>, text: &str, extra: serde_json::Value) -> Result<(MessageId, EventNotice), StorageError> {
+    post_with(tx, blobs_store, conversation, Some(task), speaker, text, text, extra)
+}
+
 /// Post into a conversation an update that belongs to no task (the user's decision
 /// on a colleague proposal); a run can answer it.
 pub(crate) fn post_note(tx: &Tx<'_>, blobs_store: &Store, conversation: ConversationId, speaker: Speaker<'_>, text: &str) -> Result<(MessageId, EventNotice), StorageError> {
