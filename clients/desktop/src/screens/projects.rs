@@ -501,6 +501,12 @@ impl AppView {
                     .child(self.render_overview(project, cx))
                     .into_any_element()
             }
+            // The board fills the page beside its columns, as on the Board page.
+            (Tab::Board, false) => {
+                let board = self.render_board(window, cx);
+                return v().flex_1().min_h_0().w_full().child(bar).child(board).into_any_element();
+            }
+            (Tab::Board, true) => div().mt(px(24.)).text_color(c(theme::MUTED)).child("The board of your own projects shows here.").into_any_element(),
             (Tab::Tasks, true) => {
                 let tasks = self.render_tasks(header, window, cx).into_any_element();
                 return v().flex_1().min_h_0().w_full().child(bar).child(h().flex_1().min_h_0().min_w_0().items_stretch().child(tasks)).into_any_element();

@@ -51,15 +51,26 @@ class BoardShownWatcher extends StatefulWidget {
 
 class _BoardShownWatcherState extends State<BoardShownWatcher> {
   bool? _shown;
+  BoardBloc? _bloc;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _bloc = context.read<BoardBloc>();
     final shown = TickerMode.valuesOf(context).enabled;
     if (shown != _shown) {
       _shown = shown;
-      context.read<BoardBloc>().add(BoardShown(shown));
+      _bloc!.add(BoardShown(shown));
     }
+  }
+
+  /// A project's Board tab is taken out of the tree when another tab shows,
+  /// while its bloc lives on with the project page.
+  @override
+  void dispose() {
+    final bloc = _bloc;
+    if (bloc != null && !bloc.isClosed) bloc.add(const BoardShown(false));
+    super.dispose();
   }
 
   @override
@@ -70,7 +81,11 @@ class _BoardShownWatcherState extends State<BoardShownWatcher> {
 /// swipe between them), from [boardWideWidth] all side by side with drag and
 /// drop. Moves without dragging: the card's button, a swipe, Move to….
 class BoardPage extends StatefulWidget {
-  const BoardPage({super.key});
+  const BoardPage({super.key, this.inProject = false});
+
+  /// Shown as a project's Board tab: the project page has the app bar (and its
+  /// + is New ticket), and the project is fixed, so there is no project filter.
+  final bool inProject;
 
   @override
   State<BoardPage> createState() => _BoardPageState();
@@ -234,20 +249,20 @@ class _BoardPageState extends State<BoardPage> {
     } else if (board.board == null) {
       content = const _Skeleton();
     } else {
-      final filteredEmpty = tickets.isEmpty && (board.projectId != null || board.owner != null || board.createdBy != null);
+      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null);
       final body = wide ? _wide(context, board, company, columns, online) : _phone(context, board, company, columns, online);
       content = Column(children: [
         if (filteredEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
             child: Row(children: [
-              Expanded(child: Text('No tickets in ${project?.name ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
+              Expanded(child: Text('No tickets in ${(widget.inProject ? null : project?.name) ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
               TextButton(
                 onPressed: () {
                   final bloc = context.read<BoardBloc>();
                   bloc.add(const BoardOwnerChosen(null));
                   bloc.add(const BoardCreatorChosen(null));
-                  bloc.add(const BoardProjectChosen(null));
+                  if (!widget.inProject) bloc.add(const BoardProjectChosen(null));
                 },
                 child: const Text('Clear filter'),
               ),
@@ -257,48 +272,52 @@ class _BoardPageState extends State<BoardPage> {
       ]);
     }
 
+    final page = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (board.board != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+            child: Text(
+              '${tickets.length} ticket${tickets.length == 1 ? '' : 's'}${needYou == 0 ? '' : ' · $needYou need${needYou == 1 ? 's' : ''} you'}${online ? '' : ' · Offline · reconnecting'}',
+              key: const ValueKey('board-count'),
+              style: TextStyle(color: Tokens.label2),
+            ),
+          ),
+        SizedBox(
+          height: 52,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            children: [
+              if (!widget.inProject) _FilterPill(key: const ValueKey('board-filter-project'), label: project?.name ?? 'All projects', active: project != null, onTap: () => _pickProject(context, board, company)),
+              _FilterPill(key: const ValueKey('board-filter-owner'), label: owner ?? 'Anyone', active: owner != null, onTap: () => _pickOwner(context, board, company)),
+              _FilterPill(key: const ValueKey('board-filter-creator'), label: 'Created by: ${creator ?? 'Anyone'}', active: creator != null, onTap: () => _pickCreator(context, board)),
+            ],
+          ),
+        ),
+        Expanded(child: content),
+      ],
+    );
+
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () => _newTicket(context, board),
         const SingleActivator(LogicalKeyboardKey.keyN, control: true): () => _newTicket(context, board),
       },
-      child: Scaffold(
-        appBar: GlassAppBar(
-          title: const Text('Board'),
-          actions: [
-            GlassButton(tooltip: 'Board settings', icon: CupertinoIcons.slider_horizontal_3, onPressed: () => context.push('/settings/board')),
-            const SizedBox(width: 8),
-            GlassButton(tooltip: 'New ticket', icon: CupertinoIcons.add, onPressed: () => _newTicket(context, board)),
-          ],
-        ),
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (board.board != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-                child: Text(
-                  '${tickets.length} ticket${tickets.length == 1 ? '' : 's'}${needYou == 0 ? '' : ' · $needYou need${needYou == 1 ? 's' : ''} you'}${online ? '' : ' · Offline · reconnecting'}',
-                  key: const ValueKey('board-count'),
-                  style: TextStyle(color: Tokens.label2),
-                ),
-              ),
-            SizedBox(
-              height: 52,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                children: [
-                  _FilterPill(key: const ValueKey('board-filter-project'), label: project?.name ?? 'All projects', active: project != null, onTap: () => _pickProject(context, board, company)),
-                  _FilterPill(key: const ValueKey('board-filter-owner'), label: owner ?? 'Anyone', active: owner != null, onTap: () => _pickOwner(context, board, company)),
-                  _FilterPill(key: const ValueKey('board-filter-creator'), label: 'Created by: ${creator ?? 'Anyone'}', active: creator != null, onTap: () => _pickCreator(context, board)),
+      child: widget.inProject
+          ? page
+          : Scaffold(
+              appBar: GlassAppBar(
+                title: const Text('Board'),
+                actions: [
+                  GlassButton(tooltip: 'Board settings', icon: CupertinoIcons.slider_horizontal_3, onPressed: () => context.push('/settings/board')),
+                  const SizedBox(width: 8),
+                  GlassButton(tooltip: 'New ticket', icon: CupertinoIcons.add, onPressed: () => _newTicket(context, board)),
                 ],
               ),
+              body: page,
             ),
-            Expanded(child: content),
-          ],
-        ),
-      ),
     );
   }
 

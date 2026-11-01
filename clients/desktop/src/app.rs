@@ -28,6 +28,8 @@ pub enum ProjectRef {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
     Overview,
+    /// The board with only this project's tickets: the Board page, its project filter fixed.
+    Board,
     Tasks,
     Ideas,
     /// The project's memory list: not a tab of the bar, opened from the project menu
@@ -39,11 +41,12 @@ pub enum Tab {
 
 impl Tab {
     /// The tabs of the project bar.
-    pub const ALL: [Tab; 4] = [Tab::Overview, Tab::Tasks, Tab::Ideas, Tab::Vault];
+    pub const ALL: [Tab; 5] = [Tab::Overview, Tab::Board, Tab::Tasks, Tab::Ideas, Tab::Vault];
 
     pub fn title(self) -> &'static str {
         match self {
             Tab::Overview => "Overview",
+            Tab::Board => "Board",
             Tab::Tasks => "Tasks",
             Tab::Ideas => "Ideas",
             Tab::Memory => "Memory",
@@ -5827,6 +5830,7 @@ impl AppView {
             // Work for the open employee: the Dashboard's Give work box, the employee chosen.
             Page::Employee(ManagerRef::Real(_)) => self.on_new_task(&NewTask, window, cx),
             Page::Project(ProjectRef::Real(_), Tab::Tasks) => self.on_new_task(&NewTask, window, cx),
+            Page::Project(ProjectRef::Real(_), Tab::Board) => self.board_new_ticket(window, cx),
             Page::Project(ProjectRef::Real(project), Tab::Memory) => self.open_dialog(DialogKind::NewMemory { project }, window, cx),
             Page::Project(ProjectRef::Real(project), Tab::Ideas) => self.open_dialog(DialogKind::NewIdea { project }, window, cx),
             Page::Projects if self.projects_tab == ProjectsTab::Ideas => {
@@ -7705,7 +7709,7 @@ mod tests {
         assert_eq!(NavItem::of(Page::Settings), NavItem::Settings);
         assert_eq!(EmployeesTab::ALL.map(|t| t.label()), ["List", "Org chart", "Guidelines"]);
         assert_eq!(ProjectsTab::ALL.map(|t| t.label()), ["Projects", "Ideas"]);
-        assert_eq!(Tab::ALL.map(|t| t.title()), ["Overview", "Tasks", "Ideas", "Vault"], "memory is not a tab of the bar");
+        assert_eq!(Tab::ALL.map(|t| t.title()), ["Overview", "Board", "Tasks", "Ideas", "Vault"], "memory is not a tab of the bar");
         assert_eq!(NavItem::of(Page::Vault), NavItem::Vault);
     }
 

@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'support/builders.dart';
+import 'support/tickets.dart';
 
 class MockRepository extends Mock implements AureliusRepository {}
 
@@ -54,6 +55,8 @@ void main() {
     when(() => repo.tasks(projectId: any(named: 'projectId'))).thenAnswer((_) async => tasks);
     when(() => repo.ideas(any())).thenAnswer((_) async => []);
     when(() => repo.memory(projectId: any(named: 'projectId'))).thenAnswer((_) async => []);
+    when(() => repo.boardChanges).thenAnswer((_) => const Stream.empty());
+    when(() => repo.board(projectId: any(named: 'projectId'))).thenAnswer((_) async => boardOf([ticketOf(projectId: 'p')], projectId: 'p'));
     when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
         .thenAnswer((_) async => receiptOf(const CommandResultFollowOrgChartSet(follow: true)));
   });
@@ -90,8 +93,8 @@ void main() {
 
     // Overview adds nothing: only the menu.
     expect(inAppBar(find.byIcon(CupertinoIcons.add)), findsNothing);
-    // Three tabs; employees are company-wide.
-    expect(ProjectPage.tabs, ['overview', 'tasks', 'ideas']);
+    // Four tabs; employees are company-wide.
+    expect(ProjectPage.tabs, ['overview', 'board', 'tasks', 'ideas']);
     expect(find.text('Conversations'), findsNothing);
     expect(find.text('Recurring'), findsNothing);
     expect(find.text('Notes'), findsNothing);
@@ -100,7 +103,7 @@ void main() {
     expect(find.text('Managers'), findsNothing);
     expect(find.text('Employees'), findsNothing);
 
-    for (final (tab, tooltip) in [('tasks', 'New task'), ('ideas', 'New idea')]) {
+    for (final (tab, tooltip) in [('board', 'New ticket'), ('tasks', 'New task'), ('ideas', 'New idea')]) {
       await show(tester, tab);
       expect(inAppBar(find.byKey(ValueKey('project-add-$tab'))), findsOneWidget, reason: tab);
       // The only add button of the tab is the one up there.
@@ -111,6 +114,20 @@ void main() {
       expect(tester.getCenter(find.byTooltip(tooltip)).dx, greaterThan(tester.getCenter(find.byTooltip('Project actions')).dx));
     }
     expect(find.text('New employee'), findsNothing, reason: 'employees are added on the Company tab');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the Board tab shows only this project\'s tickets, without a project filter', (tester) async {
+    await pump(tester);
+    verifyNever(() => repo.board(projectId: any(named: 'projectId')));
+    await show(tester, 'board');
+    verify(() => repo.board(projectId: 'p')).called(1);
+    verifyNever(() => repo.board(projectId: null));
+    expect(find.text('Write the release notes'), findsOneWidget);
+    expect(find.byKey(const ValueKey('board-count')), findsOneWidget);
+    expect(find.byKey(const ValueKey('board-filter-project')), findsNothing, reason: 'the project is fixed');
+    expect(find.byKey(const ValueKey('board-filter-owner')), findsOneWidget);
+    expect(find.byTooltip('Board settings'), findsNothing, reason: 'the project page has the app bar');
     expect(tester.takeException(), isNull);
   });
 
