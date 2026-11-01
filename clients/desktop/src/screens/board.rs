@@ -1433,6 +1433,10 @@ impl AppView {
                 }
             }
             BoardUpdate::Ticket(id, result) => {
+                // The open ticket channel's header shows its title and assignees (AUR-CHAT-001).
+                if let Ok(detail) = &result {
+                    self.channel_ticket_loaded(detail);
+                }
                 let panel = self.panel == Panel::Ticket(id);
                 if !panel && self.board_dialog_reads() != Some(id) {
                     return;

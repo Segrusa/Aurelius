@@ -1029,13 +1029,30 @@ pub struct AppView {
     pub channels: Option<Vec<aurelius_domain::views::ChannelView>>,
     /// The channel the Team chat shows (none: the general one).
     pub channel: Option<ConversationId>,
-    /// A channel just opened with this many unread messages: where "New" goes is fixed
-    /// when its messages arrive (its conversation, the count).
-    pub channel_divider: Option<(ConversationId, usize)>,
+    /// A channel just opened with this many unread messages and the reader's last
+    /// read ordinal, both as the list had them before opening (opening marks it read):
+    /// where "New messages" goes is fixed when its messages arrive.
+    pub channel_divider: Option<(ConversationId, usize, Option<u32>)>,
     /// The first message after the "New" divider in the open channel (it stays there while more come).
     pub channel_new_at: Option<MessageId>,
     /// The archived projects' channels are unfolded.
     pub channels_archived_open: bool,
+    /// "Show more" was chosen under Tickets / under Archived (AUR-CHAT-001, O-5).
+    pub channels_tickets_all: bool,
+    pub channels_archived_all: bool,
+    /// The ticket channels' order while the pointer is over the list: a row never jumps under the click.
+    pub channel_order: Option<Vec<ConversationId>>,
+    /// The search field above the channel list (`channel.search`).
+    pub channel_search: Entity<InputState>,
+    /// What `channel.search` found for this query (none: no search, the whole list shows).
+    pub channel_results: Option<(String, Vec<aurelius_domain::views::ChannelView>)>,
+    /// The open ticket channel's ticket (`ticket.get`): its title and assignees for the header.
+    pub channel_ticket: Option<aurelius_domain::ticket::TicketDetail>,
+    /// A post here was refused with `channel_archived`: the channel shows its read-only
+    /// bar until the list says it can be written in again (a reopened ticket).
+    pub channel_refused: Option<ConversationId>,
+    /// The keyboard of the Team chat composer's `@` suggestions.
+    pub group_mentions: crate::screens::discussion::MentionPicker,
     /// The backend reads the channels on every chat event while the Team chat shows
     /// (`Request::FollowChannels`); this window last asked for that.
     pub channels_followed: bool,
@@ -1263,6 +1280,7 @@ impl AppView {
         let server_input = cx.new(|cx| InputState::new(window, cx).placeholder("Paste the pairing text (aurelius-pair:…)"));
         let server_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("The server's name, for example Office"));
         let palette_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search a project, employee or command…"));
+        let channel_search = cx.new(|cx| InputState::new(window, cx).placeholder("Search channels"));
         let folder_path_input = cx.new(|cx| InputState::new(window, cx).placeholder("Type or paste a folder path"));
         let folder_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("Name of the new folder"));
         let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("Name, for example Atlas"));
@@ -1293,6 +1311,12 @@ impl AppView {
             cx.subscribe_in(&plan_input, window, |_, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::Change) {
                     cx.notify();
+                }
+            }),
+            // The channel search asks the server as the query changes (`channel.search`).
+            cx.subscribe_in(&channel_search, window, |this, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.search_channels(cx);
                 }
             }),
             cx.subscribe_in(&palette_input, window, |this, _, event: &InputEvent, _, cx| {
@@ -1352,6 +1376,9 @@ impl AppView {
                 // Shift+Enter also reports PressEnter, after inserting the newline.
                 match event {
                     // While an answer runs, Enter interrupts it with the message (stop and send in one go).
+                    // The Team chat (ui-ontwerp §4, O-2): Enter sends, Shift+Enter is a new line; Alt+Enter is Send now.
+                    InputEvent::PressEnter { shift: false, .. } if this.screen == Page::GroupChat => this.send_message(window, cx),
+                    InputEvent::PressEnter { shift: true, .. } if this.screen == Page::GroupChat => {}
                     InputEvent::PressEnter { shift: false, .. } if this.active_run().is_some() => this.send_now(window, cx),
                     InputEvent::PressEnter { shift: false, .. } => this.send_message(window, cx),
                     // Shift+Enter keeps its newline when nothing runs; while an answer runs it queues the message behind it.
@@ -1360,6 +1387,12 @@ impl AppView {
                 }
                 // Typing hides the quick replies (only the first key and a cleared draft re-render).
                 if matches!(event, InputEvent::Change) && this.quick_replies_on() && this.composer.read(cx).value().chars().count() <= 1 {
+                    cx.notify();
+                }
+                // The Team chat's `@` suggestions follow the text.
+                if matches!(event, InputEvent::Change) && this.screen == Page::GroupChat {
+                    let text = this.composer.read(cx).value().to_string();
+                    this.group_mentions.changed(&text);
                     cx.notify();
                 }
             }),
@@ -1519,6 +1552,14 @@ impl AppView {
             channel_divider: None,
             channel_new_at: None,
             channels_archived_open: false,
+            channels_tickets_all: false,
+            channels_archived_all: false,
+            channel_order: None,
+            channel_search,
+            channel_results: None,
+            channel_ticket: None,
+            channel_refused: None,
+            group_mentions: Default::default(),
             channels_followed: false,
             subagents_open: false,
             subagents: None,
@@ -2060,8 +2101,9 @@ impl AppView {
             }
             Update::Messages(snapshot) => {
                 // A channel just opened: "New" goes before its first unread message, and stays there (fase 2 §3).
-                if let Some((_, unread)) = self.channel_divider.filter(|(c, _)| *c == snapshot.conversation_id) {
-                    self.channel_new_at = crate::screens::discussion::new_divider(snapshot.messages.len(), unread as u32).map(|i| snapshot.messages[i].id);
+                if let Some((_, unread, read_through)) = self.channel_divider.filter(|(c, _, _)| *c == snapshot.conversation_id) {
+                    let ordinals: Vec<u32> = snapshot.messages.iter().map(|m| m.ordinal).collect();
+                    self.channel_new_at = crate::screens::team_feed::new_messages_at(&ordinals, read_through, unread as u32).map(|i| snapshot.messages[i].id);
                     self.channel_divider = None;
                 }
                 if self.open_conversation == Some(snapshot.conversation_id) {
@@ -2108,6 +2150,8 @@ impl AppView {
                 self.group_error = Some(why);
             }
             Update::Channels(channels) => self.channels_loaded(channels),
+            Update::ChannelSearch(query, found) => self.channels_found(query, found, cx),
+            Update::ChannelArchived(channel) => self.channel_archived(channel),
             Update::Stream(delta) => {
                 if stream_stepped(self.streams.get(&delta.conversation_id), &delta) && self.chip_conversation() == Some(delta.conversation_id) {
                     self.subagents_stepped = true;
@@ -2266,6 +2310,9 @@ impl AppView {
         self.channels = None;
         self.channel = None;
         self.channel_divider = None;
+        self.channel_ticket = None;
+        self.channel_refused = None;
+        self.channel_results = None;
         self.screen = Page::Dashboard;
         tracing::info!(panel = ?self.panel, "server state reset (see B6)");
         self.panel = Panel::None;
@@ -2353,6 +2400,11 @@ impl AppView {
     /// The server lets management choose its own task mode (feature `management_chooses_mode`).
     pub fn management_mode_supported(&self) -> bool {
         matches!(&self.connection, Connection::Online { server, .. } if server.management_chooses_mode)
+    }
+
+    /// The Team chat lists a channel per ticket (feature `ticket_channels`).
+    pub fn ticket_channels_supported(&self) -> bool {
+        matches!(&self.connection, Connection::Online { server, .. } if server.ticket_channels)
     }
 
     /// Tickets have their discussion and a ticket can be made from a message (feature `ticket_discussion`).
@@ -5262,11 +5314,6 @@ impl AppView {
         cx.notify();
     }
 
-    /// The names an `@` in the group chat can mention: the employees not archived.
-    pub fn mention_names(&self) -> Vec<&str> {
-        self.managers.iter().filter(|m| m.status != LifecycleStatus::Archived).map(|m| m.name.as_str()).collect()
-    }
-
     /// The role of the employee (not archived) by this name, from the company.
     pub fn employee_role(&self, name: &str) -> Option<&str> {
         self.managers.iter().find(|m| m.status != LifecycleStatus::Archived && m.name == name).map(|m| m.role.as_str())
@@ -5279,20 +5326,6 @@ impl AppView {
             return name;
         }
         crate::screens::chat::with_role(&name, self.employee_role(&name)).into()
-    }
-
-    /// Complete the `@name` being typed at the end of the composer to `@<name> `.
-    pub fn complete_mention(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.composer.read(cx).value();
-        let Some((at, _)) = crate::screens::chat::mention_suggestions(&text, &self.mention_names()) else { return };
-        let end = text.len();
-        let mention = format!("@{name} ");
-        self.composer.update(cx, |input, cx| {
-            input.set_selected_range(at..end, cx);
-            input.replace(mention, window, cx);
-            input.focus(window, cx);
-        });
-        cx.notify();
     }
 
     /// Who answers a group chat message without an `@name`: the top of the org chart.
@@ -6686,9 +6719,10 @@ impl AppView {
             self.notify_user(why, true, cx);
             return;
         }
-        // MU2-08 AC2: an archived project's channel is read-only.
-        if self.thread_screen() == Page::GroupChat && self.current_channel().is_some_and(|c| c.archived) {
-            self.notify_user("This project is archived: its channel is read-only.", true, cx);
+        // MU2-08 AC2: an archived project's channel is read-only, and so is a closed ticket's.
+        if self.thread_screen() == Page::GroupChat && self.channel_read_only() {
+            let note = self.current_channel().map_or_else(String::new, crate::screens::discussion::read_only_bar);
+            self.notify_user(note, true, cx);
             return;
         }
         if !self.pending_files.is_empty() && !self.takes_manager_files() {
@@ -6828,8 +6862,8 @@ impl AppView {
         }
         // Ctrl+K "Go to #…" (fase 2 §3): the Team chat's channels, in the list's order.
         if self.window_project.is_none() {
-            let (general, projects, archived) = crate::screens::discussion::ordered(self.channels.as_deref().unwrap_or_default());
-            for ch in general.into_iter().chain(projects).chain(archived) {
+            let s = crate::screens::discussion::sections(self.channels.as_deref().unwrap_or_default());
+            for ch in s.general.into_iter().chain(s.projects).chain(s.tickets).chain(s.archived) {
                 entries.push(PaletteEntry {
                     label: crate::screens::discussion::go_to_channel_label(ch).into(),
                     hint: "Channel".into(),
