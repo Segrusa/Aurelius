@@ -6202,6 +6202,7 @@ enum EventKind {
   messageAssistantCommitted('message.assistant_committed'),
   messageDeleted('message.deleted'),
   messageInterrupted('message.interrupted'),
+  messageReacted('message.reacted'),
   messageSentNow('message.sent_now'),
   messageUserCommitted('message.user_committed'),
   noteCreated('note.created'),
@@ -10652,6 +10653,7 @@ final class MessageView {
     this.threadLastReplyMs,
     this.threadParent,
     this.threadReplyCount,
+    this.threadUnread,
     this.update,
     required this.uploads,
     this.usage,
@@ -10681,8 +10683,9 @@ final class MessageView {
   /// answer running in its conversation. Such a message can be deleted
   /// (`DeleteQueuedMessage`) or sent now (`SendQueuedNow`). Left out when false.
   final bool queued;
-  /// The reactions on the message (feature `chat_reactions`, not advertised
-  /// yet), one entry per emoji. Left out when there are none and by older servers.
+  /// The reactions on the message (feature `chat_reactions`), one entry per
+  /// emoji, in the order each emoji was first used. Left out when there are
+  /// none and by older servers.
   final List<ReactionView> reactions;
   /// For retried answers: the user message this answers again.
   final String? replyTo;
@@ -10699,12 +10702,19 @@ final class MessageView {
   final String text;
   /// A message that starts a thread (feature `chat_threads`): when its latest reply was written.
   final int? threadLastReplyMs;
-  /// A reply in a thread (feature `chat_threads`, not advertised yet): the
-  /// message it answers. Left out for a message of the channel itself and by older servers.
+  /// A reply in a thread (feature `chat_threads`): the message of the channel
+  /// it answers (the thread's root, never itself a reply). Replies are only in
+  /// `thread.read`, never in the channel's own list. Left out for a message of
+  /// the channel itself and by older servers.
   final String? threadParent;
   /// A message that starts a thread (feature `chat_threads`): how many replies it has.
   /// Left out when it has none and by older servers.
   final int? threadReplyCount;
+  /// A message that starts a thread (feature `chat_threads`): how many of its
+  /// replies the reading board member has not read yet (others' replies since
+  /// their last `thread.read` of it). Reading the channel does not change it.
+  /// Left out when none are unread, for an app, and by older servers.
+  final int? threadUnread;
   /// A task update in the task's conversation, not an answer: brief |
   /// finding | question | status. `author` says from whom (a
   /// subagent, a colleague).
@@ -10738,6 +10748,7 @@ final class MessageView {
     threadLastReplyMs: (json['thread_last_reply_ms'] == null ? null : (json['thread_last_reply_ms'] as num).toInt()),
     threadParent: (json['thread_parent'] == null ? null : (json['thread_parent'] as String)),
     threadReplyCount: (json['thread_reply_count'] == null ? null : (json['thread_reply_count'] as num).toInt()),
+    threadUnread: (json['thread_unread'] == null ? null : (json['thread_unread'] as num).toInt()),
     update: (json['update'] == null ? null : (json['update'] as String)),
     uploads: (json['uploads'] as List<dynamic>).map((x0) => MessageFileView.fromJson(x0 as Map<String, dynamic>)).toList(),
     usage: (json['usage'] == null ? null : TokenUsage.fromJson(json['usage'] as Map<String, dynamic>)),
@@ -10766,6 +10777,7 @@ final class MessageView {
     if (threadLastReplyMs != null) 'thread_last_reply_ms': threadLastReplyMs,
     if (threadParent != null) 'thread_parent': threadParent,
     if (threadReplyCount != null) 'thread_reply_count': threadReplyCount,
+    if (threadUnread != null) 'thread_unread': threadUnread,
     if (update != null) 'update': update,
     'uploads': uploads.map((x0) => x0.toJson()).toList(),
     if (usage != null) 'usage': usage?.toJson(),
@@ -11275,6 +11287,13 @@ sealed class Method {
           cols: (src['cols'] as num).toInt(),
           rows: (src['rows'] as num).toInt(),
           terminalId: (src['terminal_id'] as String),
+        );
+        }
+      case 'thread.read':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodThreadRead(
+          messageId: (src['message_id'] as String),
         );
         }
       case 'ticket.get':
@@ -12621,6 +12640,28 @@ final class MethodTerminalResize extends Method {
       'cols': cols,
       'rows': rows,
       'terminal_id': terminalId,
+    },
+    };
+}
+
+/// One thread of a channel (feature `chat_threads`): `message_id` is the
+/// message that starts it (a message of a channel or a ticket's discussion
+/// that is not itself a reply), answered with the message and its replies,
+/// oldest first (`ThreadSnapshot`). The board member who reads it has read
+/// the thread (its `thread_unread` goes to none); reading the channel never
+/// does. A message without replies is a thread of none.
+final class MethodThreadRead extends Method {
+  const MethodThreadRead({
+    required this.messageId,
+  });
+
+  final String messageId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'thread.read',
+      'params': <String, dynamic>{
+      'message_id': messageId,
     },
     };
 }
@@ -14610,6 +14651,8 @@ sealed class ResponseBody {
         return const ResponseBodyTerminalDone();
       case 'terminals':
         return ResponseBodyTerminals(value: (json['value'] as List<dynamic>).map((x0) => TerminalSummary.fromJson(x0 as Map<String, dynamic>)).toList());
+      case 'thread':
+        return ResponseBodyThread(value: ThreadSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'ticket':
         return ResponseBodyTicket(value: TicketDetail.fromJson(json['value'] as Map<String, dynamic>));
       case 'tickets':
@@ -15742,6 +15785,21 @@ final class ResponseBodyTerminals extends ResponseBody {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'terminals',
       'value': value.map((x0) => x0.toJson()).toList(),
+    };
+}
+
+/// `thread.read`.
+final class ResponseBodyThread extends ResponseBody {
+  const ResponseBodyThread({
+    required this.value,
+  });
+
+  final ThreadSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'thread',
+      'value': value.toJson(),
     };
 }
 
@@ -17686,6 +17744,7 @@ final class StreamAppend {
     this.progress,
     required this.runId,
     required this.text,
+    this.threadParent,
   });
 
   /// The tools used so far, sent only when they changed since the last
@@ -17702,6 +17761,8 @@ final class StreamAppend {
   final RunProgress? progress;
   final String runId;
   final String text;
+  /// An answer streaming into a thread: its root (see `StreamDelta::thread_parent`).
+  final String? threadParent;
 
   factory StreamAppend.fromJson(Map<String, dynamic> json) => StreamAppend(
     activity: (json['activity'] == null ? null : (json['activity'] as List<dynamic>).map((x0) => ActivityView.fromJson(x0 as Map<String, dynamic>)).toList()),
@@ -17713,6 +17774,7 @@ final class StreamAppend {
     progress: (json['progress'] == null ? null : RunProgress.fromJson(json['progress'] as Map<String, dynamic>)),
     runId: (json['run_id'] as String),
     text: (json['text'] as String),
+    threadParent: (json['thread_parent'] == null ? null : (json['thread_parent'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -17725,6 +17787,7 @@ final class StreamAppend {
     if (progress != null) 'progress': progress?.toJson(),
     'run_id': runId,
     'text': text,
+    if (threadParent != null) 'thread_parent': threadParent,
   };
 }
 
@@ -17740,6 +17803,7 @@ final class StreamDelta {
     this.progress,
     required this.runId,
     required this.text,
+    this.threadParent,
   });
 
   /// All tool use so far (idempotent too), each call shortened (feature
@@ -17761,6 +17825,10 @@ final class StreamDelta {
   final String runId;
   /// Full text so far (idempotent; a dropped delta loses nothing).
   final String text;
+  /// An employee's answer streaming into a thread (feature `chat_threads`):
+  /// the thread's root message in `conversation_id`. Only connections that
+  /// accept `chat_threads` get such an update. Left out elsewhere and by older servers.
+  final String? threadParent;
 
   factory StreamDelta.fromJson(Map<String, dynamic> json) => StreamDelta(
     activity: (json['activity'] as List<dynamic>).map((x0) => ActivityView.fromJson(x0 as Map<String, dynamic>)).toList(),
@@ -17771,6 +17839,7 @@ final class StreamDelta {
     progress: (json['progress'] == null ? null : RunProgress.fromJson(json['progress'] as Map<String, dynamic>)),
     runId: (json['run_id'] as String),
     text: (json['text'] as String),
+    threadParent: (json['thread_parent'] == null ? null : (json['thread_parent'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -17782,6 +17851,7 @@ final class StreamDelta {
     if (progress != null) 'progress': progress?.toJson(),
     'run_id': runId,
     'text': text,
+    if (threadParent != null) 'thread_parent': threadParent,
   };
 }
 
@@ -18658,6 +18728,46 @@ final class TerminalView {
     'reattached': reattached,
     'shell': shell,
     'terminal_id': terminalId,
+  };
+}
+
+/// `thread.read` (feature `chat_threads`): one thread of a channel, its root
+/// message and its replies oldest first, as the reading board member sees them.
+final class ThreadSnapshot {
+  const ThreadSnapshot({
+    required this.asOfSeq,
+    required this.conversationId,
+    this.readOnly,
+    this.replies = const [],
+    required this.root,
+  });
+
+  final int asOfSeq;
+  /// The channel (or ticket's discussion) the thread is in.
+  final String conversationId;
+  /// The channel is closed (an archived project's, a ticket's on Done or
+  /// archived): the thread can be read, not answered.
+  final bool? readOnly;
+  /// Its replies, oldest first (each with `thread_parent` set to the root).
+  final List<MessageView> replies;
+  /// The message that starts the thread, with its counters (`thread_unread`
+  /// as it was before this read marked the thread read).
+  final MessageView root;
+
+  factory ThreadSnapshot.fromJson(Map<String, dynamic> json) => ThreadSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    conversationId: (json['conversation_id'] as String),
+    readOnly: (json['read_only'] == null ? null : (json['read_only'] as bool)),
+    replies: (json['replies'] == null ? const [] : (json['replies'] as List<dynamic>).map((x0) => MessageView.fromJson(x0 as Map<String, dynamic>)).toList()),
+    root: MessageView.fromJson(json['root'] as Map<String, dynamic>),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'conversation_id': conversationId,
+    if (readOnly != null) 'read_only': readOnly,
+    'replies': replies.map((x0) => x0.toJson()).toList(),
+    'root': root.toJson(),
   };
 }
 

@@ -513,7 +513,7 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     if !shared.images.is_empty() {
         conv::set_message_files(tx, update, shared.images)?;
     }
-    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login };
+    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login, thread_parent: None };
     let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
     Ok(Some((run, std::iter::once(posted).chain(queued).collect())))
 }

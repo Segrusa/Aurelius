@@ -12,27 +12,54 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 const REPLAY_PAGE: u32 = 500;
 
+/// What the hello's `accepts` named that changes the live updates of a connection
+/// (`aurelius_protocol::client_feature`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct Accepts {
+    pub activity_changes: bool,
+    pub team_channels: bool,
+    pub server_name: bool,
+    pub chat_threads: bool,
+    pub chat_reactions: bool,
+}
+
+impl Accepts {
+    /// The client features named in a hello.
+    pub(super) fn of(accepts: &[String]) -> Self {
+        use aurelius_protocol::client_feature as f;
+        let has = |feature: &str| accepts.iter().any(|a| a == feature);
+        Accepts {
+            activity_changes: has(f::ACTIVITY_CHANGES),
+            team_channels: has(f::TEAM_CHANNELS),
+            server_name: has(f::SERVER_NAME),
+            chat_threads: has(f::CHAT_THREADS),
+            chat_reactions: has(f::CHAT_REACTIONS),
+        }
+    }
+}
+
 /// Replay durable events after `after_seq`, then forward live events.
 /// A lagging subscriber re-reads from the DB instead of skipping events.
 /// With `activity_changes` live updates carry only new or changed tool calls.
 /// Without `team_channels` the events and streamed text of project channels are
 /// left out: an older client would show them in its one Team chat. Without
-/// `server_name` the `server.renamed` events are: an older client cannot read
-/// an event kind it does not know.
+/// `server_name` the `server.renamed` events are, and without `chat_reactions`
+/// the `message.reacted` ones: an older client cannot read an event kind it
+/// does not know. Without `chat_threads` the streamed text of an answer in a
+/// thread is: an older client would show it in the channel's own list.
 pub(super) async fn subscribe(
     shared: &Arc<Shared>,
     after_seq: u64,
-    activity_changes: bool,
-    team_channels: bool,
-    server_name: bool,
+    accepts: Accepts,
     out: mpsc::Sender<ServerMessage>,
 ) -> Result<(ResponseBody, tokio::task::JoinHandle<()>), ProtocolError> {
+    let activity_changes = accepts.activity_changes;
     // Subscribe before replaying so nothing committed in between is missed.
     let mut live = shared.events.subscribe();
     let mut streams = shared.streams.subscribe();
     let mut loads = Some(shared.admission.changes());
     let mut powers = Some(shared.power.changes());
-    let mut hidden = Hidden::new(team_channels, server_name);
+    let mut hidden = Hidden::new(accepts.team_channels, accepts.server_name).with_chat(accepts.chat_threads, accepts.chat_reactions);
     let mut cursor = replay(shared, after_seq, &out, &mut hidden).await?;
     let replayed_through_seq = cursor;
     let shared = shared.clone();
@@ -43,7 +70,7 @@ pub(super) async fn subscribe(
                 received = live.recv() => received,
                 delta = streams.recv() => {
                     let delta = match delta {
-                        Ok(delta) if hidden.hides(shared.store(), &delta.conversation_id.to_string()).await => continue,
+                        Ok(delta) if hidden.hides_stream(&delta) || hidden.hides(shared.store(), &delta.conversation_id.to_string()).await => continue,
                         other => other,
                     };
                     match delta {
@@ -125,21 +152,40 @@ pub(super) async fn subscribe(
 /// being a project channel, so each id is looked up once, off the async
 /// threads (`storage_task`): the forwarder never blocks a tokio worker on SQLite.
 /// Nor does a connection without `server_name` get `server.renamed`
-/// (`client_feature::SERVER_NAME`, SN-02 AC3).
+/// (`client_feature::SERVER_NAME`, SN-02 AC3), one without `chat_reactions`
+/// `message.reacted`, or one without `chat_threads` the streamed text of an
+/// answer in a thread.
 struct Hidden {
     team_channels: bool,
     server_name: bool,
+    chat_threads: bool,
+    chat_reactions: bool,
     known: HashMap<String, bool>,
 }
 
 impl Hidden {
     fn new(team_channels: bool, server_name: bool) -> Self {
-        Hidden { team_channels, server_name, known: HashMap::new() }
+        Hidden { team_channels, server_name, chat_threads: false, chat_reactions: false, known: HashMap::new() }
+    }
+
+    /// The same, for a client that shows threads and/or reactions.
+    fn with_chat(self, chat_threads: bool, chat_reactions: bool) -> Self {
+        Hidden { chat_threads, chat_reactions, ..self }
     }
 
     /// Event kinds this connection's client does not know.
     fn hides_kind(&self, kind: EventKind) -> bool {
-        kind == EventKind::ServerRenamed && !self.server_name
+        match kind {
+            EventKind::ServerRenamed => !self.server_name,
+            EventKind::MessageReacted => !self.chat_reactions,
+            _ => false,
+        }
+    }
+
+    /// Streamed text this connection's client would show in the wrong place:
+    /// an answer in a thread, for a client without threads.
+    fn hides_stream(&self, delta: &StreamDelta) -> bool {
+        delta.thread_parent.is_some() && !self.chat_threads
     }
 
     async fn hides(&mut self, store: &Arc<Store>, aggregate_id: &str) -> bool {
@@ -258,7 +304,7 @@ mod tests {
     }
 
     fn delta(message_id: MessageId, activity: Vec<ActivityView>) -> StreamDelta {
-        StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id, text: "x".into(), activity, progress: None, activity_changes: false, mode: None }
+        StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id, text: "x".into(), activity, progress: None, activity_changes: false, mode: None, thread_parent: None }
     }
 
     fn ids(calls: &[ActivityView]) -> Vec<&str> {
@@ -277,6 +323,31 @@ mod tests {
         assert!(!hidden.hides(&store, &ConversationId::new().to_string()).await);
         assert_eq!(hidden.known.len(), 2, "each id looked up once");
         assert!(!Hidden::new(true, false).hides(&store, &general).await);
+    }
+
+    #[test]
+    fn only_a_client_that_accepts_chat_reactions_gets_message_reacted() {
+        assert!(Hidden::new(true, true).hides_kind(EventKind::MessageReacted));
+        assert!(Hidden::new(true, true).with_chat(true, false).hides_kind(EventKind::MessageReacted));
+        assert!(!Hidden::new(false, false).with_chat(false, true).hides_kind(EventKind::MessageReacted));
+        // A reply in a thread is an event an older client knows.
+        assert!(!Hidden::new(true, true).hides_kind(EventKind::MessageUserCommitted));
+    }
+
+    #[test]
+    fn only_a_client_that_accepts_chat_threads_gets_an_answer_streaming_into_a_thread() {
+        let in_thread = StreamDelta { thread_parent: Some(MessageId::new()), ..delta(MessageId::new(), vec![]) };
+        assert!(Hidden::new(true, true).hides_stream(&in_thread));
+        assert!(Hidden::new(true, true).with_chat(false, true).hides_stream(&in_thread));
+        assert!(!Hidden::new(true, true).with_chat(true, false).hides_stream(&in_thread));
+        assert!(!Hidden::new(false, false).hides_stream(&delta(MessageId::new(), vec![])), "the channel's own stream as before");
+    }
+
+    #[test]
+    fn a_hello_names_the_chat_flags_it_accepts() {
+        let accepts = Accepts::of(&["chat_threads".into(), "server_name".into()]);
+        assert_eq!(accepts, Accepts { server_name: true, chat_threads: true, ..Accepts::default() });
+        assert_eq!(Accepts::of(&[]), Accepts::default());
     }
 
     #[test]

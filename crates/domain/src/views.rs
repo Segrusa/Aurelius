@@ -638,8 +638,10 @@ pub struct MessageView {
     /// Such a line never wakes anyone. Left out for other messages and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemLine>,
-    /// A reply in a thread (feature `chat_threads`, not advertised yet): the
-    /// message it answers. Left out for a message of the channel itself and by older servers.
+    /// A reply in a thread (feature `chat_threads`): the message of the channel
+    /// it answers (the thread's root, never itself a reply). Replies are only in
+    /// `thread.read`, never in the channel's own list. Left out for a message of
+    /// the channel itself and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_parent: Option<MessageId>,
     /// A message that starts a thread (feature `chat_threads`): how many replies it has.
@@ -649,10 +651,36 @@ pub struct MessageView {
     /// A message that starts a thread (feature `chat_threads`): when its latest reply was written.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_last_reply_ms: Option<i64>,
-    /// The reactions on the message (feature `chat_reactions`, not advertised
-    /// yet), one entry per emoji. Left out when there are none and by older servers.
+    /// A message that starts a thread (feature `chat_threads`): how many of its
+    /// replies the reading board member has not read yet (others' replies since
+    /// their last `thread.read` of it). Reading the channel does not change it.
+    /// Left out when none are unread, for an app, and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_unread: Option<u32>,
+    /// The reactions on the message (feature `chat_reactions`), one entry per
+    /// emoji, in the order each emoji was first used. Left out when there are
+    /// none and by older servers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reactions: Vec<ReactionView>,
+}
+
+/// `thread.read` (feature `chat_threads`): one thread of a channel, its root
+/// message and its replies oldest first, as the reading board member sees them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ThreadSnapshot {
+    pub as_of_seq: u64,
+    /// The channel (or ticket's discussion) the thread is in.
+    pub conversation_id: ConversationId,
+    /// The message that starts the thread, with its counters (`thread_unread`
+    /// as it was before this read marked the thread read).
+    pub root: MessageView,
+    /// Its replies, oldest first (each with `thread_parent` set to the root).
+    #[serde(default)]
+    pub replies: Vec<MessageView>,
+    /// The channel is closed (an archived project's, a ticket's on Done or
+    /// archived): the thread can be read, not answered.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
 }
 
 /// One emoji on a message (`MessageView::reactions`, feature `chat_reactions`):

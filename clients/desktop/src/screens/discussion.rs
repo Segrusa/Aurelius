@@ -770,6 +770,7 @@ mod tests {
             thread_parent: None,
             thread_reply_count: None,
             thread_last_reply_ms: None,
+            thread_unread: None,
             reactions: Vec::new(),
         }
     }

@@ -139,6 +139,7 @@ fn message(system: Option<SystemLine>) -> MessageView {
         thread_parent: Some(MessageId::new()),
         thread_reply_count: Some(2),
         thread_last_reply_ms: Some(1_700_000_000_500),
+        thread_unread: Some(1),
         reactions: vec![ReactionView { emoji: "👍".into(), count: 2, mine: true, by: vec!["sebastien".into(), "Atlas".into()] }],
     }
 }
@@ -182,12 +183,12 @@ fn an_older_client_reads_a_message_with_threads_reactions_and_a_line_with_an_act
 #[test]
 fn a_message_an_older_server_wrote_reads_without_threads_or_reactions() {
     let mut json = serde_json::to_value(message(None)).unwrap();
-    for field in ["thread_parent", "thread_reply_count", "thread_last_reply_ms", "reactions"] {
+    for field in ["thread_parent", "thread_reply_count", "thread_last_reply_ms", "thread_unread", "reactions"] {
         json.as_object_mut().unwrap().remove(field);
     }
     let old: OldMessageView = serde_json::from_value(json).unwrap();
     let new: MessageView = serde_json::from_value(serde_json::to_value(&old).unwrap()).unwrap();
-    assert_eq!((new.thread_parent, new.thread_reply_count, new.thread_last_reply_ms, new.reactions.len()), (None, None, None, 0));
+    assert_eq!((new.thread_parent, new.thread_reply_count, new.thread_last_reply_ms, new.thread_unread, new.reactions.len()), (None, None, None, None, 0));
     // Without threads or reactions the new server writes a message exactly as before.
     assert_eq!(serde_json::to_value(&new).unwrap(), serde_json::to_value(&old).unwrap());
 }
@@ -235,11 +236,51 @@ fn channel_list_keeps_its_wire_form_and_search_is_a_method_of_its_own() {
 }
 
 #[test]
-fn ticket_channels_is_advertised_and_threads_and_reactions_are_not_yet() {
-    assert!(FEATURES.contains(&feature::TICKET_CHANNELS));
-    assert!(!FEATURES.contains(&feature::CHAT_THREADS));
-    assert!(!FEATURES.contains(&feature::CHAT_REACTIONS));
-    assert_eq!(client_feature::TICKET_CHANNELS, feature::TICKET_CHANNELS);
+fn ticket_channels_threads_and_reactions_are_advertised_with_client_flags_of_the_same_name() {
+    for (server, client) in [
+        (feature::TICKET_CHANNELS, client_feature::TICKET_CHANNELS),
+        (feature::CHAT_THREADS, client_feature::CHAT_THREADS),
+        (feature::CHAT_REACTIONS, client_feature::CHAT_REACTIONS),
+    ] {
+        assert!(FEATURES.contains(&server), "{server}");
+        assert_eq!(client, server);
+    }
+}
+
+#[test]
+fn a_thread_is_read_with_a_method_of_its_own() {
+    let message_id = MessageId::new();
+    let read = Method::ThreadRead { message_id };
+    assert_eq!(serde_json::to_value(&read).unwrap(), serde_json::json!({ "method": "thread.read", "params": { "message_id": message_id } }));
+    assert_eq!(serde_json::from_value::<Method>(serde_json::to_value(&read).unwrap()).unwrap(), read);
+}
+
+#[test]
+fn a_thread_snapshot_has_its_root_and_replies_and_leaves_out_an_open_channel() {
+    let root = message(None);
+    let reply = MessageView { thread_parent: Some(root.id), thread_reply_count: None, thread_last_reply_ms: None, thread_unread: None, reactions: vec![], ..message(None) };
+    let snapshot = ThreadSnapshot { as_of_seq: 4, conversation_id: ConversationId::new(), root: root.clone(), replies: vec![reply], read_only: false };
+    let json = serde_json::to_value(&snapshot).unwrap();
+    assert!(json.get("read_only").is_none());
+    assert_eq!(json["replies"][0]["thread_parent"], serde_json::to_value(root.id).unwrap());
+    assert_eq!(serde_json::from_value::<ThreadSnapshot>(json).unwrap(), snapshot);
+    let body = serde_json::to_value(crate::rpc::ResponseBody::Thread(snapshot)).unwrap();
+    assert_eq!(body["type"], "thread");
+}
+
+#[test]
+fn a_reaction_is_an_event_kind_of_its_own() {
+    assert_eq!(aurelius_domain::EventKind::MessageReacted.as_str(), "message.reacted");
+    assert_eq!(aurelius_domain::EventKind::parse("message.reacted"), Some(aurelius_domain::EventKind::MessageReacted));
+}
+
+#[test]
+fn a_stream_outside_a_thread_is_written_as_before() {
+    let delta = crate::StreamDelta { run_id: aurelius_domain::RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "x".into(), activity: vec![], progress: None, activity_changes: false, mode: None, thread_parent: None };
+    assert!(serde_json::to_value(&delta).unwrap().get("thread_parent").is_none());
+    let root = MessageId::new();
+    let json = serde_json::to_value(crate::StreamDelta { thread_parent: Some(root), ..delta }).unwrap();
+    assert_eq!(json["thread_parent"], serde_json::to_value(root).unwrap());
 }
 
 #[test]

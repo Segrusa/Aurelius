@@ -381,6 +381,13 @@ abstract final class Methods {
   /// (feature `terminal.multi`; at most 4 per conversation, 8 per server).
   static const String terminalOpen = 'terminal.open';
   static const String terminalResize = 'terminal.resize';
+  /// One thread of a channel (feature `chat_threads`): `message_id` is the
+  /// message that starts it (a message of a channel or a ticket's discussion
+  /// that is not itself a reply), answered with the message and its replies,
+  /// oldest first (`ThreadSnapshot`). The board member who reads it has read
+  /// the thread (its `thread_unread` goes to none); reading the channel never
+  /// does. A message without replies is a thread of none.
+  static const String threadRead = 'thread.read';
   /// Review → Done. Only a board member; only when no linked task still works (B6).
   static const String ticketAccept = 'ticket.accept';
   /// Plan review → Doing: the owner carries the plan out.
@@ -1140,6 +1147,19 @@ Map<String, dynamic> terminalResize({required int cols, required int rows, requi
     'cols': cols,
     'rows': rows,
     'terminal_id': terminalId,
+  },
+};
+
+/// One thread of a channel (feature `chat_threads`): `message_id` is the
+/// message that starts it (a message of a channel or a ticket's discussion
+/// that is not itself a reply), answered with the message and its replies,
+/// oldest first (`ThreadSnapshot`). The board member who reads it has read
+/// the thread (its `thread_unread` goes to none); reading the channel never
+/// does. A message without replies is a thread of none.
+Map<String, dynamic> threadRead({required String messageId}) => <String, dynamic>{
+  'method': Methods.threadRead,
+  'params': <String, dynamic>{
+    'message_id': messageId,
   },
 };
 

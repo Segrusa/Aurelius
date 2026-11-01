@@ -8111,7 +8111,7 @@ mod tests {
         use aurelius_domain::MessageId;
         use aurelius_protocol::{ActivityView, StreamDelta};
         let step = |call: &str, ok: Option<bool>| ActivityView { call_id: call.into(), tool: "Read".into(), input: serde_json::Value::Null, output: None, ok, offset: 0, truncated: false, output_bytes: None };
-        let first = StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "Look".into(), activity: vec![step("agent", None)], progress: None, activity_changes: false, mode: None };
+        let first = StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "Look".into(), activity: vec![step("agent", None)], progress: None, activity_changes: false, mode: None, thread_parent: None };
         assert!(stream_stepped(None, &first), "the first delta of a conversation counts");
         let more_text = StreamDelta { text: "Looking at it".into(), ..first.clone() };
         assert!(!stream_stepped(Some(&first), &more_text), "text alone is no step");

@@ -58,6 +58,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::GroupChatGet { .. }
         | Method::ChannelList
         | Method::ChannelSearch { .. }
+        | Method::ThreadRead { .. }
         | Method::CompanyGet
         | Method::ProjectConversationList { .. }
         | Method::ApprovalList
@@ -496,6 +497,9 @@ pub struct StreamAppend {
     /// A group chat answer: the mode its run started in (see `StreamDelta::mode`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<aurelius_domain::autonomy::AgentMode>,
+    /// An answer streaming into a thread: its root (see `StreamDelta::thread_parent`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_parent: Option<aurelius_domain::MessageId>,
 }
 
 #[cfg(test)]

@@ -285,7 +285,7 @@ pub const READS_SCHEMA: i64 = 20;
 
 /// The messages that count for unread: the discussion's own (a board member's,
 /// an employee's post or answer), not Aurelius's notes and system lines.
-const COUNTED: &str = "m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group')";
+pub(crate) const COUNTED: &str = "m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group')";
 
 /// `user` read the discussion `conversation` (a channel or a ticket's
 /// discussion) up to its latest message. It never goes back; nothing for
@@ -314,6 +314,10 @@ const MENTION_SCAN: u32 = 500;
 /// What `user` (`username`) has not read yet in `conversation`: the messages of
 /// others since the last one read, and how many of those name them with
 /// `@username` (case does not matter). `read_text` reads a message's text by its storage key.
+///
+/// The replies in its threads (schema 27) are not among the unread: a thread
+/// has its own (`MessageView::thread_unread`). But a reply of another that names
+/// them and that they have not read in its thread counts among the mentions.
 pub fn unread(conn: &Connection, user: UserId, username: &str, conversation: ConversationId, read_text: &dyn Fn(&str) -> Option<String>) -> Result<(u32, u32), StorageError> {
     if !has_reads(conn)? {
         return Ok((0, 0));
@@ -322,13 +326,18 @@ pub fn unread(conn: &Connection, user: UserId, username: &str, conversation: Con
         .query_row("SELECT read_through FROM discussion_reads WHERE user_id = ?1 AND conversation_id = ?2", [user.to_string(), conversation.to_string()], |r| r.get(0))
         .optional()?
         .unwrap_or(0);
-    let filter = format!("m.conversation_id = ?1 AND m.ordinal > ?2 AND (m.author_user_id IS NULL OR m.author_user_id <> ?3) AND {COUNTED}");
+    let threads = crate::threads::has_threads(conn)?;
+    let own = if threads { " AND m.thread_parent_id IS NULL" } else { "" };
+    let filter = format!("m.conversation_id = ?1 AND m.ordinal > ?2 AND (m.author_user_id IS NULL OR m.author_user_id <> ?3) AND {COUNTED}{own}");
     let unread: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM messages m WHERE {filter}"), params![conversation.to_string(), through, user.to_string()], |r| r.get(0))?;
-    if unread == 0 {
-        return Ok((0, 0));
+    let mut keys = Vec::new();
+    if unread > 0 {
+        let mut stmt = conn.prepare(&format!("SELECT b.storage_key FROM messages m JOIN blobs b ON b.id = m.content_blob_id WHERE {filter} ORDER BY m.ordinal DESC LIMIT ?4"))?;
+        keys = stmt.query_map(params![conversation.to_string(), through, user.to_string(), MENTION_SCAN], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
     }
-    let mut stmt = conn.prepare(&format!("SELECT b.storage_key FROM messages m JOIN blobs b ON b.id = m.content_blob_id WHERE {filter} ORDER BY m.ordinal DESC LIMIT ?4"))?;
-    let keys = stmt.query_map(params![conversation.to_string(), through, user.to_string(), MENTION_SCAN], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    if threads {
+        keys.extend(crate::threads::unread_reply_keys(conn, conversation, user, MENTION_SCAN)?);
+    }
     let mentions = keys.iter().filter_map(|k| read_text(k)).filter(|text| mentions(text, username)).count();
     Ok((unread as u32, mentions as u32))
 }

@@ -198,6 +198,11 @@ pub struct StreamDelta {
     /// elsewhere and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<aurelius_domain::autonomy::AgentMode>,
+    /// An employee's answer streaming into a thread (feature `chat_threads`):
+    /// the thread's root message in `conversation_id`. Only connections that
+    /// accept `chat_threads` get such an update. Left out elsewhere and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_parent: Option<MessageId>,
 }
 
 /// Where the approval bridge keeps the agent's screenshots, under the data folder.
