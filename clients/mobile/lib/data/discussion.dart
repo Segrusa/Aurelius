@@ -65,14 +65,18 @@ String summaryRetryFailure(Object e) => switch (e) {
       _ => '$e',
     };
 
-final _mention = RegExp(r'(?<![\p{L}\p{N}._])@([\p{L}\p{N}][\p{L}\p{N}._-]*)', unicode: true);
+/// An `@name` in a message: not inside a word (an email address); group 1 is the name.
+final mentionPattern = RegExp(r'(?<![\p{L}\p{N}._])@([\p{L}\p{N}][\p{L}\p{N}._-]*)', unicode: true);
+
+/// The name of an `@` match without a trailing dot or dash (those belong to the sentence).
+String trimmedMention(String token) => token.replaceFirst(RegExp(r'[._-]+$'), '');
 
 /// The names written with `@` in [text], in order, each once (a trailing dot
 /// or dash belongs to the sentence, not the name).
 List<String> mentionedNames(String text) {
   final out = <String>[];
-  for (final m in _mention.allMatches(text)) {
-    final name = m.group(1)!.replaceFirst(RegExp(r'[._-]+$'), '');
+  for (final m in mentionPattern.allMatches(text)) {
+    final name = trimmedMention(m.group(1)!);
     if (name.isNotEmpty && !out.any((n) => n.toLowerCase() == name.toLowerCase())) out.add(name);
   }
   return out;
@@ -80,7 +84,7 @@ List<String> mentionedNames(String text) {
 
 /// Whether `@[token]` names [name]: the whole name, or its first word (a name
 /// with a space is written `@First`).
-bool _names(String token, String name) {
+bool mentionNames(String token, String name) {
   final t = token.toLowerCase();
   final n = name.trim().toLowerCase();
   return n == t || n.split(RegExp(r'\s+')).first == t;
@@ -90,13 +94,13 @@ bool _names(String token, String name) {
 /// board members): they wake no one, and the app says so (MU2-04 AC5).
 List<String> unknownMentions(String text, Iterable<String> known) => [
       for (final token in mentionedNames(text))
-        if (!known.any((k) => _names(token, k))) token,
+        if (!known.any((k) => mentionNames(token, k))) token,
     ];
 
 /// Whether [text] names the board member [username] with `@` (B9: marked).
 bool mentionsName(String text, String? username) {
   if (username == null || username.trim().isEmpty) return false;
-  return mentionedNames(text).any((t) => _names(t, username));
+  return mentionedNames(text).any((t) => mentionNames(t, username));
 }
 
 /// What a screen reader says for a system line (ui-ontwerp §5).
@@ -192,11 +196,17 @@ String? authorOf(MessageView m) {
   );
 }
 
-/// "#general", "#atlas": a channel as the picker shows it.
-String channelLabel(ChannelView c) => '#${c.projectId == null ? 'general' : c.name.toLowerCase().replaceAll(RegExp(r'\s+'), '-')}';
+/// "#general", "#atlas", "#42-login-per-board-member": a channel as the picker
+/// shows it. A ticket's name comes from the server (AUR-CHAT-001 §8 O-1).
+String channelLabel(ChannelView c) {
+  if (c.kind == ChannelKind.ticket || c.ticketId != null) return c.name.startsWith('#') ? c.name : '#${c.name}';
+  return '#${c.projectId == null ? 'general' : c.name.toLowerCase().replaceAll(RegExp(r'\s+'), '-')}';
+}
 
-/// What a screen reader says for a channel (ui-ontwerp §5): "atlas, 3 unread, 1 mention".
+/// What a screen reader says for a channel (ui-ontwerp §5): "atlas, 3 unread,
+/// 1 mention"; a ticket's: "Ticket 42, 42-login-per-board-member, 5 unread".
 String channelSemantics(ChannelView c) => [
+      if (c.ticketNumber != null && (c.kind == ChannelKind.ticket || c.ticketId != null)) 'Ticket ${c.ticketNumber}',
       channelLabel(c).substring(1),
       if (c.unread > 0) '${c.unread} unread',
       if (c.mentions > 0) '${c.mentions} mention${c.mentions == 1 ? '' : 's'}',
