@@ -9,6 +9,7 @@ import '../../core/net/connection.dart';
 import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/commands.dart';
+import '../../data/guidelines.dart';
 import '../../data/secret_write.dart';
 import '../../data/views.dart';
 
@@ -122,11 +123,39 @@ class InboxNoticeShown extends InboxEvent {
   const InboxNoticeShown();
 }
 
+/// Read the pending guideline proposals again (feature `guidelines`): at the
+/// start, when the link is back and on a `guideline.*` event only, not on
+/// every change of the company.
+class GuidelineProposalsRefreshed extends InboxEvent {
+  const GuidelineProposalsRefreshed();
+}
+
+/// Approve or reject a guideline proposal (B5, GL-14). On approve [title] and
+/// [text] are the board member's edits (null: as proposed) and [links] the
+/// links of a new guideline (null: the suggested ones). [names] words the
+/// refusal of B4.
+class GuidelineProposalDecided extends InboxEvent {
+  const GuidelineProposalDecided(this.item, {required this.approve, this.note, this.title, this.text, this.links, required this.proposer, this.employee, this.project});
+
+  final GuidelineProposalItem item;
+  final bool approve;
+  final String? note;
+  final String? title;
+  final String? text;
+  final List<GuidelineTarget>? links;
+
+  /// The proposer's name, for the notice.
+  final String proposer;
+  final String Function(String id)? employee;
+  final String Function(String id)? project;
+}
+
 class InboxState extends Equatable {
   const InboxState({
     this.loading = true,
     this.approvals = const [],
     this.proposals = const [],
+    this.guidelineProposals = const [],
     this.notifications = const [],
     this.unread = 0,
     this.deciding = const {},
@@ -144,6 +173,9 @@ class InboxState extends Equatable {
 
   /// Colleagues employees proposed that wait for a decision.
   final List<ProposalView> proposals;
+
+  /// Guideline proposals that wait for a board member (B5).
+  final List<GuidelineProposalItem> guidelineProposals;
   final List<NotificationView> notifications;
   final int unread;
 
@@ -166,7 +198,7 @@ class InboxState extends Equatable {
 
   /// The badge: decisions waiting, plus unread notifications that need you or
   /// say a task failed. Results (finished work) give no badge.
-  int get badge => approvals.length + proposals.length + notifications.where((n) => n.givesBadge).length;
+  int get badge => approvals.length + proposals.length + guidelineProposals.length + notifications.where((n) => n.givesBadge).length;
 
   ApprovalView? approval(String id) => approvals.where((a) => a.id == id).firstOrNull;
 
@@ -187,6 +219,7 @@ class InboxState extends Equatable {
     bool? loading,
     List<ApprovalView>? approvals,
     List<ProposalView>? proposals,
+    List<GuidelineProposalItem>? guidelineProposals,
     List<NotificationView>? notifications,
     int? unread,
     Set<String>? deciding,
@@ -200,6 +233,7 @@ class InboxState extends Equatable {
         loading: loading ?? this.loading,
         approvals: approvals ?? this.approvals,
         proposals: proposals ?? this.proposals,
+        guidelineProposals: guidelineProposals ?? this.guidelineProposals,
         notifications: notifications ?? this.notifications,
         unread: unread ?? this.unread,
         deciding: deciding ?? this.deciding,
@@ -211,12 +245,12 @@ class InboxState extends Equatable {
       );
 
   @override
-  List<Object?> get props => [loading, approvals, proposals, notifications, unread, deciding, planOutcomes, variants, variantsOn, notice, notSent];
+  List<Object?> get props => [loading, approvals, proposals, guidelineProposals, notifications, unread, deciding, planOutcomes, variants, variantsOn, notice, notSent];
 }
 
 extension NotificationAttention on NotificationView {
   /// Alerts whose approval or proposal is listed (and counted) on its own.
-  static const _listedItself = {'approval.requested', 'employee.proposed', 'employee.instructions_proposed'};
+  static const _listedItself = {'approval.requested', 'employee.proposed', 'employee.instructions_proposed', 'guideline.proposed'};
 
   bool get isFailure => targetType == 'task.failed';
 
@@ -243,15 +277,24 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     on<VariantsRequested>(_loadVariants, transformer: concurrent());
     on<VariantChosen>(_chooseVariant, transformer: concurrent());
     on<InboxNoticeShown>((e, emit) => emit(state.copyWith()));
+    on<GuidelineProposalsRefreshed>(_refreshGuidelineProposals, transformer: debounceRestartable());
+    on<GuidelineProposalDecided>(_decideGuidelineProposal, transformer: concurrent());
     _subs = [
-      _repository.online.listen((_) => add(const InboxRefreshed())),
+      _repository.online.listen((_) {
+        add(const InboxRefreshed());
+        add(const GuidelineProposalsRefreshed());
+      }),
       _repository.companyChanges.listen((e) {
         if (e.kind == EventKind.approvalAllowedAlways) add(ApprovalAllowedAlways(e.aggregateId));
+        if (e.kind.wire.startsWith('guideline.')) add(const GuidelineProposalsRefreshed());
         if (e.kind.wire.startsWith('task.variant')) add(VariantsRequested(e.aggregateId));
         add(const InboxRefreshed());
       }),
     ];
-    if (_repository.linkState.isOnline) add(const InboxRefreshed());
+    if (_repository.linkState.isOnline) {
+      add(const InboxRefreshed());
+      add(const GuidelineProposalsRefreshed());
+    }
   }
 
   final AureliusRepository _repository;
@@ -442,6 +485,74 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     }
     emit(state.copyWith(notice: notice));
     add(const InboxRefreshed());
+  }
+
+  Future<void> _refreshGuidelineProposals(GuidelineProposalsRefreshed event, Emitter<InboxState> emit) async {
+    if (!_repository.linkState.has('guidelines')) {
+      if (state.guidelineProposals.isNotEmpty) emit(state.copyWith(guidelineProposals: const [], deciding: state.deciding));
+      return;
+    }
+    try {
+      final pending = await _repository.guidelineProposalList(status: ProposalStatus.pending);
+      final items = <GuidelineProposalItem>[];
+      for (final p in pending.where((p) => p.status == ProposalStatus.pending)) {
+        final id = p.guidelineId;
+        if (id == null) {
+          items.add(GuidelineProposalItem(proposal: p));
+          continue;
+        }
+        // The diff is against the version the proposal rests on (GL-14 AC1).
+        try {
+          final base = await _repository.guideline(id, version: p.baseVersion);
+          items.add(GuidelineProposalItem(proposal: p, current: base.guideline, baseText: base.version.text));
+        } on ProtocolException {
+          items.add(GuidelineProposalItem(proposal: p));
+        }
+      }
+      emit(state.copyWith(guidelineProposals: items, deciding: state.deciding));
+    } on DisconnectedException {
+      // Read again when the link is back.
+    } on ProtocolException catch (e) {
+      if (!e.notOnServer) emit(state.copyWith(notice: e.shown, deciding: state.deciding));
+    }
+  }
+
+  Future<void> _decideGuidelineProposal(GuidelineProposalDecided event, Emitter<InboxState> emit) async {
+    final item = event.item;
+    final p = item.proposal;
+    final key = 'guideline-proposal:${p.id}';
+    emit(state.copyWith(deciding: {...state.deciding, key}));
+    final title = event.title ?? p.title;
+    String? notice;
+    try {
+      await _repository.write(
+        guidelineDecideProposal(
+          proposalId: p.id,
+          approve: event.approve,
+          note: event.approve ? null : event.note,
+          title: event.approve && event.title != null && event.title != p.title ? event.title : null,
+          text: event.approve && event.text != null && event.text != p.text ? event.text : null,
+          links: event.approve && item.isNew ? event.links : null,
+        ),
+        retry: false,
+      );
+      notice = switch ((event.approve, item.isNew)) {
+        (true, true) => 'Approved. “$title” is in the library and applies from the next run.',
+        (true, false) => 'Approved. The new version of “$title” applies from the next run.',
+        (false, _) => event.note == null ? 'Rejected. ${event.proposer} is told.' : 'Rejected. ${event.proposer} gets your note.',
+      };
+    } on NotSentException {
+      notice = 'Not sent. The PC was not reachable; nothing was decided.';
+    } on ProtocolException catch (e) {
+      // The proposal stays open with the reason (GL-14 AC3, AC5).
+      notice = switch (e) {
+        ProtocolException(code: ErrorCode.versionConflict) =>
+          '“$title” changed since this was proposed, so it can\'t be approved. Reject it; ${event.proposer} can propose again on the new text.',
+        _ => guidelineError(e, title: title, employee: event.employee ?? (_) => 'an employee', project: event.project ?? (_) => 'a project'),
+      };
+    }
+    emit(state.copyWith(deciding: {...state.deciding}..remove(key), notice: notice));
+    add(const GuidelineProposalsRefreshed());
   }
 
   Future<void> _loadVariants(VariantsRequested event, Emitter<InboxState> emit) async {

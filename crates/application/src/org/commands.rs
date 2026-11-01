@@ -211,7 +211,7 @@ pub(crate) fn escalate(tx: &Tx<'_>, st: &Store, task: TaskId, row: &store::TaskR
 
 /// Called before `employee` is archived, while it is still on the chart: its direct
 /// reports move one level up (one `employee.reports_to_set` event each), its open
-/// proposals are withdrawn.
+/// proposals are withdrawn (of instructions and colleagues, and of guidelines, B5).
 pub(crate) fn on_employee_archived(tx: &Tx<'_>, employee: EmployeeId, command_id: CommandId, meta: &serde_json::Value) -> Result<Vec<EventNotice>, StorageError> {
     let moved = employees::org(tx)?.on_archive(employee);
     let mut notices = Vec::new();
@@ -235,6 +235,7 @@ pub(crate) fn on_employee_archived(tx: &Tx<'_>, employee: EmployeeId, command_id
         notices.push(n);
     }
     proposals::withdraw_for(tx, employee)?;
+    aurelius_storage::guidelines::withdraw_for_employee(tx, employee, aurelius_storage::now_ms())?;
     Ok(notices)
 }
 
@@ -835,7 +836,7 @@ pub(crate) fn propose_instructions(tx: &Tx<'_>, st: &Store, run: RunId, input: I
 
 /// One reference of a proposal's evidence: a memory by its id, a task by its id
 /// or title, or else the memory that best matches the words.
-fn find_evidence(tx: &Tx<'_>, st: &Store, project: Option<ProjectId>, me: EmployeeId, needle: &str) -> Result<Result<ProposalEvidence, String>, StorageError> {
+pub(crate) fn find_evidence(tx: &Tx<'_>, st: &Store, project: Option<ProjectId>, me: EmployeeId, needle: &str) -> Result<Result<ProposalEvidence, String>, StorageError> {
     let read = |key: &str| st.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
     let scopes = aurelius_storage::memory::employee_read_scopes(tx, me, project)?.all();
     let short = |text: &str| {

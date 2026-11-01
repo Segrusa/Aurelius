@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
+import '../guidelines/run_guidelines.dart';
 import 'usage_bloc.dart';
 import '../../core/widgets/ios.dart';
 
@@ -31,6 +32,8 @@ class ContextPage extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Text('${Fmt.tokens(view.usedTokens)} of ${Fmt.tokens(view.budgetTokens)} tokens', style: Tokens.title(size: 20)),
                 ),
+                // Which guideline versions this run had (B6, P-59).
+                RunGuidelinesLine(runId: runId),
                 if (view.scopes.isNotEmpty)
                   Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 0), child: Text('Scopes: ${view.scopes.join(', ')}', style: TextStyle(color: Tokens.text2))),
                 if (view.runtimeManaged)

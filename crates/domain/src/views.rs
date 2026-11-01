@@ -3,18 +3,16 @@
 //! They live in `domain` so that `storage` and `application` never depend on the wire crate.
 
 use crate::{
-    ProposalId, NoteId,
-    proposal::ProposalStatus,
-    ApprovalId, AttachmentId, ProviderId, ConversationId, EmployeeId, MemoryId, MessageId, ProjectId, RunId, TaskId,
+    ApprovalId, AttachmentId, ConversationId, EmployeeId, MemoryId, MessageId, NoteId, ProjectId,
+    ProjectStatus, ProposalId, ProviderId, RunId, TaskId,
     approval::ApprovalStatus,
     connection::{ConfigScope, Purpose, RunDefaults},
     conversation::{MessageRole, MessageStatus},
     employee::LifecycleStatus,
+    proposal::ProposalStatus,
     task::TaskStatus,
-    ProjectStatus,
 };
 use serde::{Deserialize, Serialize};
-
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProjectSummary {
@@ -272,7 +270,7 @@ pub struct IdeaView {
     pub title: String,
     pub note: Option<String>,
     pub status: crate::idea::IdeaStatus,
-    /// Feature or bug; 
+    /// Feature or bug;
     pub kind: crate::idea::IdeaKind,
     /// "You", or the employee who noted it.
     pub author: String,
@@ -509,7 +507,6 @@ pub struct AgentView {
     pub steps: u32,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HeartbeatView {
     pub every_minutes: u32,
@@ -695,34 +692,70 @@ pub struct SystemLine {
 
 impl SystemLine {
     pub fn new(kind: SystemLineKind) -> Self {
-        SystemLine { kind, task_id: None, from: None, to: None, by: None, ticket_id: None, conversation_id: None, message_id: None }
+        SystemLine {
+            kind,
+            task_id: None,
+            from: None,
+            to: None,
+            by: None,
+            ticket_id: None,
+            conversation_id: None,
+            message_id: None,
+        }
     }
 
     /// The line in words, as the server stores it as the message's `text` and the
     /// clients show it. `ticket`: the number of `ticket_id` (`#N`, MU2-10).
     pub fn sentence(&self, ticket: Option<u32>) -> String {
-        let or = |v: &Option<String>, d: &str| v.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(d).to_string();
+        let or = |v: &Option<String>, d: &str| {
+            v.as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(d)
+                .to_string()
+        };
         let by = or(&self.by, "Aurelius");
         let number = ticket.map(|n| format!("#{n}"));
         match self.kind {
-            SystemLineKind::Delegated => format!("{} delegated a task to {}", or(&self.from, "An employee"), or(&self.to, "a colleague")),
+            SystemLineKind::Delegated => format!(
+                "{} delegated a task to {}",
+                or(&self.from, "An employee"),
+                or(&self.to, "a colleague")
+            ),
             SystemLineKind::Reported => format!("{} reported", or(&self.from, "A colleague")),
             SystemLineKind::Moved => match (&self.from, &self.to) {
                 (Some(from), Some(to)) => format!("{by} moved {from} → {to}"),
                 (_, Some(to)) => format!("{by} moved to {to}"),
                 _ => format!("{by} moved the ticket"),
             },
-            SystemLineKind::Plan => format!("{} handed in a plan · waiting for a board member", or(&self.from, "The owner")),
-            SystemLineKind::Review => format!("{} handed in the report · Review", or(&self.from, "The owner")),
+            SystemLineKind::Plan => format!(
+                "{} handed in a plan · waiting for a board member",
+                or(&self.from, "The owner")
+            ),
+            SystemLineKind::Review => format!(
+                "{} handed in the report · Review",
+                or(&self.from, "The owner")
+            ),
             SystemLineKind::Done => format!("{by} put it on Done"),
             SystemLineKind::CreatedFrom => match &self.by {
-                Some(b) => format!("{} created from a message · {b}", number.as_deref().unwrap_or("Ticket")),
-                None => format!("{} created from a message", number.as_deref().unwrap_or("Ticket")),
+                Some(b) => format!(
+                    "{} created from a message · {b}",
+                    number.as_deref().unwrap_or("Ticket")
+                ),
+                None => format!(
+                    "{} created from a message",
+                    number.as_deref().unwrap_or("Ticket")
+                ),
             },
-            SystemLineKind::TicketCreated => format!("{by} created {} from a message", number.as_deref().unwrap_or("a ticket")),
+            SystemLineKind::TicketCreated => format!(
+                "{by} created {} from a message",
+                number.as_deref().unwrap_or("a ticket")
+            ),
             SystemLineKind::Summary => "Summary saved to project memory".to_string(),
             SystemLineKind::SummaryFailed => "The summary for project memory failed".to_string(),
-            SystemLineKind::Limit => format!("Limit reached: {} was not woken.", or(&self.to, "nobody")),
+            SystemLineKind::Limit => {
+                format!("Limit reached: {} was not woken.", or(&self.to, "nobody"))
+            }
         }
     }
 }
@@ -914,7 +947,10 @@ pub struct MemorySnapshot {
 /// One line of a context manifest: what was considered and why it was (not) used.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ContextItemView {
-    /// rules | identity | request | turn | summary | memory | source
+    /// rules | identity | request | turn | summary | memory | source | guideline
+    /// (one item per guideline in the run's block, feature `guidelines`; `id` is
+    /// `g:<id>@<version>`, never left out by the budget: `included` false only
+    /// when B4's safety net dropped it).
     pub section: String,
     pub id: String,
     pub label: String,
@@ -1035,7 +1071,9 @@ pub struct SubtaskUsage {
 
 /// `variants.get_setting` / `variants.set_enabled`: whether tasks may be tried in
 /// several ways first (feature `task_variants`; off by default).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct VariantsSetting {
     pub enabled: bool,
     /// At most this many variants per task.
@@ -1094,7 +1132,9 @@ pub struct TaskVariantView {
 }
 
 /// `trace.get_setting` / `trace.set_enabled`: whether runs keep a trace (feature `run_trace`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct TraceSetting {
     pub enabled: bool,
     /// Traces kept at most (the newest).

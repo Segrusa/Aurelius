@@ -48,6 +48,7 @@ pub mod claude_logins;
 pub mod company;
 pub mod tickets;
 pub mod vault;
+pub mod guidelines;
 
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use std::path::{Path, PathBuf};
@@ -227,3 +228,7 @@ mod fresh_start_tests;
 mod vault_tests;
 #[cfg(test)]
 mod schema22_tests;
+#[cfg(test)]
+mod schema23_tests;
+#[cfg(test)]
+mod guidelines_tests;

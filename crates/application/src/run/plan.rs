@@ -8,7 +8,7 @@ use aurelius_domain::conversation::{MessageRole, MessageStatus};
 use aurelius_storage::conversations::{self as conv};
 
 /// How an employee works on its own: decide, keep its memory, ask only when stuck.
-pub const AUTONOMY_GUIDANCE: &str = "Work autonomously: decide yourself. Record important decisions (with the reason), assumptions and project knowledge you learn with the remember tool, and look up earlier decisions with recall before you decide something. Ask the user only when you really cannot continue without them: money, credentials, irreversible external actions, or conflicting goals only they can settle. Otherwise pick the most reasonable option, note the assumption and go on. Something worth doing later that is not part of the current work (an improvement, a follow-up): note it with add_idea instead of doing it now. Propose a change to your own instructions (or those of someone who reports to you) with propose_instructions only for a lesson your memory shows was confirmed at least twice, never for a single task.";
+pub const AUTONOMY_GUIDANCE: &str = "Work autonomously: decide yourself. Record important decisions (with the reason), assumptions and project knowledge you learn with the remember tool, and look up earlier decisions with recall before you decide something. Ask the user only when you really cannot continue without them: money, credentials, irreversible external actions, or conflicting goals only they can settle. Otherwise pick the most reasonable option, note the assumption and go on. Something worth doing later that is not part of the current work (an improvement, a follow-up): note it with add_idea instead of doing it now. Propose a change to your own instructions (or those of someone who reports to you) with propose_instructions only for a lesson your memory shows was confirmed at least twice, never for a single task; propose a missing or better working rule with propose_guideline, also only for a lesson confirmed at least twice.";
 
 /// Everything the daemon needs to execute a claimed chat run.
 #[derive(Debug, Clone)]
@@ -53,6 +53,9 @@ pub struct ChatRunPlan {
     /// The run works under a ticket or a ticket's discussion woke it: it gets
     /// `read_discussion` and `post_to_discussion` (MU2-07).
     pub discussion: bool,
+    /// The guidelines in its system text (B3): kept as the run's snapshot when it
+    /// starts (B6), with the board members' notice of what the block left out or redacted.
+    pub guidelines: crate::run::guidelines::RunSet,
 }
 
 /// The answer may end with ready-made replies (chats with the user).
@@ -300,6 +303,14 @@ User question:
                     Some(project) => Some(crate::conversation::project_chat::assistant_system(conn, project, &read_blob, work.is_some())?),
                     None => system,
                 };
+                // The guidelines (B3, D-GL-01): right after the identity and the instructions.
+                let employee_row = aurelius_storage::employees::employee_project(conn, conversation_id)?;
+                let guidelines = crate::run::guidelines::for_run(conn, employee_row, project_conv, channel_project.as_ref().map(|(p, _)| *p))?;
+                let system = match (system, guidelines.block.as_str()) {
+                    (system, "") => system,
+                    (Some(system), block) => Some(format!("{}\n\n{}", system.trim_end(), block.trim_end())),
+                    (None, block) => Some(block.trim_end().to_string()),
+                };
                 let system = match &work {
                     Some((folders, _)) => Some(format!(
                         "{}\n\nYou work in the folder {}{}. You can read and change files there, run commands and search the web. Whatever your mode doesn't allow by itself, Aurelius asks the user first; if something is refused, say so and continue without it. To show the user a file (an image, a report), name its full path: Aurelius attaches it to your answer and the user opens it in the app.",
@@ -413,7 +424,6 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     None => system,
                 };
                 // An employee decides on its own and knows its colleagues in the company.
-                let employee_row = aurelius_storage::employees::employee_project(conn, conversation_id)?;
                 let system = match employee_row {
                     Some((me, project)) => {
                         let mut text = system.unwrap_or_default();
@@ -560,6 +570,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     summary: summary.and_then(|(row, through)| Some(crate::memory::context::Summary { id: row.id.to_string(), text: read_blob(&row.blob_key)?, covers_through_ordinal: through })),
                     task_terms: String::new(),
                     candidates,
+                    guidelines: guidelines.items.clone(),
                     budget: crate::memory::context::input_budget(),
                     now_ms: aurelius_storage::now_ms(),
                 };
@@ -599,9 +610,12 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 let mut context = crate::run::session::context_now(conn, conversation_id, task_status)?;
                 context.memories = memories;
                 context.overview = overview.map(|o| o.entries).unwrap_or_default();
+                context.guidelines = guidelines.version_set.clone();
                 let resume = match (&stored, new_turns) {
                     (Some(stored), Some(new)) if context_error.is_none() => {
                         let before: crate::run::session::SessionContext = serde_json::from_str(&stored.context_json).unwrap_or_default();
+                        // B6: another set of guideline versions starts a new session (this conversation's only).
+                        let new = if before.guidelines == context.guidelines { new } else { Vec::new() };
                         // A session from before it kept its system text gets the current one (and keeps it from now on).
                         let changes = crate::run::session::changes(&before, &context, !stored.system_text.is_empty());
                         let mut turn = fold_turns(new).pop().filter(|t| t.role == TurnRole::User);
@@ -628,10 +642,11 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     _ => false,
                 };
                 let seen = seen_history.into_iter().map(|h| h.item).collect();
-                let session = crate::run::session::SessionPlan { stored, seen, context, resume, claimed: None, planned_at_ms, compact, compaction: None, context_tokens: None };
+                let session = crate::run::session::SessionPlan { stored, seen, context, resume, claimed: None, planned_at_ms, compact, compaction: None, context_tokens: None, frozen: false };
                 // Its answer in the group shows the mode it started in.
                 let group = conv::group_run(conn, run_id)?.map(|g| conv::GroupRun { mode: Some(mode), ..g });
-                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group, discussion }))
+                let guidelines = guidelines.run;
+                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group, discussion, guidelines }))
             })
             .map_err(storage_error)
     }

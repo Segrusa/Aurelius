@@ -1,0 +1,12 @@
+- Edition 2024; the toolchain is pinned in `rust-toolchain.toml`. Never change it in a feature branch.
+- Format with rustfmt. Clippy gets no new warnings in the code you touched.
+- Write code that reads like the code around it: same naming, idioms and comment density.
+- Every `pub` item gets a `///` doc comment that says what it is for and why, in plain English. Inside a function, comment only what the code does not already say.
+- Limits and fixed values are named consts next to their type (`*_MAX`, `*_MS`), not literals.
+- Errors are `thiserror` types (`DomainError`, `StorageError`, `AppError`). No `unwrap`/`expect` outside tests, unless an invariant makes failure impossible; then the message says which invariant.
+- A value that must not be dropped gets `#[must_use]` on its type: on a function it does not catch `f()?;`.
+- Serde: `rename_all = "snake_case"`. A new field on an existing wire type is `#[serde(default)]`, with `skip_serializing_if` when an absent value means "as before".
+- Prefer small pure functions that are easy to test; keep IO at the edges.
+- Tests: `#[cfg(test)] mod tests` in the file, a sibling `*_tests.rs` module when they grow large, `crates/<crate>/tests/` for integration tests. A test's name is a sentence of what it proves (`a_refused_update_writes_no_previous_value`).
+- Identifiers, comments, logs, commit messages and UI text are English.
+- No new dependency without the Tech Lead; use what `[workspace.dependencies]` already has.

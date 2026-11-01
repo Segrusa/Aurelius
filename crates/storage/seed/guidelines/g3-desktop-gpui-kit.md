@@ -1,0 +1,5 @@
+- The desktop app is Rust with gpui-kit (pinned, `=0.7.0`) in `clients/desktop` (crate `aurelius-desktop`), one file per screen in `src/screens/`.
+- Follow the patterns of the existing screens for state, actions and dialogs; do not introduce a second UI style.
+- Debug builds can panic with "hover style already set" on cards with an action icon (known, on main). To test past it, build with `--config 'profile.dev.package."*".debug-assertions=false'`; do not fix it inside an unrelated task.
+- When testing by hand, never click outside a gpui dialog to redraw it (that cancels the dialog); move the cursor instead.
+- Run `cargo test -p aurelius-desktop` once at the end, and update the integration tests when you change a text they look for.

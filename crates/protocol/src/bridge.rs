@@ -140,6 +140,27 @@ pub enum EmployeeTaskOp {
     },
     /// The dispatcher of a ticket chooses its owner (the bridge's `assign_ticket`, `--triage` only).
     AssignTicket { employee: String, #[serde(default)] reason: String },
+    /// Propose a guideline (the bridge's `propose_guideline`, feature `guidelines`, B5):
+    /// a change of one in the run's own block (`guideline`: its `g:` id, id or
+    /// title), or none for a new one. `text` is the whole new markdown. Always
+    /// waits for a board member, also in Auto; `evidence` names at least one task
+    /// or memory; one open proposal per guideline, two new ones per employee.
+    ProposeGuideline {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        guideline: Option<String>,
+        title: String,
+        text: String,
+        reason: String,
+        #[serde(default)]
+        evidence: Vec<String>,
+    },
+    /// The guidelines in use (the bridge's `list_guidelines`, GL-15): id, title,
+    /// current version and links by name, never a text.
+    ListGuidelines {},
+    /// One guideline's current text and version (the bridge's `read_guideline`,
+    /// GL-15; `guideline`: its `g:` id, id or title). Information only: it never
+    /// changes the run's block, and is no rule for the run.
+    ReadGuideline { guideline: String },
 }
 
 fn yes() -> bool {
@@ -191,6 +212,14 @@ mod tests {
         assert!(matches!(&op, EmployeeTaskOp::Delegate { project: Some(p), .. } if p == "Atlas"));
         let op: EmployeeTaskOp = serde_json::from_value(serde_json::json!({ "op": "propose_instructions", "instructions": "Work test-first.", "reason": "Two failed tasks", "evidence": ["Migration"] })).unwrap();
         assert!(matches!(&op, EmployeeTaskOp::ProposeInstructions { employee: None, evidence, .. } if evidence.len() == 1));
+        assert_eq!(serde_json::from_value::<EmployeeTaskOp>(serde_json::to_value(&op).unwrap()).unwrap(), op);
+        let op: EmployeeTaskOp = serde_json::from_value(serde_json::json!({ "op": "propose_guideline", "title": "Rust style", "text": "Run clippy.", "reason": "Twice a warning", "evidence": ["AUR-1"] })).unwrap();
+        assert!(matches!(&op, EmployeeTaskOp::ProposeGuideline { guideline: None, evidence, .. } if evidence.len() == 1));
+        assert_eq!(serde_json::from_value::<EmployeeTaskOp>(serde_json::to_value(&op).unwrap()).unwrap(), op);
+        let op: EmployeeTaskOp = serde_json::from_value(serde_json::json!({ "op": "list_guidelines" })).unwrap();
+        assert_eq!(op, EmployeeTaskOp::ListGuidelines {});
+        let op: EmployeeTaskOp = serde_json::from_value(serde_json::json!({ "op": "read_guideline", "guideline": "Rust style" })).unwrap();
+        assert!(matches!(&op, EmployeeTaskOp::ReadGuideline { guideline } if guideline == "Rust style"));
         assert_eq!(serde_json::from_value::<EmployeeTaskOp>(serde_json::to_value(&op).unwrap()).unwrap(), op);
     }
 }

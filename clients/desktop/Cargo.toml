@@ -33,6 +33,10 @@ wry = { version = "0.57", default-features = false }
 # The board member flow against a real daemon on a temporary folder.
 aurelius-daemon = { path = "../../crates/daemon" }
 tempfile.workspace = true
+# Headless windows with layout, for the guideline editor's panes (Pulse M1).
+gpui-kit = { version = "=0.7.0", features = ["test-support"] }
+# The mdast of a guideline preview, with the options gpui-base parses with (E14).
+markdown = "1.0.0"
 # Paused time for the refresh throttle's test.
 tokio = { workspace = true, features = ["test-util"] }
 

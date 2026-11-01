@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../guidelines/target_guidelines_page.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/dialogs.dart';
 import '../../core/widgets/ios.dart';
@@ -251,6 +252,10 @@ class _Overview extends StatelessWidget {
                   onTap: () => context.push('/vault?project=${project.id}'),
                 ),
               ]),
+            ],
+            if (context.select<ConnectionBloc, bool>((b) => b.state.has('guidelines'))) ...[
+              const SizedBox(height: 12),
+              InsetGroup(children: [GuidelinesRow(key: ValueKey('project-guidelines-${project.id}'), target: GuidelineTargetProject(id: project.id))]),
             ],
             if (waiting.isNotEmpty) ...[
               const GroupHeader('Needs Your Attention'),

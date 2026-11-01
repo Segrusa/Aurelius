@@ -114,6 +114,15 @@ fn method_needs(method: &Method) -> Needs {
         // (one role, MU4-10); the session decides who.
         | Method::VaultList { .. }
         | Method::VaultAudit { .. }
+        // Guidelines: every own device reads the library, a set and a run's versions.
+        | Method::GuidelineList { .. }
+        | Method::GuidelineGet { .. }
+        | Method::GuidelineVersions { .. }
+        | Method::GuidelineEffective { .. }
+        | Method::GuidelineProposals { .. }
+        | Method::GuidelineAffected { .. }
+        | Method::GuidelineStarterSet
+        | Method::RunGuidelines { .. }
         // Every own client must sign in and pass the onboarding (MU1-20, MU3-02):
         // the board member's session is the second layer, not a device right.
         | Method::UserList
@@ -317,7 +326,19 @@ fn command_needs(command: &Command) -> Needs {
         | Command::SetBackgroundLogin(_)
         | Command::UpdateBoardColumns(_)
         | Command::UpdateCompany(_)
-        | Command::UpdateProject(_) => Needs::Cap(TaskControl),
+        | Command::UpdateProject(_)
+        // Guidelines are company content that steers runs, managed like projects
+        // and the vault; the session decides that it is a board member.
+        | Command::CreateGuideline(_)
+        | Command::UpdateGuideline(_)
+        | Command::ArchiveGuideline(_)
+        | Command::RestoreGuideline(_)
+        | Command::RestoreGuidelineVersion(_)
+        | Command::LinkGuideline(_)
+        | Command::UnlinkGuideline(_)
+        | Command::AddStarterGuidelines(_) => Needs::Cap(TaskControl),
+        // Approving a proposal is deciding an employee's request, like `DecideProposal`.
+        Command::DecideGuidelineProposal(_) => Needs::Cap(Approve),
         // Creates an employee that works on the host: like approving an action.
         Command::DecideApproval(_) | Command::AnswerQuestion(_) | Command::DecidePlan(_) | Command::DecideProposal(_) => Needs::Cap(Approve),
         // Puts the chosen diff into the work folder: like approving an action.

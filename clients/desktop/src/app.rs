@@ -81,7 +81,7 @@ pub enum Page {
     Board,
     /// The group chat ("Team chat"): the user and every employee.
     GroupChat,
-    /// Employees, with the tabs of `EmployeesTab` (list, org chart).
+    /// Employees, with the tabs of `EmployeesTab` (list, org chart, guidelines).
     Employees,
     Employee(ManagerRef),
     /// Projects, with the tabs of `ProjectsTab` (projects, ideas of every project).
@@ -102,15 +102,18 @@ pub enum EmployeesTab {
     #[default]
     List,
     OrgChart,
+    /// The guideline library and its editor (feature `guidelines`, P-51).
+    Guidelines,
 }
 
 impl EmployeesTab {
-    pub const ALL: [EmployeesTab; 2] = [EmployeesTab::List, EmployeesTab::OrgChart];
+    pub const ALL: [EmployeesTab; 3] = [EmployeesTab::List, EmployeesTab::OrgChart, EmployeesTab::Guidelines];
 
     pub fn label(self) -> &'static str {
         match self {
             EmployeesTab::List => "List",
             EmployeesTab::OrgChart => "Org chart",
+            EmployeesTab::Guidelines => "Guidelines",
         }
     }
 }
@@ -268,7 +271,8 @@ pub enum NoteKind {
 
 pub fn note_kind(n: &NotificationView) -> NoteKind {
     match (n.severity.as_str(), n.target_type.as_str()) {
-        ("action", "approval.requested" | "employee.proposed" | "employee.instructions_proposed") => NoteKind::Hidden,
+        // The inbox lists these itself, a guideline's proposal too (B5): one row each, gone once decided.
+        ("action", "approval.requested" | "employee.proposed" | "employee.instructions_proposed" | "guideline.proposed") => NoteKind::Hidden,
         ("action", _) => NoteKind::NeedsYou,
         (_, "task.failed") => NoteKind::Failed,
         _ => NoteKind::Result,
@@ -679,6 +683,8 @@ pub enum Overlay {
     /// "You were signed out on this device." (ui-ontwerp §1): the server ended this
     /// device's session; OK shows the sign-in, which already waits beneath it.
     SignedOut,
+    /// A guideline dialog: Links, Add starter set, Reject with a note, a confirmation.
+    Guidelines,
 }
 
 /// What a menu entry does: dispatch an action (same as its shortcut) or call
@@ -915,6 +921,8 @@ pub struct AppView {
     pub members: crate::screens::board_members::Members,
     /// The vault page: its lists, a value shown for 30 s, the editor, the key export (Fase 4).
     pub vault: crate::screens::vault::Vault,
+    /// Guidelines: the library, the editor, the sets per employee, the proposals, the dialogs.
+    pub guidelines: crate::screens::guidelines::Guidelines,
     /// The signed-in board member's own Claude login (Settings → Account).
     pub claude: crate::screens::account::Claude,
     /// The board, the open ticket and their dialogs.
@@ -1358,6 +1366,8 @@ impl AppView {
         subscriptions.extend(board.subscriptions(window, cx));
         let vault = crate::screens::vault::Vault::new(window, cx);
         subscriptions.extend(vault.subscriptions(window, cx));
+        let guidelines = crate::screens::guidelines::Guidelines::new(window, cx);
+        subscriptions.extend(guidelines.subscriptions(window, cx));
 
         listen(backend.updates, 0, cx);
         poll_subagents(cx);
@@ -1389,6 +1399,7 @@ impl AppView {
             claude,
             board,
             vault,
+            guidelines,
             folded: folded_load(&ui_prefs()),
             panel_widths: serde_json::from_value(ui_prefs()["panel_widths"].clone()).unwrap_or_default(),
             panel_save: None,
@@ -1645,6 +1656,8 @@ impl AppView {
                     if self.auto_allow_supported() {
                         let _ = self.requests.send(backend::Request::LoadAutoAllow);
                     }
+                    // Guideline proposals wait in the Inbox (B5), also off the Guidelines tab; the rest reads again as it shows.
+                    self.guidelines_changed();
                 }
             }
             Update::DirListing(listing) => self.apply_dir_listing(listing),
@@ -1700,6 +1713,8 @@ impl AppView {
                 if who.user.as_ref().map(|u| u.id) != self.active_member().map(|u| u.id) {
                     // Another board member (or none) here now: nothing of the vault stays on screen.
                     self.vault_reset();
+                    // Nor a guideline being edited or decided by the previous one.
+                    self.guidelines_reset();
                 }
                 self.apply_who(who, cx)
             }
@@ -1709,6 +1724,7 @@ impl AppView {
             Update::Claude(update) => self.apply_claude(update, cx),
             Update::Board(update) => self.apply_board(update, cx),
             Update::Vault(update) => self.apply_vault(update, cx),
+            Update::Guidelines(update) => self.apply_guidelines(update, cx),
             Update::LooksLikeSecret(hold) => self.apply_secret_hold(hold, cx),
             Update::BoardMembers(list) => {
                 self.members.list = list;
@@ -2191,6 +2207,7 @@ impl AppView {
         self.members_reset(None, cx);
         self.claude_reset();
         self.vault_reset();
+        self.guidelines_reset();
         cx.notify();
     }
 
@@ -2378,6 +2395,8 @@ impl AppView {
     /// Open what this answer's run sent in the side panel.
     pub fn open_trace(&mut self, run_id: aurelius_domain::RunId, window: &mut Window, cx: &mut Context<Self>) {
         let _ = self.requests.send(backend::Request::LoadTrace(run_id));
+        // The guideline versions it had (B6), also without trace mode.
+        self.guideline_run_want(run_id);
         self.trace = Some((run_id, None));
         self.trace_open = [false, false];
         self.overlay = Overlay::Trace;
@@ -4158,6 +4177,11 @@ impl AppView {
             self.decide_proposal(proposal.id, approve, cx);
             return;
         }
+        // A guideline an employee proposed: Approve when the card allows it; Reject asks for a note.
+        if let Some(id) = self.inbox_guideline_proposal().map(|p| p.id) {
+            self.guideline_decide_selected(id, approve, window, cx);
+            return;
+        }
         let plan = self.inbox_approval().filter(|a| a.tool == PLAN_TOOL).cloned();
         if let Some(plan) = plan {
             // A plan is read first; approving, changes and rejecting happen in its drawer.
@@ -5336,7 +5360,7 @@ impl AppView {
 
     /// Items per inbox tab, in `InboxTab::ALL` order.
     pub fn inbox_counts(&self) -> [usize; 4] {
-        tab_counts(self.pending_approvals().count() + self.pending_proposals().len(), &self.inbox_notifications())
+        tab_counts(self.pending_approvals().count() + self.pending_proposals().len() + self.pending_guideline_proposals().len(), &self.inbox_notifications())
     }
 
     /// The notifications the open tab lists, after its approvals and proposals.
@@ -6219,6 +6243,7 @@ impl AppView {
         }
         match self.overlay {
             Overlay::Dialog(_) => self.confirm_dialog(window, cx),
+            Overlay::Guidelines => self.guideline_dialog_primary(window, cx),
             Overlay::None if self.screen == Page::Inbox => self.decide_selected(true, window, cx),
             Overlay::PlanApproval(_) => self.decide_plan(aurelius_domain::approval::PlanDecision::Approve, window, cx),
             Overlay::None if self.screen == Page::Settings && self.adding_server => self.servers_submit(window, cx),
@@ -6466,6 +6491,9 @@ impl AppView {
             return;
         }
         if self.vault_back(window, cx) {
+            return;
+        }
+        if self.guidelines_back(window, cx) {
             return;
         }
         if self.overlay == Overlay::ConnectClaude {
@@ -6968,6 +6996,15 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &GoVault, w, cx| this.go_nav(NavItem::Vault, w, cx)))
             .on_action(cx.listener(|this, _: &GoEmployees, w, cx| this.go_nav(NavItem::Employees, w, cx)))
             .on_action(cx.listener(|this, _: &GoOrgChart, w, cx| this.go_employees_tab(EmployeesTab::OrgChart, w, cx)))
+            .on_action(cx.listener(|this, _: &GoGuidelines, w, cx| this.guidelines_go(crate::screens::guidelines::GuidelinesView::Library, w, cx)))
+            .on_action(cx.listener(|this, _: &FindGuideline, w, cx| this.guidelines_find(w, cx)))
+            .on_action(cx.listener(|this, _: &NewGuideline, w, cx| {
+                if this.guidelines_can_edit() {
+                    this.guideline_open(None, w, cx);
+                } else {
+                    this.notify_user(crate::screens::guidelines::READ_ONLY, true, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &GoProjects, w, cx| this.go_nav(NavItem::Projects, w, cx)))
             .on_action(cx.listener(|this, _: &GoTasks, w, cx| this.go_nav(NavItem::Tasks, w, cx)))
             .on_action(cx.listener(|this, _: &GoIdeas, w, cx| this.go_projects_tab(ProjectsTab::Ideas, w, cx)))
@@ -7666,7 +7703,7 @@ mod tests {
         assert_eq!(NavItem::of(Page::Project(ProjectRef::Sample(0), Tab::Tasks)), NavItem::Projects);
         assert_eq!(NavItem::of(Page::Inbox), NavItem::Inbox, "the inbox is a page, not a dialog");
         assert_eq!(NavItem::of(Page::Settings), NavItem::Settings);
-        assert_eq!(EmployeesTab::ALL.map(|t| t.label()), ["List", "Org chart"]);
+        assert_eq!(EmployeesTab::ALL.map(|t| t.label()), ["List", "Org chart", "Guidelines"]);
         assert_eq!(ProjectsTab::ALL.map(|t| t.label()), ["Projects", "Ideas"]);
         assert_eq!(Tab::ALL.map(|t| t.title()), ["Overview", "Tasks", "Ideas", "Vault"], "memory is not a tab of the bar");
         assert_eq!(NavItem::of(Page::Vault), NavItem::Vault);
@@ -7692,9 +7729,11 @@ mod tests {
             note("escalated", "action", "task.waiting"),
             note("proposal", "action", "employee.proposed"),
             note("sign-in", "warning", "connection.changed"),
+            note("guideline", "action", "guideline.proposed"),
         ];
         let refs: Vec<&NotificationView> = notes.iter().collect();
         assert_eq!(note_kind(&notes[1]), NoteKind::Hidden, "the approval itself is listed, not its alert");
+        assert_eq!(note_kind(&notes[6]), NoteKind::Hidden, "a guideline's proposal is its own row, not also its alert");
         let ids = |tab| tab_notes(tab, &refs).iter().map(|n| n.id.as_str()).collect::<Vec<_>>();
         assert_eq!(ids(InboxTab::NeedsYou), ["escalated"]);
         assert_eq!(ids(InboxTab::Results), ["ok", "failed", "sign-in"]);

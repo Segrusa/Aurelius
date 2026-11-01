@@ -5,6 +5,7 @@ pub mod approvals;
 pub mod artifacts;
 pub mod connections;
 pub mod events;
+pub mod guidelines;
 pub mod heartbeat;
 pub mod lifecycle;
 pub mod login;

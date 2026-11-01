@@ -57,6 +57,13 @@ pub enum ErrorCode {
     /// `AppError::matched_items` names the items (never a value); send again
     /// with `confirm_secret` to store it with the value redacted.
     LooksLikeSecret,
+    /// A guideline write (save, restore, link, approve) would give a run more
+    /// than 16 000 characters of guidelines (B4): `AppError::too_large` names the
+    /// combination of employee and project. Nothing was saved.
+    GuidelineTooLarge,
+    /// `guideline.create` / `update` / `restore` / an approval: another guideline
+    /// that is not archived has this title (case does not count).
+    GuidelineTitleTaken,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, thiserror::Error)]
@@ -71,23 +78,56 @@ pub struct AppError {
     /// `looks_like_secret`: the names of the vault items the text holds the value of.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub matched_items: Vec<String>,
+    /// `guideline_too_large`: the characters, the limit and the combination that overflows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub too_large: Option<crate::guideline::GuidelineTooLarge>,
 }
 
 impl AppError {
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), retry_after_ms: None, matched_items: Vec::new() }
+        Self {
+            code,
+            message: message.into(),
+            retry_after_ms: None,
+            matched_items: Vec::new(),
+            too_large: None,
+        }
+    }
+
+    /// `guideline_too_large` for the combination that overflows (B4).
+    pub fn guideline_too_large(too_large: crate::guideline::GuidelineTooLarge, message: impl Into<String>) -> Self {
+        Self { too_large: Some(too_large), ..Self::new(ErrorCode::GuidelineTooLarge, message) }
     }
 
     /// `looks_like_secret` for the named items ("This looks like a vault secret: GitHub token. Send anyway?").
     pub fn looks_like_secret(matched_items: Vec<String>) -> Self {
-        let message = format!("This looks like a vault secret: {}. Send anyway?", matched_items.join(", "));
-        Self { code: ErrorCode::LooksLikeSecret, message, retry_after_ms: None, matched_items }
+        let message = format!(
+            "This looks like a vault secret: {}. Send anyway?",
+            matched_items.join(", ")
+        );
+        Self {
+            code: ErrorCode::LooksLikeSecret,
+            message,
+            retry_after_ms: None,
+            matched_items,
+            too_large: None,
+        }
     }
 
     /// `too_many_attempts` with the wait until the next try.
     pub fn too_many_attempts(retry_after_ms: u64) -> Self {
         let secs = retry_after_ms.div_ceil(1_000);
-        Self { code: ErrorCode::TooManyAttempts, message: format!("Too many attempts. Try again in {}:{:02}.", secs / 60, secs % 60), retry_after_ms: Some(retry_after_ms), matched_items: Vec::new() }
+        Self {
+            code: ErrorCode::TooManyAttempts,
+            message: format!(
+                "Too many attempts. Try again in {}:{:02}.",
+                secs / 60,
+                secs % 60
+            ),
+            retry_after_ms: Some(retry_after_ms),
+            matched_items: Vec::new(),
+            too_large: None,
+        }
     }
 }
 
@@ -99,11 +139,25 @@ mod tests {
     fn too_many_attempts_says_when_to_try_again() {
         let err = AppError::too_many_attempts(29_400);
         assert_eq!(err.message, "Too many attempts. Try again in 0:30.");
-        assert_eq!(serde_json::to_value(&err).unwrap(), serde_json::json!({ "code": "too_many_attempts", "message": err.message, "retry_after_ms": 29_400 }));
-        assert_eq!(AppError::too_many_attempts(15 * 60_000).message, "Too many attempts. Try again in 15:00.");
+        assert_eq!(
+            serde_json::to_value(&err).unwrap(),
+            serde_json::json!({ "code": "too_many_attempts", "message": err.message, "retry_after_ms": 29_400 })
+        );
+        assert_eq!(
+            AppError::too_many_attempts(15 * 60_000).message,
+            "Too many attempts. Try again in 15:00."
+        );
         // Other errors leave it out, and an error without it still parses.
-        assert!(serde_json::to_value(AppError::new(ErrorCode::Unauthenticated, "Sign in.")).unwrap().get("retry_after_ms").is_none());
-        let parsed: AppError = serde_json::from_value(serde_json::json!({ "code": "unauthenticated", "message": "Sign in." })).unwrap();
+        assert!(
+            serde_json::to_value(AppError::new(ErrorCode::Unauthenticated, "Sign in."))
+                .unwrap()
+                .get("retry_after_ms")
+                .is_none()
+        );
+        let parsed: AppError = serde_json::from_value(
+            serde_json::json!({ "code": "unauthenticated", "message": "Sign in." }),
+        )
+        .unwrap();
         assert_eq!(parsed.retry_after_ms, None);
     }
 
@@ -113,7 +167,29 @@ mod tests {
         let json = serde_json::to_value(&err).unwrap();
         assert_eq!(json["code"], "looks_like_secret");
         assert_eq!(json["matched_items"], serde_json::json!(["GitHub token"]));
-        assert!(serde_json::to_value(AppError::new(ErrorCode::Validation, "x")).unwrap().get("matched_items").is_none());
-        assert_eq!(serde_json::to_value(ErrorCode::VaultKindLocked).unwrap(), "vault_kind_locked");
+        assert!(
+            serde_json::to_value(AppError::new(ErrorCode::Validation, "x"))
+                .unwrap()
+                .get("matched_items")
+                .is_none()
+        );
+        assert_eq!(
+            serde_json::to_value(ErrorCode::VaultKindLocked).unwrap(),
+            "vault_kind_locked"
+        );
+    }
+
+    #[test]
+    fn guideline_too_large_names_the_combination() {
+        let employee_id = crate::EmployeeId::new();
+        let err = AppError::guideline_too_large(
+            crate::guideline::GuidelineTooLarge { chars: 17_200, limit: 16_000, employee_id: Some(employee_id), project_id: None },
+            "Bridge would get 17 200 characters of guidelines (limit 16 000).",
+        );
+        let json = serde_json::to_value(&err).unwrap();
+        assert_eq!(json["code"], "guideline_too_large");
+        assert_eq!(json["too_large"], serde_json::json!({ "chars": 17_200, "limit": 16_000, "employee_id": employee_id }));
+        assert!(serde_json::to_value(AppError::new(ErrorCode::Validation, "x")).unwrap().get("too_large").is_none(), "older clients see nothing new");
+        assert_eq!(serde_json::to_value(ErrorCode::GuidelineTitleTaken).unwrap(), "guideline_title_taken");
     }
 }

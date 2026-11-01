@@ -127,6 +127,32 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         EmployeeTaskOp::ReadDiscussion { last } => EmployeeAction::ReadDiscussion { last },
         EmployeeTaskOp::PostToDiscussion { message } => EmployeeAction::PostToDiscussion { message },
         EmployeeTaskOp::AssignTicket { employee, reason } => EmployeeAction::AssignTicket { employee, reason },
+        // B5: never in the trial filter's reading list above, so a trial is refused there (SEC0 E10).
+        EmployeeTaskOp::ProposeGuideline { guideline, title, text, reason, evidence } => {
+            // Only a run with tools has the bridge; a text-only run never proposes (E10).
+            if !shared.run_modes.lock().is_ok_and(|m| m.contains_key(&run_id)) {
+                return Ok(BridgeOutcome::Text { ok: false, text: "Only a working run of an employee can propose a guideline.".into() });
+            }
+            let input = aurelius_application::guideline_proposal::GuidelineProposalInput { guideline, title, text, reason, evidence };
+            let s = shared.clone();
+            let (ok, text, notices) = app_task(move || s.service.propose_guideline(run_id, input)).await?;
+            shared.publish(notices);
+            return Ok(BridgeOutcome::Text { ok, text });
+        }
+        // GL-15: reading only, but as propose_guideline never in the trial filter's reading list (E10).
+        op @ (EmployeeTaskOp::ListGuidelines {} | EmployeeTaskOp::ReadGuideline { .. }) => {
+            // Only a run with tools has the bridge; a text-only run never reads guidelines (E10).
+            if !shared.run_modes.lock().is_ok_and(|m| m.contains_key(&run_id)) {
+                return Ok(BridgeOutcome::Text { ok: false, text: "Only a working run of an employee can read guidelines.".into() });
+            }
+            let s = shared.clone();
+            let (ok, text) = app_task(move || match op {
+                EmployeeTaskOp::ReadGuideline { guideline } => s.service.read_guideline(run_id, &guideline),
+                _ => s.service.list_guidelines(run_id),
+            })
+            .await?;
+            return Ok(BridgeOutcome::Text { ok, text });
+        }
         op @ (EmployeeTaskOp::VaultList { .. } | EmployeeTaskOp::VaultRead { .. }) => {
             let s = shared.clone();
             let (ok, text) = app_task(move || Ok(crate::vault::tool(&s, run_id, op))).await?;

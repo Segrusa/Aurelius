@@ -281,6 +281,15 @@ pub mod feature {
     /// (`AppError::matched_items`), and `confirm_secret` on `employee.send_message`,
     /// `ticket.post` and `group_chat.send` (B10). Board members only; never apps.
     pub const VAULT: &str = "vault";
+    /// Guidelines (protocol 5, additive; docs/product/guidelines): the reads
+    /// `guideline.list`, `.get`, `.versions`, `.effective`, `.proposals`,
+    /// `.affected`, `.starter_set` and `run.guidelines`; the writes
+    /// `guideline.create`, `.update`, `.archive`, `.restore`, `.restore_version`,
+    /// `.link`, `.unlink`, `.decide_proposal`, `.add_starter_set` (board members
+    /// only; never apps); the `guideline.*` events; the error codes
+    /// `guideline_too_large` (`AppError::too_large`) and `guideline_title_taken`;
+    /// context items with section `guideline`.
+    pub const GUIDELINES: &str = "guidelines";
 }
 
 /// Every feature this build has.
@@ -309,6 +318,7 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_DISCUSSION,
     feature::TEAM_CHANNELS,
     feature::VAULT,
+    feature::GUIDELINES,
 ];
 
 /// Daemon → client.
@@ -420,6 +430,22 @@ pub enum ResponseBody {
     VaultAudit(aurelius_domain::vault::VaultAuditPage),
     /// `vault.key_export`: never printed.
     VaultKey(aurelius_domain::vault::VaultKeyExport),
+    /// `guideline.list`.
+    Guidelines(aurelius_domain::guideline::GuidelinesSnapshot),
+    /// `guideline.get`.
+    Guideline(aurelius_domain::guideline::GuidelineDetail),
+    /// `guideline.versions`.
+    GuidelineVersions(aurelius_domain::guideline::GuidelineVersions),
+    /// `guideline.effective`.
+    EffectiveGuidelines(aurelius_domain::guideline::EffectiveGuidelines),
+    /// `guideline.proposals`.
+    GuidelineProposals(aurelius_domain::guideline::GuidelineProposals),
+    /// `guideline.affected`.
+    GuidelineAffected(aurelius_domain::guideline::GuidelineAffected),
+    /// `guideline.starter_set`.
+    StarterSet(aurelius_domain::guideline::StarterSet),
+    /// `run.guidelines`.
+    RunGuidelines(aurelius_domain::guideline::RunGuidelines),
     ProjectConversations(ProjectConversationsSnapshot),
     Approvals(ApprovalsSnapshot),
     Connections(ProvidersSnapshot),

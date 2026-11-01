@@ -19,6 +19,7 @@ import '../features/board/board_settings_page.dart';
 import '../data/discussion.dart';
 import '../features/board/new_ticket_page.dart';
 import '../features/board/ticket_page.dart';
+import '../features/guidelines/guidelines_page.dart';
 import '../features/ideas/ideas_page.dart';
 import '../features/company/projects_page.dart';
 import '../features/company_org/company_org_page.dart';
@@ -102,6 +103,8 @@ class AppRouter {
       GoRoute(parentNavigatorKey: _root, path: '/tasks', pageBuilder: (context, state) => routePage(state, const TasksPage())),
       // The vault (Fase 4): the company's, or a project's with `?project=`.
       GoRoute(parentNavigatorKey: _root, path: '/vault', pageBuilder: (context, state) => routePage(state, VaultPage(projectId: state.uri.queryParameters['project']))),
+      // Guidelines (AUR-GL-01): the library; a guideline, its editor and links open from there.
+      GoRoute(parentNavigatorKey: _root, path: '/guidelines', pageBuilder: (context, state) => routePage(state, const GuidelinesPage())),
       GoRoute(
         parentNavigatorKey: _root,
         path: '/board/new',

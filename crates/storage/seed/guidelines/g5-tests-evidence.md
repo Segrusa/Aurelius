@@ -1,0 +1,7 @@
+- Every fix comes with a test that fails without it. For a critical line, prove it: break the line, watch the test fail, put it back.
+- Test what the acceptance criterion says through the layer that uses it (the daemon API, not only storage).
+- Report test results as "N passed, N failed, N ignored" against the baseline of the branch you started from, with the path of the log. Name every failure that was already there; a known failure is not a pass.
+- Never claim that a test, build or check ran without showing its output.
+- Remove temporary probe tests before you finish; leave the worktree clean.
+- Run tests with the real Claude CLI (`real_claude_*`) only when the task asks for them.
+- QA tests the real flows end to end on desktop and mobile, with screenshots in `target/<task-id>/`. A finding has steps, expected, actual and a screenshot.

@@ -33,6 +33,14 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         | Method::UserWhoami => {
             Err(internal("a session method reached the reads"))
         }
+        Method::GuidelineList { .. }
+        | Method::GuidelineGet { .. }
+        | Method::GuidelineVersions { .. }
+        | Method::GuidelineEffective { .. }
+        | Method::GuidelineProposals { .. }
+        | Method::GuidelineAffected { .. }
+        | Method::GuidelineStarterSet
+        | Method::RunGuidelines { .. } => guidelines(shared, method).await,
         Method::ServerGetHealth => health(shared).await,
         Method::ProjectList => projects(shared).await,
         Method::JobList => jobs(shared).await,
@@ -693,4 +701,102 @@ async fn tasks(
     })
     .await
     .map(ResponseBody::Tasks)
+}
+
+/// One guideline read on a read connection: its answer, or a refusal (not found).
+type GuidelineRead = Box<dyn FnOnce(&rusqlite::Connection) -> Result<Result<ResponseBody, ProtocolError>, aurelius_storage::StorageError> + Send>;
+
+/// The guideline reads (feature `guidelines`): board members' clients only, never apps (SEC0 R-d).
+async fn guidelines(shared: &Arc<Shared>, method: Method) -> Result<ResponseBody, ProtocolError> {
+    use aurelius_domain::guideline as gl;
+    use aurelius_storage::guidelines as store;
+    let not_found = |id: aurelius_domain::GuidelineId| ProtocolError::new(ErrorCode::NotFound, format!("guideline {id} does not exist"));
+    let store_handle = shared.store().clone();
+    let read = move |f: GuidelineRead| async move {
+        storage_task(move || store_handle.read(f)).await?
+    };
+    match method {
+        Method::GuidelineList { archived } => {
+            read(Box::new(move |c| {
+                let guidelines = store::list(c, archived)?.into_iter().filter(|g| g.archived == archived).collect();
+                Ok(Ok(ResponseBody::Guidelines(gl::GuidelinesSnapshot { guidelines })))
+            }))
+            .await
+        }
+        Method::GuidelineGet { guideline_id, version } => {
+            read(Box::new(move |c| {
+                let (Some(guideline), Some(found)) = (store::view(c, guideline_id)?, store::get(c, guideline_id, version)?) else {
+                    return Ok(Err(match version {
+                        Some(v) => ProtocolError::new(ErrorCode::NotFound, format!("guideline {guideline_id} has no version {v}")),
+                        None => not_found(guideline_id),
+                    }));
+                };
+                Ok(Ok(ResponseBody::Guideline(gl::GuidelineDetail { guideline, version: found })))
+            }))
+            .await
+        }
+        Method::GuidelineVersions { guideline_id } => {
+            read(Box::new(move |c| {
+                if store::view(c, guideline_id)?.is_none() {
+                    return Ok(Err(not_found(guideline_id)));
+                }
+                Ok(Ok(ResponseBody::GuidelineVersions(gl::GuidelineVersions { guideline_id, versions: store::versions(c, guideline_id)? })))
+            }))
+            .await
+        }
+        // What a run of this employee in this project gets, after the safety net (B4).
+        Method::GuidelineEffective { employee_id, project_id } => {
+            read(Box::new(move |c| Ok(Ok(ResponseBody::EffectiveGuidelines(gl::apply_safety_net(store::effective(c, employee_id, project_id)?)))))).await
+        }
+        Method::GuidelineProposals { status } => {
+            read(Box::new(move |c| Ok(Ok(ResponseBody::GuidelineProposals(gl::GuidelineProposals { proposals: store::proposals(c, status)? }))))).await
+        }
+        Method::GuidelineAffected { guideline_id } => {
+            read(Box::new(move |c| {
+                let Some(view) = store::view(c, guideline_id)? else { return Ok(Err(not_found(guideline_id))) };
+                let employees = store::affected_employees(c, guideline_id)?.len() as u32;
+                let mut projects = 0;
+                for target in &view.links {
+                    if let gl::GuidelineTarget::Project(p) = target {
+                        let status: Option<String> = c.query_row("SELECT status FROM projects WHERE id = ?1", [p.to_string()], |r| r.get(0)).ok();
+                        projects += u32::from(status.is_some_and(|s| s != "archived"));
+                    }
+                }
+                let conversations = match aurelius_application::guideline::sessions_holding(c, guideline_id) {
+                    Ok(n) => n,
+                    Err(err) => return Ok(Err(err)),
+                };
+                Ok(Ok(ResponseBody::GuidelineAffected(gl::GuidelineAffected { guideline_id, employees, projects, conversations })))
+            }))
+            .await
+        }
+        Method::GuidelineStarterSet => {
+            read(Box::new(move |c| {
+                let mut templates = Vec::new();
+                for starter in store::starter_set() {
+                    templates.push(gl::StarterTemplate {
+                        key: starter.key.to_owned(),
+                        title: starter.title.to_owned(),
+                        text: starter.text.to_owned(),
+                        chars: starter.text.chars().count() as u32,
+                        level: starter.level,
+                        in_library: store::title_taken(c, starter.title, None)?,
+                    });
+                }
+                Ok(Ok(ResponseBody::StarterSet(gl::StarterSet { templates })))
+            }))
+            .await
+        }
+        Method::RunGuidelines { run_id } => {
+            read(Box::new(move |c| {
+                let known: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM runs WHERE id = ?1)", [run_id.to_string()], |r| r.get(0))?;
+                if !known {
+                    return Ok(Err(ProtocolError::new(ErrorCode::NotFound, format!("run {run_id} does not exist"))));
+                }
+                Ok(Ok(ResponseBody::RunGuidelines(gl::RunGuidelines { run_id, guidelines: store::for_run(c, run_id)? })))
+            }))
+            .await
+        }
+        _ => Err(internal("not a guideline read")),
+    }
 }

@@ -1,9 +1,8 @@
 //! Command envelope, receipt and result: the one write pipeline.
 
 use crate::{
-    ApprovalId, AttachmentId, Command, CommandId, ProviderId, ConversationId, EmployeeId, MemoryId, MessageId, ProjectId, RunId, TaskId,
-    approval::ApprovalStatus,
-    employee::LifecycleStatus,
+    ApprovalId, AttachmentId, Command, CommandId, ConversationId, EmployeeId, MemoryId, MessageId,
+    ProjectId, ProviderId, RunId, TaskId, approval::ApprovalStatus, employee::LifecycleStatus,
 };
 use serde::{Deserialize, Serialize};
 
@@ -29,83 +28,271 @@ pub struct CommandReceipt {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CommandResult {
-    ProjectCreated { project_id: ProjectId, version: u64 },
-    ProjectRenamed { project_id: ProjectId, version: u64 },
-    ProjectDescriptionSet { project_id: ProjectId, version: u64 },
-    ChatMessageSent { conversation_id: ConversationId, message_id: MessageId, run_id: RunId },
-    ReplyRetried { run_id: RunId },
-    StopRequested { run_id: RunId, already_finished: bool },
-    EmployeeCreated { employee_id: EmployeeId, conversation_id: ConversationId },
-    EmployeeUpdated { employee_id: EmployeeId, version: u64 },
-    EmployeeStatusChanged { employee_id: EmployeeId, status: LifecycleStatus },
-    ProjectStatusChanged { project_id: ProjectId, status: LifecycleStatus },
-    EmployeeMessageSent { conversation_id: ConversationId, message_id: MessageId, run_id: RunId },
+    ProjectCreated {
+        project_id: ProjectId,
+        version: u64,
+    },
+    ProjectRenamed {
+        project_id: ProjectId,
+        version: u64,
+    },
+    ProjectDescriptionSet {
+        project_id: ProjectId,
+        version: u64,
+    },
+    ChatMessageSent {
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        run_id: RunId,
+    },
+    ReplyRetried {
+        run_id: RunId,
+    },
+    StopRequested {
+        run_id: RunId,
+        already_finished: bool,
+    },
+    EmployeeCreated {
+        employee_id: EmployeeId,
+        conversation_id: ConversationId,
+    },
+    EmployeeUpdated {
+        employee_id: EmployeeId,
+        version: u64,
+    },
+    EmployeeStatusChanged {
+        employee_id: EmployeeId,
+        status: LifecycleStatus,
+    },
+    ProjectStatusChanged {
+        project_id: ProjectId,
+        status: LifecycleStatus,
+    },
+    EmployeeMessageSent {
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        run_id: RunId,
+    },
     /// A message in the group chat, with the employees it woke (each answers in a run of its own).
-    GroupMessageSent { conversation_id: ConversationId, message_id: MessageId, to: Vec<EmployeeId>, run_ids: Vec<RunId> },
-    ApprovalDecided { approval_id: ApprovalId, status: ApprovalStatus, ok: bool, output: String },
+    GroupMessageSent {
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        to: Vec<EmployeeId>,
+        run_ids: Vec<RunId>,
+    },
+    ApprovalDecided {
+        approval_id: ApprovalId,
+        status: ApprovalStatus,
+        ok: bool,
+        output: String,
+    },
     #[serde(rename = "connection_added")]
-    ProviderAdded { connection_id: ProviderId },
+    ProviderAdded {
+        connection_id: ProviderId,
+    },
     #[serde(rename = "connection_removed")]
-    ProviderRemoved { connection_id: ProviderId },
-    VerificationStarted { connection_id: ProviderId },
+    ProviderRemoved {
+        connection_id: ProviderId,
+    },
+    VerificationStarted {
+        connection_id: ProviderId,
+    },
     RunDefaultsSet,
-    TaskCreated { task_id: TaskId },
-    TaskCancelled { task_id: TaskId },
+    TaskCreated {
+        task_id: TaskId,
+    },
+    TaskCancelled {
+        task_id: TaskId,
+    },
     /// The variant whose diff is applied to the work folder; the task goes on with it.
-    TaskVariantChosen { task_id: TaskId, variant: u8 },
-    TaskAssigned { task_id: TaskId },
+    TaskVariantChosen {
+        task_id: TaskId,
+        variant: u8,
+    },
+    TaskAssigned {
+        task_id: TaskId,
+    },
     /// Also the answer to update, pause and resume.
-    TaskScheduleCreated { schedule_id: crate::TaskScheduleId },
-    TaskScheduleUpdated { schedule_id: crate::TaskScheduleId },
-    TaskScheduleDeleted { schedule_id: crate::TaskScheduleId },
-    TaskScheduleRan { schedule_id: crate::TaskScheduleId, task_id: TaskId },
-    IdeaAdded { idea_id: crate::IdeaId },
-    IdeaUpdated { idea_id: crate::IdeaId },
-    IdeaStarted { idea_id: crate::IdeaId, task_id: TaskId },
-    IdeaDeleted { idea_id: crate::IdeaId },
-    AttachmentAdded { attachment_id: AttachmentId, conversation_id: ConversationId },
-    AttachmentRemoved { attachment_id: AttachmentId },
-    MemoryStored { memory_id: MemoryId },
-    MemoryDecided { memory_id: MemoryId, status: crate::memory::MemoryStatus },
-    MemoryForgotten { memory_id: MemoryId },
+    TaskScheduleCreated {
+        schedule_id: crate::TaskScheduleId,
+    },
+    TaskScheduleUpdated {
+        schedule_id: crate::TaskScheduleId,
+    },
+    TaskScheduleDeleted {
+        schedule_id: crate::TaskScheduleId,
+    },
+    TaskScheduleRan {
+        schedule_id: crate::TaskScheduleId,
+        task_id: TaskId,
+    },
+    IdeaAdded {
+        idea_id: crate::IdeaId,
+    },
+    IdeaUpdated {
+        idea_id: crate::IdeaId,
+    },
+    IdeaStarted {
+        idea_id: crate::IdeaId,
+        task_id: TaskId,
+    },
+    IdeaDeleted {
+        idea_id: crate::IdeaId,
+    },
+    AttachmentAdded {
+        attachment_id: AttachmentId,
+        conversation_id: ConversationId,
+    },
+    AttachmentRemoved {
+        attachment_id: AttachmentId,
+    },
+    MemoryStored {
+        memory_id: MemoryId,
+    },
+    MemoryDecided {
+        memory_id: MemoryId,
+        status: crate::memory::MemoryStatus,
+    },
+    MemoryForgotten {
+        memory_id: MemoryId,
+    },
     /// `queued` is false when a consolidation of that memory is already waiting or running.
-    MemoryConsolidationQueued { queued: bool },
-    AgentModeSet { conversation_id: ConversationId, mode: crate::autonomy::AgentMode },
-    ConversationRunSet { conversation_id: ConversationId },
-    BrowserAllowedSet { conversation_id: ConversationId, allowed: bool },
-    ScreenAllowedSet { conversation_id: ConversationId, allowed: bool },
-    ProjectFolderSet { project_id: ProjectId, folder: String },
-    Shared { share_id: crate::ShareId, memory_id: Option<MemoryId> },
+    MemoryConsolidationQueued {
+        queued: bool,
+    },
+    AgentModeSet {
+        conversation_id: ConversationId,
+        mode: crate::autonomy::AgentMode,
+    },
+    ConversationRunSet {
+        conversation_id: ConversationId,
+    },
+    BrowserAllowedSet {
+        conversation_id: ConversationId,
+        allowed: bool,
+    },
+    ScreenAllowedSet {
+        conversation_id: ConversationId,
+        allowed: bool,
+    },
+    ProjectFolderSet {
+        project_id: ProjectId,
+        folder: String,
+    },
+    Shared {
+        share_id: crate::ShareId,
+        memory_id: Option<MemoryId>,
+    },
     /// The lead employee's chat that now has the task's result as context.
-    TaskDiscussed { conversation_id: ConversationId, employee_id: EmployeeId },
-    ShareRevoked { share_id: crate::ShareId },
-    EmployeeFolderSet { employee_id: EmployeeId, folder: Option<String> },
-    ConversationDeleted { conversation_id: ConversationId },
-    HeartbeatSet { employee_id: EmployeeId, every_minutes: u32 },
+    TaskDiscussed {
+        conversation_id: ConversationId,
+        employee_id: EmployeeId,
+    },
+    ShareRevoked {
+        share_id: crate::ShareId,
+    },
+    EmployeeFolderSet {
+        employee_id: EmployeeId,
+        folder: Option<String>,
+    },
+    ConversationDeleted {
+        conversation_id: ConversationId,
+    },
+    HeartbeatSet {
+        employee_id: EmployeeId,
+        every_minutes: u32,
+    },
     /// A new, empty project conversation.
-    ProjectConversationStarted { project_id: ProjectId, conversation_id: ConversationId },
+    ProjectConversationStarted {
+        project_id: ProjectId,
+        conversation_id: ConversationId,
+    },
     /// A message in a project conversation was accepted and is being answered.
-    ProjectMessageSent { project_id: ProjectId, conversation_id: ConversationId, message_id: MessageId, run_id: RunId },
+    ProjectMessageSent {
+        project_id: ProjectId,
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        run_id: RunId,
+    },
     /// A waiting message was removed and its queued run cancelled.
-    QueuedMessageDeleted { conversation_id: ConversationId, message_id: MessageId, run_id: RunId },
+    QueuedMessageDeleted {
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        run_id: RunId,
+    },
     /// A waiting message's run starts now; the answers ahead of it were stopped.
-    QueuedMessageSentNow { conversation_id: ConversationId, message_id: MessageId, run_id: RunId },
-    EmployeeReportsToSet { employee_id: EmployeeId, reports_to: Option<EmployeeId> },
-    FollowOrgChartSet { follow: bool },
+    QueuedMessageSentNow {
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        run_id: RunId,
+    },
+    EmployeeReportsToSet {
+        employee_id: EmployeeId,
+        reports_to: Option<EmployeeId>,
+    },
+    FollowOrgChartSet {
+        follow: bool,
+    },
     /// `employee_id` is the employee that was created when the proposal was approved.
-    ProposalDecided { proposal_id: crate::ProposalId, status: crate::proposal::ProposalStatus, employee_id: Option<EmployeeId> },
+    ProposalDecided {
+        proposal_id: crate::ProposalId,
+        status: crate::proposal::ProposalStatus,
+        employee_id: Option<EmployeeId>,
+    },
     /// An earlier version of an employee's instructions was put back as `version` (the new current one).
-    EmployeeInstructionsRestored { employee_id: EmployeeId, version: u32 },
-    TicketCreated { ticket_id: crate::TicketId, number: u32 },
+    EmployeeInstructionsRestored {
+        employee_id: EmployeeId,
+        version: u32,
+    },
+    TicketCreated {
+        ticket_id: crate::TicketId,
+        number: u32,
+    },
     /// The answer to every other ticket write: where the ticket is now.
-    TicketChanged { ticket_id: crate::TicketId, column: crate::ticket::ColumnKind, version: u64 },
+    TicketChanged {
+        ticket_id: crate::TicketId,
+        column: crate::ticket::ColumnKind,
+        version: u64,
+    },
     /// A message in a ticket's discussion, with the employees it woke (or the
     /// owner it went to: `run_ids` is empty when the main task already runs and takes it).
-    TicketMessagePosted { ticket_id: crate::TicketId, conversation_id: ConversationId, message_id: MessageId, to: Vec<EmployeeId>, run_ids: Vec<RunId> },
+    TicketMessagePosted {
+        ticket_id: crate::TicketId,
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        to: Vec<EmployeeId>,
+        run_ids: Vec<RunId>,
+    },
     /// The board's new version (`ticket::board_version`).
-    BoardColumnsUpdated { version: u64 },
-    CompanyUpdated { version: u64 },
-    ProjectUpdated { project_id: ProjectId, version: u64 },
+    BoardColumnsUpdated {
+        version: u64,
+    },
+    CompanyUpdated {
+        version: u64,
+    },
+    ProjectUpdated {
+        project_id: ProjectId,
+        version: u64,
+    },
     /// A new board member (`user.create`).
-    UserCreated { user_id: crate::UserId },
+    UserCreated {
+        user_id: crate::UserId,
+    },
+    /// Every guideline write but a proposal's decision and the starter set: the
+    /// guideline and its current version now.
+    GuidelineChanged {
+        guideline_id: crate::GuidelineId,
+        version: u32,
+    },
+    /// `guideline.decide_proposal`; `guideline_id`: the guideline that got the
+    /// new version (or was made), none for a rejection.
+    GuidelineProposalDecided {
+        proposal_id: crate::GuidelineProposalId,
+        status: crate::proposal::ProposalStatus,
+        guideline_id: Option<crate::GuidelineId>,
+    },
+    /// `guideline.add_starter_set`: the guidelines made (keys already in the library are skipped).
+    StarterGuidelinesAdded {
+        guideline_ids: Vec<crate::GuidelineId>,
+    },
 }

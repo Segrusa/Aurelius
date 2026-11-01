@@ -1,3 +1,4 @@
+import '../../data/guidelines.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
 import '../project/task_status_mark.dart';
@@ -14,6 +15,7 @@ class InboxSections {
   const InboxSections({
     required this.approvals,
     required this.proposals,
+    this.guidelineProposals = const [],
     required this.waitingTasks,
     this.variantTasks = const [],
     required this.runningTasks,
@@ -29,6 +31,7 @@ class InboxSections {
     return InboxSections(
       approvals: inbox.approvals,
       proposals: inbox.proposals,
+      guidelineProposals: inbox.guidelineProposals,
       // Variants ready to compare show as their compare card (feature `task_variants`).
       variantTasks: inbox.variantsOn ? open.where((t) => t.variantsReady && !asked.contains(t.id)).toList() : const [],
       waitingTasks: open.where((t) => taskMark(t) == TaskMark.needsYou && !asked.contains(t.id) && !(inbox.variantsOn && t.variantsReady)).toList(),
@@ -48,6 +51,9 @@ class InboxSections {
   final List<ApprovalView> approvals;
   final List<ProposalView> proposals;
 
+  /// Guideline proposals (B5), each a card with its diff.
+  final List<GuidelineProposalItem> guidelineProposals;
+
   /// Tasks waiting for the user's input or decision without a pending approval.
   final List<TaskView> waitingTasks;
 
@@ -59,7 +65,7 @@ class InboxSections {
   /// Finished results; "Clear all" dismisses these (never approvals).
   final List<NotificationView> results;
 
-  int get needsYou => approvals.length + proposals.length + variantTasks.length + waitingTasks.length;
+  int get needsYou => approvals.length + proposals.length + guidelineProposals.length + variantTasks.length + waitingTasks.length;
   int get running => runningTasks.length + answers.length;
   int get done => results.length;
   bool get isEmpty => needsYou == 0 && running == 0 && done == 0;

@@ -32,7 +32,10 @@ const fn plain(version: i64, sql: &'static str) -> Migration {
 /// 19 the discussions: a channel per project, a discussion per ticket, and the
 /// board member who wrote a message; 20 the read markers; 21 phase 3's logins:
 /// user sessions, disabled users, Claude logins and whose login runs use; 22
-/// phase 4's vault: encrypted items per scope and their append-only audit. A 14–17 database does not migrate into 18: `fresh_start` imports it.
+/// phase 4's vault: encrypted items per scope and their append-only audit; 23
+/// the guidelines: a library with append-only versions, links, proposals and a
+/// snapshot per run (no content: the starter set is a seed step, B7). A 14–17
+/// database does not migrate into 18: `fresh_start` imports it.
 pub const MIGRATIONS: &[Migration] = &[
     plain(1, include_str!("../../../migrations/0001_schema.sql")),
     plain(2, include_str!("../../../migrations/0002_artifacts.sql")),
@@ -56,6 +59,7 @@ pub const MIGRATIONS: &[Migration] = &[
     plain(20, include_str!("../../../migrations/0020_discussion_reads.sql")),
     Migration { version: 21, sql: include_str!("../../../migrations/0021_multi_user_sessions.sql"), rebuild: true, then: None },
     plain(22, include_str!("../../../migrations/0022_vault.sql")),
+    plain(23, include_str!("../../../migrations/0023_guidelines.sql")),
 ];
 
 /// The last schema of protocol 2 (managers per project). The v0.6 import writes

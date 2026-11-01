@@ -1,0 +1,6 @@
+- The app is in `clients/mobile`. State per feature with flutter_bloc (`<area>_bloc.dart` and `<area>_page.dart` in `lib/features/<area>/`), value types with equatable, navigation with go_router.
+- Talk to the server only through `lib/data/aurelius_repository.dart` and the generated protocol. Check the server's features before you show a feature.
+- A bloc that refreshes on events does so only while its tab is visible (TickerMode); otherwise it marks itself stale and refreshes when shown.
+- A failure is never an endless "Loading…": show what failed and a Try again.
+- UI text is English and uses the same words as the desktop app.
+- `flutter analyze` reports no more issues than on the base branch, and `flutter test` is green. Flutter is in `~/development/flutter/bin` (not on PATH).

@@ -194,6 +194,19 @@ event_kinds! {
     VaultItemCreated => "vault.item_created",
     VaultItemUpdated => "vault.item_updated",
     VaultItemArchived => "vault.item_archived",
+    // Guidelines (feature `guidelines`); the aggregate is the guideline. `metadata` is a
+    // `guideline::GuidelineEventMeta`: id, title, version, by (and the target of a link).
+    GuidelineCreated => "guideline.created",
+    GuidelineUpdated => "guideline.updated",
+    GuidelineArchived => "guideline.archived",
+    GuidelineRestored => "guideline.restored",
+    GuidelineLinked => "guideline.linked",
+    GuidelineUnlinked => "guideline.unlinked",
+    // An employee proposed a guideline or a change (`propose_guideline`, B5); the
+    // aggregate is the proposal, `metadata` a `guideline::GuidelineProposedMeta`.
+    GuidelineProposed => "guideline.proposed",
+    // A board member decided; `metadata` a `guideline::GuidelineProposalDecidedMeta`.
+    GuidelineProposalDecided => "guideline.proposal_decided",
 }
 
 impl EventKind {

@@ -101,8 +101,10 @@ impl AppView {
             Some(Some(Err(why))) => div().text_color(c(theme::MUTED)).child(why.clone()).into_any_element(),
             _ => div().text_color(c(theme::MUTED)).child("Loading…").into_any_element(),
         };
+        // The guideline versions the run had (B6, P-59): also when trace mode kept no trace.
+        let guidelines = self.trace.as_ref().and_then(|(run, _)| self.render_run_guidelines(*run, cx));
         let panel = self.side_panel("TRACE", cx)
-            .child(v().id("trace-body").flex_1().min_h_0().overflow_y_scrollbar().px(px(28.)).py(px(20.)).gap(px(18.)).child(body))
+            .child(v().id("trace-body").flex_1().min_h_0().overflow_y_scrollbar().px(px(28.)).py(px(20.)).gap(px(18.)).children(guidelines).child(body))
             .child(
                 h().px(px(28.)).py(px(12.)).gap(px(10.)).border_t_1().border_color(c(theme::BORDER))
                     .child(h().flex_1().child(ui::info("trace-estimates-about", "Token counts per part are estimates (4 characters ≈ 1 token); the steps are as the model reported them.")))

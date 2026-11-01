@@ -433,6 +433,7 @@ final class AppError {
     this.matchedItems = const [],
     required this.message,
     this.retryAfterMs,
+    this.tooLarge,
   });
 
   final ErrorCode code;
@@ -442,12 +443,15 @@ final class AppError {
   final String message;
   /// `too_many_attempts`: how long until the next try is taken.
   final int? retryAfterMs;
+  /// `guideline_too_large`: the characters, the limit and the combination that overflows.
+  final GuidelineTooLarge? tooLarge;
 
   factory AppError.fromJson(Map<String, dynamic> json) => AppError(
     code: ErrorCode.fromJson(json['code'] as String),
     matchedItems: (json['matched_items'] == null ? const [] : (json['matched_items'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     message: (json['message'] as String),
     retryAfterMs: (json['retry_after_ms'] == null ? null : (json['retry_after_ms'] as num).toInt()),
+    tooLarge: (json['too_large'] == null ? null : GuidelineTooLarge.fromJson(json['too_large'] as Map<String, dynamic>)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -455,6 +459,7 @@ final class AppError {
     'matched_items': matchedItems,
     'message': message,
     if (retryAfterMs != null) 'retry_after_ms': retryAfterMs,
+    if (tooLarge != null) 'too_large': tooLarge?.toJson(),
   };
 }
 
@@ -1557,6 +1562,10 @@ sealed class Command {
         return CommandAddConnection(value: AddConnection.fromJson(json as Map<String, dynamic>));
       case 'add_idea':
         return CommandAddIdea(value: AddIdea.fromJson(json as Map<String, dynamic>));
+      case 'add_starter_guidelines':
+        return CommandAddStarterGuidelines(
+          keys: (json['keys'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+        );
       case 'answer_question':
         return CommandAnswerQuestion(value: AnswerQuestion.fromJson(json as Map<String, dynamic>));
       case 'approve_plan':
@@ -1564,6 +1573,10 @@ sealed class Command {
           decision: PlanApproval.fromJson(json['decision'] as String),
           feedback: (json['feedback'] == null ? null : (json['feedback'] as String)),
           ticketId: (json['ticket_id'] as String),
+        );
+      case 'archive_guideline':
+        return CommandArchiveGuideline(
+          guidelineId: (json['guideline_id'] as String),
         );
       case 'archive_ticket':
         return CommandArchiveTicket(
@@ -1591,6 +1604,12 @@ sealed class Command {
         return CommandConsolidateMemory(value: ConsolidateMemory.fromJson(json as Map<String, dynamic>));
       case 'create_employee':
         return CommandCreateEmployee(value: CreateEmployee.fromJson(json as Map<String, dynamic>));
+      case 'create_guideline':
+        return CommandCreateGuideline(
+          links: (json['links'] == null ? const [] : (json['links'] as List<dynamic>).map((x0) => GuidelineTarget.fromJson(x0 as Map<String, dynamic>)).toList()),
+          text: (json['text'] as String),
+          title: (json['title'] as String),
+        );
       case 'create_project':
         return CommandCreateProject(value: CreateProject.fromJson(json as Map<String, dynamic>));
       case 'create_task':
@@ -1614,6 +1633,15 @@ sealed class Command {
         );
       case 'decide_approval':
         return CommandDecideApproval(value: DecideApproval.fromJson(json as Map<String, dynamic>));
+      case 'decide_guideline_proposal':
+        return CommandDecideGuidelineProposal(
+          approve: (json['approve'] as bool),
+          links: (json['links'] == null ? null : (json['links'] as List<dynamic>).map((x0) => GuidelineTarget.fromJson(x0 as Map<String, dynamic>)).toList()),
+          note: (json['note'] == null ? null : (json['note'] as String)),
+          proposalId: (json['proposal_id'] as String),
+          text: (json['text'] == null ? null : (json['text'] as String)),
+          title: (json['title'] == null ? null : (json['title'] as String)),
+        );
       case 'decide_memory':
         return CommandDecideMemory(value: DecideMemory.fromJson(json as Map<String, dynamic>));
       case 'decide_plan':
@@ -1632,6 +1660,11 @@ sealed class Command {
         return CommandDiscussTask(value: DiscussTask.fromJson(json as Map<String, dynamic>));
       case 'forget_memory':
         return CommandForgetMemory(value: ForgetMemory.fromJson(json as Map<String, dynamic>));
+      case 'link_guideline':
+        return CommandLinkGuideline(
+          guidelineId: (json['guideline_id'] as String),
+          target: GuidelineTarget.fromJson(json['target'] as Map<String, dynamic>),
+        );
       case 'move_ticket':
         return CommandMoveTicket(
           beforeTicketId: (json['before_ticket_id'] == null ? null : (json['before_ticket_id'] as String)),
@@ -1658,6 +1691,15 @@ sealed class Command {
         return CommandRenameProject(value: RenameProject.fromJson(json as Map<String, dynamic>));
       case 'restore_employee_instructions':
         return CommandRestoreEmployeeInstructions(value: RestoreEmployeeInstructions.fromJson(json as Map<String, dynamic>));
+      case 'restore_guideline':
+        return CommandRestoreGuideline(
+          guidelineId: (json['guideline_id'] as String),
+        );
+      case 'restore_guideline_version':
+        return CommandRestoreGuidelineVersion(
+          guidelineId: (json['guideline_id'] as String),
+          version: (json['version'] as num).toInt(),
+        );
       case 'retry_reply':
         return CommandRetryReply(value: RetryReply.fromJson(json as Map<String, dynamic>));
       case 'retry_ticket_summary':
@@ -1739,6 +1781,11 @@ sealed class Command {
         );
       case 'stop_run':
         return CommandStopRun(value: StopRun.fromJson(json as Map<String, dynamic>));
+      case 'unlink_guideline':
+        return CommandUnlinkGuideline(
+          guidelineId: (json['guideline_id'] as String),
+          target: GuidelineTarget.fromJson(json['target'] as Map<String, dynamic>),
+        );
       case 'update_board_columns':
         return CommandUpdateBoardColumns(
           columns: (json['columns'] as List<dynamic>).map((x0) => BoardColumnEdit.fromJson(x0 as Map<String, dynamic>)).toList(),
@@ -1747,6 +1794,12 @@ sealed class Command {
         return CommandUpdateCompany(value: UpdateCompany.fromJson(json as Map<String, dynamic>));
       case 'update_employee':
         return CommandUpdateEmployee(value: UpdateEmployee.fromJson(json as Map<String, dynamic>));
+      case 'update_guideline':
+        return CommandUpdateGuideline(
+          guidelineId: (json['guideline_id'] as String),
+          text: (json['text'] == null ? null : (json['text'] as String)),
+          title: (json['title'] == null ? null : (json['title'] as String)),
+        );
       case 'update_idea':
         return CommandUpdateIdea(value: UpdateIdea.fromJson(json as Map<String, dynamic>));
       case 'update_project':
@@ -1830,6 +1883,22 @@ final class CommandAddIdea extends Command {
     };
 }
 
+/// `guideline.add_starter_set`: the chosen templates as guidelines without links (B7).
+/// A key whose title is in the library already is skipped.
+final class CommandAddStarterGuidelines extends Command {
+  const CommandAddStarterGuidelines({
+    required this.keys,
+  });
+
+  final List<String> keys;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'add_starter_guidelines',
+      'keys': keys,
+    };
+}
+
 final class CommandAnswerQuestion extends Command {
   const CommandAnswerQuestion({
     required this.value,
@@ -1862,6 +1931,21 @@ final class CommandApprovePlan extends Command {
       'decision': decision.toJson(),
       if (feedback != null) 'feedback': feedback,
       'ticket_id': ticketId,
+    };
+}
+
+/// `guideline.archive`: no run gets it any more; links and versions stay.
+final class CommandArchiveGuideline extends Command {
+  const CommandArchiveGuideline({
+    required this.guidelineId,
+  });
+
+  final String guidelineId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'archive_guideline',
+      'guideline_id': guidelineId,
     };
 }
 
@@ -2005,6 +2089,27 @@ final class CommandCreateEmployee extends Command {
     };
 }
 
+/// `guideline.create`: a new guideline (version 1, source `created`), linked at once to `links`.
+final class CommandCreateGuideline extends Command {
+  const CommandCreateGuideline({
+    this.links = const [],
+    required this.text,
+    required this.title,
+  });
+
+  final List<GuidelineTarget> links;
+  final String text;
+  final String title;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'create_guideline',
+      'links': links.map((x0) => x0.toJson()).toList(),
+      'text': text,
+      'title': title,
+    };
+}
+
 final class CommandCreateProject extends Command {
   const CommandCreateProject({
     required this.value,
@@ -2113,6 +2218,39 @@ final class CommandDecideApproval extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'decide_approval',
       ...value.toJson(),
+    };
+}
+
+/// `guideline.decide_proposal` (B5): approve (with `title`/`text` edited by the
+/// board member, and for a new guideline the `links`; none: the suggested
+/// ones) or reject. `note` goes back to the proposer. `version_conflict` when
+/// the guideline moved on since the proposal's base version.
+final class CommandDecideGuidelineProposal extends Command {
+  const CommandDecideGuidelineProposal({
+    required this.approve,
+    this.links,
+    this.note,
+    required this.proposalId,
+    this.text,
+    this.title,
+  });
+
+  final bool approve;
+  final List<GuidelineTarget>? links;
+  final String? note;
+  final String proposalId;
+  final String? text;
+  final String? title;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'decide_guideline_proposal',
+      'approve': approve,
+      if (links != null) 'links': links?.map((x0) => x0.toJson()).toList(),
+      if (note != null) 'note': note,
+      'proposal_id': proposalId,
+      if (text != null) 'text': text,
+      if (title != null) 'title': title,
     };
 }
 
@@ -2239,6 +2377,24 @@ final class CommandForgetMemory extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'forget_memory',
       ...value.toJson(),
+    };
+}
+
+/// `guideline.link`: an employee or a project gets it from its next run.
+final class CommandLinkGuideline extends Command {
+  const CommandLinkGuideline({
+    required this.guidelineId,
+    required this.target,
+  });
+
+  final String guidelineId;
+  final GuidelineTarget target;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'link_guideline',
+      'guideline_id': guidelineId,
+      'target': target.toJson(),
     };
 }
 
@@ -2386,6 +2542,39 @@ final class CommandRestoreEmployeeInstructions extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'restore_employee_instructions',
       ...value.toJson(),
+    };
+}
+
+/// `guideline.restore`: back from the archive, with its links (B4 and the title are checked again).
+final class CommandRestoreGuideline extends Command {
+  const CommandRestoreGuideline({
+    required this.guidelineId,
+  });
+
+  final String guidelineId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'restore_guideline',
+      'guideline_id': guidelineId,
+    };
+}
+
+/// `guideline.restore_version`: a copy of `version` as the newest (source `restored`).
+final class CommandRestoreGuidelineVersion extends Command {
+  const CommandRestoreGuidelineVersion({
+    required this.guidelineId,
+    required this.version,
+  });
+
+  final String guidelineId;
+  final int version;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'restore_guideline_version',
+      'guideline_id': guidelineId,
+      'version': version,
     };
 }
 
@@ -2880,6 +3069,24 @@ final class CommandStopRun extends Command {
     };
 }
 
+/// `guideline.unlink`.
+final class CommandUnlinkGuideline extends Command {
+  const CommandUnlinkGuideline({
+    required this.guidelineId,
+    required this.target,
+  });
+
+  final String guidelineId;
+  final GuidelineTarget target;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'unlink_guideline',
+      'guideline_id': guidelineId,
+      'target': target.toJson(),
+    };
+}
+
 /// Rename the columns and set their order (B3): all six, left to right.
 /// `expected_version` is the board's (`board_version`: the columns change
 /// together); the answer gives the new one.
@@ -2922,6 +3129,29 @@ final class CommandUpdateEmployee extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'update_employee',
       ...value.toJson(),
+    };
+}
+
+/// `guideline.update`: a new version with what changed (source `edited`); what
+/// is left out stays. `expected_version` in the envelope is the version the
+/// editor started from (`version_conflict` otherwise).
+final class CommandUpdateGuideline extends Command {
+  const CommandUpdateGuideline({
+    required this.guidelineId,
+    this.text,
+    this.title,
+  });
+
+  final String guidelineId;
+  final String? text;
+  final String? title;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'update_guideline',
+      'guideline_id': guidelineId,
+      if (text != null) 'text': text,
+      if (title != null) 'title': title,
     };
 }
 
@@ -3152,6 +3382,17 @@ sealed class CommandResult {
           runIds: (json['run_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
           to: (json['to'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
         );
+      case 'guideline_changed':
+        return CommandResultGuidelineChanged(
+          guidelineId: (json['guideline_id'] as String),
+          version: (json['version'] as num).toInt(),
+        );
+      case 'guideline_proposal_decided':
+        return CommandResultGuidelineProposalDecided(
+          guidelineId: (json['guideline_id'] == null ? null : (json['guideline_id'] as String)),
+          proposalId: (json['proposal_id'] as String),
+          status: ProposalStatus.fromJson(json['status'] as String),
+        );
       case 'heartbeat_set':
         return CommandResultHeartbeatSet(
           employeeId: (json['employee_id'] as String),
@@ -3270,6 +3511,10 @@ sealed class CommandResult {
         return CommandResultShared(
           memoryId: (json['memory_id'] == null ? null : (json['memory_id'] as String)),
           shareId: (json['share_id'] as String),
+        );
+      case 'starter_guidelines_added':
+        return CommandResultStarterGuidelinesAdded(
+          guidelineIds: (json['guideline_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
         );
       case 'stop_requested':
         return CommandResultStopRequested(
@@ -3704,6 +3949,47 @@ final class CommandResultGroupMessageSent extends CommandResult {
     };
 }
 
+/// Every guideline write but a proposal's decision and the starter set: the
+/// guideline and its current version now.
+final class CommandResultGuidelineChanged extends CommandResult {
+  const CommandResultGuidelineChanged({
+    required this.guidelineId,
+    required this.version,
+  });
+
+  final String guidelineId;
+  final int version;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'guideline_changed',
+      'guideline_id': guidelineId,
+      'version': version,
+    };
+}
+
+/// `guideline.decide_proposal`; `guideline_id`: the guideline that got the
+/// new version (or was made), none for a rejection.
+final class CommandResultGuidelineProposalDecided extends CommandResult {
+  const CommandResultGuidelineProposalDecided({
+    this.guidelineId,
+    required this.proposalId,
+    required this.status,
+  });
+
+  final String? guidelineId;
+  final String proposalId;
+  final ProposalStatus status;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'guideline_proposal_decided',
+      if (guidelineId != null) 'guideline_id': guidelineId,
+      'proposal_id': proposalId,
+      'status': status.toJson(),
+    };
+}
+
 final class CommandResultHeartbeatSet extends CommandResult {
   const CommandResultHeartbeatSet({
     required this.employeeId,
@@ -4115,6 +4401,21 @@ final class CommandResultShared extends CommandResult {
       'type': 'shared',
       if (memoryId != null) 'memory_id': memoryId,
       'share_id': shareId,
+    };
+}
+
+/// `guideline.add_starter_set`: the guidelines made (keys already in the library are skipped).
+final class CommandResultStarterGuidelinesAdded extends CommandResult {
+  const CommandResultStarterGuidelinesAdded({
+    required this.guidelineIds,
+  });
+
+  final List<String> guidelineIds;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'starter_guidelines_added',
+      'guideline_ids': guidelineIds,
     };
 }
 
@@ -4624,7 +4925,10 @@ final class ContextItemView {
   final String label;
   final String reason;
   final double? score;
-  /// rules | identity | request | turn | summary | memory | source
+  /// rules | identity | request | turn | summary | memory | source | guideline
+  /// (one item per guideline in the run's block, feature `guidelines`; `id` is
+  /// `g:<id>@<version>`, never left out by the budget: `included` false only
+  /// when B4's safety net dropped it).
   final String section;
   final int tokens;
 
@@ -5263,6 +5567,82 @@ final class DiscussTask {
   };
 }
 
+/// One guideline as a run gets it.
+final class EffectiveGuideline {
+  const EffectiveGuideline({
+    required this.chars,
+    required this.id,
+    required this.level,
+    required this.text,
+    required this.title,
+    required this.version,
+  });
+
+  final int chars;
+  final String id;
+  final GuidelineLevel level;
+  final String text;
+  final String title;
+  final int version;
+
+  factory EffectiveGuideline.fromJson(Map<String, dynamic> json) => EffectiveGuideline(
+    chars: (json['chars'] as num).toInt(),
+    id: (json['id'] as String),
+    level: GuidelineLevel.fromJson(json['level'] as String),
+    text: (json['text'] as String),
+    title: (json['title'] as String),
+    version: (json['version'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'chars': chars,
+    'id': id,
+    'level': level.toJson(),
+    'text': text,
+    'title': title,
+    'version': version,
+  };
+}
+
+/// `guideline.effective`: the set a run of this employee in this project would
+/// get, in block order, and how it relates to the limit (B4).
+final class EffectiveGuidelines {
+  const EffectiveGuidelines({
+    this.dropped = const [],
+    this.employeeId,
+    required this.guidelines,
+    required this.limitChars,
+    this.projectId,
+    required this.totalChars,
+  });
+
+  /// Left out by the safety net at run start (over the limit; employee ones first).
+  final List<String> dropped;
+  final String? employeeId;
+  final List<EffectiveGuideline> guidelines;
+  final int limitChars;
+  final String? projectId;
+  final int totalChars;
+
+  factory EffectiveGuidelines.fromJson(Map<String, dynamic> json) => EffectiveGuidelines(
+    dropped: (json['dropped'] == null ? const [] : (json['dropped'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+    guidelines: (json['guidelines'] as List<dynamic>).map((x0) => EffectiveGuideline.fromJson(x0 as Map<String, dynamic>)).toList(),
+    limitChars: (json['limit_chars'] as num).toInt(),
+    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+    totalChars: (json['total_chars'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'dropped': dropped,
+    if (employeeId != null) 'employee_id': employeeId,
+    'guidelines': guidelines.map((x0) => x0.toJson()).toList(),
+    'limit_chars': limitChars,
+    if (projectId != null) 'project_id': projectId,
+    'total_chars': totalChars,
+  };
+}
+
 /// One version of an employee's instructions (feature `instruction_proposals`).
 final class EmployeeInstructionVersionView {
   const EmployeeInstructionVersionView({
@@ -5489,6 +5869,13 @@ enum ErrorCode {
   /// The caller lacks the right for this method.
   forbidden('forbidden'),
   frameTooLarge('frame_too_large'),
+  /// `guideline.create` / `update` / `restore` / an approval: another guideline
+  /// that is not archived has this title (case does not count).
+  guidelineTitleTaken('guideline_title_taken'),
+  /// A guideline write (save, restore, link, approve) would give a run more
+  /// than 16 000 characters of guidelines (B4): `AppError::too_large` names the
+  /// combination of employee and project. Nothing was saved.
+  guidelineTooLarge('guideline_too_large'),
   idempotencyConflict('idempotency_conflict'),
   incompatibleProtocol('incompatible_protocol'),
   internal('internal'),
@@ -5619,6 +6006,14 @@ enum EventKind {
   employeeReportsToSet('employee.reports_to_set'),
   employeeResumed('employee.resumed'),
   folderChanged('folder.changed'),
+  guidelineArchived('guideline.archived'),
+  guidelineCreated('guideline.created'),
+  guidelineLinked('guideline.linked'),
+  guidelineProposalDecided('guideline.proposal_decided'),
+  guidelineProposed('guideline.proposed'),
+  guidelineRestored('guideline.restored'),
+  guidelineUnlinked('guideline.unlinked'),
+  guidelineUpdated('guideline.updated'),
   heartbeatChanged('heartbeat.changed'),
   heartbeatReported('heartbeat.reported'),
   hostWrite('host.write'),
@@ -6096,6 +6491,424 @@ final class GitStatusView {
     'files': files,
     if (head != null) 'head': head,
     'insertions': insertions,
+  };
+}
+
+/// `guideline.affected`: who a change reaches, for "applies from the next run
+/// of N employees" (B6). A run gets it at its next start; a conversation whose
+/// session had another version starts a new session then.
+final class GuidelineAffected {
+  const GuidelineAffected({
+    required this.conversations,
+    required this.employees,
+    required this.guidelineId,
+    required this.projects,
+  });
+
+  /// Conversations whose current session holds a version of it (they start a new session).
+  final int conversations;
+  /// Active employees that get it: linked themselves, or working in a linked project.
+  final int employees;
+  final String guidelineId;
+  /// Linked projects that are not archived.
+  final int projects;
+
+  factory GuidelineAffected.fromJson(Map<String, dynamic> json) => GuidelineAffected(
+    conversations: (json['conversations'] as num).toInt(),
+    employees: (json['employees'] as num).toInt(),
+    guidelineId: (json['guideline_id'] as String),
+    projects: (json['projects'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'conversations': conversations,
+    'employees': employees,
+    'guideline_id': guidelineId,
+    'projects': projects,
+  };
+}
+
+/// `guideline.get`: the guideline as the list shows it, plus one version with
+/// its text (the current one unless a `version` was asked).
+final class GuidelineDetail {
+  const GuidelineDetail({
+    required this.guideline,
+    required this.version,
+  });
+
+  final GuidelineView guideline;
+  final GuidelineVersionView version;
+
+  factory GuidelineDetail.fromJson(Map<String, dynamic> json) => GuidelineDetail(
+    guideline: GuidelineView.fromJson(json['guideline'] as Map<String, dynamic>),
+    version: GuidelineVersionView.fromJson(json['version'] as Map<String, dynamic>),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'guideline': guideline.toJson(),
+    'version': version.toJson(),
+  };
+}
+
+/// The level a guideline has in a run's block (B3: employee first, then project;
+/// a guideline linked to both is in it once, at project level).
+enum GuidelineLevel {
+  employee('employee'),
+  project('project');
+
+  const GuidelineLevel(this.wire);
+
+  final String wire;
+
+  static GuidelineLevel fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown GuidelineLevel value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
+/// A proposal from `propose_guideline` (`guideline.proposals`).
+final class GuidelineProposalView {
+  const GuidelineProposalView({
+    this.baseVersion,
+    required this.createdAtMs,
+    this.decidedAtMs,
+    this.decidedBy,
+    this.decisionNote,
+    this.evidence = const [],
+    this.guidelineId,
+    required this.id,
+    this.originConversationId,
+    required this.proposedBy,
+    required this.reason,
+    this.runId,
+    required this.status,
+    this.suggestedLinks = const [],
+    required this.text,
+    required this.title,
+  });
+
+  /// The version the proposal rests on (None for a new guideline).
+  final int? baseVersion;
+  final int createdAtMs;
+  final int? decidedAtMs;
+  final UserRef? decidedBy;
+  final String? decisionNote;
+  final List<ProposalEvidence> evidence;
+  /// None: a new guideline.
+  final String? guidelineId;
+  final String id;
+  final String? originConversationId;
+  final String proposedBy;
+  final String reason;
+  final String? runId;
+  final ProposalStatus status;
+  /// For a new guideline: the links the proposer suggests (themselves and the
+  /// run's project by default); the board member may change them.
+  final List<GuidelineTarget> suggestedLinks;
+  final String text;
+  final String title;
+
+  factory GuidelineProposalView.fromJson(Map<String, dynamic> json) => GuidelineProposalView(
+    baseVersion: (json['base_version'] == null ? null : (json['base_version'] as num).toInt()),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    decidedAtMs: (json['decided_at_ms'] == null ? null : (json['decided_at_ms'] as num).toInt()),
+    decidedBy: (json['decided_by'] == null ? null : UserRef.fromJson(json['decided_by'] as Map<String, dynamic>)),
+    decisionNote: (json['decision_note'] == null ? null : (json['decision_note'] as String)),
+    evidence: (json['evidence'] == null ? const [] : (json['evidence'] as List<dynamic>).map((x0) => ProposalEvidence.fromJson(x0 as Map<String, dynamic>)).toList()),
+    guidelineId: (json['guideline_id'] == null ? null : (json['guideline_id'] as String)),
+    id: (json['id'] as String),
+    originConversationId: (json['origin_conversation_id'] == null ? null : (json['origin_conversation_id'] as String)),
+    proposedBy: (json['proposed_by'] as String),
+    reason: (json['reason'] as String),
+    runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
+    status: ProposalStatus.fromJson(json['status'] as String),
+    suggestedLinks: (json['suggested_links'] == null ? const [] : (json['suggested_links'] as List<dynamic>).map((x0) => GuidelineTarget.fromJson(x0 as Map<String, dynamic>)).toList()),
+    text: (json['text'] as String),
+    title: (json['title'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (baseVersion != null) 'base_version': baseVersion,
+    'created_at_ms': createdAtMs,
+    if (decidedAtMs != null) 'decided_at_ms': decidedAtMs,
+    if (decidedBy != null) 'decided_by': decidedBy?.toJson(),
+    if (decisionNote != null) 'decision_note': decisionNote,
+    'evidence': evidence.map((x0) => x0.toJson()).toList(),
+    if (guidelineId != null) 'guideline_id': guidelineId,
+    'id': id,
+    if (originConversationId != null) 'origin_conversation_id': originConversationId,
+    'proposed_by': proposedBy,
+    'reason': reason,
+    if (runId != null) 'run_id': runId,
+    'status': status.toJson(),
+    'suggested_links': suggestedLinks.map((x0) => x0.toJson()).toList(),
+    'text': text,
+    'title': title,
+  };
+}
+
+/// `guideline.proposals`: pending first, then the latest decisions.
+final class GuidelineProposals {
+  const GuidelineProposals({
+    required this.proposals,
+  });
+
+  final List<GuidelineProposalView> proposals;
+
+  factory GuidelineProposals.fromJson(Map<String, dynamic> json) => GuidelineProposals(
+    proposals: (json['proposals'] as List<dynamic>).map((x0) => GuidelineProposalView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'proposals': proposals.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// How a version came about.
+enum GuidelineSource {
+  created('created'),
+  edited('edited'),
+  /// An approved `propose_guideline`.
+  proposal('proposal'),
+  /// `guideline.restore_version`: a copy of an older version as the newest.
+  restored('restored'),
+  /// The starter set (B7).
+  seed('seed');
+
+  const GuidelineSource(this.wire);
+
+  final String wire;
+
+  static GuidelineSource fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown GuidelineSource value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
+/// What a guideline is linked to: an employee or a project, never both (B2).
+sealed class GuidelineTarget {
+  const GuidelineTarget();
+
+  factory GuidelineTarget.fromJson(Map<String, dynamic> json) {
+    final tag = json['kind'] as String;
+    switch (tag) {
+      case 'employee':
+        return GuidelineTargetEmployee(
+          id: (json['id'] as String),
+        );
+      case 'project':
+        return GuidelineTargetProject(
+          id: (json['id'] as String),
+        );
+      default:
+        throw FormatException('Unknown GuidelineTarget kind: $tag');
+    }
+  }
+
+  Map<String, dynamic> toJson();
+}
+
+final class GuidelineTargetEmployee extends GuidelineTarget {
+  const GuidelineTargetEmployee({
+    required this.id,
+  });
+
+  final String id;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'kind': 'employee',
+      'id': id,
+    };
+}
+
+final class GuidelineTargetProject extends GuidelineTarget {
+  const GuidelineTargetProject({
+    required this.id,
+  });
+
+  final String id;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'kind': 'project',
+      'id': id,
+    };
+}
+
+/// `guideline_too_large` (B4): a write would give one combination of an
+/// employee and a project (or a project alone, or an employee without a
+/// project) more than `limit` characters of guidelines. The first combination
+/// that overflows; nothing was saved.
+final class GuidelineTooLarge {
+  const GuidelineTooLarge({
+    required this.chars,
+    this.employeeId,
+    required this.limit,
+    this.projectId,
+  });
+
+  final int chars;
+  final String? employeeId;
+  final int limit;
+  final String? projectId;
+
+  factory GuidelineTooLarge.fromJson(Map<String, dynamic> json) => GuidelineTooLarge(
+    chars: (json['chars'] as num).toInt(),
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+    limit: (json['limit'] as num).toInt(),
+    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'chars': chars,
+    if (employeeId != null) 'employee_id': employeeId,
+    'limit': limit,
+    if (projectId != null) 'project_id': projectId,
+  };
+}
+
+/// One version with its text (`guideline.get`, `guideline.versions`).
+final class GuidelineVersionView {
+  const GuidelineVersionView({
+    this.by,
+    required this.createdAtMs,
+    required this.guidelineId,
+    this.proposalId,
+    this.restoredFrom,
+    required this.source,
+    required this.text,
+    required this.title,
+    required this.version,
+  });
+
+  /// None: the seed.
+  final UserRef? by;
+  final int createdAtMs;
+  final String guidelineId;
+  final String? proposalId;
+  final int? restoredFrom;
+  final GuidelineSource source;
+  final String text;
+  final String title;
+  final int version;
+
+  factory GuidelineVersionView.fromJson(Map<String, dynamic> json) => GuidelineVersionView(
+    by: (json['by'] == null ? null : UserRef.fromJson(json['by'] as Map<String, dynamic>)),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    guidelineId: (json['guideline_id'] as String),
+    proposalId: (json['proposal_id'] == null ? null : (json['proposal_id'] as String)),
+    restoredFrom: (json['restored_from'] == null ? null : (json['restored_from'] as num).toInt()),
+    source: GuidelineSource.fromJson(json['source'] as String),
+    text: (json['text'] as String),
+    title: (json['title'] as String),
+    version: (json['version'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (by != null) 'by': by?.toJson(),
+    'created_at_ms': createdAtMs,
+    'guideline_id': guidelineId,
+    if (proposalId != null) 'proposal_id': proposalId,
+    if (restoredFrom != null) 'restored_from': restoredFrom,
+    'source': source.toJson(),
+    'text': text,
+    'title': title,
+    'version': version,
+  };
+}
+
+/// `guideline.versions`: every version, newest first.
+final class GuidelineVersions {
+  const GuidelineVersions({
+    required this.guidelineId,
+    required this.versions,
+  });
+
+  final String guidelineId;
+  final List<GuidelineVersionView> versions;
+
+  factory GuidelineVersions.fromJson(Map<String, dynamic> json) => GuidelineVersions(
+    guidelineId: (json['guideline_id'] as String),
+    versions: (json['versions'] as List<dynamic>).map((x0) => GuidelineVersionView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'guideline_id': guidelineId,
+    'versions': versions.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// One guideline in the library list (`guideline.list`), without its text.
+final class GuidelineView {
+  const GuidelineView({
+    this.archived,
+    required this.chars,
+    required this.id,
+    required this.links,
+    this.openProposals = 0,
+    required this.title,
+    required this.updatedAtMs,
+    this.updatedBy,
+    required this.version,
+  });
+
+  final bool? archived;
+  /// Characters of the current text.
+  final int chars;
+  final String id;
+  final List<GuidelineTarget> links;
+  /// Pending proposals for this guideline.
+  final int openProposals;
+  final String title;
+  final int updatedAtMs;
+  final UserRef? updatedBy;
+  /// The current version (the envelope's `expected_version`).
+  final int version;
+
+  factory GuidelineView.fromJson(Map<String, dynamic> json) => GuidelineView(
+    archived: (json['archived'] == null ? null : (json['archived'] as bool)),
+    chars: (json['chars'] as num).toInt(),
+    id: (json['id'] as String),
+    links: (json['links'] as List<dynamic>).map((x0) => GuidelineTarget.fromJson(x0 as Map<String, dynamic>)).toList(),
+    openProposals: (json['open_proposals'] == null ? 0 : (json['open_proposals'] as num).toInt()),
+    title: (json['title'] as String),
+    updatedAtMs: (json['updated_at_ms'] as num).toInt(),
+    updatedBy: (json['updated_by'] == null ? null : UserRef.fromJson(json['updated_by'] as Map<String, dynamic>)),
+    version: (json['version'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (archived != null) 'archived': archived,
+    'chars': chars,
+    'id': id,
+    'links': links.map((x0) => x0.toJson()).toList(),
+    'open_proposals': openProposals,
+    'title': title,
+    'updated_at_ms': updatedAtMs,
+    if (updatedBy != null) 'updated_by': updatedBy?.toJson(),
+    'version': version,
+  };
+}
+
+/// `guideline.list`: the library, without texts. Archived ones only with `archived`.
+final class GuidelinesSnapshot {
+  const GuidelinesSnapshot({
+    required this.guidelines,
+  });
+
+  final List<GuidelineView> guidelines;
+
+  factory GuidelinesSnapshot.fromJson(Map<String, dynamic> json) => GuidelinesSnapshot(
+    guidelines: (json['guidelines'] as List<dynamic>).map((x0) => GuidelineView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'guidelines': guidelines.map((x0) => x0.toJson()).toList(),
   };
 }
 
@@ -9982,6 +10795,52 @@ sealed class Method {
           channel: (src['channel'] == null ? null : (src['channel'] as String)),
         );
         }
+      case 'guideline.affected':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGuidelineAffected(
+          guidelineId: (src['guideline_id'] as String),
+        );
+        }
+      case 'guideline.effective':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGuidelineEffective(
+          employeeId: (src['employee_id'] == null ? null : (src['employee_id'] as String)),
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
+      case 'guideline.get':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGuidelineGet(
+          guidelineId: (src['guideline_id'] as String),
+          version: (src['version'] == null ? null : (src['version'] as num).toInt()),
+        );
+        }
+      case 'guideline.list':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGuidelineList(
+          archived: (src['archived'] == null ? null : (src['archived'] as bool)),
+        );
+        }
+      case 'guideline.proposals':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGuidelineProposals(
+          status: (src['status'] == null ? null : ProposalStatus.fromJson(src['status'] as String)),
+        );
+        }
+      case 'guideline.starter_set':
+        return const MethodGuidelineStarterSet();
+      case 'guideline.versions':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGuidelineVersions(
+          guidelineId: (src['guideline_id'] as String),
+        );
+        }
       case 'idea.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -10107,6 +10966,13 @@ sealed class Method {
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodRunGetTrace(
+          runId: (src['run_id'] as String),
+        );
+        }
+      case 'run.guidelines':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodRunGuidelines(
           runId: (src['run_id'] as String),
         );
         }
@@ -10735,6 +11601,129 @@ final class MethodGroupChatGet extends Method {
     };
 }
 
+/// Who a change of this guideline reaches from their next run (B6): employees,
+/// projects and conversations that start a new session.
+final class MethodGuidelineAffected extends Method {
+  const MethodGuidelineAffected({
+    required this.guidelineId,
+  });
+
+  final String guidelineId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'guideline.affected',
+      'params': <String, dynamic>{
+      'guideline_id': guidelineId,
+    },
+    };
+}
+
+/// The set a run of this employee in this project would get now, in block
+/// order, with `total_chars` against `limit_chars` (B4). Only an employee:
+/// its own chat (employee guidelines); only a project: its guidelines alone.
+final class MethodGuidelineEffective extends Method {
+  const MethodGuidelineEffective({
+    this.employeeId,
+    this.projectId,
+  });
+
+  final String? employeeId;
+  final String? projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'guideline.effective',
+      'params': <String, dynamic>{
+      if (employeeId != null) 'employee_id': employeeId,
+      if (projectId != null) 'project_id': projectId,
+    },
+    };
+}
+
+/// One guideline with the text of its current version, or of `version`.
+final class MethodGuidelineGet extends Method {
+  const MethodGuidelineGet({
+    required this.guidelineId,
+    this.version,
+  });
+
+  final String guidelineId;
+  final int? version;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'guideline.get',
+      'params': <String, dynamic>{
+      'guideline_id': guidelineId,
+      if (version != null) 'version': version,
+    },
+    };
+}
+
+/// The guideline library (feature `guidelines`): every guideline without its
+/// text, alphabetical; archived ones only with `archived` (then only those).
+final class MethodGuidelineList extends Method {
+  const MethodGuidelineList({
+    this.archived,
+  });
+
+  final bool? archived;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'guideline.list',
+      'params': <String, dynamic>{
+      if (archived != null) 'archived': archived,
+    },
+    };
+}
+
+/// Proposals of `propose_guideline` (B5), pending first, then the latest
+/// decisions; `status` filters. Apart from `proposal.list`.
+final class MethodGuidelineProposals extends Method {
+  const MethodGuidelineProposals({
+    this.status,
+  });
+
+  final ProposalStatus? status;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'guideline.proposals',
+      'params': <String, dynamic>{
+      if (status != null) 'status': status?.toJson(),
+    },
+    };
+}
+
+/// The templates of the starter set (B7), for "Add starter set…".
+final class MethodGuidelineStarterSet extends Method {
+  const MethodGuidelineStarterSet();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'guideline.starter_set',
+    };
+}
+
+/// Every version of a guideline, newest first, with its text and source.
+final class MethodGuidelineVersions extends Method {
+  const MethodGuidelineVersions({
+    required this.guidelineId,
+  });
+
+  final String guidelineId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'guideline.versions',
+      'params': <String, dynamic>{
+      'guideline_id': guidelineId,
+    },
+    };
+}
+
 final class MethodIdeaList extends Method {
   const MethodIdeaList({
     required this.projectId,
@@ -11107,6 +12096,24 @@ final class MethodRunGetTrace extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'run.get_trace',
+      'params': <String, dynamic>{
+      'run_id': runId,
+    },
+    };
+}
+
+/// The guideline versions a run had in its system text (B6), kept for every
+/// run (the trace's "Guidelines: Rust v3, …"); also without trace mode.
+final class MethodRunGuidelines extends Method {
+  const MethodRunGuidelines({
+    required this.runId,
+  });
+
+  final String runId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'run.guidelines',
       'params': <String, dynamic>{
       'run_id': runId,
     },
@@ -13179,6 +14186,8 @@ sealed class ResponseBody {
         return ResponseBodyContext(value: ContextView.fromJson(json['value'] as Map<String, dynamic>));
       case 'dir_listing':
         return ResponseBodyDirListing(value: DirListing.fromJson(json['value'] as Map<String, dynamic>));
+      case 'effective_guidelines':
+        return ResponseBodyEffectiveGuidelines(value: EffectiveGuidelines.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_instruction_versions':
         return ResponseBodyEmployeeInstructionVersions(value: EmployeeInstructionVersionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_plugins':
@@ -13201,6 +14210,16 @@ sealed class ResponseBody {
         return ResponseBodyGitDiff(value: (json['value'] == null ? null : GitDiffView.fromJson(json['value'] as Map<String, dynamic>)));
       case 'git_status':
         return ResponseBodyGitStatus(value: (json['value'] == null ? null : GitStatusView.fromJson(json['value'] as Map<String, dynamic>)));
+      case 'guideline':
+        return ResponseBodyGuideline(value: GuidelineDetail.fromJson(json['value'] as Map<String, dynamic>));
+      case 'guideline_affected':
+        return ResponseBodyGuidelineAffected(value: GuidelineAffected.fromJson(json['value'] as Map<String, dynamic>));
+      case 'guideline_proposals':
+        return ResponseBodyGuidelineProposals(value: GuidelineProposals.fromJson(json['value'] as Map<String, dynamic>));
+      case 'guideline_versions':
+        return ResponseBodyGuidelineVersions(value: GuidelineVersions.fromJson(json['value'] as Map<String, dynamic>));
+      case 'guidelines':
+        return ResponseBodyGuidelines(value: GuidelinesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'health':
         return ResponseBodyHealth(value: HealthResult.fromJson(json['value'] as Map<String, dynamic>));
       case 'hello':
@@ -13255,6 +14274,8 @@ sealed class ResponseBody {
         return ResponseBodyReceipt(value: Receipt.fromJson(json['value'] as Map<String, dynamic>));
       case 'remote':
         return ResponseBodyRemote(value: RemoteStatus.fromJson(json['value'] as Map<String, dynamic>));
+      case 'run_guidelines':
+        return ResponseBodyRunGuidelines(value: RunGuidelines.fromJson(json['value'] as Map<String, dynamic>));
       case 'run_trace':
         return ResponseBodyRunTrace(value: RunTrace.fromJson(json['value'] as Map<String, dynamic>));
       case 'runtime_detected':
@@ -13276,6 +14297,8 @@ sealed class ResponseBody {
         return ResponseBodySessions(value: SessionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'shares':
         return ResponseBodyShares(value: (json['value'] as List<dynamic>).map((x0) => ShareView.fromJson(x0 as Map<String, dynamic>)).toList());
+      case 'starter_set':
+        return ResponseBodyStarterSet(value: StarterSet.fromJson(json['value'] as Map<String, dynamic>));
       case 'subagents':
         return ResponseBodySubagents(value: (json['value'] as List<dynamic>).map((x0) => AgentView.fromJson(x0 as Map<String, dynamic>)).toList());
       case 'subscribed':
@@ -13606,6 +14629,21 @@ final class ResponseBodyDirListing extends ResponseBody {
     };
 }
 
+/// `guideline.effective`.
+final class ResponseBodyEffectiveGuidelines extends ResponseBody {
+  const ResponseBodyEffectiveGuidelines({
+    required this.value,
+  });
+
+  final EffectiveGuidelines value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'effective_guidelines',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodyEmployeeInstructionVersions extends ResponseBody {
   const ResponseBodyEmployeeInstructionVersions({
     required this.value,
@@ -13713,6 +14751,81 @@ final class ResponseBodyGitStatus extends ResponseBody {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'git_status',
       if (value != null) 'value': value?.toJson(),
+    };
+}
+
+/// `guideline.get`.
+final class ResponseBodyGuideline extends ResponseBody {
+  const ResponseBodyGuideline({
+    required this.value,
+  });
+
+  final GuidelineDetail value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'guideline',
+      'value': value.toJson(),
+    };
+}
+
+/// `guideline.affected`.
+final class ResponseBodyGuidelineAffected extends ResponseBody {
+  const ResponseBodyGuidelineAffected({
+    required this.value,
+  });
+
+  final GuidelineAffected value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'guideline_affected',
+      'value': value.toJson(),
+    };
+}
+
+/// `guideline.proposals`.
+final class ResponseBodyGuidelineProposals extends ResponseBody {
+  const ResponseBodyGuidelineProposals({
+    required this.value,
+  });
+
+  final GuidelineProposals value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'guideline_proposals',
+      'value': value.toJson(),
+    };
+}
+
+/// `guideline.versions`.
+final class ResponseBodyGuidelineVersions extends ResponseBody {
+  const ResponseBodyGuidelineVersions({
+    required this.value,
+  });
+
+  final GuidelineVersions value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'guideline_versions',
+      'value': value.toJson(),
+    };
+}
+
+/// `guideline.list`.
+final class ResponseBodyGuidelines extends ResponseBody {
+  const ResponseBodyGuidelines({
+    required this.value,
+  });
+
+  final GuidelinesSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'guidelines',
+      'value': value.toJson(),
     };
 }
 
@@ -14096,6 +15209,21 @@ final class ResponseBodyRemote extends ResponseBody {
     };
 }
 
+/// `run.guidelines`.
+final class ResponseBodyRunGuidelines extends ResponseBody {
+  const ResponseBodyRunGuidelines({
+    required this.value,
+  });
+
+  final RunGuidelines value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'run_guidelines',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodyRunTrace extends ResponseBody {
   const ResponseBodyRunTrace({
     required this.value,
@@ -14172,6 +15300,21 @@ final class ResponseBodyShares extends ResponseBody {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'shares',
       'value': value.map((x0) => x0.toJson()).toList(),
+    };
+}
+
+/// `guideline.starter_set`.
+final class ResponseBodyStarterSet extends ResponseBody {
+  const ResponseBodyStarterSet({
+    required this.value,
+  });
+
+  final StarterSet value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'starter_set',
+      'value': value.toJson(),
     };
 }
 
@@ -14624,6 +15767,66 @@ final class RevokeShare {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'share_id': shareId,
+  };
+}
+
+/// A run's snapshot row (`run_guidelines`, B6): what it had in its system text.
+final class RunGuideline {
+  const RunGuideline({
+    required this.chars,
+    required this.guidelineId,
+    required this.level,
+    required this.runId,
+    required this.title,
+    required this.version,
+  });
+
+  final int chars;
+  final String guidelineId;
+  final GuidelineLevel level;
+  final String runId;
+  final String title;
+  final int version;
+
+  factory RunGuideline.fromJson(Map<String, dynamic> json) => RunGuideline(
+    chars: (json['chars'] as num).toInt(),
+    guidelineId: (json['guideline_id'] as String),
+    level: GuidelineLevel.fromJson(json['level'] as String),
+    runId: (json['run_id'] as String),
+    title: (json['title'] as String),
+    version: (json['version'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'chars': chars,
+    'guideline_id': guidelineId,
+    'level': level.toJson(),
+    'run_id': runId,
+    'title': title,
+    'version': version,
+  };
+}
+
+/// `run.guidelines`: the versions a run had in its system text (B6), in block
+/// order. Kept for every run, also without trace mode; empty for a run without
+/// guidelines and for runs from before guidelines.
+final class RunGuidelines {
+  const RunGuidelines({
+    required this.guidelines,
+    required this.runId,
+  });
+
+  final List<RunGuideline> guidelines;
+  final String runId;
+
+  factory RunGuidelines.fromJson(Map<String, dynamic> json) => RunGuidelines(
+    guidelines: (json['guidelines'] as List<dynamic>).map((x0) => RunGuideline.fromJson(x0 as Map<String, dynamic>)).toList(),
+    runId: (json['run_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'guidelines': guidelines.map((x0) => x0.toJson()).toList(),
+    'run_id': runId,
   };
 }
 
@@ -16031,6 +17234,63 @@ final class StartProjectConversation {
     if (browserAllowed != null) 'browser_allowed': browserAllowed,
     'project_id': projectId,
     if (screenAllowed != null) 'screen_allowed': screenAllowed,
+  };
+}
+
+/// `guideline.starter_set`.
+final class StarterSet {
+  const StarterSet({
+    required this.templates,
+  });
+
+  final List<StarterTemplate> templates;
+
+  factory StarterSet.fromJson(Map<String, dynamic> json) => StarterSet(
+    templates: (json['templates'] as List<dynamic>).map((x0) => StarterTemplate.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'templates': templates.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// One template of the starter set (B7, `guideline.starter_set`).
+final class StarterTemplate {
+  const StarterTemplate({
+    required this.chars,
+    this.inLibrary = false,
+    required this.key,
+    required this.level,
+    required this.text,
+    required this.title,
+  });
+
+  final int chars;
+  /// A non-archived guideline with this title is in the library already.
+  final bool inLibrary;
+  /// Stable key for `guideline.add_starter_set` (`rust_style`, …).
+  final String key;
+  /// What it is meant for: employees (how the team works) or a project (one repository).
+  final GuidelineLevel level;
+  final String text;
+  final String title;
+
+  factory StarterTemplate.fromJson(Map<String, dynamic> json) => StarterTemplate(
+    chars: (json['chars'] as num).toInt(),
+    inLibrary: (json['in_library'] == null ? false : (json['in_library'] as bool)),
+    key: (json['key'] as String),
+    level: GuidelineLevel.fromJson(json['level'] as String),
+    text: (json['text'] as String),
+    title: (json['title'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'chars': chars,
+    'in_library': inLibrary,
+    'key': key,
+    'level': level.toJson(),
+    'text': text,
+    'title': title,
   };
 }
 

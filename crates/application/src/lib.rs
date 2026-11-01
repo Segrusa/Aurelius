@@ -81,6 +81,9 @@ impl CommandContext {
 pub const CHAT_RUN_KIND: &str = "run.chat";
 
 pub mod conversation;
+pub mod guideline;
+pub mod guideline_proposal;
+pub mod guideline_read;
 pub mod memory;
 pub mod org;
 pub mod run;
@@ -144,7 +147,10 @@ pub(crate) fn domain_error(err: DomainError) -> AppError {
         | DomainError::ProposalNotFound(_)
         | DomainError::TaskNotFound(_)
         | DomainError::TicketNotFound(_)
-        | DomainError::BoardColumnNotFound(_) => ErrorCode::NotFound,
+        | DomainError::BoardColumnNotFound(_)
+        | DomainError::GuidelineNotFound(_)
+        | DomainError::GuidelineProposalNotFound(_) => ErrorCode::NotFound,
+        DomainError::GuidelineTitleTaken => ErrorCode::GuidelineTitleTaken,
         DomainError::VersionConflict { .. } => ErrorCode::VersionConflict,
         DomainError::BoardMemberRequired => ErrorCode::BoardMemberRequired,
         DomainError::InvalidUsername(_) => ErrorCode::InvalidUsername,
@@ -291,6 +297,15 @@ impl CommandService {
             Command::UpdateProject(cmd) => self.update_project(ctx, &envelope, hash, cmd),
             Command::PostTicketMessage(cmd) => self.post_ticket_message(ctx, &envelope, hash, cmd),
             Command::RetryTicketSummary(cmd) => self.retry_ticket_summary(ctx, &envelope, hash, cmd),
+            Command::CreateGuideline(_)
+            | Command::UpdateGuideline(_)
+            | Command::ArchiveGuideline(_)
+            | Command::RestoreGuideline(_)
+            | Command::RestoreGuidelineVersion(_)
+            | Command::LinkGuideline(_)
+            | Command::UnlinkGuideline(_)
+            | Command::DecideGuidelineProposal(_)
+            | Command::AddStarterGuidelines(_) => self.guideline_command(ctx, &envelope, hash),
         };
         COMMAND_METHOD.set("");
         result
@@ -685,3 +700,9 @@ mod discussion_tests;
 
 #[cfg(test)]
 mod login_tests;
+
+#[cfg(test)]
+mod guideline_tests;
+
+#[cfg(test)]
+mod guideline_run_tests;

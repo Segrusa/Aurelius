@@ -307,6 +307,21 @@ async fn run_inner(
         .await??
     };
     let store = Arc::new(store);
+    // The guidelines' starter set, once (B7): only into an empty library with a project
+    // "Aurelius"; otherwise only its marker (a board member uses Add starter set).
+    {
+        let store = store.clone();
+        match tokio::task::spawn_blocking(move || store.write(|tx| aurelius_storage::guidelines::seed_guidelines_once(tx, aurelius_storage::now_ms()))).await? {
+            Ok(report) if report.ran => {
+                tracing::info!(inserted = report.inserted, linked = report.linked, "added the guidelines' starter set");
+                if !report.missing.is_empty() {
+                    tracing::warn!(missing = %report.missing.join(", "), "starter guidelines not linked: no employee with these names");
+                }
+            }
+            Ok(_) => {}
+            Err(err) => tracing::warn!(error = %err, "could not run the guidelines' seed step; it runs again at the next start"),
+        }
+    }
     // The board members' Claude logins: `logins/` and each folder in it only for this user (D1).
     match aurelius_runtime::claude_code::login::check_all(&root) {
         Ok(fixed) if !fixed.is_empty() => tracing::warn!(folders = fixed.len(), "Claude login folders were open to others; set back to 0700"),

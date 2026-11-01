@@ -14,14 +14,15 @@ pub mod command;
 pub mod company;
 pub mod connection;
 pub mod conversation;
+pub mod employee;
 pub mod error;
 pub mod events;
 pub mod files;
 pub mod group_chat;
+pub mod guideline;
 pub mod idea;
 pub mod ids;
 pub mod job;
-pub mod employee;
 pub mod memory;
 pub mod org;
 pub mod project;
@@ -159,6 +160,15 @@ pub enum Command {
     UpdateCompany(company::UpdateCompany),
     SetBackgroundLogin(company::SetBackgroundLogin),
     UpdateProject(company::UpdateProject),
+    CreateGuideline(guideline::CreateGuideline),
+    UpdateGuideline(guideline::UpdateGuideline),
+    ArchiveGuideline(guideline::ArchiveGuideline),
+    RestoreGuideline(guideline::RestoreGuideline),
+    RestoreGuidelineVersion(guideline::RestoreGuidelineVersion),
+    LinkGuideline(guideline::LinkGuideline),
+    UnlinkGuideline(guideline::UnlinkGuideline),
+    DecideGuidelineProposal(guideline::DecideGuidelineProposal),
+    AddStarterGuidelines(guideline::AddStarterGuidelines),
 }
 
 /// `(type, method)` for every command: the tag in the JSON of a `Command` and
@@ -194,7 +204,10 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("send_employee_message", "employee.send_message"),
     ("send_group_message", "group_chat.send"),
     ("decide_proposal", "proposal.decide"),
-    ("restore_employee_instructions", "employee.restore_instructions"),
+    (
+        "restore_employee_instructions",
+        "employee.restore_instructions",
+    ),
     ("decide_approval", "approval.decide"),
     ("answer_question", "approval.answer"),
     ("decide_plan", "approval.decide_plan"),
@@ -243,13 +256,26 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("update_company", "company.update"),
     ("set_background_login", "company.set_background_login"),
     ("update_project", "project.update"),
+    ("create_guideline", "guideline.create"),
+    ("update_guideline", "guideline.update"),
+    ("archive_guideline", "guideline.archive"),
+    ("restore_guideline", "guideline.restore"),
+    ("restore_guideline_version", "guideline.restore_version"),
+    ("link_guideline", "guideline.link"),
+    ("unlink_guideline", "guideline.unlink"),
+    ("decide_guideline_proposal", "guideline.decide_proposal"),
+    ("add_starter_guidelines", "guideline.add_starter_set"),
 ];
 
 impl Command {
     /// The tag of this command in JSON (`create_project`, …); used in audit records.
     pub fn kind(&self) -> String {
         match serde_json::to_value(self) {
-            Ok(serde_json::Value::Object(map)) => map.get("type").and_then(|t| t.as_str()).unwrap_or("").to_owned(),
+            Ok(serde_json::Value::Object(map)) => map
+                .get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_owned(),
             _ => String::new(),
         }
     }
@@ -257,7 +283,11 @@ impl Command {
     /// The `<area>.<verb>` method name of this command.
     pub fn method(&self) -> &'static str {
         let kind = self.kind();
-        COMMAND_METHODS.iter().find(|(t, _)| *t == kind).map(|(_, m)| *m).unwrap_or("")
+        COMMAND_METHODS
+            .iter()
+            .find(|(t, _)| *t == kind)
+            .map(|(_, m)| *m)
+            .unwrap_or("")
     }
 }
 
@@ -343,23 +373,43 @@ pub enum DomainError {
     WeakPassword(String),
     #[error("another board member already has this name")]
     UsernameTaken,
+    #[error("guideline {0} does not exist")]
+    GuidelineNotFound(GuidelineId),
+    #[error("guideline proposal {0} does not exist")]
+    GuidelineProposalNotFound(GuidelineProposalId),
+    #[error("another guideline already has this title")]
+    GuidelineTitleTaken,
+    #[error("this proposal was withdrawn: the employee who proposed it no longer works here")]
+    GuidelineProposalWithdrawn,
 }
 
 pub(crate) fn require_text(field: &str, value: &str, max: usize) -> Result<String, DomainError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err(DomainError::Required { field: field.into() });
+        return Err(DomainError::Required {
+            field: field.into(),
+        });
     }
     if trimmed.chars().count() > max {
-        return Err(DomainError::TooLong { field: field.into(), max });
+        return Err(DomainError::TooLong {
+            field: field.into(),
+            max,
+        });
     }
     Ok(trimmed.to_owned())
 }
 
-pub(crate) fn optional_text(field: &str, value: Option<&str>, max: usize) -> Result<Option<String>, DomainError> {
+pub(crate) fn optional_text(
+    field: &str,
+    value: Option<&str>,
+    max: usize,
+) -> Result<Option<String>, DomainError> {
     match value.map(str::trim) {
         None | Some("") => Ok(None),
-        Some(text) if text.chars().count() > max => Err(DomainError::TooLong { field: field.into(), max }),
+        Some(text) if text.chars().count() > max => Err(DomainError::TooLong {
+            field: field.into(),
+            max,
+        }),
         Some(text) => Ok(Some(text.to_owned())),
     }
 }
@@ -373,16 +423,35 @@ mod tests {
     #[test]
     fn every_command_has_a_method_name() {
         let schema = serde_json::to_value(schemars::schema_for!(Command)).unwrap();
-        let variants = schema["oneOf"].as_array().expect("Command is a tagged enum");
-        let types: BTreeSet<&str> = variants.iter().filter_map(|v| v["properties"]["type"]["const"].as_str()).collect();
-        assert_eq!(types.len(), variants.len(), "every variant carries a type tag");
+        let variants = schema["oneOf"]
+            .as_array()
+            .expect("Command is a tagged enum");
+        let types: BTreeSet<&str> = variants
+            .iter()
+            .filter_map(|v| v["properties"]["type"]["const"].as_str())
+            .collect();
+        assert_eq!(
+            types.len(),
+            variants.len(),
+            "every variant carries a type tag"
+        );
         let table: BTreeSet<&str> = COMMAND_METHODS.iter().map(|(t, _)| *t).collect();
-        assert_eq!(types, table, "COMMAND_METHODS and Command list the same commands");
+        assert_eq!(
+            types, table,
+            "COMMAND_METHODS and Command list the same commands"
+        );
         let methods: BTreeSet<&str> = COMMAND_METHODS.iter().map(|(_, m)| *m).collect();
-        assert_eq!(methods.len(), COMMAND_METHODS.len(), "method names are unique");
+        assert_eq!(
+            methods.len(),
+            COMMAND_METHODS.len(),
+            "method names are unique"
+        );
         for method in methods {
             let (area, verb) = method.split_once('.').expect("area.verb");
-            assert!(!area.is_empty() && !verb.is_empty() && !verb.contains('.'), "{method}");
+            assert!(
+                !area.is_empty() && !verb.is_empty() && !verb.contains('.'),
+                "{method}"
+            );
         }
     }
 }

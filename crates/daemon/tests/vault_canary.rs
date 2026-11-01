@@ -1,7 +1,7 @@
 //! Sentinel SEC0, the canary: a fake secret goes into a work run's environment,
 //! the run tries every way to leak it (text split over deltas, a command, tool
 //! output in every encoding, the group chat, memory, an idea, an approval, a
-//! ticket's discussion, a delegated task, the log), with trace mode on; a
+//! ticket's discussion, a delegated task, a guideline proposal, the log), with trace mode on; a
 //! board member pastes it (Team chat, ticket discussion, a task's title); an
 //! app's task posts its end to a local webhook receiver; and then no form of it
 //! (E12) may be in the database files, any table (the traces too), a blob, a
@@ -119,6 +119,16 @@ impl AgentRuntime for Leaky {
             let _ = bridge.employee_act(run, EmployeeTaskOp::PostToGroupChat { message: format!("FYI the key is {value}"), channel: None }).await;
             let _ = bridge.memory_run(run, EmployeeMemoryOp::Remember { kind: "project_knowledge".into(), scope: "project".into(), content: format!("the deploy key is {value}") }).await;
             let _ = bridge.employee_act(run, EmployeeTaskOp::AddIdea { title: format!("rotate {value}"), note: value.clone(), kind: Default::default(), project: None }).await;
+            // A guideline proposal (B5, SEC0 T15): title, text, reason and evidence.
+            let propose = EmployeeTaskOp::ProposeGuideline {
+                guideline: None,
+                title: format!("Keys {value}"),
+                text: format!("Deploy with {value} only."),
+                reason: format!("{value} leaked twice"),
+                // The ticket's task in project A (evidence is kept as what it found, never as given).
+                evidence: vec!["Deploy".into()],
+            };
+            let _ = bridge.employee_act(run, propose).await;
             // A ticket's discussion (refused outside a ticket), and once a delegated part.
             let _ = bridge.employee_act(run, EmployeeTaskOp::PostToDiscussion { message: format!("the deploy key: {value}") }).await;
             if delegate {
@@ -398,6 +408,17 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
     assert!(texts.iter().any(|t| *t == "use «secret:CANARY_TOKEN»"), "the board member's, confirmed: {texts:?}");
     let delegated: String = db(dir.path()).query_row("SELECT title FROM tasks WHERE parent_task_id IS NOT NULL ORDER BY created_at_ms LIMIT 1", [], |r| r.get(0)).unwrap();
     assert_eq!(delegated, "Use «secret:CANARY_TOKEN»");
+    // T15: the guideline proposal is kept with the marker, never the value; links are the daemon's (E12).
+    {
+        let conn = db(dir.path());
+        let mut stmt = conn.prepare("SELECT title, text, reason, evidence_json, suggested_links_json FROM guideline_proposals WHERE status = 'pending'").unwrap();
+        let rows: Vec<(String, String, String, String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap().map(Result::unwrap).collect();
+        let (title, text, reason, _, links) = rows.iter().find(|r| r.4.contains(&project_a.to_string())).unwrap_or_else(|| panic!("a proposal from project A's runs: {rows:?}"));
+        assert_eq!((title.as_str(), text.as_str(), reason.as_str()), ("Keys «secret:CANARY_TOKEN»", "Deploy with «secret:CANARY_TOKEN» only.", "«secret:CANARY_TOKEN» leaked twice"));
+        assert!(links.contains("\"employee\""), "the proposer and the run's project: {links}");
+        let subject: String = conn.query_row("SELECT json_extract(metadata_json, '$.subject') FROM events WHERE type = 'guideline.proposed' LIMIT 1", [], |r| r.get(0)).unwrap();
+        assert!(subject.starts_with("“Keys «secret:CANARY_TOKEN»” by "), "{subject}");
+    }
     let traces: i64 = db(dir.path()).query_row("SELECT COUNT(*) FROM run_traces", [], |r| r.get(0)).unwrap();
     assert!(traces > 0, "trace mode kept the runs' traces");
 
@@ -441,6 +462,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
     }
     assert!(hits.is_empty(), "the canary leaked:\n{}", hits.join("\n"));
     assert!(!received.is_empty(), "the client got events");
+    assert!(received.iter().any(|e| e.contains("guideline.proposed")), "the client got the proposal's event");
     assert!(String::from_utf8_lossy(&logged).contains("«secret:CANARY_TOKEN»"), "the runtime's log line was there, redacted");
     // The request hash of the vault write is no plain hash of the value.
     let hashes: Vec<String> = {

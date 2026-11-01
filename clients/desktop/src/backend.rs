@@ -10,10 +10,11 @@
 
 use aurelius_client::{Client, ClientError, Target, envelope, retryable};
 use aurelius_domain::{
-    ApprovalId, Command, CommandEnvelope, ProviderId, ConversationId, EmployeeId, MessageId, ProjectId, RunId, approval,
+    ApprovalId, Command, CommandEnvelope, ProviderId, ConversationId, EmployeeId, GuidelineId, GuidelineProposalId, MessageId, ProjectId, RunId, approval,
     connection::{self, ConfigScope, ProviderKind, Purpose, RunDefaults},
     conversation,
     employee::{self, LifecycleStatus},
+    guideline::GuidelineTarget,
     project,
 };
 use aurelius_protocol::{Method, ResponseBody};
@@ -89,6 +90,8 @@ pub struct ServerInfo {
     pub ticket_discussion: bool,
     /// The vault of the company and its projects (feature `vault`).
     pub vault: bool,
+    /// The guideline library, its links and proposals (feature `guidelines`).
+    pub guidelines: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -394,6 +397,8 @@ pub enum Request {
     Board(BoardCall),
     /// The vault (feature `vault`; see [`VaultCall`]).
     Vault(VaultCall),
+    /// The guidelines (feature `guidelines`; see [`GuidelineCall`]).
+    Guidelines(GuidelineCall),
     /// A message `looks_like_secret` held back, sent again after "Send anyway" (B10):
     /// its `confirm_secret` is set, so the server stores it with the value redacted.
     SendConfirmed(Command),
@@ -494,6 +499,128 @@ pub enum VaultUpdate {
     Saved(Result<aurelius_domain::vault::VaultItemView, String>),
     Archived(aurelius_domain::VaultItemId, Result<aurelius_domain::vault::VaultItemView, String>),
     /// A `vault.item_*` event (also of another device): read again what shows (MU4-01 AC2).
+    Changed,
+}
+
+/// The guidelines' reads and writes (feature `guidelines`, docs/product/guidelines).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GuidelineCall {
+    /// `guideline.list`: the library, or (`archived`) only the archived ones.
+    List { archived: bool },
+    /// `guideline.get`: the current version, or `version`.
+    Get { guideline_id: GuidelineId, version: Option<u32> },
+    Versions(GuidelineId),
+    /// `guideline.effective`: what a run of this employee in this project gets now.
+    Effective(EffectiveKey),
+    Proposals,
+    Affected(GuidelineId),
+    StarterSet,
+    /// `run.guidelines`: the versions a run had (B6).
+    Run(aurelius_domain::RunId),
+    Write(GuidelineWrite),
+}
+
+/// The employee and the project of a `guideline.effective` (none: without).
+pub type EffectiveKey = (Option<EmployeeId>, Option<ProjectId>);
+
+/// A guideline write (a domain command; only a board member).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GuidelineWrite {
+    Create { title: String, text: String, links: Vec<GuidelineTarget> },
+    /// `expected_version`: the version the editor started from (P-64: no silent overwrite).
+    Update { guideline_id: GuidelineId, expected_version: u32, title: Option<String>, text: Option<String> },
+    Archive(GuidelineId),
+    Restore(GuidelineId),
+    RestoreVersion { guideline_id: GuidelineId, version: u32 },
+    /// Links and unlinks, one after the other, in this order; stops at the first refusal.
+    Links(Vec<LinkChange>),
+    /// `expected_version`: the guideline's version the proposal rests on (a change).
+    Decide { proposal_id: GuidelineProposalId, approve: bool, title: Option<String>, text: Option<String>, links: Option<Vec<GuidelineTarget>>, note: Option<String>, expected_version: Option<u32> },
+    AddStarter(Vec<String>),
+}
+
+/// One link or unlink of the Links dialog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LinkChange {
+    pub guideline_id: GuidelineId,
+    pub target: GuidelineTarget,
+    pub link: bool,
+}
+
+impl GuidelineCall {
+    /// A read: kept by the gate for after the sign-in.
+    pub fn is_read(&self) -> bool {
+        !matches!(self, GuidelineCall::Write(_))
+    }
+
+    /// What the window hears when the call cannot go.
+    pub fn refused(&self, failure: GuidelineFailure) -> GuidelineUpdate {
+        let why = failure.message.clone();
+        match self {
+            GuidelineCall::List { archived } => GuidelineUpdate::Listed { archived: *archived, result: Err(why) },
+            GuidelineCall::Get { guideline_id, version } => GuidelineUpdate::Detail { guideline_id: *guideline_id, version: *version, result: Err(why) },
+            GuidelineCall::Versions(id) => GuidelineUpdate::Versions(*id, Err(why)),
+            GuidelineCall::Effective(key) => GuidelineUpdate::Effective(*key, Err(why)),
+            GuidelineCall::Proposals => GuidelineUpdate::Proposals(Err(why)),
+            GuidelineCall::Affected(id) => GuidelineUpdate::Affected(*id, Err(why)),
+            GuidelineCall::StarterSet => GuidelineUpdate::Starter(Err(why)),
+            GuidelineCall::Run(run_id) => GuidelineUpdate::Run(*run_id, Err(why)),
+            GuidelineCall::Write(write) => GuidelineUpdate::Written { write: write.clone(), done: 0, result: Err(failure) },
+        }
+    }
+}
+
+/// Why a guideline call was refused, with what the window needs to say it well.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GuidelineFailure {
+    pub code: Option<aurelius_domain::error::ErrorCode>,
+    pub message: String,
+    /// `guideline_too_large`: the combination that overflows (B4).
+    pub too_large: Option<aurelius_domain::guideline::GuidelineTooLarge>,
+    /// `looks_like_secret`: the vault items' names (never a value).
+    pub matched_items: Vec<String>,
+}
+
+impl GuidelineFailure {
+    /// A refusal this app says itself (not connected, signed out).
+    pub fn said(message: &str) -> Self {
+        Self { code: None, message: message.into(), too_large: None, matched_items: Vec::new() }
+    }
+
+    pub fn of(err: &ClientError) -> Self {
+        use aurelius_domain::error::ErrorCode;
+        match err {
+            ClientError::Protocol(p) if p.code == ErrorCode::UnknownMethod || (p.code == ErrorCode::Validation && p.message.starts_with(GUIDELINES_PLACEHOLDER)) => {
+                Self { code: Some(ErrorCode::UnknownMethod), ..Self::said(GUIDELINES_NOT_BUILT) }
+            }
+            e if not_built(e) => Self { code: Some(ErrorCode::UnknownMethod), ..Self::said(GUIDELINES_NOT_BUILT) },
+            ClientError::Protocol(p) if p.code == ErrorCode::BoardMemberRequired => Self { code: Some(p.code), ..Self::said(BOARD_MEMBER_REQUIRED) },
+            ClientError::Protocol(p) => Self { code: Some(p.code), message: p.message.clone(), too_large: p.too_large.clone(), matched_items: p.matched_items.clone() },
+            e if ends(e) => Self::said("The connection dropped before the server answered. Guidelines reload with what the server has."),
+            ClientError::TimedOut(_) => Self::said("The server did not answer in time."),
+            e => Self::said(&e.to_string()),
+        }
+    }
+}
+
+/// The text of the daemon's placeholder until AUR-GL-01-F2 (a Validation error).
+pub const GUIDELINES_PLACEHOLDER: &str = "Guidelines are not available on this server yet";
+pub const GUIDELINES_NOT_BUILT: &str = "This server does not have guidelines yet. Update the server.";
+
+/// What the guidelines hear back.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GuidelineUpdate {
+    Listed { archived: bool, result: Result<Vec<aurelius_domain::guideline::GuidelineView>, String> },
+    Detail { guideline_id: GuidelineId, version: Option<u32>, result: Result<aurelius_domain::guideline::GuidelineDetail, String> },
+    Versions(GuidelineId, Result<Vec<aurelius_domain::guideline::GuidelineVersionView>, String>),
+    Effective(EffectiveKey, Result<aurelius_domain::guideline::EffectiveGuidelines, String>),
+    Proposals(Result<Vec<aurelius_domain::guideline::GuidelineProposalView>, String>),
+    Affected(GuidelineId, Result<aurelius_domain::guideline::GuidelineAffected, String>),
+    Starter(Result<Vec<aurelius_domain::guideline::StarterTemplate>, String>),
+    Run(aurelius_domain::RunId, Result<Vec<aurelius_domain::guideline::RunGuideline>, String>),
+    /// A write answered; `done`: the link changes that went through before a refusal.
+    Written { write: GuidelineWrite, done: usize, result: Result<Option<aurelius_domain::CommandResult>, GuidelineFailure> },
+    /// A `guideline.*` event (also of another device): read again what shows.
     Changed,
 }
 
@@ -1344,6 +1471,7 @@ pub enum Update {
     BoardMemberRequired,
     Board(BoardUpdate),
     Vault(VaultUpdate),
+    Guidelines(GuidelineUpdate),
     /// A message held back by `looks_like_secret` (B10): ask "Send anyway?".
     LooksLikeSecret(SecretHold),
 }
@@ -1380,6 +1508,7 @@ async fn idle(requests: &mut mpsc::UnboundedReceiver<Request>, updates: &mpsc::U
             Request::BoardMembers(call) if call.waits() => Update::BoardMemberFailed(MemberFailure::general(text)),
             Request::Board(call) if call.is_write() => Update::Board(call.refused(text.into())),
             Request::Vault(call) => Update::Vault(call.refused(text.into())),
+            Request::Guidelines(call) => Update::Guidelines(call.refused(GuidelineFailure::said(text))),
             _ => Update::Error(text.into()),
         });
     }
@@ -1471,6 +1600,10 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                             Some(Request::Vault(call)) => {
                                 let _ = updates.send(Update::Vault(call.refused("Not connected to the server. Try again when it is back.".into())));
                             }
+                            // Nor the guidelines': a write is not kept for later; the page reads again once online.
+                            Some(Request::Guidelines(call)) => {
+                                let _ = updates.send(Update::Guidelines(call.refused(GuidelineFailure::said("Not connected to the server. Try again when it is back."))));
+                            }
                             Some(other) => match me {
                                 Some(by) => if let Some(env) = to_envelope(other) { outbox.push_back((by, env)) },
                                 // Signed out: nobody's write to keep (the gate refuses it too).
@@ -1525,6 +1658,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 auto_allow: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::AUTO_ALLOW),
                 ticket_discussion: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_DISCUSSION),
                 vault: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::VAULT),
+                guidelines: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::GUIDELINES),
             },
         }));
 
@@ -1770,6 +1904,7 @@ fn held_read(request: &Request) -> bool {
     match request {
         Request::Board(call) => !call.is_write(),
         Request::Vault(call) => call.is_list(),
+        Request::Guidelines(call) => call.is_read(),
         Request::AppKeys(call) => matches!(call, AppKeyCall::List),
         Request::Plugins(call) => matches!(call, PluginsCall::List | PluginsCall::Available | PluginsCall::ManagerGet(_) | PluginsCall::ProjectGet(_)),
         Request::Backups(call) => matches!(call, BackupsCall::List),
@@ -1791,6 +1926,7 @@ fn refuse_at_gate(request: Request, updates: &mpsc::UnboundedSender<Update>) {
         Request::Claude(_) => Update::Claude(ClaudeUpdate::Failed(BOARD_MEMBER_REQUIRED.into())),
         Request::Board(call) => Update::Board(call.refused(BOARD_MEMBER_REQUIRED.into())),
         Request::Vault(call) => Update::Vault(call.refused(BOARD_MEMBER_REQUIRED.into())),
+        Request::Guidelines(call) => Update::Guidelines(call.refused(GuidelineFailure::said(BOARD_MEMBER_REQUIRED))),
         Request::AppKeys(_) => Update::AppKeys(AppKeyUpdate::Failed(BOARD_MEMBER_REQUIRED.into())),
         _ => Update::Error(BOARD_MEMBER_REQUIRED.into()),
     });
@@ -1916,7 +2052,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SetEmployeeFolder { employee_id, path } => envelope(Command::SetEmployeeFolder(employee::SetEmployeeFolder { employee_id, path }), None),
         Request::SetProjectFolder { project_id, path } => envelope(Command::SetProjectFolder(project::SetProjectFolder { project_id, path }), None),
         Request::LoadUsage | Request::LoadUsageHours(_) | Request::LoadSubscription(_) | Request::CheckUpdate(_) | Request::InstallUpdate | Request::InstallAppUpdate | Request::RestartServer | Request::Power(_) | Request::AppKeys(_) | Request::Plugins(_) | Request::LoadServerLoad | Request::SetLoadLimits(_) | Request::LoadBrowser | Request::SetBrowser(_) | Request::SetBrowserBackend(_) | Request::LoadArtifactSetting | Request::SetArtifactsEnabled(_) | Request::LoadUsageTotals { .. } | Request::LoadTraceSetting | Request::SetTraceEnabled(_) | Request::LoadTrace(_) | Request::LoadInstructionVersions(_) | Request::LoadAutoAllow | Request::SetAutoAllow(_) | Request::LoadManagementMode | Request::SetManagementMode(_) | Request::LoadMcp | Request::SetMcp(_) | Request::McpAdd(_) | Request::McpRemove(_) | Request::McpAuth(_) | Request::LoadMcpAlwaysAllow | Request::McpAlwaysAllowRemove(_) | Request::Backups(_) | Request::ExportProject(_) | Request::Remote(_) => return None,
-        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode | Request::BoardMembers(_) | Request::Claude(_) | Request::Board(_) | Request::Vault(_) => return None,
+        Request::BrowseDir { .. } | Request::CreateDir { .. } | Request::AddClaudeCode | Request::BoardMembers(_) | Request::Claude(_) | Request::Board(_) | Request::Vault(_) | Request::Guidelines(_) => return None,
         Request::SendConfirmed(command) => envelope(command, None),
     })
 }
@@ -2626,6 +2762,10 @@ async fn session(
                     vault(client, call, updates).await?;
                     continue;
                 }
+                if let Request::Guidelines(call) = request {
+                    guidelines(client, call, updates).await?;
+                    continue;
+                }
                 if let Request::Board(call) = request {
                     if let BoardCall::Discussion(conversation) = call {
                         *open_discussion = conversation;
@@ -2763,6 +2903,7 @@ async fn session(
                 let mut board_tasks: Vec<String> = Vec::new();
                 let mut claude = false;
                 let mut vault = false;
+                let mut guidelines = false;
                 for e in std::iter::once(first).chain(std::iter::from_fn(|| events.try_recv().ok())) {
                     // 'Always allow' on an approval adds its tool to the always-allowed list.
                     approval |= e.kind.area() == "approval";
@@ -2785,6 +2926,8 @@ async fn session(
                         schedules = true;
                     } else if e.kind.area() == "vault" {
                         vault = true;
+                    } else if e.kind.area() == "guideline" {
+                        guidelines = true;
                     } else if is_artifact(&e) { artifact = true } else if is_chat(&e) { chat = true } else { other = true }
                     task |= e.kind.area() == "task";
                     users |= e.kind.area() == "user";
@@ -2802,6 +2945,10 @@ async fn session(
                 if vault {
                     // The window reads again only what shows (MU4-01 AC2).
                     let _ = updates.send(Update::Vault(VaultUpdate::Changed));
+                }
+                if guidelines {
+                    // The library, a link or a proposal changed (also on another device): the window reads again what shows.
+                    let _ = updates.send(Update::Guidelines(GuidelineUpdate::Changed));
                 }
                 if users {
                     // Another window made or disabled a board member.
@@ -3301,6 +3448,110 @@ async fn vault(client: &Client, call: VaultCall, updates: &mpsc::UnboundedSender
         VaultCall::Archive(item_id) => VaultUpdate::Archived(item_id, vault_said(client.vault_archive(item_id).await, &mut lost)),
     };
     let _ = updates.send(Update::Vault(answer));
+    match lost {
+        Some(e) => Err(e.into()),
+        None => Ok(()),
+    }
+}
+
+/// A guideline read's answer, picked out of its body; a lost connection is kept in `lost`.
+async fn guideline_read<T>(client: &Client, method: Method, pick: impl FnOnce(ResponseBody) -> Option<T>, lost: &mut Option<ClientError>) -> Result<T, String> {
+    let result = match client.call(method).await {
+        Ok(body) => pick(body).ok_or(ClientError::UnexpectedResponse),
+        Err(e) => Err(e),
+    };
+    result.map_err(|e| {
+        let text = GuidelineFailure::of(&e).message;
+        if ends(&e) {
+            *lost = Some(e);
+        }
+        text
+    })
+}
+
+/// The domain command of a guideline write, with the version it expects; `Links` has one per change.
+pub fn guideline_commands(write: &GuidelineWrite) -> Vec<(Command, Option<u64>)> {
+    use aurelius_domain::guideline as g;
+    match write.clone() {
+        GuidelineWrite::Create { title, text, links } => vec![(Command::CreateGuideline(g::CreateGuideline { title, text, links }), None)],
+        GuidelineWrite::Update { guideline_id, expected_version, title, text } => {
+            vec![(Command::UpdateGuideline(g::UpdateGuideline { guideline_id, title, text }), Some(u64::from(expected_version)))]
+        }
+        GuidelineWrite::Archive(guideline_id) => vec![(Command::ArchiveGuideline(g::ArchiveGuideline { guideline_id }), None)],
+        GuidelineWrite::Restore(guideline_id) => vec![(Command::RestoreGuideline(g::RestoreGuideline { guideline_id }), None)],
+        GuidelineWrite::RestoreVersion { guideline_id, version } => vec![(Command::RestoreGuidelineVersion(g::RestoreGuidelineVersion { guideline_id, version }), None)],
+        GuidelineWrite::Links(changes) => changes
+            .into_iter()
+            .map(|c| match c.link {
+                true => (Command::LinkGuideline(g::LinkGuideline { guideline_id: c.guideline_id, target: c.target }), None),
+                false => (Command::UnlinkGuideline(g::UnlinkGuideline { guideline_id: c.guideline_id, target: c.target }), None),
+            })
+            .collect(),
+        GuidelineWrite::Decide { proposal_id, approve, title, text, links, note, expected_version } => {
+            vec![(Command::DecideGuidelineProposal(g::DecideGuidelineProposal { proposal_id, approve, title, text, links, note }), expected_version.map(u64::from))]
+        }
+        GuidelineWrite::AddStarter(keys) => vec![(Command::AddStarterGuidelines(g::AddStarterGuidelines { keys }), None)],
+    }
+}
+
+/// The guidelines' calls (feature `guidelines`).
+async fn guidelines(client: &Client, call: GuidelineCall, updates: &mpsc::UnboundedSender<Update>) -> Result<(), Disconnected> {
+    let mut lost = None;
+    let answer = match call {
+        GuidelineCall::List { archived } => {
+            let result = guideline_read(client, Method::GuidelineList { archived }, |b| match b { ResponseBody::Guidelines(s) => Some(s.guidelines), _ => None }, &mut lost).await;
+            GuidelineUpdate::Listed { archived, result }
+        }
+        GuidelineCall::Get { guideline_id, version } => {
+            let result = guideline_read(client, Method::GuidelineGet { guideline_id, version }, |b| match b { ResponseBody::Guideline(d) => Some(d), _ => None }, &mut lost).await;
+            GuidelineUpdate::Detail { guideline_id, version, result }
+        }
+        GuidelineCall::Versions(guideline_id) => {
+            let result = guideline_read(client, Method::GuidelineVersions { guideline_id }, |b| match b { ResponseBody::GuidelineVersions(v) => Some(v.versions), _ => None }, &mut lost).await;
+            GuidelineUpdate::Versions(guideline_id, result)
+        }
+        GuidelineCall::Effective(key) => {
+            let (employee_id, project_id) = key;
+            let result = guideline_read(client, Method::GuidelineEffective { employee_id, project_id }, |b| match b { ResponseBody::EffectiveGuidelines(e) => Some(e), _ => None }, &mut lost).await;
+            GuidelineUpdate::Effective(key, result)
+        }
+        GuidelineCall::Proposals => {
+            let result = guideline_read(client, Method::GuidelineProposals { status: None }, |b| match b { ResponseBody::GuidelineProposals(p) => Some(p.proposals), _ => None }, &mut lost).await;
+            GuidelineUpdate::Proposals(result)
+        }
+        GuidelineCall::Affected(guideline_id) => {
+            let result = guideline_read(client, Method::GuidelineAffected { guideline_id }, |b| match b { ResponseBody::GuidelineAffected(a) => Some(a), _ => None }, &mut lost).await;
+            GuidelineUpdate::Affected(guideline_id, result)
+        }
+        GuidelineCall::StarterSet => {
+            let result = guideline_read(client, Method::GuidelineStarterSet, |b| match b { ResponseBody::StarterSet(s) => Some(s.templates), _ => None }, &mut lost).await;
+            GuidelineUpdate::Starter(result)
+        }
+        GuidelineCall::Run(run_id) => {
+            let result = guideline_read(client, Method::RunGuidelines { run_id }, |b| match b { ResponseBody::RunGuidelines(r) => Some(r.guidelines), _ => None }, &mut lost).await;
+            GuidelineUpdate::Run(run_id, result)
+        }
+        GuidelineCall::Write(write) => {
+            let (mut done, mut result) = (0, Ok(None));
+            for (command, expected_version) in guideline_commands(&write) {
+                match client.execute(envelope(command, expected_version)).await {
+                    Ok(receipt) => {
+                        done += 1;
+                        result = Ok(Some(receipt.result));
+                    }
+                    Err(e) => {
+                        result = Err(GuidelineFailure::of(&e));
+                        if ends(&e) {
+                            lost = Some(e);
+                        }
+                        break;
+                    }
+                }
+            }
+            GuidelineUpdate::Written { write, done, result }
+        }
+    };
+    let _ = updates.send(Update::Guidelines(answer));
     match lost {
         Some(e) => Err(e.into()),
         None => Ok(()),
@@ -5548,6 +5799,90 @@ mod tests {
             assert_eq!(why, secret_refusal(&["D3 token".into()]));
             drop(alex);
             stop(&root, server).await;
+        }
+    }
+
+    /// The guideline calls against a real daemon (AUR-GL-01-D1): every read and write goes
+    /// over the wire as the frozen protocol says and comes back as an answer, or (until the
+    /// server implements it, F2) as "not on this server yet"; never a parse error.
+    mod guidelines_against_a_daemon {
+        use super::super::*;
+
+        async fn next<T>(handle: &mut Handle, mut pick: impl FnMut(Update) -> Option<T>) -> T {
+            tokio::time::timeout(Duration::from_secs(30), async {
+                loop {
+                    if let Some(found) = pick(handle.updates.recv().await.expect("the backend runs")) {
+                        return found;
+                    }
+                }
+            })
+            .await
+            .expect("the update came")
+        }
+
+        fn answered<T>(result: &Result<T, String>) {
+            if let Err(why) = result {
+                assert_eq!(why, GUIDELINES_NOT_BUILT, "an answer, or the server says it has no guidelines yet");
+            }
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn the_guideline_calls_reach_the_server() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(aurelius_daemon::run(root.clone(), Some(tx)));
+            tokio::time::timeout(Duration::from_secs(20), rx).await.expect("daemon ready").expect("ready signal");
+            let mut alex = start(Some(Target::Local { root: root.clone(), spawn: false }), super::memory_tokens().0);
+            let online = next(&mut alex, |u| match u {
+                Update::Connection(Connection::Online { server, .. }) => Some(server),
+                _ => None,
+            })
+            .await;
+            assert!(online.guidelines, "this daemon announces the feature `guidelines`");
+            alex.requests.send(Request::BoardMembers(UserCall::Create { username: "alex".into(), password: Password::new("Tr0ub4dor&3-zebra-alex".into()) })).unwrap();
+            next(&mut alex, |u| matches!(u, Update::Who(w) if w.user.is_some()).then_some(())).await;
+
+            alex.requests.send(Request::Guidelines(GuidelineCall::List { archived: false })).unwrap();
+            let list = next(&mut alex, |u| match u {
+                Update::Guidelines(GuidelineUpdate::Listed { archived: false, result }) => Some(result),
+                _ => None,
+            })
+            .await;
+            answered(&list);
+            alex.requests.send(Request::Guidelines(GuidelineCall::Proposals)).unwrap();
+            answered(&next(&mut alex, |u| match u {
+                Update::Guidelines(GuidelineUpdate::Proposals(r)) => Some(r),
+                _ => None,
+            })
+            .await);
+            alex.requests.send(Request::Guidelines(GuidelineCall::StarterSet)).unwrap();
+            answered(&next(&mut alex, |u| match u {
+                Update::Guidelines(GuidelineUpdate::Starter(r)) => Some(r),
+                _ => None,
+            })
+            .await);
+            alex.requests.send(Request::Guidelines(GuidelineCall::Effective((None, None)))).unwrap();
+            answered(&next(&mut alex, |u| match u {
+                Update::Guidelines(GuidelineUpdate::Effective(_, r)) => Some(r),
+                _ => None,
+            })
+            .await);
+            let write = GuidelineWrite::Create { title: "Rust".into(), text: "## Errors\n- No `unwrap()` outside tests.".into(), links: vec![] };
+            alex.requests.send(Request::Guidelines(GuidelineCall::Write(write.clone()))).unwrap();
+            let (back, result) = next(&mut alex, |u| match u {
+                Update::Guidelines(GuidelineUpdate::Written { write, result, .. }) => Some((write, result)),
+                _ => None,
+            })
+            .await;
+            assert_eq!(back, write, "the window hears which write was answered");
+            match result {
+                Ok(result) => assert!(matches!(result, Some(aurelius_domain::CommandResult::GuidelineChanged { version: 1, .. })), "{result:?}"),
+                Err(f) => assert_eq!(f.message, GUIDELINES_NOT_BUILT),
+            }
+            drop(alex);
+            aurelius_client::bridge::shutdown_daemon(&root).await.expect("shutdown");
+            tokio::time::timeout(Duration::from_secs(20), server).await.expect("daemon stops").expect("join").expect("clean stop");
         }
     }
 }

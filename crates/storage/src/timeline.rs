@@ -20,6 +20,7 @@ const MEANINGFUL: &[&str] = &[
     "employee.proposed",
     "employee.proposal_decided",
     "employee.instructions_proposed",
+    "guideline.proposed",
     "settings.follow_org_chart",
     "company.converted",
     "task.created",
@@ -165,6 +166,11 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
             let by = lookup(conn, "SELECT name FROM employees WHERE id = ?1", &s(&m["proposed_by"])).unwrap_or_else(|| "An employee".into());
             ("decision", "PROPOSAL", format!("{by} proposes new instructions for {}", s(&m["subject"])), s(&m["reason"]), by)
         }
+        // B5 (SEC0 E15): the title and who proposed it, never the text or the reason.
+        "guideline.proposed" => {
+            let by = lookup(conn, "SELECT name FROM employees WHERE id = ?1", &s(&m["by_employee"])).unwrap_or_else(|| "An employee".into());
+            ("decision", "PROPOSAL", format!("A guideline is proposed: {}", s(&m["subject"])), String::new(), by)
+        }
         "employee.proposal_decided" if m["kind"].as_str() == Some("instructions") => (
             "decision",
             "DECISION",
@@ -295,6 +301,8 @@ pub fn notification_for(event_type: &str, metadata: &serde_json::Value) -> Optio
         "employee.proposed" => Some(("action", "A colleague is proposed")),
         // So do new instructions an employee proposes (Harness² B).
         "employee.instructions_proposed" => Some(("action", "New instructions are proposed")),
+        // And so does a guideline (B5): only a board member decides; the subject is its title and proposer.
+        "guideline.proposed" => Some(("action", "A guideline is proposed")),
         // The variants of a task wait for the user's choice (Harness² C).
         "task.variants_ready" if metadata["auto"].as_bool() != Some(true) => Some(("action", "Variants ready to compare")),
         "connection.changed" if matches!(metadata["status"].as_str(), Some("needs_auth" | "needs_login")) => Some(("warning", "Connection needs sign-in")),
@@ -432,6 +440,7 @@ pub fn unread_count_for(conn: &Connection, user: Option<&str>) -> Result<u64, St
 /// proposal decided, answered or expired; a task no longer waiting for them) is no longer shown.
 const STILL_RELEVANT: &str = concat!("NOT (e.type = 'approval.requested' AND EXISTS (SELECT 1 FROM approvals a WHERE a.id = e.aggregate_id AND a.status <> 'pending'))
      AND NOT (e.type IN ('employee.proposed','employee.instructions_proposed') AND EXISTS (SELECT 1 FROM proposals p WHERE p.id = e.aggregate_id AND p.status <> 'pending'))
+     AND NOT (e.type = 'guideline.proposed' AND EXISTS (SELECT 1 FROM guideline_proposals g WHERE g.id = e.aggregate_id AND g.status <> 'pending'))
      AND NOT (e.type = 'task.variants_ready' AND NOT EXISTS (SELECT 1 FROM task_variant_sets s WHERE s.task_id = e.aggregate_id AND s.phase = 'ready'))
      AND NOT (e.type = 'task.waiting' AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = e.aggregate_id AND t.status = 'waiting'))
      AND NOT (n.user_id IS NOT NULL AND json_extract(e.metadata_json, '$.needs') = 'login' AND ", login_linked_since!(), ")");

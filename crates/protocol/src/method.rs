@@ -150,6 +150,51 @@ pub enum Method {
     /// item. Not for apps.
     #[serde(rename = "vault.key_export")]
     VaultKeyExport(KeyExportParams),
+    /// The guideline library (feature `guidelines`): every guideline without its
+    /// text, alphabetical; archived ones only with `archived` (then only those).
+    #[serde(rename = "guideline.list")]
+    GuidelineList {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        archived: bool,
+    },
+    /// One guideline with the text of its current version, or of `version`.
+    #[serde(rename = "guideline.get")]
+    GuidelineGet {
+        guideline_id: aurelius_domain::GuidelineId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        version: Option<u32>,
+    },
+    /// Every version of a guideline, newest first, with its text and source.
+    #[serde(rename = "guideline.versions")]
+    GuidelineVersions { guideline_id: aurelius_domain::GuidelineId },
+    /// The set a run of this employee in this project would get now, in block
+    /// order, with `total_chars` against `limit_chars` (B4). Only an employee:
+    /// its own chat (employee guidelines); only a project: its guidelines alone.
+    #[serde(rename = "guideline.effective")]
+    GuidelineEffective {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        employee_id: Option<EmployeeId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+    },
+    /// Proposals of `propose_guideline` (B5), pending first, then the latest
+    /// decisions; `status` filters. Apart from `proposal.list`.
+    #[serde(rename = "guideline.proposals")]
+    GuidelineProposals {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        status: Option<aurelius_domain::proposal::ProposalStatus>,
+    },
+    /// Who a change of this guideline reaches from their next run (B6): employees,
+    /// projects and conversations that start a new session.
+    #[serde(rename = "guideline.affected")]
+    GuidelineAffected { guideline_id: aurelius_domain::GuidelineId },
+    /// The templates of the starter set (B7), for "Add starter set…".
+    #[serde(rename = "guideline.starter_set")]
+    GuidelineStarterSet,
+    /// The guideline versions a run had in its system text (B6), kept for every
+    /// run (the trace's "Guidelines: Rust v3, …"); also without trace mode.
+    #[serde(rename = "run.guidelines")]
+    RunGuidelines { run_id: RunId },
     /// The conversations of a project, most recently active first.
     #[serde(rename = "project_conversation.list")]
     ProjectConversationList { project_id: ProjectId },

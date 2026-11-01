@@ -27,3 +27,4 @@ testing = ["aurelius-runtime/testing"]
 [dev-dependencies]
 aurelius-runtime = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
+zeroize.workspace = true

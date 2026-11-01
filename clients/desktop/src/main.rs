@@ -47,6 +47,7 @@ mod screens {
     pub mod discussion;
     pub mod ticket_discussion;
     pub mod vault;
+    pub mod guidelines;
 }
 
 use gpui_kit::*;

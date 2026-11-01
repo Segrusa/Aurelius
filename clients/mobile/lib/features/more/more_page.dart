@@ -8,7 +8,7 @@ import '../connection/connection_bloc.dart';
 import '../onboarding/onboarding.dart' show ActiveBoardMemberRow;
 
 /// The More tab: Projects, Tasks (B7: also those without a ticket), Ideas,
-/// the Vault (on a server that has it), the company (employees, org chart)
+/// the Vault and Guidelines (on a server that has them), the company (employees, org chart)
 /// and Settings.
 class MorePage extends StatelessWidget {
   const MorePage({super.key});
@@ -17,6 +17,7 @@ class MorePage extends StatelessWidget {
   Widget build(BuildContext context) {
     final employees = context.select<CompanyBloc, int>((b) => b.state.activeEmployees.length);
     final vault = context.select<ConnectionBloc, bool>((b) => b.state.has('vault'));
+    final guidelines = context.select<ConnectionBloc, bool>((b) => b.state.has('guidelines'));
     return LargeTitleScaffold(
       title: 'More',
       children: [
@@ -55,6 +56,15 @@ class MorePage extends StatelessWidget {
                 subtitle: 'Shared links, notes and secrets',
                 chevron: true,
                 onTap: () => context.push('/vault'),
+              ),
+            if (guidelines)
+              GroupRow(
+                key: const ValueKey('more-guidelines'),
+                leading: const IconTile(CupertinoIcons.book_fill),
+                title: 'Guidelines',
+                subtitle: 'Working rules for employees and projects',
+                chevron: true,
+                onTap: () => context.push('/guidelines'),
               ),
             GroupRow(
               key: const ValueKey('more-company'),

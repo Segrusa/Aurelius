@@ -61,6 +61,20 @@ pub struct Summary {
     pub covers_through_ordinal: u32,
 }
 
+/// One guideline of the run's block, for the manifest (section `guideline`,
+/// id `g:<id>@<version>`). Required: its text is part of `rules` already (the
+/// block sits in the system text after the instructions), so it is counted
+/// there and never cut; `included` is false only for what the safety net of
+/// B4 left out.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GuidelineItem {
+    pub id: String,
+    pub label: String,
+    pub text: String,
+    pub included: bool,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct Input {
     /// Mandatory trusted system text: app rules, identity, instructions.
@@ -77,6 +91,8 @@ pub struct Input {
     /// Task title/goal for task_match; empty in plain conversations.
     pub task_terms: String,
     pub candidates: Vec<Candidate>,
+    /// The guidelines in `rules` (and what the safety net left out of it).
+    pub guidelines: Vec<GuidelineItem>,
     pub budget: u32,
     pub now_ms: i64,
 }
@@ -143,6 +159,10 @@ pub fn build(input: Input) -> Result<Built, ContextTooLarge> {
         return Err(ContextTooLarge { needed: mandatory, budget });
     }
     items.push(item("rules", "rules", "Instructions and identity".into(), &input.rules, None, true, "required"));
+    // Counted in the rules, which hold the block: mandatory like them.
+    for g in &input.guidelines {
+        items.push(item("guideline", &g.id, g.label.clone(), &g.text, None, g.included, &g.reason));
+    }
     items.push(item("request", "request", "Current question".into(), &input.request.text, None, true, "required"));
     let mut used = mandatory;
 
@@ -392,6 +412,7 @@ mod tests {
             request: turn(TurnRole::User, "Wat weten we over de onboarding?"),
             summary: None,
             task_terms: String::new(),
+            guidelines: Vec::new(),
             candidates: vec![
                 cand("m1", MemoryKind::ProjectKnowledge, "De onboarding heeft drie stappen", 0.8, false),
                 cand("m2", MemoryKind::Decision, "Publicatie vereist review", 0.0, false),
@@ -464,6 +485,23 @@ mod tests {
         assert_eq!(ids, vec!["a", "b", "k"], "decisions first, oldest first; not by score");
         assert!(built.system.ends_with("\n\nStatus of your task: running."), "{}", built.system);
         assert!(built.system.find("## Memory").unwrap() < built.system.find("Status of your task").unwrap());
+    }
+
+    #[test]
+    fn every_guideline_is_a_required_item_counted_in_the_rules() {
+        let mut i = input(10_000);
+        i.rules = "Je bent Alex.\n\n## Guidelines\n<guideline id=\"g:a\" version=\"2\" level=\"employee\">\n### Rust\nUse clippy.\n</guideline>".into();
+        let used_without = build(input(10_000)).unwrap().used_tokens;
+        let rules_tokens = token_estimate(&i.rules) - token_estimate("Je bent Alex.");
+        i.guidelines = vec![
+            GuidelineItem { id: "g:a@2".into(), label: "Rust".into(), text: "Use clippy.".into(), included: true, reason: "required".into() },
+            GuidelineItem { id: "g:b@1".into(), label: "Big".into(), text: "x".repeat(9_000), included: false, reason: "over the guideline limit".into() },
+        ];
+        let built = build(i).unwrap();
+        let items: Vec<(&str, bool, &str)> = built.items.iter().filter(|i| i.section == "guideline").map(|i| (i.id.as_str(), i.included, i.reason.as_str())).collect();
+        assert_eq!(items, vec![("g:a@2", true, "required"), ("g:b@1", false, "over the guideline limit")]);
+        assert!(built.system.starts_with("Je bent Alex.\n\n## Guidelines"));
+        assert!(built.used_tokens <= used_without + rules_tokens + 1, "a guideline is not counted twice");
     }
 
     #[test]

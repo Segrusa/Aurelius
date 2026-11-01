@@ -87,6 +87,7 @@ impl AppView {
             Overlay::ServerFolder => self.render_server_folder(max_h, window, cx).into_any_element(),
             Overlay::ConnectClaude => self.render_connect_dialog(max_h, cx).into_any_element(),
             Overlay::SignedOut => self.render_signed_out(cx).into_any_element(),
+            Overlay::Guidelines => self.render_guidelines_dialog(max_h, cx),
             Overlay::None | Overlay::PlanApproval(_) | Overlay::Menu | Overlay::Screenshot | Overlay::Markdown | Overlay::Trace | Overlay::Artifact => div().into_any_element(),
         };
         deferred(ui::fade_in(
@@ -1177,7 +1178,9 @@ impl AppView {
         let notes: Vec<aurelius_protocol::NotificationView> = self.inbox_notes().into_iter().cloned().collect();
         // A colleague a manager proposed sits between the approvals and the results.
         let proposals: Vec<aurelius_protocol::ProposalView> = if tab.shows_head() { self.pending_proposals().into_iter().cloned().collect() } else { Vec::new() };
-        let head = pending.len() + proposals.len();
+        // Then the guidelines employees proposed (B5), beside the instruction proposals.
+        let guideline_proposals: Vec<aurelius_domain::guideline::GuidelineProposalView> = if tab.shows_head() { self.pending_guideline_proposals().into_iter().cloned().collect() } else { Vec::new() };
+        let head = pending.len() + proposals.len() + guideline_proposals.len();
         let total = head + notes.len();
         let selected = self.inbox_selected.min(total.saturating_sub(1));
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
@@ -1185,6 +1188,7 @@ impl AppView {
         let note_task_id = note_selected.as_ref().and_then(|n| n.task_id);
         let note_conversation = note_task_id.and_then(|id| self.tasks.iter().find(|t| t.id == id)).and_then(|t| t.conversation_id);
         let proposal_selected = selected.checked_sub(pending.len()).filter(|i| *i < proposals.len());
+        let guideline_selected = selected.checked_sub(pending.len() + proposals.len()).filter(|i| *i < guideline_proposals.len());
         let question_selected = pending.get(selected).is_some_and(|a| a.tool == crate::app::QUESTION_TOOL);
         let plan_selected = pending.get(selected).is_some_and(|a| a.tool == crate::app::PLAN_TOOL);
         let always = pending.get(selected).and_then(|a| self.always_allow_button(a, "inbox", cx));
@@ -1192,6 +1196,10 @@ impl AppView {
             None if proposal_selected.is_some() => {
                 let i = proposal_selected.unwrap_or_default();
                 v().p(px(22.)).gap(px(12.)).child(self.proposal_body(&proposals[i], i, cx)).into_any_element()
+            }
+            None if guideline_selected.is_some() => {
+                let i = guideline_selected.unwrap_or_default();
+                v().id("inbox-guideline").p(px(22.)).gap(px(12.)).overflow_y_scrollbar().child(self.guideline_proposal_body(&guideline_proposals[i], i, cx)).into_any_element()
             }
             None if note_selected.is_some() => {
                 let n = note_selected.clone().unwrap_or_else(|| unreachable!());
@@ -1360,6 +1368,11 @@ impl AppView {
             };
             let mark = ui::dot(7., theme::MANAGER_MARK).into_any_element();
             rows.push(row(("inbox-proposal", j).into(), pending.len() + j, mark, title, false, None, format!("Proposed by {}", p.proposed_by_name), ui::relative_age(p.created_at_ms, now), None));
+        }
+        for (j, p) in guideline_proposals.iter().enumerate() {
+            let (title, meta) = self.guideline_proposal_row(p);
+            let mark = ui::dot(7., theme::MANAGER_MARK).into_any_element();
+            rows.push(row(("inbox-guideline-proposal", j).into(), pending.len() + proposals.len() + j, mark, title, false, None, meta, ui::relative_age(p.created_at_ms, now), None));
         }
         let mut day = None;
         for (j, n) in notes.iter().enumerate() {
@@ -1771,8 +1784,11 @@ impl AppView {
             "turn" => "Conversation",
             "summary" => "Summary",
             "memory" => "Memory",
+            "guideline" => "Guidelines",
             _ => "Other",
         };
+        // A guideline's version is in its id (P-59): visible here without trace mode too.
+        let label = |i: &aurelius_protocol::ContextItemView| if i.section == "guideline" { crate::screens::guidelines::context_guideline(&i.id, &i.label) } else { i.label.clone() };
         let used = view.items.iter().filter(|i| i.included).count();
         card(760.)
             .track_focus(&self.overlay_focus)
@@ -1794,7 +1810,7 @@ impl AppView {
                         .child(div().w(px(14.)).flex_none().text_color(c(if i.included { theme::ACCENT } else { theme::MUTED })).child(if i.included { "✓" } else { "–" }))
                         .child(div().w(px(96.)).flex_none().text_color(c(theme::MUTED)).child(section_title(&i.section)))
                         .child(v().flex_1().min_w_0()
-                            .child(div().text_color(c(if i.included { theme::TEXT } else { theme::TEXT_2 })).child(i.label.clone()))
+                            .child(div().text_color(c(if i.included { theme::TEXT } else { theme::TEXT_2 })).child(label(i)))
                             .child(div().text_size(px(11.5)).text_color(c(theme::MUTED)).child(i.reason.clone())))
                         .child(div().flex_none().font_family(mono.clone()).text_size(px(11.)).text_color(c(theme::MUTED)).child(match i.score {
                             Some(s) => format!("{} tok · {s:.2}", i.tokens),

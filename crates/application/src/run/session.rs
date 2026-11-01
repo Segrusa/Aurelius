@@ -42,6 +42,10 @@ pub struct SessionContext {
     /// Screenshots without asking each time.
     #[serde(default)]
     pub screen: bool,
+    /// The guideline versions in its system text (`<id>@<version>`, B6): another
+    /// set starts a new session, a resumed one never gets other guidelines.
+    #[serde(default)]
+    pub guidelines: Vec<String>,
     /// The memories this run's system text has (id, line). Not stored: `memory_ids` is.
     #[serde(skip)]
     pub memories: Vec<(String, String)>,
@@ -80,6 +84,9 @@ pub struct SessionPlan {
     pub compaction: Option<String>,
     /// Set by the daemon: how big the session's context is after this run's last model call.
     pub context_tokens: Option<u64>,
+    /// Set by the daemon: the run gets the session's own system text, not the plan's
+    /// (it goes on in a session that keeps one).
+    pub frozen: bool,
 }
 
 /// The update kind of the line that says a session was compacted. Shown in the
@@ -385,6 +392,8 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, conversation: ConversationId, run: Ru
     let mut context = context_now(tx, conversation, plan.context.task_status.clone())?;
     context.mcp = claimed.mcp.clone();
     context.overview = plan.context.overview.clone();
+    // The guideline versions its system text has (B6): the plan's (a resumed run had the same).
+    context.guidelines = plan.context.guidelines.clone();
     // The memories it has: those it knew (when it went on), those this run gave it, and
     // those written while it ran (its own).
     let mut known: Vec<String> = match (claimed.resumed, &plan.stored) {

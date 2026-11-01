@@ -1,0 +1,8 @@
+- Scope: an exact commit range (`git diff <base>..<head>`) and the task's acceptance criteria. Read the code; do not only run it.
+- Verdict first: GOEDGEKEURD or NIET GOEDGEKEURD, with the number of blockers, majors and minors.
+- Blocker: data loss, a security hole, a broken build or main flow. Major: a criterion not met, or a real bug with a reproducible effect. Minor: anything else worth fixing.
+- Each blocker or major gives: where (`file:line`), what goes wrong, the proof (a test, a probe or a mutation), the effect, and a concrete fix with the test that should come with it.
+- Minors go in one table: where, finding, fix.
+- A section "Checks done" with the suite numbers and the log path, and a coverage list for each point you were asked to look at.
+- The reviewer does not change the branch: a probe is a throwaway test, removed afterwards.
+- The report goes in `target/<task-id>/<review-id>.md`. Questions for the Tech Lead go under "Open points", not as findings.

@@ -149,6 +149,49 @@ abstract final class Methods {
   /// `channel.list`; none: the general channel, the one older servers have.
   static const String groupChatGet = 'group_chat.get';
   static const String groupChatSend = 'group_chat.send';
+  /// `guideline.add_starter_set`: the chosen templates as guidelines without links (B7).
+  /// A key whose title is in the library already is skipped.
+  static const String guidelineAddStarterSet = 'guideline.add_starter_set';
+  /// Who a change of this guideline reaches from their next run (B6): employees,
+  /// projects and conversations that start a new session.
+  static const String guidelineAffected = 'guideline.affected';
+  /// `guideline.archive`: no run gets it any more; links and versions stay.
+  static const String guidelineArchive = 'guideline.archive';
+  /// `guideline.create`: a new guideline (version 1, source `created`), linked at once to `links`.
+  static const String guidelineCreate = 'guideline.create';
+  /// `guideline.decide_proposal` (B5): approve (with `title`/`text` edited by the
+  /// board member, and for a new guideline the `links`; none: the suggested
+  /// ones) or reject. `note` goes back to the proposer. `version_conflict` when
+  /// the guideline moved on since the proposal's base version.
+  static const String guidelineDecideProposal = 'guideline.decide_proposal';
+  /// The set a run of this employee in this project would get now, in block
+  /// order, with `total_chars` against `limit_chars` (B4). Only an employee:
+  /// its own chat (employee guidelines); only a project: its guidelines alone.
+  static const String guidelineEffective = 'guideline.effective';
+  /// One guideline with the text of its current version, or of `version`.
+  static const String guidelineGet = 'guideline.get';
+  /// `guideline.link`: an employee or a project gets it from its next run.
+  static const String guidelineLink = 'guideline.link';
+  /// The guideline library (feature `guidelines`): every guideline without its
+  /// text, alphabetical; archived ones only with `archived` (then only those).
+  static const String guidelineList = 'guideline.list';
+  /// Proposals of `propose_guideline` (B5), pending first, then the latest
+  /// decisions; `status` filters. Apart from `proposal.list`.
+  static const String guidelineProposals = 'guideline.proposals';
+  /// `guideline.restore`: back from the archive, with its links (B4 and the title are checked again).
+  static const String guidelineRestore = 'guideline.restore';
+  /// `guideline.restore_version`: a copy of `version` as the newest (source `restored`).
+  static const String guidelineRestoreVersion = 'guideline.restore_version';
+  /// The templates of the starter set (B7), for "Add starter set…".
+  static const String guidelineStarterSet = 'guideline.starter_set';
+  /// `guideline.unlink`.
+  static const String guidelineUnlink = 'guideline.unlink';
+  /// `guideline.update`: a new version with what changed (source `edited`); what
+  /// is left out stays. `expected_version` in the envelope is the version the
+  /// editor started from (`version_conflict` otherwise).
+  static const String guidelineUpdate = 'guideline.update';
+  /// Every version of a guideline, newest first, with its text and source.
+  static const String guidelineVersions = 'guideline.versions';
   static const String heartbeatSet = 'heartbeat.set';
   static const String ideaAdd = 'idea.add';
   static const String ideaDelete = 'idea.delete';
@@ -276,6 +319,9 @@ abstract final class Methods {
   /// What one run sent to the runtime and what each model call cost; not found
   /// unless trace mode was on for it and it is among the latest (feature `run_trace`).
   static const String runGetTrace = 'run.get_trace';
+  /// The guideline versions a run had in its system text (B6), kept for every
+  /// run (the trace's "Guidelines: Rust v3, …"); also without trace mode.
+  static const String runGuidelines = 'run.guidelines';
   static const String runStop = 'run.stop';
   /// A screenshot the agent took (the id is in its screenshot tool's output).
   static const String screenshotGet = 'screenshot.get';
@@ -691,6 +737,66 @@ Map<String, dynamic> groupChatGet({String? channel}) => <String, dynamic>{
   },
 };
 
+/// Who a change of this guideline reaches from their next run (B6): employees,
+/// projects and conversations that start a new session.
+Map<String, dynamic> guidelineAffected({required String guidelineId}) => <String, dynamic>{
+  'method': Methods.guidelineAffected,
+  'params': <String, dynamic>{
+    'guideline_id': guidelineId,
+  },
+};
+
+/// The set a run of this employee in this project would get now, in block
+/// order, with `total_chars` against `limit_chars` (B4). Only an employee:
+/// its own chat (employee guidelines); only a project: its guidelines alone.
+Map<String, dynamic> guidelineEffective({String? employeeId, String? projectId}) => <String, dynamic>{
+  'method': Methods.guidelineEffective,
+  'params': <String, dynamic>{
+    if (employeeId != null) 'employee_id': employeeId,
+    if (projectId != null) 'project_id': projectId,
+  },
+};
+
+/// One guideline with the text of its current version, or of `version`.
+Map<String, dynamic> guidelineGet({required String guidelineId, int? version}) => <String, dynamic>{
+  'method': Methods.guidelineGet,
+  'params': <String, dynamic>{
+    'guideline_id': guidelineId,
+    if (version != null) 'version': version,
+  },
+};
+
+/// The guideline library (feature `guidelines`): every guideline without its
+/// text, alphabetical; archived ones only with `archived` (then only those).
+Map<String, dynamic> guidelineList({bool? archived}) => <String, dynamic>{
+  'method': Methods.guidelineList,
+  'params': <String, dynamic>{
+    if (archived != null) 'archived': archived,
+  },
+};
+
+/// Proposals of `propose_guideline` (B5), pending first, then the latest
+/// decisions; `status` filters. Apart from `proposal.list`.
+Map<String, dynamic> guidelineProposals({ProposalStatus? status}) => <String, dynamic>{
+  'method': Methods.guidelineProposals,
+  'params': <String, dynamic>{
+    if (status != null) 'status': status.toJson(),
+  },
+};
+
+/// The templates of the starter set (B7), for "Add starter set…".
+Map<String, dynamic> guidelineStarterSet() => <String, dynamic>{
+  'method': Methods.guidelineStarterSet,
+};
+
+/// Every version of a guideline, newest first, with its text and source.
+Map<String, dynamic> guidelineVersions({required String guidelineId}) => <String, dynamic>{
+  'method': Methods.guidelineVersions,
+  'params': <String, dynamic>{
+    'guideline_id': guidelineId,
+  },
+};
+
 Map<String, dynamic> ideaList({required String projectId}) => <String, dynamic>{
   'method': Methods.ideaList,
   'params': <String, dynamic>{
@@ -865,6 +971,15 @@ Map<String, dynamic> runGetContext({required String runId}) => <String, dynamic>
 /// unless trace mode was on for it and it is among the latest (feature `run_trace`).
 Map<String, dynamic> runGetTrace({required String runId}) => <String, dynamic>{
   'method': Methods.runGetTrace,
+  'params': <String, dynamic>{
+    'run_id': runId,
+  },
+};
+
+/// The guideline versions a run had in its system text (B6), kept for every
+/// run (the trace's "Guidelines: Rust v3, …"); also without trace mode.
+Map<String, dynamic> runGuidelines({required String runId}) => <String, dynamic>{
+  'method': Methods.runGuidelines,
   'params': <String, dynamic>{
     'run_id': runId,
   },
@@ -1822,6 +1937,96 @@ Map<String, dynamic> employeeUpdate(UpdateEmployee params) => <String, dynamic>{
 Map<String, dynamic> groupChatSend(SendGroupMessage params) => <String, dynamic>{
   'method': Methods.groupChatSend,
   'params': params.toJson(),
+};
+
+/// `guideline.add_starter_set`: the chosen templates as guidelines without links (B7).
+/// A key whose title is in the library already is skipped.
+Map<String, dynamic> guidelineAddStarterSet({required List<String> keys}) => <String, dynamic>{
+  'method': Methods.guidelineAddStarterSet,
+  'params': <String, dynamic>{
+    'keys': keys,
+  },
+};
+
+/// `guideline.archive`: no run gets it any more; links and versions stay.
+Map<String, dynamic> guidelineArchive({required String guidelineId}) => <String, dynamic>{
+  'method': Methods.guidelineArchive,
+  'params': <String, dynamic>{
+    'guideline_id': guidelineId,
+  },
+};
+
+/// `guideline.create`: a new guideline (version 1, source `created`), linked at once to `links`.
+Map<String, dynamic> guidelineCreate({List<GuidelineTarget> links = const [], required String text, required String title}) => <String, dynamic>{
+  'method': Methods.guidelineCreate,
+  'params': <String, dynamic>{
+    'links': links.map((x0) => x0.toJson()).toList(),
+    'text': text,
+    'title': title,
+  },
+};
+
+/// `guideline.decide_proposal` (B5): approve (with `title`/`text` edited by the
+/// board member, and for a new guideline the `links`; none: the suggested
+/// ones) or reject. `note` goes back to the proposer. `version_conflict` when
+/// the guideline moved on since the proposal's base version.
+Map<String, dynamic> guidelineDecideProposal({required bool approve, List<GuidelineTarget>? links, String? note, required String proposalId, String? text, String? title}) => <String, dynamic>{
+  'method': Methods.guidelineDecideProposal,
+  'params': <String, dynamic>{
+    'approve': approve,
+    if (links != null) 'links': links.map((x0) => x0.toJson()).toList(),
+    if (note != null) 'note': note,
+    'proposal_id': proposalId,
+    if (text != null) 'text': text,
+    if (title != null) 'title': title,
+  },
+};
+
+/// `guideline.link`: an employee or a project gets it from its next run.
+Map<String, dynamic> guidelineLink({required String guidelineId, required GuidelineTarget target}) => <String, dynamic>{
+  'method': Methods.guidelineLink,
+  'params': <String, dynamic>{
+    'guideline_id': guidelineId,
+    'target': target.toJson(),
+  },
+};
+
+/// `guideline.restore`: back from the archive, with its links (B4 and the title are checked again).
+Map<String, dynamic> guidelineRestore({required String guidelineId}) => <String, dynamic>{
+  'method': Methods.guidelineRestore,
+  'params': <String, dynamic>{
+    'guideline_id': guidelineId,
+  },
+};
+
+/// `guideline.restore_version`: a copy of `version` as the newest (source `restored`).
+Map<String, dynamic> guidelineRestoreVersion({required String guidelineId, required int version}) => <String, dynamic>{
+  'method': Methods.guidelineRestoreVersion,
+  'params': <String, dynamic>{
+    'guideline_id': guidelineId,
+    'version': version,
+  },
+};
+
+/// `guideline.unlink`.
+Map<String, dynamic> guidelineUnlink({required String guidelineId, required GuidelineTarget target}) => <String, dynamic>{
+  'method': Methods.guidelineUnlink,
+  'params': <String, dynamic>{
+    'guideline_id': guidelineId,
+    'target': target.toJson(),
+  },
+};
+
+/// `guideline.update`: a new version with what changed (source `edited`); what
+/// is left out stays. `expected_version` in the envelope is the version the
+/// editor started from (`version_conflict` otherwise).
+Map<String, dynamic> guidelineUpdate({required String guidelineId, String? text, String? title}) => <String, dynamic>{
+  'method': Methods.guidelineUpdate,
+  'params': <String, dynamic>{
+    'guideline_id': guidelineId,
+    if (text != null) 'text': text,
+    if (title != null) 'title': title,
+  },
 };
 
 Map<String, dynamic> heartbeatSet(SetHeartbeat params) => <String, dynamic>{

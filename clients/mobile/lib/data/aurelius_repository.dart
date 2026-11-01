@@ -371,6 +371,43 @@ class AureliusRepository {
   /// An item was created, changed or archived (here or on another client).
   Stream<Event> get vaultChanges => events.where((e) => e.kind.wire.startsWith('vault.'));
 
+  /// The server has guidelines (feature `guidelines`, AUR-GL-01).
+  bool get guidelinesEnabled => linkState.has('guidelines');
+
+  /// The library without texts, alphabetical: the active guidelines, or only the archived ones.
+  Future<List<GuidelineView>> guidelines({bool archived = false}) async =>
+      (await _ask<ResponseBodyGuidelines>(guidelineList(archived: archived ? true : null))).value.guidelines;
+
+  /// One guideline with the text of its current version, or of [version].
+  Future<GuidelineDetail> guideline(String guidelineId, {int? version}) async =>
+      (await _ask<ResponseBodyGuideline>(guidelineGet(guidelineId: guidelineId, version: version))).value;
+
+  /// Every version of a guideline, newest first.
+  Future<List<GuidelineVersionView>> guidelineVersionList(String guidelineId) async =>
+      (await _ask<ResponseBodyGuidelineVersions>(guidelineVersions(guidelineId: guidelineId))).value.versions;
+
+  /// What a run of [employeeId] in [projectId] would get now (B3 order, B4 total).
+  Future<EffectiveGuidelines> effectiveGuidelines({String? employeeId, String? projectId}) async =>
+      (await _ask<ResponseBodyEffectiveGuidelines>(guidelineEffective(employeeId: employeeId, projectId: projectId))).value;
+
+  /// Proposals of `propose_guideline` (B5): pending first.
+  Future<List<GuidelineProposalView>> guidelineProposalList({ProposalStatus? status}) async =>
+      (await _ask<ResponseBodyGuidelineProposals>(guidelineProposals(status: status))).value.proposals;
+
+  /// Who a change of a guideline reaches from their next run (B6).
+  Future<GuidelineAffected> guidelineReach(String guidelineId) async =>
+      (await _ask<ResponseBodyGuidelineAffected>(guidelineAffected(guidelineId: guidelineId))).value;
+
+  /// The templates of the starter set (B7).
+  Future<List<StarterTemplate>> starterTemplates() async => (await _ask<ResponseBodyStarterSet>(guidelineStarterSet())).value.templates;
+
+  /// The guideline versions [runId] had in its system text (B6).
+  Future<List<RunGuideline>> runGuidelineList(String runId) async =>
+      (await _ask<ResponseBodyRunGuidelines>(runGuidelines(runId: runId))).value.guidelines;
+
+  /// A guideline or one of its proposals changed (here or on another client).
+  Stream<Event> get guidelineChanges => events.where((e) => e.kind.wire.startsWith('guideline.'));
+
   /// The user's Claude Code MCP servers and which are on for every chat, conversation, employee and task.
   Future<McpServers> mcpServers() async => (await _ask<ResponseBodyMcpServers>(mcpList())).value;
 

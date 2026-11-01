@@ -112,6 +112,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     // The conversation's session: go on in it with only the new messages, or start
     // it (again) from the whole conversation.
     let mut choice = session::choose(&shared, &plan, &runtime, &request.profile, parked, request.system.as_deref()).await;
+    plan.session.frozen = choice.system.is_some();
     // Its context grew too big: compacted first (or started over when that fails).
     if choice.compact {
         // While it compacts the answer already shows as running ("Context comprimeren…"):
@@ -129,6 +130,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
         match compacted {
             session::Compacted::Go(next, line) => {
                 choice = next;
+                plan.session.frozen = choice.system.is_some();
                 plan.session.compaction = Some(line);
                 send_progress(&shared, &plan);
             }

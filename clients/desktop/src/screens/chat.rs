@@ -606,8 +606,8 @@ impl AppView {
         let copy = (!text.trim().is_empty()).then(|| self.copy_button(format!("msg-{}", m.id), text.clone(), cx));
         // What the run sent: only kept while trace mode is on, once the answer ended.
         let trace = m.run_id.filter(|_| m.status != MessageStatus::Partial && self.trace_on()).map(|run_id| {
+            // action_icon has its own tooltip: a second one panics in debug builds.
             ui::action_icon(SharedString::from(format!("trace-{}", m.id)), "⌁", "Trace", None, None)
-                .tooltip(ui::tip("Trace: what this answer sent and what each model call cost", None))
                 .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
                     cx.stop_propagation();
                     this.open_trace(run_id, w, cx);

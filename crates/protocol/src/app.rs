@@ -52,6 +52,15 @@ pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
             | Method::BoardGet { .. }
             | Method::TicketGet { .. }
             | Method::TicketList { .. } => Ok(vec![Read]),
+            // Guidelines: no app tool needs them, so an app reads nothing of them either (SEC0 R-d).
+            Method::GuidelineList { .. }
+            | Method::GuidelineGet { .. }
+            | Method::GuidelineVersions { .. }
+            | Method::GuidelineEffective { .. }
+            | Method::GuidelineProposals { .. }
+            | Method::GuidelineAffected { .. }
+            | Method::GuidelineStarterSet
+            | Method::RunGuidelines { .. } => Err(NOT_FOR_APPS),
             // The group chat is the user's own conversation with the team, like an employee's chat.
             Method::GroupChatGet { .. } | Method::ChannelList => Err(NOT_FOR_APPS),
             // The vault is the board members' and the runs' (B5): an app reads nothing of it.
@@ -100,6 +109,16 @@ fn command_needs(command: &Command) -> Result<Vec<AppScope>, &'static str> {
         Command::SendGroupMessage(_) | Command::PostTicketMessage(_) | Command::RetryTicketSummary(_) => Err(NOT_FOR_APPS),
         // The review gate is a board member's, never an app's (any audience).
         Command::AcceptTicket(_) | Command::SendBackTicket(_) => Err(REVIEW_GATE),
+        // Guidelines go into every run: only a board member changes them (B5).
+        Command::CreateGuideline(_)
+        | Command::UpdateGuideline(_)
+        | Command::ArchiveGuideline(_)
+        | Command::RestoreGuideline(_)
+        | Command::RestoreGuidelineVersion(_)
+        | Command::LinkGuideline(_)
+        | Command::UnlinkGuideline(_)
+        | Command::DecideGuidelineProposal(_)
+        | Command::AddStarterGuidelines(_) => Err(NOT_FOR_APPS),
         Command::CreateTicket(t) if !t.files.is_empty() => Err(NO_FILES),
         // An app has no board member: the server answers `board_member_required`.
         Command::CreateTicket(_)

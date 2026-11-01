@@ -10,7 +10,7 @@ export '../../data/protocol/protocol.dart' show protocolMajor;
 
 /// A daemon error (`code` is the snake_case ErrorCode).
 class ProtocolException implements Exception {
-  const ProtocolException(this.code, this.message, {this.retryAfterMs, this.matchedItems = const []});
+  const ProtocolException(this.code, this.message, {this.retryAfterMs, this.matchedItems = const [], this.tooLarge});
 
   final ErrorCode code;
   final String message;
@@ -21,6 +21,10 @@ class ProtocolException implements Exception {
   /// `looks_like_secret` (B10): the names of the vault items the text holds
   /// the value of. Never a value.
   final List<String> matchedItems;
+
+  /// `guideline_too_large` (B4): the combination of employee and project that
+  /// would get too many characters of guidelines.
+  final GuidelineTooLarge? tooLarge;
 
   /// The text holds a vault secret's value: nothing was stored (B10).
   bool get looksLikeSecret => code == ErrorCode.looksLikeSecret;
@@ -36,9 +40,11 @@ class ProtocolException implements Exception {
   bool get needsBoardMember => code == ErrorCode.boardMemberRequired;
 
   /// The server does not have this yet: an older server (`unknown_method`), or
-  /// one whose protocol 5 methods are still placeholders ("cannot do this yet").
+  /// one whose protocol 5 methods are still placeholders ("cannot do this yet",
+  /// "… are not available on this server yet").
   bool get notOnServer =>
-      code == ErrorCode.unknownMethod || (code == ErrorCode.validation && RegExp(r'cannot do this yet|not (yet )?implemented', caseSensitive: false).hasMatch(message));
+      code == ErrorCode.unknownMethod ||
+      (code == ErrorCode.validation && RegExp(r'cannot do this yet|not (yet )?implemented|not available on this server yet', caseSensitive: false).hasMatch(message));
 
   /// What to show the user.
   String get shown => switch (this) {

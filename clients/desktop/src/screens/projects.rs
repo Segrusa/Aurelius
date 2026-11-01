@@ -104,7 +104,7 @@ impl AppView {
             Page::Projects => self.render_projects_page(cx),
             Page::Project(project, tab) => self.render_project(project, tab, window, cx).into_any_element(),
             Page::Employee(manager) => self.render_manager(manager, window, cx).into_any_element(),
-            Page::Employees => self.render_employees_page(cx),
+            Page::Employees => self.render_employees_page(window, cx),
             Page::Tasks => self.render_all_tasks(cx),
             Page::Inbox => self.render_inbox_page(cx),
             Page::Settings => self.render_settings_page(window, cx),
@@ -146,13 +146,14 @@ impl AppView {
     }
 
     /// Employees: the list and the org chart as tabs (Ctrl+Tab and h / l switch).
-    fn render_employees_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_employees_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let labels = EmployeesTab::ALL.map(EmployeesTab::label);
         let active = EmployeesTab::ALL.iter().position(|t| *t == self.employees_tab).unwrap_or(0);
         let bar = self.page_tab_bar("employees-tabs", &labels, active, |this, i, cx| this.set_employees_tab(EmployeesTab::ALL[i], cx), cx);
         let content = match self.employees_tab {
             EmployeesTab::List => self.render_employees(cx),
             EmployeesTab::OrgChart => self.render_company_org(cx),
+            EmployeesTab::Guidelines => self.render_guidelines_tab(window, cx),
         };
         v().flex_1().min_h_0().w_full().child(bar).child(content).into_any_element()
     }
@@ -572,7 +573,11 @@ impl AppView {
             )
         })
         .map(|el| match project {
-            ProjectRef::Real(id) => el.child(self.overview_sections(id, cx)),
+            // What every run here gets on top (Guidelines §6.2, P-53: a block, no tab).
+            ProjectRef::Real(id) => {
+                let guidelines = self.render_project_guidelines(id, cx).map(|g| g.mt(px(18.)));
+                el.child(self.overview_sections(id, cx)).children(guidelines)
+            }
             ProjectRef::Sample(_) => el,
         })
     }

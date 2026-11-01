@@ -6,7 +6,19 @@ use uuid::Uuid;
 
 macro_rules! id_type {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Hash,
+            PartialOrd,
+            Ord,
+            Serialize,
+            Deserialize,
+            schemars::JsonSchema,
+        )]
         #[serde(transparent)]
         pub struct $name(pub Uuid);
 
@@ -67,3 +79,5 @@ id_type!(BoardColumnId);
 id_type!(UserId);
 id_type!(SessionId);
 id_type!(VaultItemId);
+id_type!(GuidelineId);
+id_type!(GuidelineProposalId);

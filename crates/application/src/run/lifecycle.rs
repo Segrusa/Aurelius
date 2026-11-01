@@ -107,6 +107,16 @@ impl CommandService {
                         (id, Some(notice))
                     }
                 };
+                // What its system text has of the guidelines (B6), and the board members'
+                // notice of what the block left out or redacted. The only writer of the
+                // snapshot: a run that goes on with the system text its session kept
+                // from an earlier start of it keeps that start's; any other run (also
+                // one going again after a wait, with the plan's text) gets the plan's.
+                let mut guideline_notices = Vec::new();
+                let kept = plan.session.frozen && !aurelius_storage::guidelines::for_run(tx, plan.run_id)?.is_empty();
+                if plan.context_error.is_none() && !kept {
+                    guideline_notices = crate::run::guidelines::record(tx, plan.run_id, plan.conversation_id, &plan.guidelines)?;
+                }
                 if conv::message_for_run(tx, plan.run_id)?.is_none() {
                     conv::insert_message(tx, NewMessage {
                         id: plan.message_id,
@@ -123,6 +133,7 @@ impl CommandService {
                 }
                 let mut notices: Vec<EventNotice> = started.into_iter().collect();
                 notices.extend(resumed);
+                notices.extend(guideline_notices);
                 // A run of a finished task goes from queued to running.
                 notices.extend(crate::task::task_runs::live_run_notice(tx, plan.conversation_id)?);
                 Ok(Some(notices))

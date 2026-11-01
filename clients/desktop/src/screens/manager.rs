@@ -87,6 +87,11 @@ impl AppView {
             ));
 
         // Its own settings, for all its work: mode (the default for new work), browser and screen.
+        // What its runs get on top of its instructions (GL-05 AC2, GL-07).
+        let guidelines = match manager.key {
+            ManagerRef::Real(id) => self.guidelines_chip(id, cx),
+            ManagerRef::Sample(..) => None,
+        };
         let settings = self.real_manager(manager.key).map(|m| {
             let (id, mode, browser, screen) = (m.id, m.agent_mode, m.browser_allowed, m.screen_allowed);
             let task_open = self.current_manager_thread().is_some();
@@ -99,6 +104,7 @@ impl AppView {
                 ))
                 .child(browser_chip(browser, cx))
                 .child(screen_chip(screen, cx))
+                .children(guidelines)
                 .child(div().flex_1())
                 .child(
                     h().id("employee-team-chat").gap(px(6.)).cursor_pointer().text_color(c(theme::ACCENT_TEXT)).hover(|s| s.text_color(c(theme::TEXT)))

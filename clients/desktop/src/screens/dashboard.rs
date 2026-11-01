@@ -56,7 +56,7 @@ pub fn needs_you(approvals: usize, proposals: usize, tasks: &[aurelius_protocol:
 
 impl AppView {
     pub fn needs_you_count(&self) -> usize {
-        needs_you(self.pending_approvals().count(), self.pending_proposals().len(), &self.tasks)
+        needs_you(self.pending_approvals().count(), self.pending_proposals().len() + self.pending_guideline_proposals().len(), &self.tasks)
     }
 
     pub fn render_dashboard(&mut self, _wide: bool, cx: &mut Context<Self>) -> AnyElement {
