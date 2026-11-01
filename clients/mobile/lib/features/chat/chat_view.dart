@@ -460,7 +460,7 @@ class _MessagesState extends State<_Messages> {
         own: named(m),
         child: m.isUser
             ? _UserBubble(id: m.id, text: m.text, files: m.files, uploads: m.uploads, queuedId: m.queued ? m.id : null, message: m, source: source, ticket: made[m.id], flat: true)
-            : _AssistantMessage(message: m, group: true, flat: true, source: source, ticket: made[m.id], blocking: m.isStreaming ? approvals.where((a) => a.runId == m.runId).firstOrNull : null),
+            : _AssistantMessage(message: m, group: true, flat: true, grouped: grouped, source: source, ticket: made[m.id], blocking: m.isStreaming ? approvals.where((a) => a.runId == m.runId).firstOrNull : null),
       );
     }
 
@@ -922,10 +922,13 @@ class _UserBubble extends StatelessWidget {
 }
 
 class _AssistantMessage extends StatelessWidget {
-  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket, this.flat = false});
+  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket, this.flat = false, this.grouped = false});
 
   /// In a channel row of the Slack-style Team chat: the row has the name and time.
   final bool flat;
+
+  /// A later message of a group in a channel: the mode shows only in the group's first row.
+  final bool grouped;
 
   final MessageView message;
 
@@ -1026,7 +1029,7 @@ class _AssistantMessage extends StatelessWidget {
     final header = [
       if (!flat && author != null && author.isNotEmpty) withRole(author, role),
       // A group chat answer: the mode the employee answered in.
-      if (message.mode case final mode?) '${mode.label} mode',
+      if (message.mode case final mode? when !grouped) '${mode.label} mode',
       if (message.producedBy != null) message.producedBy!,
       if (version != null) 'version ${version!.$1}/${version!.$2}',
       if (mentioned) '@ you',

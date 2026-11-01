@@ -81,13 +81,14 @@ int _today(int minutes) {
   return start.add(Duration(minutes: minutes)).millisecondsSinceEpoch;
 }
 
-MessageView _msg(String id, String text, {UserView? by, String? author, required int at, int ordinal = 0, SystemLine? system}) => MessageView(
+MessageView _msg(String id, String text, {UserView? by, String? author, required int at, int ordinal = 0, SystemLine? system, AgentMode? mode}) => MessageView(
       activity: const [],
       author: system != null ? 'Aurelius' : author,
       authorUser: by,
       createdAtMs: at,
       files: const [],
       id: id,
+      mode: mode,
       ordinal: ordinal,
       queued: false,
       role: by != null ? MessageRole.user : MessageRole.assistant,
@@ -430,6 +431,23 @@ void main() {
       await board.settleBoard(tester);
       expect(find.text('#42 is Done · read-only.'), findsOneWidget);
       expect(find.textContaining('#42 is closed · Login per board member'), findsOneWidget);
+    });
+  });
+
+  group('grouped rows', () {
+    testWidgets("an employee's mode shows in the group's header row only, not above every grouped message", (tester) async {
+      // Read through all three: no New messages line breaks the group.
+      await pump(tester, list: [_general, _channel('c-42', '#42-login-per-board-member', projectId: 'p1', kind: ChannelKind.ticket, number: 42, column: ColumnKind.review, readThrough: 3)], messages: {
+        'c-42': [
+          _msg('m1', 'Looking at it.', author: 'Forge', at: _today(0), ordinal: 1, mode: AgentMode.ask),
+          _msg('m2', 'Found the cause.', author: 'Forge', at: _today(1), ordinal: 2, mode: AgentMode.ask),
+          _msg('m3', 'Fixed.', author: 'Forge', at: _today(2), ordinal: 3, mode: AgentMode.ask),
+        ],
+      });
+      await open(tester, 'c-42');
+      expect(find.text('Fixed.'), findsOneWidget);
+      expect(find.textContaining('Ask mode'), findsOneWidget);
+      expect(tester.getTopLeft(find.textContaining('Ask mode')).dy < top(tester, 'channel-row-m2'), isTrue, reason: 'in the first row');
     });
   });
 
