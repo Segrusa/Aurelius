@@ -1005,8 +1005,8 @@ impl AppView {
                 return page
                     .child(
                         v().id("server-pc-body").flex_1().min_h_0().overflow_y_scrollbar().p(px(22.)).gap(px(12.))
-                            .when_some(self.remote_name().map(str::to_owned), |el, host| el.child(row("Server", host)))
-                            .child(ui::eyebrow("UPDATES"))
+                            .child(self.render_server_name(cx))
+                            .child(if self.server_name_section() { section("UPDATES") } else { div().child(ui::eyebrow("UPDATES")) })
                             .child(row("Installed", u.current.clone()))
                             .child(row("Latest", u.latest.clone().unwrap_or_else(|| "—".into())))
                             .child(row("Status", state(&u)))
@@ -1030,6 +1030,7 @@ impl AppView {
                     )
                     .child(
                         footer
+                            .when(self.server_rename_allowed(), |el| el.child(ui::hint("s-rename", "f2", "Rename server", || Box::new(SettingsRenameServer), cx)))
                             .child(ui::hint("s-install", "u", "Update server", || Box::new(SettingsInstallUpdate), cx))
                             .child(ui::hint("s-restart", "e", "Restart server", || Box::new(SettingsRestartServer), cx))
                             .child(ui::hint("s-shutdown", "q", "Shut down PC", || Box::new(SettingsShutdownNow), cx))
