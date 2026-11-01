@@ -64,6 +64,7 @@ pub const MIGRATIONS: &[Migration] = &[
     plain(23, include_str!("../../../migrations/0023_guidelines.sql")),
     plain(24, include_str!("../../../migrations/0024_server_name.sql")),
     Migration { version: 25, sql: include_str!("../../../migrations/0025_board_testing.sql"), rebuild: true, then: None },
+    plain(26, include_str!("../../../migrations/0026_ticket_channels.sql")),
 ];
 
 /// The last schema of protocol 2 (managers per project). The v0.6 import writes

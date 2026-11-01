@@ -38,7 +38,7 @@ fn migration_23_is_unchanged_and_25_rebuilds() {
     }
     let m25 = migrate::MIGRATIONS.iter().find(|m| m.version == 25).unwrap();
     assert!(m25.rebuild && m25.then.is_none());
-    assert_eq!(migrate::supported_version(), 25);
+    assert!(migrate::supported_version() >= 25);
 }
 
 /// A schema 23 database with a board member, a project, an employee, a renamed
@@ -85,7 +85,7 @@ fn a_schema_23_board_gains_testing_before_review_and_keeps_its_cards_and_names()
     };
     assert_eq!(ids_before.len(), 6);
 
-    drop(Store::open(dir.path()).unwrap());
+    drop(Store::open_until(dir.path(), 25).unwrap());
     let conn = db(dir.path());
     assert_eq!(conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get::<_, i64>(0)).unwrap(), 25);
     assert!(strings(&conn, "SELECT \"table\" FROM pragma_foreign_key_check").is_empty());
