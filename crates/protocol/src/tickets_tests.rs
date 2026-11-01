@@ -32,7 +32,7 @@ fn writes() -> Vec<Command> {
     let t = TicketId::new();
     vec![
         Command::CreateTicket(create(None)),
-        Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }),
+        Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: vec![] }),
         Command::MoveTicket(MoveTicket { ticket_id: t, column_id: BoardColumnId::new(), before_ticket_id: None }),
         Command::StartTicket(StartTicket { ticket_id: t, employee_id: None }),
         Command::AssignTicket(AssignTicket { ticket_id: t, employee_id: Some(EmployeeId::new()), reason: None }),

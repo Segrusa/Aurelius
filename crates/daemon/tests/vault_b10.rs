@@ -271,6 +271,7 @@ async fn every_text_command_is_refused_by_name_and_stored_redacted_when_confirme
             deadline_ms: None,
             clear_deadline: false,
             run: None,
+            add_files: vec![],
             confirm_secret,
         })
     })

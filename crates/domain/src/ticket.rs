@@ -20,6 +20,8 @@ pub const LABELS_MAX: usize = 12;
 pub const LABEL_MAX: usize = 40;
 pub const FEEDBACK_MAX: usize = 10_000;
 pub const REASON_MAX: usize = 500;
+/// At most this many files on one ticket, as on a message or task.
+pub const ATTACHMENTS_MAX: usize = crate::conversation::UPLOADS_MAX;
 /// The last deadline taken: 9999-12-31 (ms since the epoch).
 pub const DEADLINE_MAX_MS: i64 = 253_402_300_799_999;
 
@@ -261,6 +263,11 @@ pub struct UpdateTicket {
     pub clear_deadline: bool,
     #[serde(default)]
     pub run: Option<RunSettings>,
+    /// Files to add to the ticket's attachments, as `CreateTicket::files`
+    /// (feature `ticket_add_files`): the ones it has stay, and a main task
+    /// that still works gets them too. At most `ATTACHMENTS_MAX` in all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub add_files: Vec<String>,
     /// A board member confirmed that the text may hold a vault secret's value
     /// (after `looks_like_secret`, B10): it is stored with the value redacted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -593,6 +600,14 @@ pub fn valid_labels(labels: &[String]) -> Result<Vec<String>, DomainError> {
     Ok(out)
 }
 
+/// A ticket may hold `count` files in all (the ones it keeps and the new ones).
+pub fn check_file_count(count: usize) -> Result<(), DomainError> {
+    if count > ATTACHMENTS_MAX {
+        return Err(DomainError::File(format!("Too many files: a ticket has at most {ATTACHMENTS_MAX} attachments.")));
+    }
+    Ok(())
+}
+
 impl UpdateBoardColumns {
     /// Every one of the `current` columns once, with valid names; the list order is the new order.
     pub fn decide(&self, current: &[BoardColumnView]) -> Result<Vec<(BoardColumnId, String)>, DomainError> {
@@ -616,6 +631,16 @@ impl UpdateBoardColumns {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ticket_holds_at_most_eight_files_and_add_files_is_optional_on_the_wire() {
+        assert!(check_file_count(ATTACHMENTS_MAX).is_ok());
+        assert!(matches!(check_file_count(ATTACHMENTS_MAX + 1), Err(DomainError::File(m)) if m.starts_with("Too many files")));
+        let id = TicketId::new();
+        let old: UpdateTicket = serde_json::from_value(serde_json::json!({ "ticket_id": id, "title": "x" })).unwrap();
+        assert!(old.add_files.is_empty());
+        assert!(serde_json::to_value(&old).unwrap().get("add_files").is_none(), "an update without files looks as before");
+    }
 
     #[test]
     fn kinds_and_priorities_round_trip() {

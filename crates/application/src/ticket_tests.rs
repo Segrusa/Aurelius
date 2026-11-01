@@ -130,7 +130,7 @@ fn every_ticket_board_and_company_write_needs_a_board_member() {
     let ticket = new_ticket(&s, "Mine");
     let commands = [
         Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: s.project, title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None }),
-        Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: ticket, title: Some("y".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None }),
+        Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: ticket, title: Some("y".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: vec![] }),
         Command::MoveTicket(ticket::MoveTicket { ticket_id: ticket, column_id: column(&s, ColumnKind::Todo), before_ticket_id: None }),
         Command::StartTicket(ticket::StartTicket { ticket_id: ticket, employee_id: None }),
         Command::AssignTicket(ticket::AssignTicket { ticket_id: ticket, employee_id: Some(EmployeeId::new()), reason: None }),
@@ -303,7 +303,7 @@ fn plan_review_and_review_are_decided_by_buttons_with_feedback() {
         .collect();
     assert_eq!(said, [("Smaller steps".to_string(), Some(s.user)), ("Add a test".to_string(), Some(s.user))], "no message for an approval without feedback");
     // Done is read-only: no update, no move, no cancel.
-    let err = run(&s, Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("New".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None })).unwrap_err();
+    let err = run(&s, Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("New".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: vec![] })).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation);
     assert!(run(&s, Command::CancelTicket(ticket::CancelTicket { ticket_id: id })).is_err());
     // But it can leave the board.
@@ -326,6 +326,7 @@ fn update_changes_fields_but_never_the_author_and_checks_the_version() {
         deadline_ms: Some(42),
         clear_deadline: false,
         run: None,
+        add_files: vec![],
     };
     let err = run_as(&s, Some(s.user), Command::UpdateTicket(update(Some("Final"), None)), Some(7)).unwrap_err();
     assert_eq!(err.code, ErrorCode::VersionConflict);
@@ -342,7 +343,7 @@ fn update_changes_fields_but_never_the_author_and_checks_the_version() {
         .unwrap();
     run_as(&s, Some(other), Command::UpdateTicket(update(None, Some(TicketPriority::High))), None).unwrap();
     assert_eq!(view(&s, id).created_by_user, s.user);
-    let nothing = ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None };
+    let nothing = ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: vec![] };
     assert_eq!(run(&s, Command::UpdateTicket(nothing)).unwrap_err().code, ErrorCode::Validation);
 }
 
@@ -556,7 +557,7 @@ fn a_deadline_must_be_a_real_moment() {
     assert_eq!(run(&s, Command::CreateTicket(create.clone())).unwrap_err().code, ErrorCode::Validation);
     create.deadline_ms = Some(1_800_000_000_000);
     let CommandResult::TicketCreated { ticket_id: id, .. } = run(&s, Command::CreateTicket(create)).unwrap() else { panic!() };
-    let update = |deadline_ms| ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms, clear_deadline: false, run: None };
+    let update = |deadline_ms| ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms, clear_deadline: false, run: None, add_files: vec![] };
     for bad in [0, -1, ticket::DEADLINE_MAX_MS + 1] {
         assert_eq!(run(&s, Command::UpdateTicket(update(Some(bad)))).unwrap_err().code, ErrorCode::Validation, "{bad}");
     }
@@ -745,4 +746,121 @@ fn the_task_job_returns_the_cards_move_with_its_own() {
     assert!(kinds.contains(&(aurelius_domain::EventKind::TicketMoved, id.to_string())), "{kinds:?}");
     assert!(kinds.contains(&(aurelius_domain::EventKind::TaskWaiting, root.to_string())), "{kinds:?}");
     assert_eq!(view(&s, id).column, ColumnKind::Doing);
+}
+
+/// The project gets a work folder to keep files in; two files to attach live next to it.
+fn with_files(s: &Setup) -> (std::path::PathBuf, std::path::PathBuf, Vec<String>) {
+    let folder = s._dir.path().join("work");
+    let uploads = folder.join(".aurelius").join("uploads");
+    std::fs::create_dir_all(&folder).unwrap();
+    let (project, path) = (s.project, folder.display().to_string());
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE projects SET folder = ?2 WHERE id = ?1", [project.to_string(), path])?)).unwrap();
+    let outside = s._dir.path().join("pasted");
+    std::fs::create_dir_all(&outside).unwrap();
+    let files: Vec<String> = ["shot.png", "log.txt"]
+        .iter()
+        .map(|name| {
+            let p = outside.join(name);
+            std::fs::write(&p, name.as_bytes()).unwrap();
+            p.display().to_string()
+        })
+        .collect();
+    (folder, uploads, files)
+}
+
+fn add_files(id: TicketId, files: &[String]) -> Command {
+    Command::UpdateTicket(ticket::UpdateTicket {
+        confirm_secret: false,
+        ticket_id: id,
+        title: None,
+        description: None,
+        priority: None,
+        labels: None,
+        deadline_ms: None,
+        clear_deadline: false,
+        run: None,
+        add_files: files.to_vec(),
+    })
+}
+
+fn names(files: &[aurelius_domain::views::MessageFileView]) -> Vec<&str> {
+    files.iter().map(|f| f.name.as_str()).collect()
+}
+
+fn uploaded(uploads: &std::path::Path) -> usize {
+    std::fs::read_dir(uploads).map_or(0, |d| d.filter(|e| e.as_ref().unwrap().file_name() != ".gitignore").count())
+}
+
+#[test]
+fn files_added_to_a_ticket_join_the_ones_it_has_and_the_event_names_them() {
+    let s = setup();
+    let (_, uploads, files) = with_files(&s);
+    let id = new_ticket(&s, "Paste");
+    let version = view(&s, id).version;
+    run_as(&s, Some(s.user), add_files(id, &files[..1]), Some(version)).unwrap();
+    run(&s, add_files(id, &files[1..])).unwrap();
+    let shown = view(&s, id);
+    assert_eq!(names(&shown.attachments), vec!["shot.png", "log.txt"], "the first file stays, the new one is appended");
+    assert_eq!(uploaded(&uploads), 2, "one folder for the ticket's files");
+    assert_eq!(kinds(&s, id).iter().filter(|k| *k == "ticket.updated").count(), 2);
+    let meta: serde_json::Value = s
+        .service
+        .store()
+        .read(move |c| Ok(c.query_row("SELECT metadata_json FROM events WHERE aggregate_id = ?1 AND type = 'ticket.updated' ORDER BY seq DESC LIMIT 1", [id.to_string()], |r| r.get::<_, String>(0))?))
+        .map(|j| serde_json::from_str(&j).unwrap())
+        .unwrap();
+    assert_eq!(meta["changed"], serde_json::json!(["files"]));
+    assert_eq!(meta["files_added"], serde_json::json!(["log.txt"]), "the name only, never where it is kept");
+    let (cards, _) = s.service.store().read(|c| aurelius_storage::timeline::cards(c, None, Some(&id.to_string()), None, 20, false)).unwrap();
+    let card = cards.iter().find(|c| c.label == "ATTACHMENT").expect("a timeline line for the files");
+    assert_eq!((card.title.as_str(), card.detail.as_str()), ("grace added 1 file to #1", "log.txt"));
+}
+
+#[test]
+fn too_many_files_on_a_ticket_are_refused_and_nothing_is_kept() {
+    let s = setup();
+    let (_, uploads, files) = with_files(&s);
+    let id = new_ticket(&s, "Full");
+    run(&s, add_files(id, &files[..1])).unwrap();
+    let before = view(&s, id).version;
+    let over = vec![files[1].clone(); ticket::ATTACHMENTS_MAX];
+    let err = run(&s, add_files(id, &over)).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Validation);
+    assert!(err.message.contains("at most 8"), "{}", err.message);
+    let shown = view(&s, id);
+    assert_eq!((names(&shown.attachments), shown.version), (vec!["shot.png"], before));
+    assert_eq!(uploaded(&uploads), 1, "no copy is left behind");
+    // Refused in the transaction (Done): the copies made before it go again.
+    engine_puts(&s, id, ColumnKind::Done);
+    assert_eq!(run(&s, add_files(id, &files[1..])).unwrap_err().code, ErrorCode::Validation);
+    assert_eq!(uploaded(&uploads), 1, "a refused update keeps no copies");
+}
+
+#[test]
+fn a_replayed_ticket_update_does_not_attach_its_files_twice() {
+    let s = setup();
+    let (_, uploads, files) = with_files(&s);
+    let id = new_ticket(&s, "Once");
+    let envelope = CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: add_files(id, &files[..1]) };
+    let first = s.service.execute(&ctx(Some(s.user)), envelope.clone()).unwrap();
+    let again = s.service.execute(&ctx(Some(s.user)), envelope).unwrap();
+    assert!(!first.receipt.replayed && again.receipt.replayed);
+    assert_eq!(names(&view(&s, id).attachments), vec!["shot.png"]);
+    assert_eq!(uploaded(&uploads), 1, "the replay copies nothing");
+}
+
+#[test]
+fn a_live_main_task_gets_the_ticket_s_new_files_and_a_finished_one_does_not() {
+    let s = setup();
+    let (_, _, files) = with_files(&s);
+    let id = new_ticket(&s, "Work");
+    run(&s, Command::StartTicket(ticket::StartTicket { ticket_id: id, employee_id: None })).unwrap();
+    let root = view(&s, id).root_task_id.expect("a main task");
+    let task_files = |s: &Setup| s.service.store().read(move |c| aurelius_storage::tasks::attachments_of(c, root)).unwrap().map(|a| a.files).unwrap_or_default();
+    run(&s, add_files(id, &files[..1])).unwrap();
+    assert_eq!(names(&task_files(&s)), vec!["shot.png"], "the next run finds it");
+    root_is(&s, id, TaskStatus::Succeeded, None);
+    run(&s, add_files(id, &files[1..])).unwrap();
+    assert_eq!(names(&view(&s, id).attachments), vec!["shot.png", "log.txt"]);
+    assert_eq!(names(&task_files(&s)), vec!["shot.png"], "a finished main task keeps its own files");
 }

@@ -178,7 +178,7 @@ async fn start_with_an_owner_then_update_the_fields() {
     assert_ne!(ticket.column, ColumnKind::Backlog);
     assert_eq!((ticket.owner_employee_id, ticket.owner_name.as_deref()), (Some(forge), Some("Forge")));
     // Update: the fields change while the engine works (its moves give the ticket new versions, so none is expected here).
-    let rename = Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("Owned, renamed".into()), description: None, priority: Some(TicketPriority::Low), labels: None, deadline_ms: None, clear_deadline: true, run: None });
+    let rename = Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("Owned, renamed".into()), description: None, priority: Some(TicketPriority::Low), labels: None, deadline_ms: None, clear_deadline: true, run: None, add_files: vec![] });
     client.ticket_command(rename, None).await.unwrap();
     let ticket = client.ticket(id).await.unwrap().ticket;
     assert_eq!((ticket.title.as_str(), ticket.priority, ticket.deadline_ms), ("Owned, renamed", TicketPriority::Low, None));
