@@ -7,6 +7,20 @@ import 'views.dart' show TaskViewState;
 // may make between columns, the words for priorities, columns and the card's
 // state, and what needs you. Derived from the generated protocol types only.
 
+/// The server has the Testing column and the company tester (ticket #5,
+/// protocol 5): only then does a client show either.
+const boardTestingFeature = 'board_testing';
+
+/// Why a hand cannot move a card into Testing or out of it, other than back to
+/// Backlog (`domain::ticket::TESTING_MOVES_BY_ITSELF`).
+const testingMovesByItself = 'Testing moves on by itself when the tests have run.';
+
+/// [board] as this client shows it: without the Testing column when the server
+/// lacks [boardTestingFeature] ([testing] false).
+BoardView boardShown(BoardView board, {required bool testing}) => testing
+    ? board
+    : BoardView(asOfSeq: board.asOfSeq, projectId: board.projectId, columns: [for (final c in board.columns) if (c.column.kind != ColumnKind.testing) c]);
+
 /// What a move between two columns does once allowed (§6).
 enum MoveKind {
   /// Within its column: only the order.
@@ -55,6 +69,10 @@ MoveRule moveRule(ColumnKind from, ColumnKind to) {
   if (from == ColumnKind.done) return to == ColumnKind.done ? const MoveRefused('Done tickets are sorted by when they closed.') : const MoveRefused('Done tickets are closed.');
   if (from == to) return const MoveAllowed(MoveKind.reorder);
   return switch ((from, to)) {
+    // The tester moves it on (ticket #5); a hand only cancels it.
+    (ColumnKind.testing, ColumnKind.backlog) => const MoveAllowed(MoveKind.cancel, confirm: 'This stops the tests and the work on the ticket.'),
+    (ColumnKind.testing, ColumnKind.done) => const MoveRefused('Only from Review.'),
+    (ColumnKind.testing, _) || (_, ColumnKind.testing) => const MoveRefused(testingMovesByItself),
     (ColumnKind.backlog, ColumnKind.todo) => const MoveAllowed(MoveKind.start),
     (ColumnKind.backlog, _) => const MoveRefused('Start first.'),
     (ColumnKind.todo, ColumnKind.backlog) => const MoveAllowed(MoveKind.cancel, confirm: 'The dispatcher stops choosing an owner.'),
@@ -91,6 +109,7 @@ extension ColumnKindView on ColumnKind {
         ColumnKind.todo => 'Dispatch',
         ColumnKind.doing => 'Work',
         ColumnKind.planReview => 'Plan gate',
+        ColumnKind.testing => 'Test gate',
         ColumnKind.review => 'Review gate',
         ColumnKind.done => 'Closed',
       };
@@ -101,6 +120,7 @@ extension ColumnKindView on ColumnKind {
         ColumnKind.todo => 'Started tickets wait here for an owner.',
         ColumnKind.doing => 'Nothing in progress.',
         ColumnKind.planReview => 'Only tickets in Plan mode stop here, with their plan.',
+        ColumnKind.testing => 'Reported tickets are tested here once before Review.',
         ColumnKind.review => 'Nothing to review.',
         ColumnKind.done => 'Closed tickets appear here.',
       };
@@ -195,6 +215,9 @@ enum TicketState {
   /// Plan review: a plan waits.
   planReview,
 
+  /// Testing: the tester runs the full test suite once (ticket #5); nothing for you.
+  testing,
+
   /// Review: a report waits.
   review,
 
@@ -217,6 +240,7 @@ TicketState ticketState(TicketView ticket, {TaskView? root, bool needsOwner = fa
       ColumnKind.doing when root != null && root.needsYou => TicketState.waitingForYou,
       ColumnKind.doing => TicketState.working,
       ColumnKind.planReview => TicketState.planReview,
+      ColumnKind.testing => TicketState.testing,
       ColumnKind.review => TicketState.review,
       ColumnKind.done => TicketState.done,
     };
@@ -230,8 +254,8 @@ extension TicketStateView on TicketState {
 
   /// The status line on a card; null where the column says enough. [login]:
   /// whose Claude login it runs on (`login_username`, "your" when it is
-  /// yours), [untilMs] when its limit resets.
-  String? line({String? owner, String? dispatcher, String? login, bool mine = false, int? untilMs, bool expired = false}) => switch (this) {
+  /// yours), [untilMs] when its limit resets, [tester] who runs the tests.
+  String? line({String? owner, String? dispatcher, String? tester, String? login, bool mine = false, int? untilMs, bool expired = false}) => switch (this) {
         TicketState.backlog => null,
         TicketState.choosing => '${dispatcher ?? 'The dispatcher'} is choosing…',
         TicketState.needsOwner => 'Choose an employee',
@@ -244,6 +268,7 @@ extension TicketStateView on TicketState {
         TicketState.waitingForLimit => limitWaitOf(mine ? 'your' : "${login ?? 'its creator'}'s", untilMs),
         TicketState.failed => 'Failed',
         TicketState.planReview => 'Plan to review',
+        TicketState.testing => '${tester ?? 'The tester'} is testing…',
         TicketState.review => 'Report to review',
         TicketState.done => 'Done',
       };
@@ -317,6 +342,11 @@ String activityText(TimelineCard card) {
     'ticket.plan_approved' => '$who approved the plan',
     'ticket.plan_revised' => '$who sent the plan back',
     'ticket.review' => 'A report was handed in',
+    'ticket.tested' => switch (card.detail) {
+        'passed' => 'Tests passed',
+        'failed' => 'Tests failed',
+        _ => 'The tests ran',
+      },
     'ticket.sent_back' => '$who sent it back to Doing',
     'ticket.accepted' => '$who marked it as Done',
     'ticket.cancelled' => '$who put it back in Backlog',

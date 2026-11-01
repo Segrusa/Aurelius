@@ -104,7 +104,7 @@ class TicketCard extends StatelessWidget {
     final action = cardAction(state);
     final deadline = deadlineOf(ticket);
     final done = state == TicketState.done;
-    final line = state.line(owner: owner, dispatcher: dispatcher, login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired);
+    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired);
 
     final summary = [
       'Ticket ${ticket.number}, ${ticket.title}',
@@ -334,7 +334,7 @@ class _StateMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => switch (state) {
-        TicketState.working => const StatusDot(pulse: true),
+        TicketState.working || TicketState.testing => const StatusDot(pulse: true),
         TicketState.choosing => Icon(CupertinoIcons.circle_lefthalf_fill, size: 12, color: Tokens.label2),
         TicketState.failed => Text('✕', style: TextStyle(color: Tokens.negative, fontWeight: FontWeight.w700)),
         TicketState.waitingForLimit || TicketState.waitsForLogin => Text('⏸', style: TextStyle(color: Tokens.label2, fontSize: 12)),

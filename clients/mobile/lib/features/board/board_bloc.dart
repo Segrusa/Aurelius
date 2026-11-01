@@ -198,7 +198,8 @@ class BoardBloc extends Bloc<BoardEvent, BoardState> {
 
   Future<void> _refresh(BoardRefreshed event, Emitter<BoardState> emit) async {
     try {
-      final board = await _repository.board(projectId: state.projectId).timeout(timeout);
+      // Testing only shows when the server has it (ticket #5).
+      final board = boardShown(await _repository.board(projectId: state.projectId).timeout(timeout), testing: _repository.linkState.has(boardTestingFeature));
       _roots = {for (final t in board.columns.expand((c) => c.tickets)) ?t.rootTaskId};
       final (gaveUp, unknown) = await _gaveUp(board);
       emit(state.copyWith(loading: false, board: board, unsupported: false, gaveUp: gaveUp, ownerUnknown: unknown));
