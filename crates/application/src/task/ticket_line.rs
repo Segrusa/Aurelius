@@ -106,6 +106,11 @@ fn column_name(tx: &Tx<'_>, kind: ColumnKind) -> Result<String, StorageError> {
 /// moved it, from → to, and what it was when it was more than a move
 /// (`what`: "started it", "approved the plan", …). One line per change.
 pub(crate) fn column_line(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>, from: ColumnKind, to: ColumnKind, what: Option<&str>) -> Result<Vec<EventNotice>, StorageError> {
+    column_line_with(tx, ticket, by, from, to, what, None)
+}
+
+/// `column_line` with the action of the decision it was (`system_action`, feature `ticket_channels`).
+pub(crate) fn column_line_with(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>, from: ColumnKind, to: ColumnKind, what: Option<&str>, action: Option<&str>) -> Result<Vec<EventNotice>, StorageError> {
     let name = crate::conversation::discussion::actor_name(tx, by)?;
     let (from_name, to_name) = (column_name(tx, from)?, column_name(tx, to)?);
     let text = match what {
@@ -114,6 +119,7 @@ pub(crate) fn column_line(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>, from
     };
     let mut line = SystemLine::new(SystemLineKind::Moved);
     (line.by, line.from, line.to) = (Some(name), Some(from_name), Some(to_name));
+    line.action = action.map(str::to_owned);
     crate::conversation::discussion::ticket_line(tx, ticket, line, &text)
 }
 
@@ -248,6 +254,7 @@ pub(crate) fn on_employee(tx: &Tx<'_>, task: TaskId, employee: Option<EmployeeId
         (line.from, line.to, line.task_id) = (Some(from.clone()), Some(to.clone()), Some(task));
         notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{from} handed the ticket over to {to}"))?);
     }
+    notices.extend(crate::conversation::ticket_channel::sync(tx, ticket, by)?);
     Ok(notices)
 }
 

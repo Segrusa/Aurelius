@@ -132,6 +132,127 @@ pub fn ticket_of_conversation(conn: &Connection, conversation: ConversationId) -
     Ok(id.and_then(|t| TicketId::parse(&t).ok()))
 }
 
+// ---- ticket channels (migration 26) ----
+
+/// The schema version whose migration makes channel members, threads and reactions.
+pub const TICKET_CHANNELS_SCHEMA: i64 = 26;
+
+/// Whether the database has channel members (schema 26 or later).
+pub fn has_members(conn: &Connection) -> Result<bool, StorageError> {
+    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channel_members')", [], |r| r.get(0))?)
+}
+
+/// Who is in a channel: a board member or an employee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Member {
+    User(UserId),
+    Employee(EmployeeId),
+}
+
+/// `member` joins the channel `conversation` (a ticket's), unless already in it.
+/// True when they joined now. Nobody is ever removed. Nothing before schema 26.
+pub fn join(tx: &Transaction<'_>, conversation: ConversationId, member: Member, at_ms: i64) -> Result<bool, StorageError> {
+    if !has_members(tx)? {
+        return Ok(false);
+    }
+    let (user, employee) = match member {
+        Member::User(u) => (Some(u.to_string()), None),
+        Member::Employee(e) => (None, Some(e.to_string())),
+    };
+    let added = tx.execute(
+        "INSERT OR IGNORE INTO channel_members(conversation_id, user_id, employee_id, joined_at_ms) VALUES (?1, ?2, ?3, ?4)",
+        params![conversation.to_string(), user, employee, at_ms],
+    )?;
+    Ok(added > 0)
+}
+
+/// The members of `conversation`, oldest first.
+pub fn members(conn: &Connection, conversation: ConversationId) -> Result<Vec<Member>, StorageError> {
+    if !has_members(conn)? {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare("SELECT user_id, employee_id FROM channel_members WHERE conversation_id = ?1 ORDER BY joined_at_ms, rowid")?;
+    let rows = stmt.query_map([conversation.to_string()], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?)))?;
+    let mut out = Vec::new();
+    for row in rows {
+        match row? {
+            (Some(u), _) => out.push(Member::User(parse(UserId::parse(&u))?)),
+            (_, Some(e)) => out.push(Member::Employee(parse(EmployeeId::parse(&e))?)),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// The Owner: the board members made in the onboarding (by nobody) who are not
+/// disabled. Board members have no roles; the one who set the server up owns it.
+pub fn owners(conn: &Connection) -> Result<Vec<UserId>, StorageError> {
+    let mut stmt = conn.prepare("SELECT id FROM users WHERE created_by_user IS NULL AND disabled_at_ms IS NULL ORDER BY created_at_ms, id")?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    Ok(rows.filter_map(|r| r.ok().and_then(|id| UserId::parse(&id).ok())).collect())
+}
+
+/// When the channel `conversation` was archived (a closed ticket's); none: open.
+pub fn archived_at(conn: &Connection, conversation: ConversationId) -> Result<Option<i64>, StorageError> {
+    Ok(conn.query_row("SELECT archived_at_ms FROM conversations WHERE id = ?1", [conversation.to_string()], |r| r.get(0)).optional()?.flatten())
+}
+
+/// Archive (`Some`) or reopen (`None`) a ticket's channel. Only a conversation
+/// of kind `ticket`: archiving another kind means deleting it.
+pub fn set_ticket_channel_archived(tx: &Transaction<'_>, conversation: ConversationId, at_ms: Option<i64>) -> Result<(), StorageError> {
+    tx.execute("UPDATE conversations SET archived_at_ms = ?2 WHERE id = ?1 AND kind = 'ticket'", params![conversation.to_string(), at_ms])?;
+    Ok(())
+}
+
+/// A ticket's channel, as `channel.list` shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TicketChannel {
+    pub conversation_id: ConversationId,
+    pub project_id: ProjectId,
+    pub ticket_id: TicketId,
+    pub number: u32,
+    pub title: String,
+    pub column: aurelius_domain::ticket::ColumnKind,
+    /// Closed (the ticket is on Done or archived): read-only.
+    pub archived: bool,
+    pub member_count: u32,
+}
+
+/// Every ticket's channel, newest ticket first.
+pub fn ticket_channels(conn: &Connection) -> Result<Vec<TicketChannel>, StorageError> {
+    let members = if has_members(conn)? { "(SELECT COUNT(*) FROM channel_members m WHERE m.conversation_id = c.id)" } else { "0" };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT c.id, t.project_id, t.id, t.number, t.title, b.kind, c.archived_at_ms IS NOT NULL OR t.archived_at_ms IS NOT NULL OR b.kind = 'done', {members}
+         FROM tickets t JOIN conversations c ON c.id = t.conversation_id JOIN board_columns b ON b.id = t.column_id
+         WHERE c.kind = 'ticket'
+         ORDER BY t.number DESC"
+    ))?;
+    let rows = stmt.query_map([], |r| {
+        Ok(TicketChannel {
+            conversation_id: parse(ConversationId::parse(&r.get::<_, String>(0)?))?,
+            project_id: parse(ProjectId::parse(&r.get::<_, String>(1)?))?,
+            ticket_id: parse(TicketId::parse(&r.get::<_, String>(2)?))?,
+            number: r.get::<_, i64>(3)? as u32,
+            title: r.get(4)?,
+            column: aurelius_domain::ticket::ColumnKind::parse(&r.get::<_, String>(5)?).unwrap_or(aurelius_domain::ticket::ColumnKind::Backlog),
+            archived: r.get(6)?,
+            member_count: r.get::<_, i64>(7)? as u32,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The highest ordinal `user` had read in `conversation`; none: never read.
+pub fn read_through(conn: &Connection, user: UserId, conversation: ConversationId) -> Result<Option<u32>, StorageError> {
+    if !has_reads(conn)? {
+        return Ok(None);
+    }
+    let through: Option<i64> = conn
+        .query_row("SELECT read_through FROM discussion_reads WHERE user_id = ?1 AND conversation_id = ?2", [user.to_string(), conversation.to_string()], |r| r.get(0))
+        .optional()?;
+    Ok(through.map(|t| t as u32))
+}
+
 // ---- the loop limits ----
 
 /// How many posts woke colleagues (`woke` in their meta), over every channel and

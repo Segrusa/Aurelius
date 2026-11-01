@@ -184,7 +184,7 @@ pub(crate) fn verdict(tx: &Tx<'_>, st: &Store, run: RunId, passed: bool, summary
     let tester = row.employee_id.map(|employee_id| Actor::Employee { employee_id });
     let tester_name = crate::conversation::discussion::actor_name(tx, tester)?;
     let mut notices = vec![ticket_event(tx, ticket, state.project_id, EventKind::TicketTested, tester, json!({ "passed": passed, "task_id": task }))?];
-    let mut line = SystemLine::new(SystemLineKind::Reported);
+    let mut line = SystemLine::new(SystemLineKind::Reported).with_action(if passed { aurelius_domain::views::system_action::TESTED_PASSED } else { aurelius_domain::views::system_action::TESTED_FAILED });
     (line.from, line.task_id) = (Some(tester_name.clone()), Some(task));
     let outcome = if passed { "the tests passed" } else { "the tests failed" };
     notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{tester_name}: {outcome} · {summary}"))?);

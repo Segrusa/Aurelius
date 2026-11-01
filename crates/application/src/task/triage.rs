@@ -248,5 +248,6 @@ pub(crate) fn assign(tx: &Tx<'_>, st: &Store, run: RunId, employee: &str, reason
     )?];
     notices.extend(ticket_line::owner_line(tx, ticket, Some(by), chosen.id, Some(&reason))?);
     notices.extend(ticket_line::dispatched(tx, ticket, chosen.id)?);
+    notices.extend(crate::conversation::ticket_channel::sync(tx, ticket, Some(by))?);
     Ok((true, format!("Assigned the ticket to {}; their main task starts now. Answer in one sentence.", chosen.name), notices))
 }

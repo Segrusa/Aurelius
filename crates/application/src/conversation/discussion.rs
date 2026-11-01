@@ -434,6 +434,11 @@ pub(crate) fn created_from(tx: &Tx<'_>, ticket: TicketId, number: u32, user: Use
     let mut notices = ticket_line(tx, ticket, first, &format!("#{number} created from a message in {label} · {by}"))?;
     let mut back = SystemLine::new(SystemLineKind::TicketCreated);
     (back.by, back.ticket_id, back.message_id) = (Some(by), Some(ticket), Some(message));
+    // The link to the ticket's channel; in General this is its one line on opening.
+    back.channel_id = of_ticket(tx, ticket)?.map(|d| d.id);
+    if general(tx)?.is_some_and(|g| g.id == conversation) {
+        back.action = Some(aurelius_domain::views::system_action::OPENED.to_owned());
+    }
     notices.push(system_line(tx, conversation, &back, None)?);
     Ok(notices)
 }
@@ -628,10 +633,14 @@ impl CommandService {
             .store
             .read(|c| match cmd.channel {
                 None => general(c),
-                Some(id) => Ok(load(c, id)?.filter(|d| d.ticket().is_none())),
+                // A ticket's channel too (feature `ticket_channels`): the same discussion as `ticket.post`.
+                Some(id) => load(c, id),
             })
             .map_err(storage_error)?
             .ok_or_else(|| AppError::new(ErrorCode::NotFound, if cmd.channel.is_some() { "This channel does not exist." } else { "The group chat does not exist." }))?;
+        if discussion.ticket().is_some() {
+            crate::ticket::require_board_member(ctx)?;
+        }
         self.send_in(ctx, envelope, hash, discussion, text, &cmd.images, &cmd.files, |d, s| CommandResult::GroupMessageSent { conversation_id: d.id, message_id: s.0, to: s.1.to, run_ids: s.1.run_ids })
     }
 
@@ -664,7 +673,7 @@ impl CommandService {
         result: impl FnOnce(&Discussion, (MessageId, Sent)) -> CommandResult + Send + 'static,
     ) -> Result<Committed, AppError> {
         if let Some(why) = discussion.read_only() {
-            return Err(AppError::new(ErrorCode::Validation, why));
+            return Err(AppError::new(ErrorCode::ChannelArchived, why));
         }
         let sources = crate::conversation::message_uploads::check(files)?;
         let images = crate::conversation::message_images::prepare(&self.store, images)?;
@@ -709,7 +718,7 @@ impl CommandService {
             // Read again inside the transaction: the ticket may have moved to Done meanwhile.
             let Some(d) = load(tx, discussion.id)? else { return Ok(Err(AppError::new(ErrorCode::NotFound, "This discussion no longer exists."))) };
             if let Some(why) = d.read_only() {
-                return Ok(Err(AppError::new(ErrorCode::Validation, why)));
+                return Ok(Err(AppError::new(ErrorCode::ChannelArchived, why)));
             }
             let correlation = command_id.to_string();
             blobs::register(tx, &text_blob)?;

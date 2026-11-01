@@ -195,10 +195,11 @@ fn the_general_channel_wakes_the_ceo_and_a_project_channel_its_dispatcher() {
     assert_eq!(answer.author.as_deref(), Some("Ann"));
     // The board member's messages carry their author.
     assert!(messages(&s, orbit).iter().filter(|m| m.role == aurelius_domain::conversation::MessageRole::User).all(|m| m.author_user.as_ref().map(|u| u.username.as_str()) == Some("grace")));
-    // A ticket's discussion is no channel.
+    // A ticket's discussion is its channel too (feature `ticket_channels`).
     let t = new_ticket(&s, "Login", None);
     let discussion = ticket_view(&s, t).conversation_id.unwrap();
-    assert_eq!(send(&s, Some(discussion), "x").unwrap_err().code, ErrorCode::NotFound);
+    send(&s, Some(discussion), "x").unwrap();
+    assert!(messages(&s, discussion).iter().any(|m| m.text == "x"));
 }
 
 fn aurelius_storage_main_chat(s: &Setup, employee: EmployeeId) -> ConversationId {
@@ -432,7 +433,8 @@ fn a_ticket_on_done_and_an_archived_projects_channel_are_read_only() {
     let (_, runs) = post(&s, t, "@Bo before").unwrap();
     engine_puts(&s, t, ColumnKind::Done);
     let err = post(&s, t, "after").unwrap_err();
-    assert_eq!(err.code, ErrorCode::Validation);
+    // A closed channel (the daemon sends `validation` to a client without `ticket_channels`).
+    assert_eq!(err.code, ErrorCode::ChannelArchived);
     assert!(err.message.contains("can only be read"), "{}", err.message);
     let (ok, text) = post_in_discussion(&s, runs[0], "after");
     assert!(!ok && text.contains("can only be read"), "{text}");
@@ -445,7 +447,7 @@ fn a_ticket_on_done_and_an_archived_projects_channel_are_read_only() {
     // Archived project: its channel can only be read.
     exec(&s, Command::SetProjectStatus(aurelius_domain::employee::SetProjectStatus { project_id: s.project, status: aurelius_domain::employee::LifecycleStatus::Archived })).unwrap();
     let orbit = channel(&s, s.project);
-    assert_eq!(send(&s, Some(orbit), "x").unwrap_err().code, ErrorCode::Validation);
+    assert_eq!(send(&s, Some(orbit), "x").unwrap_err().code, ErrorCode::ChannelArchived);
     let (ok, text) = post_in_channel(&s, runs[0], Some("Orbit"), "x");
     assert!(!ok && text.contains("archived"), "{text}");
 }
@@ -571,7 +573,7 @@ fn a_system_line_goes_into_a_discussion_on_done_but_people_cannot() {
     let s = setup();
     let t = new_ticket(&s, "Closed", None);
     engine_puts(&s, t, ColumnKind::Done);
-    assert_eq!(post(&s, t, "late").unwrap_err().code, ErrorCode::Validation);
+    assert_eq!(post(&s, t, "late").unwrap_err().code, ErrorCode::ChannelArchived);
     s.service.store().write(move |tx| discussion::ticket_line(tx, t, SystemLine::new(SystemLineKind::SummaryFailed), "The summary for project memory failed: quota. A board member can try again.")).unwrap();
     let d = ticket_view(&s, t).conversation_id.unwrap();
     assert_eq!(system_lines(&s, d).last().map(|(k, _)| *k), Some(SystemLineKind::SummaryFailed));

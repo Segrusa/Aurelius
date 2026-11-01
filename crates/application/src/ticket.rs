@@ -21,6 +21,7 @@ use aurelius_storage::{
     queries, tickets as store,
 };
 use crate::task::{plan_review, ticket_line};
+use aurelius_domain::views::system_action;
 use serde_json::{Value, json};
 
 /// Why a paused or archived employee cannot be the tester: nobody would run the tests.
@@ -37,11 +38,14 @@ struct Base {
     command_id: String,
     meta: Value,
     actor: String,
+    /// The board member of the write, as a ticket's lines name them.
+    by: Option<Actor>,
 }
 
 impl Base {
     fn of(ctx: &CommandContext, envelope: &CommandEnvelope) -> Self {
-        Self { command_id: envelope.command_id.to_string(), meta: ctx.metadata(), actor: ctx.principal_id.to_string() }
+        let by = ctx.user_id.map(|user_id| Actor::BoardMember { user_id });
+        Self { command_id: envelope.command_id.to_string(), meta: ctx.metadata(), actor: ctx.principal_id.to_string(), by }
     }
 }
 
@@ -54,6 +58,7 @@ struct Events {
     command_id: String,
     meta: Value,
     actor: String,
+    by: Option<Actor>,
     notices: Vec<EventNotice>,
 }
 
@@ -67,6 +72,7 @@ impl Events {
             command_id: base.command_id.clone(),
             meta: base.meta.clone(),
             actor: base.actor.clone(),
+            by: base.by,
             notices: Vec::new(),
         }
     }
@@ -271,7 +277,7 @@ impl CommandService {
                     store::set_feedback(tx, state.id, feedback.as_deref())?;
                     e.moved(tx, state.column, ColumnKind::Doing, by)?;
                     e.push(tx, EventKind::TicketPlanApproved, json!({ "decision": cmd.decision, "feedback": feedback.is_some(), "by": by }))?;
-                    e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("approved the plan"))?);
+                    e.line(ticket_line::column_line_with(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("approved the plan"), Some(system_action::APPROVED))?);
                     finish_then(tx, state.id, e, |tx| {
                         let mut notices = match &feedback {
                             Some(text) => feedback_note(tx, &st, state.id, user, &base, text)?,
@@ -295,7 +301,7 @@ impl CommandService {
                     store::set_feedback(tx, state.id, Some(&feedback))?;
                     e.moved(tx, state.column, ColumnKind::Doing, by)?;
                     e.push(tx, EventKind::TicketPlanRevised, json!({ "by": by }))?;
-                    e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("sent the plan back"))?);
+                    e.line(ticket_line::column_line_with(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("sent the plan back"), Some(system_action::ADJUSTED))?);
                     // B2: the feedback goes to the main task's conversation; Plan mode stays.
                     finish_then(tx, state.id, e, |tx| {
                         let mut notices = feedback_note(tx, &st, state.id, user, &base, &feedback)?;
@@ -345,7 +351,7 @@ impl CommandService {
                     store::set_feedback(tx, state.id, Some(&feedback))?;
                     e.moved(tx, state.column, ColumnKind::Doing, by)?;
                     e.push(tx, EventKind::TicketSentBack, json!({ "by": by }))?;
-                    e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("sent it back"))?);
+                    e.line(ticket_line::column_line_with(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("sent it back"), Some(system_action::SENT_BACK))?);
                     // B2: the feedback goes to the main task's conversation.
                     finish_then(tx, state.id, e, |tx| {
                         let mut notices = feedback_note(tx, &st, state.id, user, &base, &feedback)?;
@@ -521,6 +527,10 @@ impl CommandService {
             if cmd.start {
                 notices.extend(ticket_line::started(tx, &st, id, user)?);
             }
+            // Its channel opens; made from a message in General, that line there is the one.
+            let general = crate::conversation::discussion::general(tx)?.map(|d| d.id);
+            let in_general = source.as_ref().is_some_and(|(_, (conversation, _))| Some(*conversation) == general);
+            notices.extend(crate::conversation::ticket_channel::opened(tx, id, user, in_general)?);
             Ok(Ok((CommandResult::TicketCreated { ticket_id: id, number }, notices)))
         });
         self.discard_unused(&attachments, committed.as_ref().map_or(true, |c| c.receipt.replayed));
@@ -690,7 +700,7 @@ impl CommandService {
 
 /// "‹name› put it on Done" (MU2-06 AC2).
 fn done_line(tx: &Transaction<'_>, ticket: TicketId, by: Actor) -> Result<Vec<EventNotice>, StorageError> {
-    let mut line = aurelius_domain::views::SystemLine::new(aurelius_domain::views::SystemLineKind::Done);
+    let mut line = aurelius_domain::views::SystemLine::new(aurelius_domain::views::SystemLineKind::Done).with_action(system_action::APPROVED);
     line.by = Some(crate::conversation::discussion::actor_name(tx, Some(by))?);
     crate::conversation::discussion::ticket_line(tx, ticket, line, "")
 }
@@ -717,6 +727,8 @@ fn finish_then(
     store::touch(tx, id, e.version)?;
     let mut notices = e.notices;
     notices.extend(engine(tx)?);
+    // The ticket's channel follows: who joined, closed on Done, reopened off it.
+    notices.extend(crate::conversation::ticket_channel::sync(tx, id, e.by)?);
     let Some(state) = store::state(tx, id)? else { return rejected(DomainError::TicketNotFound(id)) };
     Ok(Ok((CommandResult::TicketChanged { ticket_id: id, column: state.column, version: state.version }, notices)))
 }
@@ -724,5 +736,7 @@ fn finish_then(
 /// Store the ticket's version after its events and answer where it is now.
 fn finish(tx: &Transaction<'_>, id: TicketId, column: ColumnKind, e: Events) -> TxResult<(CommandResult, Vec<EventNotice>)> {
     store::touch(tx, id, e.version)?;
-    Ok(Ok((CommandResult::TicketChanged { ticket_id: id, column, version: e.version }, e.notices)))
+    let mut notices = e.notices;
+    notices.extend(crate::conversation::ticket_channel::sync(tx, id, e.by)?);
+    Ok(Ok((CommandResult::TicketChanged { ticket_id: id, column, version: e.version }, notices)))
 }

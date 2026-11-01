@@ -64,8 +64,11 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let found = storage_task(move || {
                 store.read(|c| match channel {
                     None => aurelius_storage::conversations::group_conversation(c),
-                    // Only a channel: a ticket's discussion is read with `conversation.get`.
-                    Some(id) => Ok(aurelius_storage::discussions::channels(c)?.into_iter().find(|ch| ch.conversation_id == id).map(|ch| ch.conversation_id)),
+                    // A channel, or a ticket's (feature `ticket_channels`; also read with `conversation.get`).
+                    Some(id) => Ok(match aurelius_storage::discussions::channels(c)?.into_iter().find(|ch| ch.conversation_id == id) {
+                        Some(ch) => Some(ch.conversation_id),
+                        None => aurelius_storage::discussions::ticket_of_conversation(c, id)?.map(|_| id),
+                    }),
                 })
             })
             .await?;
@@ -778,12 +781,15 @@ _ => Err(internal("not a guideline read")),
 }
 
 /// `channel.list` and `channel.search { query }`: General, the project channels
-/// and (`ticket_channels`: the connection accepts them) the ticket channels. A
-/// query keeps the channels whose name or ticket number matches it.
+/// and (`ticket_channels`: the connection accepts them) the ticket channels,
+/// open ones first, newest ticket first. A query keeps the channels whose name or
+/// ticket number matches it. A connection without `ticket_channels` gets exactly
+/// the list of before: no ticket channels and none of the new fields.
 pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, ticket_channels: bool, query: Option<String>) -> Result<ResponseBody, ProtocolError> {
-    let _ = ticket_channels;
+    use aurelius_domain::views::{ChannelKind, ChannelView, ChannelsSnapshot, ticket_channel_name};
+    use aurelius_storage::discussions::{self, Member};
     let store = shared.store().clone();
-    storage_task(move || {
+    let snapshot = storage_task(move || {
         store.read(|c| {
             let as_of_seq = queries::last_seq(c)?;
             let read_text = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
@@ -792,21 +798,58 @@ pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domai
                 Some(user) => aurelius_storage::users::get(c, &user.to_string())?.map(|u| (user, u.username)),
                 None => None,
             };
+            let last = |id: ConversationId| c.query_row("SELECT MAX(created_at_ms) FROM messages WHERE conversation_id = ?1", [id.to_string()], |r| r.get::<_, Option<i64>>(0));
             let mut channels = Vec::new();
-            for ch in aurelius_storage::discussions::channels(c)? {
-                let last: Option<i64> = c.query_row("SELECT MAX(created_at_ms) FROM messages WHERE conversation_id = ?1", [ch.conversation_id.to_string()], |r| r.get(0))?;
-                let name = if ch.project_id.is_none() { "General".to_owned() } else { ch.name };
+            for ch in discussions::channels(c)? {
                 let (unread, mentions) = match &reader {
-                    Some((user, username)) => aurelius_storage::discussions::unread(c, *user, username, ch.conversation_id, &read_text)?,
+                    Some((user, username)) => discussions::unread(c, *user, username, ch.conversation_id, &read_text)?,
                     None => (0, 0),
                 };
-                channels.push(aurelius_domain::views::ChannelView { conversation_id: ch.conversation_id, project_id: ch.project_id, name, unread, mentions, archived: ch.read_only, last_activity_ms: last, kind: if ch.project_id.is_none() { aurelius_domain::views::ChannelKind::General } else { aurelius_domain::views::ChannelKind::Project }, ticket_id: None, ticket_number: None, ticket_column: None, member: false, member_count: None, read_through: None });
+                let kind = if ch.project_id.is_none() { ChannelKind::General } else { ChannelKind::Project };
+                let name = if ch.project_id.is_none() { "General".to_owned() } else { ch.name };
+                let read_through = match &reader {
+                    Some((user, _)) => discussions::read_through(c, *user, ch.conversation_id)?,
+                    None => None,
+                };
+                // Every board member is in General and the project channels.
+                channels.push(ChannelView {
+                    conversation_id: ch.conversation_id, project_id: ch.project_id, name, unread, mentions, archived: ch.read_only, last_activity_ms: last(ch.conversation_id)?,
+                    kind, ticket_id: None, ticket_number: None, ticket_column: None, member: reader.is_some(), member_count: None, read_through,
+                });
             }
-            Ok(aurelius_domain::views::ChannelsSnapshot { as_of_seq, channels })
+            if ticket_channels {
+                let mut tickets = discussions::ticket_channels(c)?;
+                // Open channels first; within each, the newest ticket first (as listed).
+                tickets.sort_by_key(|t| t.archived);
+                for t in tickets {
+                    let (unread, mentions, read_through, member) = match &reader {
+                        Some((user, username)) => {
+                            let (unread, mentions) = discussions::unread(c, *user, username, t.conversation_id, &read_text)?;
+                            let member = discussions::members(c, t.conversation_id)?.contains(&Member::User(*user));
+                            (unread, mentions, discussions::read_through(c, *user, t.conversation_id)?, member)
+                        }
+                        None => (0, 0, None, false),
+                    };
+                    channels.push(ChannelView {
+                        conversation_id: t.conversation_id, project_id: Some(t.project_id), name: ticket_channel_name(t.number, &t.title), unread, mentions,
+                        archived: t.archived, last_activity_ms: last(t.conversation_id)?, kind: ChannelKind::Ticket, ticket_id: Some(t.ticket_id),
+                        ticket_number: Some(t.number), ticket_column: Some(t.column), member, member_count: Some(t.member_count), read_through,
+                    });
+                }
+            }
+            Ok(ChannelsSnapshot { as_of_seq, channels })
         })
     })
-    .await
-        .map(|snapshot| ResponseBody::Channels(aurelius_domain::views::ChannelsSnapshot { channels: snapshot.channels.into_iter().filter(|ch| query.as_deref().is_none_or(|q| channel_matches(ch, q))).collect(), ..snapshot }))
+    .await?;
+    let channels = snapshot.channels.into_iter().filter(|ch| query.as_deref().is_none_or(|q| channel_matches(ch, q)));
+    let channels = if ticket_channels { channels.collect() } else { channels.map(as_before).collect() };
+    Ok(ResponseBody::Channels(ChannelsSnapshot { channels, ..snapshot }))
+}
+
+/// A channel as a connection without `ticket_channels` gets it: without the
+/// fields that feature adds, so its list is exactly the one of before.
+fn as_before(channel: aurelius_domain::views::ChannelView) -> aurelius_domain::views::ChannelView {
+    aurelius_domain::views::ChannelView { kind: Default::default(), ticket_id: None, ticket_number: None, ticket_column: None, member: false, member_count: None, read_through: None, ..channel }
 }
 
 /// Whether `query` finds `channel` (`channel.search`): `#12` or `12` its ticket
@@ -817,10 +860,10 @@ fn channel_matches(channel: &aurelius_domain::views::ChannelView, query: &str) -
         return true;
     }
     let number = query.strip_prefix('#').unwrap_or(query);
-    if let (Ok(n), Some(own)) = (number.parse::<u32>(), channel.ticket_number) {
-        if n == own {
-            return true;
-        }
+    if let (Ok(n), Some(own)) = (number.parse::<u32>(), channel.ticket_number)
+        && n == own
+    {
+        return true;
     }
     channel.name.to_lowercase().contains(&query.to_lowercase())
 }
