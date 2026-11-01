@@ -16,6 +16,8 @@ import '../connection/connection_banner.dart';
 import '../connection/connection_bloc.dart';
 import '../ideas/ideas_bloc.dart';
 import '../ideas/ideas_tab.dart';
+import '../board/board_bloc.dart';
+import '../board/board_page.dart';
 import '../board/dispatcher_row.dart';
 import '../company/company_bloc.dart';
 import '../company_org/employee_widgets.dart';
@@ -24,7 +26,7 @@ import 'project_edit.dart';
 import 'task_status_mark.dart';
 import 'tasks_tab.dart';
 
-/// A project with tabs Overview, Tasks and Ideas. Employees are company-wide;
+/// A project with tabs Overview, Board, Tasks and Ideas. Employees are company-wide;
 /// the overview shows who works here (employees with open tasks in it).
 class ProjectPage extends StatelessWidget {
   const ProjectPage({super.key, required this.projectId, this.initialTab});
@@ -32,7 +34,7 @@ class ProjectPage extends StatelessWidget {
   final String projectId;
   final String? initialTab;
 
-  static const tabs = ['overview', 'tasks', 'ideas'];
+  static const tabs = ['overview', 'board', 'tasks', 'ideas'];
 
   @override
   Widget build(BuildContext context) {
@@ -42,6 +44,15 @@ class ProjectPage extends StatelessWidget {
       providers: [
         BlocProvider(create: (context) => ProjectBloc(context.read<AureliusRepository>(), projectId)),
         BlocProvider(create: (context) => IdeasBloc(context.read<AureliusRepository>(), projectId)),
+        // This project's tickets only; read once the Board tab first shows.
+        BlocProvider(create: (context) {
+          final company = context.read<CompanyBloc>();
+          return BoardBloc(
+            context.read<AureliusRepository>(),
+            projectId: projectId,
+            ticketTask: (id) => company.state.tasks.any((t) => t.id == id && t.ticketId != null),
+          );
+        }),
       ],
       child: DefaultTabController(
         length: tabs.length,
@@ -73,6 +84,7 @@ class ProjectPage extends StatelessWidget {
                             physics: Theme.of(context).platform == TargetPlatform.iOS ? const NeverScrollableScrollPhysics() : null,
                             children: [
                               _Overview(state: state),
+                              const BoardShownWatcher(child: BoardPage(inProject: true)),
                               const TasksTab(),
                               const IdeasTab(),
                             ],
@@ -92,7 +104,7 @@ class ProjectPage extends StatelessWidget {
 class _ProjectTabs extends StatelessWidget {
   const _ProjectTabs();
 
-  static const labels = ['Overview', 'Tasks', 'Ideas'];
+  static const labels = ['Overview', 'Board', 'Tasks', 'Ideas'];
 
   @override
   Widget build(BuildContext context) {
@@ -117,6 +129,7 @@ class _ProjectTabs extends StatelessWidget {
 typedef ProjectAdd = ({String tooltip, Future<void> Function(BuildContext) add});
 
 ProjectAdd? projectAdd(int tab) => switch (ProjectPage.tabs[tab]) {
+      'board' => (tooltip: 'New ticket', add: (context) => context.push('/board/new?project=${context.read<ProjectBloc>().projectId}')),
       'tasks' => (tooltip: 'New task', add: createTask),
       'ideas' => (tooltip: 'New idea', add: addIdea),
       _ => null,
@@ -239,7 +252,7 @@ class _Overview extends StatelessWidget {
                   ),
                 ),
               ),
-            const GroupHeader('Board'),
+            GroupHeader('Board', action: 'See All', onAction: () => tab('board')),
             ProjectDispatcherRow(project: project),
             if (context.select<ConnectionBloc, bool>((b) => b.state.has('vault'))) ...[
               const SizedBox(height: 12),
