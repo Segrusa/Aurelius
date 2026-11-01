@@ -270,13 +270,15 @@ pub fn may_disable(list: &[UserView], user: &UserView) -> Result<(), &'static st
 }
 
 /// What a board member was typing on this window (R3 m1): the chat composer with
-/// its picked images and files, the ticket discussion's composer and the feedback
-/// field, each with the ticket it belongs to.
+/// its picked images and files, the drafts of the other Team chat channels
+/// (AUR-CHAT-001 R2 D-M2), the ticket discussion's composer and the feedback field,
+/// each with the ticket it belongs to.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Drafts {
     pub chat: String,
     pub images: Vec<std::path::PathBuf>,
     pub files: Vec<(std::path::PathBuf, u64)>,
+    pub channels: crate::screens::discussion::Drafts,
     pub discussion: String,
     pub discussion_for: Option<aurelius_domain::TicketId>,
     pub feedback: String,
@@ -288,13 +290,27 @@ pub struct Drafts {
 /// come back (empty for someone new). Nobody sees or sends another's draft.
 pub fn swap_drafts(kept: &mut HashMap<UserId, Drafts>, from: Option<UserId>, to: Option<UserId>, shown: Drafts) -> Drafts {
     if let Some(from) = from {
-        if shown == Drafts::default() {
+        if shown.is_empty() {
             kept.remove(&from);
         } else {
             kept.insert(from, shown);
         }
     }
     to.and_then(|to| kept.remove(&to)).unwrap_or_default()
+}
+
+impl Drafts {
+    /// Nothing typed: where the composer was does not count.
+    pub fn is_empty(&self) -> bool {
+        self.channels.is_empty() && *self == Drafts { channels: self.channels.clone(), ..Drafts::default() }
+    }
+}
+
+/// The drafts on screen leave with their board member (R2 D-M2): the channels'
+/// drafts go along, and the window keeps none of them for the next one.
+pub fn leaving(mut shown: Drafts, channels: &mut crate::screens::discussion::Drafts) -> Drafts {
+    shown.channels = std::mem::take(channels);
+    shown
 }
 
 /// The board member screens' state in a window.
@@ -449,7 +465,10 @@ impl AppView {
             // The previous board member's /usage is not this one's (R3 m2, P-37).
             self.subscription = None;
             if !first {
-                let shown = self.members.drafts_shown.take().unwrap_or_else(|| self.drafts_on_screen(cx));
+                let shown = match self.members.drafts_shown.take() {
+                    Some(shown) => shown,
+                    None => leaving(self.drafts_on_screen(cx), &mut self.drafts),
+                };
                 self.members.drafts_shown = Some(swap_drafts(&mut self.members.drafts, from, to, shown));
             }
         }
@@ -487,6 +506,8 @@ impl AppView {
             chat: self.composer.read(cx).value().to_string(),
             images: self.pending_images.clone(),
             files: self.pending_files.clone(),
+            // Taken along by `leaving`.
+            channels: Default::default(),
             discussion: self.board.composer.read(cx).value().to_string(),
             discussion_for: self.board.composer_for,
             feedback: self.board.feedback.read(cx).value().to_string(),
@@ -505,6 +526,9 @@ impl AppView {
         self.board.composer_clear = false;
         self.board.feedback.update(cx, |input, cx| input.set_value(d.feedback, window, cx));
         self.board.feedback_for = d.feedback_for;
+        // `chat` is the draft of the place the channels' drafts were left at.
+        self.drafts = d.channels;
+        self.settle_draft(window, cx);
     }
 
     /// The server ended this device's session (MU3-04 AC2, MU3-06 AC3): the sign-in
@@ -1092,7 +1116,7 @@ pub fn session_label(s: &aurelius_domain::user::SessionView, now_ms: i64) -> Str
 #[cfg(test)]
 mod tests {
     // Not `super::*`: gpui's `test` attribute would shadow the standard one.
-    use super::{SIGNED_OUT_TITLE, kept_at_the_gate, page_at_the_gate, shown_step, sign_in_refusal, swap_drafts, Drafts, Arrival, Field, Form, Gate, Step, active_count, arrival, countdown, create_ready, current_step, dropped_while_busy, gate, may_disable, password_problem, password_ready, repeat_problem, session_detail, shown_problem, sign_in_problem, signed_out_notice, username_problem};
+    use super::{SIGNED_OUT_TITLE, kept_at_the_gate, leaving, page_at_the_gate, shown_step, sign_in_refusal, swap_drafts, Drafts, Arrival, Field, Form, Gate, Step, active_count, arrival, countdown, create_ready, current_step, dropped_while_busy, gate, may_disable, password_problem, password_ready, repeat_problem, session_detail, shown_problem, sign_in_problem, signed_out_notice, username_problem};
     use crate::backend::{MemberFailure, MemberField};
     use aurelius_domain::user::{SessionView, SignOutReason, UserView, WhoAmI};
     use aurelius_domain::{SessionId, UserId};
@@ -1311,5 +1335,34 @@ mod tests {
         let shown = swap_drafts(&mut kept, Some(alex), Some(robin), Drafts::default());
         assert_eq!(shown, robins);
         assert!(kept.is_empty(), "an emptied draft is not kept");
+    }
+
+    /// AUR-CHAT-001 R2 D-M2: Alex typed in #3 and went to #general; Robin signs in on this
+    /// window and opens #3: empty. Alex comes back and finds the draft in #3 again.
+    #[test]
+    fn another_board_member_never_gets_a_channel_draft_of_the_one_before() {
+        use crate::screens::discussion::{DraftPlace, Drafts as Channels};
+        let (alex, robin) = (UserId::new(), UserId::new());
+        let (general, three) = (DraftPlace::Channel(None), DraftPlace::Channel(Some(aurelius_domain::ConversationId::new())));
+        let mut kept = std::collections::HashMap::new();
+        // The window's channel drafts, as AppView holds them.
+        let mut on_screen = Channels::default();
+        on_screen.moved(three, "");
+        assert_eq!(on_screen.moved(general, "alex: half a thought for #3"), Some(String::new()));
+        // Alex signs out: the sign-in shows, the drafts wait for Alex.
+        let shown = swap_drafts(&mut kept, Some(alex), None, leaving(Drafts::default(), &mut on_screen));
+        assert!(shown.is_empty());
+        // Robin signs in and opens #3.
+        let mut shown = swap_drafts(&mut kept, None, Some(robin), leaving(shown, &mut on_screen));
+        on_screen = std::mem::take(&mut shown.channels);
+        on_screen.moved(general, &shown.chat);
+        assert_eq!(on_screen.moved(three, "").as_deref(), Some(""), "Robin starts empty in #3");
+        // Robin signs out without typing, Alex is back: the #3 draft is Alex's again.
+        let shown = swap_drafts(&mut kept, Some(robin), None, leaving(Drafts::default(), &mut on_screen));
+        let mut shown = swap_drafts(&mut kept, None, Some(alex), leaving(shown, &mut on_screen));
+        assert_eq!(shown.chat, "", "Alex was in #general");
+        on_screen = std::mem::take(&mut shown.channels);
+        assert_eq!(on_screen.moved(three, &shown.chat).as_deref(), Some("alex: half a thought for #3"), "Alex finds the #3 draft again");
+        assert!(kept.is_empty(), "Robin left nothing, Alex took theirs back");
     }
 }
