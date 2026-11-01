@@ -170,13 +170,11 @@ List<ChannelRow> channelRows(List<MessageView> messages, {int? readThrough, Stri
   return rows;
 }
 
-/// Variation selector 15: the glyph before it is drawn as text, never as a
-/// colour emoji (↩ ▶ ⚠ ⏸ have both forms).
-const textPresentation = '\uFE0E';
-
 /// The shape before a system line's text (§2), so colour is never the only
 /// signal, and whether it tells of a failure (NEGATIVE). By `action` when the
-/// server sends one, else by `kind` (§8 O-4).
+/// server sends one, else by `kind` (§8 O-4). Every shape is a glyph without
+/// an emoji form (↶ ► ! ‖, not ↩ ▶ ⚠ ⏸): the fallback colour emoji font
+/// ignores U+FE0E, so only such a glyph stays monochrome like → ✓ ◆.
 ({String shape, bool negative}) systemLineShape(SystemLine line, String text) {
   switch (line.action) {
     case 'opened' || 'joined':
@@ -188,18 +186,18 @@ const textPresentation = '\uFE0E';
     case 'approved' || 'tested_passed':
       return (shape: '✓', negative: false);
     case 'adjusted' || 'sent_back':
-      return (shape: '↩$textPresentation', negative: false);
+      return (shape: '↶', negative: false);
     case 'tested_failed':
       return (shape: '✕', negative: true);
   }
   return switch (line.kind) {
     SystemLineKind.moved || SystemLineKind.done || SystemLineKind.delegated || SystemLineKind.createdFrom || SystemLineKind.ticketCreated => (shape: '→', negative: false),
     // A run result: the text says reported or failed (§8 O-4).
-    SystemLineKind.reported => _failed(text) ? (shape: '✕', negative: true) : (shape: '▶$textPresentation', negative: false),
+    SystemLineKind.reported => _failed(text) ? (shape: '✕', negative: true) : (shape: '►', negative: false),
     SystemLineKind.plan || SystemLineKind.review => (shape: '◆', negative: false),
     SystemLineKind.summary => (shape: '✓', negative: false),
-    SystemLineKind.summaryFailed => (shape: '⚠$textPresentation', negative: true),
-    SystemLineKind.limit => (shape: '⏸$textPresentation', negative: false),
+    SystemLineKind.summaryFailed => (shape: '!', negative: true),
+    SystemLineKind.limit => (shape: '‖', negative: false),
   };
 }
 
