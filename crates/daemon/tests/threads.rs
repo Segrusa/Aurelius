@@ -201,7 +201,11 @@ async fn an_employee_named_in_a_reply_answers_in_that_thread() {
     let answer = answer.expect("Ann answered in the thread");
     assert_eq!(answer.thread_parent, Some(root));
     let list = channel_messages(&mut alex, channel).await;
-    assert!(list.iter().all(|m| m.author.as_deref() != Some("Ann")), "not in the channel's own list");
+    assert!(list.iter().all(|m| m.id != answer.id), "the thread's answer is not in the channel's own list");
+    assert!(list.iter().all(|m| m.thread_parent.is_none()), "no reply is in the channel's own list");
+    // The root names nobody, so B3 wakes Ann (the only employee) for it too: that answer is the
+    // channel's, and the only one of hers there.
+    assert!(list.iter().filter(|m| m.author.as_deref() == Some("Ann")).count() <= 1, "only her answer to the root");
     assert_eq!(list.iter().find(|m| m.id == root).unwrap().thread_reply_count, Some(2));
 
     drop(client);
