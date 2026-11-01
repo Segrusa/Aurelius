@@ -202,8 +202,8 @@ void main() {
       expect(shape(SystemLineKind.ticketCreated, action: 'opened').shape, '+');
       expect(shape(SystemLineKind.moved, action: 'reopened').shape, '↺');
       expect(shape(SystemLineKind.plan, action: 'approved').shape, '✓');
-      expect(shape(SystemLineKind.plan, action: 'adjusted').shape, '↩');
-      expect(shape(SystemLineKind.review, action: 'sent_back').shape, '↩');
+      expect(shape(SystemLineKind.plan, action: 'adjusted').shape, '↩\uFE0E');
+      expect(shape(SystemLineKind.review, action: 'sent_back').shape, '↩\uFE0E');
       expect(shape(SystemLineKind.moved, action: 'tested_passed'), (shape: '✓', negative: false));
       expect(shape(SystemLineKind.moved, action: 'tested_failed'), (shape: '✕', negative: true));
     });
@@ -212,11 +212,17 @@ void main() {
       expect(shape(SystemLineKind.moved).shape, '→');
       expect(shape(SystemLineKind.done).shape, '→');
       expect(shape(SystemLineKind.moved, action: 'something_new').shape, '→');
-      expect(shape(SystemLineKind.summaryFailed), (shape: '⚠', negative: true));
+      expect(shape(SystemLineKind.summaryFailed), (shape: '⚠\uFE0E', negative: true));
+    });
+
+    test('a glyph that also has a colour emoji form is drawn as text', () {
+      for (final s in [shape(SystemLineKind.plan, action: 'adjusted'), shape(SystemLineKind.reported, text: 'Forge reported'), shape(SystemLineKind.summaryFailed), shape(SystemLineKind.limit)]) {
+        expect(s.shape, endsWith('\uFE0E'), reason: s.shape);
+      }
     });
 
     test('a reported run result is a run line, and a failed one is negative', () {
-      expect(shape(SystemLineKind.reported, text: 'Forge reported on task 12'), (shape: '▶', negative: false));
+      expect(shape(SystemLineKind.reported, text: 'Forge reported on task 12'), (shape: '▶\uFE0E', negative: false));
       expect(shape(SystemLineKind.reported, text: 'Forge failed task 12'), (shape: '✕', negative: true));
     });
 
