@@ -295,6 +295,12 @@ pub mod feature {
     /// `guideline_too_large` (`AppError::too_large`) and `guideline_title_taken`;
     /// context items with section `guideline`.
     pub const GUIDELINES: &str = "guidelines";
+    /// The server's name (protocol 5, additive; docs/product/servernaam): the
+    /// read `server.get_name`, the write `server.set_name` (board members only;
+    /// never apps; remote: owner) and the event `server.renamed`, only to
+    /// connections whose `HelloParams::accepts` names `server_name`. The hello's
+    /// `host_name`, the pairing text and the pairing poll give the chosen name.
+    pub const SERVER_NAME: &str = "server_name";
 }
 
 /// Every feature this build has.
@@ -325,6 +331,7 @@ pub const FEATURES: &[&str] = &[
     feature::VAULT,
     feature::GUIDELINES,
     feature::BOARD_TESTING,
+    feature::SERVER_NAME,
 ];
 
 /// Daemon → client.
@@ -452,6 +459,8 @@ pub enum ResponseBody {
     StarterSet(aurelius_domain::guideline::StarterSet),
     /// `run.guidelines`.
     RunGuidelines(aurelius_domain::guideline::RunGuidelines),
+    /// `server.get_name`.
+    ServerName(aurelius_domain::server::ServerNameView),
     ProjectConversations(ProjectConversationsSnapshot),
     Approvals(ApprovalsSnapshot),
     Connections(ProvidersSnapshot),

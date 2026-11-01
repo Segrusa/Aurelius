@@ -211,6 +211,10 @@ event_kinds! {
     GuidelineProposed => "guideline.proposed",
     // A board member decided; `metadata` a `guideline::GuidelineProposalDecidedMeta`.
     GuidelineProposalDecided => "guideline.proposal_decided",
+    // The server's name changed (feature `server_name`); the aggregate is the server
+    // (`server`). `metadata`: `by`, `before` and `after` (the shown names) and `chosen`
+    // (none: the computer's name). Clients read `server.get_name` again.
+    ServerRenamed => "server.renamed",
 }
 
 impl EventKind {

@@ -1770,6 +1770,10 @@ sealed class Command {
         return CommandSetRunDefaults(value: SetRunDefaults.fromJson(json as Map<String, dynamic>));
       case 'set_screen_allowed':
         return CommandSetScreenAllowed(value: SetScreenAllowed.fromJson(json as Map<String, dynamic>));
+      case 'set_server_name':
+        return CommandSetServerName(
+          name: (json['name'] as String),
+        );
       case 'set_task_schedule_paused':
         return CommandSetTaskSchedulePaused(value: SetTaskSchedulePaused.fromJson(json as Map<String, dynamic>));
       case 'share_message':
@@ -2985,6 +2989,23 @@ final class CommandSetScreenAllowed extends Command {
     };
 }
 
+/// Choose the server's name (`server.set_name`). Empty or only spaces puts the
+/// computer's name back. The same name as now changes nothing (no event).
+/// Answers `ServerNameSet`.
+final class CommandSetServerName extends Command {
+  const CommandSetServerName({
+    required this.name,
+  });
+
+  final String name;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'set_server_name',
+      'name': name,
+    };
+}
+
 final class CommandSetTaskSchedulePaused extends Command {
   const CommandSetTaskSchedulePaused({
     required this.value,
@@ -3507,6 +3528,11 @@ sealed class CommandResult {
         return CommandResultScreenAllowedSet(
           allowed: (json['allowed'] as bool),
           conversationId: (json['conversation_id'] as String),
+        );
+      case 'server_name_set':
+        return CommandResultServerNameSet(
+          name: (json['name'] as String),
+          version: (json['version'] as num).toInt(),
         );
       case 'share_revoked':
         return CommandResultShareRevoked(
@@ -4375,6 +4401,25 @@ final class CommandResultScreenAllowedSet extends CommandResult {
       'type': 'screen_allowed_set',
       'allowed': allowed,
       'conversation_id': conversationId,
+    };
+}
+
+/// `server.set_name`: the name clients show now and its version (unchanged
+/// when the name was the same).
+final class CommandResultServerNameSet extends CommandResult {
+  const CommandResultServerNameSet({
+    required this.name,
+    required this.version,
+  });
+
+  final String name;
+  final int version;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'server_name_set',
+      'name': name,
+      'version': version,
     };
 }
 
@@ -6074,6 +6119,7 @@ enum EventKind {
   runStarted('run.started'),
   runUsageReported('run.usage_reported'),
   runWaiting('run.waiting'),
+  serverRenamed('server.renamed'),
   settingsFollowOrgChart('settings.follow_org_chart'),
   shareGranted('share.granted'),
   shareRevoked('share.revoked'),
@@ -10998,6 +11044,8 @@ sealed class Method {
         }
       case 'server.get_health':
         return const MethodServerGetHealth();
+      case 'server.get_name':
+        return const MethodServerGetName();
       case 'session.hello':
         return MethodSessionHello(params: HelloParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'session.list':
@@ -12156,6 +12204,16 @@ final class MethodServerGetHealth extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'server.get_health',
+    };
+}
+
+/// The server's name, its source and the computer's name (feature `server_name`).
+final class MethodServerGetName extends Method {
+  const MethodServerGetName();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'server.get_name',
     };
 }
 
@@ -14306,6 +14364,8 @@ sealed class ResponseBody {
           jpegBase64: (src['jpeg_base64'] as String),
         );
         }
+      case 'server_name':
+        return ResponseBodyServerName(value: ServerNameView.fromJson(json['value'] as Map<String, dynamic>));
       case 'sessions':
         return ResponseBodySessions(value: SessionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'shares':
@@ -15285,6 +15345,21 @@ final class ResponseBodyScreenshot extends ResponseBody {
       'id': id,
       'jpeg_base64': jpegBase64,
     },
+    };
+}
+
+/// `server.get_name`.
+final class ResponseBodyServerName extends ResponseBody {
+  const ResponseBodyServerName({
+    required this.value,
+  });
+
+  final ServerNameView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'server_name',
+      'value': value.toJson(),
     };
 }
 
@@ -16420,6 +16495,40 @@ final class ServerMessageTerminalOutput extends ServerMessage {
       'type': 'terminal_output',
       ...value.toJson(),
     };
+}
+
+/// `server.get_name`: the name clients show, and where it comes from.
+final class ServerNameView {
+  const ServerNameView({
+    this.chosen,
+    required this.computerName,
+    required this.name,
+    required this.version,
+  });
+
+  /// The name a board member chose; none: the computer's name is used.
+  final String? chosen;
+  /// The computer's name, the default ("Default: ‹computer_name›").
+  final String computerName;
+  /// What clients show: the chosen name, else the computer's name. The same
+  /// as `HelloResult::host_name`.
+  final String name;
+  /// Counts the changes; 0 before the first one.
+  final int version;
+
+  factory ServerNameView.fromJson(Map<String, dynamic> json) => ServerNameView(
+    chosen: (json['chosen'] == null ? null : (json['chosen'] as String)),
+    computerName: (json['computer_name'] as String),
+    name: (json['name'] as String),
+    version: (json['version'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (chosen != null) 'chosen': chosen,
+    'computer_name': computerName,
+    'name': name,
+    'version': version,
+  };
 }
 
 /// One signed-in device of a board member (`session.list`).

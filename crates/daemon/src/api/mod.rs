@@ -291,6 +291,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
     // The hello said this client merges tool-use changes in live updates.
     let mut activity_changes = false;
     let mut team_channels = false;
+    let mut server_name_events = false;
     // The tries of `user.login` on this connection, and its new board members (S5-3).
     let mut attempts = users::Attempts::default();
     let mut creates = users::Attempts::default();
@@ -361,8 +362,15 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             Call::Read(Method::SessionHello(params)) => {
                 activity_changes = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::ACTIVITY_CHANGES);
                 team_channels = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::TEAM_CHANNELS);
+                server_name_events = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::SERVER_NAME);
                 match authenticate(&shared, &mut peer, params.app_key).await {
-                    Ok(()) => users::hello_session(&shared, &mut peer, &end_tx, params.session_token).await.map(|who| ResponseBody::Hello(hello(&shared, &peer, who))),
+                    Ok(()) => match users::hello_session(&shared, &mut peer, &end_tx, params.session_token).await {
+                        Ok(who) => {
+                            let host_name = server_name(&shared).await.name;
+                            Ok(ResponseBody::Hello(hello(&shared, &peer, who, host_name)))
+                        }
+                        Err(err) => Err(err),
+                    },
                     Err(err) => Err(err),
                 }
             }
@@ -376,7 +384,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             // The password is checked again and counted like a sign-in (E9).
             Call::Read(Method::VaultKeyExport(params)) => vault::key_export(&shared, &peer, &mut attempts, params).await,
             Call::Read(method @ (Method::VaultList { .. } | Method::VaultReveal { .. } | Method::VaultAudit { .. })) => vault::read(&shared, &peer, method).await,
-            Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, activity_changes, team_channels, out_tx.clone()).await {
+            Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, activity_changes, team_channels, server_name_events, out_tx.clone()).await {
                 Ok((body, task)) => {
                     if let Some(old) = forwarder.replace(task) {
                         old.abort();
@@ -550,13 +558,21 @@ fn while_changing_password(call: &Call, me: Option<aurelius_domain::UserId>) -> 
     }
 }
 
-fn hello(shared: &Arc<Shared>, peer: &Peer, who: users::HelloWho) -> HelloResult {
+/// The server's name as clients see it (SN-01): the chosen one, else the computer's.
+pub(super) async fn server_name(shared: &Arc<Shared>) -> aurelius_domain::server::ServerNameView {
+    let store = shared.store().clone();
+    tokio::task::spawn_blocking(move || aurelius_host::server_name(&store))
+        .await
+        .unwrap_or_else(|_| aurelius_domain::server::ServerNameView::of(None, aurelius_host::host_name(), 0))
+}
+
+fn hello(shared: &Arc<Shared>, peer: &Peer, who: users::HelloWho, host_name: String) -> HelloResult {
     HelloResult {
         host_id: shared.host_id,
         daemon_version: VERSION.into(),
         protocol: PROTOCOL_MAJOR,
         environment: aurelius_host::Environment::current().as_str().into(),
-        host_name: aurelius_host::host_name(),
+        host_name,
         os: std::env::consts::OS.into(),
         remote: peer.remote.is_some() || peer.origin == Origin::Remote,
         client_id: peer.remote.as_ref().map(|_| peer.client_id),

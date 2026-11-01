@@ -72,6 +72,23 @@ class AureliusRepository {
     return (receipt.result as WriteResultHost).value;
   }
 
+  /// The server's name, its source and the computer's name (`server.get_name`).
+  /// Only ask when the link has the feature `server_name` (SN-02 AC4).
+  Future<ServerNameView> serverName() => connection.refreshServerName();
+
+  /// Every `server.get_name` answer, the reads after `server.renamed` too.
+  Stream<ServerNameView> get serverNameChanges => connection.serverNames;
+
+  /// Rename the server (`server.set_name`); empty or only spaces brings the
+  /// computer's name back. Returns the name clients show now. Never resent
+  /// after a reconnect: the board member sees the outcome in the dialog.
+  Future<CommandResultServerNameSet> setServerName(String name) async {
+    final receipt = await connection.write(serverSetName(name: name), retry: false);
+    final set = (receipt.result as WriteResultCommand).value as CommandResultServerNameSet;
+    await connection.applyServerName(set.name);
+    return set;
+  }
+
   /// The board members, oldest first, disabled ones too.
   Future<List<UserView>> boardMembers() async => (await _ask<ResponseBodyUsers>(userList())).value.users;
 

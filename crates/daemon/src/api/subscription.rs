@@ -3,7 +3,7 @@
 
 use super::storage_task;
 use crate::Shared;
-use aurelius_domain::MessageId;
+use aurelius_domain::{EventKind, MessageId};
 use aurelius_protocol::{ActivityView, ErrorCode, Event, LoadSnapshot, PowerState, ProtocolError, ResponseBody, ServerMessage, StreamDelta};
 use aurelius_storage::{Store, queries};
 use std::collections::HashMap;
@@ -16,12 +16,15 @@ const REPLAY_PAGE: u32 = 500;
 /// A lagging subscriber re-reads from the DB instead of skipping events.
 /// With `activity_changes` live updates carry only new or changed tool calls.
 /// Without `team_channels` the events and streamed text of project channels are
-/// left out: an older client would show them in its one Team chat.
+/// left out: an older client would show them in its one Team chat. Without
+/// `server_name` the `server.renamed` events are: an older client cannot read
+/// an event kind it does not know.
 pub(super) async fn subscribe(
     shared: &Arc<Shared>,
     after_seq: u64,
     activity_changes: bool,
     team_channels: bool,
+    server_name: bool,
     out: mpsc::Sender<ServerMessage>,
 ) -> Result<(ResponseBody, tokio::task::JoinHandle<()>), ProtocolError> {
     // Subscribe before replaying so nothing committed in between is missed.
@@ -29,7 +32,7 @@ pub(super) async fn subscribe(
     let mut streams = shared.streams.subscribe();
     let mut loads = Some(shared.admission.changes());
     let mut powers = Some(shared.power.changes());
-    let mut hidden = Hidden::new(team_channels);
+    let mut hidden = Hidden::new(team_channels, server_name);
     let mut cursor = replay(shared, after_seq, &out, &mut hidden).await?;
     let replayed_through_seq = cursor;
     let shared = shared.clone();
@@ -91,7 +94,7 @@ pub(super) async fn subscribe(
                         }
                     }
                     cursor = notice.seq;
-                    if hidden.hides(shared.store(), &notice.aggregate_id).await {
+                    if hidden.hides_kind(notice.kind) || hidden.hides(shared.store(), &notice.aggregate_id).await {
                         continue;
                     }
                     let event = Event::from(notice);
@@ -121,14 +124,22 @@ pub(super) async fn subscribe(
 /// (`client_feature::TEAM_CHANNELS`). A conversation never becomes or stops
 /// being a project channel, so each id is looked up once, off the async
 /// threads (`storage_task`): the forwarder never blocks a tokio worker on SQLite.
+/// Nor does a connection without `server_name` get `server.renamed`
+/// (`client_feature::SERVER_NAME`, SN-02 AC3).
 struct Hidden {
     team_channels: bool,
+    server_name: bool,
     known: HashMap<String, bool>,
 }
 
 impl Hidden {
-    fn new(team_channels: bool) -> Self {
-        Hidden { team_channels, known: HashMap::new() }
+    fn new(team_channels: bool, server_name: bool) -> Self {
+        Hidden { team_channels, server_name, known: HashMap::new() }
+    }
+
+    /// Event kinds this connection's client does not know.
+    fn hides_kind(&self, kind: EventKind) -> bool {
+        kind == EventKind::ServerRenamed && !self.server_name
     }
 
     async fn hides(&mut self, store: &Arc<Store>, aggregate_id: &str) -> bool {
@@ -224,7 +235,7 @@ async fn replay(shared: &Arc<Shared>, mut cursor: u64, out: &mpsc::Sender<Server
         let done = page.len() < REPLAY_PAGE as usize;
         for notice in page {
             cursor = notice.seq;
-            if hidden.hides(shared.store(), &notice.aggregate_id).await {
+            if hidden.hides_kind(notice.kind) || hidden.hides(shared.store(), &notice.aggregate_id).await {
                 continue;
             }
             out.send(ServerMessage::Event(Event::from(notice)))
@@ -261,11 +272,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Arc::new(Store::open(dir.path()).unwrap());
         let general = store.read(aurelius_storage::conversations::group_conversation).unwrap().expect("the general channel").to_string();
-        let mut hidden = Hidden::new(false);
+        let mut hidden = Hidden::new(false, false);
         assert!(!hidden.hides(&store, &general).await, "the general channel is not hidden");
         assert!(!hidden.hides(&store, &ConversationId::new().to_string()).await);
         assert_eq!(hidden.known.len(), 2, "each id looked up once");
-        assert!(!Hidden::new(true).hides(&store, &general).await);
+        assert!(!Hidden::new(true, false).hides(&store, &general).await);
+    }
+
+    #[test]
+    fn only_a_client_that_accepts_server_name_gets_server_renamed() {
+        assert!(Hidden::new(true, false).hides_kind(EventKind::ServerRenamed));
+        assert!(!Hidden::new(false, true).hides_kind(EventKind::ServerRenamed));
+        assert!(!Hidden::new(false, false).hides_kind(EventKind::TaskCreated));
     }
 
     #[test]

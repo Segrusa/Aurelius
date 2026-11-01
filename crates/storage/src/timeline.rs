@@ -47,7 +47,7 @@ const MEANINGFUL: &[&str] = &[
 ];
 
 fn is_meaningful(event_type: &str) -> bool {
-    MEANINGFUL.contains(&event_type) || event_type == "user.disabled"
+    MEANINGFUL.contains(&event_type) || event_type == "user.disabled" || event_type == "server.renamed"
 }
 
 /// Account writes recorded as `host.write` that belong in the timeline (MU3-04 AC4).
@@ -201,6 +201,11 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
         "user.disabled" => {
             let by = board_member(conn, &m["by"]);
             ("decision", "ACCOUNT", format!("{by} disabled {}", s(&m["subject"])), "Their sessions were signed out".into(), by)
+        }
+        // SN-01 AC7: who, the old and the new name (the time is the card's).
+        "server.renamed" => {
+            let by = board_member(conn, &m["by"]);
+            ("decision", "SERVER", format!("{by} renamed the server to “{}”", s(&m["after"])), format!("It was “{}”", s(&m["before"])), by)
         }
         other => ("activity", "ACTIVITY", other.to_string(), row.aggregate_type.clone(), row.actor_kind.clone()),
     };

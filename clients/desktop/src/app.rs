@@ -932,6 +932,9 @@ pub struct AppView {
     pub board: crate::screens::board::Board,
     pub adding_server: bool,
     pub server_input: Entity<InputState>,
+    /// Settings → Server & PC: the server's name and its field (feature `server_name`).
+    pub server_name: crate::screens::server_name::ServerName,
+    pub server_name_input: Entity<InputState>,
     /// The folder browser's typed path (Ctrl+L) and new folder name.
     pub folder_path_input: Entity<InputState>,
     pub folder_name_input: Entity<InputState>,
@@ -1258,6 +1261,7 @@ impl AppView {
         let servers = data_root.as_deref().map(aurelius_client::servers::Servers::load).unwrap_or_default();
         let backend = backend::start(target, backend::Tokens::os(pin_server.clone()));
         let server_input = cx.new(|cx| InputState::new(window, cx).placeholder("Paste the pairing text (aurelius-pair:…)"));
+        let server_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("The server's name, for example Office"));
         let palette_input = cx.new(|cx| InputState::new(window, cx).placeholder("Search a project, employee or command…"));
         let folder_path_input = cx.new(|cx| InputState::new(window, cx).placeholder("Type or paste a folder path"));
         let folder_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("Name of the new folder"));
@@ -1451,6 +1455,8 @@ impl AppView {
             remote_host,
             adding_server: false,
             server_input,
+            server_name: Default::default(),
+            server_name_input,
             folder_path_input,
             folder_name_input,
             pairing_wait: None,
@@ -1661,6 +1667,8 @@ impl AppView {
                     }
                     // Guideline proposals wait in the Inbox (B5), also off the Guidelines tab; the rest reads again as it shows.
                     self.guidelines_changed();
+                    // The hello's name goes to servers.json; Settings reads where it comes from.
+                    self.server_name_online(cx);
                 }
             }
             Update::DirListing(listing) => self.apply_dir_listing(listing),
@@ -1728,6 +1736,7 @@ impl AppView {
             Update::Board(update) => self.apply_board(update, cx),
             Update::Vault(update) => self.apply_vault(update, cx),
             Update::Guidelines(update) => self.apply_guidelines(update, cx),
+            Update::ServerName(update) => self.apply_server_name(update, cx),
             Update::LooksLikeSecret(hold) => self.apply_secret_hold(hold, cx),
             Update::BoardMembers(list) => {
                 self.members.list = list;
@@ -2211,6 +2220,7 @@ impl AppView {
         self.claude_reset();
         self.vault_reset();
         self.guidelines_reset();
+        self.server_name_reset();
         cx.notify();
     }
 
@@ -4679,6 +4689,7 @@ impl AppView {
         self.settings_tab = tab;
         self.settings_selected = 0;
         self.adding_connection = false;
+        self.server_name.editing = false;
         match tab {
             1 => {
                 self.login_start = aurelius_host::startup::enabled();
@@ -4686,6 +4697,10 @@ impl AppView {
             }
             crate::screens::overlays::SERVER_PC_TAB => {
                 let _ = self.requests.send(backend::Request::CheckUpdate(false));
+                // Its name may have changed while the event could not arrive (only servers that have it).
+                if matches!(&self.connection, Connection::Online { server, .. } if server.server_name) {
+                    let _ = self.requests.send(backend::Request::ServerName(backend::ServerNameCall::Load));
+                }
             }
             crate::screens::trace::TRACE_TAB => self.enter_trace_tab(),
             crate::screens::schedules::SCHEDULES_TAB => {}
@@ -6256,6 +6271,7 @@ impl AppView {
             Overlay::None if self.screen == Page::Inbox => self.decide_selected(true, window, cx),
             Overlay::PlanApproval(_) => self.decide_plan(aurelius_domain::approval::PlanDecision::Approve, window, cx),
             Overlay::None if self.screen == Page::Settings && self.adding_server => self.servers_submit(window, cx),
+            Overlay::None if self.screen == Page::Settings && self.server_name.editing => self.server_name_save(cx),
             Overlay::None if self.screen == Page::Settings && self.entering_key => self.save_key(window, cx),
             Overlay::Confirm(kind) => {
                 let request = match kind {
@@ -6509,6 +6525,9 @@ impl AppView {
             // Closing the dialog ends Claude's sign-in on the server too.
             self.claude_cancel(cx);
             self.focus.focus(window, cx);
+            return;
+        }
+        if self.overlay == Overlay::None && self.screen == Page::Settings && self.server_name_cancel(window, cx) {
             return;
         }
         if self.overlay == Overlay::None && self.screen == Page::Settings && self.adding_server {
@@ -7064,6 +7083,11 @@ impl Render for AppView {
                         Some(u) if !u.enabled => this.notify_user(u.reason.unwrap_or_default(), false, cx),
                         _ => this.notify_user("No newer server version available.", false, cx),
                     }
+                }
+            }))
+            .on_action(cx.listener(|this, _: &SettingsRenameServer, w, cx| {
+                if this.settings_tab == crate::screens::overlays::SERVER_PC_TAB {
+                    this.server_name_edit(w, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &SettingsRestartServer, w, cx| {

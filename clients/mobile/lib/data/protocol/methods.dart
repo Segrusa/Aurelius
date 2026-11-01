@@ -327,7 +327,13 @@ abstract final class Methods {
   static const String screenshotGet = 'screenshot.get';
   static const String secretSet = 'secret.set';
   static const String serverGetHealth = 'server.get_health';
+  /// The server's name, its source and the computer's name (feature `server_name`).
+  static const String serverGetName = 'server.get_name';
   static const String serverRestart = 'server.restart';
+  /// Choose the server's name (`server.set_name`). Empty or only spaces puts the
+  /// computer's name back. The same name as now changes nothing (no event).
+  /// Answers `ServerNameSet`.
+  static const String serverSetName = 'server.set_name';
   /// The first request of a session: who is calling. The protocol major in
   /// every request must equal the server's, else the answer is a hard error.
   static const String sessionHello = 'session.hello';
@@ -996,6 +1002,11 @@ Map<String, dynamic> screenshotGet({required String id}) => <String, dynamic>{
 
 Map<String, dynamic> serverGetHealth() => <String, dynamic>{
   'method': Methods.serverGetHealth,
+};
+
+/// The server's name, its source and the computer's name (feature `server_name`).
+Map<String, dynamic> serverGetName() => <String, dynamic>{
+  'method': Methods.serverGetName,
 };
 
 /// The first request of a session: who is calling. The protocol major in
@@ -2163,6 +2174,16 @@ Map<String, dynamic> recurringTaskUpdate(UpdateTaskSchedule params) => <String, 
 Map<String, dynamic> runStop(StopRun params) => <String, dynamic>{
   'method': Methods.runStop,
   'params': params.toJson(),
+};
+
+/// Choose the server's name (`server.set_name`). Empty or only spaces puts the
+/// computer's name back. The same name as now changes nothing (no event).
+/// Answers `ServerNameSet`.
+Map<String, dynamic> serverSetName({required String name}) => <String, dynamic>{
+  'method': Methods.serverSetName,
+  'params': <String, dynamic>{
+    'name': name,
+  },
 };
 
 Map<String, dynamic> shareCreate(ShareMessage params) => <String, dynamic>{

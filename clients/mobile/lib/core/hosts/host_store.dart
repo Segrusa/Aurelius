@@ -15,6 +15,10 @@ abstract class HostStore {
   Future<String?> secret(String hostId);
   Future<void> remove(String hostId);
 
+  /// Keep [name] as [hostId]'s name (SN-02 AC2); nothing when that host is
+  /// not paired here or already has it.
+  Future<void> rename(String hostId, String name);
+
   /// The sign-in session's token for [hostId] (`user.login`, protocol 5),
   /// given in every hello. Only in the Keychain / Keystore (S8).
   Future<String?> sessionToken(String hostId);
@@ -89,6 +93,13 @@ class DeviceHostStore implements HostStore {
   }
 
   @override
+  Future<void> rename(String hostId, String name) async {
+    final all = await hosts();
+    if (!all.any((h) => h.hostId == hostId && h.name != name)) return;
+    await _write([for (final h in all) h.hostId == hostId ? h.withName(name) : h]);
+  }
+
+  @override
   Future<String?> sessionToken(String hostId) => _secure.read(key: _sessionKey(hostId));
 
   @override
@@ -136,6 +147,12 @@ class MemoryHostStore implements HostStore {
     _secrets.remove(hostId);
     _sessions.remove(hostId);
     if (_active == hostId) _active = _hosts.isEmpty ? null : _hosts.first.hostId;
+  }
+
+  @override
+  Future<void> rename(String hostId, String name) async {
+    final at = _hosts.indexWhere((h) => h.hostId == hostId);
+    if (at >= 0) _hosts[at] = _hosts[at].withName(name);
   }
 
   @override

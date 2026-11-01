@@ -160,9 +160,10 @@ pub struct Client {
     accepts: Vec<String>,
 }
 
-/// The client features a hello names: `activity_changes` always, plus `extra`.
+/// The client features a hello names: `activity_changes` and `server_name`
+/// always (this crate reads every event kind it was built with), plus `extra`.
 fn accepted(extra: &[&str]) -> Vec<String> {
-    let mut accepts = vec![aurelius_protocol::client_feature::ACTIVITY_CHANGES.to_owned()];
+    let mut accepts = vec![aurelius_protocol::client_feature::ACTIVITY_CHANGES.to_owned(), aurelius_protocol::client_feature::SERVER_NAME.to_owned()];
     accepts.extend(extra.iter().filter(|f| !accepts.iter().any(|a| a == *f)).map(|f| (*f).to_owned()).collect::<Vec<_>>());
     accepts
 }
@@ -696,6 +697,11 @@ impl Client {
 
     pub async fn health(&self) -> Result<HealthResult, ClientError> {
         self.read(Method::ServerGetHealth, body!(Health)).await
+    }
+
+    /// The server's name, whether a board member chose it and the computer's name (feature `server_name`).
+    pub async fn server_name(&self) -> Result<aurelius_domain::server::ServerNameView, ClientError> {
+        self.read(Method::ServerGetName, body!(ServerName)).await
     }
 
     pub async fn projects(&self) -> Result<ProjectsSnapshot, ClientError> {

@@ -62,6 +62,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { version: 21, sql: include_str!("../../../migrations/0021_multi_user_sessions.sql"), rebuild: true, then: None },
     plain(22, include_str!("../../../migrations/0022_vault.sql")),
     plain(23, include_str!("../../../migrations/0023_guidelines.sql")),
+    plain(24, include_str!("../../../migrations/0024_server_name.sql")),
     Migration { version: 25, sql: include_str!("../../../migrations/0025_board_testing.sql"), rebuild: true, then: None },
 ];
 

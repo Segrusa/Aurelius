@@ -88,6 +88,7 @@ pub mod memory;
 pub mod org;
 pub mod run;
 pub mod task;
+pub mod server_name;
 pub mod ticket;
 pub mod user;
 
@@ -306,6 +307,7 @@ impl CommandService {
             | Command::UnlinkGuideline(_)
             | Command::DecideGuidelineProposal(_)
             | Command::AddStarterGuidelines(_) => self.guideline_command(ctx, &envelope, hash),
+            Command::SetServerName(cmd) => self.set_server_name(ctx, &envelope, hash, cmd),
         };
         COMMAND_METHOD.set("");
         result
@@ -706,3 +708,5 @@ mod guideline_tests;
 
 #[cfg(test)]
 mod guideline_run_tests;
+#[cfg(test)]
+mod server_name_tests;
