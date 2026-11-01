@@ -1,6 +1,7 @@
 //! Shared conversation pieces: messages, composer and status row.
 
 use crate::app::AppView;
+use crate::screens::team_feed as feed;
 use aurelius_domain::{MessageId, conversation::{MessageRole, MessageStatus}};
 use crate::keymap::*;
 use crate::theme::{self, c};
@@ -264,15 +265,19 @@ impl AppView {
             cache.full
         };
         let mut rows: Vec<AnyElement> = Vec::new();
-        // A channel opened with messages not read yet: "New" before the first of them (fase 2 §3).
-        let divider = self.channel_new_at.filter(|_| self.screen == crate::app::Page::GroupChat);
-        for m in snapshot.messages.iter().filter(|m| !self.deleted_queued.contains(&m.id)) {
-            if divider == Some(m.id) {
-                rows.push(h().id("channel-new").role(Role::Note).aria_label("New messages").w_full().gap(px(10.)).text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT))
-                    .child(div().flex_1().h(px(1.)).bg(c(theme::ACCENT)))
-                    .child("New")
-                    .child(div().flex_1().h(px(1.)).bg(c(theme::ACCENT)))
-                    .into_any_element());
+        // The Team chat is a flat feed (ui-ontwerp §2): day separators, grouped rows.
+        let group = self.screen == crate::app::Page::GroupChat;
+        // A channel opened with messages not read yet: "New messages" before the first of them (fase 2 §3).
+        let divider = self.channel_new_at.filter(|_| group);
+        let today = feed::local_day(now_ms(), aurelius_host::local_utc_offset_minutes());
+        for (i, m) in snapshot.messages.iter().enumerate().filter(|(_, m)| !self.deleted_queued.contains(&m.id)) {
+            let before = if group { feed::before(&snapshot.messages, i, divider, feed_day) } else { feed::Before::default() };
+            if before.day {
+                let label = feed::day_label(feed_day(m.created_at_ms), today);
+                rows.push(feed_separator(SharedString::from(format!("day-{}", m.id)), label.into(), theme::BORDER, theme::TEXT_2).pt(px(18.)).pb(px(4.)).into_any_element());
+            }
+            if before.new {
+                rows.push(feed_separator("channel-new".into(), "New messages".into(), theme::ACCENT, theme::ACCENT_TEXT).pt(px(14.)).into_any_element());
             }
             let el = if m.status == MessageStatus::Partial || self.live.contains_key(&m.id) {
                 self.render_message(m, &author, cx)
@@ -291,23 +296,25 @@ impl AppView {
             } else {
                 row
             };
+            let row = row.when(group, |el| el.pt(px(if before.grouped { 2. } else { 14. })));
             rows.push(ui::rise(row, SharedString::from(format!("msg-{}", m.id)), 0).into_any_element());
         }
         // Group chat: answers still streaming in, before they are messages there.
         for l in self.group_live.iter().filter(|l| !snapshot.messages.iter().any(|m| m.id == l.message)) {
             let streaming = streaming_answer(l.message, l.run, l.author.clone().or_else(|| self.run_author(l.run)), l.mode);
-            rows.push(ui::rise(v().w_full().child(self.render_message(&streaming, &author, cx)), SharedString::from(format!("msg-{}", l.message)), 0).into_any_element());
+            rows.push(ui::rise(v().w_full().when(group, |el| el.pt(px(14.))).child(self.render_message(&streaming, &author, cx)), SharedString::from(format!("msg-{}", l.message)), 0).into_any_element());
         }
         // Group chat: what an employee's run asks that has no answer streaming here to show it under.
         if self.open_conversation.is_some() && self.open_conversation == self.group_conversation {
-            rows.extend(self.group_approvals(cx));
+            rows.extend(self.group_approvals(cx).into_iter().map(|a| div().w_full().pt(px(14.)).child(a).into_any_element()));
         }
-        v().w_full().max_w(px(700.)).gap(px(26.))
+        // The feed spaces its rows itself (a grouped row sits close under its header).
+        v().w_full().max_w(px(700.)).gap(px(if group { 0. } else { 26. }))
             .children(rows)
             // The answer waits for the server's load ("Server busy: CPU 82%, waiting"), live.
-            .children(self.load_banner(cx))
+            .children(self.load_banner(cx).map(|el| div().w_full().when(group, |el| el.pt(px(14.))).child(el)))
             // The suggested replies under the last answer: not a message, nothing waits for them.
-            .children(self.quick_replies_card(cx))
+            .children(self.quick_replies_card(cx).map(|el| div().w_full().when(group, |el| el.pt(px(14.))).child(el)))
     }
 
     /// A finished message: its cached view at the height it was measured at (rendered again
@@ -393,6 +400,12 @@ impl AppView {
     /// One message of the open conversation.
     fn render_message(&self, m: &aurelius_protocol::MessageView, author: &SharedString, cx: &mut Context<Self>) -> AnyElement {
         let all = self.messages.as_ref().map_or(&[][..], |s| &s.messages[..]);
+        let group = self.screen == crate::app::Page::GroupChat;
+        // The same author's message just before (ui-ontwerp §2): no header of its own.
+        let grouped = group && all.iter().position(|x| x.id == m.id).is_some_and(|i| feed::before(all, i, self.channel_new_at, feed_day).grouped);
+        if m.role == MessageRole::User && group {
+            return self.feed_post(m, grouped, cx);
+        }
         if m.role == MessageRole::User {
             let waiting = m.queued;
             // Another board member's post stands on the left; yours on the right.
@@ -438,6 +451,9 @@ impl AppView {
         // A line the server writes in the group chat itself (nobody could answer, an answer
         // was cut off): a quiet note, not an answer by somebody.
         // A system line of phase 2 (a ticket made from a message here, a loop limit): a quiet note.
+        if let Some(line) = m.system.as_ref().filter(|_| group) {
+            return self.feed_line(m, line, cx);
+        }
         if let Some(line) = &m.system {
             let text = crate::screens::discussion::system_text(line, &m.text);
             let when = ui::fmt_when(m.created_at_ms);
@@ -620,19 +636,53 @@ impl AppView {
         let usage = m.usage.as_ref().filter(|_| self.run_usage_on()).map(|u| self.usage_row(m.id.to_string(), u));
         // Not while it streams: no extra work per delta, and it never folds under the reader.
         let (folded, fold_toggle) = if m.status == MessageStatus::Partial { (None, None) } else { self.fold_view(m.id, &text, cx) };
+        let sources = (!sources.is_empty()).then(|| {
+            let ok = sources.iter().filter(|s| s.error.is_none()).count();
+            v().gap(px(10.))
+                .child(div().text_size(px(12.)).text_color(c(theme::MUTED)).child(format!("{ok} of {} sources fetched", sources.len())))
+                .child(h().gap(px(8.)).items_start().flex_wrap().children(sources.iter().map(|s| {
+                    let host = s.url.split('/').nth(2).unwrap_or(&s.url).to_string();
+                    v().w(px(220.)).gap(px(5.)).px(px(12.)).py(px(10.)).rounded(px(8.)).border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE))
+                        .child(div().text_size(px(11.)).text_color(c(theme::MUTED)).font_family(ui::mono(cx)).child(format!("{} · {host}", s.n)))
+                        .child(div().text_size(px(12.5)).line_height(px(17.)).text_color(c(if s.error.is_some() { theme::MUTED } else { theme::TEXT })).child(
+                            s.error.clone().map(|e| format!("Not fetched: {e}")).or(s.title.clone()).unwrap_or_else(|| s.url.clone()),
+                        ))
+                })))
+        });
+        let mut actions: Vec<AnyElement> = Vec::new();
+        actions.extend(self.message_ticket_pill(m.id, cx));
+        actions.extend((m.status != MessageStatus::Partial).then(|| self.make_ticket_action(m, cx)).flatten());
+        actions.extend(trace.map(IntoElement::into_any_element));
+        actions.extend(copy.map(IntoElement::into_any_element));
+        let body = if text.is_empty() && m.status == MessageStatus::Partial {
+            ui::thinking_steps().into_any_element()
+        } else {
+            let mut activity = self.live_activity.get(&m.id).cloned().unwrap_or_else(|| m.activity.clone());
+            let text = match folded {
+                // Only the steps taken within the shown lines.
+                Some((shown, cut)) => {
+                    activity.retain(|a| (a.offset as usize) < cut);
+                    shown
+                }
+                None => text,
+            };
+            self.answer_body(m.id, if text.is_empty() && activity.is_empty() { "…".to_string() } else { text }, activity, cx)
+        };
+        let files = (!m.files.is_empty()).then(|| self.message_files(m.id, &m.files, cx));
+        let status = div().text_size(px(11.5)).text_color(c(theme::MUTED)).child(status);
+        // The Team chat: the flat row of the feed (ui-ontwerp §2), the answer under its employee's name.
+        if group {
+            let who = crate::screens::discussion::author(m, |name| self.employee_role(name).map(str::to_owned));
+            let mentions_me = crate::screens::discussion::names_me(&text_of(m, &self.live), self.me_name().as_deref());
+            let tags = h().gap(px(6.)).text_size(px(11.5)).text_color(c(theme::TEXT_2))
+                .when_some(m.mode, |el, mode| el.child(mode_badge(mode)))
+                .when_some(m.produced_by.clone(), |el, label| el.child(format!("· {label}")))
+                .when(total > 1, |el| el.child(format!("· version {}/{}", index.unwrap_or(1), total)));
+            let content: Vec<AnyElement> = [sources.map(IntoElement::into_any_element), Some(body), fold_toggle.map(IntoElement::into_any_element), files, Some(status.into_any_element()), usage.map(IntoElement::into_any_element)].into_iter().flatten().collect();
+            return self.feed_row(m, &who, grouped, mentions_me, tags.into_any_element(), actions, content, cx);
+        }
         v().gap(px(10.))
-            .when(!sources.is_empty(), |el| {
-                let ok = sources.iter().filter(|s| s.error.is_none()).count();
-                el.child(div().text_size(px(12.)).text_color(c(theme::MUTED)).child(format!("{ok} of {} sources fetched", sources.len())))
-                    .child(h().gap(px(8.)).items_start().flex_wrap().children(sources.iter().map(|s| {
-                        let host = s.url.split('/').nth(2).unwrap_or(&s.url).to_string();
-                        v().w(px(220.)).gap(px(5.)).px(px(12.)).py(px(10.)).rounded(px(8.)).border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE))
-                            .child(div().text_size(px(11.)).text_color(c(theme::MUTED)).font_family(ui::mono(cx)).child(format!("{} · {host}", s.n)))
-                            .child(div().text_size(px(12.5)).line_height(px(17.)).text_color(c(if s.error.is_some() { theme::MUTED } else { theme::TEXT })).child(
-                                s.error.clone().map(|e| format!("Not fetched: {e}")).or(s.title.clone()).unwrap_or_else(|| s.url.clone()),
-                            ))
-                    })))
-            })
+            .children(sources)
             .child(
                 h().gap(px(8.)).text_size(px(12.)).text_color(c(theme::MUTED))
                     .child(self.author_label(m, author))
@@ -641,31 +691,161 @@ impl AppView {
                     .when_some(m.produced_by.clone(), |el, label| el.child(div().text_color(c(theme::TEXT_2)).child(format!("· {label}"))))
                     .when(total > 1, |el| el.child(format!("· version {}/{}", index.unwrap_or(1), total)))
                     .child(div().flex_1())
-                    .children(self.message_ticket_pill(m.id, cx))
-                    .children((m.status != MessageStatus::Partial).then(|| self.make_ticket_action(m, cx)).flatten())
-                    .children(trace)
-                    .children(copy),
+                    .children(actions),
             )
-            .child(if text.is_empty() && m.status == MessageStatus::Partial {
-                ui::thinking_steps().into_any_element()
-            } else {
-                let mut activity = self.live_activity.get(&m.id).cloned().unwrap_or_else(|| m.activity.clone());
-                let text = match folded {
-                    // Only the steps taken within the shown lines.
-                    Some((shown, cut)) => {
-                        activity.retain(|a| (a.offset as usize) < cut);
-                        shown
-                    }
-                    None => text,
-                };
-                self.answer_body(m.id, if text.is_empty() && activity.is_empty() { "…".to_string() } else { text }, activity, cx)
-            })
+            .child(body)
             .children(fold_toggle)
-            .when(!m.files.is_empty(), |el| el.child(self.message_files(m.id, &m.files, cx)))
-            .child(div().text_size(px(11.5)).text_color(c(theme::MUTED)).child(status))
+            .children(files)
+            .child(status)
             .children(usage)
             .into_any_element()
     }
+
+    // ---- The Team chat's feed (AUR-CHAT-001, ui-ontwerp §2) ------------------------
+
+    /// One row of the feed: monogram, name, what they are and the time over the body,
+    /// which aligns with the name; a grouped row only the body, its time and actions
+    /// in the gutter on hover. A message naming the reader: "@ you", an ACCENT bar and
+    /// the halo behind the row.
+    #[allow(clippy::too_many_arguments)]
+    fn feed_row(&self, m: &aurelius_protocol::MessageView, who: &crate::screens::discussion::Author, grouped: bool, mentions_me: bool, tags: AnyElement, actions: Vec<AnyElement>, content: Vec<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
+        let clock = feed::clock(m.created_at_ms, aurelius_host::utc_offset_minutes_at(m.created_at_ms));
+        let label = format!("{}, {}, {}{}", who.name, who.kind, ui::fmt_when(m.created_at_ms), if mentions_me { ", mentions you" } else { "" });
+        let hover = SharedString::from(format!("feed-{}", m.id));
+        let kind = if who.human { "· board member".to_string() } else { format!("— {}", who.kind) };
+        let row = v().id(SharedString::from(format!("feed-row-{}", m.id))).group(hover.clone()).role(Role::Article).aria_label(label).w_full().gap(px(4.)).rounded(px(4.))
+            .when(mentions_me, |el| el.pl(px(8.)).py(px(4.)).border_l_2().border_color(c(theme::ACCENT)).bg(c(theme::ACCENT_HALO)));
+        if grouped {
+            return row
+                .child(
+                    h().items_start()
+                        .child(div().w(px(28.)).flex_none().pt(px(3.)).text_size(px(10.5)).text_color(c(theme::MUTED)).opacity(0.).group_hover(hover.clone(), |s| s.opacity(1.)).child(clock))
+                        .child(v().flex_1().min_w_0().gap(px(6.)).children(content))
+                        .child(h().flex_none().gap(px(2.)).opacity(0.).group_hover(hover, |s| s.opacity(1.)).children(actions)),
+                )
+                .into_any_element();
+        }
+        row.child(
+            h().gap(px(8.))
+                .child(if who.human { ui::member_monogram(&who.name, 20., cx) } else { ui::monogram(&who.name, 20., cx) })
+                .child(div().text_size(px(12.5)).font_weight(FontWeight::MEDIUM).child(who.name.clone()))
+                .child(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(kind))
+                .child(tags)
+                .when(mentions_me, |el| el.child(div().text_size(px(11.)).text_color(c(theme::ACCENT_TEXT)).child("@ you")))
+                .child(div().flex_1())
+                .children(actions)
+                .child(div().text_size(px(11.)).text_color(c(theme::TEXT_2)).child(clock)),
+        )
+        .child(v().pl(px(28.)).gap(px(6.)).children(content))
+        .into_any_element()
+    }
+
+    /// A board member's post in the feed: everyone left-aligned, yours too (ui-ontwerp §2).
+    fn feed_post(&self, m: &aurelius_protocol::MessageView, grouped: bool, cx: &mut Context<Self>) -> AnyElement {
+        let who = crate::screens::discussion::author(m, |_| None);
+        let mentions_me = crate::screens::discussion::names_me(&m.text, self.me_name().as_deref());
+        let (folded, fold_toggle) = self.fold_view(m.id, &m.text, cx);
+        let shown = folded.map_or_else(|| m.text.clone(), |(s, _)| s);
+        let mut content: Vec<AnyElement> = Vec::new();
+        if !m.text.trim().is_empty() {
+            content.push(div().text_size(px(14.)).line_height(px(21.)).text_color(c(theme::TEXT)).child(self.feed_markdown(m.id, format!("user-{}", m.id), &shown, cx)).into_any_element());
+        }
+        content.extend(fold_toggle.map(IntoElement::into_any_element));
+        if !m.files.is_empty() {
+            content.push(self.message_files(m.id, &m.files, cx));
+        }
+        if !m.uploads.is_empty() {
+            content.push(self.message_uploads(m.id, &m.uploads, cx));
+        }
+        content.extend(self.markdown_chips(m.id, &m.text, cx));
+        // Sent while an answer runs and still waiting behind it (an older server queues it).
+        if m.queued {
+            let id = m.id;
+            content.push(
+                h().gap(px(8.)).items_center().text_size(px(12.)).text_color(c(theme::MUTED))
+                    .child(ui::diamond(7., theme::MUTED, false))
+                    .child("Waiting · sends after the current answer")
+                    .child(send_now_button(SharedString::from(format!("queued-delete-{id}")), "Delete").text_color(c(theme::TEXT_2)).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.delete_queued(id, cx))))
+                    .child(send_now_button(SharedString::from(format!("queued-send-{id}")), "Send now").on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.send_queued_now(id, cx))))
+                    .into_any_element(),
+            );
+        }
+        let mut actions: Vec<AnyElement> = Vec::new();
+        actions.extend(self.message_ticket_pill(m.id, cx));
+        actions.extend(self.make_ticket_action(m, cx));
+        if !m.text.trim().is_empty() {
+            actions.push(self.copy_button(format!("msg-{}", m.id), m.text.clone(), cx).into_any_element());
+        }
+        self.feed_row(m, &who, grouped, mentions_me, div().into_any_element(), actions, content, cx)
+    }
+
+    /// Markdown of the feed with its `@names` marked (`feed::mark_mentions`).
+    fn feed_markdown(&self, message: MessageId, key: String, text: &str, cx: &mut Context<Self>) -> gpui_kit::component::text::TextView {
+        let marked = self.mark_mentions(text);
+        self.message_markdown(message, key, crate::screens::markdown::linked(&marked), cx).on_link_click(self.markdown_link_handler(false, cx))
+    }
+
+    /// `text` with the `@names` of the people here marked, the reader's own stronger.
+    pub fn mark_mentions(&self, text: &str) -> String {
+        if !text.contains('@') {
+            return text.to_string();
+        }
+        let people = self.mentionables();
+        let names: Vec<&str> = people.iter().map(|p| p.name.as_str()).collect();
+        feed::mark_mentions(text, &names, self.me_name().as_deref())
+    }
+
+    /// A system line of the feed (ui-ontwerp §2, O-4): one compact line with a shape
+    /// by its action, else its kind; a ticket's line in General links to its channel.
+    fn feed_line(&self, m: &aurelius_protocol::MessageView, line: &aurelius_domain::views::SystemLine, cx: &mut Context<Self>) -> AnyElement {
+        let number = line.ticket_id.and_then(|t| self.channels.iter().flatten().find(|c| c.ticket_id == Some(t))).and_then(|c| c.ticket_number);
+        let text = feed::line_text(line, &m.text, number);
+        let mark = match crate::screens::discussion::login_line(line, &text) {
+            Some(login) => feed::LineMark { mark: crate::screens::discussion::login_mark(Some(login)), failed: false },
+            None => feed::line_mark(line, &text),
+        };
+        let clock = feed::clock(m.created_at_ms, aurelius_host::utc_offset_minutes_at(m.created_at_ms));
+        let connect = crate::screens::discussion::login_line(line, &text) == Some(crate::screens::discussion::LoginLine::Connect) && crate::screens::account::needs_connect(self.claude.view.as_ref(), self.claude.unsupported.is_some());
+        let ticket = line.ticket_id.filter(|_| line.kind == aurelius_domain::views::SystemLineKind::TicketCreated);
+        // The ticket's channel, from another channel (General's opened / closed lines).
+        let open = self.current_channel().map(|c| c.conversation_id);
+        let channel = line.channel_id.filter(|id| Some(*id) != open && self.channels.iter().flatten().any(|c| c.conversation_id == *id));
+        let task = crate::screens::discussion::system_task(line);
+        let color = if mark.failed { theme::NEGATIVE } else { theme::TEXT_2 };
+        h().id(SharedString::from(format!("system-{}", m.id))).w_full().justify_center().flex_wrap().gap(px(8.)).px(px(24.)).role(Role::Note).aria_label(crate::screens::discussion::system_label(&text, &ui::fmt_when(m.created_at_ms)))
+            .child(div().text_size(px(11.5)).line_height(px(17.)).text_color(c(color)).text_center().child(format!("┄ {}{} · {clock} ┄", mark.mark, text.lines().next().unwrap_or_default())))
+            .when(connect, |el| {
+                el.child(div().id(SharedString::from(format!("system-connect-{}", m.id))).role(Role::Button).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child(crate::screens::board::connect_label(self.claude.view.as_ref())).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.claude_connect(cx))))
+            })
+            .when_some(ticket, |el, id| {
+                el.child(div().id(SharedString::from(format!("system-open-{}", m.id))).role(Role::Link).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child("Open ticket").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket(id, w, cx))))
+            })
+            .when_some(channel, |el, id| {
+                el.child(div().id(SharedString::from(format!("system-channel-{}", m.id))).role(Role::Link).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child("Open channel").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.go_to_channel(id, w, cx))))
+            })
+            .when_some(task, |el, task| {
+                el.child(div().id(SharedString::from(format!("system-task-{}", m.id))).role(Role::Link).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child("Open task").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket_task(task, w, cx))))
+            })
+            .into_any_element()
+    }
+}
+
+/// A moment's local day, for the feed's day separators and grouping.
+fn feed_day(ms: i64) -> i64 {
+    feed::local_day(ms, aurelius_host::utc_offset_minutes_at(ms))
+}
+
+/// A message's text as shown: the streamed text while it streams.
+fn text_of(m: &aurelius_protocol::MessageView, live: &std::collections::HashMap<MessageId, String>) -> String {
+    live.get(&m.id).cloned().unwrap_or_else(|| m.text.clone())
+}
+
+/// A line across the feed with a label in the middle: a day, or "New messages".
+fn feed_separator(id: SharedString, label: SharedString, line: u32, text: u32) -> Stateful<Div> {
+    h().id(id.clone()).role(Role::Note).aria_label(label.clone()).w_full().gap(px(10.)).text_size(px(11.)).text_color(c(text))
+        .child(div().flex_1().h(px(1.)).bg(c(line)))
+        .child(label)
+        .child(div().flex_1().h(px(1.)).bg(c(line)))
 }
 
 impl AppView {
@@ -796,9 +976,12 @@ impl AppView {
         // The checklist and the quick replies show as cards of their own, not as steps.
         let todo = crate::screens::progress::todos(&activity);
         activity.retain(|a| !crate::screens::progress::is_progress_tool(&a.tool));
+        // The Team chat's feed: smaller type, and the `@names` marked (ui-ontwerp §2).
+        let group = self.screen == crate::app::Page::GroupChat;
         let md = |this: &Self, segment: &str, n: usize, cx: &mut Context<Self>| {
-            div().text_size(px(15.)).line_height(px(25.5)).child(
-                this.message_markdown(id, format!("md-{id}-{n}"), crate::screens::markdown::linked(segment), cx)
+            let segment = if group { this.mark_mentions(segment) } else { segment.to_string() };
+            div().text_size(px(if group { 14. } else { 15. })).line_height(px(if group { 21. } else { 25.5 })).child(
+                this.message_markdown(id, format!("md-{id}-{n}"), crate::screens::markdown::linked(&segment), cx)
                     .on_link_click(this.markdown_link_handler(false, cx)),
             )
         };
@@ -1118,6 +1301,9 @@ fn bubble(text: gpui_kit::component::text::TextView, mine: bool) -> Div {
 /// pasted image (or copied image file) goes with the message.
 pub fn composer(view: &AppView, _placeholder: &str, tall: bool, cx: &mut Context<AppView>) -> impl IntoElement {
     let this = cx.entity().downgrade();
+    // The Team chat (ui-ontwerp §4, O-2): Enter sends, Shift+Enter is a new line, Alt+Enter is Send now.
+    let group = view.screen == crate::app::Page::GroupChat;
+    let suggesting = group && !view.group_suggestions(cx).is_empty();
     // Same type metrics as ui::input (22 px lines), but it grows with the text.
     let input = gpui_kit::component::input::Textarea::new(&view.composer).py(px(7.)).line_height(px(22.)).appearance(false).on_paste(move |item, _, cx| {
         this.update(cx, |this, cx| this.paste_into_composer(item, cx)).unwrap_or(false)
@@ -1133,7 +1319,14 @@ pub fn composer(view: &AppView, _placeholder: &str, tall: bool, cx: &mut Context
         .pr(px(10.))
         .py(px(if tall { 10. } else { 6. }))
         .key_context("Composer")
-        .child(div().flex_1().child(input))
+        // While the `@` suggestions show, ↑↓ / Enter / Tab / Esc are theirs (ui-ontwerp §4).
+        .child(div().flex_1().when(suggesting, |el| {
+            el.key_context(MENTIONS)
+                .on_action(cx.listener(|this, _: &MentionUp, _, cx| this.group_step_mention(false, cx)))
+                .on_action(cx.listener(|this, _: &MentionDown, _, cx| this.group_step_mention(true, cx)))
+                .on_action(cx.listener(|this, _: &MentionPick, w, cx| this.group_pick_mention(w, cx)))
+                .on_action(cx.listener(|this, _: &MentionClose, _, cx| this.group_close_mentions(cx)))
+        }).child(input))
         .child(
             h().id("add-image").flex_none().px(px(7.)).h(px(28.)).items_center().rounded(px(7.)).cursor_pointer()
                 .text_size(px(12.5)).text_color(c(theme::MUTED))
@@ -1147,7 +1340,7 @@ pub fn composer(view: &AppView, _placeholder: &str, tall: bool, cx: &mut Context
             el.child(
                 send_now_button("send-now".into(), "Send now")
                     .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.send_now(w, cx)))
-                    .child(ui::kbd("enter", cx).opacity(0.55)),
+                    .child(ui::kbd(if group { "alt-enter" } else { "enter" }, cx).opacity(0.55)),
             )
         })
         .child(
@@ -1163,7 +1356,7 @@ pub fn composer(view: &AppView, _placeholder: &str, tall: bool, cx: &mut Context
                 .text_color(c(theme::BG))
                 .font_weight(FontWeight::SEMIBOLD)
                 .cursor_pointer()
-                .tooltip(ui::tip(if view.active_run().is_some() { "Queue behind the running answer" } else { "Send" }, Some("shift-enter")))
+                .tooltip(if group { ui::tip("Send", Some("enter")) } else { ui::tip(if view.active_run().is_some() { "Queue behind the running answer" } else { "Send" }, Some("shift-enter")) })
                 .on_click(cx.listener(|this, _: &ClickEvent, w, cx| this.send_message(w, cx)))
                 .child("↵"),
         );
@@ -1214,50 +1407,42 @@ pub fn composer(view: &AppView, _placeholder: &str, tall: bool, cx: &mut Context
             })
             .children(mention_row(view, cx))
             .child(input_box)
-            .child(if view.screen == crate::app::Page::GroupChat { group_row(view).into_any_element() } else { status_row(view, cx).into_any_element() }),
+            .children(group.then(|| mention_warning(view, cx)).flatten())
+            .child(if group { group_row(view).into_any_element() } else { status_row(view, cx).into_any_element() }),
     )
 }
 
-/// The `@name` being typed at the end of `text`: where its `@` is, and the names that
-/// start with what follows it (case-insensitive; a name already typed whole is no
-/// suggestion), at most six. An `@` inside a word (an email address) starts none.
-pub fn mention_suggestions<'a>(text: &str, names: &[&'a str]) -> Option<(usize, Vec<&'a str>)> {
-    let at = text.rfind('@')?;
-    if text[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '.' || c == '_') {
-        return None;
-    }
-    let typed = text[at + 1..].to_lowercase();
-    if typed.contains('\n') {
-        return None;
-    }
-    let found: Vec<&str> = names.iter().copied().filter(|n| {
-        let n = n.trim().to_lowercase();
-        n.starts_with(&typed) && n != typed
-    }).take(6).collect();
-    (!found.is_empty()).then_some((at, found))
-}
-
-/// Group chat: the employees the `@name` being typed can be, above the composer; a click completes it.
+/// Team chat: whom the `@name` being typed can be, above the composer (ui-ontwerp §4):
+/// employees in org chart order, then board members; ↑↓ move, Enter / Tab or a click picks.
 fn mention_row(view: &AppView, cx: &mut Context<AppView>) -> Option<impl IntoElement> {
     if view.screen != crate::app::Page::GroupChat {
         return None;
     }
-    let text = view.composer.read(cx).value();
-    let names = view.mention_names();
-    let (_, found) = mention_suggestions(&text, &names)?;
-    let found: Vec<String> = found.into_iter().map(str::to_owned).collect();
-    Some(
-        h().id("mentions").aria_label("Mention an employee").flex_wrap().gap(px(6.)).pb(px(8.)).text_size(px(12.5))
-            .child(div().text_color(c(theme::MUTED)).child("Mention"))
-            .children(found.into_iter().enumerate().map(|(i, name)| {
-                let label = format!("@{}", with_role(&name, view.employee_role(&name)));
-                h().id(("mention", i)).role(Role::Button).aria_label(label.clone()).gap(px(6.)).px(px(8.)).py(px(2.)).rounded(px(6.)).cursor_pointer()
-                    .border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE))
-                    .hover(|s| s.bg(c(theme::SURFACE_2)).border_color(c(theme::BORDER_STRONG)))
-                    .child(label)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.complete_mention(&name, w, cx)))
-            })),
-    )
+    let suggestions = view.group_suggestions(cx);
+    let of = suggestions.len();
+    let active = view.group_mentions.active(of);
+    (of > 0).then(|| {
+        v().id("mentions").role(Role::ListBox).aria_label("Mention someone").mb(px(8.)).gap(px(2.)).p(px(4.)).rounded(px(6.)).border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE))
+            .children(suggestions.into_iter().enumerate().map(|(i, (at, p))| {
+                let name = p.name.clone();
+                let on = active == Some(i);
+                h().id(("mention", i)).role(Role::ListBoxOption).aria_label(crate::screens::discussion::suggestion_label(&p, i, of)).aria_selected(on).gap(px(8.)).px(px(6.)).py(px(3.)).rounded(px(4.)).cursor_pointer()
+                    .when(on, |el| el.bg(c(theme::SURFACE_2)))
+                    .hover(|s| s.bg(c(theme::SURFACE_2)))
+                    .child(if p.employee { ui::monogram(&p.name, 16., cx) } else { ui::member_monogram(&p.name, 16., cx) })
+                    .child(div().text_size(px(12.5)).child(p.name.clone()))
+                    .child(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(p.kind.clone()))
+                    .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.group_complete(at, &name, w, cx)))
+            }))
+    })
+}
+
+/// Team chat, under the composer: the `@names` that wake nobody (MU2-04 AC5).
+fn mention_warning(view: &AppView, cx: &mut Context<AppView>) -> Option<AnyElement> {
+    let text = view.composer.read(cx).value().to_string();
+    let people = view.mentionables();
+    let names = crate::screens::discussion::unknown_mentions(&text, &people, &view.archived_names());
+    crate::screens::discussion::unknown_warning(&names).map(|w| div().id("group-mention-warning").role(Role::Status).pt(px(6.)).px(px(4.)).text_size(px(12.)).text_color(c(crate::screens::board::HIGH)).child(w).into_any_element())
 }
 
 /// Group chat, under the composer: who answers.
@@ -1478,7 +1663,7 @@ fn activity_ring(busy: bool) -> AnyElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{artifact_url, fold, is_system_line, mention_suggestions, message_author, other_member, streaming_answer, web_search_summary, with_role};
+    use super::{artifact_url, fold, is_system_line, message_author, other_member, streaming_answer, web_search_summary, with_role};
     use aurelius_domain::conversation::{MessageRole, MessageStatus};
     use gpui_kit::SharedString;
 
@@ -1554,16 +1739,7 @@ mod tests {
     }
 
     #[test]
-    fn an_at_sign_suggests_employee_names() {
-        let names = ["Atlas", "Orion", "Titan", "Trace"];
-        assert_eq!(mention_suggestions("Hi @t", &names), Some((3, vec!["Titan", "Trace"])), "case-insensitive prefix");
-        assert_eq!(mention_suggestions("@", &names).map(|(_, n)| n.len()), Some(4), "a bare @ offers everyone");
-        assert_eq!(mention_suggestions("@Atlas", &names), None, "a name typed whole needs no suggestion");
-        assert_eq!(mention_suggestions("@Atlas please", &names), None, "the mention ended");
-        assert_eq!(mention_suggestions("mail me at me@or", &names), None, "an @ inside a word is an email address");
-        assert_eq!(mention_suggestions("no mention", &names), None);
-        assert_eq!(mention_suggestions("@x", &names), None, "nobody by that name");
-        // Each suggestion and each sender in the group chat carries the role.
+    fn each_sender_in_the_group_chat_carries_its_role() {
         assert_eq!(with_role("Orion", Some("Project Manager")), "Orion — Project Manager");
         assert_eq!(with_role("Orion", Some("  ")), "Orion", "no dangling dash without a role");
         assert_eq!(with_role("Aurelius", None), "Aurelius");

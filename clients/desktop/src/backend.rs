@@ -99,6 +99,9 @@ pub struct ServerInfo {
     pub guidelines: bool,
     /// The Testing column and the company's tester (feature `board_testing`).
     pub board_testing: bool,
+    /// A channel per ticket in the Team chat, `channel.search` and the error code
+    /// `channel_archived` (feature `ticket_channels`, AUR-CHAT-001).
+    pub ticket_channels: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -225,6 +228,9 @@ pub enum Request {
     OpenGroupChat(Option<ConversationId>),
     /// The Team chat's channels (`channel.list`) once; answered with `Update::Channels`.
     LoadChannels,
+    /// The channels whose name or ticket number matches (`channel.search`, feature
+    /// `ticket_channels`); answered with `Update::ChannelSearch`.
+    SearchChannels(String),
     /// The Team chat shows (`true`: read the channels now and again on every chat
     /// event, for their counts) or closed (`false`: stop that).
     FollowChannels(bool),
@@ -1492,6 +1498,10 @@ pub enum Update {
     GroupChatFailed(String),
     /// The Team chat's channels; none when the server has no channels (before `team_channels`).
     Channels(Option<Vec<aurelius_domain::views::ChannelView>>),
+    /// What `channel.search` found for the query (none: the server could not search).
+    ChannelSearch(String, Option<Vec<aurelius_domain::views::ChannelView>>),
+    /// A post in this channel (none: general) was refused with `channel_archived`: it is read-only now.
+    ChannelArchived(Option<ConversationId>),
     Stream(StreamDelta),
     EmployeeCreated(EmployeeId),
     Info(String),
@@ -1596,7 +1606,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
         let _ = updates.send(Update::Connection(Connection::Connecting));
         let (events_tx, mut events) = mpsc::unbounded_channel();
         let (streams_tx, mut streams) = mpsc::unbounded_channel();
-        let client = match Client::open(&target, "aurelius-desktop", events_tx, Some(streams_tx), &[aurelius_protocol::client_feature::TEAM_CHANNELS]).await {
+        let client = match Client::open(&target, "aurelius-desktop", events_tx, Some(streams_tx), &[aurelius_protocol::client_feature::TEAM_CHANNELS, aurelius_protocol::client_feature::TICKET_CHANNELS]).await {
             Ok(client) => client,
             // Before `is_final`, which an update-needed error also is.
             Err(err) if update_needed(&err) => {
@@ -1620,7 +1630,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                             None => return,
                             Some(Request::OpenConversation(id)) => open_conversation = id,
                             // Its id is known once connected; the window asks again then.
-                            Some(Request::OpenGroupChat(_) | Request::LoadChannels) => {}
+                            Some(Request::OpenGroupChat(_) | Request::LoadChannels | Request::SearchChannels(_)) => {}
                             Some(Request::FollowChannels(on)) => channels_shown = on,
                             Some(Request::LoadMemory(project_id)) => open_memory = Some(project_id),
                             Some(Request::LoadIdeas(project_id)) => open_ideas = Some(project_id),
@@ -1725,6 +1735,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 vault: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::VAULT),
                 guidelines: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::GUIDELINES),
                 board_testing: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::BOARD_TESTING),
+                ticket_channels: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_CHANNELS),
             },
         }));
 
@@ -1976,7 +1987,7 @@ fn held_read(request: &Request) -> bool {
         Request::Plugins(call) => matches!(call, PluginsCall::List | PluginsCall::Available | PluginsCall::ManagerGet(_) | PluginsCall::ProjectGet(_)),
         Request::Backups(call) => matches!(call, BackupsCall::List),
         Request::Remote(call) => matches!(call, RemoteCall::Status),
-        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::FollowChannels(_) => true,
+        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::SearchChannels(_) | Request::FollowChannels(_) => true,
         Request::LoadMemory(_) | Request::LoadMemoryContext { .. } | Request::LoadIdeas(_) | Request::LoadContext(_) | Request::LoadScreenshot(_) | Request::LoadFullActivity(..) => true,
         Request::LoadFile(_) | Request::LoadUpload(_) | Request::LoadUploadThumb(_) | Request::LoadSubagents(_) | Request::LoadPreviewMessages(_) | Request::LoadMarkdownFile(..) | Request::LoadArtifactContent { .. } => true,
         Request::LoadUsage | Request::LoadUsageHours(_) | Request::LoadSubscription(_) | Request::CheckUpdate(_) | Request::LoadServerLoad | Request::LoadBrowser | Request::LoadArtifactSetting => true,
@@ -2034,7 +2045,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::SendQueuedNow { conversation_id, message_id } => {
             envelope(Command::SendQueuedNow(conversation::SendQueuedNow { conversation_id, message_id }), None)
         }
-        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::FollowChannels(_) => return None,
+        Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::SearchChannels(_) | Request::FollowChannels(_) => return None,
         Request::CreateEmployee { name, role, title, reports_to, instructions, folder } => {
             envelope(Command::CreateEmployee(employee::CreateEmployee { name, role, title, reports_to, instructions, folder }), None)
         }
@@ -2181,6 +2192,11 @@ fn shown<T>(result: Result<T, ClientError>, updates: &mpsc::UnboundedSender<Upda
 /// Why the group chat did not load, for its page. A server from before the group
 /// chat does not know `group_chat.get` (`unknown_method`): it still runs the old
 /// version after an update and must be restarted.
+/// A write refused because its channel can only be read (`channel_archived`, AUR-CHAT-001).
+pub fn channel_archived(e: &ClientError) -> bool {
+    matches!(e, ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::ChannelArchived)
+}
+
 pub fn group_chat_failure(e: &ClientError) -> String {
     match e {
         ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::UnknownMethod => {
@@ -2295,6 +2311,19 @@ async fn session(
                 }
                 if let Request::LoadChannels = request {
                     send_channels(client, updates).await?;
+                    continue;
+                }
+                if let Request::SearchChannels(query) = request {
+                    let result = read(client, Method::ChannelSearch { query: query.clone() }, |b| match b { ResponseBody::Channels(c) => Some(c), _ => None }).await;
+                    match result {
+                        Ok(found) => {
+                            let _ = updates.send(Update::ChannelSearch(query, Some(found.channels)));
+                        }
+                        Err(e) if ends(&e) => return Err(e.into()),
+                        Err(_) => {
+                            let _ = updates.send(Update::ChannelSearch(query, None));
+                        }
+                    }
                     continue;
                 }
                 if let Request::FollowChannels(on) = request {
@@ -3945,6 +3974,10 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
         _ => None,
     };
     let deciding = matches!(&envelope.command, Command::DecideProposal(_));
+    let posting_in = match &envelope.command {
+        Command::SendGroupMessage(m) => Some(m.channel),
+        _ => None,
+    };
     // B10: a text the server may hold back, ready to go again with `confirm_secret`.
     let held = confirmed(&envelope.command);
     let sent = held.is_none().then(|| envelope.command.clone());
@@ -4056,6 +4089,12 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
             });
             Ok(())
         }
+        // A closed ticket's or an archived project's channel (feature `ticket_channels`):
+        // the window shows its read-only bar, never the raw error; the list says it too.
+        Err(err) if posting_in.is_some() && channel_archived(&err) => {
+            let _ = updates.send(Update::ChannelArchived(posting_in.flatten()));
+            send_channels(client, updates).await
+        }
         Err(err) => {
             // Rejected (validation, conflict): tell the user; do not retry.
             if let Some(message_id) = deleting {
@@ -4078,6 +4117,15 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_post_in_a_closed_channel_is_known_by_its_code_not_its_text() {
+        use aurelius_domain::error::{AppError, ErrorCode};
+        assert!(channel_archived(&ClientError::Protocol(AppError::new(ErrorCode::ChannelArchived, "This ticket is on Done."))));
+        // An older connection gets `validation` with the same text: shown as before.
+        assert!(!channel_archived(&ClientError::Protocol(AppError::new(ErrorCode::Validation, "This ticket is on Done."))));
+        assert!(!channel_archived(&ClientError::Disconnected));
+    }
 
     #[test]
     fn a_team_chat_that_does_not_load_says_why() {
@@ -4900,7 +4948,8 @@ mod tests {
             }
             app.requests.send(Request::Board(BoardCall::Discussion(None))).unwrap();
 
-            // MU2-08: #general first, then one channel per project by name.
+            // MU2-08: #general first, then one channel per project by name; this app accepts
+            // `ticket_channels` (AUR-CHAT-001), so the ticket's discussion is a channel too.
             app.requests.send(Request::LoadChannels).unwrap();
             let channels = next(&mut app, |u| match u {
                 Update::Channels(c) => Some(c),
@@ -4908,9 +4957,21 @@ mod tests {
             })
             .await
             .expect("this server has channel.list");
-            assert_eq!(channels.iter().map(|c| (c.project_id, c.name.as_str())).collect::<Vec<_>>(), [(None, "General"), (Some(projects[0]), "Demo"), (Some(projects[1]), "Docs")]);
+            assert_eq!(channels.iter().map(|c| (c.project_id, c.name.as_str())).collect::<Vec<_>>(), [(None, "General"), (Some(projects[0]), "Demo"), (Some(projects[1]), "Docs"), (Some(project), "#1-discuss-me")]);
             let general = channels[0].conversation_id;
             let demo = channels[1].conversation_id;
+            let channel = &channels[3];
+            assert_eq!((channel.kind, channel.conversation_id, channel.ticket_id, channel.ticket_number, channel.archived), (aurelius_domain::views::ChannelKind::Ticket, discussion, Some(ticket.id), Some(1), false));
+            assert_eq!(crate::screens::discussion::sections(&channels).tickets.len(), 1, "listed under Tickets");
+            // `channel.search`: `#1` finds the ticket's channel.
+            app.requests.send(Request::SearchChannels("#1".into())).unwrap();
+            let found = next(&mut app, |u| match u {
+                Update::ChannelSearch(q, found) if q == "#1" => Some(found),
+                _ => None,
+            })
+            .await
+            .expect("this server has channel.search");
+            assert_eq!(found.iter().map(|c| c.conversation_id).collect::<Vec<_>>(), [discussion]);
 
             // ada writes in #Demo and names marie.
             app.requests.send(Request::OpenGroupChat(Some(demo))).unwrap();
@@ -5015,6 +5076,39 @@ mod tests {
             })
             .await;
             assert!(retried.is_some(), "nothing to retry before Done");
+
+            // AUR-CHAT-001: the Team chat composer posts in the ticket's channel.
+            app.requests.send(Request::OpenGroupChat(Some(discussion))).unwrap();
+            next(&mut app, |u| match u {
+                Update::GroupChat(c) if c == discussion => Some(()),
+                Update::GroupChatFailed(why) => panic!("{why}"),
+                _ => None,
+            })
+            .await;
+            app.requests.send(Request::SendGroup { text: "From the channel".into(), images: vec![], files: vec![], channel: Some(discussion) }).unwrap();
+            next(&mut app, |u| match u {
+                Update::Messages(m) if m.conversation_id == discussion && m.messages.iter().any(|m| m.text == "From the channel") => Some(()),
+                Update::Error(e) => panic!("{e}"),
+                _ => None,
+            })
+            .await;
+            // Archived, the channel is read-only: a post comes back as `channel_archived`
+            // (the read-only bar), never as the server's raw error, and the list says so.
+            done(&mut app, Command::ArchiveTicket(ticket::ArchiveTicket { ticket_id: ticket.id }), None).await;
+            app.requests.send(Request::SendGroup { text: "Too late".into(), images: vec![], files: vec![], channel: Some(discussion) }).unwrap();
+            let refused = next(&mut app, |u| match u {
+                Update::ChannelArchived(c) => Some(c),
+                Update::Error(e) => panic!("shown raw: {e}"),
+                _ => None,
+            })
+            .await;
+            assert_eq!(refused, Some(discussion));
+            let after = next(&mut app, |u| match u {
+                Update::Channels(Some(c)) => c.into_iter().find(|c| c.conversation_id == discussion),
+                _ => None,
+            })
+            .await;
+            assert!(after.archived, "{after:?}");
 
             drop(other);
             drop(app);
