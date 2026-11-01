@@ -30,7 +30,7 @@ class MockRuntimeBloc extends MockBloc<RuntimeEvent, RuntimeState> implements Ru
 class MockPowerBloc extends MockBloc<PowerEvent, PowerBlocState> implements PowerBloc {}
 
 const _owner = ['read', 'chat', 'task_control', 'approve', 'owner'];
-const _me = UserView(createdAtMs: 0, id: 'u-1', username: 'sebastien');
+const _me = UserView(createdAtMs: 0, id: 'u-1', username: 'owner');
 
 ServerNameView nameOf(String name, {String? chosen, String computer = 'my-pc', int version = 0}) => ServerNameView(name: name, chosen: chosen, computerName: computer, version: version);
 
@@ -194,7 +194,7 @@ void main() {
       late AureliusConnection connection;
       await tester.runAsync(() async {
         store = await storeWithSecret();
-        daemon.addUser('u-1', 'sebastien', 'a long password');
+        daemon.addUser('u-1', 'owner', 'a long password');
         await store.setSessionToken(testHost.hostId, daemon.sessionFor('u-1'));
         connection = AureliusConnection(host: testHost, store: store, api: FakeApi(), connect: daemon.connect)..start();
         await until(() => connection.state.isOnline);

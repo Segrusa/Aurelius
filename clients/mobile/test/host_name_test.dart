@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/fake_daemon.dart';
 
 const _owner = ['read', 'chat', 'task_control', 'approve', 'owner'];
-const _me = UserView(createdAtMs: 0, id: 'u-1', username: 'sebastien');
+const _me = UserView(createdAtMs: 0, id: 'u-1', username: 'owner');
 
 LinkState linkOf({List<String> features = const [serverNameFeature], List<String> capabilities = _owner, UserView? user = _me}) => LinkState(status: LinkStatus.online, features: features, capabilities: capabilities).withBoardMember(exists: true, user: user);
 
@@ -21,7 +21,7 @@ void main() {
 
     Future<void> connect({bool signedIn = true}) async {
       store = await storeWithSecret();
-      daemon.addUser('u-1', 'sebastien', 'a long password');
+      daemon.addUser('u-1', 'owner', 'a long password');
       if (signedIn) await store.setSessionToken(testHost.hostId, daemon.sessionFor('u-1'));
       connection = AureliusConnection(host: testHost, store: store, api: FakeApi(), connect: daemon.connect)..start();
       await until(() => connection.state.isOnline);

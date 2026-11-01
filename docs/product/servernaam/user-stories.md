@@ -1,8 +1,8 @@
 # User stories Servernaam
 
-- **Task:** ticket #1 "Ik zou graag de servernaam kunnen wijzigen" (Nova, gevraagd door Sebastien)
+- **Task:** ticket #1 "Ik zou graag de servernaam kunnen wijzigen" (Nova, gevraagd door de Owner)
 - **Bron:** de vraag van de board member en de huidige code (zie "Huidige situatie").
-- **Status:** klaar voor de bouw. OV-01 is beslist door Sebastien (2026-11-01): één naam op de server (SN-01/02 Must). SN-03 blijft Could en valt buiten deze bouw.
+- **Status:** klaar voor de bouw. OV-01 is beslist door de Owner (2026-11-01): één naam op de server (SN-01/02 Must). SN-03 blijft Could en valt buiten deze bouw.
 - **Regel:** wat de bron niet vastlegt, staat als **aanname** (A-xx) of **open vraag** (OV-xx).
 
 ## Huidige situatie
