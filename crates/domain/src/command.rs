@@ -295,4 +295,10 @@ pub enum CommandResult {
     StarterGuidelinesAdded {
         guideline_ids: Vec<crate::GuidelineId>,
     },
+    /// `server.set_name`: the name clients show now and its version (unchanged
+    /// when the name was the same).
+    ServerNameSet {
+        name: String,
+        version: u64,
+    },
 }

@@ -698,6 +698,11 @@ impl Client {
         self.read(Method::ServerGetHealth, body!(Health)).await
     }
 
+    /// The server's name, whether a board member chose it and the computer's name (feature `server_name`).
+    pub async fn server_name(&self) -> Result<aurelius_domain::server::ServerNameView, ClientError> {
+        self.read(Method::ServerGetName, body!(ServerName)).await
+    }
+
     pub async fn projects(&self) -> Result<ProjectsSnapshot, ClientError> {
         self.read(Method::ProjectList, body!(Projects)).await
     }

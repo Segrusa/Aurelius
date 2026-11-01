@@ -16,6 +16,9 @@ pub enum Method {
     SessionHello(HelloParams),
     #[serde(rename = "server.get_health")]
     ServerGetHealth,
+    /// The server's name, its source and the computer's name (feature `server_name`).
+    #[serde(rename = "server.get_name")]
+    ServerGetName,
 
     #[serde(rename = "project.list")]
     ProjectList,

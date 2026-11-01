@@ -31,6 +31,7 @@ pub mod proposal;
 pub mod remote;
 pub mod schedule;
 pub mod scheduler;
+pub mod server;
 pub mod share;
 pub mod task;
 pub mod ticket;
@@ -169,6 +170,7 @@ pub enum Command {
     UnlinkGuideline(guideline::UnlinkGuideline),
     DecideGuidelineProposal(guideline::DecideGuidelineProposal),
     AddStarterGuidelines(guideline::AddStarterGuidelines),
+    SetServerName(server::SetServerName),
 }
 
 /// `(type, method)` for every command: the tag in the JSON of a `Command` and
@@ -265,6 +267,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("unlink_guideline", "guideline.unlink"),
     ("decide_guideline_proposal", "guideline.decide_proposal"),
     ("add_starter_guidelines", "guideline.add_starter_set"),
+    ("set_server_name", "server.set_name"),
 ];
 
 impl Command {
@@ -381,6 +384,9 @@ pub enum DomainError {
     GuidelineTitleTaken,
     #[error("this proposal was withdrawn: the employee who proposed it no longer works here")]
     GuidelineProposalWithdrawn,
+    /// The server's name was refused (A-05); the text says why.
+    #[error("{0}")]
+    ServerName(String),
 }
 
 pub(crate) fn require_text(field: &str, value: &str, max: usize) -> Result<String, DomainError> {
