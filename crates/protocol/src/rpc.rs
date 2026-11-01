@@ -317,7 +317,7 @@ pub mod feature {
     /// on `group_chat.send` / `ticket.post` (a message of the same channel that is
     /// not itself a reply); the read `thread.read { message_id }` (`ThreadSnapshot`,
     /// marks the thread read); `MessageView::thread_parent`, `thread_reply_count`,
-    /// `thread_last_reply_ms` and `thread_unread`. Replies are never in the
+    /// `thread_last_reply_ms`, `thread_unread` and `thread_repliers`. Replies are never in the
     /// channel's own list and not in its `unread`; unread replies that name the
     /// reader count in its `mentions`. A reply gives the events a message of the
     /// channel gives (`message.user_committed`, `task.posted` on the channel's
