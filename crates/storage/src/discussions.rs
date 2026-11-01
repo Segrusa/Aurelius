@@ -145,7 +145,9 @@ pub fn has_members(conn: &Connection) -> Result<bool, StorageError> {
 /// Who is in a channel: a board member or an employee.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Member {
+    /// A board member: the ticket's creator, the Owner, or who joined later.
     User(UserId),
+    /// An employee: the ticket's owner or its main task's employee.
     Employee(EmployeeId),
 }
 
@@ -207,14 +209,21 @@ pub fn set_ticket_channel_archived(tx: &Transaction<'_>, conversation: Conversat
 /// A ticket's channel, as `channel.list` shows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TicketChannel {
+    /// The ticket's discussion, which is its channel.
     pub conversation_id: ConversationId,
+    /// The project the ticket belongs to.
     pub project_id: ProjectId,
+    /// The ticket whose channel this is.
     pub ticket_id: TicketId,
+    /// The ticket's number (`#N`), for the channel's name and search.
     pub number: u32,
+    /// The ticket's whole title: the name's slug is cut, search reads all of it.
     pub title: String,
+    /// The kind of the column the ticket is in.
     pub column: aurelius_domain::ticket::ColumnKind,
     /// Closed (the ticket is on Done or archived): read-only.
     pub archived: bool,
+    /// How many board members and employees are members (0 before schema 26).
     pub member_count: u32,
 }
 
