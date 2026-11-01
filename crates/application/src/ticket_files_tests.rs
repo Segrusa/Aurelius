@@ -221,6 +221,39 @@ fn a_running_main_task_without_a_run_gets_one_and_a_waiting_one_only_the_message
     assert_eq!(status(&s, root), TaskStatus::Waiting);
 }
 
+/// A run parked for the usage limit or a Claude login resumes with its old
+/// message, so the files go to a run after it, and the task keeps waiting.
+fn parked_run_is_followed_by_a_files_run(cause: &'static str) {
+    let s = setup();
+    let (id, root, conversation) = working(&s);
+    set_runs(&s, conversation, "waiting");
+    // As on_run_quota_wait and login_wait park it: the status and the event that names the cause.
+    s.service
+        .store()
+        .write(move |tx| {
+            let project = aurelius_storage::tasks::load_task(tx, root)?.expect("the main task").project_id;
+            let _ = crate::task::task_line::set_status(tx, root, TaskStatus::Waiting, Some(cause))?;
+            crate::task::tasks::task_event(tx, root, project, "task.waiting", serde_json::json!({ "reason": cause })).map(|_| ())
+        })
+        .unwrap();
+    exec(&s, add_files(id, std::slice::from_ref(&s.shot))).unwrap();
+    let after = runs(&s, conversation);
+    assert_eq!(after.len(), 2, "a run after the parked one: {after:?}");
+    assert_eq!(after[0].1, "waiting", "the parked run stays parked");
+    assert!(turns_of(&s, after[1].0).iter().any(|t| t.contains(&kept_shot(&s, id))), "the run after it reads the files");
+    assert_eq!(status(&s, root), TaskStatus::Waiting, "the task still waits for its {cause}");
+}
+
+#[test]
+fn files_added_while_a_run_waits_for_the_limit_reach_the_run_after_it() {
+    parked_run_is_followed_by_a_files_run("quota");
+}
+
+#[test]
+fn files_added_while_a_run_waits_for_a_login_reach_the_run_after_it() {
+    parked_run_is_followed_by_a_files_run(aurelius_domain::task::WAITING_LOGIN);
+}
+
 #[test]
 fn a_main_task_without_a_conversation_gets_the_files_through_its_brief_only() {
     let s = setup();

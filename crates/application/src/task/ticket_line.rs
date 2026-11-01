@@ -365,8 +365,9 @@ pub(crate) fn resume_with(tx: &Tx<'_>, st: &Store, task: TaskId, user: UserId, t
 /// that names each file (absolute path and size, as `TaskAttachments::prompt`).
 /// A Running task gets a run that answers it; a live run is never interrupted:
 /// it reads only up to the message it answers, so the new run comes after it.
-/// A task that waits (its turn, a plan's decision, Review) reads it on its next
-/// run. A task without a conversation yet gets nothing here: its brief names the files.
+/// The same holds for a run parked for the usage limit or a Claude login: it
+/// resumes with its old message, so a run after it reads the files. A task that
+/// waits otherwise (its turn, a plan's decision, Review) reads it on its next run. A task without a conversation yet gets nothing here: its brief names the files.
 pub(crate) fn files_added(tx: &Tx<'_>, st: &Store, task: TaskId, added: &task_store::TaskAttachments) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = task_store::load_task(tx, task)? else { return Ok(vec![]) };
     if row.status.is_terminal() {
@@ -375,7 +376,8 @@ pub(crate) fn files_added(tx: &Tx<'_>, st: &Store, task: TaskId, added: &task_st
     let (Some((conversation, _)), Some(text)) = (task_store::task_conversation(tx, task)?, added.prompt()) else { return Ok(vec![]) };
     let (message, posted) = thread::post_returning(tx, st, conversation, task, Speaker::Update { kind: "files", from: "Aurelius" }, &text)?;
     let mut notices = vec![posted];
-    if row.status == TaskStatus::Running {
+    let parked = row.status == TaskStatus::Waiting && matches!(task_store::waiting_cause(tx, task)?.as_deref(), Some("quota" | aurelius_domain::task::WAITING_LOGIN));
+    if row.status == TaskStatus::Running || parked {
         notices.extend(crate::task::task_runs::run_for(tx, task, conversation, message)?);
     }
     Ok(notices)
