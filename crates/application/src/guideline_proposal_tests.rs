@@ -440,6 +440,7 @@ fn every_action() -> Vec<EmployeeAction> {
         EmployeeAction::ReadDiscussion { last: None },
         EmployeeAction::PostToDiscussion { message: "m".into() },
         EmployeeAction::AssignTicket { employee: "Ann".into(), reason: "r".into() },
+        EmployeeAction::ReportTestResult { passed: true, summary: "s".into() },
     ];
     for action in &all {
         match action {
@@ -458,7 +459,8 @@ fn every_action() -> Vec<EmployeeAction> {
             | EmployeeAction::PostToGroupChat { .. }
             | EmployeeAction::ReadDiscussion { .. }
             | EmployeeAction::PostToDiscussion { .. }
-            | EmployeeAction::AssignTicket { .. } => {}
+            | EmployeeAction::AssignTicket { .. }
+            | EmployeeAction::ReportTestResult { .. } => {}
         }
     }
     all

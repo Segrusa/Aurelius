@@ -11,6 +11,7 @@ pub mod task_runs;
 pub mod task_schedules;
 pub mod task_threads;
 pub mod tasks;
+pub mod testing;
 pub(crate) mod ticket_line;
 pub mod triage;
 pub mod variants;

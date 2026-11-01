@@ -140,6 +140,11 @@ pub enum EmployeeTaskOp {
     },
     /// The dispatcher of a ticket chooses its owner (the bridge's `assign_ticket`, `--triage` only).
     AssignTicket { employee: String, #[serde(default)] reason: String },
+    /// The tester's verdict on a ticket in Testing (the bridge's `report_test_result`,
+    /// `--testing` only, ticket #5): `passed` moves the card to Review, else back to
+    /// Doing with `summary` for the owner. The daemon refuses it for any run other
+    /// than the open test task of a ticket in Testing.
+    ReportTestResult { passed: bool, #[serde(default)] summary: String },
     /// Propose a guideline (the bridge's `propose_guideline`, feature `guidelines`, B5):
     /// a change of one in the run's own block (`guideline`: its `g:` id, id or
     /// title), or none for a new one. `text` is the whole new markdown. Always

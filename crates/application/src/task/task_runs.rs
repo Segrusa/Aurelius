@@ -136,7 +136,7 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
         notices.extend(up.map(|(_, n)| n).unwrap_or_default());
         return Ok(notices);
     }
-    if store::children_of(tx, task)?.iter().any(|c| !c.status.is_terminal()) {
+    if open_parts(tx, task)? {
         // Colleagues still work on parts: it continues when they are done.
         notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("dependency"))?);
         notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "delegated" }))?);
@@ -184,7 +184,7 @@ pub(crate) fn on_run_not_started(tx: &Tx<'_>, st: &Store, run: RunId) -> Result<
 }
 
 /// The task of `run` (still going, not handed over), if there is one.
-fn live_task_of(tx: &Tx<'_>, run: RunId) -> Result<Option<(TaskId, store::TaskRow)>, StorageError> {
+pub(crate) fn live_task_of(tx: &Tx<'_>, run: RunId) -> Result<Option<(TaskId, store::TaskRow)>, StorageError> {
     let task: Option<String> = tx.query_row("SELECT task_id FROM runs WHERE id = ?1 AND conversation_id IS NOT NULL", [run.to_string()], |r| r.get(0)).ok().flatten();
     let Some(task) = task.and_then(|t| TaskId::parse(&t).ok()) else { return Ok(None) };
     let Some(row) = store::load_task(tx, task)? else { return Ok(None) };
@@ -267,7 +267,7 @@ pub(crate) fn complete(tx: &Tx<'_>, st: &Store, task: TaskId, report: &str) -> R
         }
     }
     if crate::task::ticket_line::is_root(tx, task)? {
-        notices.extend(crate::task::ticket_line::reported(tx, task)?);
+        notices.extend(crate::task::ticket_line::reported(tx, st, task)?);
         return Ok(notices);
     }
     notices.extend(accept(tx, st, task, &report, None)?);
@@ -316,6 +316,10 @@ pub(crate) fn accept(tx: &Tx<'_>, st: &Store, task: TaskId, report: &str, by: Op
 /// that conversation, and the employee answers on it.
 fn after_ended(tx: &Tx<'_>, st: &Store, task: TaskId, text: &str, succeeded: bool) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
+    // A test task's end moves the card itself (`testing`); the owner gets no result of it.
+    if crate::task::testing::is_test_task(tx, task)? {
+        return Ok(vec![]);
+    }
     let colleague = row.employee_id.and_then(|m| employees::load_employee(tx, m).ok().flatten()).map(|m| m.name).unwrap_or_else(|| "A colleague".into());
     let finding = if succeeded { format!("Finished “{}”:\n\n{}", row.title, text.trim()) } else { text.to_owned() };
     let speaker = Speaker::Update { kind: if succeeded { "finding" } else { "status" }, from: &colleague };
@@ -431,10 +435,21 @@ fn unseen_results(tx: &Tx<'_>, task: TaskId, run: RunId) -> Result<bool, Storage
     )?)
 }
 
+/// Parts of the task colleagues still work on. A ticket's test task is no part
+/// of its main task: the main task keeps status Review while the tests run.
+fn open_parts(tx: &Tx<'_>, task: TaskId) -> Result<bool, StorageError> {
+    for child in store::children_of(tx, task)? {
+        if !child.status.is_terminal() && !crate::task::testing::is_test_task(tx, child.id)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// A task waiting for its colleagues goes on once none of them is still at work.
 pub(crate) fn continue_when_done(tx: &Tx<'_>, st: &Store, task: TaskId) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
-    if row.status != TaskStatus::Waiting || store::children_of(tx, task)?.iter().any(|c| !c.status.is_terminal()) || live_run(tx, task, None)? {
+    if row.status != TaskStatus::Waiting || open_parts(tx, task)? || live_run(tx, task, None)? {
         return Ok(vec![]);
     }
     let Some((conversation, _)) = store::task_conversation(tx, task)? else { return Ok(vec![]) };
@@ -525,6 +540,9 @@ pub enum EmployeeAction {
     PostToDiscussion { message: String },
     /// The dispatcher of a ticket chooses its owner (`triage`; only in a dispatcher's run).
     AssignTicket { employee: String, reason: String },
+    /// The tester's verdict on a ticket in Testing (`testing::verdict`; only in
+    /// the run of its open test task).
+    ReportTestResult { passed: bool, summary: String },
 }
 
 impl CommandService {
@@ -696,6 +714,10 @@ impl CommandService {
             let (employee, reason) = (employee.clone(), reason.clone());
             return self.store.write(move |tx| crate::task::triage::assign(tx, &st, run, &employee, &reason)).map_err(storage_error);
         }
+        if let EmployeeAction::ReportTestResult { passed, summary } = &action {
+            let (passed, summary) = (*passed, summary.clone());
+            return self.store.write(move |tx| crate::task::testing::verdict(tx, &st, run, passed, &summary)).map_err(storage_error);
+        }
         if let EmployeeAction::MessageTask { task, message, interrupt } = action {
             return self.store.write(move |tx| message_task(tx, &st, run, &task, &message, interrupt)).map_err(storage_error);
         }
@@ -783,7 +805,8 @@ impl CommandService {
                     | EmployeeAction::PostToGroupChat { .. }
                     | EmployeeAction::ReadDiscussion { .. }
                     | EmployeeAction::PostToDiscussion { .. }
-                    | EmployeeAction::AssignTicket { .. } => unreachable!("handled above"),
+                    | EmployeeAction::AssignTicket { .. }
+                    | EmployeeAction::ReportTestResult { .. } => unreachable!("handled above"),
                     EmployeeAction::HandOver { employee, reason } => {
                         let Some(to) = find(&employee) else {
                             return Ok((false, format!("No active colleague called {employee} in the company."), vec![]));

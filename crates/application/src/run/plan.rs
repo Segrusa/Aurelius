@@ -53,6 +53,8 @@ pub struct ChatRunPlan {
     /// The run works under a ticket or a ticket's discussion woke it: it gets
     /// `read_discussion` and `post_to_discussion` (MU2-07).
     pub discussion: bool,
+    /// The run is a ticket's test task: it gets `report_test_result` (ticket #5).
+    pub testing: bool,
     /// The guidelines in its system text (B3): kept as the run's snapshot when it
     /// starts (B6), with the board members' notice of what the block left out or redacted.
     pub guidelines: crate::run::guidelines::RunSet,
@@ -511,6 +513,12 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 }
                 let discussion = ticket_discussion.is_some()
                     || conv::group_run(conn, run_id)?.is_some_and(|g| crate::conversation::discussion::load(conn, g.conversation_id).ok().flatten().is_some_and(|d| d.ticket().is_some()));
+                // The Testing column (ticket #5): the ticket's test task gives its verdict.
+                let testing = match own_task {
+                    Some(task) => crate::task::testing::role(conn, task)?,
+                    None => crate::task::testing::TestingRole::Outside,
+                };
+                let testing = testing == crate::task::testing::TestingRole::Tester;
 
                 // Context Builder: permitted scopes first, then retrieval.
                 let ordinals: Vec<u32> = history
@@ -646,7 +654,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 // Its answer in the group shows the mode it started in.
                 let group = conv::group_run(conn, run_id)?.map(|g| conv::GroupRun { mode: Some(mode), ..g });
                 let guidelines = guidelines.run;
-                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group, discussion, guidelines }))
+                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group, discussion, testing, guidelines }))
             })
             .map_err(storage_error)
     }
