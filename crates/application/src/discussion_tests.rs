@@ -214,7 +214,7 @@ fn a_mention_in_a_ticket_wakes_and_the_answer_comes_back_there() {
     let (to, runs) = post(&s, t, "Some thoughts first.").unwrap();
     assert!(to.is_empty() && runs.is_empty());
     // A system line (not an employee's message), which clients show as one.
-    assert!(system_lines(&s, d).iter().any(|(k, text)| *k == SystemLineKind::Limit && text.contains("only answers here while the ticket is in Todo, Doing or Plan review")), "{:?}", system_lines(&s, d));
+    assert!(system_lines(&s, d).iter().any(|(k, text)| *k == SystemLineKind::Limit && text.contains("only answers here while the ticket is in Todo, Doing, Plan review or Review")), "{:?}", system_lines(&s, d));
     assert!(!messages(&s, d).iter().any(|m| m.system.is_none() && m.text.starts_with("Nobody was woken")));
     // @Bo: Bo is woken at hop 0, in its own main chat, with the ticket's context; it is no owner.
     let (to, runs) = post(&s, t, "@Bo what do you think?").unwrap();
@@ -294,10 +294,53 @@ fn without_a_mention_a_ticket_goes_to_its_owner_in_the_main_task() {
     assert_eq!(runs.len(), 1, "only Bo was woken");
     assert_eq!(last_woken(&s, s.bo).0, runs[0]);
     assert!(woken(&s, s.ann).is_empty());
-    // In Review the owner no longer answers by itself.
-    engine_puts(&s, t, ColumnKind::Review);
+    // In Backlog the owner no longer answers by itself.
+    engine_puts(&s, t, ColumnKind::Backlog);
     let (to, _) = post(&s, t, "Thanks").unwrap();
     assert!(to.is_empty());
+}
+
+#[test]
+fn an_answer_in_the_discussion_reaches_an_owner_whose_report_asks_a_question() {
+    // AUR-BUG-Q: the owner reports with a question (Review); the board member answers
+    // in the discussion without @, as in the main task's own conversation: a run of the
+    // main task answers it, the ticket stays in Review and reports again.
+    use aurelius_domain::task::TaskStatus;
+    let s = setup();
+    let t = new_ticket(&s, "Server name", Some(s.ann));
+    exec(&s, Command::StartTicket(ticket::StartTicket { ticket_id: t, employee_id: None })).unwrap();
+    let root = ticket_view(&s, t).root_task_id.expect("a main task");
+    let job = s.service.store().write(|tx| aurelius_storage::queries::claim_due_job(tx, "test", aurelius_storage::now_ms() + 60_000, 45_000, 4)).unwrap().expect("the task's job");
+    let task = s.service.task_context(root).unwrap().unwrap();
+    s.service.start_task_conversation(&task, job.lease_epoch).unwrap();
+    let root_conversation = s.service.store().read(move |c| aurelius_storage::tasks::task_conversation(c, root)).unwrap().map(|(c, _)| c).expect("its conversation");
+    let runs_in = |s: &Setup| -> Vec<(RunId, String)> { s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, root_conversation)).unwrap() };
+    // The owner's run ends with a question: the main task reports, the ticket goes to Review.
+    let first = runs_in(&s)[0].0;
+    let st = s.service.store().clone();
+    s.service.store().write(move |tx| {
+        tx.execute("UPDATE runs SET status = 'succeeded' WHERE id = ?1", [first.to_string()])?;
+        crate::task::task_runs::complete(tx, &st, root, "Which server name do you mean: the host or the label?")
+    })
+    .unwrap();
+    assert_eq!(task_status(&s, root), TaskStatus::Review);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
+    assert!(runs_in(&s).is_empty());
+    // The answer without @ goes to the owner in the main task, and a run answers it.
+    let (to, runs) = post(&s, t, "The label all clients show.").unwrap();
+    assert_eq!((to, runs), (vec![s.ann], vec![]), "the owner took it, nobody else was woken");
+    let note = messages(&s, root_conversation).into_iter().last().unwrap();
+    assert!(note.text.starts_with("The label all clients show."), "{}", note.text);
+    assert_eq!(runs_in(&s).len(), 1, "a run of the main task answers it");
+    assert!(woken(&s, s.ann).is_empty(), "not in the owner's main chat");
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    assert!(system_lines(&s, d).iter().all(|(k, _)| *k != SystemLineKind::Limit), "no 'nobody' line: {:?}", system_lines(&s, d));
+    // The task stays in Review until that run reports again.
+    assert_eq!(task_status(&s, root), TaskStatus::Review);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
+    // A second answer while that run is queued: no extra run.
+    post(&s, t, "And show it on mobile too.").unwrap();
+    assert_eq!(runs_in(&s).len(), 1);
 }
 
 #[test]

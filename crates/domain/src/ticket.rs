@@ -374,7 +374,7 @@ pub struct CancelTicket {
 
 /// A board member writes in a ticket's discussion (feature `ticket_discussion`).
 /// Without `@Name` it goes to the owner while the ticket is in Todo (with an
-/// owner), Doing or Plan review; else it wakes nobody. `@Name` wakes those
+/// owner), Doing, Plan review or Review; else it wakes nobody. `@Name` wakes those
 /// employees. Refused on Done (the discussion is read-only there). Not for apps.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]

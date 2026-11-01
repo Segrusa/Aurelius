@@ -232,9 +232,16 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     assert_eq!(extractions_of(dir.path(), part.id), 0, "no extraction for the part");
     assert_eq!(extractions_of(dir.path(), main.id), 0, "none for the main task before Done");
 
-    // A board member's word in Review (wakes nobody: no owner run in Review), then Done.
+    // A board member's word in Review goes to the owner (AUR-BUG-Q): a run of the
+    // main task answers it and reports again, the ticket stays in Review; then Done.
+    let runs = |root: &std::path::Path| -> i64 { common::db(root).query_row("SELECT COUNT(*) FROM runs WHERE conversation_id = ?1", [main.conversation_id.unwrap().to_string()], |r| r.get(0)).unwrap() };
+    let before = runs(dir.path());
     let posted = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: id, text: "Keep the old file name.".into(), images: vec![], files: vec![] }), None).await;
     assert!(posted.is_ok(), "{posted:?}");
+    // The post queued the owner's run in the same commit.
+    assert_eq!(runs(dir.path()), before + 1, "a run of the main task answers it");
+    quiet(dir.path(), main.conversation_id.unwrap()).await;
+    until(&client, id, ColumnKind::Review, TaskStatus::Review).await;
     client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await.unwrap();
     let done = until(&client, id, ColumnKind::Done, TaskStatus::Succeeded).await;
     let summary = line_of(&client, id, SystemLineKind::Summary).await;

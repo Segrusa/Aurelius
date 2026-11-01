@@ -7,8 +7,8 @@
 //!   from a board member: in the general channel the top of the org chart (the
 //!   CEO); in a project channel the project's dispatcher, else the CEO; in a
 //!   ticket's discussion the owner, while the ticket is in Todo (with an owner),
-//!   Doing or Plan review, as a message in its main task (no run of its own:
-//!   the main task's conversation answers it); else nobody, with a hint. A post
+//!   Doing, Plan review or Review, as a message in its main task (no run of its
+//!   own: the main task's conversation answers it); else nobody, with a hint. A post
 //!   of an employee wakes only the colleagues it names, never itself.
 //! * Loop limits (RULE 08), the same constants for every discussion and counted
 //!   over all of them together: at most `MAX_HOPS` hops after one message of a
@@ -186,9 +186,10 @@ fn ceo(conn: &rusqlite::Connection) -> Result<Option<EmployeeId>, StorageError> 
 }
 
 /// Whether a board member's message without `@Name` goes to the ticket's owner
-/// (B3): while the ticket is in Todo with an owner, Doing or Plan review.
+/// (B3): while the ticket is in Todo with an owner, Doing, Plan review or Review
+/// (the owner's report often ends with a question the board member answers here).
 fn owner_answers(t: &TicketPlace) -> bool {
-    t.owner.is_some() && !t.archived && matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview)
+    t.owner.is_some() && !t.archived && matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Review)
 }
 
 /// Who answers `text` in `d`: the active employees it names (not `author`);
@@ -281,7 +282,7 @@ fn nobody_answers(d: &Discussion, paused: &[String]) -> String {
         (_, [one]) => format!("Nobody was woken: {one} is paused. Resume them, or name a colleague with @Name."),
         (_, [_, ..]) => format!("Nobody was woken: {} are paused. Resume them, or name a colleague with @Name.", paused.join(", ")),
         (Place::Ticket(t), []) if t.owner.is_none() => "Nobody was woken: this ticket has no owner yet. Name a colleague with @Name.".into(),
-        (Place::Ticket(_), []) => "Nobody was woken: the owner only answers here while the ticket is in Todo, Doing or Plan review. Name a colleague with @Name.".into(),
+        (Place::Ticket(_), []) => "Nobody was woken: the owner only answers here while the ticket is in Todo, Doing, Plan review or Review. Name a colleague with @Name.".into(),
         (_, []) => "Nobody was woken: there is no CEO to answer a message without @Name. Name a colleague with @Name.".into(),
     }
 }
@@ -505,10 +506,11 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
 }
 
 /// A board member's message without `@Name` for the ticket's owner (B3): an
-/// update in the main task's conversation. Only while the main task runs does a
-/// run answer it: the one already queued there, else one queued behind the run
-/// that goes (its end counts for the task, as an answer in the task's own
-/// conversation does). Otherwise nothing runs and the owner reads it when the
+/// update in the main task's conversation. Only while the main task runs or is
+/// in Review does a run answer it: the one already queued there, else one queued
+/// behind the run that goes (its end counts for the task, as an answer in the
+/// task's own conversation does: in Review it reports again, so the answer to the
+/// report's question comes back as a new report). Otherwise nothing runs and the owner reads it when the
 /// task goes on: before its start (it starts with the discussion as context),
 /// while it waits for its turn (Queued: `start_task_conversation` goes on from
 /// its conversation), and while it waits (Waiting: for the plan's decision, a
@@ -534,7 +536,7 @@ fn to_owner(tx: &Tx<'_>, store: &Store, t: &TicketPlace, from: &str, text: &str)
     );
     let (message, posted) = crate::task::task_threads::post_returning(tx, store, conversation, root, crate::task::task_threads::Speaker::Update { kind: "message", from }, &body)?;
     let mut notices = vec![posted];
-    if row.status != TaskStatus::Running {
+    if !matches!(row.status, TaskStatus::Running | TaskStatus::Review) {
         return Ok(Some(notices));
     }
     let runs = conv::unfinished_runs_in(tx, conversation)?;

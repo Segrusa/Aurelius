@@ -72,11 +72,13 @@ void main() {
       expect(discussionAddressee(ticketOf(column: ColumnKind.planReview, ownerName: 'Forge')), 'Forge');
       expect(discussionAddressee(ticketOf(column: ColumnKind.todo, ownerEmployeeId: 'forge', ownerName: 'Forge')), 'Forge');
       expect(discussionAddressee(ticketOf(column: ColumnKind.todo)), isNull, reason: 'Todo without an owner: nobody yet');
-      for (final c in [ColumnKind.backlog, ColumnKind.review, ColumnKind.done]) {
+      expect(discussionAddressee(ticketOf(column: ColumnKind.review, ownerName: 'Forge')), 'Forge', reason: 'AUR-BUG-Q: the answer to a question in the report');
+      for (final c in [ColumnKind.backlog, ColumnKind.done]) {
         expect(discussionAddressee(ticketOf(column: c, ownerName: 'Forge')), isNull, reason: '$c');
       }
       expect(discussionHint(ticketOf(column: ColumnKind.doing, ownerName: 'Forge')), 'Message Forge (owner) · @ to mention someone else');
-      expect(discussionHint(ticketOf(column: ColumnKind.review, ownerName: 'Forge')), 'No one is woken. @mention to ask someone.');
+      expect(discussionHint(ticketOf(column: ColumnKind.review, ownerName: 'Forge')), 'Message Forge (owner) · @ to mention someone else');
+      expect(discussionHint(ticketOf(column: ColumnKind.backlog, ownerName: 'Forge')), 'No one is woken. @mention to ask someone.');
     });
 
     test('an archived ticket or a main task that ended: nobody is woken without @ (R1 c3/m1, as the server)', () {

@@ -288,10 +288,10 @@ pub fn writable(t: &TicketView) -> bool {
 }
 
 /// Whom a post without `@` reaches (B3, P-21): the owner while the ticket is in
-/// Todo with an owner, Doing or Plan review and not archived; else nobody. The
-/// same rule as the server's `owner_answers`.
+/// Todo with an owner, Doing, Plan review or Review and not archived; else nobody.
+/// The same rule as the server's `owner_answers`.
 pub fn reaches_owner(t: &TicketView) -> bool {
-    t.owner_employee_id.is_some() && t.archived_at_ms.is_none() && matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview)
+    t.owner_employee_id.is_some() && t.archived_at_ms.is_none() && matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Review)
 }
 
 /// What the read-only footer says (B7): Done with how the summary went, or archived.
@@ -387,7 +387,7 @@ pub fn retry_failure(e: &ClientError) -> String {
 /// `owner_answers`, the same rule as `reaches_owner`), with or without a run of
 /// its own; every other one in `to` was woken in the discussion. Whether the
 /// owner took it: the owner is in `to` while the post reaches them. Outside that
-/// (Review, Backlog) an `@owner` wakes them like anyone else.
+/// (Backlog) an `@owner` wakes them like anyone else.
 pub fn reached(t: Option<&TicketView>, to: &[EmployeeId]) -> (bool, Vec<EmployeeId>) {
     let owner = t.filter(|t| reaches_owner(t)).and_then(|t| t.owner_employee_id).filter(|o| to.contains(o));
     (owner.is_some(), to.iter().copied().filter(|e| Some(*e) != owner).collect())
@@ -743,7 +743,10 @@ mod tests {
     fn a_post_without_at_reaches_the_owner_only_while_the_ticket_runs() {
         assert_eq!(composer_hint(&ticket(ColumnKind::Doing, true)), "Message Forge (owner) · @ to mention someone else");
         assert!(reaches_owner(&ticket(ColumnKind::Todo, true)) && reaches_owner(&ticket(ColumnKind::PlanReview, true)));
-        for column in [ColumnKind::Backlog, ColumnKind::Review, ColumnKind::Done] {
+        // AUR-BUG-Q: the report in Review may ask a question; the answer goes to the owner.
+        assert!(reaches_owner(&ticket(ColumnKind::Review, true)));
+        assert_eq!(composer_hint(&ticket(ColumnKind::Review, true)), "Message Forge (owner) · @ to mention someone else");
+        for column in [ColumnKind::Backlog, ColumnKind::Done] {
             assert_eq!(composer_hint(&ticket(column, true)), "No one is woken. @mention to ask someone.", "P-21: {column:?}");
         }
         assert!(!reaches_owner(&ticket(ColumnKind::Doing, false)));
@@ -777,10 +780,14 @@ mod tests {
         // F3: the main task is terminal, the owner is not in `to`: nobody took it.
         assert_eq!(reached(Some(&doing), &[]), (false, vec![]));
         assert_eq!(reached(Some(&doing), &[sentinel]), (false, vec![sentinel]));
-        // In Review an @owner wakes the owner in the discussion, like anyone.
+        // In Review the owner takes it in the main task, as in Doing.
         let review = ticket(ColumnKind::Review, true);
         let owner = review.owner_employee_id.unwrap();
-        assert_eq!(reached(Some(&review), &[owner]), (false, vec![owner]));
+        assert_eq!(reached(Some(&review), &[owner]), (true, vec![]));
+        // In Backlog an @owner wakes the owner in the discussion, like anyone.
+        let backlog = ticket(ColumnKind::Backlog, true);
+        let owner = backlog.owner_employee_id.unwrap();
+        assert_eq!(reached(Some(&backlog), &[owner]), (false, vec![owner]));
         // The ticket is gone from the board: everyone named is woken.
         assert_eq!(reached(None, &[sentinel]), (false, vec![sentinel]));
         assert_eq!(posted_text(&[], true), "Sent. The owner gets it in the main task.");
@@ -792,7 +799,7 @@ mod tests {
     fn nobody_woken_is_a_system_line_in_the_servers_words() {
         // F3: "Nobody was woken…" comes as a system line (meta.system); it reads as the
         // server wrote it and as a system line, not as a message of "Aurelius".
-        let text = "Nobody was woken: the owner only answers here while the ticket is in Todo, Doing or Plan review. Name a colleague with @Name.";
+        let text = "Nobody was woken: the owner only answers here while the ticket is in Todo, Doing, Plan review or Review. Name a colleague with @Name.";
         let nobody = line(SystemLineKind::Limit, text);
         let s = nobody.system.as_ref().expect("a system line");
         assert_eq!(system_text(s, &nobody.text), text);
