@@ -9,7 +9,7 @@
 
 use crate::app::{AppView, MenuItems, Overlay, Panel};
 use crate::backend::{self, BoardCall};
-use crate::screens::board::{BoardDialog, BoardDo, Dispatcher, DoneCheck, EditField, done_check, Needs, PRIORITIES, TicketTab, activity_detail, activity_text, deadline_input, feedback_label, mode_text, deadline_text, empty_update, feedback_ready, menu_entry, move_column, new_ticket_problems, parse_deadline, parse_labels, priority_label};
+use crate::screens::board::{BoardDialog, BoardDo, Dispatcher, DoneCheck, EditField, done_check, Needs, PRIORITIES, TicketTab, activity_detail, activity_text, deadline_input, feedback_label, mode_text, deadline_text, empty_update, pasted_add_files, feedback_ready, menu_entry, move_column, new_ticket_problems, parse_deadline, parse_labels, priority_label};
 use crate::theme::{self, c};
 use crate::ui::{self, ButtonKind, h, v};
 use aurelius_domain::task::TaskStatus;
@@ -233,8 +233,7 @@ impl AppView {
                 }
             },
         }
-        let files: Vec<String> = self.board.edit_files.drain(..).map(|(p, _)| p.display().to_string()).collect();
-        update.add_files = Some(files).filter(|f| !f.is_empty());
+        update.add_files = pasted_add_files(std::mem::take(&mut self.board.edit_files));
         self.board.editing = None;
         self.board.edit_error = None;
         self.ticket_update(update, cx);
