@@ -62,6 +62,10 @@ event_kinds! {
     MessageInterrupted => "message.interrupted",
     MessageDeleted => "message.deleted",
     MessageSentNow => "message.sent_now",
+    // A board member added or took back a reaction on a message of a channel
+    // (feature `chat_reactions`); aggregate: the channel's conversation;
+    // `metadata.message_id`, `emoji`, `on`. Only to connections that accept `chat_reactions`.
+    MessageReacted => "message.reacted",
     RunQueued => "run.queued",
     RunStarted => "run.started",
     RunWaiting => "run.waiting",

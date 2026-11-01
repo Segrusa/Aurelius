@@ -204,6 +204,38 @@ extension MessageViewState on MessageView {
         uploads: uploads,
       );
 
+  /// The same message with [next] as its reactions (feature `chat_reactions`);
+  /// every other field as it was.
+  MessageView withReactions(List<ReactionView> next) => MessageView(
+        activity: activity,
+        approvalId: approvalId,
+        author: author,
+        authorUser: authorUser,
+        createdAtMs: createdAtMs,
+        files: files,
+        id: id,
+        mode: mode,
+        ordinal: ordinal,
+        producedBy: producedBy,
+        queued: queued,
+        reactions: next,
+        replyTo: replyTo,
+        role: role,
+        runId: runId,
+        sources: sources,
+        status: status,
+        system: system,
+        text: text,
+        threadLastReplyMs: threadLastReplyMs,
+        threadParent: threadParent,
+        threadRepliers: threadRepliers,
+        threadReplyCount: threadReplyCount,
+        threadUnread: threadUnread,
+        update: update,
+        uploads: uploads,
+        usage: usage,
+      );
+
   /// The text split around the tools it used, in order: `String` pieces of
   /// Markdown and [ActivityView]s. Offsets are UTF-8 bytes (Rust strings).
   List<Object> get parts {

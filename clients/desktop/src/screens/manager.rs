@@ -156,6 +156,9 @@ impl AppView {
         if let Panel::Ticket(id) = self.panel {
             return self.render_ticket_panel(id, window, cx);
         }
+        if let Panel::Thread(root) = self.panel {
+            return self.render_thread_panel(root, cx);
+        }
         let task = self.panel_task().cloned();
         let manager = self.panel_manager().cloned();
         let conversation = self.current_manager_thread();

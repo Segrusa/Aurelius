@@ -313,12 +313,23 @@ pub mod feature {
     /// `SystemLine::channel_id`, with one line in General when a ticket opens and
     /// one when it closes.
     pub const TICKET_CHANNELS: &str = "ticket_channels";
-    /// Threads in channels (phase 2, defined but not advertised yet):
-    /// `thread_parent` on `group_chat.send` / `ticket.post`, and
-    /// `MessageView::thread_parent`, `thread_reply_count`, `thread_last_reply_ms`.
+    /// Threads in channels (protocol 5, additive; AUR-CHAT-002): `thread_parent`
+    /// on `group_chat.send` / `ticket.post` (a message of the same channel that is
+    /// not itself a reply); the read `thread.read { message_id }` (`ThreadSnapshot`,
+    /// marks the thread read); `MessageView::thread_parent`, `thread_reply_count`,
+    /// `thread_last_reply_ms`, `thread_unread` and `thread_repliers`. Replies are never in the
+    /// channel's own list and not in its `unread`; unread replies that name the
+    /// reader count in its `mentions`. A reply gives the events a message of the
+    /// channel gives (`message.user_committed`, `task.posted` on the channel's
+    /// conversation); an employee's answer streams with `StreamDelta::thread_parent`,
+    /// only to connections whose `HelloParams::accepts` names `chat_threads`.
     pub const CHAT_THREADS: &str = "chat_threads";
-    /// Reactions on messages (phase 2, defined but not advertised yet): the
-    /// write `message.react` and `MessageView::reactions`.
+    /// Reactions on messages (protocol 5, additive; AUR-CHAT-002): the write
+    /// `message.react { message_id, emoji, on }` (board members, on a message of a
+    /// channel or a ticket's discussion that is not closed; idempotent),
+    /// `MessageView::reactions`, and the event `message.reacted` (aggregate: the
+    /// channel's conversation), only to connections whose `HelloParams::accepts`
+    /// names `chat_reactions`.
     pub const CHAT_REACTIONS: &str = "chat_reactions";
     /// `ticket.update { add_files }` (protocol 5, additive): files added to an
     /// existing ticket, as `files` on `ticket.create`. A main task that still
@@ -360,6 +371,8 @@ pub const FEATURES: &[&str] = &[
     feature::BOARD_TESTING,
     feature::SERVER_NAME,
     feature::TICKET_ADD_FILES,
+    feature::CHAT_THREADS,
+    feature::CHAT_REACTIONS,
 ];
 
 /// Daemon → client.
@@ -458,6 +471,8 @@ pub enum ResponseBody {
     Tickets(aurelius_domain::ticket::TicketsSnapshot),
     Users(aurelius_domain::user::UsersSnapshot),
     Channels(aurelius_domain::views::ChannelsSnapshot),
+    /// `thread.read`.
+    Thread(aurelius_domain::views::ThreadSnapshot),
     WhoAmI(aurelius_domain::user::WhoAmI),
     /// `user.login`: the session token, once.
     Login(aurelius_domain::user::LoginResult),

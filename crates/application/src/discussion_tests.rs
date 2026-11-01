@@ -373,7 +373,7 @@ fn hops_stop_at_max_and_leave_a_system_line_that_wakes_nobody() {
     // A system line written anywhere wakes nobody, even with @Name in it.
     let mut line = SystemLine::new(SystemLineKind::Moved);
     line.by = Some("@Cy".into());
-    s.service.store().write(move |tx| discussion::post_system(tx, general, &line)).unwrap();
+    s.service.store().write(move |tx| discussion::system_line(tx, general, &line, None)).unwrap();
     assert!(woken(&s, s.cy).is_empty());
 }
 
@@ -386,7 +386,7 @@ fn system_lines_are_written_in_words_with_the_ticket_number() {
     let mut line = SystemLine::new(SystemLineKind::TicketCreated);
     line.by = Some("alex".into());
     line.ticket_id = Some(t);
-    s.service.store().write(move |tx| discussion::post_system(tx, general, &line)).unwrap();
+    s.service.store().write(move |tx| discussion::system_line(tx, general, &line, None)).unwrap();
     let lines = system_lines(&s, general);
     assert!(lines.contains(&(SystemLineKind::TicketCreated, format!("alex created #{number} from a message"))), "{lines:?}");
 }
@@ -791,3 +791,6 @@ fn a_post_in_a_ticket_channel_through_group_chat_send_needs_a_board_member() {
     send(&s, Some(d), "signed in").unwrap();
     assert!(messages(&s, d).iter().any(|m| m.text == "signed in"));
 }
+
+#[path = "discussion_thread_tests.rs"]
+mod threads;

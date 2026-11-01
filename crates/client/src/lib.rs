@@ -740,6 +740,13 @@ impl Client {
         self.read(Method::GroupChatGet { channel: Some(channel) }, body!(Messages)).await
     }
 
+    /// One thread of a channel: `message_id` starts it; its replies oldest
+    /// first. Reading it marks it read. Only on a server that `supports`
+    /// `aurelius_protocol::feature::CHAT_THREADS` (an older one refuses the method).
+    pub async fn thread(&self, message_id: aurelius_domain::MessageId) -> Result<aurelius_domain::views::ThreadSnapshot, ClientError> {
+        self.read(Method::ThreadRead { message_id }, body!(Thread)).await
+    }
+
     /// The Team chat's channels (feature `team_channels`): General first, then one per project.
     pub async fn channels(&self) -> Result<aurelius_domain::views::ChannelsSnapshot, ClientError> {
         self.read(Method::ChannelList, body!(Channels)).await

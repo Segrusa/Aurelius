@@ -411,7 +411,7 @@ pub struct PostTicketMessage {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub confirm_secret: bool,
     /// A reply in the thread of this message of the discussion (feature
-    /// `chat_threads`, not advertised yet: the server refuses it until then).
+    /// `chat_threads`): a message of the same discussion that is not itself a reply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_parent: Option<crate::MessageId>,
 }
