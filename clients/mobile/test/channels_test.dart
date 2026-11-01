@@ -3,6 +3,9 @@ import 'package:aurelius_mobile/data/discussion.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/builders.dart' show taskOf;
+import 'support/tickets.dart' show ticketOf;
+
 // AUR-CHAT-001-M1: the pure helpers of the Slack-style Team chat (ui-ontwerp
 // §1–§2, §6). Neutral names: board members ada and lena, employees Forge, Orion.
 
@@ -245,6 +248,24 @@ void main() {
       expect(mentionMarkOf('alexandra', known: known), MentionMark.other);
       expect(mentionMarkOf('ADA', known: known, me: 'ada'), MentionMark.me);
       expect(mentionMarkOf('Forge.', known: known), MentionMark.other, reason: 'a trailing dot belongs to the sentence');
+    });
+  });
+
+  group('the header of a ticket channel (§3)', () {
+    test('the owner comes first, then every other employee of its tasks once', () {
+      final detail = TicketDetail(
+        asOfSeq: 1,
+        ticket: ticketOf(ownerName: 'Forge'),
+        rootTask: taskOf(id: 't0', employeeName: 'Forge'),
+        tasks: [taskOf(id: 't1', employeeName: 'Schema'), taskOf(id: 't2', employeeName: 'Forge'), taskOf(id: 't3', employeeName: null)],
+      );
+      expect(ticketAssignees(detail), ['Forge', 'Schema']);
+    });
+
+    test('more than two assignees are two names and a count of the rest', () {
+      expect(assigneesLine(['Forge']), 'Forge');
+      expect(assigneesLine(['Forge', 'Schema']), 'Forge, Schema');
+      expect(assigneesLine(['Forge', 'Schema', 'Orion', 'Pulse']), 'Forge, Schema +2');
     });
   });
 }

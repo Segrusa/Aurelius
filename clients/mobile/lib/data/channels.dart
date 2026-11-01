@@ -243,3 +243,24 @@ List<(String, MentionMark?)> mentionSegments(String text, {required Iterable<Str
   if (at < text.length) out.add((text.substring(at), null));
   return out;
 }
+
+/// Who works on a ticket, as its channel's header names them (§3): the owner
+/// first, then every other employee of its tasks, each once.
+List<String> ticketAssignees(TicketDetail detail) {
+  final out = <String>[];
+  void add(String? name) {
+    final n = name?.trim();
+    if (n != null && n.isNotEmpty && !out.contains(n)) out.add(n);
+  }
+
+  add(detail.ticket.ownerName);
+  add(detail.rootTask?.employeeName);
+  for (final t in detail.tasks) {
+    add(t.employeeName);
+  }
+  return out;
+}
+
+/// The assignees as the header's line says them (§3): at most two names,
+/// then "+n" for the rest.
+String assigneesLine(List<String> names) => names.length <= 2 ? names.join(', ') : '${names.take(2).join(', ')} +${names.length - 2}';
