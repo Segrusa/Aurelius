@@ -68,9 +68,9 @@ fn a_schema_23_database_migrates_without_losing_anything() {
     assert!(before.iter().any(|r| r.starts_with("guideline_versions:")) && before.iter().any(|r| r.contains("sn01_probe")));
     assert_eq!(server_name::get(&db(dir.path())).unwrap(), server_name::StoredServerName::default(), "before 24: no name");
 
-    drop(Store::open(dir.path()).unwrap());
+    drop(Store::open_until(dir.path(), 24).unwrap());
     let conn = db(dir.path());
-    assert_eq!(conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get::<_, i64>(0)).unwrap(), migrate::supported_version());
+    assert_eq!(conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get::<_, i64>(0)).unwrap(), 24);
     assert!(strings(&conn, "SELECT \"table\" FROM pragma_foreign_key_check").is_empty());
     assert_eq!(snapshot(&conn), before);
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM server_name", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
