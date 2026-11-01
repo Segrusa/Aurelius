@@ -188,8 +188,8 @@ pub fn members(conn: &Connection, conversation: ConversationId) -> Result<Vec<Me
 /// disabled. Board members have no roles; the one who set the server up owns it.
 pub fn owners(conn: &Connection) -> Result<Vec<UserId>, StorageError> {
     let mut stmt = conn.prepare("SELECT id FROM users WHERE created_by_user IS NULL AND disabled_at_ms IS NULL ORDER BY created_at_ms, id")?;
-    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-    Ok(rows.filter_map(|r| r.ok().and_then(|id| UserId::parse(&id).ok())).collect())
+    let rows = stmt.query_map([], |r| parse(UserId::parse(&r.get::<_, String>(0)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// When the channel `conversation` was archived (a closed ticket's); none: open.

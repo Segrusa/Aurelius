@@ -72,3 +72,16 @@ fn a_read_never_carries_the_hash() {
     let shown = store.read(|c| Ok(format!("{:?} {:?} {:?}", users::list(c)?, users::get(c, &uid(1))?, users::by_username(c, "grace")?))).unwrap();
     assert!(!shown.contains("argon2"), "{shown}");
 }
+
+#[test]
+fn owners_reports_an_unreadable_row_instead_of_skipping_it() {
+    // Trace R1 m6: a read error must not quietly leave the Owner out of a ticket's channel.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    add(&store, &uid(1), "grace", None, 10).unwrap();
+    add(&store, &uid(2), "ada", Some(&uid(1)), 20).unwrap();
+    let owners = store.read(crate::discussions::owners).unwrap();
+    assert_eq!(owners.iter().map(ToString::to_string).collect::<Vec<_>>(), [uid(1)], "only the one made in the onboarding");
+    add(&store, "not-a-user-id", "broken", None, 30).unwrap();
+    assert!(store.read(crate::discussions::owners).is_err());
+}
