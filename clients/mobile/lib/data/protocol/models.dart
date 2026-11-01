@@ -1145,7 +1145,7 @@ final class BoardColumnView {
   };
 }
 
-/// `board.get`: the six columns left to right, each with its cards (not archived).
+/// `board.get`: the seven columns left to right, each with its cards (not archived).
 final class BoardView {
   const BoardView({
     required this.asOfSeq,
@@ -1517,7 +1517,7 @@ final class ClaudeLoginView {
   };
 }
 
-/// What a column does. The six kinds always exist, once each.
+/// What a column does. The seven kinds always exist, once each.
 enum ColumnKind {
   /// New tickets; nothing starts from here by itself.
   backlog('backlog'),
@@ -1529,6 +1529,10 @@ enum ColumnKind {
   planReview('plan_review'),
   /// The main task reported; a board member accepts it or sends it back.
   review('review'),
+  /// The main task reported; the tester runs the full test suite once before
+  /// Review (protocol 5, feature `board_testing`). Only with a company tester:
+  /// without one, cards go from Doing to Review as before.
+  testing('testing'),
   /// Started: waiting for the dispatcher or for the owner's turn.
   todo('todo');
 
@@ -2400,7 +2404,8 @@ final class CommandLinkGuideline extends Command {
 
 /// Drag a card. Within its column: only the order. To Todo: start it. To
 /// Backlog: cancel it. Done only through `ticket.accept`, and Review back to
-/// Doing only through `ticket.send_back`; other moves follow the work and are refused.
+/// Doing only through `ticket.send_back`; out of Testing only to Backlog (cancel);
+/// other moves follow the work and are refused.
 /// The place is relative to a neighbour, so it means the same on a board
 /// filtered by project as on the whole board. A move within the same column
 /// also gives `ticket.moved` (with `from` = `to`). A card put above itself in
@@ -2443,7 +2448,7 @@ final class CommandPinMemory extends Command {
 
 /// A board member writes in a ticket's discussion (feature `ticket_discussion`).
 /// Without `@Name` it goes to the owner while the ticket is in Todo (with an
-/// owner), Doing, Plan review or Review; else it wakes nobody. `@Name` wakes those
+/// owner), Doing, Plan review, Testing or Review; else it wakes nobody. `@Name` wakes those
 /// employees. Refused on Done (the discussion is read-only there). Not for apps.
 final class CommandPostTicketMessage extends Command {
   const CommandPostTicketMessage({
@@ -3087,7 +3092,7 @@ final class CommandUnlinkGuideline extends Command {
     };
 }
 
-/// Rename the columns and set their order (B3): all six, left to right.
+/// Rename the columns and set their order (B3): all of them, left to right.
 /// `expected_version` is the board's (`board_version`: the columns change
 /// together); the answer gives the new one.
 final class CommandUpdateBoardColumns extends Command {
@@ -4717,6 +4722,7 @@ final class CompanyView {
     this.dispatcherEmployeeId,
     required this.id,
     required this.name,
+    this.testerEmployeeId,
     required this.version,
   });
 
@@ -4725,12 +4731,17 @@ final class CompanyView {
   final String? dispatcherEmployeeId;
   final String id;
   final String name;
+  /// Runs the full test suite once while a card is in Testing, before Review
+  /// (feature `board_testing`). None: no Testing step, cards go from Doing to
+  /// Review as before. Left out by older servers.
+  final String? testerEmployeeId;
   final int version;
 
   factory CompanyView.fromJson(Map<String, dynamic> json) => CompanyView(
     dispatcherEmployeeId: (json['dispatcher_employee_id'] == null ? null : (json['dispatcher_employee_id'] as String)),
     id: (json['id'] as String),
     name: (json['name'] as String),
+    testerEmployeeId: (json['tester_employee_id'] == null ? null : (json['tester_employee_id'] as String)),
     version: (json['version'] as num).toInt(),
   );
 
@@ -4738,6 +4749,7 @@ final class CompanyView {
     if (dispatcherEmployeeId != null) 'dispatcher_employee_id': dispatcherEmployeeId,
     'id': id,
     'name': name,
+    if (testerEmployeeId != null) 'tester_employee_id': testerEmployeeId,
     'version': version,
   };
 }
@@ -6098,6 +6110,7 @@ enum EventKind {
   ticketReview('ticket.review'),
   ticketSentBack('ticket.sent_back'),
   ticketStarted('ticket.started'),
+  ticketTested('ticket.tested'),
   ticketUpdated('ticket.updated'),
   userCreated('user.created'),
   userDisabled('user.disabled'),
@@ -16861,6 +16874,25 @@ final class SetTaskSchedulePaused {
   };
 }
 
+/// Who runs the full test suite once for a card in Testing (feature
+/// `board_testing`). `employee_id` none: no tester, so no Testing step: cards
+/// go from Doing to Review as before.
+final class SetTester {
+  const SetTester({
+    this.employeeId,
+  });
+
+  final String? employeeId;
+
+  factory SetTester.fromJson(Map<String, dynamic> json) => SetTester(
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (employeeId != null) 'employee_id': employeeId,
+  };
+}
+
 /// A field that can inherit, hold a value, or be explicitly disabled.
 sealed class Setting {
   const Setting();
@@ -18816,24 +18848,29 @@ final class UpdateAgentFunction {
   };
 }
 
-/// Change the company's name or its dispatcher; left out: unchanged.
+/// Change the company's name, its dispatcher or its tester; left out: unchanged.
 final class UpdateCompany {
   const UpdateCompany({
     this.dispatcher,
     this.name,
+    this.tester,
   });
 
   final SetDispatcher? dispatcher;
   final String? name;
+  /// Feature `board_testing`.
+  final SetTester? tester;
 
   factory UpdateCompany.fromJson(Map<String, dynamic> json) => UpdateCompany(
     dispatcher: (json['dispatcher'] == null ? null : SetDispatcher.fromJson(json['dispatcher'] as Map<String, dynamic>)),
     name: (json['name'] == null ? null : (json['name'] as String)),
+    tester: (json['tester'] == null ? null : SetTester.fromJson(json['tester'] as Map<String, dynamic>)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (dispatcher != null) 'dispatcher': dispatcher?.toJson(),
     if (name != null) 'name': name,
+    if (tester != null) 'tester': tester?.toJson(),
   };
 }
 
