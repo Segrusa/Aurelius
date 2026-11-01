@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -96,13 +94,10 @@ class _TicketTextDialogState extends State<TicketTextDialog> {
     if (_files.length >= widget.room) return toast(context, 'This ticket takes no more files.');
     if (data.length > maxTaskFileBytes) return toast(context, 'The image is larger than 25 MB and was not added.');
     final repository = context.read<AureliusRepository>();
-    final name = 'Pasted image.$extension';
+    final name = pastedImageName(_files.map((f) => f.name), extension);
     setState(() => _uploading = true);
     try {
-      final dir = await Directory.systemTemp.createTemp('aurelius-paste');
-      final file = File('${dir.path}/$name');
-      await file.writeAsBytes(data);
-      final uploaded = await repository.upload(file, name);
+      final uploaded = await withPastedFile(data, name, (file) => repository.upload(file, name));
       if (mounted) setState(() => _files.add((name: uploaded.name, path: uploaded.path)));
     } catch (e) {
       if (mounted) toast(context, '$name: $e');
@@ -148,7 +143,7 @@ class _TicketTextDialogState extends State<TicketTextDialog> {
               if (_uploading) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
               for (final f in _files)
                 ListTile(
-                  key: ValueKey('ticket-text-file-${f.name}'),
+                  key: ValueKey('ticket-text-file-${f.path}'),
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   leading: const Icon(Icons.image_outlined),

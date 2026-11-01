@@ -66,6 +66,17 @@ const ticketAddFilesFeature = 'ticket_add_files';
 /// none when the server cannot add them to an existing ticket.
 int ticketFileRoom(TicketView ticket, LinkState link) => link.has(ticketAddFilesFeature) ? (maxTaskFiles - ticket.attachments.length).clamp(0, maxTaskFiles) : 0;
 
+/// The `ticket.update` for an edit of the [title] or the description: only the
+/// text when it changed (an empty description clears it) and the pasted files;
+/// `null` when nothing changed or a title would be empty.
+Map<String, dynamic>? ticketTextUpdate(TicketView ticket, TicketTextEdit edit, {required bool title}) {
+  final before = title ? ticket.title : ticket.description ?? '';
+  final text = edit.text == before ? null : edit.text;
+  if ((title && edit.text.isEmpty) || (text == null && edit.files.isEmpty)) return null;
+  final files = edit.files.isEmpty ? null : edit.files;
+  return title ? ticketUpdate(ticketId: ticket.id, title: text, addFiles: files) : ticketUpdate(ticketId: ticket.id, description: text, addFiles: files);
+}
+
 /// How many messages of a discussion this phone showed, by conversation: the
 /// Discussion tab gets a dot for newer ones (ui-ontwerp Fase 2 §2). The server
 /// keeps no read state for a ticket's discussion.
@@ -426,16 +437,17 @@ class _TicketViewState extends State<_TicketView> {
   Future<void> _editTitle(BuildContext context, TicketView ticket) async {
     final room = ticketFileRoom(ticket, context.read<ConnectionBloc>().state);
     final edit = await editTicketText(context, label: 'Title', initial: ticket.title, maxLength: 160, room: room);
-    if (edit == null || edit.text.isEmpty || (edit.text == ticket.title && edit.files.isEmpty) || !context.mounted) return;
-    await ticketWrite(context, ticketUpdate(ticketId: ticket.id, title: edit.text == ticket.title ? null : edit.text, addFiles: edit.files.isEmpty ? null : edit.files), expectedVersion: ticket.version);
+    final request = edit == null ? null : ticketTextUpdate(ticket, edit, title: true);
+    if (request == null || !context.mounted) return;
+    await ticketWrite(context, request, expectedVersion: ticket.version);
   }
 
   Future<void> _editDescription(BuildContext context, TicketView ticket) async {
     final room = ticketFileRoom(ticket, context.read<ConnectionBloc>().state);
     final edit = await editTicketText(context, label: 'Description', initial: ticket.description ?? '', lines: 6, required: false, room: room);
-    if (edit == null || (edit.text == (ticket.description ?? '') && edit.files.isEmpty) || !context.mounted) return;
-    // An empty text clears it.
-    await ticketWrite(context, ticketUpdate(ticketId: ticket.id, description: edit.text == (ticket.description ?? '') ? null : edit.text, addFiles: edit.files.isEmpty ? null : edit.files), expectedVersion: ticket.version);
+    final request = edit == null ? null : ticketTextUpdate(ticket, edit, title: false);
+    if (request == null || !context.mounted) return;
+    await ticketWrite(context, request, expectedVersion: ticket.version);
   }
 
   Future<void> _editPriority(BuildContext context, TicketView ticket) async {

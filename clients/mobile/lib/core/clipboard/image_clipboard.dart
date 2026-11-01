@@ -51,6 +51,30 @@ String pastedImageExtension(String mimeType) => switch (mimeType) {
       _ => 'jpg',
     };
 
+/// The name of a pasted image: "Pasted image.png", then "Pasted image 2.png",
+/// … for the [taken] names already in the list, so two pastes can be told apart.
+String pastedImageName(Iterable<String> taken, String extension) {
+  final names = taken.toSet();
+  var name = 'Pasted image.$extension';
+  for (var n = 2; names.contains(name); n++) {
+    name = 'Pasted image $n.$extension';
+  }
+  return name;
+}
+
+/// Writes pasted bytes to a temporary file, hands it to [upload], and deletes
+/// it again whatever [upload] does.
+Future<T> withPastedFile<T>(Uint8List data, String name, Future<T> Function(File file) upload) async {
+  final dir = await Directory.systemTemp.createTemp('aurelius-paste');
+  try {
+    final file = File('${dir.path}/$name');
+    await file.writeAsBytes(data);
+    return await upload(file);
+  } finally {
+    await dir.delete(recursive: true).catchError((_) => dir);
+  }
+}
+
 /// A field's edit menu with Paste Image after Paste (Flutter's own Paste only
 /// handles text), or Paste on top when there is no text to paste.
 List<ContextMenuButtonItem> withPasteImage(List<ContextMenuButtonItem> items, VoidCallback onPasteImage) {

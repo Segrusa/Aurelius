@@ -256,10 +256,11 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
   /// Keep pasted bytes as a file and attach it like a picked photo.
   Future<void> _addImage(Uint8List data, String extension) async {
     if (_files.length >= maxTaskFiles) return toast(context, 'At most $maxTaskFiles files per ticket.');
-    final dir = await Directory.systemTemp.createTemp('aurelius-paste');
-    final file = File('${dir.path}/Pasted image.$extension');
-    await file.writeAsBytes(data);
-    if (mounted) await _upload([(file, 'Pasted image.$extension')]);
+    if (data.length > maxTaskFileBytes) return toast(context, 'The image is larger than 25 MB and was not added.');
+    final name = pastedImageName(_files.map((f) => f.name), extension);
+    await withPastedFile(data, name, (file) async {
+      if (mounted) await _upload([(file, name)]);
+    });
   }
 
   /// The edit menu of the title and description, with Paste Image when the clipboard holds one.
