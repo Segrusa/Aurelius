@@ -214,7 +214,7 @@ fn a_mention_in_a_ticket_wakes_and_the_answer_comes_back_there() {
     let (to, runs) = post(&s, t, "Some thoughts first.").unwrap();
     assert!(to.is_empty() && runs.is_empty());
     // A system line (not an employee's message), which clients show as one.
-    assert!(system_lines(&s, d).iter().any(|(k, text)| *k == SystemLineKind::Limit && text.contains("only answers here while the ticket is in Todo, Doing, Plan review or Review")), "{:?}", system_lines(&s, d));
+    assert!(system_lines(&s, d).iter().any(|(k, text)| *k == SystemLineKind::Limit && text.contains("only answers here while the ticket is in Todo, Doing, Plan review, Testing or Review")), "{:?}", system_lines(&s, d));
     assert!(!messages(&s, d).iter().any(|m| m.system.is_none() && m.text.starts_with("Nobody was woken")));
     // @Bo: Bo is woken at hop 0, in its own main chat, with the ticket's context; it is no owner.
     let (to, runs) = post(&s, t, "@Bo what do you think?").unwrap();

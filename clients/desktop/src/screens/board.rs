@@ -72,11 +72,12 @@ pub fn drop_effect(from: ColumnKind, to: ColumnKind, choosing: bool) -> Drop {
         (a, b) if a == b => Drop::Reorder,
         (Backlog, Todo) => Drop::Start,
         (Todo, Backlog) => Drop::BackToBacklog { confirm: choosing },
-        (Doing | Review, Backlog) => Drop::BackToBacklog { confirm: true },
+        (Doing | Testing | Review, Backlog) => Drop::BackToBacklog { confirm: true },
         (PlanReview, Backlog) => Drop::Reject,
         (PlanReview, Doing) => Drop::PlanDialog,
         (Review, Doing) => Drop::SendBack,
         (Review, Done) => Drop::MarkDone,
+        (Testing, _) | (_, Testing) => Drop::Refused("Testing moves on by itself when the tests have run."),
         (Backlog, _) => Drop::Refused("Start first."),
         (_, Done) => Drop::Refused("Only from Review."),
         (_, Review) => Drop::Refused("The owner hands it in."),
@@ -281,6 +282,7 @@ pub fn empty_text(kind: ColumnKind) -> &'static str {
         ColumnKind::Todo => "Started tickets wait here for an owner.",
         ColumnKind::Doing => "Nothing in progress.",
         ColumnKind::PlanReview => "Only tickets in Plan mode stop here, with their plan.",
+        ColumnKind::Testing => "Nothing being tested.",
         ColumnKind::Review => "Nothing to review.",
         ColumnKind::Done => "Closed tickets appear here.",
     }
@@ -2048,7 +2050,7 @@ impl AppView {
             Some(name) => format!("{name} is the company's dispatcher."),
             None => "No company dispatcher: started tickets wait in Todo for an owner.".into(),
         };
-        let command = Command::UpdateCompany(aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(ticket::SetDispatcher { employee_id: employee }) });
+        let command = Command::UpdateCompany(aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(ticket::SetDispatcher { employee_id: employee }), tester: None });
         let _ = self.requests.send(backend::Request::Board(BoardCall::Write { command, expected_version: None, done: Some(done) }));
         cx.notify();
     }
@@ -3317,7 +3319,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn columns_are_renamed_and_moved_all_six_together() {
+    fn columns_are_renamed_and_moved_all_together() {
         let mut columns: Vec<ticket::BoardColumnView> = ColumnKind::ALL
             .iter()
             .enumerate()
@@ -3327,7 +3329,7 @@ pub(crate) mod tests {
         assert!(!move_column(&mut columns, 1, true), "already the first");
         columns[2].name = " Building ".into();
         let edit = columns_edit(&columns);
-        assert_eq!(edit.columns.len(), 6, "B3: all six, none added or dropped");
+        assert_eq!(edit.columns.len(), ColumnKind::ALL.len(), "B3: all of them, none added or dropped");
         assert_eq!(edit.columns[0].column_id, columns[1].id);
         assert_eq!(edit.columns[2].name, "Building");
         assert!(edit.decide(&columns).is_ok(), "the server takes it");

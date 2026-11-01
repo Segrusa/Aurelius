@@ -469,6 +469,7 @@ impl AppView {
                     .child(back(cx))
             }
             ColumnKind::PlanReview => bar.child(line("◆ Plan review · only a board member decides.".into(), theme::ACCENT_TEXT)).when(root_id.is_some(), |el| el.child(open_conversation(cx))),
+            ColumnKind::Testing => bar.child(line("◆ Testing · the tester runs the full test suite.".into(), theme::TEXT_2)).when(root_id.is_some(), |el| el.child(open_conversation(cx))).child(back(cx)),
             ColumnKind::Review => bar.child(line("◆ Review · only a board member decides.".into(), theme::ACCENT_TEXT)).when(root_id.is_some(), |el| el.child(open_conversation(cx))).child(back(cx)),
             ColumnKind::Done => {
                 // MU2-12: how the summary went, from the discussion; a failure can be tried again (AC4).
@@ -1092,6 +1093,7 @@ pub fn column_role(kind: ColumnKind) -> &'static str {
         ColumnKind::Todo => "Dispatch",
         ColumnKind::Doing => "Work",
         ColumnKind::PlanReview => "Plan gate",
+        ColumnKind::Testing => "Test gate",
         ColumnKind::Review => "Review gate",
         ColumnKind::Done => "Closed",
     }
@@ -1128,6 +1130,6 @@ mod tests {
 
     #[test]
     fn every_column_shows_its_fixed_role() {
-        assert_eq!(ColumnKind::ALL.map(column_role), ["Start", "Dispatch", "Work", "Plan gate", "Review gate", "Closed"]);
+        assert_eq!(ColumnKind::ALL.map(column_role), ["Start", "Dispatch", "Work", "Plan gate", "Test gate", "Review gate", "Closed"]);
     }
 }

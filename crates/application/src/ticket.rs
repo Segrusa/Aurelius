@@ -23,6 +23,9 @@ use aurelius_storage::{
 use crate::task::{plan_review, ticket_line};
 use serde_json::{Value, json};
 
+/// Why `company.update { tester }` is refused until the Testing engine is built.
+pub(crate) const TESTER_NOT_YET: &str = "Setting a tester is not supported yet: the Testing step is not built on this server.";
+
 /// The board member of the connection, or `board_member_required`.
 pub(crate) fn require_board_member(ctx: &CommandContext) -> Result<UserId, AppError> {
     ctx.user_id.ok_or_else(|| domain_error(DomainError::BoardMemberRequired))
@@ -583,6 +586,10 @@ impl CommandService {
     }
 
     fn update_company(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: UpdateCompany, by: Actor) -> Result<Committed, AppError> {
+        // The wire of the tester is frozen (AUR-T5-P); storing it comes with the Testing engine (AUR-T5-F).
+        if cmd.tester.is_some() {
+            return Err(AppError::new(aurelius_domain::ErrorCode::Validation, TESTER_NOT_YET));
+        }
         let name = cmd.valid_name().map_err(domain_error)?;
         let dispatcher = cmd.dispatcher.map(|d| d.employee_id);
         if name.is_none() && dispatcher.is_none() {

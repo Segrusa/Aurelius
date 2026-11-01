@@ -1,12 +1,12 @@
-//! The board and its tickets (protocol 4). One board per company with six
-//! fixed columns: behaviour hangs on the column's kind, a board member may only
+//! The board and its tickets (protocol 4). One board per company with seven
+//! fixed columns (Testing since protocol 5, feature `board_testing`): behaviour hangs on the column's kind, a board member may only
 //! rename them and change their order (B3). A ticket sits on top of tasks: its
 //! main task (and every delegation below it) carries the ticket's id.
 //!
 //! The rules here are the board member's side of the workflow: which column a
 //! hand may move a card to, and which button works in which column. The engine
-//! (starting the main task, the dispatcher, report and accept, plan review)
-//! moves cards by itself and is not decided here.
+//! (starting the main task, the dispatcher, report and accept, plan review,
+//! the tester's run of the full test suite) moves cards by itself and is not decided here.
 
 use crate::{BoardColumnId, ConversationId, DomainError, EmployeeId, MessageId, ProjectId, TaskId, TicketId, UserId, optional_text, require_text};
 use crate::task::{RunSettings, TaskStatus};
@@ -23,7 +23,7 @@ pub const REASON_MAX: usize = 500;
 /// The last deadline taken: 9999-12-31 (ms since the epoch).
 pub const DEADLINE_MAX_MS: i64 = 253_402_300_799_999;
 
-/// What a column does. The six kinds always exist, once each.
+/// What a column does. The seven kinds always exist, once each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ColumnKind {
@@ -35,6 +35,10 @@ pub enum ColumnKind {
     Doing,
     /// A plan waits for a board member (Plan mode only).
     PlanReview,
+    /// The main task reported; the tester runs the full test suite once before
+    /// Review (protocol 5, feature `board_testing`). Only with a company tester:
+    /// without one, cards go from Doing to Review as before.
+    Testing,
     /// The main task reported; a board member accepts it or sends it back.
     Review,
     /// Accepted by a board member; read-only.
@@ -42,7 +46,8 @@ pub enum ColumnKind {
 }
 
 impl ColumnKind {
-    pub const ALL: [ColumnKind; 6] = [Self::Backlog, Self::Todo, Self::Doing, Self::PlanReview, Self::Review, Self::Done];
+    /// Every kind, in board order (left to right on a new board).
+    pub const ALL: [ColumnKind; 7] = [Self::Backlog, Self::Todo, Self::Doing, Self::PlanReview, Self::Testing, Self::Review, Self::Done];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -50,6 +55,7 @@ impl ColumnKind {
             Self::Todo => "todo",
             Self::Doing => "doing",
             Self::PlanReview => "plan_review",
+            Self::Testing => "testing",
             Self::Review => "review",
             Self::Done => "done",
         }
@@ -175,7 +181,7 @@ pub struct BoardColumnCards {
     pub tickets: Vec<TicketView>,
 }
 
-/// `board.get`: the six columns left to right, each with its cards (not archived).
+/// `board.get`: the seven columns left to right, each with its cards (not archived).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BoardView {
     pub as_of_seq: u64,
@@ -269,7 +275,8 @@ pub struct UpdateTicket {
 
 /// Drag a card. Within its column: only the order. To Todo: start it. To
 /// Backlog: cancel it. Done only through `ticket.accept`, and Review back to
-/// Doing only through `ticket.send_back`; other moves follow the work and are refused.
+/// Doing only through `ticket.send_back`; out of Testing only to Backlog (cancel);
+/// other moves follow the work and are refused.
 /// The place is relative to a neighbour, so it means the same on a board
 /// filtered by project as on the whole board. A move within the same column
 /// also gives `ticket.moved` (with `from` = `to`). A card put above itself in
@@ -374,7 +381,7 @@ pub struct CancelTicket {
 
 /// A board member writes in a ticket's discussion (feature `ticket_discussion`).
 /// Without `@Name` it goes to the owner while the ticket is in Todo (with an
-/// owner), Doing, Plan review or Review; else it wakes nobody. `@Name` wakes those
+/// owner), Doing, Plan review, Testing or Review; else it wakes nobody. `@Name` wakes those
 /// employees. Refused on Done (the discussion is read-only there). Not for apps.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -431,7 +438,7 @@ pub struct BoardColumnEdit {
     pub name: String,
 }
 
-/// Rename the columns and set their order (B3): all six, left to right.
+/// Rename the columns and set their order (B3): all of them, left to right.
 /// `expected_version` is the board's (`board_version`: the columns change
 /// together); the answer gives the new one.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -450,6 +457,9 @@ pub struct SetDispatcher {
 }
 
 // ---- Rules ----------------------------------------------------------------
+
+/// Why a hand cannot move a card into or out of Testing (other than to Backlog).
+pub const TESTING_MOVES_BY_ITSELF: &str = "Testing moves on by itself when the tests have run.";
 
 fn refused(text: &str) -> DomainError {
     DomainError::Ticket(text.into())
@@ -473,6 +483,8 @@ pub fn decide_move(from: ColumnKind, to: ColumnKind) -> Result<MoveEffect, Domai
         (Done, _) => Err(refused("A ticket in Done is closed; it cannot move.")),
         (a, b) if a == b => Ok(MoveEffect::Reorder),
         (_, Done) => Err(refused("Only Accept puts a ticket in Done (from Review).")),
+        (Testing, Backlog) => Ok(MoveEffect::Cancel),
+        (Testing, _) | (_, Testing) => Err(refused(TESTING_MOVES_BY_ITSELF)),
         (Review, Doing) => Err(refused("Send it back with feedback to put it in Doing again.")),
         (Backlog, Todo) => Ok(MoveEffect::Start),
         (_, Todo) => Err(refused("Only a ticket in Backlog can be started; cancel it first.")),
@@ -521,7 +533,7 @@ pub fn check_in(column: ColumnKind, wanted: ColumnKind, action: &str) -> Result<
 
 pub fn check_cancel(column: ColumnKind) -> Result<(), DomainError> {
     match column {
-        ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Review => Ok(()),
+        ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Testing | ColumnKind::Review => Ok(()),
         ColumnKind::Backlog => Err(refused("This ticket has not started.")),
         ColumnKind::Done => Err(refused("A ticket in Done is closed.")),
     }
@@ -541,6 +553,7 @@ pub fn column_title(kind: ColumnKind) -> &'static str {
         ColumnKind::Todo => "Todo",
         ColumnKind::Doing => "Doing",
         ColumnKind::PlanReview => "Plan review",
+        ColumnKind::Testing => "Testing",
         ColumnKind::Review => "Review",
         ColumnKind::Done => "Done",
     }
@@ -636,7 +649,7 @@ mod tests {
         assert_eq!(decide_move(Doing, Doing), Ok(MoveEffect::Reorder));
         assert_eq!(decide_move(Backlog, Todo), Ok(MoveEffect::Start));
         assert_eq!(decide_move(Review, Backlog), Ok(MoveEffect::Cancel));
-        for from in [Backlog, Todo, Doing, PlanReview, Review] {
+        for from in [Backlog, Todo, Doing, PlanReview, Testing, Review] {
             assert!(decide_move(from, Done).is_err(), "{from:?} → Done");
         }
         assert!(decide_move(Review, Doing).is_err());
@@ -644,6 +657,37 @@ mod tests {
         assert!(decide_move(Backlog, Doing).is_err());
         assert!(decide_move(PlanReview, Doing).is_err());
         assert!(decide_move(Done, Backlog).is_err() && decide_move(Done, Done).is_err());
+    }
+
+    #[test]
+    fn the_board_has_seven_kinds_with_testing_between_plan_review_and_review() {
+        use ColumnKind::*;
+        assert_eq!(ColumnKind::ALL, [Backlog, Todo, Doing, PlanReview, Testing, Review, Done]);
+        assert_eq!(serde_json::to_value(Testing).unwrap(), "testing");
+        assert_eq!(serde_json::from_value::<ColumnKind>(serde_json::json!("testing")).unwrap(), Testing);
+        assert_eq!(column_title(Testing), "Testing");
+    }
+
+    #[test]
+    fn a_hand_only_takes_a_card_out_of_testing_to_cancel_it() {
+        use ColumnKind::*;
+        assert_eq!(decide_move(Testing, Backlog), Ok(MoveEffect::Cancel));
+        assert_eq!(decide_move(Testing, Testing), Ok(MoveEffect::Reorder));
+        for to in [Todo, Doing, PlanReview, Review] {
+            assert_eq!(decide_move(Testing, to), Err(DomainError::Ticket(TESTING_MOVES_BY_ITSELF.into())), "Testing → {to:?}");
+        }
+        assert!(decide_move(Testing, Done).is_err(), "only Accept puts a ticket in Done");
+        for from in [Backlog, Todo, Doing, PlanReview, Review] {
+            assert_eq!(decide_move(from, Testing), Err(DomainError::Ticket(TESTING_MOVES_BY_ITSELF.into())), "{from:?} → Testing");
+        }
+    }
+
+    #[test]
+    fn a_ticket_in_testing_can_be_cancelled_but_not_started_assigned_or_archived() {
+        assert!(check_cancel(ColumnKind::Testing).is_ok());
+        assert!(check_start(ColumnKind::Testing, Some(TaskStatus::Review)).is_err());
+        assert!(check_assign(ColumnKind::Testing, Some(TaskStatus::Review)).is_err());
+        assert!(check_archive(ColumnKind::Testing).is_err());
     }
 
     #[test]
@@ -665,7 +709,7 @@ mod tests {
     #[test]
     fn the_dispatcher_chooses_again_only_in_backlog() {
         assert!(check_unassign(ColumnKind::Backlog).is_ok());
-        for column in [ColumnKind::Todo, ColumnKind::Doing, ColumnKind::PlanReview, ColumnKind::Review, ColumnKind::Done] {
+        for column in [ColumnKind::Todo, ColumnKind::Doing, ColumnKind::PlanReview, ColumnKind::Testing, ColumnKind::Review, ColumnKind::Done] {
             assert!(check_unassign(column).is_err(), "{column:?}");
         }
     }
@@ -717,7 +761,7 @@ mod tests {
             .collect();
         let mut edits: Vec<BoardColumnEdit> = current.iter().rev().map(|c| BoardColumnEdit { column_id: c.id, name: format!(" {} ", c.name) }).collect();
         let decided = UpdateBoardColumns { columns: edits.clone() }.decide(&current).unwrap();
-        assert_eq!(decided[0], (current[5].id, "Done".into()));
+        assert_eq!(decided[0], (current[current.len() - 1].id, "Done".into()));
         edits.pop();
         assert!(UpdateBoardColumns { columns: edits.clone() }.decide(&current).is_err(), "one missing");
         edits.push(edits[0].clone());

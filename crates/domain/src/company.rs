@@ -1,5 +1,6 @@
-//! The company (one per server, protocol 4): its name and its default
-//! dispatcher. A project may name its own dispatcher (B5).
+//! The company (one per server, protocol 4): its name, its default
+//! dispatcher and its tester (protocol 5, feature `board_testing`). A project
+//! may name its own dispatcher (B5).
 
 use crate::ticket::SetDispatcher;
 use crate::{DomainError, EmployeeId, ProjectId, require_text};
@@ -14,16 +15,33 @@ pub struct CompanyView {
     /// Chooses the owner of a started ticket without one, unless its project
     /// names its own. None: such tickets wait in Todo for a board member.
     pub dispatcher_employee_id: Option<EmployeeId>,
+    /// Runs the full test suite once while a card is in Testing, before Review
+    /// (feature `board_testing`). None: no Testing step, cards go from Doing to
+    /// Review as before. Left out by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tester_employee_id: Option<EmployeeId>,
     pub version: u64,
 }
 
-/// Change the company's name or its dispatcher; left out: unchanged.
+/// Change the company's name, its dispatcher or its tester; left out: unchanged.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdateCompany {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub dispatcher: Option<SetDispatcher>,
+    /// Feature `board_testing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tester: Option<SetTester>,
+}
+
+/// Who runs the full test suite once for a card in Testing (feature
+/// `board_testing`). `employee_id` none: no tester, so no Testing step: cards
+/// go from Doing to Review as before.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SetTester {
+    #[serde(default)]
+    pub employee_id: Option<EmployeeId>,
 }
 
 /// The company's background jobs (memory consolidation, B6) run on the Claude

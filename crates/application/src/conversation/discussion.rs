@@ -186,10 +186,13 @@ fn ceo(conn: &rusqlite::Connection) -> Result<Option<EmployeeId>, StorageError> 
 }
 
 /// Whether a board member's message without `@Name` goes to the ticket's owner
-/// (B3): while the ticket is in Todo with an owner, Doing, Plan review or Review
-/// (the owner's report often ends with a question the board member answers here).
+/// (B3): while the ticket is in Todo with an owner, Doing, Plan review, Testing
+/// or Review (the owner's report often ends with a question the board member
+/// answers here; Testing counts like Review).
 fn owner_answers(t: &TicketPlace) -> bool {
-    t.owner.is_some() && !t.archived && matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Review)
+    t.owner.is_some()
+        && !t.archived
+        && matches!(t.column, ColumnKind::Todo | ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Testing | ColumnKind::Review)
 }
 
 /// Who answers `text` in `d`: the active employees it names (not `author`);
@@ -282,7 +285,7 @@ fn nobody_answers(d: &Discussion, paused: &[String]) -> String {
         (_, [one]) => format!("Nobody was woken: {one} is paused. Resume them, or name a colleague with @Name."),
         (_, [_, ..]) => format!("Nobody was woken: {} are paused. Resume them, or name a colleague with @Name.", paused.join(", ")),
         (Place::Ticket(t), []) if t.owner.is_none() => "Nobody was woken: this ticket has no owner yet. Name a colleague with @Name.".into(),
-        (Place::Ticket(_), []) => "Nobody was woken: the owner only answers here while the ticket is in Todo, Doing, Plan review or Review. Name a colleague with @Name.".into(),
+        (Place::Ticket(_), []) => "Nobody was woken: the owner only answers here while the ticket is in Todo, Doing, Plan review, Testing or Review. Name a colleague with @Name.".into(),
         (_, []) => "Nobody was woken: there is no CEO to answer a message without @Name. Name a colleague with @Name.".into(),
     }
 }
@@ -1004,5 +1007,22 @@ impl CommandService {
                 Ok(vec![system_line(tx, d.id, &SystemLine::new(SystemLineKind::Limit), Some(&text))?])
             })
             .map_err(storage_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn place(column: ColumnKind) -> TicketPlace {
+        TicketPlace { id: TicketId::new(), number: 1, title: "t".into(), project: ProjectId::new(), column, owner: Some(EmployeeId::new()), root_task: None, archived: false }
+    }
+
+    #[test]
+    fn a_word_in_testing_goes_to_the_owner_as_in_review() {
+        assert!(owner_answers(&place(ColumnKind::Testing)));
+        assert!(owner_answers(&place(ColumnKind::Review)));
+        assert!(!owner_answers(&place(ColumnKind::Backlog)) && !owner_answers(&place(ColumnKind::Done)));
+        assert!(!owner_answers(&TicketPlace { owner: None, ..place(ColumnKind::Testing) }));
     }
 }

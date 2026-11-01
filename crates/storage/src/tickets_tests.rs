@@ -75,7 +75,9 @@ fn titles_in(f: &Fixture, kind: ColumnKind) -> Vec<String> {
 fn the_board_has_six_fixed_columns_and_one_company() {
     let f = fixture();
     let columns = f.store.read(company::columns).unwrap();
-    assert_eq!(columns.iter().map(|c| c.kind).collect::<Vec<_>>(), ColumnKind::ALL);
+    // Testing is on the wire (AUR-T5-P); its column comes with the migration of AUR-T5-F.
+    let stored: Vec<ColumnKind> = ColumnKind::ALL.into_iter().filter(|k| *k != ColumnKind::Testing).collect();
+    assert_eq!(columns.iter().map(|c| c.kind).collect::<Vec<_>>(), stored);
     assert_eq!(columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["Backlog", "Todo", "Doing", "Plan review", "Review", "Done"]);
     let company = f.store.read(company::get).unwrap();
     assert_eq!((company.name.as_str(), company.dispatcher_employee_id), ("Company", None));

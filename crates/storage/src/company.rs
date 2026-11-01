@@ -16,7 +16,7 @@ fn employee(text: Option<String>) -> Option<EmployeeId> {
 /// The company. Every database at schema 18 has exactly one.
 pub fn get(conn: &Connection) -> Result<CompanyView, StorageError> {
     conn.query_row("SELECT id, name, dispatcher_employee_id, version FROM company", [], |r| {
-        Ok(CompanyView { id: r.get(0)?, name: r.get(1)?, dispatcher_employee_id: employee(r.get(2)?), version: r.get::<_, i64>(3)? as u64 })
+        Ok(CompanyView { id: r.get(0)?, name: r.get(1)?, dispatcher_employee_id: employee(r.get(2)?), tester_employee_id: None, version: r.get::<_, i64>(3)? as u64 })
     })
     .optional()?
     .ok_or_else(|| StorageError::Rejected("there is no company".into()))

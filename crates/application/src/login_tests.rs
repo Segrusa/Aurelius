@@ -296,7 +296,7 @@ fn schedules_heartbeats_and_background_jobs_use_their_own_login_or_none() {
 #[test]
 fn the_dispatchers_triage_and_the_summary_after_done_use_the_tickets_login() {
     let s = setup();
-    let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }) };
+    let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }), tester: None };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
         confirm_secret: false,
@@ -484,7 +484,7 @@ fn run_on_my_login_takes_the_ticket_over_for_its_waiting_runs_only_for_oneself()
 fn the_dispatcher_waits_for_its_logins_limit_without_using_a_try() {
     // R2 m8: like the runs on that login, it waits for the reset instead of failing.
     let s = setup();
-    let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }) };
+    let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }), tester: None };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
         confirm_secret: false,
@@ -574,7 +574,7 @@ fn the_background_login_is_only_ones_own() {
 #[test]
 fn the_dispatcher_waits_for_the_tickets_login_without_using_a_try() {
     let s = setup();
-    let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }) };
+    let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }), tester: None };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
         confirm_secret: false,

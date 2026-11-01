@@ -94,7 +94,7 @@ async fn a_real_dispatcher_assigns_the_ticket() {
     else {
         panic!()
     };
-    client.ticket_command(Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id: Some(dispatcher) }) }), None).await.unwrap();
+    client.ticket_command(Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id: Some(dispatcher) }), tester: None }), None).await.unwrap();
     let made = client
         .create_ticket(CreateTicket {
             confirm_secret: false,

@@ -4581,7 +4581,9 @@ mod tests {
 
             // The empty board: the six columns in order (MU1-05 AC1, MU1-19 AC4).
             let empty = load(&mut app, None).await;
-            assert_eq!(empty.columns.iter().map(|c| c.column.kind).collect::<Vec<_>>(), ColumnKind::ALL);
+            // Testing is on the wire (AUR-T5-P); its column comes with the migration of AUR-T5-F.
+            let stored: Vec<ColumnKind> = ColumnKind::ALL.into_iter().filter(|k| *k != ColumnKind::Testing).collect();
+            assert_eq!(empty.columns.iter().map(|c| c.column.kind).collect::<Vec<_>>(), stored);
             assert!(empty.columns.iter().all(|c| c.tickets.is_empty()));
 
             // New tickets land in Backlog, made by the active board member (MU1-07 AC1).

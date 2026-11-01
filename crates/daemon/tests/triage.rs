@@ -101,7 +101,7 @@ async fn employee(client: &Client, name: &str, role: &str) -> EmployeeId {
 }
 
 async fn company_dispatcher(client: &Client, employee_id: Option<EmployeeId>) {
-    client.ticket_command(Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id }) }), None).await.unwrap();
+    client.ticket_command(Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id }), tester: None }), None).await.unwrap();
 }
 
 async fn started(client: &Client, project_id: ProjectId, title: &str) -> TicketId {
