@@ -1808,6 +1808,7 @@ sealed class Command {
         return CommandUpdateTaskSchedule(value: UpdateTaskSchedule.fromJson(json as Map<String, dynamic>));
       case 'update_ticket':
         return CommandUpdateTicket(
+          addFiles: (json['add_files'] == null ? null : (json['add_files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           clearDeadline: (json['clear_deadline'] == null ? null : (json['clear_deadline'] as bool)),
           confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
           deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
@@ -3202,6 +3203,7 @@ final class CommandUpdateTaskSchedule extends Command {
 /// the main task does not run.
 final class CommandUpdateTicket extends Command {
   const CommandUpdateTicket({
+    this.addFiles,
     this.clearDeadline,
     this.confirmSecret,
     this.deadlineMs,
@@ -3213,6 +3215,12 @@ final class CommandUpdateTicket extends Command {
     this.title,
   });
 
+  /// Files to add to the ticket's attachments, as `CreateTicket::files`
+  /// (feature `ticket_add_files`): the ones it has stay, and a main task
+  /// that still works gets them too. At most `ATTACHMENTS_MAX` in all.
+  /// Optional rather than a list with a default, so a client leaves it out
+  /// unless it adds files: older servers refuse fields they do not know.
+  final List<String>? addFiles;
   final bool? clearDeadline;
   /// A board member confirmed that the text may hold a vault secret's value
   /// (after `looks_like_secret`, B10): it is stored with the value redacted.
@@ -3230,6 +3238,7 @@ final class CommandUpdateTicket extends Command {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'update_ticket',
+      if (addFiles != null) 'add_files': addFiles,
       if (clearDeadline != null) 'clear_deadline': clearDeadline,
       if (confirmSecret != null) 'confirm_secret': confirmSecret,
       if (deadlineMs != null) 'deadline_ms': deadlineMs,
