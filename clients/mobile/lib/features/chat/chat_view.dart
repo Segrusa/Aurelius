@@ -1355,18 +1355,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
   /// The edit menu, with Paste Image when the clipboard holds an image
   /// (Flutter's own Paste only handles text).
   Widget _menu(BuildContext context, EditableTextState field) {
-    final items = [...field.contextMenuButtonItems];
-    if (_clipboardImage) {
-      final at = items.indexWhere((i) => i.type == ContextMenuButtonType.paste);
-      final paste = ContextMenuButtonItem(
-        label: at < 0 ? 'Paste' : 'Paste Image',
-        onPressed: () {
-          ContextMenuController.removeAny();
-          _pasteImage();
-        },
-      );
-      items.insert(at < 0 ? 0 : at + 1, paste);
-    }
+    final items = _clipboardImage ? withPasteImage(field.contextMenuButtonItems, _pasteImage) : field.contextMenuButtonItems;
     return AdaptiveTextSelectionToolbar.buttonItems(anchors: field.contextMenuAnchors, buttonItems: items);
   }
 
@@ -1394,14 +1383,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
       toast(context, 'This image could not be read; pick it from the photo library.');
       return;
     }
-    final extension = switch (content.mimeType) {
-      'image/png' => 'png',
-      'image/gif' => 'gif',
-      'image/webp' => 'webp',
-      'image/bmp' => 'bmp',
-      _ => 'jpg',
-    };
-    await _addImage(data, extension);
+    await _addImage(data, pastedImageExtension(content.mimeType));
   }
 
   /// Keep pasted bytes as a file; it is then uploaded like a photo.
@@ -1698,7 +1680,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                     onTap: _checkClipboard,
                     contextMenuBuilder: _menu,
                     contentInsertionConfiguration: ContentInsertionConfiguration(
-                      allowedMimeTypes: const ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp'],
+                      allowedMimeTypes: pastedImageMimeTypes,
                       onContentInserted: _insert,
                     ),
                     decoration: InputDecoration(

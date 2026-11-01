@@ -2462,6 +2462,12 @@ impl AppView {
         matches!(&self.connection, Connection::Online { server, .. } if server.board_testing)
     }
 
+    /// An existing ticket takes more files, so a paste into its title or description attaches
+    /// them (feature `ticket_add_files`).
+    pub fn ticket_add_files_supported(&self) -> bool {
+        matches!(&self.connection, Connection::Online { server, .. } if server.ticket_add_files)
+    }
+
     /// The server can auto-allow safe read-only tools (feature `auto_allow`).
     pub fn auto_allow_supported(&self) -> bool {
         matches!(&self.connection, Connection::Online { server, .. } if server.auto_allow)
@@ -2968,6 +2974,15 @@ impl AppView {
     /// A paste into the goal: a copied image (a screenshot) or copied files are attached to
     /// the task. Returns whether it took the paste; anything else is pasted as text.
     pub fn paste_into_task_goal(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
+        let (took, found) = self.pasted_files(item, |p| p.is_file(), cx);
+        self.add_task_files(found, cx);
+        took
+    }
+
+    /// The files a paste brings: a copied image (a screenshot) saved as a file, and the
+    /// copied files that `keep` accepts. Returns whether the paste held any, so the
+    /// caller can let a text paste through; a pasted image that cannot be kept is told.
+    pub fn pasted_files(&mut self, item: &ClipboardItem, keep: impl Fn(&std::path::Path) -> bool, cx: &mut Context<Self>) -> (bool, Vec<std::path::PathBuf>) {
         let mut found = Vec::new();
         let mut took = false;
         for entry in item.entries() {
@@ -2980,15 +2995,14 @@ impl AppView {
                     }
                 }
                 ClipboardEntry::ExternalPaths(paths) => {
-                    let files: Vec<_> = paths.paths().iter().filter(|p| p.is_file()).cloned().collect();
+                    let files: Vec<_> = paths.paths().iter().filter(|p| keep(p)).cloned().collect();
                     took |= !files.is_empty();
                     found.extend(files);
                 }
                 ClipboardEntry::String(_) => {}
             }
         }
-        self.add_task_files(found, cx);
-        took
+        (took, found)
     }
 
     /// The recurrence typed in the recurring task dialog, or what to correct.
@@ -6828,25 +6842,7 @@ impl AppView {
     /// image files wait beside it to go with the message. Returns whether it
     /// took the paste; anything else is pasted as text.
     pub fn paste_into_composer(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
-        let mut found = Vec::new();
-        let mut took = false;
-        for entry in item.entries() {
-            match entry {
-                ClipboardEntry::Image(image) => {
-                    took = true;
-                    match save_pasted_image(image) {
-                        Ok(path) => found.push(path),
-                        Err(e) => self.notify_user(e, true, cx),
-                    }
-                }
-                ClipboardEntry::ExternalPaths(paths) => {
-                    let images: Vec<_> = paths.paths().iter().filter(|p| is_image_file(p)).cloned().collect();
-                    took |= !images.is_empty();
-                    found.extend(images);
-                }
-                ClipboardEntry::String(_) => {}
-            }
-        }
+        let (took, found) = self.pasted_files(item, is_image_file, cx);
         self.add_images(found, cx);
         took
     }
