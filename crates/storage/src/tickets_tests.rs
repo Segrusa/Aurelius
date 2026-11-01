@@ -262,6 +262,42 @@ fn the_dispatcher_is_the_projects_else_the_companys_while_active() {
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), Some(orion), "without its own, the company's");
 }
 
+/// Ticket #5: a `ticket.tested` card says in `detail` whether the tests
+/// passed, which is all the clients read to word "Tests passed/failed".
+#[test]
+fn a_tested_card_says_passed_or_failed_in_its_detail() {
+    let f = fixture();
+    let (ticket, _) = add(&f, f.atlas, "Tested");
+    let project = f.atlas;
+    f.store
+        .write(move |tx| {
+            for (version, passed) in [(1, false), (2, true)] {
+                events::append(
+                    tx,
+                    events::NewEvent {
+                        aggregate_type: "ticket",
+                        aggregate_id: ticket.to_string(),
+                        aggregate_version: version,
+                        event_type: "ticket.tested",
+                        project_id: Some(project),
+                        actor_kind: aurelius_domain::ActorKind::Employee,
+                        actor_id: None,
+                        correlation_id: ticket.to_string(),
+                        causation_id: None,
+                        payload_blob_id: None,
+                        metadata: serde_json::json!({ "passed": passed, "task_id": TaskId::new().to_string() }),
+                        dedupe_key: aurelius_domain::EventId::new().to_string(),
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    let (cards, _) = f.store.read(|c| crate::timeline::cards(c, None, Some(&ticket.to_string()), None, 50, true)).unwrap();
+    let lines: Vec<(&str, &str)> = cards.iter().filter(|c| c.label == "TESTING").map(|c| (c.title.as_str(), c.detail.as_str())).collect();
+    assert_eq!(lines, [("Tests passed", "passed"), ("Tests failed", "failed")], "newest first");
+}
+
 /// A ticket's Activity (`timeline.list` on its id): the board member's writes
 /// (correlated by their command) together with the engine's (correlated by
 /// the ticket), once each, newest first.
