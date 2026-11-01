@@ -55,12 +55,22 @@ class ChannelScreen extends StatelessWidget {
           runAuthor: (runId) => runAuthorOf(company.state, runId),
           // General is read without a channel, as before.
           channel: general ? null : id,
+          channelTicket: ticketId,
           onRead: () => _readChannels(context),
         ),
-        // The ticket left Done (or the project came back): writing works again (§8 Reopen).
-        child: BlocListener<ChannelsBloc, ChannelsState>(
-          listenWhen: (a, b) => (a.byId(id)?.archived ?? false) && b.byId(id)?.archived == false,
-          listener: (context, _) => context.read<ChatBloc>().add(const ChatReopened()),
+        child: MultiBlocListener(
+          listeners: [
+            // The ticket left Done (or the project came back): writing works again (§8 Reopen).
+            BlocListener<ChannelsBloc, ChannelsState>(
+              listenWhen: (a, b) => (a.byId(id)?.archived ?? false) && b.byId(id)?.archived == false,
+              listener: (context, _) => context.read<ChatBloc>().add(const ChatReopened()),
+            ),
+            // The ticket went to Done: its closed lines show at once, under the read-only bar.
+            BlocListener<ChannelsBloc, ChannelsState>(
+              listenWhen: (a, b) => a.byId(id)?.archived == false && (b.byId(id)?.archived ?? false),
+              listener: (context, _) => context.read<ChatBloc>().add(const ChatRefreshed()),
+            ),
+          ],
           child: ChatShownWatcher(
             child: ChatView(
               key: ValueKey('team-chat-$id'),
