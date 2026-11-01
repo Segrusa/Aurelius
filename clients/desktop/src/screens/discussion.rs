@@ -638,7 +638,7 @@ pub enum DraftPlace {
 
 /// The composer's drafts per place: a draft stays in the channel it was typed in, also
 /// when that channel closes and the Team chat goes back to #general.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone, PartialEq)]
 pub struct Drafts {
     at: Option<DraftPlace>,
     kept: std::collections::HashMap<DraftPlace, String>,
@@ -648,6 +648,11 @@ impl Drafts {
     /// Where the composer's text is from.
     pub fn at(&self) -> Option<DraftPlace> {
         self.at
+    }
+
+    /// No channel keeps a draft (the composer's own text is not in here).
+    pub fn is_empty(&self) -> bool {
+        self.kept.is_empty()
     }
 
     /// The composer, holding `text`, now shows `to`: `text` stays with the place it was
