@@ -151,6 +151,28 @@ pub enum Panel {
     Ticket(aurelius_domain::TicketId),
 }
 
+/// Whether `panel` shows beside `screen`: not beside a page with a conversation of its own
+/// (an employee, the group chat), except a ticket beside the Team chat: "Open ticket" in a
+/// channel shows it there (AUR-CHAT-001 Q1-B3; its own composer, the channel keeps the main one).
+pub fn panel_beside(panel: Panel, screen: Page) -> bool {
+    match (panel, screen) {
+        (Panel::None, _) => false,
+        (Panel::Ticket(_), Page::GroupChat) => true,
+        (_, Page::Employee(..) | Page::GroupChat) => false,
+        _ => true,
+    }
+}
+
+/// The main composer's placeholder once a panel opens: the panel's employee, or the
+/// channel's beside the Team chat (the composer there still writes in the channel).
+pub fn panel_placeholder(screen: Page, manager: Option<String>, channel: impl FnOnce() -> String) -> String {
+    match (screen, manager) {
+        (Page::GroupChat, _) => channel(),
+        (_, Some(name)) => format!("Message {name}…"),
+        (_, None) => "Reply…".to_string(),
+    }
+}
+
 /// One entry of the sidebar, top to bottom (Settings has no row: Ctrl+, , Ctrl+9, the app menu and the server picker open it).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NavItem {
@@ -1035,6 +1057,8 @@ pub struct AppView {
     pub channel_divider: Option<(ConversationId, usize, Option<u32>)>,
     /// The first message after the "New" divider in the open channel (it stays there while more come).
     pub channel_new_at: Option<MessageId>,
+    /// The composer's drafts per Team chat channel (and one for the other pages).
+    pub drafts: crate::screens::discussion::Drafts,
     /// The archived projects' channels are unfolded.
     pub channels_archived_open: bool,
     /// "Show more" was chosen under Tickets / under Archived (AUR-CHAT-001, O-5).
@@ -1561,6 +1585,7 @@ impl AppView {
             channel_refused: None,
             group_mentions: Default::default(),
             channels_followed: false,
+            drafts: Default::default(),
             subagents_open: false,
             subagents: None,
             subagents_stepped: false,
@@ -2144,6 +2169,9 @@ impl AppView {
                 self.group_error = None;
                 if self.screen == Page::GroupChat && self.open_conversation.is_none() {
                     self.open_conversation = Some(conversation);
+                }
+                if self.screen == Page::GroupChat {
+                    self.channel_read(conversation);
                 }
             }
             Update::GroupChatFailed(why) => {
@@ -5744,7 +5772,7 @@ impl AppView {
         let conversation = self.current_manager_thread();
         self.open(conversation);
         let name = self.panel_manager().map(|m| m.name.clone());
-        let placeholder = name.map_or_else(|| "Reply…".to_string(), |n| format!("Message {n}…"));
+        let placeholder = panel_placeholder(self.screen, name, || self.channel_placeholder());
         self.composer.update(cx, |input, cx| input.set_placeholder(placeholder, window, cx));
         cx.notify();
     }
@@ -5786,10 +5814,9 @@ impl AppView {
         }
     }
 
-    /// The right panel shows beside this page: not beside a page with a conversation of its
-    /// own (an employee, the group chat).
+    /// The right panel shows beside this page (`panel_beside`).
     pub fn panel_shown(&self) -> bool {
-        self.panel != Panel::None && !matches!(self.screen, Page::Employee(..) | Page::GroupChat)
+        panel_beside(self.panel, self.screen)
     }
 
     /// The conversation shown: the group chat on its page, else the right panel's, else the
@@ -6957,6 +6984,14 @@ impl Render for AppView {
         if let Some(text) = self.pending_placeholder.take() {
             self.composer.update(cx, |input, cx| input.set_placeholder(text, window, cx));
         }
+        // The composer's text stays with the channel (or page) it was typed in (Q1 o2).
+        let place = if self.screen == Page::GroupChat { crate::screens::discussion::DraftPlace::Channel(self.channel) } else { crate::screens::discussion::DraftPlace::Elsewhere };
+        if self.drafts.at() != Some(place) {
+            let text = self.composer.read(cx).value().to_string();
+            if let Some(draft) = self.drafts.moved(place, &text) {
+                self.composer.update(cx, |input, cx| input.set_value(draft, window, cx));
+            }
+        }
         if let Some(text) = self.pending_notice.take() {
             self.notify_user(text, true, cx);
         }
@@ -7774,6 +7809,25 @@ mod tests {
         assert_eq!(ProjectsTab::ALL.map(|t| t.label()), ["Projects", "Ideas"]);
         assert_eq!(Tab::ALL.map(|t| t.title()), ["Overview", "Board", "Tasks", "Ideas", "Vault"], "memory is not a tab of the bar");
         assert_eq!(NavItem::of(Page::Vault), NavItem::Vault);
+    }
+
+    /// Q1-B3: "Open ticket" in a Team chat channel shows the ticket's panel there, and the
+    /// composer keeps the channel's placeholder (it was "Reply…" with no panel drawn).
+    #[test]
+    fn a_ticket_opened_in_the_team_chat_shows_beside_it_and_the_channel_keeps_its_placeholder() {
+        use super::{ManagerRef, Page, Panel, panel_beside, panel_placeholder};
+        let ticket = Panel::Ticket(aurelius_domain::TicketId::new());
+        assert!(panel_beside(ticket, Page::GroupChat), "the ticket panel beside the Team chat");
+        assert!(panel_beside(ticket, Page::Board));
+        assert_eq!(panel_placeholder(Page::GroupChat, None, || "Message #1-login · @ to mention".into()), "Message #1-login · @ to mention");
+        // A conversation in the panel still stays off the pages with a conversation of their own.
+        let chat = Panel::Chat(ConversationId::new());
+        assert!(!panel_beside(chat, Page::GroupChat));
+        assert!(!panel_beside(Panel::Task(TaskId::new()), Page::GroupChat));
+        assert!(!panel_beside(ticket, Page::Employee(ManagerRef::Sample(0, 0))));
+        assert!(!panel_beside(Panel::None, Page::GroupChat));
+        assert_eq!(panel_placeholder(Page::Board, Some("Forge".into()), || unreachable!()), "Message Forge…");
+        assert_eq!(panel_placeholder(Page::Board, None, || unreachable!()), "Reply…");
     }
 
     #[test]

@@ -525,6 +525,15 @@ pub fn badge(channels: &[ChannelView]) -> (u32, bool) {
     (channels.iter().map(|c| c.mentions).sum(), channels.iter().any(|c| c.unread > 0))
 }
 
+/// The open channel counts as read (AUR-CHAT-001 Q1): the sidebar badge has no unread
+/// or mentions of it, also from a list read just before the channel was.
+pub fn mark_read(channels: &mut [ChannelView], open: aurelius_domain::ConversationId) {
+    for c in channels.iter_mut().filter(|c| c.conversation_id == open) {
+        c.unread = 0;
+        c.mentions = 0;
+    }
+}
+
 /// The channel Alt+↑/↓ goes to among the `visible` ones (ui-ontwerp §1: Channels →
 /// Tickets → Archived while unfolded); the list's ends stop it.
 pub fn step_channel(visible: &[aurelius_domain::ConversationId], current: Option<aurelius_domain::ConversationId>, down: bool) -> Option<aurelius_domain::ConversationId> {
@@ -550,6 +559,42 @@ pub fn channel_hint(c: Option<&ChannelView>) -> String {
         Some(c) => format!("Message #{} · @ to mention", bare_name(c)),
         None => "Message the team · @ to mention".into(),
     }
+}
+
+/// The composer's placeholder in a ticket's channel (P-21): the owner while a post
+/// without `@` reaches them, else the channel's name. `t` is the ticket once read.
+pub fn ticket_channel_hint(c: &ChannelView, t: Option<&TicketView>) -> String {
+    match t.filter(|_| !c.archived).and_then(owner_answers) {
+        Some(owner) => format!("Message {owner} (owner)… · @ to mention"),
+        None => channel_hint(Some(c)),
+    }
+}
+
+/// The owner who answers a post without `@` in the ticket's discussion (P-21).
+fn owner_answers(t: &TicketView) -> Option<&str> {
+    t.owner_name.as_deref().filter(|_| reaches_owner(t))
+}
+
+/// Who a post without `@` reaches in a ticket's channel, for its empty state and the
+/// row under the composer (not General's "Titan answers"); before the ticket is read, none.
+fn without_name(t: Option<&TicketView>) -> String {
+    match t.map(owner_answers) {
+        Some(Some(owner)) => format!("; without a name, {owner} (owner) answers"),
+        Some(None) => "; without a name, no one is woken".into(),
+        None => " about this ticket".into(),
+    }
+}
+
+/// A ticket channel's empty state (ui-ontwerp §3): its heading and who answers.
+pub const TICKET_CHANNEL_EMPTY: &str = "Discuss the ticket here.";
+
+pub fn ticket_channel_empty(t: Option<&TicketView>) -> String {
+    format!("Write @Name to ask an employee{}.", without_name(t))
+}
+
+/// The row under a ticket channel's composer: who answers.
+pub fn ticket_channel_row(t: Option<&TicketView>) -> String {
+    format!("@Name asks that employee{}.", without_name(t))
 }
 
 /// The bar instead of the composer in a read-only channel (ui-ontwerp §3): a closed
@@ -580,6 +625,47 @@ pub fn assignees(detail: &aurelius_domain::ticket::TicketDetail) -> Vec<String> 
 
 /// Assignees shown by name before the rest fold into "+n" (ui-ontwerp §3).
 pub const ASSIGNEES_SHOWN: usize = 2;
+
+// ---- Drafts -----------------------------------------------------------------------
+
+/// Where the main composer's text belongs (AUR-CHAT-001 Q1 o2): a Team chat channel
+/// (none: #general), or the other pages, which share it as before.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DraftPlace {
+    Channel(Option<aurelius_domain::ConversationId>),
+    Elsewhere,
+}
+
+/// The composer's drafts per place: a draft stays in the channel it was typed in, also
+/// when that channel closes and the Team chat goes back to #general.
+#[derive(Default, Debug)]
+pub struct Drafts {
+    at: Option<DraftPlace>,
+    kept: std::collections::HashMap<DraftPlace, String>,
+}
+
+impl Drafts {
+    /// Where the composer's text is from.
+    pub fn at(&self) -> Option<DraftPlace> {
+        self.at
+    }
+
+    /// The composer, holding `text`, now shows `to`: `text` stays with the place it was
+    /// typed in, and the composer gets `to`'s draft (empty without one). None when
+    /// the composer keeps its text: the same place, or the first place it shows.
+    pub fn moved(&mut self, to: DraftPlace, text: &str) -> Option<String> {
+        let from = self.at.replace(to)?;
+        if from == to {
+            return None;
+        }
+        if text.trim().is_empty() {
+            self.kept.remove(&from);
+        } else {
+            self.kept.insert(from, text.to_string());
+        }
+        Some(self.kept.remove(&to).unwrap_or_default())
+    }
+}
 
 // ---- A ticket from a message -----------------------------------------------------------
 
@@ -858,6 +944,53 @@ mod tests {
         assert!(writable(&ticket(ColumnKind::Review, true)));
     }
 
+    /// Q1 minor: a ticket's channel says its owner answers a post without `@`, not
+    /// General's "Titan answers"; nobody once the ticket is out of the owner's columns.
+    #[test]
+    fn a_ticket_channel_names_its_owner_in_the_empty_state_and_under_the_composer() {
+        let ch = ticket_channel(42, false, 100, 0, 0);
+        let doing = ticket(ColumnKind::Doing, true);
+        assert_eq!(ticket_channel_hint(&ch, Some(&doing)), "Message Forge (owner)… · @ to mention");
+        assert_eq!(ticket_channel_empty(Some(&doing)), "Write @Name to ask an employee; without a name, Forge (owner) answers.");
+        assert_eq!(ticket_channel_row(Some(&doing)), "@Name asks that employee; without a name, Forge (owner) answers.");
+        let backlog = ticket(ColumnKind::Backlog, true);
+        assert_eq!(ticket_channel_hint(&ch, Some(&backlog)), "Message #42-login-per-board-member · @ to mention");
+        assert_eq!(ticket_channel_row(Some(&backlog)), "@Name asks that employee; without a name, no one is woken.");
+        // Before `ticket.get` answered: nobody is named.
+        assert_eq!(ticket_channel_hint(&ch, None), "Message #42-login-per-board-member · @ to mention");
+        assert_eq!(ticket_channel_empty(None), "Write @Name to ask an employee about this ticket.");
+        for text in [ticket_channel_empty(Some(&doing)), ticket_channel_row(None), ticket_channel_hint(&ch, Some(&doing))] {
+            assert!(!text.contains("Titan"), "{text}");
+        }
+        // A closed ticket's channel keeps its read-only text.
+        let done = ticket_channel(12, true, 100, 0, 0);
+        assert_eq!(ticket_channel_hint(&done, Some(&doing)), "#12 is Done · read-only.");
+    }
+
+    /// Q1 o2: switching channels keeps each draft with its own channel; a draft typed in a
+    /// channel that closes (the Team chat goes back to #general) never moves to #general.
+    #[test]
+    fn switching_channels_keeps_each_draft_with_its_own_channel() {
+        let (one, two) = (Some(ConversationId::new()), Some(ConversationId::new()));
+        let mut drafts = Drafts::default();
+        assert_eq!(drafts.moved(DraftPlace::Channel(one), ""), None, "the first place keeps the composer as it is");
+        assert_eq!(drafts.moved(DraftPlace::Channel(one), "half"), None, "same channel");
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for #1"), Some(String::new()), "#2 starts empty");
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), "for #2"), Some(String::new()), "#general has its own");
+        assert_eq!(drafts.moved(DraftPlace::Channel(one), "for general"), Some("for #1".into()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for #1"), Some("for #2".into()));
+        // #2 closes while its draft is typed: the Team chat goes to #general without it.
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), "for #2, more"), Some("for general".into()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for general"), Some("for #2, more".into()), "still #2's");
+        // Sent (the composer empty): nothing is kept for it.
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), ""), Some("for general".into()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(two), "for general"), Some(String::new()));
+        // The other pages share one draft, as before, apart from the channels'.
+        assert_eq!(drafts.moved(DraftPlace::Elsewhere, "  "), Some(String::new()));
+        assert_eq!(drafts.moved(DraftPlace::Channel(None), "to Forge"), Some("for general".into()));
+        assert_eq!(drafts.moved(DraftPlace::Elsewhere, "for general"), Some("to Forge".into()));
+    }
+
     #[test]
     fn a_post_without_at_reaches_the_owner_while_the_tester_runs_the_tests() {
         let testing = ticket(ColumnKind::Testing, true);
@@ -991,6 +1124,21 @@ mod tests {
         assert_eq!(badge(&[channel("General", false, false, 0, 0)]), (0, false));
         assert_eq!(channel_hint(Some(&list[3])), "Message #Aurelius · @ to mention");
         assert_eq!(channel_hint(Some(&list[1])), "This project is archived · read-only.", "MU2-08 AC2");
+    }
+
+    /// Q1 minor: reading the only channel with a mention clears the sidebar's "@1" at
+    /// once, and the open channel keeps adding nothing while a list says otherwise.
+    #[test]
+    fn reading_a_channel_clears_its_part_of_the_sidebar_badge() {
+        let mut list = vec![channel("General", false, false, 0, 0), channel("Aurelius", true, false, 2, 1), ticket_channel(3, false, 100, 4, 0)];
+        assert_eq!(badge(&list), (1, true));
+        let aurelius = list[1].conversation_id;
+        mark_read(&mut list, aurelius);
+        assert_eq!(badge(&list), (0, true), "the mention is read; #3 stays unread");
+        assert_eq!((list[2].unread, list[2].mentions), (4, 0), "another channel keeps its counts");
+        let three = list[2].conversation_id;
+        mark_read(&mut list, three);
+        assert_eq!(badge(&list), (0, false), "nothing unread: no dot");
     }
 
     #[test]

@@ -1445,11 +1445,16 @@ fn mention_warning(view: &AppView, cx: &mut Context<AppView>) -> Option<AnyEleme
     crate::screens::discussion::unknown_warning(&names).map(|w| div().id("group-mention-warning").role(Role::Status).pt(px(6.)).px(px(4.)).text_size(px(12.)).text_color(c(crate::screens::board::HIGH)).child(w).into_any_element())
 }
 
-/// Group chat, under the composer: who answers.
+/// Group chat, under the composer: who answers (in a ticket's channel its owner, P-21).
 fn group_row(view: &AppView) -> impl IntoElement {
-    let first = view.group_answerer().map_or_else(|| "the top of the org chart".to_string(), |name| name.to_string());
-    h().pt(px(8.)).px(px(4.)).text_size(px(12.)).text_color(c(theme::MUTED))
-        .child(format!("@Name asks that employee; without a name, {first} answers."))
+    let text = match view.ticket_channel_open() {
+        Some(ticket) => crate::screens::discussion::ticket_channel_row(ticket),
+        None => {
+            let first = view.group_answerer().map_or_else(|| "the top of the org chart".to_string(), |name| name.to_string());
+            format!("@Name asks that employee; without a name, {first} answers.")
+        }
+    };
+    h().pt(px(8.)).px(px(4.)).text_size(px(12.)).text_color(c(theme::MUTED)).child(text)
 }
 
 /// How many subagents the open manager conversation runs, as a chip above the

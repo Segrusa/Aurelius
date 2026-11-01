@@ -57,6 +57,18 @@ impl AppView {
             let _ = self.requests.send(crate::backend::Request::Board(crate::backend::BoardCall::Ticket(ticket)));
         }
         self.channels = channels.filter(|list| !list.is_empty());
+        // The channel shown is being read: it adds nothing to the sidebar badge.
+        if let (Some(list), Some(open), crate::app::Page::GroupChat) = (self.channels.as_mut(), self.group_conversation, self.screen) {
+            d::mark_read(list, open);
+        }
+    }
+
+    /// The Team chat read a channel (`group_chat.get` marks it read on the server): it is
+    /// read here at once, and the list is read again for the other channels' counts.
+    pub fn channel_read(&mut self, conversation: ConversationId) {
+        let Some(list) = self.channels.as_mut() else { return };
+        d::mark_read(list, conversation);
+        let _ = self.requests.send(crate::backend::Request::LoadChannels);
     }
 
     /// `channel.search` answered for `query` (none: the server could not search; then
@@ -113,12 +125,22 @@ impl AppView {
         self.current_channel().and_then(|c| c.project_id)
     }
 
-    /// The composer's placeholder in the Team chat (fase 2 §3).
+    /// The composer's placeholder in the Team chat (fase 2 §3; a ticket's channel: P-21).
     pub fn channel_placeholder(&self) -> String {
         match self.current_channel() {
             None => crate::app::GROUP_PLACEHOLDER.into(),
+            Some(ch) if d::kind_of(ch) == ChannelKind::Ticket => d::ticket_channel_hint(ch, self.shown_ticket(ch)),
             c => d::channel_hint(c),
         }
+    }
+
+    /// The open channel when it is a ticket's: with the ticket once `ticket.get` answered.
+    pub fn ticket_channel_open(&self) -> Option<Option<&aurelius_domain::ticket::TicketView>> {
+        self.current_channel().filter(|ch| d::kind_of(ch) == ChannelKind::Ticket).map(|ch| self.shown_ticket(ch))
+    }
+
+    fn shown_ticket(&self, ch: &ChannelView) -> Option<&aurelius_domain::ticket::TicketView> {
+        self.channel_ticket.as_ref().filter(|d| Some(d.ticket.id) == ch.ticket_id).map(|d| &d.ticket)
     }
 
     /// Choose the channel the Team chat shows; it loads when the Team chat opens it.
@@ -147,6 +169,11 @@ impl AppView {
     pub fn channel_ticket_loaded(&mut self, detail: &aurelius_domain::ticket::TicketDetail) {
         if self.current_channel().and_then(|c| c.ticket_id) == Some(detail.ticket.id) {
             self.channel_ticket = Some(detail.clone());
+            // Whom a post without `@` reaches is known now (the owner, P-21).
+            if self.screen == crate::app::Page::GroupChat {
+                let placeholder = self.channel_placeholder();
+                self.pending_placeholder_set(placeholder);
+            }
         }
     }
 
@@ -479,11 +506,18 @@ impl AppView {
                 )
             })
             .when(empty, |el| {
-                let first = self.group_answerer().map_or_else(|| "the top of the org chart".to_string(), str::to_owned);
+                let (title, text) = match self.ticket_channel_open() {
+                    // A ticket's channel: its owner answers, not the top of the org chart (P-21).
+                    Some(ticket) => (d::TICKET_CHANNEL_EMPTY, d::ticket_channel_empty(ticket)),
+                    None => {
+                        let first = self.group_answerer().map_or_else(|| "the top of the org chart".to_string(), str::to_owned);
+                        ("Talk with your whole team here.", format!("Write @Name to ask an employee; without a name, {first} answers and brings in whoever is needed."))
+                    }
+                };
                 el.child(
                     v().gap(px(6.)).text_size(px(13.5)).text_color(c(theme::TEXT_2))
-                        .child(div().text_size(px(15.)).text_color(c(theme::TEXT)).child("Talk with your whole team here."))
-                        .child(format!("Write @Name to ask an employee; without a name, {first} answers and brings in whoever is needed.")),
+                        .child(div().text_size(px(15.)).text_color(c(theme::TEXT)).child(title))
+                        .child(text),
                 )
             })
             .when(failed.is_none(), |el| el.child(self.render_messages("Aurelius".into(), cx)));
