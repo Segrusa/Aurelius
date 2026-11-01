@@ -698,6 +698,9 @@ mod run_end_tests;
 mod ticket_tests;
 
 #[cfg(test)]
+mod ticket_files_tests;
+
+#[cfg(test)]
 mod discussion_tests;
 
 #[cfg(test)]

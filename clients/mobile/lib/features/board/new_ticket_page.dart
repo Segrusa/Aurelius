@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/clipboard/image_clipboard.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
@@ -30,7 +31,8 @@ import 'ticket_page.dart' show parseLabels;
 const ticketTitleMax = 160;
 
 /// "New ticket" (§10.2, MU1-07): title and project required; priority, owner,
-/// labels, a photo or file; mode and deadline under Advanced. Create puts it
+/// labels, a photo or file (also pasted into the title or description); mode
+/// and deadline under Advanced. Create puts it
 /// in Backlog; "Create and start" also starts it (D-09).
 class NewTicketPage extends StatefulWidget {
   const NewTicketPage({super.key, this.projectId, this.draft});
@@ -45,11 +47,18 @@ class NewTicketPage extends StatefulWidget {
   State<NewTicketPage> createState() => _NewTicketPageState();
 }
 
-class _NewTicketPageState extends State<NewTicketPage> {
+class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserver {
   late final _title = TextEditingController(text: widget.draft?.title);
   late final _description = TextEditingController(text: widget.draft?.description);
   final _labels = TextEditingController();
   final _titleFocus = FocusNode();
+  final _descriptionFocus = FocusNode();
+  final _clipboard = ImageClipboard();
+
+  /// Whether the clipboard holds an image, for Paste Image in the edit menu.
+  /// Checked when a field gets focus or is tapped and when the app returns,
+  /// since the edit menu is built synchronously.
+  bool _clipboardImage = false;
   late String? _project = widget.draft?.projectId ?? widget.projectId;
   TicketPriority _priority = TicketPriority.normal;
   String? _owner;
@@ -65,13 +74,26 @@ class _NewTicketPageState extends State<NewTicketPage> {
   void initState() {
     super.initState();
     _title.addListener(() => setState(() {}));
+    WidgetsBinding.instance.addObserver(this);
+    for (final focus in [_titleFocus, _descriptionFocus]) {
+      focus.addListener(() {
+        if (focus.hasFocus) _checkClipboard();
+      });
+    }
     // One open project: it is the project.
     final open = context.read<CompanyBloc>().state.openProjects;
     if (_project == null && open.length == 1) _project = open.single.id;
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkClipboard();
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _descriptionFocus.dispose();
     _title.dispose();
     _description.dispose();
     _labels.dispose();
@@ -185,6 +207,11 @@ class _NewTicketPageState extends State<NewTicketPage> {
       picked = [if (image != null) (File(image.path), image.name)];
     }
     if (picked.isEmpty || !mounted) return;
+    await _upload(picked);
+  }
+
+  /// Uploads files to the PC at once; they are sent with the ticket.
+  Future<void> _upload(List<(File, String)> picked) async {
     final repository = context.read<AureliusRepository>();
     setState(() => _uploading = true);
     try {
@@ -205,6 +232,43 @@ class _NewTicketPageState extends State<NewTicketPage> {
     }
   }
 
+  Future<void> _checkClipboard() async {
+    final has = await _clipboard.hasImage();
+    if (mounted && has != _clipboardImage) setState(() => _clipboardImage = has);
+  }
+
+  /// Paste the clipboard's image (⌘⇧V on a hardware keyboard) as an attachment.
+  Future<void> _pasteImage() async {
+    if (_busy || _uploading) return;
+    final image = await _clipboard.read();
+    if (!mounted) return;
+    if (image == null) return toast(context, 'There is no image on the clipboard.');
+    await _addImage(image.$1, image.$2);
+  }
+
+  /// An image inserted by the keyboard (Gboard) into the title or description.
+  Future<void> _insert(KeyboardInsertedContent content) async {
+    final data = content.data;
+    if (data == null || data.isEmpty) return toast(context, 'This image could not be read; add it with Photo or file.');
+    await _addImage(data, pastedImageExtension(content.mimeType));
+  }
+
+  /// Keep pasted bytes as a file and attach it like a picked photo.
+  Future<void> _addImage(Uint8List data, String extension) async {
+    if (_files.length >= maxTaskFiles) return toast(context, 'At most $maxTaskFiles files per ticket.');
+    if (data.length > maxTaskFileBytes) return toast(context, 'The image is larger than 25 MB and was not added.');
+    final name = pastedImageName(_files.map((f) => f.name), extension);
+    await withPastedFile(data, name, (file) async {
+      if (mounted) await _upload([(file, name)]);
+    });
+  }
+
+  /// The edit menu of the title and description, with Paste Image when the clipboard holds one.
+  Widget _menu(BuildContext context, EditableTextState field) {
+    final items = _clipboardImage ? withPasteImage(field.contextMenuButtonItems, _pasteImage) : field.contextMenuButtonItems;
+    return AdaptiveTextSelectionToolbar.buttonItems(anchors: field.contextMenuAnchors, buttonItems: items);
+  }
+
   Future<void> _pickDeadline() async {
     final now = DateTime.now();
     final day = await showDatePicker(context: context, initialDate: _deadline ?? now, firstDate: now.subtract(const Duration(days: 1)), lastDate: DateTime(now.year + 10));
@@ -223,6 +287,8 @@ class _NewTicketPageState extends State<NewTicketPage> {
       bindings: {
         const SingleActivator(LogicalKeyboardKey.enter, meta: true): () => _create(start: false),
         const SingleActivator(LogicalKeyboardKey.enter, control: true): () => _create(start: false),
+        const SingleActivator(LogicalKeyboardKey.keyV, meta: true, shift: true): _pasteImage,
+        const SingleActivator(LogicalKeyboardKey.keyV, control: true, shift: true): _pasteImage,
       },
       child: Scaffold(
         appBar: GlassAppBar(
@@ -242,15 +308,22 @@ class _NewTicketPageState extends State<NewTicketPage> {
                 autofocus: true,
                 maxLength: ticketTitleMax,
                 textCapitalization: TextCapitalization.sentences,
+                onTap: _checkClipboard,
+                contextMenuBuilder: _menu,
+                contentInsertionConfiguration: ContentInsertionConfiguration(allowedMimeTypes: pastedImageMimeTypes, onContentInserted: _insert),
                 buildCounter: (context, {required currentLength, required isFocused, maxLength}) => currentLength >= 140 ? Text('$currentLength/$maxLength') : null,
                 decoration: InputDecoration(labelText: 'Title *', border: InputBorder.none, errorText: _titleError),
               ),
               TextField(
                 key: const ValueKey('new-ticket-description'),
                 controller: _description,
+                focusNode: _descriptionFocus,
                 minLines: 3,
                 maxLines: 10,
                 textCapitalization: TextCapitalization.sentences,
+                onTap: _checkClipboard,
+                contextMenuBuilder: _menu,
+                contentInsertionConfiguration: ContentInsertionConfiguration(allowedMimeTypes: pastedImageMimeTypes, onContentInserted: _insert),
                 decoration: const InputDecoration(labelText: 'Description', border: InputBorder.none, alignLabelWithHint: true),
               ),
             ]),

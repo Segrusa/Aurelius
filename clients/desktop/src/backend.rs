@@ -99,6 +99,8 @@ pub struct ServerInfo {
     pub guidelines: bool,
     /// The Testing column and the company's tester (feature `board_testing`).
     pub board_testing: bool,
+    /// An existing ticket takes more files (feature `ticket_add_files`, `UpdateTicket::add_files`).
+    pub ticket_add_files: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -786,6 +788,7 @@ fn has_files(command: &Command) -> bool {
         Command::AddIdea(c) => !c.files.is_empty(),
         Command::UpdateIdea(c) => !c.add_files.is_empty(),
         Command::CreateTicket(c) => !c.files.is_empty(),
+        Command::UpdateTicket(c) => c.add_files.as_ref().is_some_and(|f| !f.is_empty()),
         _ => false,
     }
 }
@@ -1725,6 +1728,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 vault: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::VAULT),
                 guidelines: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::GUIDELINES),
                 board_testing: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::BOARD_TESTING),
+                ticket_add_files: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_ADD_FILES),
             },
         }));
 
@@ -3443,24 +3447,27 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
         }
         BoardCall::Write { mut command, expected_version, done } => {
             let ticket = ticket_of(&command);
-            // A new ticket's files: as they are for the local service, uploaded for a remote one.
+            // A ticket's new files: as they are for the local service, uploaded for a remote one.
             // Sent anyway (B10), they went up already with the first try.
-            if let Command::CreateTicket(create) = &mut command
-                && !create.confirm_secret
-            {
+            let files = match &mut command {
+                Command::CreateTicket(create) if !create.confirm_secret => Some(&mut create.files),
+                Command::UpdateTicket(update) if !update.confirm_secret => update.add_files.as_mut(),
+                _ => None,
+            };
+            if let Some(files) = files {
                 let mut staged = Vec::new();
-                for path in &create.files {
+                for path in files.iter() {
                     match client.stage_file(std::path::Path::new(path)).await {
                         Ok(path) => staged.push(path),
                         Err(e) => {
                             let name = std::path::Path::new(path).file_name().map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
                             let message = if lost(&e) { BOARD_CONNECTION_DROPPED.to_string() } else { format!("Could not send the file {name}: {e}") };
-                            let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket: None, message }));
+                            let _ = updates.send(Update::Board(BoardUpdate::Failed { ticket, message }));
                             return if lost(&e) { Err(e.into()) } else { Ok(()) };
                         }
                     }
                 }
-                create.files = staged;
+                *files = staged;
             }
             // B10: a ticket's text the server may hold back, ready to go again with `confirm_secret`.
             let held = confirmed(&command);
@@ -4822,6 +4829,14 @@ mod tests {
             done(&mut app, Command::CreateTicket(create), None).await;
             let attached = tickets(&load(&mut app, Some(with_folder)).await, ColumnKind::Backlog);
             assert_eq!(attached[0].attachments.iter().map(|f| (f.name.as_str(), f.byte_length)).collect::<Vec<_>>(), [("spec.md", 14)]);
+
+            // A screenshot pasted while editing it: added beside the file it had (ticket #3).
+            let shot = root.join("screenshot.png");
+            std::fs::write(&shot, b"\x89PNG").unwrap();
+            let update = ticket::UpdateTicket { add_files: Some(vec![shot.display().to_string()]), ..crate::screens::board::empty_update(attached[0].id) };
+            done(&mut app, Command::UpdateTicket(update), Some(attached[0].version)).await;
+            let attached = tickets(&load(&mut app, Some(with_folder)).await, ColumnKind::Backlog);
+            assert_eq!(attached[0].attachments.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["spec.md", "screenshot.png"]);
 
             // Offline a write says so at once and is not kept for later.
             aurelius_client::bridge::shutdown_daemon(&root).await.expect("shutdown");

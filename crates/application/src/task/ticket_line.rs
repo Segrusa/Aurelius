@@ -382,6 +382,30 @@ pub(crate) fn resume_as(tx: &Tx<'_>, st: &Store, task: TaskId, from: &str, text:
     Ok(notices)
 }
 
+/// Files added to the ticket (`ticket.update { add_files }`) while its main task
+/// still works: the task only hears of its files through the brief, posted once
+/// when its conversation opens, so a task that has one gets them as an update
+/// that names each file (absolute path and size, as `TaskAttachments::prompt`).
+/// A Running task gets a run that answers it; a live run is never interrupted:
+/// it reads only up to the message it answers, so the new run comes after it.
+/// The same holds for a run parked for the usage limit or a Claude login: it
+/// resumes with its old message, so a run after it reads the files. A task that
+/// waits otherwise (its turn, a plan's decision, Review) reads it on its next run. A task without a conversation yet gets nothing here: its brief names the files.
+pub(crate) fn files_added(tx: &Tx<'_>, st: &Store, task: TaskId, added: &task_store::TaskAttachments) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(row) = task_store::load_task(tx, task)? else { return Ok(vec![]) };
+    if row.status.is_terminal() {
+        return Ok(vec![]);
+    }
+    let (Some((conversation, _)), Some(text)) = (task_store::task_conversation(tx, task)?, added.prompt()) else { return Ok(vec![]) };
+    let (message, posted) = thread::post_returning(tx, st, conversation, task, Speaker::Update { kind: "files", from: "Aurelius" }, &text)?;
+    let mut notices = vec![posted];
+    let parked = row.status == TaskStatus::Waiting && matches!(task_store::waiting_cause(tx, task)?.as_deref(), Some("quota" | aurelius_domain::task::WAITING_LOGIN));
+    if row.status == TaskStatus::Running || parked {
+        notices.extend(crate::task::task_runs::run_for(tx, task, conversation, message)?);
+    }
+    Ok(notices)
+}
+
 /// `ticket.send_back` (B2): the feedback goes to the main task's conversation and
 /// its employee works on (the card is in Doing already).
 pub(crate) fn send_back(tx: &Tx<'_>, st: &Store, ticket: TicketId, user: UserId, feedback: &str) -> Result<Vec<EventNotice>, StorageError> {
