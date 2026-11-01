@@ -542,6 +542,7 @@ impl CommandService {
         let (before, added) = self.add_ticket_files(&cmd)?;
         let new_files = added.clone();
         let expected = envelope.expected_version;
+        let st = self.store().clone();
         let committed = self.commit(envelope.command_id, hash, move |tx| {
             let state = check!(load(tx, cmd.ticket_id, expected)?);
             if state.column == ColumnKind::Done {
@@ -551,6 +552,7 @@ impl CommandService {
                 return rejected(DomainError::Ticket("Mode and model change only while the main task does not run.".into()));
             }
             let mut files_added: Vec<String> = Vec::new();
+            let mut told: Vec<EventNotice> = Vec::new();
             if let Some(new) = &new_files {
                 // Counted and copied against what the ticket had before the transaction.
                 if store::attachments_of(tx, state.id)? != before {
@@ -559,17 +561,22 @@ impl CommandService {
                 let mut all = before.clone().unwrap_or_else(|| task_store::TaskAttachments { folder: new.folder.clone(), files: Vec::new() });
                 all.files.extend(new.files.iter().cloned());
                 store::set_attachments(tx, state.id, Some(&all))?;
-                // A main task that still works finds them on its next run; a finished one keeps its own.
+                // A main task that still works gets them too, and is told in its
+                // conversation (`ticket_line::files_added`); a finished one keeps its own.
                 if let (Some(root), Some(status)) = (state.root_task_id, state.root_status)
                     && !status.is_terminal()
                 {
                     let mut task_files = task_store::attachments_of(tx, root)?;
                     match task_files.as_mut() {
                         Some(t) if t.folder == new.folder => t.files.extend(new.files.iter().cloned()),
+                        // The main task copies the ticket's folder when it starts, so this does not
+                        // happen; if it does, its row keeps its own files (their paths are relative to
+                        // its folder), and the update in its conversation still names the new ones.
                         Some(_) => {}
                         None => task_files = Some(new.clone()),
                     }
                     task_store::set_attachments(tx, root, task_files.as_ref())?;
+                    told = ticket_line::files_added(tx, &st, root, new)?;
                 }
                 files_added = new.files.iter().map(|f| f.name.clone()).collect();
             }
@@ -609,7 +616,7 @@ impl CommandService {
                 extra["files_added"] = json!(files_added);
             }
             e.push(tx, EventKind::TicketUpdated, extra)?;
-            finish(tx, state.id, state.column, e)
+            finish_then(tx, state.id, e, |_| Ok(told))
         });
         // Copies of a command that failed or was only replayed are not kept.
         self.discard_unused(&added, committed.as_ref().map_or(true, |c| c.receipt.replayed));
