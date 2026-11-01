@@ -800,3 +800,53 @@ async fn a_phones_session_belongs_to_the_phone_and_ends_with_it() {
     assert!(!desktop.sessions(None).await.unwrap().sessions.iter().any(|s| s.client_id.is_some()));
     stop(dir.path(), daemon).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_pairing_and_its_poll_give_the_chosen_name_and_only_an_owner_renames_remotely() {
+    use aurelius_domain::server::SetServerName;
+    let rename = |name: &str| Command::SetServerName(SetServerName { name: name.into() });
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_remote(dir.path()).await;
+    let desktop = connect(dir.path()).await;
+    desktop.execute(envelope(rename("Kantoor"), None)).await.unwrap();
+
+    // The QR code, the pairing text and the poll's answer (pair_device checks the poll) name it.
+    desktop.remote(HostWrite::RemoteEnable).await.unwrap();
+    let code = desktop.pairing_start().await.unwrap();
+    assert_eq!(serde_json::from_str::<PairingPayload>(&code.qr).unwrap().host_name, "Kantoor");
+    assert_eq!(PairingPayload::from_text(&code.pairing_text).unwrap().host_name, "Kantoor");
+    let (phone, _) = pair(&desktop).await;
+    let mut socket = phone.socket(&phone.session().await.unwrap()).await.unwrap();
+    let hello_phone = hello(&mut socket).await;
+    assert_eq!(hello_phone.host_name, "Kantoor");
+    assert!(!hello_phone.capabilities.contains(&Capability::Owner), "a phone: the client hides the button");
+
+    // A phone reads the name but cannot change it (A-04).
+    assert!(matches!(call(&mut socket, 2, Method::ServerGetName).await, Outcome::Ok(ResponseBody::ServerName(v)) if v.name == "Kantoor"));
+    assert!(forbidden(command(&mut socket, 3, rename("Telefoon")).await));
+
+    // A computer with full access can; an empty name brings the computer's name back.
+    let (mac, _) = pair_device(&desktop, "macbook", "macos", Some("owner"), true).await;
+    let mut owner = mac.socket(&mac.session().await.unwrap()).await.unwrap();
+    hello(&mut owner).await;
+    assert_eq!(done(command(&mut owner, 2, rename("Thuis")).await), CommandResult::ServerNameSet { name: "Thuis".into(), version: 2 });
+    let code = desktop.pairing_start().await.unwrap();
+    assert_eq!(PairingPayload::from_text(&code.pairing_text).unwrap().host_name, "Thuis");
+    assert!(accepted(&command(&mut owner, 3, rename("")).await));
+    let code = desktop.pairing_start().await.unwrap();
+    assert_eq!(PairingPayload::from_text(&code.pairing_text).unwrap().host_name, aurelius_host::host_name());
+
+    // The poll of a new pairing gives the name of that moment.
+    desktop.execute(envelope(rename("Na de koppeling"), None)).await.unwrap();
+    let status = desktop.remote_status().await.unwrap();
+    let base = format!("http://127.0.0.1:{}", status.port);
+    let http = reqwest::Client::new();
+    let code = desktop.pairing_start().await.unwrap();
+    let pending: serde_json::Value = ask_pairing(&http, &base, &code.code, "pixel", "android", None).await.json().await.unwrap();
+    let pairing_id = pending["pairing_id"].as_str().unwrap().to_owned();
+    desktop.remote(HostWrite::RemoteDecidePairing { pairing_id: pairing_id.clone(), approve: true, owner: false }).await.unwrap();
+    let approved: serde_json::Value = http.get(format!("{base}/v1/pair/{pairing_id}")).send().await.unwrap().json().await.unwrap();
+    assert_eq!(approved["host_name"], "Na de koppeling");
+
+    stop(dir.path(), daemon).await;
+}
