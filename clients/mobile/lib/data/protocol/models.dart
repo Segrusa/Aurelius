@@ -10688,6 +10688,7 @@ final class MessageView {
     required this.text,
     this.threadLastReplyMs,
     this.threadParent,
+    this.threadRepliers = const [],
     this.threadReplyCount,
     this.threadUnread,
     this.update,
@@ -10743,6 +10744,12 @@ final class MessageView {
   /// `thread.read`, never in the channel's own list. Left out for a message of
   /// the channel itself and by older servers.
   final String? threadParent;
+  /// A message that starts a thread (feature `chat_threads`): who replied, so
+  /// a client can show them under the root. The names (board members'
+  /// usernames, employees' names, as in `ReactionView::by`) of at most
+  /// `THREAD_REPLIERS_MAX` (3) distinct repliers, most recent first. Left out when
+  /// it has no replies and by older servers.
+  final List<String> threadRepliers;
   /// A message that starts a thread (feature `chat_threads`): how many replies it has.
   /// Left out when it has none and by older servers.
   final int? threadReplyCount;
@@ -10783,6 +10790,7 @@ final class MessageView {
     text: (json['text'] as String),
     threadLastReplyMs: (json['thread_last_reply_ms'] == null ? null : (json['thread_last_reply_ms'] as num).toInt()),
     threadParent: (json['thread_parent'] == null ? null : (json['thread_parent'] as String)),
+    threadRepliers: (json['thread_repliers'] == null ? const [] : (json['thread_repliers'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     threadReplyCount: (json['thread_reply_count'] == null ? null : (json['thread_reply_count'] as num).toInt()),
     threadUnread: (json['thread_unread'] == null ? null : (json['thread_unread'] as num).toInt()),
     update: (json['update'] == null ? null : (json['update'] as String)),
@@ -10812,6 +10820,7 @@ final class MessageView {
     'text': text,
     if (threadLastReplyMs != null) 'thread_last_reply_ms': threadLastReplyMs,
     if (threadParent != null) 'thread_parent': threadParent,
+    'thread_repliers': threadRepliers,
     if (threadReplyCount != null) 'thread_reply_count': threadReplyCount,
     if (threadUnread != null) 'thread_unread': threadUnread,
     if (update != null) 'update': update,

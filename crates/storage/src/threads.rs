@@ -10,7 +10,8 @@
 
 use crate::discussions::COUNTED;
 use crate::{StorageError, now_ms};
-use aurelius_domain::views::{MessageView, ReactionView};
+use aurelius_domain::group_chat::OWNER;
+use aurelius_domain::views::{MessageView, ReactionView, THREAD_REPLIERS_MAX};
 use aurelius_domain::{ConversationId, MessageId, UserId};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::collections::HashMap;
@@ -84,6 +85,37 @@ fn reply_counts(conn: &Connection, conversation: ConversationId) -> Result<HashM
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Per root in `conversation`: who replied (the replies that count), each name
+/// once, most recent first, at most `THREAD_REPLIERS_MAX`. One query for the
+/// whole conversation: each (root, name) once with its latest reply.
+fn repliers(conn: &Connection, conversation: ConversationId) -> Result<HashMap<String, Vec<String>>, StorageError> {
+    // A board member by username (the owner before phase 2 has none), an employee by the name it posted under.
+    let mut stmt = conn.prepare(&format!(
+        "SELECT m.thread_parent_id,
+                CASE WHEN m.role = 'user' THEN COALESCE(u.username, ?2) ELSE COALESCE(json_extract(m.meta_json, '$.from'), 'Aurelius') END AS name,
+                MAX(m.ordinal) AS latest
+         FROM messages m LEFT JOIN users u ON u.id = m.author_user_id
+         WHERE m.conversation_id = ?1 AND m.thread_parent_id IS NOT NULL AND {COUNTED}
+         GROUP BY m.thread_parent_id, name"
+    ))?;
+    let rows = stmt.query_map(params![conversation.to_string(), OWNER], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?;
+    Ok(most_recent_repliers(rows.collect::<Result<Vec<_>, _>>()?))
+}
+
+/// Per root, the names of (root, name, latest reply ordinal) rows, latest first,
+/// at most `THREAD_REPLIERS_MAX`. A name is once per root in the rows already.
+fn most_recent_repliers(mut rows: Vec<(String, String, i64)>) -> HashMap<String, Vec<String>> {
+    rows.sort_by_key(|row| std::cmp::Reverse(row.2));
+    let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    for (root, name, _) in rows {
+        let names = out.entry(root).or_default();
+        if names.len() < THREAD_REPLIERS_MAX && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    out
+}
+
 /// Per root in `conversation`: the replies of others `user` has not read yet.
 fn unread_counts(conn: &Connection, conversation: ConversationId, user: UserId) -> Result<HashMap<String, u32>, StorageError> {
     let mut stmt = conn.prepare(&format!(
@@ -140,12 +172,14 @@ fn reactions_in(conn: &Connection, conversation: ConversationId) -> Result<React
 
 /// The threads' counters and the reactions of `messages` (of `conversation`),
 /// as `reader` sees them: `thread_reply_count`, `thread_last_reply_ms`,
-/// `thread_unread` (none without a reader) and `reactions` (`mine` for the reader).
+/// `thread_repliers`, `thread_unread` (none without a reader) and `reactions`
+/// (`mine` for the reader).
 pub fn decorate(conn: &Connection, conversation: ConversationId, reader: Option<UserId>, messages: &mut [MessageView]) -> Result<(), StorageError> {
     if !has_threads(conn)? {
         return Ok(());
     }
     let counts = reply_counts(conn, conversation)?;
+    let mut repliers = if counts.is_empty() { HashMap::new() } else { repliers(conn, conversation)? };
     let unread = match reader {
         Some(user) if !counts.is_empty() => unread_counts(conn, conversation, user)?,
         _ => HashMap::new(),
@@ -158,6 +192,7 @@ pub fn decorate(conn: &Connection, conversation: ConversationId, reader: Option<
             message.thread_reply_count = Some(*count);
             message.thread_last_reply_ms = Some(*last);
         }
+        message.thread_repliers = repliers.remove(&id).unwrap_or_default();
         message.thread_unread = unread.get(&id).copied().filter(|n| *n > 0);
         message.reactions = reactions
             .get(&id)

@@ -116,6 +116,38 @@ fn a_root_counts_its_replies_and_the_readers_unread_until_they_read_the_thread()
 }
 
 #[test]
+fn a_root_names_at_most_three_distinct_repliers_most_recent_first() {
+    let (_dir, store) = channel();
+    let repliers = |id: &str| decorated(&store, None).into_iter().find(|m| m.id == msg_id(id)).unwrap().thread_repliers;
+    // Pulse (3) after Bea (2); the system line (5) is no replier.
+    assert_eq!(repliers(ROOT), ["Pulse", "bea"]);
+    assert!(repliers(OWN).is_empty(), "no replies, no repliers");
+    // Alex (6), Atlas (7), then Bea again (8): Bea once, as the latest, and Pulse drops out.
+    store
+        .write(|tx| {
+            tx.execute_batch(&format!(
+                "INSERT INTO messages(id, conversation_id, ordinal, role, content_blob_id, source_event_id, status, input_kind, created_at_ms, author_user_id, thread_parent_id, meta_json) VALUES
+                   ('00000000-0000-7000-8000-0000000000a6', '{CHANNEL}', 6, 'user', 'b3', '{EVENT}', 'complete', 'text', 600, '{ALEX}', '{ROOT}', NULL),
+                   ('00000000-0000-7000-8000-0000000000a7', '{CHANNEL}', 7, 'tool', 'b3', '{EVENT}', 'complete', 'tool', 700, NULL, '{ROOT}', '{{\"kind\":\"group\",\"from\":\"Atlas\"}}'),
+                   ('00000000-0000-7000-8000-0000000000a8', '{CHANNEL}', 8, 'user', 'b3', '{EVENT}', 'complete', 'text', 800, '{BEA}', '{ROOT}', NULL);"
+            ))?;
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(repliers(ROOT), ["bea", "Atlas", "alex"]);
+    // The thread's own read names them on its root too.
+    let thread = store
+        .read(|c| {
+            let mut messages = conversations::list_thread(c, conv_id(CHANNEL), msg_id(ROOT), &text)?;
+            threads::decorate(c, conv_id(CHANNEL), None, &mut messages)?;
+            Ok(messages)
+        })
+        .unwrap();
+    assert_eq!(thread[0].thread_repliers, ["bea", "Atlas", "alex"]);
+    assert!(thread[1..].iter().all(|m| m.thread_repliers.is_empty()), "a reply names no repliers");
+}
+
+#[test]
 fn a_thread_read_marker_never_goes_back() {
     let (_dir, store) = channel();
     let alex: UserId = user_id(ALEX);

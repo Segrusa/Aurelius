@@ -140,6 +140,7 @@ fn message(system: Option<SystemLine>) -> MessageView {
         thread_reply_count: Some(2),
         thread_last_reply_ms: Some(1_700_000_000_500),
         thread_unread: Some(1),
+        thread_repliers: vec!["Atlas".into(), "sebastien".into()],
         reactions: vec![ReactionView { emoji: "👍".into(), count: 2, mine: true, by: vec!["sebastien".into(), "Atlas".into()] }],
     }
 }
@@ -174,6 +175,7 @@ fn an_older_client_reads_a_message_with_threads_reactions_and_a_line_with_an_act
     let json = serde_json::to_value(&new).unwrap();
     assert_eq!(json["system"]["action"], "closed");
     assert_eq!(json["reactions"][0]["emoji"], "👍");
+    assert_eq!(json["thread_repliers"], serde_json::json!(["Atlas", "sebastien"]));
     let old: OldMessageView = serde_json::from_value(json).unwrap();
     let line = old.system.unwrap();
     assert_eq!((line.kind, line.by.as_deref()), (OldSystemLineKind::Done, Some("sebastien")));
@@ -183,12 +185,12 @@ fn an_older_client_reads_a_message_with_threads_reactions_and_a_line_with_an_act
 #[test]
 fn a_message_an_older_server_wrote_reads_without_threads_or_reactions() {
     let mut json = serde_json::to_value(message(None)).unwrap();
-    for field in ["thread_parent", "thread_reply_count", "thread_last_reply_ms", "thread_unread", "reactions"] {
+    for field in ["thread_parent", "thread_reply_count", "thread_last_reply_ms", "thread_unread", "thread_repliers", "reactions"] {
         json.as_object_mut().unwrap().remove(field);
     }
     let old: OldMessageView = serde_json::from_value(json).unwrap();
     let new: MessageView = serde_json::from_value(serde_json::to_value(&old).unwrap()).unwrap();
-    assert_eq!((new.thread_parent, new.thread_reply_count, new.thread_last_reply_ms, new.thread_unread, new.reactions.len()), (None, None, None, None, 0));
+    assert_eq!((new.thread_parent, new.thread_reply_count, new.thread_last_reply_ms, new.thread_unread, new.thread_repliers.len(), new.reactions.len()), (None, None, None, None, 0, 0));
     // Without threads or reactions the new server writes a message exactly as before.
     assert_eq!(serde_json::to_value(&new).unwrap(), serde_json::to_value(&old).unwrap());
 }
@@ -258,7 +260,7 @@ fn a_thread_is_read_with_a_method_of_its_own() {
 #[test]
 fn a_thread_snapshot_has_its_root_and_replies_and_leaves_out_an_open_channel() {
     let root = message(None);
-    let reply = MessageView { thread_parent: Some(root.id), thread_reply_count: None, thread_last_reply_ms: None, thread_unread: None, reactions: vec![], ..message(None) };
+    let reply = MessageView { thread_parent: Some(root.id), thread_reply_count: None, thread_last_reply_ms: None, thread_unread: None, thread_repliers: vec![], reactions: vec![], ..message(None) };
     let snapshot = ThreadSnapshot { as_of_seq: 4, conversation_id: ConversationId::new(), root: root.clone(), replies: vec![reply], read_only: false };
     let json = serde_json::to_value(&snapshot).unwrap();
     assert!(json.get("read_only").is_none());
