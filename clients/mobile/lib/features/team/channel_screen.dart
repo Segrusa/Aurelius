@@ -23,11 +23,22 @@ import 'team_page.dart';
 /// on a tablet. [readThrough] is the reader's last read before it opened:
 /// opening it marks it read, and "New messages" stays where it was.
 class ChannelScreen extends StatelessWidget {
-  const ChannelScreen({super.key, required this.channel, this.readThrough});
+  const ChannelScreen({super.key, required this.channel, this.readThrough, this.onOpen});
 
   /// The channel as it was when opened; the list's newer view of it wins.
   final ChannelView channel;
   final int? readThrough;
+
+  /// Opens another channel, as a tap in the list does (a line in General links to a ticket's).
+  final ValueChanged<ChannelView>? onOpen;
+
+  /// Opens the channel [conversationId] a line links to; false when the list does not know it (yet).
+  bool _openLinked(BuildContext context, String conversationId) {
+    final found = context.read<ChannelsBloc>().state.byId(conversationId);
+    if (found == null || onOpen == null) return false;
+    onOpen!(found);
+    return true;
+  }
 
   void _readChannels(BuildContext context) {
     if (!context.mounted) return;
@@ -86,7 +97,11 @@ class ChannelScreen extends StatelessWidget {
                   ? null
                   : TextButton(key: const ValueKey('channel-read-only-open'), onPressed: () => context.push('/ticket/$ticketId'), child: const Text('Open ticket')),
               hint: channelHint(live),
-              channel: ChannelChatOptions(readThrough: readThrough, closedNote: channelReadOnlyNote(live)),
+              channel: ChannelChatOptions(
+                readThrough: readThrough,
+                closedNote: channelReadOnlyNote(live),
+                openChannel: (linked) => _openLinked(context, linked),
+              ),
               source: TicketSource(from: 'Team chat · $label', projectId: live.projectId),
             ),
           ),

@@ -336,6 +336,53 @@ void main() {
     });
   });
 
+  group('a line in General opens its ticket channel (Q1-B1)', () {
+    Map<String?, List<MessageView>> general({String channel = 'c-42'}) => {
+          null: [
+            _msg('s1', 'lena opened #42 "Login per board member"', at: _today(0), ordinal: 1, system: SystemLine(kind: SystemLineKind.ticketCreated, by: 'lena', ticketId: 'k42', channelId: channel)),
+            _msg('s2', 'ada closed #47 "Vault rotation"', at: _today(1), ordinal: 2, system: const SystemLine(kind: SystemLineKind.done, by: 'ada', ticketId: 'k47', channelId: 'c-47')),
+          ],
+        };
+
+    testWidgets('a tap on an opened line pushes the channel of its channel_id, not the ticket page', (tester) async {
+      await pump(tester, messages: general());
+      await open(tester, 'c-general');
+      await tester.tap(find.textContaining('lena opened #42'));
+      await board.settleBoard(tester);
+      expect(find.byWidgetPredicate((w) => w is Text && w.key == const ValueKey('channel-title') && w.data == '#42-login-per-board-member'), findsOneWidget);
+      expect(find.text('ticket k42'), findsNothing);
+      verify(() => repo.groupChat(channel: 'c-42')).called(1);
+      // Back goes to General.
+      await tester.pageBack();
+      await board.settleBoard(tester);
+      expect(find.textContaining('lena opened #42'), findsOneWidget);
+    });
+
+    testWidgets("a closed line opens its archived channel, read-only", (tester) async {
+      await pump(tester, messages: general());
+      await open(tester, 'c-general');
+      await tester.tap(find.textContaining('ada closed #47'));
+      await board.settleBoard(tester);
+      expect(find.text('#47 is Done · read-only.'), findsOneWidget);
+    });
+
+    testWidgets('on a tablet the channel takes the place of General beside the list', (tester) async {
+      await pump(tester, messages: general(), size: const Size(1024, 768));
+      await tester.tap(find.textContaining('lena opened #42'));
+      await board.settleBoard(tester);
+      expect(find.byWidgetPredicate((w) => w is Text && w.key == const ValueKey('channel-title') && w.data == '#42-login-per-board-member'), findsOneWidget);
+      expect(find.byKey(const ValueKey('channel-list')), findsOneWidget);
+    });
+
+    testWidgets('a channel the list does not know yet opens the ticket page instead', (tester) async {
+      await pump(tester, messages: general(channel: 'c-unknown'));
+      await open(tester, 'c-general');
+      await tester.tap(find.textContaining('lena opened #42'));
+      await board.settleBoard(tester);
+      expect(find.text('ticket k42'), findsOneWidget);
+    });
+  });
+
   group('a ticket channel updates live (Q1-B2)', () {
     testWidgets("a line or an employee's post in the open ticket's discussion reads the channel again and shows", (tester) async {
       final changes = StreamController<Event>.broadcast();

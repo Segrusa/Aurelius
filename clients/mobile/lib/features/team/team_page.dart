@@ -148,10 +148,13 @@ class _ChannelHomeState extends State<_ChannelHome> {
       });
       return;
     }
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ChannelScreen(channel: c, readThrough: readThrough))).then((_) {
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ChannelScreen(channel: c, readThrough: readThrough, onOpen: _openLinked))).then((_) {
       if (mounted) context.read<ChannelsBloc>().add(const ChannelsRefreshed());
     });
   }
+
+  /// A line in a channel links to another: it opens as from the list.
+  void _openLinked(ChannelView c) => _show(c, wide: MediaQuery.sizeOf(context).width >= channelSplitWidth);
 
   @override
   Widget build(BuildContext context) {
@@ -170,7 +173,7 @@ class _ChannelHomeState extends State<_ChannelHome> {
       body: Row(children: [
         SizedBox(width: channelListWidth, child: list),
         VerticalDivider(width: 1, thickness: 1, color: Tokens.border),
-        Expanded(child: open == null ? const SizedBox.shrink() : ChannelScreen(key: ValueKey('channel-${open.conversationId}'), channel: open, readThrough: _readThrough)),
+        Expanded(child: open == null ? const SizedBox.shrink() : ChannelScreen(key: ValueKey('channel-${open.conversationId}'), channel: open, readThrough: _readThrough, onOpen: _openLinked)),
       ]),
     );
   }
