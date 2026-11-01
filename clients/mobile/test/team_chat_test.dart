@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:aurelius_mobile/core/hosts/host.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/net/protocol.dart';
@@ -79,13 +81,14 @@ int _today(int minutes) {
   return start.add(Duration(minutes: minutes)).millisecondsSinceEpoch;
 }
 
-MessageView _msg(String id, String text, {UserView? by, String? author, required int at, int ordinal = 0, SystemLine? system}) => MessageView(
+MessageView _msg(String id, String text, {UserView? by, String? author, required int at, int ordinal = 0, SystemLine? system, AgentMode? mode}) => MessageView(
       activity: const [],
       author: system != null ? 'Aurelius' : author,
       authorUser: by,
       createdAtMs: at,
       files: const [],
       id: id,
+      mode: mode,
       ordinal: ordinal,
       queued: false,
       role: by != null ? MessageRole.user : MessageRole.assistant,
@@ -111,6 +114,7 @@ void main() {
     Map<String?, List<MessageView>> messages = const {},
     Size size = const Size(390, 844),
     Object? sendError,
+    Stream<Event> changes = const Stream.empty(),
   }) async {
     tester.view.physicalSize = size * 3;
     tester.view.devicePixelRatio = 3;
@@ -121,7 +125,7 @@ void main() {
     when(() => repo.host).thenReturn(_host);
     when(() => repo.linkState).thenReturn(link);
     when(() => repo.online).thenAnswer((_) => const Stream.empty());
-    when(() => repo.changes).thenAnswer((_) => const Stream.empty());
+    when(() => repo.changes).thenAnswer((_) => changes);
     when(() => repo.chatChanges).thenAnswer((_) => const Stream.empty());
     when(() => repo.boardChanges).thenAnswer((_) => const Stream.empty());
     when(() => repo.appends).thenAnswer((_) => const Stream.empty());
@@ -330,6 +334,120 @@ void main() {
       expect(span('@ada')?.style?.fontWeight, FontWeight.w600);
       expect(span('@Orion')?.style?.color, Tokens.accentText);
       expect(span('@Orion')?.style?.backgroundColor, isNull);
+    });
+  });
+
+  group('a line in General opens its ticket channel (Q1-B1)', () {
+    Map<String?, List<MessageView>> general({String channel = 'c-42'}) => {
+          null: [
+            _msg('s1', 'lena opened #42 "Login per board member"', at: _today(0), ordinal: 1, system: SystemLine(kind: SystemLineKind.ticketCreated, by: 'lena', ticketId: 'k42', channelId: channel)),
+            _msg('s2', 'ada closed #47 "Vault rotation"', at: _today(1), ordinal: 2, system: const SystemLine(kind: SystemLineKind.done, by: 'ada', ticketId: 'k47', channelId: 'c-47')),
+          ],
+        };
+
+    testWidgets('a tap on an opened line pushes the channel of its channel_id, not the ticket page', (tester) async {
+      await pump(tester, messages: general());
+      await open(tester, 'c-general');
+      await tester.tap(find.textContaining('lena opened #42'));
+      await board.settleBoard(tester);
+      expect(find.byWidgetPredicate((w) => w is Text && w.key == const ValueKey('channel-title') && w.data == '#42-login-per-board-member'), findsOneWidget);
+      expect(find.text('ticket k42'), findsNothing);
+      verify(() => repo.groupChat(channel: 'c-42')).called(1);
+      // Back goes to General.
+      await tester.pageBack();
+      await board.settleBoard(tester);
+      expect(find.textContaining('lena opened #42'), findsOneWidget);
+    });
+
+    testWidgets("a closed line opens its archived channel, read-only", (tester) async {
+      await pump(tester, messages: general());
+      await open(tester, 'c-general');
+      await tester.tap(find.textContaining('ada closed #47'));
+      await board.settleBoard(tester);
+      expect(find.text('#47 is Done · read-only.'), findsOneWidget);
+    });
+
+    testWidgets('on a tablet the channel takes the place of General beside the list', (tester) async {
+      await pump(tester, messages: general(), size: const Size(1024, 768));
+      await tester.tap(find.textContaining('lena opened #42'));
+      await board.settleBoard(tester);
+      expect(find.byWidgetPredicate((w) => w is Text && w.key == const ValueKey('channel-title') && w.data == '#42-login-per-board-member'), findsOneWidget);
+      expect(find.byKey(const ValueKey('channel-list')), findsOneWidget);
+    });
+
+    testWidgets('a channel the list does not know yet opens the ticket page instead', (tester) async {
+      await pump(tester, messages: general(channel: 'c-unknown'));
+      await open(tester, 'c-general');
+      await tester.tap(find.textContaining('lena opened #42'));
+      await board.settleBoard(tester);
+      expect(find.text('ticket k42'), findsOneWidget);
+    });
+  });
+
+  group('a ticket channel updates live (Q1-B2)', () {
+    testWidgets("a line or an employee's post in the open ticket's discussion reads the channel again and shows", (tester) async {
+      final changes = StreamController<Event>.broadcast();
+      addTearDown(changes.close);
+      final messages = {
+        'c-42': [_msg('m1', 'Please keep the argon2 params configurable.', by: _lena, at: _today(0), ordinal: 1)],
+      };
+      await pump(tester, messages: messages, changes: changes.stream);
+      await open(tester, 'c-42');
+      clearInteractions(repo);
+      messages['c-42'] = [...messages['c-42']!, _msg('m2', 'Plan handed in.', author: 'Forge', at: _today(1), ordinal: 2)];
+      // Discussion posts come as task.posted on the conversation, not as a chat event.
+      changes.add(Event(aggregateId: 'c-42', atMs: 0, kind: EventKind.taskPosted, seq: 20));
+      await board.settleBoard(tester);
+      verify(() => repo.groupChat(channel: 'c-42')).called(1);
+      expect(find.text('Plan handed in.'), findsOneWidget);
+      // Another channel's post does not read this one again.
+      changes.add(Event(aggregateId: 'c-52', atMs: 0, kind: EventKind.taskPosted, seq: 21));
+      await board.settleBoard(tester);
+      verifyNever(() => repo.groupChat(channel: 'c-42'));
+    });
+
+    testWidgets("the ticket's own event reads the channel again", (tester) async {
+      final changes = StreamController<Event>.broadcast();
+      addTearDown(changes.close);
+      final messages = {'c-42': <MessageView>[]};
+      await pump(tester, messages: messages, changes: changes.stream);
+      await open(tester, 'c-42');
+      clearInteractions(repo);
+      messages['c-42'] = [_msg('s1', 'Forge moved #42 Review → Testing', at: _today(1), ordinal: 1, system: const SystemLine(kind: SystemLineKind.moved, by: 'Forge'))];
+      changes.add(Event(aggregateId: 'k42', atMs: 0, kind: EventKind.ticketMoved, seq: 20));
+      await board.settleBoard(tester);
+      verify(() => repo.groupChat(channel: 'c-42')).called(1);
+      expect(find.textContaining('Forge moved #42 Review → Testing'), findsOneWidget);
+    });
+
+    testWidgets('the channel turning read-only reads it again: the closed lines show under the read-only bar', (tester) async {
+      final messages = {'c-42': <MessageView>[]};
+      await pump(tester, messages: messages);
+      await open(tester, 'c-42');
+      messages['c-42'] = [_msg('s1', '#42 is closed · Login per board member', at: _today(1), ordinal: 1, system: const SystemLine(kind: SystemLineKind.done, by: 'ada'))];
+      final bloc = tester.element(find.byType(TeamPage, skipOffstage: false)).read<ChannelsBloc>();
+      channels = [_general, _channel('c-42', '#42-login-per-board-member', projectId: 'p1', kind: ChannelKind.ticket, number: 42, column: ColumnKind.done, archived: true)];
+      bloc.add(const ChannelsRefreshed());
+      await board.settleBoard(tester);
+      expect(find.text('#42 is Done · read-only.'), findsOneWidget);
+      expect(find.textContaining('#42 is closed · Login per board member'), findsOneWidget);
+    });
+  });
+
+  group('grouped rows', () {
+    testWidgets("an employee's mode shows in the group's header row only, not above every grouped message", (tester) async {
+      // Read through all three: no New messages line breaks the group.
+      await pump(tester, list: [_general, _channel('c-42', '#42-login-per-board-member', projectId: 'p1', kind: ChannelKind.ticket, number: 42, column: ColumnKind.review, readThrough: 3)], messages: {
+        'c-42': [
+          _msg('m1', 'Looking at it.', author: 'Forge', at: _today(0), ordinal: 1, mode: AgentMode.ask),
+          _msg('m2', 'Found the cause.', author: 'Forge', at: _today(1), ordinal: 2, mode: AgentMode.ask),
+          _msg('m3', 'Fixed.', author: 'Forge', at: _today(2), ordinal: 3, mode: AgentMode.ask),
+        ],
+      });
+      await open(tester, 'c-42');
+      expect(find.text('Fixed.'), findsOneWidget);
+      expect(find.textContaining('Ask mode'), findsOneWidget);
+      expect(tester.getTopLeft(find.textContaining('Ask mode')).dy < top(tester, 'channel-row-m2'), isTrue, reason: 'in the first row');
     });
   });
 

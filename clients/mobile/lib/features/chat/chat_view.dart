@@ -132,7 +132,7 @@ class ChatView extends StatefulWidget {
 
 /// How a channel of the Slack-style Team chat shows (AUR-CHAT-001 §2–§4).
 class ChannelChatOptions {
-  const ChannelChatOptions({this.readThrough, required this.closedNote});
+  const ChannelChatOptions({this.readThrough, required this.closedNote, this.openChannel});
 
   /// The reader's last read message before the channel opened (`ChannelView.read_through`):
   /// "New messages" goes after it, and stays there while the channel is open.
@@ -140,6 +140,10 @@ class ChannelChatOptions {
 
   /// The read-only bar once a write was refused with `channel_archived`.
   final String closedNote;
+
+  /// Opens the channel a line links to (the "opened" and "closed" lines in
+  /// General); false when it cannot, and the line opens its ticket instead.
+  final bool Function(String conversationId)? openChannel;
 }
 
 class _ChatViewState extends State<ChatView> {
@@ -441,7 +445,7 @@ class _MessagesState extends State<_Messages> {
     bool named(MessageView m) => authorOf(m) != me && mentionsName(m.text, me);
     Widget row(MessageView m, bool grouped) {
       if (m.system != null) {
-        return SystemLineView(message: m, ticketId: context.read<ChatBloc>().ticketId, taskProjectId: widget.config.taskProjectId, summarized: m.id != lastSummary, compact: true);
+        return SystemLineView(message: m, ticketId: context.read<ChatBloc>().ticketId, taskProjectId: widget.config.taskProjectId, summarized: m.id != lastSummary, compact: true, openChannel: channel.openChannel);
       }
       if (!m.isUser && isSystemLine(m, inGroup: true)) return _SystemLine(message: m);
       if (!m.isUser && m.update != null && m.update != 'group') return _TaskUpdate(message: m);
@@ -456,7 +460,7 @@ class _MessagesState extends State<_Messages> {
         own: named(m),
         child: m.isUser
             ? _UserBubble(id: m.id, text: m.text, files: m.files, uploads: m.uploads, queuedId: m.queued ? m.id : null, message: m, source: source, ticket: made[m.id], flat: true)
-            : _AssistantMessage(message: m, group: true, flat: true, source: source, ticket: made[m.id], blocking: m.isStreaming ? approvals.where((a) => a.runId == m.runId).firstOrNull : null),
+            : _AssistantMessage(message: m, group: true, flat: true, grouped: grouped, source: source, ticket: made[m.id], blocking: m.isStreaming ? approvals.where((a) => a.runId == m.runId).firstOrNull : null),
       );
     }
 
@@ -918,10 +922,13 @@ class _UserBubble extends StatelessWidget {
 }
 
 class _AssistantMessage extends StatelessWidget {
-  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket, this.flat = false});
+  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket, this.flat = false, this.grouped = false});
 
   /// In a channel row of the Slack-style Team chat: the row has the name and time.
   final bool flat;
+
+  /// A later message of a group in a channel: the mode shows only in the group's first row.
+  final bool grouped;
 
   final MessageView message;
 
@@ -1022,7 +1029,7 @@ class _AssistantMessage extends StatelessWidget {
     final header = [
       if (!flat && author != null && author.isNotEmpty) withRole(author, role),
       // A group chat answer: the mode the employee answered in.
-      if (message.mode case final mode?) '${mode.label} mode',
+      if (message.mode case final mode? when !grouped) '${mode.label} mode',
       if (message.producedBy != null) message.producedBy!,
       if (version != null) 'version ${version!.$1}/${version!.$2}',
       if (mentioned) '@ you',
@@ -2195,7 +2202,7 @@ class TicketPill extends StatelessWidget {
 /// task opens it; the plan and the report that wait for a board member are a
 /// card with their action; a failed summary has Try again (MU2-12 AC4).
 class SystemLineView extends StatelessWidget {
-  const SystemLineView({super.key, required this.message, this.ticketId, this.taskProjectId, this.summarized = false, this.compact = false});
+  const SystemLineView({super.key, required this.message, this.ticketId, this.taskProjectId, this.summarized = false, this.compact = false, this.openChannel});
 
   /// In a channel of the Slack-style Team chat: a shape before the text and
   /// the time after it, NEGATIVE for a failure (AUR-CHAT-001 §2).
@@ -2211,6 +2218,9 @@ class SystemLineView extends StatelessWidget {
 
   /// A later line says the summary went to memory (or failed again): Try again is gone.
   final bool summarized;
+
+  /// See [ChannelChatOptions.openChannel].
+  final bool Function(String conversationId)? openChannel;
 
   @override
   Widget build(BuildContext context) {
@@ -2243,11 +2253,19 @@ class SystemLineView extends StatelessWidget {
           color: Tokens.warning,
           action: summarized || ticket == null ? null : ('Try again', () => retrySummary(context, ticket)),
         ),
+      // A line in General that links to a ticket's channel (opened, closed): the channel opens.
+      _ when compact && line.channelId != null && openChannel != null => _Line(
+          message: message,
+          text: text,
+          onTap: () {
+            if (!openChannel!(line.channelId!) && line.ticketId != null) context.push('/ticket/${line.ticketId}');
+          },
+        ),
       SystemLineKind.ticketCreated when line.ticketId != null => _Line(message: message, text: text, onTap: () => context.push('/ticket/${line.ticketId}')),
       SystemLineKind.reported when line.taskId != null && project != null =>
         _Line(message: message, text: compact ? '$text · Open task' : '$text · Report ›', color: color, onTap: () => context.push('/project/$project/task/${line.taskId}')),
       SystemLineKind.delegated when line.taskId != null && project != null => _Line(message: message, text: text, onTap: () => context.push('/project/$project/task/${line.taskId}')),
-      // A line in General that links to a ticket's channel (opened, closed): the ticket opens.
+      // Without a way to the channel: the ticket opens.
       _ when compact && line.channelId != null && line.ticketId != null => _Line(message: message, text: text, onTap: () => context.push('/ticket/${line.ticketId}')),
       _ => _Line(message: message, text: text, color: color),
     };

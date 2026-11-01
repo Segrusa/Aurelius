@@ -422,6 +422,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       : assert(employeeId != null || projectId != null, 'a conversation belongs to an employee or a project'),
         group = false,
         channel = null,
+        channelTicket = null,
         ticketId = null,
         runAuthor = null,
         onRead = null,
@@ -437,7 +438,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// last update once its run no longer works.
   /// [onRead] runs after each read of the channel (which the server counts as
   /// read): the channels' unread and mentions are asked for again then.
-  ChatBloc.group(this._repository, {this.runAuthor, this.liveTimeout = const Duration(seconds: 3), this.channel, this.onRead})
+  /// [channelTicket]: the ticket whose channel this is (feature `ticket_channels`).
+  ChatBloc.group(this._repository, {this.runAuthor, this.liveTimeout = const Duration(seconds: 3), this.channel, this.channelTicket, this.onRead})
       : employeeId = null,
         projectId = null,
         ticketId = null,
@@ -453,6 +455,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       : employeeId = null,
         projectId = null,
         channel = null,
+        channelTicket = null,
         onRead = null,
         group = true,
         super(ChatState(conversationId: conversationId)) {
@@ -500,6 +503,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       _repository.online.listen((_) => _changed()),
       _repository.chatChanges.where((e) => e.aggregateId == state.conversationId || e.isRun).listen((_) => _changed()),
       _repository.appends.where((a) => a.conversationId == state.conversationId).listen((a) => add(_AppendReceived(a))),
+      // A ticket's channel is its discussion: its lines and employees' posts
+      // come as `task.posted` on the conversation, a move as the ticket's own event.
+      if (channelTicket case final ticket?)
+        _repository.changes.where((e) => (e.kind == EventKind.taskPosted && e.aggregateId == state.conversationId) || e.aggregateId == ticket).listen((_) => _changed()),
     ];
     if (load && _repository.linkState.isOnline) add(const ChatRefreshed());
   }
@@ -514,6 +521,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   /// The group chat's channel (a project's, from `channel.list`); null: General.
   final String? channel;
+
+  /// The ticket whose channel [channel] is; null for General and a project's.
+  final String? channelTicket;
 
   /// The ticket whose discussion this is; null for every other chat.
   final String? ticketId;
