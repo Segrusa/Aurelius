@@ -26,6 +26,17 @@ So every worktree builds only into its own `target` folder.
 - Never run `cargo clean` in the main checkout or with `CARGO_TARGET_DIR` pointing at
   the shared target; never delete another session's `target/wt-*` folder.
 
+## Build-cache
+
+- On the Linux dev machine sccache is on for every cargo build through the user-level
+  `~/.cargo/config.toml` (`rustc-wrapper`); the cache is `~/.cache/sccache` (100 GiB,
+  set in `~/.config/sccache/config`). Each worktree keeps its own `target`; sccache
+  shares compiled dependencies between them, so a fresh worktree does not rebuild them.
+- Check that it works with `sccache --show-stats` (cache hits go up after a build).
+- Do not set `RUSTC_WRAPPER`, `CARGO_INCREMENTAL` or a `rustc-wrapper` of your own,
+  and do not run `sccache --zero-stats` or `--stop-server`: other sessions share the server.
+- On a machine without sccache, do nothing: the repo does not need it.
+
 ## Cleaning up
 
 - When the task is done: `scripts/worktree.ps1 remove <name>` (deletes the worktree's
