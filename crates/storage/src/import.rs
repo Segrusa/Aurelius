@@ -17,8 +17,17 @@ use std::path::Path;
 const V06_VERSION: i64 = 28;
 const V06_RELEASED: i64 = 27;
 
-fn is_v06(version: Option<i64>) -> bool {
-    matches!(version, Some(v) if v == V06_RELEASED || v == V06_VERSION)
+/// Whether `conn` holds a v0.6 database. The version alone does not say it: the current numbering
+/// reaches 27 and 28 too. Its migration 14 renamed `managers` to `employees`, and v0.6 never had
+/// `employees`, so the shape tells the two apart.
+fn is_v06(conn: &Connection, version: Option<i64>) -> rusqlite::Result<bool> {
+    if !matches!(version, Some(v) if v == V06_RELEASED || v == V06_VERSION) {
+        return Ok(false);
+    }
+    let table = |name: &str| -> rusqlite::Result<bool> {
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)", [name], |r| r.get(0))
+    };
+    Ok(table("managers")? && !table("employees")?)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -214,7 +223,7 @@ fn read_v06(from: &Path, put: Put<'_>) -> Result<Plan, ImportError> {
     let version: Option<i64> = conn
         .query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))
         .map_err(|_| ImportError::Refused(format!("{} is not an Aurelius database", db.display())))?;
-    if !is_v06(version) {
+    if !is_v06(&conn, version)? {
         return Err(ImportError::Refused(format!(
             "the database has schema version {version:?}; open it with Aurelius v0.6 first so it reaches version {V06_RELEASED}"
         )));
@@ -526,13 +535,14 @@ pub fn upgrade_legacy(root: &Path) -> Result<Option<ImportReport>, ImportError> 
     if !db.exists() {
         return Ok(None);
     }
-    let version: Option<i64> = {
+    let v06 = {
         // Leaves no empty -wal/-shm behind: they would move along with data/.
         let conn = crate::fresh_start::open_read_only(&db)?;
         let has: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations')", [], |r| r.get(0))?;
-        if has { conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))? } else { None }
+        let version: Option<i64> = if has { conn.query_row("SELECT MAX(version) FROM schema_migrations", [], |r| r.get(0))? } else { None };
+        is_v06(&conn, version)?
     };
-    if !is_v06(version) {
+    if !v06 {
         return Ok(None);
     }
     let backup = root.join("v0.6-backup");
@@ -731,6 +741,43 @@ mod tests {
         assert!(dir.path().join("v0.6-backup").join("data").join("aurelius.sqlite").exists());
         Store::open(dir.path()).unwrap();
         assert!(upgrade_legacy(dir.path()).unwrap().is_none());
+    }
+
+    /// A database of the current numbering at `version`, with every file under `root`.
+    fn current_at(root: &Path, version: i64) -> Vec<std::path::PathBuf> {
+        drop(Store::open(root).unwrap());
+        let conn = Connection::open(root.join("data").join("aurelius.sqlite")).unwrap();
+        conn.execute("DELETE FROM schema_migrations WHERE version > ?1", [version]).unwrap();
+        conn.execute("INSERT OR IGNORE INTO schema_migrations(version, checksum, applied_at_ms) VALUES (?1, 'x', 1)", [version]).unwrap();
+        drop(conn);
+        let mut files: Vec<_> = walk(root);
+        files.sort();
+        files
+    }
+
+    fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flat_map(|e| {
+                let path = e.unwrap().path();
+                if path.is_dir() { walk(&path) } else { vec![path] }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_current_database_at_schema_27_or_28_is_not_taken_for_v06() {
+        for version in [V06_RELEASED, V06_VERSION] {
+            let dir = tempfile::tempdir().unwrap();
+            let before = current_at(dir.path(), version);
+            assert!(upgrade_legacy(dir.path()).unwrap().is_none(), "schema {version} of the current numbering");
+            assert!(!dir.path().join("v0.6-backup").exists(), "schema {version}: nothing moved aside");
+            let mut after = walk(dir.path());
+            after.sort();
+            assert_eq!(after, before, "schema {version}: data/ and blobs/ stay in place");
+            let to = tempfile::tempdir().unwrap();
+            assert!(matches!(import(dir.path(), to.path(), true), Err(ImportError::Refused(_))), "schema {version}: import refuses it");
+        }
     }
 
     #[test]
