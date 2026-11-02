@@ -535,6 +535,40 @@ async fn the_followers_of_an_unknown_ticket_are_not_found() {
     stop(dir.path(), daemon).await;
 }
 
+// ---- Activity ----
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_activity_says_who_changed_the_responsible_and_when() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let (alex, alex_id, _bea, bea_id) = two_members(dir.path()).await;
+    let (project_id, _) = project(&alex).await;
+    let (ticket_id, number) = ticket(&alex, project_id).await;
+    let started = aurelius_storage::now_ms();
+
+    run(&alex, set_responsible(ticket_id, Some(bea_id))).await.unwrap();
+    run(&alex, set_responsible(ticket_id, Some(alex_id))).await.unwrap();
+    run(&alex, set_responsible(ticket_id, None)).await.unwrap();
+
+    // Also without routine events: this is what people want to read later.
+    for activity in [false, true] {
+        let page = alex.timeline(TimelineQuery { project_id: None, correlation_id: Some(ticket_id.to_string()), before_seq: None, limit: 50, activity }).await.unwrap();
+        let mut cards: Vec<_> = page.cards.into_iter().filter(|c| c.label == "RESPONSIBLE").collect();
+        cards.reverse();
+        let words: Vec<(&str, &str, &str)> = cards.iter().map(|c| (c.title.as_str(), c.detail.as_str(), c.actor.as_str())).collect();
+        let (made, handed, removed) = (format!("alex made bea responsible for #{number}"), format!("alex made alex responsible for #{number}"), format!("alex removed alex as responsible for #{number}"));
+        assert_eq!(words, vec![
+            (made.as_str(), "Nobody was responsible before", "alex"),
+            (handed.as_str(), "bea was responsible before", "alex"),
+            (removed.as_str(), "Nobody is responsible now", "alex"),
+        ]);
+        assert!(cards.iter().all(|c| c.at_ms >= started && c.detail.contains("responsible")), "the clients look for this word");
+    }
+
+    drop((alex, _bea));
+    stop(dir.path(), daemon).await;
+}
+
 // ---- what an older client gets (R1) ----
 
 /// A raw connection signed in as `BOARD_MEMBER`, whose hello accepts `accepts`.

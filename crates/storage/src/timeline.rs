@@ -57,6 +57,12 @@ fn meaningful(row: &Row) -> bool {
     is_meaningful(&row.event_type)
         || (row.event_type == "host.write" && row.metadata["method"].as_str().is_some_and(|m| ACCOUNT_WRITES.contains(&m)))
         || (row.event_type == "ticket.updated" && row.metadata["files_added"].is_array())
+        || (row.event_type == "ticket.updated" && changes_responsible(&row.metadata))
+}
+
+/// A `ticket.updated` about who is responsible (`ticket.set_responsible`).
+fn changes_responsible(metadata: &serde_json::Value) -> bool {
+    metadata["changed"].as_array().is_some_and(|changed| changed.iter().any(|c| c == "responsible"))
 }
 
 /// "added 1 file" / "added 3 files".
@@ -199,6 +205,19 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
             let by = board_member(conn, &m["by"]["user_id"]);
             let number = lookup(conn, "SELECT CAST(number AS TEXT) FROM tickets WHERE id = ?1", &row.aggregate_id).map(|n| format!(" to #{n}")).unwrap_or_default();
             ("minor", "ATTACHMENT", format!("{by} {}{number}", added_files(names.len())), names.join(", "), by)
+        }
+        // US-A1: who (the time is the card's). The clients look for "responsible" in `detail`.
+        "ticket.updated" if changes_responsible(m) => {
+            let by = board_member(conn, &m["by"]["user_id"]);
+            let number = lookup(conn, "SELECT CAST(number AS TEXT) FROM tickets WHERE id = ?1", &row.aggregate_id).map(|n| format!(" for #{n}")).unwrap_or_default();
+            let before = (!m["before"].is_null()).then(|| board_member(conn, &m["before"]));
+            let (title, detail) = match (m["responsible_user_id"].is_null(), before) {
+                (true, Some(before)) => (format!("{by} removed {before} as responsible{number}"), "Nobody is responsible now".to_owned()),
+                (true, None) => (format!("{by} changed who is responsible{number}"), "Nobody is responsible now".to_owned()),
+                (false, Some(before)) => (format!("{by} made {} responsible{number}", board_member(conn, &m["responsible_user_id"])), format!("{before} was responsible before")),
+                (false, None) => (format!("{by} made {} responsible{number}", board_member(conn, &m["responsible_user_id"])), "Nobody was responsible before".to_owned()),
+            };
+            ("decision", "RESPONSIBLE", title, detail, by)
         }
         "attachment.added" => ("minor", "ATTACHMENT", format!("Attachment {}", s(&m["name"])), String::new(), "You".into()),
         // Accounts: always with the name of the board member who did it.
