@@ -120,6 +120,11 @@ pub struct ServerInfo {
     /// A personal Inbox: notifications per person, per ticket or channel, with a reason
     /// (feature `personal_inbox`, A3).
     pub personal_inbox: bool,
+    /// My tickets: `ticket.my_tickets` (feature `my_tickets`, A4).
+    pub my_tickets: bool,
+    /// Own messages can be edited and deleted: `message.edit`, `message.delete`,
+    /// `message.history`, `MessageView::editable` (feature `message_edits`, A6).
+    pub message_edits: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -912,6 +917,8 @@ pub enum BoardCall {
     Followers(aurelius_domain::TicketId),
     /// Where a linked message is (`message.locate`, feature `message_locate`).
     Locate(MessageId),
+    /// `ticket.my_tickets` (feature `my_tickets`): the tabs of My tickets come from this one answer.
+    MyTickets { project: Option<ProjectId>, include_done: bool },
     /// A ticket write, `board.columns_update` (with the board's version) or
     /// `project.update`. `done`: what the board says when it worked.
     Write { command: Command, expected_version: Option<u64>, done: Option<String> },
@@ -987,6 +994,8 @@ pub enum BoardUpdate {
     Followers(aurelius_domain::TicketId, Result<aurelius_domain::ticket::TicketFollowersView, String>),
     /// `ticket.follow_changed`: someone started or stopped following a ticket.
     FollowChanged,
+    /// `ticket.my_tickets` for that project filter and `include_done`, or why it did not load.
+    MyTickets { project: Option<ProjectId>, include_done: bool, result: Result<aurelius_domain::ticket::MyTicketsView, String> },
     /// Where a linked message is, or what to say instead.
     Located(Result<aurelius_domain::views::MessageLocation, String>),
     /// A write worked; `text` is what to say.
@@ -1797,6 +1806,8 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 ticket_follow: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_FOLLOW),
                 message_locate: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::MESSAGE_LOCATE),
                 personal_inbox: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::PERSONAL_INBOX),
+                my_tickets: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::MY_TICKETS),
+                message_edits: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::MESSAGE_EDITS),
             },
         }));
 
@@ -3572,6 +3583,13 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
                 return Err(result.unwrap_err().into());
             }
             let _ = updates.send(Update::Board(BoardUpdate::Followers(ticket_id, result.map_err(|e| board_failure(&e)))));
+        }
+        BoardCall::MyTickets { project, include_done } => {
+            let result = read(client, Method::TicketMyTickets { project_id: project, include_done }, |b| match b { ResponseBody::MyTickets(v) => Some(v), _ => None }).await;
+            if let Err(e) = &result && lost(e) {
+                return Err(result.unwrap_err().into());
+            }
+            let _ = updates.send(Update::Board(BoardUpdate::MyTickets { project, include_done, result: result.map_err(|e| board_failure(&e)) }));
         }
         BoardCall::Locate(message_id) => {
             let result = client.message_locate(message_id).await;

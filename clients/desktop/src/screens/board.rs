@@ -1459,6 +1459,12 @@ impl AppView {
     /// Read again the board and the open ticket.
     pub fn board_refresh(&mut self) {
         self.board_load();
+        // My tickets reads again only while it shows; else when it shows again.
+        if self.my_tickets_shown() {
+            self.my_load();
+        } else {
+            self.my.stale = true;
+        }
         if let Panel::Ticket(id) = self.panel {
             let _ = self.requests.send(backend::Request::Board(BoardCall::Ticket(id)));
             if self.board.tab == TicketTab::Activity {
@@ -1675,6 +1681,7 @@ impl AppView {
                     self.board_refresh();
                 }
             }
+            BoardUpdate::MyTickets { project, include_done, result } => self.apply_my_tickets(project, include_done, result, cx),
             BoardUpdate::Changed { tickets, settings, tasks } => {
                 // A task matters only when it works for a ticket (D-m3); a task this window does not know yet may.
                 let on_ticket = |id: aurelius_domain::TaskId| self.tasks.iter().find(|t| t.id == id).map(|t| t.ticket_id.is_some());
@@ -1750,6 +1757,10 @@ impl AppView {
 
     /// The cards as the Board shows them now (filters included), for the keyboard.
     pub fn board_grid(&self, cx: &App) -> Grid {
+        // My tickets: one column, the tab's tickets in order; the arrows move along the list.
+        if self.my_tickets_shown() {
+            return vec![(ColumnKind::Todo, self.my_tab_tickets(self.my_tab()).into_iter().map(|t| t.id).collect())];
+        }
         let Some(view) = &self.board.view else { return Vec::new() };
         let query = self.board.find.read(cx).value().to_string();
         let testing = self.board_testing_supported();
@@ -1790,7 +1801,7 @@ impl AppView {
     fn board_focused(&self, cx: &App) -> Option<TicketView> {
         let id = self.board.focused?;
         find_in(&self.board_grid(cx), id)?;
-        self.board.ticket(id).cloned()
+        self.board.ticket(id).or_else(|| self.my.ticket(id)).cloned()
     }
 
     /// Enter: open the focused card, or put the held one down (§6 decides; a dialog may follow).
@@ -1912,7 +1923,7 @@ impl AppView {
             self.board_announce(format!("#{} stays where it was.", held.number), cx);
             return;
         }
-        let Some(t) = self.board_focused(cx) else { return };
+        let Some(t) = self.board_focused(cx).filter(|_| !self.my_tickets_shown()) else { return };
         if t.column == ColumnKind::Done || !self.board_online() {
             self.notify_user(if t.column == ColumnKind::Done { "Done tickets are closed." } else { "Offline · reconnecting" }, true, cx);
             return;
@@ -2019,6 +2030,9 @@ impl AppView {
         crate::app::set_ui_value(PREF_PROJECT, project.map_or(serde_json::Value::Null, |p| serde_json::Value::String(p.to_string())));
         self.board.view = None;
         self.board_load();
+        if self.my_tickets_shown() {
+            self.my_load();
+        }
         cx.notify();
     }
 
@@ -2331,7 +2345,7 @@ impl AppView {
         cx.notify();
     }
 
-    fn board_filter_menu(&self, field: &'static str) -> MenuItems {
+    pub(crate) fn board_filter_menu(&self, field: &'static str) -> MenuItems {
         if field == "board-project" {
             let mut items = vec![menu_entry("All projects", BoardDo::FilterProject(None), self.board.project.is_none(), None), None];
             items.extend(
@@ -2452,6 +2466,9 @@ impl AppView {
     // ---- The page -----------------------------------------------------------
 
     pub fn render_board(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if self.my_tickets_shown() && self.project_board().is_none() {
+            return self.render_my_tickets(cx);
+        }
         let scope = self.board_filter();
         // Between the Board page and a project's Board tab: never show the other one's cards.
         if self.board.view.as_ref().is_some_and(|v| v.project_id != scope) {
@@ -2586,6 +2603,7 @@ impl AppView {
             .key_context(keys)
             // What a screen reader is told (moves, a held card): a status, not shown (§15).
             .children(announce.map(|(n, text)| div().id(("board-announce", n as usize)).role(Role::Status).aria_label(text).absolute().top_0().left_0().size(px(1.)).overflow_hidden()))
+            .children(self.render_board_switch(cx))
             .child(header)
             .when(!online && self.board.view.is_some(), |el| el.child(div().px(px(24.)).pb(px(6.)).text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Offline · reconnecting. The board shows the last known state.")))
             .child(body)
@@ -2751,7 +2769,7 @@ impl AppView {
             .into_any_element()
     }
 
-    fn render_card(&self, t: &TicketView, key: usize, open: bool, filter_project: Option<ProjectId>, online: bool, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_card(&self, t: &TicketView, key: usize, open: bool, filter_project: Option<ProjectId>, online: bool, cx: &mut Context<Self>) -> AnyElement {
         let id = t.id;
         let choosing = self.ticket_choosing(t);
         let needs = self.ticket_needs(t);
@@ -2869,9 +2887,12 @@ impl AppView {
             // The keyboard's card: the focus ring always shows, also while it is held (§15).
             .when(focused || held, |el| el.border_2().border_color(c(theme::FOCUS_RING)).aria_active_descendant().child(ui::track_bounds(self.dropdown_bounds.clone(), FOCUSED_CARD)))
             .when(held, |el| el.opacity(0.55))
-            .when(online && !done, |el| el.on_drag(dragged, |d, _, _, cx| cx.new(|_| CardGhost(d.clone()))))
+            .when(online && !done && !self.my_tickets_shown(), |el| el.on_drag(dragged, |d, _, _, cx| cx.new(|_| CardGhost(d.clone()))))
             .on_drop(cx.listener(move |this, d: &DraggedCard, w, cx| {
                 cx.stop_propagation();
+                if this.my_tickets_shown() {
+                    return;
+                }
                 if let Some(kind) = this.board.ticket(id).map(|t| t.column) {
                     this.board_drop(d, kind, Some(id), w, cx);
                 }

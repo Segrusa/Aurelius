@@ -132,7 +132,7 @@ impl AppView {
     // ── Pages with tabs: Employees and Projects ─────────────────────────
 
     /// A row of tabs on top of a page; `on` switches to tab `i`.
-    fn page_tab_bar(&self, id: &'static str, labels: &[&'static str], active: usize, on: fn(&mut AppView, usize, &mut Context<AppView>), cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(crate) fn page_tab_bar(&self, id: &'static str, labels: &[&'static str], active: usize, on: fn(&mut AppView, usize, &mut Context<AppView>), cx: &mut Context<Self>) -> Stateful<Div> {
         h().id(id).flex_none().w_full().h(px(48.)).px(px(22.)).gap(px(2.)).border_b_1().border_color(c(theme::BORDER))
             .children(labels.iter().enumerate().map(|(i, label)| {
                 let on_tab = i == active;

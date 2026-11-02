@@ -13,6 +13,7 @@ actions!(
         GoTeamChat,
         GoBoard,
         GoVault,
+        GoMyTickets,
         GoEmployees,
         GoOrgChart,
         GoGuidelines,
@@ -273,6 +274,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc!(&["secondary-7"], Some(APP), NONE, "Go to Tasks (all projects)", General, true, GoTasks),
     sc!(&["secondary-0"], Some(APP), NONE, "Go to Ideas (Projects tab)", General, true, GoIdeas),
     sc!(&["secondary-shift-v"], Some(APP), NONE, "Go to Vault (items of the company and its projects)", General, true, GoVault),
+    // My tickets (A4): the Board page's second part. Kept out of the palette's list: the palette adds
+    // it only for a server with the feature.
+    sc!(&["secondary-shift-i"], Some(APP), NONE, "Go to My tickets (tickets that are yours)", General, false, GoMyTickets),
     // Every Ctrl-digit is taken: the guidelines are in the palette only (Guidelines P-51).
     sc!(&[], Some(APP), NONE, "Go to Guidelines (Employees tab)", General, true, GoGuidelines),
     sc!(&[], Some(APP), NONE, "Find guideline…", General, true, FindGuideline),

@@ -1035,6 +1035,10 @@ pub struct AppView {
     pub claude: crate::screens::account::Claude,
     /// The board, the open ticket and their dialogs.
     pub board: crate::screens::board::Board,
+    /// The part of the Board page that shows (`[ Board ] [ My tickets ]`, A4).
+    pub board_page: crate::screens::my_tickets::BoardPage,
+    /// My tickets (A4).
+    pub my: crate::screens::my_tickets::MyTickets,
     /// The Team chat's thread panel and its composer (AUR-CHAT-002).
     pub thread: crate::screens::thread_panel::ThreadPanel,
     pub adding_server: bool,
@@ -1560,6 +1564,8 @@ impl AppView {
             members,
             claude,
             board,
+            board_page: Default::default(),
+            my: Default::default(),
             thread,
             vault,
             guidelines,
@@ -1814,6 +1820,7 @@ impl AppView {
                 let online = matches!(connection, Connection::Online { .. }) && !matches!(self.connection, Connection::Online { .. });
                 self.members_connection(&connection, cx);
                 self.board_connection(&connection, cx);
+                self.my_connection(matches!(connection, backend::Connection::Online { .. }));
                 self.connection = connection;
                 if online {
                     // The board reads again what it missed while offline (also for the sidebar's count).
@@ -5812,6 +5819,10 @@ impl AppView {
         } else if self.screen == Page::Projects {
             let at = ProjectsTab::ALL.iter().position(|t| *t == self.projects_tab).unwrap_or(0) as isize;
             self.set_projects_tab(ProjectsTab::ALL[(at + delta).rem_euclid(ProjectsTab::ALL.len() as isize) as usize], cx);
+        } else if self.screen == Page::Board && self.my_tickets_supported() {
+            let pages = crate::screens::my_tickets::BoardPage::ALL;
+            let at = pages.iter().position(|p| *p == self.board_page).unwrap_or(0) as isize;
+            self.set_board_page(pages[(at + delta).rem_euclid(pages.len() as isize) as usize], cx);
         } else if self.screen == Page::Inbox {
             let tabs = InboxTab::shown(self.personal_inbox_supported());
             let at = tabs.iter().position(|t| *t == self.inbox_tab).unwrap_or(0) as isize;
@@ -5863,7 +5874,11 @@ impl AppView {
             NavItem::Inbox => return self.open_inbox(&OpenInbox, window, cx),
             NavItem::Settings => return self.open_settings(&OpenSettings, window, cx),
             NavItem::Dashboard => Page::Dashboard,
-            NavItem::Board => Page::Board,
+            NavItem::Board => {
+                // Ctrl+5 and the sidebar always open the board itself.
+                self.board_page = crate::screens::my_tickets::BoardPage::Board;
+                Page::Board
+            }
             NavItem::Chat => Page::GroupChat,
             NavItem::Employees => Page::Employees,
             NavItem::Projects => Page::Projects,
@@ -6848,6 +6863,11 @@ impl AppView {
 
     fn on_select(&mut self, delta: isize, cx: &mut Context<Self>) {
         self.preview_closed = false;
+        // My tickets is a list: j and k move its cards like the arrows.
+        if self.my_tickets_shown() {
+            self.board_step(if delta > 0 { crate::screens::board::Step::Down } else { crate::screens::board::Step::Up }, cx);
+            return;
+        }
         // Dashboard: Up and Down move through "At work now" (its employee shows in the preview pane).
         if self.screen == Page::Dashboard {
             let at_work = self.working_now().len();
@@ -6893,6 +6913,7 @@ impl AppView {
 
     fn on_filter(&mut self, filter: usize, cx: &mut Context<Self>) {
         match self.screen {
+            _ if self.my_tickets_shown() => return self.set_my_tab_index(filter, cx),
             Page::Project(_, Tab::Tasks) => self.task_filter = filter,
             Page::Project(ProjectRef::Real(_), Tab::Memory) => self.memory_filter = filter.min(2),
             _ if self.on_ideas_screen() && filter == 3 => self.ideas_author = self.ideas_author.next(),
@@ -7073,6 +7094,7 @@ impl AppView {
             }
         }
         entries.extend(self.board_palette_entries(cx));
+        entries.extend(self.my_tickets_palette_entries());
         for shortcut in SHORTCUTS.iter().filter(|s| s.in_palette) {
             entries.push(PaletteEntry {
                 label: shortcut.label.into(),
@@ -7265,6 +7287,7 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &GoTeamChat, w, cx| this.go_nav(NavItem::Chat, w, cx)))
             .on_action(cx.listener(|this, _: &GoBoard, w, cx| this.go_nav(NavItem::Board, w, cx)))
             .on_action(cx.listener(|this, _: &GoVault, w, cx| this.go_nav(NavItem::Vault, w, cx)))
+            .on_action(cx.listener(|this, _: &GoMyTickets, w, cx| this.go_my_tickets(w, cx)))
             .on_action(cx.listener(|this, _: &GoEmployees, w, cx| this.go_nav(NavItem::Employees, w, cx)))
             .on_action(cx.listener(|this, _: &GoOrgChart, w, cx| this.go_employees_tab(EmployeesTab::OrgChart, w, cx)))
             .on_action(cx.listener(|this, _: &GoGuidelines, w, cx| this.guidelines_go(crate::screens::guidelines::GuidelinesView::Library, w, cx)))
