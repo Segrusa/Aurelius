@@ -260,10 +260,13 @@ class AppRouter {
     return true;
   }
 
-  /// Open a link from outside a page, once this host's app is up (a switch of server, A5a).
-  void openLink(String raw) {
+  /// Open a link from outside a page, once this host's app is up (a switch of
+  /// server, A5a; the operating system, A5b). False while there is no page yet.
+  bool openLink(String raw) {
     final context = _root.currentContext;
-    if (context != null && context.mounted) unawaited(openAureliusLink(context, raw));
+    if (context == null || !context.mounted) return false;
+    unawaited(openAureliusLink(context, raw));
+    return true;
   }
 
   void _openApproval(String approvalId) {

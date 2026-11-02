@@ -22,7 +22,6 @@ import 'package:aurelius_mobile/core/widgets/ios.dart';
 import 'package:aurelius_mobile/features/pairing/pairing_bloc.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
