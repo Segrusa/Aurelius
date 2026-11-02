@@ -8368,6 +8368,13 @@ sealed class HostWrite {
         return const HostWriteNotificationDismissAll();
       case 'notification.mark_all_read':
         return const HostWriteNotificationMarkAllRead();
+      case 'notification.mark_read':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteNotificationMarkRead(
+          id: (src['id'] as String),
+        );
+        }
       case 'plugin.install':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -9122,6 +9129,24 @@ final class HostWriteNotificationMarkAllRead extends HostWrite {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'notification.mark_all_read',
+    };
+}
+
+/// One row read, for this board member only (feature `personal_inbox`); answers
+/// `Count`, 0 when there was nothing to read, so it can be repeated.
+final class HostWriteNotificationMarkRead extends HostWrite {
+  const HostWriteNotificationMarkRead({
+    required this.id,
+  });
+
+  final String id;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'notification.mark_read',
+      'params': <String, dynamic>{
+      'id': id,
+    },
     };
 }
 
