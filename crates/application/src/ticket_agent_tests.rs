@@ -260,6 +260,20 @@ fn creating_the_same_title_twice_in_one_run_makes_one_ticket() {
 }
 
 #[test]
+fn the_same_title_in_two_projects_makes_two_tickets() {
+    let s = setup();
+    let made = exec(&s, Command::CreateProject(CreateProject { name: "Zeta".into(), description: None, folder: None }));
+    assert!(matches!(made, CommandResult::ProjectCreated { .. }), "{made:?}");
+    let run = run_of(&s, s.atlas, true);
+    assert!(act(&s, run, create_action("Write docs")).0);
+    let before = counts(&s);
+    let zeta = EmployeeAction::CreateTicket { project: Some("Zeta".into()), title: "Write docs".into(), description: None, priority: None, labels: vec![] };
+    let (ok, text) = act(&s, run, zeta);
+    assert!(ok && text.contains("Created ticket") && !text.contains("already made"), "{text}");
+    assert_eq!(counts(&s)[1], before[1] + 1);
+}
+
+#[test]
 fn a_run_without_a_board_member_behind_it_cannot_make_or_start_a_ticket() {
     let s = setup();
     let run = run_of(&s, s.atlas, false);

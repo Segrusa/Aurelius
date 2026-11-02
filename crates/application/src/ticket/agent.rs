@@ -246,7 +246,7 @@ pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>
         Err(why) => return refuse(why),
     };
     let Some(user) = crate::run::login::of_run(tx, run)? else { return refuse(NO_BOARD_MEMBER) };
-    if let Some((_, number)) = store::created_in_run(tx, run, me.employee, &title)? {
+    if let Some((_, number)) = store::created_in_run(tx, run, me.employee, project, &title)? {
         return Ok((true, format!("Ticket #{number} “{title}” was already made in this run; nothing new was made."), vec![]));
     }
     let blob = match &description {

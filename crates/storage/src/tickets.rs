@@ -342,16 +342,16 @@ pub fn employee_works_on(conn: &Connection, ticket: TicketId, employee: Employee
     )?)
 }
 
-/// The ticket `employee` already made in this `run` with the same title (any case), as (id, number):
-/// a repeated `create_ticket` call finds it instead of making a second one.
-pub fn created_in_run(conn: &Connection, run: aurelius_domain::RunId, employee: EmployeeId, title: &str) -> Result<Option<(TicketId, u32)>, StorageError> {
+/// The ticket `employee` already made in this `run` and `project` with the same title (any case),
+/// as (id, number): a repeated `create_ticket` call finds it instead of making a second one.
+pub fn created_in_run(conn: &Connection, run: aurelius_domain::RunId, employee: EmployeeId, project: ProjectId, title: &str) -> Result<Option<(TicketId, u32)>, StorageError> {
     let row: Option<(String, i64)> = conn
         .query_row(
             "SELECT k.id, k.number FROM events v JOIN tickets k ON k.id = v.aggregate_id
              WHERE v.aggregate_type = 'ticket' AND v.type = 'ticket.created' AND v.actor_id = ?2
-               AND json_extract(v.metadata_json, '$.run_id') = ?1 AND lower(k.title) = lower(?3)
+               AND json_extract(v.metadata_json, '$.run_id') = ?1 AND lower(k.title) = lower(?3) AND k.project_id = ?4
              ORDER BY v.seq LIMIT 1",
-            params![run.to_string(), employee.to_string(), title],
+            params![run.to_string(), employee.to_string(), title, project.to_string()],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
