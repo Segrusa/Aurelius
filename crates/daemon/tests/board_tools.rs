@@ -7,8 +7,7 @@ mod common;
 
 use aurelius_client::bridge::BridgeClient;
 use aurelius_client::{Client, envelope};
-use aurelius_domain::conversation::SendChatMessage;
-use aurelius_domain::employee::CreateEmployee;
+use aurelius_domain::employee::{CreateEmployee, SendEmployeeMessage};
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::{Command, CommandResult, ConversationId, EmployeeId, RunId};
 use aurelius_protocol::EmployeeTaskOp;
@@ -23,13 +22,10 @@ async fn hire(client: &Client, name: &str, boss: Option<EmployeeId>) -> (Employe
 }
 
 /// A run in the employee's chat on the signed-in board member's login.
-async fn run_in(client: &Client, root: &Path, conversation_id: ConversationId) -> RunId {
-    let sent = client
-        .execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: "hello".into(), images: Vec::new(), interrupt: false }), None))
-        .await
-        .unwrap()
-        .result;
-    let CommandResult::ChatMessageSent { run_id, .. } = sent else { panic!("{sent:?}") };
+async fn run_in(client: &Client, root: &Path, employee_id: EmployeeId, conversation_id: ConversationId) -> RunId {
+    let message = SendEmployeeMessage { employee_id, text: "hello".into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false, confirm_secret: false };
+    let sent = client.execute(envelope(Command::SendEmployeeMessage(message), None)).await.unwrap().result;
+    let CommandResult::EmployeeMessageSent { run_id, .. } = sent else { panic!("{sent:?}") };
     for _ in 0..200 {
         let seen: i64 = db(root).query_row("SELECT COUNT(*) FROM runs WHERE id = ?1", [run_id.to_string()], |r| r.get(0)).unwrap();
         if seen == 1 {
@@ -57,9 +53,9 @@ async fn management_makes_and_starts_a_ticket_and_a_plain_agent_cannot() {
     let client = connect_as(dir.path(), "grace").await;
     client.execute(envelope(Command::CreateProject(CreateProject { name: "Orbit".into(), description: None, folder: None }), None)).await.unwrap();
     let (atlas, atlas_chat) = hire(&client, "Atlas", None).await;
-    let (_ann, ann_chat) = hire(&client, "Ann", Some(atlas)).await;
-    let atlas_run = run_in(&client, dir.path(), atlas_chat).await;
-    let ann_run = run_in(&client, dir.path(), ann_chat).await;
+    let (ann, ann_chat) = hire(&client, "Ann", Some(atlas)).await;
+    let atlas_run = run_in(&client, dir.path(), atlas, atlas_chat).await;
+    let ann_run = run_in(&client, dir.path(), ann, ann_chat).await;
     let bridge = BridgeClient::connect(dir.path()).await.unwrap();
     let create = |title: &str| EmployeeTaskOp::CreateTicket { project: Some("Orbit".into()), title: title.into(), description: Some("Why.".into()), priority: Some("high".into()), labels: vec!["api".into()] };
 
@@ -112,9 +108,9 @@ async fn a_vault_value_in_a_ticket_title_or_message_never_reaches_the_board() {
     let daemon = start_with_delay(dir.path(), 100).await;
     let client = connect_as(dir.path(), "grace").await;
     client.execute(envelope(Command::CreateProject(CreateProject { name: "Orbit".into(), description: None, folder: None }), None)).await.unwrap();
-    let (_atlas, atlas_chat) = hire(&client, "Atlas", None).await;
-    let (_ann, _) = hire(&client, "Ann", Some(_atlas)).await;
-    let run = run_in(&client, dir.path(), atlas_chat).await;
+    let (atlas, atlas_chat) = hire(&client, "Atlas", None).await;
+    hire(&client, "Ann", Some(atlas)).await;
+    let run = run_in(&client, dir.path(), atlas, atlas_chat).await;
     let secret = "sk-test-FAKE-board-tool-canary-7731";
     aurelius_runtime::redact::add_to_set(&owner, aurelius_runtime::redact::Secret { name: "BOARD_TOOL_TOKEN".into(), label: String::new(), value: zeroize::Zeroizing::new(secret.into()) });
     let bridge = BridgeClient::connect(dir.path()).await.unwrap();
