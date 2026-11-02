@@ -719,13 +719,14 @@ impl AppView {
     #[allow(clippy::too_many_arguments)]
     fn feed_row(&self, m: &aurelius_protocol::MessageView, who: &crate::screens::discussion::Author, grouped: bool, mentions_me: bool, tags: AnyElement, actions: Vec<AnyElement>, content: Vec<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
         let clock = feed::clock(m.created_at_ms, aurelius_host::utc_offset_minutes_at(m.created_at_ms));
-        let label = format!("{}, {}, {}{}", who.name, who.kind, ui::fmt_when(m.created_at_ms), if mentions_me { ", mentions you" } else { "" });
+        let label = crate::screens::message_edit::row_label(&who.name, &ui::fmt_when(m.created_at_ms), m, self.message_edits_supported())
+            .unwrap_or_else(|| format!("{}, {}, {}{}", who.name, who.kind, ui::fmt_when(m.created_at_ms), if mentions_me { ", mentions you" } else { "" }));
         let hover = SharedString::from(format!("feed-{}", m.id));
         let kind = if who.human { "· board member".to_string() } else { format!("— {}", who.kind) };
         let pill = self.message_ticket_pill(m.id, cx);
         let toolbar = self.row_toolbar_on();
         let (actions, bar) = if toolbar {
-            (pill.into_iter().collect::<Vec<_>>(), Some(self.row_toolbar(m, hover.clone(), actions, cx)))
+            (pill.into_iter().collect::<Vec<_>>(), (!crate::screens::message_edit::is_deleted(m)).then(|| self.row_toolbar(m, hover.clone(), actions, cx)))
         } else {
             (pill.into_iter().chain(actions).collect(), None)
         };
@@ -766,7 +767,15 @@ impl AppView {
     /// A board member's post in the feed: everyone left-aligned, yours too (ui-ontwerp §2).
     fn feed_post(&self, m: &aurelius_protocol::MessageView, grouped: bool, cx: &mut Context<Self>) -> AnyElement {
         let who = crate::screens::discussion::author(m, |_| None);
+        // A deleted message: its line, and nothing of it (no text, files, uploads, reactions or actions).
+        if crate::screens::message_edit::is_deleted(m) {
+            return self.feed_row(m, &who, grouped, false, div().into_any_element(), Vec::new(), vec![self.deleted_line(m)], cx);
+        }
         let mentions_me = crate::screens::discussion::names_me(&m.text, self.me_name().as_deref());
+        // In the field, the row shows the field instead of its text (A6).
+        if self.edit.is(m.id) {
+            return self.feed_row(m, &who, grouped, mentions_me, div().into_any_element(), Vec::new(), vec![self.edit_field(m, cx)], cx);
+        }
         let (folded, fold_toggle) = self.fold_view(m.id, &m.text, cx);
         let shown = folded.map_or_else(|| m.text.clone(), |(s, _)| s);
         let mut content: Vec<AnyElement> = Vec::new();
@@ -781,6 +790,9 @@ impl AppView {
             content.push(self.message_uploads(m.id, &m.uploads, cx));
         }
         content.extend(self.markdown_chips(m.id, &m.text, cx));
+        // A6: "edited", pressed to read the earlier versions.
+        content.extend(self.edited_tag(m, cx));
+        content.extend(self.history_block(m));
         // Sent while an answer runs and still waiting behind it (an older server queues it).
         if m.queued {
             let id = m.id;

@@ -1560,6 +1560,10 @@ impl AppView {
                 crate::screens::vault::held_title(self.vault.held.as_ref().map_or(&[][..], |h| h.names.as_slice())),
                 crate::screens::vault::held_body(self.vault.held.as_ref().map(|h| &h.command)),
             ),
+            ConfirmKind::DeleteMessage(message) => (
+                crate::screens::message_edit::DELETE_TITLE.to_string(),
+                crate::screens::message_edit::DELETE_BODY,
+            ),
             ConfirmKind::DisconnectClaude => (
                 "Disconnect your Claude login?".to_string(),
                 "Claude Code signs out on the server and your login's folder there is removed. Your tickets wait until you connect again; nothing runs on someone else's login.",
@@ -1572,6 +1576,10 @@ impl AppView {
                 crate::screens::who::disable_note(&self.member_name(user), tickets.filter(|t| t.responsible_user_id == Some(user) && t.column != aurelius_domain::ticket::ColumnKind::Done).count())
             }
             _ => None,
+        };
+        let responsible_for = match kind {
+            ConfirmKind::DeleteMessage(message) => self.delete_ticket_note(message),
+            _ => responsible_for,
         };
         let switch_label = match kind {
             ConfirmKind::LinkOtherServer(link) => format!("Switch to {}", self.link_question(&link).1),
@@ -1591,7 +1599,7 @@ impl AppView {
             ConfirmKind::DisableMember(_) => "Disable",
             ConfirmKind::DisconnectClaude => "Disconnect",
             ConfirmKind::UseMyLogin(_) => "Run on my login",
-            ConfirmKind::ArchiveVaultItem(_) => "Delete",
+            ConfirmKind::ArchiveVaultItem(_) | ConfirmKind::DeleteMessage(_) => "Delete",
             ConfirmKind::LooksLikeSecret => "Send anyway",
             _ => "Archive",
         };

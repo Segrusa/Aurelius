@@ -116,7 +116,7 @@ pub fn held_in(command: &aurelius_domain::Command) -> HeldIn {
             Some(root) => HeldIn::Thread(root),
             None => HeldIn::Channel(m.channel),
         },
-        Command::PostTicketMessage(_) | Command::CreateTicket(_) | Command::UpdateTicket(_) | Command::AcceptTicket(_) => HeldIn::Ticket,
+        Command::PostTicketMessage(_) | Command::EditMessage(_) | Command::CreateTicket(_) | Command::UpdateTicket(_) | Command::AcceptTicket(_) => HeldIn::Ticket,
         Command::RevisePlan(c) => HeldIn::Feedback(c.ticket_id),
         Command::SendBackTicket(c) => HeldIn::Feedback(c.ticket_id),
         Command::DecidePlan(_) => HeldIn::Plan,
@@ -1148,6 +1148,7 @@ impl AppView {
                     self.board.form.busy = true;
                     self.board.form.error = None;
                 }
+                aurelius_domain::Command::EditMessage(_) => self.edit_sent_anyway(),
                 command => {
                     if let Some(ticket) = crate::backend::ticket_of(command) {
                         self.board.busy.insert(ticket);

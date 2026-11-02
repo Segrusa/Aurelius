@@ -30,6 +30,10 @@ pub enum ChatDo {
     Reply(MessageId),
     /// Copy the message's link (AUR-FA A5a).
     CopyLink(MessageId),
+    /// Edit the reader's own message in place (A6).
+    Edit(MessageId),
+    /// Delete the reader's own message, after asking (A6).
+    Delete(MessageId),
 }
 
 /// The thread panel's state in a window.
@@ -264,7 +268,7 @@ impl AppView {
     // ---- Reactions -----------------------------------------------------------------
 
     /// A message of the channel or of the shown thread.
-    fn shown_message(&self, id: MessageId) -> Option<&MessageView> {
+    pub(crate) fn shown_message(&self, id: MessageId) -> Option<&MessageView> {
         let channel = self.messages.iter().flat_map(|s| s.messages.iter());
         let thread = self.thread.snapshot.iter().flat_map(|s| std::iter::once(&s.root).chain(s.replies.iter()));
         channel.chain(thread).find(|m| m.id == id)
@@ -302,6 +306,8 @@ impl AppView {
             ChatDo::React(message, emoji, on) => self.react(message, emoji, on, cx),
             ChatDo::Reply(message) => self.open_thread_panel(message, window, cx),
             ChatDo::CopyLink(message) => self.copy_message_link(message, cx),
+            ChatDo::Edit(message) => self.edit_start(message, window, cx),
+            ChatDo::Delete(message) => self.edit_delete_ask(message, window, cx),
         }
     }
 
@@ -310,6 +316,10 @@ impl AppView {
     pub fn message_menu(&self, m: &MessageView, anchor: Point<Pixels>) -> MenuItems {
         let RowActions { react, reply } = if self.row_toolbar_on() { threads::row_actions(m, self.message_caps(m)) } else { RowActions::default() };
         let chat = |label: &str, run| Some(MenuEntry { label: label.to_string().into(), keys: None, run: MenuDo::Chat(run), danger: false, checked: false, detail: None });
+        // A deleted message has no actions: its line stays, and its thread.
+        if crate::screens::message_edit::is_deleted(m) {
+            return Vec::new();
+        }
         let mut items = Vec::new();
         if react {
             items.push(chat("React…", ChatDo::Picker(m.id, anchor)));
@@ -323,6 +333,7 @@ impl AppView {
         if self.message_link_allowed(m) {
             items.push(chat("Copy link", ChatDo::CopyLink(m.id)));
         }
+        items.extend(self.edit_menu_entries(m));
         items
     }
 
@@ -384,7 +395,7 @@ impl AppView {
     /// the accent; a click toggles yours, the tooltip says who; `[☺+]` opens the picker.
     pub fn reactions_row(&self, m: &MessageView, cx: &mut Context<Self>) -> Option<AnyElement> {
         let caps = self.message_caps(m);
-        if !caps.reactions || m.reactions.is_empty() {
+        if !caps.reactions || m.reactions.is_empty() || crate::screens::message_edit::is_deleted(m) {
             return None;
         }
         let can = threads::row_actions(m, caps).react;

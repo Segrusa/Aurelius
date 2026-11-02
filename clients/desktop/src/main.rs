@@ -14,6 +14,8 @@ mod screens {
     pub mod chat;
     pub mod group_chat;
     pub mod projects;
+    pub mod my_tickets;
+    pub mod message_edit;
     pub mod sidebar;
     pub mod dashboard;
     pub mod employees;
