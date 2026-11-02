@@ -95,8 +95,8 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::TicketList { project_id, column, query } => tickets(shared, project_id, column, query).await,
         Method::MessageLocate { message_id } => message_location(shared, message_id).await,
         Method::TicketFollowers { ticket_id } => ticket_followers(shared, ticket_id).await,
-        // Not built yet: their features are not in `FEATURES`, so no client calls them.
-        Method::TicketMyTickets { .. } | Method::MessageHistory { .. } => Err(ProtocolError::new(ErrorCode::Validation, NOT_BUILT_YET)),
+        Method::TicketMyTickets { project_id, include_done } => my_tickets(shared, reader, project_id, include_done).await,
+        Method::MessageHistory { message_id } => message_history(shared, reader, message_id).await,
         Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
         Method::ApprovalList => approvals(shared).await,
         Method::ProviderList => connections(shared).await,
@@ -417,6 +417,7 @@ async fn messages(shared: &Arc<Shared>, conversation_id: ConversationId, reader:
             let as_of_seq = queries::last_seq(c)?;
             let mut messages = aurelius_storage::conversations::list_messages(c, conversation_id, &read_blob)?;
             aurelius_storage::threads::decorate(c, conversation_id, reader, &mut messages)?;
+            aurelius_storage::message_edits::mark_editable(c, conversation_id, reader, &mut messages)?;
             for message in messages.iter_mut() {
                 message.activity = std::mem::take(&mut message.activity).into_iter().map(aurelius_domain::activity::preview).collect();
             }
@@ -803,8 +804,50 @@ async fn guidelines(shared: &Arc<Shared>, method: Method) -> Result<ResponseBody
     }
 }
 
-/// The answer to a read of the phase A freeze whose server part is not built yet.
-const NOT_BUILT_YET: &str = "This server does not do this yet.";
+/// `ticket.my_tickets`: the tickets of the board member of the session, never of
+/// one named in a param. An app has none, and so no tickets of its own.
+async fn my_tickets(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, project: Option<ProjectId>, include_done: bool) -> Result<ResponseBody, ProtocolError> {
+    let Some(viewer) = reader else { return Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "My tickets are those of a board member.")) };
+    let store = shared.store().clone();
+    storage_task(move || {
+        store.read(|c| {
+            let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+            aurelius_storage::tickets::my_tickets(c, viewer, project, include_done, &read_blob)
+        })
+    })
+    .await
+    .map(ResponseBody::MyTickets)
+}
+
+/// `message.history { message_id }`: the earlier texts of an edited message of a
+/// channel or a ticket's discussion, newest first, each through the vault
+/// redactor. A deleted message answers `deleted` with no versions at all: its
+/// text stays in the audit log and backups, not in any read.
+async fn message_history(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, message: aurelius_domain::MessageId) -> Result<ResponseBody, ProtocolError> {
+    use aurelius_domain::views::{MessageHistoryView, MessageVersionView};
+    if reader.is_none() {
+        return Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "The history of a message is for a board member."));
+    }
+    let store = shared.store().clone();
+    let found = storage_task(move || {
+        store.read(|c| {
+            let Some(deleted) = aurelius_storage::message_edits::deleted(c, message)? else { return Ok(None) };
+            if deleted {
+                return Ok(Some(MessageHistoryView { versions: Vec::new(), deleted }));
+            }
+            let versions = aurelius_storage::message_edits::earlier_texts(c, message)?
+                .into_iter()
+                .filter_map(|(key, replaced_at_ms)| {
+                    let text = String::from_utf8(store.blobs().read(&key).ok()?).ok()?;
+                    Some(MessageVersionView { text: aurelius_runtime::redact::text(&text).into_owned(), replaced_at_ms })
+                })
+                .collect();
+            Ok(Some(MessageHistoryView { versions, deleted }))
+        })
+    })
+    .await?;
+    found.map(ResponseBody::MessageHistory).ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "This message does not exist."))
+}
 
 /// `message.locate { message_id }`: where a message of a channel or a ticket's
 /// discussion is. Any other message answers as an unknown one, so a link never
@@ -837,6 +880,7 @@ async fn thread(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, r
             let as_of_seq = queries::last_seq(c)?;
             let mut messages = aurelius_storage::conversations::list_thread(c, place.conversation_id, root, &read_blob)?;
             threads::decorate(c, place.conversation_id, reader, &mut messages)?;
+            aurelius_storage::message_edits::mark_editable(c, place.conversation_id, reader, &mut messages)?;
             for message in messages.iter_mut() {
                 message.activity = std::mem::take(&mut message.activity).into_iter().map(aurelius_domain::activity::preview).collect();
             }

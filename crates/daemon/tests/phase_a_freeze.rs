@@ -123,27 +123,92 @@ async fn message_locate_answers_not_found_outside_a_channel_or_a_discussion() {
     stop(dir.path(), daemon).await;
 }
 
+async fn edit(client: &Client, message: MessageId, text: &str) -> Result<CommandResult, ClientError> {
+    client.execute(aurelius_client::envelope(Command::EditMessage(EditMessage { message_id: message, text: text.into(), confirm_secret: false }), None)).await.map(|c| c.result)
+}
+
+async fn delete(client: &Client, message: MessageId) -> Result<CommandResult, ClientError> {
+    client.execute(aurelius_client::envelope(Command::DeleteMessage(DeleteMessage { message_id: message }), None)).await.map(|c| c.result)
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn a_stub_write_refuses_with_validation_and_leaves_no_receipt() {
+async fn an_edit_and_a_delete_show_in_the_read_and_history_and_wake_nobody() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let (_, channel) = project_channel(&client, "Atlas").await;
     let message = post(&client, channel, "Hello", None).await;
-    let events = || db(dir.path()).query_row("SELECT COUNT(*) FROM events", [], |r| r.get::<_, i64>(0)).unwrap();
-    let before = events();
+    let mut stream = raw(dir.path(), &[client_feature::MESSAGE_EDITS]).await;
+    let runs = || db(dir.path()).query_row("SELECT COUNT(*) FROM runs", [], |r| r.get::<_, i64>(0)).unwrap();
+    let rows = || db(dir.path()).query_row("SELECT (SELECT COUNT(*) FROM notifications) + (SELECT COUNT(*) FROM messages)", [], |r| r.get::<_, i64>(0)).unwrap();
+    let (runs_before, rows_before) = (runs(), rows());
+    let as_read = |snapshot: aurelius_protocol::MessagesSnapshot| snapshot.messages.into_iter().find(|m| m.id == message).unwrap();
 
-    for command in [
-        Command::EditMessage(EditMessage { message_id: message, text: "Better".into(), confirm_secret: false }),
-        Command::DeleteMessage(DeleteMessage { message_id: message }),
-    ] {
-        let key = CommandId::new();
-        let refused = client.execute(CommandEnvelope { command_id: key, expected_version: None, command: command.clone() }).await.unwrap_err();
-        assert_eq!(code(refused), ErrorCode::Validation, "{}", command.method());
-        let receipts: i64 = db(dir.path()).query_row("SELECT COUNT(*) FROM command_receipts WHERE command_id = ?1", [key.to_string()], |r| r.get(0)).unwrap();
-        assert_eq!(receipts, 0, "{}", command.method());
+    assert!(as_read(client.channel_messages(channel).await.unwrap()).editable, "the author may");
+    assert!(matches!(edit(&client, message, "Hello @alex").await.unwrap(), CommandResult::MessageEdited { .. }));
+    let read = as_read(client.channel_messages(channel).await.unwrap());
+    assert_eq!((read.text.as_str(), read.edited_at_ms.is_some(), read.editable), ("Hello @alex", true, true));
+    match read_outcome(&mut stream, Method::MessageHistory { message_id: message }).await {
+        Outcome::Ok(ResponseBody::MessageHistory(history)) => assert_eq!((history.deleted, history.versions.iter().map(|v| v.text.as_str()).collect::<Vec<_>>()), (false, vec!["Hello"])),
+        other => panic!("{other:?}"),
     }
-    assert_eq!(events(), before, "a refusal writes no event");
+
+    assert!(matches!(delete(&client, message).await.unwrap(), CommandResult::MessageDeleted { .. }));
+    let read = as_read(client.channel_messages(channel).await.unwrap());
+    assert_eq!((read.text.as_str(), read.deleted_at_ms.is_some(), read.editable), ("This message was deleted.", true, false));
+    match read_outcome(&mut stream, Method::MessageHistory { message_id: message }).await {
+        Outcome::Ok(ResponseBody::MessageHistory(history)) => assert!(history.deleted && history.versions.is_empty(), "{history:?}"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(code(edit(&client, message, "Back").await.unwrap_err()), ErrorCode::NotFound);
+    assert_eq!((runs(), rows()), (runs_before, rows_before), "no run, no notification, no message");
+    assert_eq!(code(client.message_locate(MessageId::new()).await.unwrap_err()), ErrorCode::NotFound);
+    match read_outcome(&mut stream, Method::MessageHistory { message_id: MessageId::new() }).await {
+        Outcome::Error(err) => assert_eq!(err.code, ErrorCode::NotFound),
+        other => panic!("{other:?}"),
+    }
+
+    drop(client);
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_history_goes_through_the_vault_redactor_when_it_goes_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let (_, channel) = project_channel(&client, "Atlas").await;
+    let value = format!("ghp_{}", CommandId::new().0.simple());
+    let message = post(&client, channel, &format!("The token is {value}"), None).await;
+    edit(&client, message, "No token any more").await.unwrap();
+    let mut stream = raw(dir.path(), &[client_feature::MESSAGE_EDITS]).await;
+    let owner = format!("history-test-{}", CommandId::new());
+    let secret = aurelius_runtime::redact::Secret { name: "GH_TOKEN".into(), label: "GitHub token".into(), value: zeroize::Zeroizing::new(value.clone()) };
+    aurelius_runtime::redact::install_set(&owner, vec![secret]);
+    let history = read_outcome(&mut stream, Method::MessageHistory { message_id: message }).await;
+    aurelius_runtime::redact::install_set(&owner, Vec::new());
+    let Outcome::Ok(ResponseBody::MessageHistory(history)) = history else { panic!("{history:?}") };
+    let text = &history.versions[0].text;
+    assert!(!text.contains(&value) && text.contains("«secret:GH_TOKEN»"), "{text}");
+
+    drop(client);
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_real_edit_reaches_only_a_connection_that_accepts_message_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let (_, channel) = project_channel(&client, "Atlas").await;
+    let message = post(&client, channel, "Hello", None).await;
+    edit(&client, message, "Hello again").await.unwrap();
+    delete(&client, message).await.unwrap();
+    let count = |kinds: &[EventKind], kind| kinds.iter().filter(|k| **k == kind).count();
+    let older = replayed_kinds(&mut raw(dir.path(), &[client_feature::TEAM_CHANNELS]).await).await;
+    assert_eq!((count(&older, EventKind::MessageEdited), count(&older, EventKind::MessageDeleted)), (0, 1), "{older:?}");
+    let newer = replayed_kinds(&mut raw(dir.path(), &[client_feature::TEAM_CHANNELS, client_feature::MESSAGE_EDITS]).await).await;
+    assert_eq!((count(&newer, EventKind::MessageEdited), count(&newer, EventKind::MessageDeleted)), (1, 1), "{newer:?}");
 
     drop(client);
     stop(dir.path(), daemon).await;
@@ -186,20 +251,31 @@ async fn read_outcome(stream: &mut BoxStream, method: Method) -> Outcome {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_stub_read_refuses_with_validation() {
+async fn my_tickets_are_those_of_the_reader_only() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
+    let (project, _) = project_channel(&client, "Atlas").await;
+    let (mine, _) = ticket(&client, project).await;
+    let other = connect_as(dir.path(), "dana").await;
+    let (theirs, _) = ticket(&other, project).await;
+    let tickets = |outcome: Outcome| match outcome {
+        Outcome::Ok(ResponseBody::MyTickets(view)) => (view.tickets.iter().map(|t| t.id).collect::<Vec<_>>(), view.following),
+        other => panic!("{other:?}"),
+    };
     let mut stream = raw(dir.path(), &[]).await;
-    for method in [Method::TicketMyTickets { project_id: None, include_done: false }, Method::MessageHistory { message_id: MessageId::new() }] {
-        match read_outcome(&mut stream, method.clone()).await {
-            Outcome::Error(err) => assert_eq!(err.code, ErrorCode::Validation, "{method:?}"),
-            Outcome::Ok(body) => panic!("{method:?}: {body:?}"),
-        }
-    }
-    assert!(matches!(read_outcome(&mut stream, Method::UserWhoami).await, Outcome::Ok(ResponseBody::WhoAmI(_))), "the connection stays usable");
+    let (listed, following) = tickets(read_outcome(&mut stream, Method::TicketMyTickets { project_id: None, include_done: false }).await);
+    assert!(listed.contains(&mine) && following.contains(&mine));
+    assert!(listed.contains(&theirs), "a ticket without a responsible is for everyone");
+    assert!(!following.contains(&theirs), "following is the reader's own");
 
-    drop(client);
+    // Someone made responsible for one is no longer everyone's.
+    let dana = other.user_whoami().await.unwrap().user.unwrap().id;
+    other.execute(aurelius_client::envelope(Command::SetTicketResponsible(aurelius_domain::ticket::SetTicketResponsible { ticket_id: theirs, responsible_user_id: Some(dana) }), None)).await.unwrap();
+    let (listed, _) = tickets(read_outcome(&mut stream, Method::TicketMyTickets { project_id: None, include_done: false }).await);
+    assert!(!listed.contains(&theirs));
+
+    drop((client, other));
     stop(dir.path(), daemon).await;
 }
 
