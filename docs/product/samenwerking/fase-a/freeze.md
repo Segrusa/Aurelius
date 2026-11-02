@@ -73,6 +73,12 @@ De client maakt de vier tabs en tellers uit dit ene antwoord. *Waiting on me* is
 ### Linkvorm (A5a, beide clients gelijk)
 `aurelius://<host_id>/ticket/<ticket_id>` en `aurelius://<host_id>/message/<message_id>`. Strikt parsen: scheme, host_id, precies één soort, geldig id; alles anders is *"This isn't a valid Aurelius link."*. Een link navigeert alleen.
 
+### Vastgelegd door N1 (`feat/aur-fa-proto`)
+- Rechten op een apparaat: `ticket.set_responsible` en `ticket.follow` `TaskControl`; `message.edit` en `message.delete` `Chat`; de vier reads `Read`. Apps nooit.
+- `CommandResult`: `ticket.set_responsible` geeft `TicketChanged`; nieuw zijn `TicketFollowChanged`, `MessageEdited`, `MessageDeleted`.
+- Tot een serverdeel klaar is: `Validation` met *"This server does not do this yet."*. Wie een deel afmaakt, zet de feature in `FEATURES`, haalt hem uit de lijst in `only_message_locate_is_advertised_until_the_server_parts_are_built` en verwijdert de stub.
+- Client: `crates/client` kreeg alleen `message_locate`; de andere reads en writes voegt Flux toe. Dart-velden zijn nullable (`?? false`, `?? 0`). Mobiel: `EventKind.messageEdited` hoort in `isChat`.
+
 ## 3. Migratie 0029 (geen rebuild, gooit niets weg)
 0029 is op 2026-11-02 op geen enkele branch of remote in gebruik.
 - `tickets.responsible_user_id TEXT REFERENCES users(id)`.
@@ -108,7 +114,7 @@ De client maakt de vier tabs en tellers uit dit ene antwoord. *Waiting on me* is
 - *Groei:* `timeline::prune_notifications` verwijdert rijen ouder dan `NOTIFICATION_KEEP_MS` (90 d), tenzij het een nog relevante `action`-rij is. Reads en dismissals gaan mee via `ON DELETE CASCADE`; het event blijft. Draait bij de start van de daemon en daarna dagelijks. Dit raakt geen audit: de events blijven.
 
 ## 5. A6-regels
-- Bewerken: nieuwe blob, event `message.edited` met de **vorige** blob als payload. Verwijderen: vaste tekst *"This message was deleted."*, event `message.deleted` met de vorige blob. Metadata alleen `message_id` en `by`.
+- Bewerken: nieuwe blob, event `message.edited` met de **vorige** blob als payload. Verwijderen: vaste tekst *"This message was deleted."*, event `message.deleted` met de vorige blob. Metadata alleen `message_id` en `by`, plus bij `message.deleted` `queued: false`. Geen tekst in metadata. Metadata komt niet op de wire (`protocol/src/events.rs:9`); clients kijken alleen naar de kind en lezen opnieuw.
 - `editable` = auteur is de lezer, `kind` `group` of `ticket`, geen systeemregel, niet in de wachtrij, niet verwijderd, geen beslissingsfeedback, discussie niet alleen-lezen. De command controleert exact dezelfde helper.
 - Roept `board_message` nooit aan: tests `an_edit_with_a_new_mention_wakes_nobody`, `a_deleted_message_starts_no_run`. Geen `mentioned_users`, geen volgen, geen rij.
 - Dialoogtekst (B3), letterlijk op beide clients: *"Delete this message? A line stays that says it was deleted. The text stays in the audit log and backups, and employees that read it keep it. This doesn't erase a secret: rotate it and put it in the vault."* Bewerkhint: *"Editing wakes no one. An employee that already read this keeps the original. This doesn't erase a secret: rotate it and put it in the vault."*
