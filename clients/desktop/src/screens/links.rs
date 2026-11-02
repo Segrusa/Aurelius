@@ -151,6 +151,23 @@ pub fn locate_failure(e: &aurelius_client::ClientError) -> String {
     }
 }
 
+/// What a link from the OS does now (A5b): a bad one says so at once, a good one waits until the
+/// server is connected and then goes the way of a click.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OsLink {
+    Invalid,
+    Wait,
+    Open,
+}
+
+pub fn os_link_step(url: &str, connected: bool) -> OsLink {
+    match (parse_link(url), connected) {
+        (None, _) => OsLink::Invalid,
+        (Some(_), false) => OsLink::Wait,
+        (Some(_), true) => OsLink::Open,
+    }
+}
+
 /// A link's way to its place; done on the next render, which has the window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PendingLink {
@@ -283,8 +300,25 @@ impl AppView {
         }
     }
 
+    /// A link from the OS (argument, second process or open-URL event). A bad one says so at
+    /// once; a good one waits until the server is connected, then goes the way of a click.
+    pub fn os_link_received(&mut self, url: String, cx: &mut Context<Self>) {
+        if os_link_step(&url, false) == OsLink::Invalid {
+            self.os_link = None;
+            self.notify_user(INVALID_LINK, true, cx);
+            return;
+        }
+        self.os_link = Some(url);
+        cx.notify();
+    }
+
     /// Every render: what waits for the window, the connection or the sign-in.
     pub fn link_step(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.os_link.as_deref().is_some_and(|url| os_link_step(url, self.board_online()) == OsLink::Open) {
+            if let Some(url) = self.os_link.take() {
+                self.open_link(&url, window, cx);
+            }
+        }
         match self.pending_link.clone() {
             Some(PendingLink::Link(link)) if self.board_online() && self.active_member().is_some() && self.link_host() == Some(link.host) => {
                 self.pending_link = None;
@@ -360,6 +394,7 @@ impl AppView {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: gpui's `test` attribute would shadow the standard one.
+    use super::{OsLink, os_link_step};
     use super::{AureliusLink, LinkRoute, LinkTarget, MESSAGE_GONE, OLD_SERVER, is_aurelius, link_pills, link_route, linkable, locate_failure, message_link, other_server_question, parse_link, ticket_link};
     use aurelius_client::ClientError;
     use aurelius_domain::AppError;
@@ -378,6 +413,17 @@ mod tests {
 
     fn message() -> MessageId {
         MessageId::parse("33333333-3333-4333-8333-333333333333").unwrap()
+    }
+
+    #[test]
+    fn a_link_from_the_os_waits_for_the_connection_and_a_bad_one_does_not() {
+        let good = ticket_link(host(), ticket());
+        assert_eq!(os_link_step(&good, false), OsLink::Wait);
+        assert_eq!(os_link_step(&good, true), OsLink::Open);
+        for bad in ["aurelius://nonsense", "aurelius://", &format!("{good}/extra"), &format!("{good}?token=x")] {
+            assert_eq!(os_link_step(bad, false), OsLink::Invalid, "{bad}");
+            assert_eq!(os_link_step(bad, true), OsLink::Invalid, "{bad}");
+        }
     }
 
     #[test]

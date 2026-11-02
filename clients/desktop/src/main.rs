@@ -5,6 +5,7 @@
 mod app;
 mod backend;
 mod keymap;
+mod open_link;
 mod preview;
 mod project_window;
 mod resize;
@@ -77,7 +78,28 @@ fn main() {
     tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).init();
     record_version();
 
-    gpui_kit::application().with_assets(gpui_kit::assets::Assets).run(move |cx| {
+    // A link the OS handed over (A5b): with a running app it goes there and this process ends.
+    let (links, mut incoming) = open_link::channel();
+    let data_root = aurelius_host::data_dir().ok();
+    let first = open_link::link_arg(std::env::args());
+    let running = data_root.as_deref().is_some_and(|root| open_link::pass_to_running(root, first.as_deref().unwrap_or("")));
+    if running && first.is_some() {
+        return;
+    }
+    if let Some(url) = first {
+        let _ = links.send(url);
+    }
+    if !running && let Some(root) = data_root.as_deref() {
+        open_link::listen(root, links.clone());
+    }
+
+    let application = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
+    // macOS hands a clicked link over as an event, not as an argument.
+    application.on_open_urls({
+        let links = links.clone();
+        move |urls| urls.into_iter().for_each(|url| drop(links.send(url)))
+    });
+    application.run(move |cx| {
         gpui_kit::init(cx);
         theme::apply(cx);
         keymap::bind(cx);
@@ -108,5 +130,18 @@ fn main() {
         let (main, _) = gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| app::AppView::new(window, cx)))
             .expect("failed to open the Aurelius window");
         cx.default_global::<project_window::Windows>().main = Some(main.window_id());
+
+        // Links wait here until the window exists; the app holds them until the server is connected.
+        cx.spawn(async move |cx| {
+            while let Some(url) = incoming.recv().await {
+                let _ = main.update(cx, |_, window, cx| {
+                    let Some(Some(root)) = window.root::<gpui_kit::base::Root>() else { return };
+                    if let Ok(view) = root.read(cx).view().clone().downcast::<app::AppView>() {
+                        view.update(cx, |view, cx| view.os_link_received(url, cx));
+                    }
+                });
+            }
+        })
+        .detach();
     });
 }
