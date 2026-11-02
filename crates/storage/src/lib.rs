@@ -241,6 +241,8 @@ mod schema26_tests;
 #[cfg(test)]
 mod schema27_tests;
 #[cfg(test)]
+mod schema28_tests;
+#[cfg(test)]
 mod threads_tests;
 #[cfg(test)]
 mod guidelines_tests;

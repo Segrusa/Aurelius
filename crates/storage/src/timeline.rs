@@ -393,10 +393,17 @@ pub fn list_notifications_for(conn: &Connection, limit: u32, user: Option<&str>)
     list(conn, limit, Some(viewer(user)))
 }
 
-/// Whose notifications a query sees: everyone's and those of the board member
-/// bound at `?{at}` (`viewer`; NULL: only everyone's).
+/// Whose notifications a query sees: the board member bound at `?{at}` (`viewer`)
+/// sees their own and those for everyone they did not dismiss; NULL: only those
+/// for everyone.
 fn visible_to(at: u8) -> String {
-    format!("(n.user_id IS NULL OR n.user_id = ?{at})")
+    format!("(n.user_id = ?{at} OR (n.user_id IS NULL AND NOT EXISTS (SELECT 1 FROM notification_dismissals d WHERE d.notification_id = n.id AND d.user_id = ?{at})))")
+}
+
+/// Whether the board member bound at `?{at}` has read a notification. A
+/// `read_at_ms` on a row for everyone is from before schema 28 and counts for all.
+fn read_by(at: u8) -> String {
+    format!("(n.read_at_ms IS NOT NULL OR EXISTS (SELECT 1 FROM notification_reads r WHERE r.notification_id = n.id AND r.user_id = ?{at}))")
 }
 
 /// The value for `visible_to`: `user` when it is a board member's id, else NULL.
@@ -409,8 +416,9 @@ fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>) -> Result
     let visible = if viewer.is_some() { visible_to(2) } else { "?2 IS NULL".to_string() };
     let mut stmt = conn.prepare(
         &format!(
-            "SELECT n.id, n.severity, n.target_json, n.created_at_ms, n.read_at_ms, e.type, e.metadata_json, e.correlation_id
-             FROM notifications n JOIN events e ON e.id = n.event_id WHERE {STILL_RELEVANT} AND {visible} ORDER BY n.created_at_ms DESC LIMIT ?1"
+            "SELECT n.id, n.severity, n.target_json, n.created_at_ms, {read}, e.type, e.metadata_json, e.correlation_id
+             FROM notifications n JOIN events e ON e.id = n.event_id WHERE {STILL_RELEVANT} AND {visible} ORDER BY n.created_at_ms DESC LIMIT ?1",
+            read = read_by(2),
         ),
     )?;
     let rows = stmt.query_map(params![limit, viewer.flatten()], |r| {
@@ -419,7 +427,7 @@ fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>) -> Result
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
             r.get::<_, i64>(3)?,
-            r.get::<_, Option<i64>>(4)?,
+            r.get::<_, bool>(4)?,
             r.get::<_, String>(5)?,
             r.get::<_, String>(6)?,
             r.get::<_, String>(7)?,
@@ -442,7 +450,7 @@ fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>) -> Result
             title,
             subject,
             created_at_ms: created,
-            read: read.is_some(),
+            read,
             task_id: TaskId::parse(&correlation).ok().filter(|_| !lookup(conn, "SELECT id FROM tasks WHERE id = ?1", &correlation).unwrap_or_default().is_empty()),
             target_type: target["type"].as_str().unwrap_or("").to_owned(),
         });
@@ -456,7 +464,7 @@ pub fn unread_count(conn: &Connection) -> Result<u64, StorageError> {
 
 pub fn unread_count_for(conn: &Connection, user: Option<&str>) -> Result<u64, StorageError> {
     Ok(conn.query_row(
-        &format!("SELECT COUNT(*) FROM notifications n JOIN events e ON e.id = n.event_id WHERE n.read_at_ms IS NULL AND {STILL_RELEVANT} AND {}", visible_to(1)),
+        &format!("SELECT COUNT(*) FROM notifications n JOIN events e ON e.id = n.event_id WHERE NOT {} AND {STILL_RELEVANT} AND {}", read_by(1), visible_to(1)),
         [viewer(user)],
         |r| r.get::<_, i64>(0),
     )? as u64)
@@ -473,30 +481,45 @@ const STILL_RELEVANT: &str = concat!("NOT (e.type = 'approval.requested' AND EXI
 
 
 
-/// Remove one notification (the event it was about stays).
-pub fn dismiss(tx: &rusqlite::Transaction<'_>, id: &str) -> Result<usize, StorageError> {
-    dismiss_for(tx, id, None)
-}
-
-/// `dismiss`, only of what `user` sees (never another board member's own).
+/// Remove one notification from `user`'s Inbox (the event it was about stays):
+/// their own goes, one for everyone stays for the others. Answers how many went;
+/// without a board member none.
 pub fn dismiss_for(tx: &rusqlite::Transaction<'_>, id: &str, user: Option<&str>) -> Result<usize, StorageError> {
-    Ok(tx.execute(&format!("DELETE FROM notifications AS n WHERE n.id = ?1 AND {}", visible_to(2)), params![id, viewer(user)])?)
+    let Some(user) = viewer(user) else { return Ok(0) };
+    let own = tx.execute("DELETE FROM notifications WHERE id = ?1 AND user_id = ?2", params![id, user])?;
+    let shared = tx.execute(
+        &format!("INSERT INTO notification_dismissals(notification_id, user_id, dismissed_at_ms) SELECT n.id, ?2, ?3 FROM notifications n WHERE n.id = ?1 AND n.user_id IS NULL AND {}", visible_to(2)),
+        params![id, user, now_ms()],
+    )?;
+    Ok(own + shared)
 }
 
-pub fn dismiss_all(tx: &rusqlite::Transaction<'_>) -> Result<usize, StorageError> {
-    dismiss_all_for(tx, None)
-}
-
+/// `dismiss_for`, of everything in `user`'s Inbox.
 pub fn dismiss_all_for(tx: &rusqlite::Transaction<'_>, user: Option<&str>) -> Result<usize, StorageError> {
-    Ok(tx.execute(&format!("DELETE FROM notifications AS n WHERE {}", visible_to(1)), [viewer(user)])?)
+    let Some(user) = viewer(user) else { return Ok(0) };
+    let own = tx.execute("DELETE FROM notifications WHERE user_id = ?1", [&user])?;
+    let shared = tx.execute(
+        &format!("INSERT INTO notification_dismissals(notification_id, user_id, dismissed_at_ms) SELECT n.id, ?1, ?2 FROM notifications n WHERE n.user_id IS NULL AND {}", visible_to(1)),
+        params![user, now_ms()],
+    )?;
+    Ok(own + shared)
 }
 
-pub fn mark_all_read(tx: &rusqlite::Transaction<'_>) -> Result<usize, StorageError> {
-    mark_all_read_for(tx, None)
-}
-
+/// Mark what `user` has not read as read, for them only. Answers how many; without
+/// a board member none.
 pub fn mark_all_read_for(tx: &rusqlite::Transaction<'_>, user: Option<&str>) -> Result<usize, StorageError> {
-    Ok(tx.execute(&format!("UPDATE notifications AS n SET read_at_ms = ?1 WHERE n.read_at_ms IS NULL AND {}", visible_to(2)), params![now_ms(), viewer(user)])?)
+    let Some(user) = viewer(user) else { return Ok(0) };
+    let now = now_ms();
+    let own = tx.execute("UPDATE notifications SET read_at_ms = ?1 WHERE user_id = ?2 AND read_at_ms IS NULL", params![now, user])?;
+    let shared = tx.execute(
+        &format!(
+            "INSERT INTO notification_reads(notification_id, user_id, read_at_ms) SELECT n.id, ?1, ?2 FROM notifications n WHERE n.user_id IS NULL AND {} AND NOT {}",
+            visible_to(1),
+            read_by(1)
+        ),
+        params![user, now],
+    )?;
+    Ok(own + shared)
 }
 
 /// The notification created for the event at `seq`, with what it points at
