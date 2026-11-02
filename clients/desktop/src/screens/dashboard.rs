@@ -49,14 +49,15 @@ pub fn assignee_order(managers: &[EmployeeSummary]) -> Vec<&EmployeeSummary> {
 }
 
 /// What "Needs you" lists: approvals, proposals and tasks waiting for the user. Unread results
-/// count on the inbox badge only, as the list does not show them.
-pub fn needs_you(approvals: usize, proposals: usize, tasks: &[aurelius_protocol::TaskView]) -> usize {
-    approvals + proposals + tasks.iter().filter(|t| ui::is_waiting(t)).count()
+/// count on the inbox badge only, as the list does not show them. `mine`: a ticket's main task
+/// only when it waits for this board member (freeze §5).
+pub fn needs_you(approvals: usize, proposals: usize, tasks: &[aurelius_protocol::TaskView], mine: impl Fn(&aurelius_protocol::TaskView) -> bool) -> usize {
+    approvals + proposals + tasks.iter().filter(|t| ui::is_waiting(t) && mine(t)).count()
 }
 
 impl AppView {
     pub fn needs_you_count(&self) -> usize {
-        needs_you(self.pending_approvals().count(), self.pending_proposals().len() + self.pending_guideline_proposals().len(), &self.tasks)
+        needs_you(self.pending_approvals().count(), self.pending_proposals().len() + self.pending_guideline_proposals().len(), &self.tasks, |t| self.task_counts_for_me(t))
     }
 
     pub fn render_dashboard(&mut self, _wide: bool, cx: &mut Context<Self>) -> AnyElement {
@@ -137,7 +138,7 @@ impl AppView {
         }).collect();
         let room = 4usize.saturating_sub(cards.len());
         cards.extend(self.pending_proposals().into_iter().take(room).map(|p| (p.proposed_by_name.clone(), 0, format!("Proposes {}", p.name), None)));
-        cards.extend(self.tasks.iter().filter(|t| ui::is_waiting(t)).take(4).map(|t| (t.employee_name.clone().unwrap_or_else(|| "Task".into()), t.updated_at_ms, t.title.clone(), Some(t.id))));
+        cards.extend(self.tasks.iter().filter(|t| ui::is_waiting(t) && self.task_counts_for_me(t)).take(4).map(|t| (t.employee_name.clone().unwrap_or_else(|| "Task".into()), t.updated_at_ms, t.title.clone(), Some(t.id))));
         v().gap(px(10.))
             .child(h().justify_between().child(ui::eyebrow(format!("WAITING FOR YOU · {}", self.needs_you_count()))).child(ui::hint("dash-inbox", "secondary-2", "Inbox →", || Box::new(OpenInbox), cx)))
             .when(cards.is_empty(), |el| el.child(div().text_size(px(12.5)).text_color(c(theme::MUTED)).child("Nothing is waiting for you.")))
@@ -197,10 +198,11 @@ mod tests {
     fn needs_you_counts_what_its_list_shows() {
         let p = ProjectId::new();
         let mut waiting = task(p, None, TaskStatus::Waiting, 1);
-        assert_eq!(needs_you(1, 1, std::slice::from_ref(&waiting)), 3);
+        assert_eq!(needs_you(1, 1, std::slice::from_ref(&waiting), |_| true), 3);
+        assert_eq!(needs_you(1, 1, std::slice::from_ref(&waiting), |_| false), 2, "freeze §5: another's main task does not count, approvals do");
         // The task ended: nothing waits any more (unread results are not counted here).
         waiting.status = TaskStatus::Succeeded;
-        assert_eq!(needs_you(0, 0, &[waiting, task(p, None, TaskStatus::Running, 2)]), 0);
+        assert_eq!(needs_you(0, 0, &[waiting, task(p, None, TaskStatus::Running, 2)], |_| true), 0);
     }
 
     #[test]

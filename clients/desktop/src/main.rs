@@ -50,6 +50,7 @@ mod screens {
     pub mod threads;
     pub mod who;
     pub mod links;
+    pub mod updates;
     pub mod thread_panel;
     pub mod ticket_discussion;
     pub mod vault;
