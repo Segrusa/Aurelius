@@ -217,7 +217,7 @@ async fn general_gets_one_line_when_a_ticket_opens_and_one_when_it_closes_and_it
     assert_eq!(general(&client).await.iter().filter(|m| m.system.is_some()).count(), 2);
     let own = client.messages(channel).await.unwrap().messages;
     let texts: Vec<&str> = own.iter().filter(|m| m.system.is_some()).map(|m| m.text.as_str()).collect();
-    assert!(texts.iter().any(|t| t.ends_with("· Backlog → Todo")) && texts.contains(&"grace put it on Done"), "{texts:#?}");
+    assert!(texts.iter().any(|t| t.ends_with("the ticket moved from Backlog to Todo")) && texts.contains(&"grace accepted the report and moved the ticket to Done"), "{texts:#?}");
     let done = own.iter().filter_map(|m| m.system.as_ref()).find(|s| s.kind == SystemLineKind::Done && s.action.as_deref() == Some(system_action::APPROVED));
     assert!(done.is_some(), "Accept is an approval");
     assert!(texts.contains(&"#1 is closed · this channel can only be read now"), "{texts:#?}");

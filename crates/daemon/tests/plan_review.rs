@@ -147,11 +147,11 @@ async fn a_tickets_plan_waits_for_the_board_and_is_revised_then_approved() {
     let lines = discussion_lines(&client, id).await;
     let plans: Vec<_> = lines.iter().filter(|(k, _, _)| *k == aurelius_domain::views::SystemLineKind::Plan).collect();
     assert_eq!(plans.len(), 2, "{lines:#?}");
-    assert!(plans.iter().all(|(_, task, text)| *task == root && text == "Planner handed in a plan · waiting for a board member"), "{plans:#?}");
+    assert!(plans.iter().all(|(_, task, text)| *task == root && text == "Planner handed in a plan. It waits for a board member to approve it"), "{plans:#?}");
     let texts: Vec<&str> = lines.iter().map(|(_, _, t)| t.as_str()).collect();
     let at = |want: &str| texts.iter().position(|t| *t == want).unwrap_or_else(|| panic!("no “{want}” in {texts:#?}"));
-    assert!(at("grace sent the plan back · Plan review → Doing") < at("grace approved the plan · Plan review → Doing"));
-    assert!(at("grace approved the plan · Plan review → Doing") < at("Planner handed in the report · Review"));
+    assert!(at("grace sent the plan back — the ticket moved from Plan review to Doing") < at("grace approved the plan — the ticket moved from Plan review to Doing"));
+    assert!(at("grace approved the plan — the ticket moved from Plan review to Doing") < at("Planner handed in the report. It is ready for your review"));
 
     drop(client);
     common::stop(dir.path(), daemon).await;

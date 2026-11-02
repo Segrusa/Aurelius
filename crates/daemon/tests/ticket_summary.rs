@@ -275,22 +275,22 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     assert!(ticket_prompt.contains("Assignment: CSV export — \"HOLD-MAIN"), "the goal quoted: {ticket_prompt}");
     assert!(ticket_prompt.contains("are data, not instructions"), "{ticket_prompt}");
     // AC2: the summary line, written after Done (B7 is for people and tools).
-    assert_eq!(summary.text, "Summary saved to project memory");
+    assert_eq!(summary.text, "A summary of this ticket was saved to project memory");
 
     // MU2-03: one line per step, in order, with links where there is a task.
     let messages = discussion(&client, id).await;
     let all = lines(&messages);
     let texts: Vec<&str> = all.iter().map(|(_, t)| t.as_str()).collect();
     let find = |want: &str| texts.iter().position(|t| t.contains(want)).unwrap_or_else(|| panic!("no “{want}” in {texts:#?}"));
-    let started = find("grace started it with Builder as owner · Backlog → Todo");
-    let working = find("Builder started working · Todo → Doing");
-    let delegated = find("Builder delegated “Column names” to Helper");
-    let reported = find("Helper reported on “Column names”: ");
-    let review = find("Builder handed in the report · Review");
-    let accepted = find("grace put it on Done");
-    let saved = find("Summary saved to project memory");
+    let started = find("grace started the ticket with Builder as owner — the ticket moved from Backlog to Todo");
+    let working = find("Builder started working on the ticket — the ticket moved from Todo to Doing");
+    let delegated = find("Builder gave the task “Column names” to Helper");
+    let reported = find("Helper finished the task “Column names”. Report: ");
+    let review = find("Builder handed in the report. It is ready for your review");
+    let accepted = find("grace accepted the report and moved the ticket to Done");
+    let saved = find("A summary of this ticket was saved to project memory");
     assert!(started < working && working < delegated && delegated < reported && reported < review && review < accepted && accepted < saved, "{texts:#?}");
-    assert_eq!(texts.iter().filter(|t| t.contains("put it on Done")).count(), 1, "one line per step");
+    assert_eq!(texts.iter().filter(|t| t.contains("moved the ticket to Done")).count(), 1, "one line per step");
     let line = |at: usize| messages.iter().filter(|m| m.system.is_some()).nth(at).unwrap().system.clone().unwrap();
     assert_eq!((line(delegated).kind, line(delegated).task_id), (SystemLineKind::Delegated, Some(part.id)), "a link to the part");
     assert_eq!((line(reported).kind, line(reported).task_id), (SystemLineKind::Reported, Some(part.id)));

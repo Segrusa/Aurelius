@@ -598,7 +598,8 @@ impl AppView {
                                 let (model, effort, effective) = self.manager_run_labels(id);
                                 let run = &self.pending_manager_run;
                                 let (model_set, effort_set) = (matches!(run.model, Setting::Value(_)), matches!(run.effort, Setting::Value(_)));
-                                el.child(self.dropdown("manager-model", "Model", model, model_set, "alt-l", || Box::new(CycleTaskModel), cx))
+                                el.child(self.dropdown("manager-mode", "Default mode", self.pending_manager_mode.label().to_string(), true, "alt-o", || Box::new(CycleTaskMode), cx))
+                                    .child(self.dropdown("manager-model", "Model", model, model_set, "alt-l", || Box::new(CycleTaskModel), cx))
                                     .child(self.dropdown("manager-effort", "Effort", effort, effort_set, "alt-e", || Box::new(CycleTaskEffort), cx))
                                     .child(
                                         h().w_full().min_w_0().gap(px(6.)).text_size(px(11.5))

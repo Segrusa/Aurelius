@@ -846,6 +846,8 @@ pub enum TaskChoice {
     /// New idea dialog: the project the idea is added to.
     IdeaDialogProject(ProjectId),
     Mode(Option<aurelius_domain::autonomy::AgentMode>),
+    /// Edit manager: the employee's default mode.
+    ManagerMode(aurelius_domain::autonomy::AgentMode),
     Model(Option<(aurelius_domain::ProviderId, String)>),
     Effort(Option<String>),
     /// Edit manager: the manager's default model (None: inherit).
@@ -1274,6 +1276,8 @@ pub struct AppView {
     pub pending_manager_run: aurelius_domain::connection::RunDefaults,
     /// Edit manager dialog: run its tasks one at a time, saved with the dialog.
     pub pending_manager_sequential: bool,
+    /// Edit manager dialog: the employee's default mode, saved with the dialog.
+    pub pending_manager_mode: aurelius_domain::autonomy::AgentMode,
     /// Edit manager dialog: the manager's layer for tasks given to it and for its
     /// subagents (indexed by `DelegationRow`), saved with the dialog.
     pub pending_manager_delegation: [aurelius_domain::connection::RunDefaults; 1],
@@ -1754,6 +1758,7 @@ impl AppView {
             schedules: Vec::new(),
             pending_manager_run: Default::default(),
             pending_manager_sequential: false,
+            pending_manager_mode: Default::default(),
             pending_manager_delegation: Default::default(),
             dropdown_bounds: Default::default(),
             dialog_folder: None,
@@ -3701,6 +3706,12 @@ impl AppView {
     /// Alt+O in the new task dialog: the mode dropdown (as the manager, Plan, Ask, Accept edits, Auto).
     fn on_cycle_task_mode(&mut self, _: &CycleTaskMode, window: &mut Window, cx: &mut Context<Self>) {
         use aurelius_domain::autonomy::AgentMode;
+        if let Overlay::Dialog(DialogKind::EditManager { .. }) = self.overlay {
+            let current = self.pending_manager_mode;
+            let items: MenuItems = [AgentMode::Ask, AgentMode::AcceptEdits, AgentMode::Auto, AgentMode::Plan].into_iter().map(|m| Self::task_option(m.label(), None, TaskChoice::ManagerMode(m), current == m)).collect();
+            self.open_dropdown("manager-mode", items, window, cx);
+            return;
+        }
         if self.task_dialog_project().is_none() && !self.give_work_open() {
             return;
         }
@@ -5291,6 +5302,7 @@ impl AppView {
                 TaskChoice::IdeasProject(p) => self.ideas_project_filter = p,
                 TaskChoice::IdeaDialogProject(p) => self.pending_idea_project = Some(p),
                 TaskChoice::Mode(m) => self.pending_task_run.mode = m,
+                TaskChoice::ManagerMode(m) => self.pending_manager_mode = m,
                 TaskChoice::Model(m) => {
                     self.pending_task_run.connection_id = m.as_ref().map(|(c, _)| *c);
                     self.pending_task_run.model = m.map(|(_, m)| m);
@@ -6152,6 +6164,30 @@ impl AppView {
         self.open_dialog(DialogKind::NewProject, window, cx);
     }
 
+    /// The Edit manager dialog of an employee (its page, or the Edit button in the Employees list).
+    pub fn open_edit_manager(&mut self, manager: ManagerRef, window: &mut Window, cx: &mut Context<Self>) {
+        match self.real_manager(manager).cloned() {
+            Some(m) => {
+                self.open_dialog(DialogKind::EditManager { id: m.id, version: m.version }, window, cx);
+                // Its instruction versions are asked again each time it opens.
+                self.instruction_versions_requested = None;
+                self.pending_manager_run = self.manager_defaults(m.id);
+                self.pending_manager_delegation = DelegationRow::ALL.map(|row| self.run_layer(aurelius_domain::connection::ConfigScope::Employee(m.id), row.purpose()).unwrap_or_default());
+                self.pending_manager_sequential = m.sequential_tasks;
+                self.pending_manager_mode = m.agent_mode;
+                self.pending_reports_to = m.reports_to;
+                let title = m.title.clone().unwrap_or_default();
+                self.title_input.update(cx, |input, cx| input.set_value(title, window, cx));
+                self.plugins_for_manager(m.id);
+                self.name_input.update(cx, |input, cx| input.set_value(m.name.clone(), window, cx));
+                self.role_input.update(cx, |input, cx| input.set_value(m.role.clone(), window, cx));
+                let instructions = m.instructions.clone().unwrap_or_default();
+                self.instructions_input.update(cx, |input, cx| input.set_value(instructions, window, cx));
+            }
+            None => self.notify_user("Sample employees can't be edited.", true, cx),
+        }
+    }
+
     fn on_edit(&mut self, _: &EditItem, window: &mut Window, cx: &mut Context<Self>) {
         if self.on_ideas_screen() {
             match self.selected_idea() {
@@ -6176,25 +6212,7 @@ impl AppView {
             return;
         }
         if let Page::Employee(manager) = self.screen {
-            match self.real_manager(manager).cloned() {
-                Some(m) => {
-                    self.open_dialog(DialogKind::EditManager { id: m.id, version: m.version }, window, cx);
-                    // Its instruction versions are asked again each time it opens.
-                    self.instruction_versions_requested = None;
-                    self.pending_manager_run = self.manager_defaults(m.id);
-                    self.pending_manager_delegation = DelegationRow::ALL.map(|row| self.run_layer(aurelius_domain::connection::ConfigScope::Employee(m.id), row.purpose()).unwrap_or_default());
-                    self.pending_manager_sequential = m.sequential_tasks;
-                    self.pending_reports_to = m.reports_to;
-                    let title = m.title.clone().unwrap_or_default();
-                    self.title_input.update(cx, |input, cx| input.set_value(title, window, cx));
-                    self.plugins_for_manager(m.id);
-                    self.name_input.update(cx, |input, cx| input.set_value(m.name.clone(), window, cx));
-                    self.role_input.update(cx, |input, cx| input.set_value(m.role.clone(), window, cx));
-                    let instructions = m.instructions.clone().unwrap_or_default();
-                    self.instructions_input.update(cx, |input, cx| input.set_value(instructions, window, cx));
-                }
-                None => self.notify_user("Sample employees can't be edited.", true, cx),
-            }
+            self.open_edit_manager(manager, window, cx);
             return;
         }
         self.on_rename(window, cx);
@@ -6468,6 +6486,8 @@ impl AppView {
                 self.save_manager_defaults(id);
                 self.save_manager_delegation(id);
                 let sequential_tasks = self.take_manager_sequential(id);
+                let mode = self.pending_manager_mode;
+                self.remember_mode(Some(id), Some(mode));
                 // An empty title clears it.
                 let title = self.title_input.read(cx).value().trim().to_string();
                 // The reporting line is its own command: sent after the update, which checks the manager's version.

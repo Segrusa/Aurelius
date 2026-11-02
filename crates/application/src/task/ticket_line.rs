@@ -114,8 +114,8 @@ pub(crate) fn column_line_with(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>,
     let name = crate::conversation::discussion::actor_name(tx, by)?;
     let (from_name, to_name) = (column_name(tx, from)?, column_name(tx, to)?);
     let text = match what {
-        Some(what) => format!("{name} {what} · {from_name} → {to_name}"),
-        None => format!("{name} moved {from_name} → {to_name}"),
+        Some(what) => format!("{name} {what} — the ticket moved from {from_name} to {to_name}"),
+        None => format!("{name} moved the ticket from {from_name} to {to_name}"),
     };
     let mut line = SystemLine::new(SystemLineKind::Moved);
     (line.by, line.from, line.to) = (Some(name), Some(from_name), Some(to_name));
@@ -147,8 +147,8 @@ pub(crate) fn owner_line(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>, owner
     let owner_name = crate::conversation::discussion::employee_name(tx, owner)?;
     let reason = reason.map(str::trim).filter(|r| !r.is_empty());
     let text = match reason {
-        Some(reason) => format!("{name} chose {owner_name} as owner: {reason}"),
-        None => format!("{name} chose {owner_name} as owner"),
+        Some(reason) => format!("{name} made {owner_name} the owner of this ticket. Reason: {reason}"),
+        None => format!("{name} made {owner_name} the owner of this ticket"),
     };
     let mut line = SystemLine::new(SystemLineKind::Delegated);
     (line.from, line.to, line.by) = (Some(name), Some(owner_name), None);
@@ -167,7 +167,7 @@ pub(crate) fn delegated_line(tx: &Tx<'_>, parent: TaskId, child: TaskId, from: &
     let Some(ticket) = ticket_of(tx, parent)? else { return Ok(vec![]) };
     let mut line = SystemLine::new(SystemLineKind::Delegated);
     (line.from, line.to, line.task_id) = (Some(from.to_owned()), Some(to.to_owned()), Some(child));
-    crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{from} delegated “{title}” to {to}"))
+    crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{from} gave the task “{title}” to {to}"))
 }
 
 /// How much of a sub-task's report its line in the discussion shows: a short summary, not the report.
@@ -182,10 +182,10 @@ pub(crate) fn sub_task_line(tx: &Tx<'_>, task: TaskId, who: &str, title: &str, t
     }
     let gist = report_gist(text, title);
     let text = match (succeeded, gist.is_empty()) {
-        (true, true) => format!("{who} reported on “{title}”"),
-        (true, false) => format!("{who} reported on “{title}”: {gist}"),
-        (false, true) => format!("{who}'s task “{title}” failed"),
-        (false, false) => format!("{who}: {gist}"),
+        (true, true) => format!("{who} finished the task “{title}”"),
+        (true, false) => format!("{who} finished the task “{title}”. Report: {gist}"),
+        (false, true) => format!("{who} could not finish the task “{title}”"),
+        (false, false) => format!("{who} could not finish the task “{title}”. Reason: {gist}"),
     };
     let mut line = SystemLine::new(SystemLineKind::Reported);
     (line.from, line.task_id) = (Some(who.to_owned()), Some(task));
@@ -232,9 +232,9 @@ pub(crate) fn on_status(tx: &Tx<'_>, task: TaskId, status: TaskStatus, waiting_r
     let mut notices = vec![ticket_event(tx, ticket, project, EventKind::TicketMoved, by, json!({ "from": column, "to": to, "reason": status.as_str() }))?];
     // Plan review and Review get the line of the plan or the report instead (`plan_review`, `reported`).
     let what = match (status, column) {
-        (TaskStatus::Failed, _) => Some("could not finish the main task"),
-        (TaskStatus::Running, ColumnKind::Todo) => Some("started working"),
-        (TaskStatus::Running, ColumnKind::Testing) => Some("works on it after the failed tests"),
+        (TaskStatus::Failed, _) => Some("could not finish the ticket's main task"),
+        (TaskStatus::Running, ColumnKind::Todo) => Some("started working on the ticket"),
+        (TaskStatus::Running, ColumnKind::Testing) => Some("is working on the ticket again after the failed tests"),
         (TaskStatus::Review, _) => Some("reported"),
         _ => None,
     };
@@ -250,7 +250,7 @@ fn failed_in_place(tx: &Tx<'_>, task: TaskId, ticket: TicketId) -> Result<Vec<Ev
     let name = crate::conversation::discussion::actor_name(tx, worked_by(tx, task)?)?;
     let mut line = SystemLine::new(SystemLineKind::Reported);
     (line.from, line.task_id) = (Some(name.clone()), Some(task));
-    crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{name} could not finish the main task · Start makes a new one"))
+    crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{name} could not finish the ticket's main task. Press Start to begin a new attempt."))
 }
 
 /// The hook of `task_line::set_employee`: a hand-over of the main task makes the
@@ -269,7 +269,7 @@ pub(crate) fn on_employee(tx: &Tx<'_>, task: TaskId, employee: Option<EmployeeId
         let (from, to) = (crate::conversation::discussion::employee_name(tx, before)?, crate::conversation::discussion::employee_name(tx, after)?);
         let mut line = SystemLine::new(SystemLineKind::Delegated);
         (line.from, line.to, line.task_id) = (Some(from.clone()), Some(to.clone()), Some(task));
-        notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{from} handed the ticket over to {to}"))?);
+        notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{from} handed the ticket over to {to}, who is now the owner"))?);
     }
     notices.extend(crate::conversation::ticket_channel::sync(tx, ticket, by)?);
     Ok(notices)

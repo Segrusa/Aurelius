@@ -61,6 +61,15 @@ impl AppView {
                     let id = m.id;
                     let pinned = self.employee_pins.contains(&id);
                     self.employee_row(("employee", n), 0, m, None, cx).child(
+                        h().id(("employee-edit", n)).flex_none().h(px(24.)).px(px(8.)).items_center().rounded(px(5.)).cursor_pointer().text_size(px(12.)).text_color(c(theme::MUTED))
+                            .hover(|s| s.bg(c(theme::BORDER)))
+                            .tooltip(ui::tip("Edit this employee's settings", None))
+                            .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                                cx.stop_propagation();
+                                this.open_edit_manager(crate::app::ManagerRef::Real(id), w, cx);
+                            }))
+                            .child("Edit"),
+                    ).child(
                         h().id(("employee-pin", n)).flex_none().size(px(24.)).justify_center().rounded(px(5.)).cursor_pointer()
                             .hover(|s| s.bg(c(theme::BORDER)))
                             .tooltip(ui::tip(if pinned { "Unpin from the sidebar" } else { "Pin to the sidebar" }, None))

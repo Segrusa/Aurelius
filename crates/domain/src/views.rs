@@ -877,25 +877,25 @@ impl SystemLine {
         let number = ticket.map(|n| format!("#{n}"));
         match self.kind {
             SystemLineKind::Delegated => format!(
-                "{} delegated a task to {}",
+                "{} gave a task to {}",
                 or(&self.from, "An employee"),
                 or(&self.to, "a colleague")
             ),
-            SystemLineKind::Reported => format!("{} reported", or(&self.from, "A colleague")),
+            SystemLineKind::Reported => format!("{} reported back on a task", or(&self.from, "A colleague")),
             SystemLineKind::Moved => match (&self.from, &self.to) {
-                (Some(from), Some(to)) => format!("{by} moved {from} → {to}"),
-                (_, Some(to)) => format!("{by} moved to {to}"),
+                (Some(from), Some(to)) => format!("{by} moved the ticket from {from} to {to}"),
+                (_, Some(to)) => format!("{by} moved the ticket to {to}"),
                 _ => format!("{by} moved the ticket"),
             },
             SystemLineKind::Plan => format!(
-                "{} handed in a plan · waiting for a board member",
+                "{} handed in a plan. It waits for a board member to approve it",
                 or(&self.from, "The owner")
             ),
             SystemLineKind::Review => format!(
-                "{} handed in the report · Review",
+                "{} finished the work and handed in the report. It is ready for your review",
                 or(&self.from, "The owner")
             ),
-            SystemLineKind::Done => format!("{by} put it on Done"),
+            SystemLineKind::Done => format!("{by} accepted the report and moved the ticket to Done"),
             SystemLineKind::CreatedFrom => match &self.by {
                 Some(b) => format!(
                     "{} created from a message · {b}",
@@ -910,8 +910,8 @@ impl SystemLine {
                 "{by} created {} from a message",
                 number.as_deref().unwrap_or("a ticket")
             ),
-            SystemLineKind::Summary => "Summary saved to project memory".to_string(),
-            SystemLineKind::SummaryFailed => "The summary for project memory failed".to_string(),
+            SystemLineKind::Summary => "A summary of this ticket was saved to project memory".to_string(),
+            SystemLineKind::SummaryFailed => "The summary of this ticket could not be saved to project memory".to_string(),
             SystemLineKind::Limit => {
                 format!("Limit reached: {} was not woken.", or(&self.to, "nobody"))
             }

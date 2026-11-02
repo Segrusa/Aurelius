@@ -372,7 +372,7 @@ fn a_manager_starts_a_backlog_ticket_and_the_events_name_the_employee() {
         assert_eq!((actor_kind.as_str(), actor.as_deref()), ("employee", Some(s.orion.to_string().as_str())), "{kind}");
         assert_eq!(meta["by"]["employee_id"], s.orion.to_string(), "{kind}");
     }
-    assert!(discussion_text(&s, t).contains("Orion started it"));
+    assert!(discussion_text(&s, t).contains("Orion started the ticket"));
     // The dispatcher is asked to choose the owner: a triage job is queued, as after a board member's Start.
     let jobs: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM jobs WHERE kind = 'ticket.triage'", [], |r| r.get(0))?)).unwrap();
     assert_eq!(jobs, 1);

@@ -277,9 +277,9 @@ async fn a_report_goes_to_testing_and_a_green_verdict_of_the_test_task_to_review
     assert_eq!(moves(dir.path(), id), ["todo", "doing", "testing", "review"]);
     assert_eq!(verdicts(dir.path(), id), [(true, test.id.to_string())]);
     let said = lines(&client, id).await;
-    assert!(said.contains(&"Builder reported · Doing → Testing".to_string()), "{said:#?}");
+    assert!(said.contains(&"Builder reported — the ticket moved from Doing to Testing".to_string()), "{said:#?}");
     assert!(said.contains(&"Pulse: the tests passed · 1093 passed, 0 failed, 16 ignored; log target/t/suite.log".to_string()), "{said:#?}");
-    assert_eq!(said.iter().filter(|t| t.ends_with("handed in the report · Review")).count(), 1, "{said:#?}");
+    assert_eq!(said.iter().filter(|t| t.ends_with("handed in the report. It is ready for your review")).count(), 1, "{said:#?}");
     // Once given, the verdict is closed: the same run is refused now.
     let (ok, text) = bridge.employee_act(run, verdict(false, "again")).await.unwrap();
     assert_eq!((ok, text.as_str()), (false, NOT_THE_TEST_TASK));
@@ -321,7 +321,7 @@ async fn a_red_verdict_sends_the_failures_to_the_owner_and_the_next_report_is_te
     assert_eq!((told.update.as_deref(), told.author.as_deref()), (Some("message"), Some("Pulse")), "said by the tester");
     let said = lines(&client, id).await;
     assert!(said.contains(&"Pulse: the tests failed · 2 new failures: login::empty_password, login::lockout".to_string()), "{said:#?}");
-    assert!(said.contains(&"Builder works on it after the failed tests · Testing → Doing".to_string()), "{said:#?}");
+    assert!(said.contains(&"Builder is working on the ticket again after the failed tests — the ticket moved from Testing to Doing".to_string()), "{said:#?}");
 
     // Green the second time: Review.
     let (ok, text) = bridge.employee_act(run, verdict(true, "1095 passed")).await.unwrap();
