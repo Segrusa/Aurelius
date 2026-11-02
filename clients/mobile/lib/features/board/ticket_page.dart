@@ -151,7 +151,7 @@ class _TicketViewState extends State<_TicketView> {
     final expired = link.claudeLogin?.status == ClaudeLoginStatus.expired;
     // The ◆ is the responsible's (B6); the buttons stay for anyone.
     final mine = needsMe(ticket, state, me: link.user?.id);
-    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired, waitsFor: waitsForOther(ticket, state, me: link.user?.id));
+    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired, others: decidedByOther(ticket, state, me: link.user?.id));
     final segment = conversation == null && _segment == _Segment.discussion ? _Segment.ticket : _segment;
     final responsibleOn = link.has(ticketResponsibleFeature);
     final followOn = link.has(ticketFollowFeature);

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:aurelius_mobile/core/hosts/host.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
+import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/channels.dart';
@@ -92,6 +93,7 @@ void main() {
     when(() => repo.link).thenAnswer((_) => const Stream.empty());
     when(() => repo.load()).thenAnswer((_) async => loadOf());
     when(() => repo.channels()).thenAnswer((_) async => channels);
+    when(() => repo.messageLocation(any())).thenThrow(const ProtocolException(ErrorCode.notFound, 'This message does not exist.'));
     when(() => repo.boardMembers()).thenAnswer((_) async => const [_ada]);
     when(() => repo.groupChat(channel: any(named: 'channel'))).thenAnswer((_) async => snapshotOf('c-42', messages: messages ?? _many));
     when(() => repo.messages(any())).thenAnswer((_) async => snapshotOf('c-42', messages: messages ?? _many));

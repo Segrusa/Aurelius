@@ -370,19 +370,45 @@ class _MessagesState extends State<_Messages> {
   /// [ChatView.revealMessage] was acted on: once, not again on every new message.
   bool _revealed = false;
 
-  /// Go to the message a link names once the messages are read; it can be gone by now.
+  /// The server was asked about a [ChatView.revealMessage] this read lacks: once.
+  bool _askedWhy = false;
+
+  /// Go to the message a link names once the messages are read. A read that
+  /// failed lacks it too, so it comes back here on the next read.
   void _reveal(ChatState state) {
     final target = widget.config.revealMessage;
     if (target == null || _revealed || state.loading) return;
-    _revealed = true;
     final message = state.messages.where((m) => m.id == target).firstOrNull;
+    if (message == null) {
+      if (!_askedWhy) {
+        _askedWhy = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_sayWhyMissing(target));
+        });
+      }
+      return;
+    }
+    _revealed = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (message == null) return toast(context, 'That message no longer exists.');
       final channel = widget.config.channel;
       unawaited(_list.currentState?.reveal(target));
       if (channel != null && channel.revealThread) channel.openThread?.call(context, message);
     });
+  }
+
+  /// Only the server knows a message is gone; anything else is not that.
+  Future<void> _sayWhyMissing(String messageId) async {
+    String text;
+    try {
+      await context.read<AureliusRepository>().messageLocation(messageId);
+      text = 'Could not show that message. Try again.';
+    } on ProtocolException catch (e) {
+      text = e.code == ErrorCode.notFound ? 'That message no longer exists.' : e.shown;
+    } on Object {
+      text = 'Could not show that message. Try again.';
+    }
+    if (mounted) toast(context, text);
   }
 
   @override

@@ -118,7 +118,7 @@ class TicketCard extends StatelessWidget {
     final done = state == TicketState.done;
     // The ◆ is the responsible's (B6); the line and the button stay for anyone.
     final mine = needsMe(ticket, state, me: board.me);
-    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired, waitsFor: waitsForOther(ticket, state, me: board.me));
+    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired, others: decidedByOther(ticket, state, me: board.me));
 
     final summary = [
       'Ticket ${ticket.number}, ${ticket.title}',
