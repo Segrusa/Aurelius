@@ -487,7 +487,7 @@ class AureliusConnection {
   }
 
   Future<HelloResult> _hello(String? token) async {
-    final body = await call(sessionHello(HelloParams(clientName: clientName, clientVersion: clientVersion, accepts: const ['activity_changes', 'team_channels', 'server_name', 'ticket_channels', 'chat_threads', 'chat_reactions', 'ticket_follow'], sessionToken: token)));
+    final body = await call(sessionHello(HelloParams(clientName: clientName, clientVersion: clientVersion, accepts: const ['activity_changes', 'team_channels', 'server_name', 'ticket_channels', 'chat_threads', 'chat_reactions', 'ticket_follow', 'message_edits'], sessionToken: token)));
     return (body as ResponseBodyHello).value;
   }
 
