@@ -17,6 +17,7 @@ import '../features/account/claude_login.dart' show ClaudeLoginPage;
 import '../features/board/board_page.dart';
 import '../features/board/board_settings_page.dart';
 import '../data/discussion.dart';
+import '../data/links.dart' show messageLocateFeature;
 import '../features/board/new_ticket_page.dart';
 import '../features/board/ticket_page.dart';
 import '../features/guidelines/guidelines_page.dart';
@@ -28,9 +29,12 @@ import '../features/dashboard/dashboard_page.dart';
 import '../features/more/more_page.dart';
 import '../features/more/recurring_page.dart';
 import '../features/tasks/tasks_page.dart';
+import '../features/links/link_actions.dart' show openAureliusLink, openMessageAt;
+import '../features/team/channel_link_page.dart';
 import '../features/team/team_page.dart';
 import '../features/inbox/approval_page.dart';
 import '../features/inbox/inbox_page.dart';
+import '../features/inbox/inbox_rows.dart' show pushPlace;
 import '../features/more/hosts_page.dart';
 import '../features/more/settings_page.dart';
 import '../features/onboarding/onboarding.dart';
@@ -113,7 +117,7 @@ class AppRouter {
       GoRoute(
         parentNavigatorKey: _root,
         path: '/ticket/:tid',
-        pageBuilder: (context, state) => routePage(state, TicketPage(ticketId: state.pathParameters['tid']!, discussion: state.uri.queryParameters['tab'] == 'discussion')),
+        pageBuilder: (context, state) => routePage(state, TicketPage(ticketId: state.pathParameters['tid']!, discussion: state.uri.queryParameters['tab'] == 'discussion', activity: state.uri.queryParameters['tab'] == 'activity', message: state.uri.queryParameters['message'])),
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'plan', pageBuilder: (context, state) => routePage(state, TicketPlanPage(ticketId: state.pathParameters['tid']!))),
           GoRoute(parentNavigatorKey: _root, path: 'report', pageBuilder: (context, state) => routePage(state, TicketReportPage(ticketId: state.pathParameters['tid']!))),
@@ -153,6 +157,12 @@ class AppRouter {
         parentNavigatorKey: _root,
         path: '/company',
         pageBuilder: (context, state) => routePage(state, CompanyOrgPage(initial: state.uri.queryParameters['view'])),
+      ),
+      // Where a link to a message in a channel lands (A5a).
+      GoRoute(
+        parentNavigatorKey: _root,
+        path: '/channel/:cid',
+        pageBuilder: (context, state) => routePage(state, ChannelLinkPage(conversationId: state.pathParameters['cid']!, message: state.uri.queryParameters['message'], thread: state.uri.queryParameters['thread'])),
       ),
       GoRoute(parentNavigatorKey: _root, path: '/projects', pageBuilder: (context, state) => routePage(state, const ProjectsPage())),
       GoRoute(parentNavigatorKey: _root, path: '/ideas', pageBuilder: (context, state) => routePage(state, const IdeasPage())),
@@ -223,12 +233,40 @@ class AppRouter {
         return;
       }
       _openApproval(aggregateId);
+    } else if (_openPersonal(data, repository)) {
+      return;
     } else if (taskId != null && projectId != null) {
       config.go('/home');
       config.push('/project/$projectId/task/$taskId');
     } else {
       config.go('/inbox');
     }
+  }
+
+  /// A push of the personal Inbox: the ticket or channel it names, at its place
+  /// (A3). It carries ids and the server's words only. False when it names neither.
+  bool _openPersonal(Map<String, dynamic> data, AureliusRepository repository) {
+    final messageId = data['message_id'] as String?;
+    final place = pushPlace(data);
+    if (place == null) return false;
+    config.go(data['ticket_id'] != null ? '/board' : '/team');
+    // A reply in a thread has its own place; only the server knows it.
+    final context = _root.currentContext;
+    if (messageId != null && context != null && context.mounted && repository.linkState.has(messageLocateFeature)) {
+      unawaited(openMessageAt(context, repository, messageId));
+    } else {
+      config.push(place);
+    }
+    return true;
+  }
+
+  /// Open a link from outside a page, once this host's app is up (a switch of
+  /// server, A5a; the operating system, A5b). False while there is no page yet.
+  bool openLink(String raw) {
+    final context = _root.currentContext;
+    if (context == null || !context.mounted) return false;
+    unawaited(openAureliusLink(context, raw));
+    return true;
   }
 
   void _openApproval(String approvalId) {

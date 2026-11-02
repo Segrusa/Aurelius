@@ -43,7 +43,7 @@ pub struct RowActions {
 /// channel itself (not a reply: no nested threads) can start a thread. Nothing in a
 /// closed channel, and nothing the server does not have.
 pub fn row_actions(m: &MessageView, caps: Caps) -> RowActions {
-    let open = !caps.read_only && m.system.is_none() && m.status != MessageStatus::Partial && !m.queued;
+    let open = !caps.read_only && m.system.is_none() && m.status != MessageStatus::Partial && !m.queued && m.deleted_at_ms.is_none();
     RowActions {
         react: open && caps.reactions,
         reply: open && caps.threads && m.thread_parent.is_none(),
@@ -244,6 +244,7 @@ mod tests {
 
     fn msg(text: &str) -> MessageView {
         MessageView {
+            edited_at_ms: None, deleted_at_ms: None, editable: false,
             id: MessageId::new(),
             ordinal: 1,
             role: MessageRole::Assistant,

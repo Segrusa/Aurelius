@@ -36,6 +36,7 @@ async fn employee(client: &Client, name: &str) -> EmployeeId {
 async fn create(client: &Client, project_id: ProjectId, title: &str, priority: TicketPriority) -> (TicketId, u32) {
     let made = client
         .create_ticket(CreateTicket {
+            responsible_user_id: None,
             confirm_secret: false,
             project_id,
             title: title.into(),
@@ -205,6 +206,7 @@ async fn a_board_member_adds_files_to_an_existing_ticket() {
     let path = |p: &std::path::Path| p.display().to_string();
     let made = client
         .create_ticket(CreateTicket {
+            responsible_user_id: None,
             confirm_secret: false,
             project_id: atlas,
             title: "Paste".into(),

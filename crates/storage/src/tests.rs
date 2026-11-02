@@ -43,13 +43,14 @@ fn newer_database_is_refused() {
 }
 
 #[test]
-fn a_database_of_an_older_release_is_refused() {
+fn a_database_of_a_higher_schema_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     drop(Store::open(dir.path()).unwrap());
+    let too_new = crate::migrate::supported_version() + 1;
     let conn = rusqlite::Connection::open(dir.path().join("data/aurelius.sqlite")).unwrap();
-    conn.execute("INSERT INTO schema_migrations VALUES (28, 'v0.6', 0)", []).unwrap();
+    conn.execute("INSERT INTO schema_migrations VALUES (?1, 'newer', 0)", [too_new]).unwrap();
     drop(conn);
-    assert!(matches!(Store::open(dir.path()), Err(StorageError::DatabaseTooNew { found: 28, supported }) if supported == crate::migrate::supported_version()));
+    assert!(matches!(Store::open(dir.path()), Err(StorageError::DatabaseTooNew { found, supported }) if found == too_new && supported == too_new - 1));
 }
 
 #[test]

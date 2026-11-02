@@ -12,6 +12,7 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/discussion.dart';
+import '../../data/links.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../chat/chat_bloc.dart';
@@ -19,30 +20,37 @@ import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../project/new_task_page.dart' show maxTaskFiles;
+import '../links/link_actions.dart';
 import '../markdown/links.dart';
 import '../team/team_page.dart' show runAuthorOf;
 import 'ticket_actions.dart';
 import 'ticket_bloc.dart';
 import 'ticket_text_dialog.dart';
 import 'detail_row.dart';
-import 'ticket_card.dart' show priorityColor, startWith;
+import 'ticket_card.dart' show WhoBlock, priorityColor, startWith;
 
 /// `/ticket/:tid` (§8): a full page with the ticket's fields, its tasks, its
 /// activity and, at the bottom, the actions of its column. With a server of
 /// Phase 2 also its discussion (ui-ontwerp Fase 2 §2), where the plan and the
 /// report are decided; [discussion] opens on it.
 class TicketPage extends StatelessWidget {
-  const TicketPage({super.key, required this.ticketId, this.discussion = false});
+  const TicketPage({super.key, required this.ticketId, this.discussion = false, this.activity = false, this.message});
 
   final String ticketId;
   final bool discussion;
+
+  /// Opens on the Activity: the `+n` of a row in the Inbox.
+  final bool activity;
+
+  /// A link to a message of its discussion: scroll to it there.
+  final String? message;
 
   @override
   Widget build(BuildContext context) => BlocProvider(
         // Another ticket on the same route (a `go`) gets its own bloc, not the last one's.
         key: ValueKey('ticket-$ticketId'),
         create: (context) => TicketBloc(context.read<AureliusRepository>(), ticketId),
-        child: _TicketView(key: ValueKey('ticket-view-$ticketId'), discussion: discussion),
+        child: _TicketView(key: ValueKey('ticket-view-$ticketId'), discussion: discussion, activity: activity, message: message),
       );
 }
 
@@ -83,16 +91,18 @@ Map<String, dynamic>? ticketTextUpdate(TicketView ticket, TicketTextEdit edit, {
 final _seen = <String, int>{};
 
 class _TicketView extends StatefulWidget {
-  const _TicketView({super.key, required this.discussion});
+  const _TicketView({super.key, required this.discussion, this.activity = false, this.message});
 
   final bool discussion;
+  final bool activity;
+  final String? message;
 
   @override
   State<_TicketView> createState() => _TicketViewState();
 }
 
 class _TicketViewState extends State<_TicketView> {
-  late _Segment _segment = widget.discussion ? _Segment.discussion : _Segment.ticket;
+  late _Segment _segment = widget.activity ? _Segment.activity : widget.discussion ? _Segment.discussion : _Segment.ticket;
 
   /// The discussion's composer: Send back and Pas aan take their text from it (MU2-05/06).
   final _composer = TextEditingController();
@@ -123,7 +133,14 @@ class _TicketViewState extends State<_TicketView> {
     if (ticket == null) {
       return Scaffold(
         appBar: const GlassAppBar(title: Text('Ticket')),
-        body: page.error != null
+        body: page.notFound || page.denied
+            ? EmptyState(
+                page.notFound ? 'Ticket not found' : 'No access',
+                key: const ValueKey('ticket-unreachable'),
+                detail: page.notFound ? "This ticket doesn't exist on ${context.read<AureliusRepository>().host.name}. It may have been deleted from the Backlog." : "You don't have access to this ticket.",
+                action: FilledButton(key: const ValueKey('ticket-go-to-board'), onPressed: () => context.go('/board'), child: const Text('Go to Board')),
+              )
+            : page.error != null
             ? ErrorRetry(page.error!, onRetry: () => context.read<TicketBloc>().add(const TicketRefreshed()))
             : const Center(child: CircularProgressIndicator()),
       );
@@ -136,8 +153,14 @@ class _TicketViewState extends State<_TicketView> {
     final owner = ticket.ownerName ?? employeeName(company, ticket.ownerEmployeeId);
     final dispatcher = dispatcherName(company, ticket.projectId);
     final expired = link.claudeLogin?.status == ClaudeLoginStatus.expired;
-    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired);
+    // The ◆ is the responsible's (B6); the buttons stay for anyone.
+    final mine = needsMe(ticket, state, me: link.user?.id);
+    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired, others: decidedByOther(ticket, state, me: link.user?.id));
     final segment = conversation == null && _segment == _Segment.discussion ? _Segment.ticket : _segment;
+    final responsibleOn = link.has(ticketResponsibleFeature);
+    final followOn = link.has(ticketFollowFeature);
+    // Yours to do or not, anyone can decide (B6, §1.4).
+    final othersNote = state.needsYou && !mine ? '${responsibleLabel(ticket)} is responsible. You can decide too.' : null;
     final scaffold = Scaffold(
       appBar: GlassAppBar(
         title: Text('#${ticket.number} · ${ticket.projectName}'),
@@ -146,6 +169,7 @@ class _TicketViewState extends State<_TicketView> {
             tooltip: 'Ticket actions',
             items: () => [
               GlassMenuItem('copy', 'Copy #${ticket.number}'),
+              if (link.has(messageLocateFeature)) const GlassMenuItem('link', 'Copy link'),
               if (ticket.column != ColumnKind.backlog && ticket.column != ColumnKind.done && online) GlassMenuItem('backlog', ticket.column == ColumnKind.planReview ? 'Afwijzen' : 'Back to Backlog', danger: true),
               if ((ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.done) && online) GlassMenuItem('archive', 'Archive'),
               // P-23: the main task's own conversation stays reachable.
@@ -156,6 +180,8 @@ class _TicketViewState extends State<_TicketView> {
                 case 'copy':
                   await Clipboard.setData(ClipboardData(text: '#${ticket.number} ${ticket.title}'));
                   if (context.mounted) toast(context, 'Copied #${ticket.number}.');
+                case 'link':
+                  await copyTicketLink(context, ticket.id, ticket.number);
                 case 'main':
                   await context.push('/conversation/${root!.conversationId}?e=${root.employeeId ?? ''}');
                 case 'backlog':
@@ -178,11 +204,13 @@ class _TicketViewState extends State<_TicketView> {
               online: online,
               onReviewPlan: () => _reviewPlan(ticket),
               onSendBack: conversation == null ? null : () => _toDiscussion('Write what needs to change, then Send back.'),
+              note: othersNote,
             ),
       body: segment == _Segment.discussion
           ? Column(children: [
+              if (responsibleOn) Padding(padding: const EdgeInsets.fromLTRB(20, 4, 20, 0), child: WhoBlock(ticket: ticket, owner: owner, me: link.user?.id, keyId: 'strip')),
               _segments(context, conversation),
-              Expanded(child: _discussion(context, ticket, state, owner, online)),
+              Expanded(child: _discussion(context, ticket, state, owner, online, othersNote)),
             ])
           : RefreshIndicator.adaptive(
         onRefresh: () async => context.read<TicketBloc>().add(const TicketRefreshed()),
@@ -202,11 +230,13 @@ class _TicketViewState extends State<_TicketView> {
                   decoration: BoxDecoration(color: Tokens.cell2, borderRadius: BorderRadius.circular(999)),
                   child: Text(_columnName(page, ticket), style: const TextStyle(fontWeight: FontWeight.w600)),
                 ),
-                if (line != null && state != TicketState.done) Text(state.needsYou ? '◆ $line' : line, style: TextStyle(color: state.needsYou ? Tokens.accentText : Tokens.label2, fontWeight: state.needsYou ? FontWeight.w600 : null)),
+                if (line != null && state != TicketState.done) Text(mine ? '◆ $line' : line, style: TextStyle(color: mine ? Tokens.accentText : Tokens.label2, fontWeight: mine ? FontWeight.w600 : null)),
               ]),
             ),
+            // On every tab, so a reviewer sees who does what in the discussion too (P-75).
+            if (responsibleOn) Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: WhoBlock(ticket: ticket, owner: owner, me: link.user?.id, keyId: 'strip')),
             _segments(context, conversation),
-            if (segment == _Segment.ticket) ..._ticketTab(context, page, company, ticket, state, owner, dispatcher, online, conversation != null) else ..._activityTab(page),
+            if (segment == _Segment.ticket) ..._ticketTab(context, page, company, ticket, state, owner, dispatcher, online, conversation != null, mine: mine, responsibleOn: responsibleOn, followOn: followOn) else ..._activityTab(page),
           ],
         ),
       ),
@@ -250,11 +280,12 @@ class _TicketViewState extends State<_TicketView> {
 
   /// The Discussion tab (MU2-01..06): the chat of the ticket, read-only on Done
   /// and when archived (B7).
-  Widget _discussion(BuildContext context, TicketView ticket, TicketState state, String? owner, bool online) {
+  Widget _discussion(BuildContext context, TicketView ticket, TicketState state, String? owner, bool online, String? note) {
     final readOnly = discussionReadOnly(ticket);
     final member = context.select<ConnectionBloc, bool>((b) => b.state.user != null);
     return ChatView(
       key: ValueKey('discussion-${ticket.id}'),
+      revealMessage: widget.message,
       emptyTitle: 'Discuss the ticket here',
       emptyDetail: 'Employees join when you @mention them or when it starts.',
       composer: readOnly == null,
@@ -265,7 +296,7 @@ class _TicketViewState extends State<_TicketView> {
       composerText: _composer,
       composerActions: !member || readOnly != null || (ticket.column != ColumnKind.planReview && ticket.column != ColumnKind.review)
           ? null
-          : (context, text) => _Decisions(ticket: ticket, text: text, online: online),
+          : (context, text) => _Decisions(ticket: ticket, text: text, online: online, note: note),
     );
   }
 
@@ -295,7 +326,7 @@ class _TicketViewState extends State<_TicketView> {
           ]),
       ];
 
-  List<Widget> _ticketTab(BuildContext context, TicketPageState page, CompanyState company, TicketView ticket, TicketState state, String? owner, String? dispatcher, bool online, bool discussion) {
+  List<Widget> _ticketTab(BuildContext context, TicketPageState page, CompanyState company, TicketView ticket, TicketState state, String? owner, String? dispatcher, bool online, bool discussion, {required bool mine, required bool responsibleOn, required bool followOn}) {
     final root = page.root;
     final editable = online && ticket.column != ColumnKind.done;
     final running = root != null && (root.status == TaskStatus.running || root.hasLiveRun);
@@ -303,6 +334,19 @@ class _TicketViewState extends State<_TicketView> {
     final deadline = deadlineOf(ticket);
     final project = company.project(ticket.projectId);
     final inactive = dispatcher == null ? inactiveDispatcher(company, ticket.projectId) : null;
+    final ownerRow = DetailRow(
+      key: const ValueKey('ticket-row-owner'),
+      label: 'Owner',
+      value: owner ?? (ticket.column == ColumnKind.backlog ? 'Dispatcher${dispatcher == null ? '' : ' ($dispatcher)'}' : 'No owner'),
+      onTap: online && (ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.todo) ? () => chooseOwner(context, ticket) : null,
+    );
+    final createdRow = DetailRow(label: 'Created by', value: '${ticket.createdByUsername} · ${DateFormat.MMMd().format(DateTime.fromMillisecondsSinceEpoch(ticket.createdAtMs))}');
+    // MU3-10 AC4: whose subscription it uses, in words; never a choice.
+    final loginRow = DetailRow(
+      key: const ValueKey('ticket-row-login'),
+      label: 'Runs on',
+      value: ticket.loginUser == context.read<ConnectionBloc>().state.user?.id ? 'Your Claude login' : "${ticket.loginUsername}'s Claude login",
+    );
     final ownDispatcher = project?.dispatcherEmployeeId != null && project!.dispatcherEmployeeId == effectiveDispatcher(project, company.company?.dispatcherEmployeeId, company.employees);
     return [
       if (state == TicketState.done)
@@ -315,8 +359,8 @@ class _TicketViewState extends State<_TicketView> {
       if (state == TicketState.needsOwner)
         _Notice(
           key: const ValueKey('ticket-needs-owner'),
-          attention: true,
-          title: '◆ Needs you · choose an owner',
+          attention: mine,
+          title: mine ? '◆ Needs you · choose an owner' : 'Choose an owner',
           body: dispatcher != null
               ? '$dispatcher could not choose an employee.'
               : '${inactive ?? 'No dispatcher is set for this project'}. Started tickets wait in Todo until you choose an owner.',
@@ -324,14 +368,14 @@ class _TicketViewState extends State<_TicketView> {
       if (state == TicketState.ownerUnknown)
         _Notice(
           key: const ValueKey('ticket-owner-unknown'),
-          attention: true,
-          title: '◆ Needs you · choose an owner',
+          attention: mine,
+          title: mine ? '◆ Needs you · choose an owner' : 'Choose an owner',
           body: 'Could not check whether ${dispatcher ?? 'the dispatcher'} is still choosing. Choose an employee yourself, or try again.',
           action: ('Try again', () => context.read<TicketBloc>().add(const TicketRefreshed())),
         ),
       if (state == TicketState.queued) _Notice(title: 'Queued for ${owner ?? 'its owner'}.'),
       if (state == TicketState.failed)
-        _Notice(key: const ValueKey('ticket-failed'), attention: true, title: '✕ The main task failed', body: root?.result ?? 'Start again for a new main task; the old one stays linked.'),
+        _Notice(key: const ValueKey('ticket-failed'), attention: mine, title: '✕ The main task failed', body: root?.result ?? 'Start again for a new main task; the old one stays linked.'),
       if (state == TicketState.needsYourLogin)
         _Notice(
           key: const ValueKey('ticket-needs-login'),
@@ -353,9 +397,9 @@ class _TicketViewState extends State<_TicketView> {
           title: '⏸ ${state.line(login: ticket.loginUsername, mine: ticket.loginUser == context.read<ConnectionBloc>().state.user?.id, untilMs: root?.waitingUntilMs)}',
           body: "Runs only on the subscription of the login it runs on. It goes on by itself after the reset.",
         ),
-      if (state == TicketState.waitingForYou) _Notice(attention: true, title: '◆ Waiting for your approval', body: 'Answer it in the Inbox.', action: ('Open Inbox', () => context.go('/inbox'))),
+      if (state == TicketState.waitingForYou) _Notice(attention: mine, title: mine ? '◆ Waiting for your approval' : 'Waiting for an approval', body: 'Answer it in the Inbox.', action: ('Open Inbox', () => context.go('/inbox'))),
       if (state == TicketState.planReview)
-        _Notice(attention: true, title: '◆ A plan waits for you', body: 'Approve it, or send it back with what needs to change.', action: ('Review plan', () => _reviewPlan(ticket))),
+        _Notice(attention: mine, title: mine ? '◆ A plan waits for you' : 'A plan waits for review', body: 'Approve it, or send it back with what needs to change.', action: ('Review plan', () => _reviewPlan(ticket))),
       if (state == TicketState.testing)
         _Notice(
           key: const ValueKey('ticket-testing'),
@@ -376,6 +420,18 @@ class _TicketViewState extends State<_TicketView> {
       ],
       if (ticket.reviewFeedback != null && ticket.column != ColumnKind.done)
         _Notice(title: 'Your last feedback', body: ticket.reviewFeedback),
+      if (responsibleOn || followOn) ...[
+        GroupHeader('Who', caps: true),
+        InsetGroup(children: [
+          if (responsibleOn) ...[
+            _responsibleRow(context, ticket, editable),
+            ownerRow,
+            loginRow,
+            createdRow,
+          ],
+          if (followOn) ..._followRows(context, page, ticket, online),
+        ]),
+      ],
       GroupHeader('Description', caps: true, action: editable ? 'Edit' : null, onAction: () => _editDescription(context, ticket)),
       InsetGroup(padding: const EdgeInsets.all(16), children: [
         (ticket.description ?? '').trim().isEmpty ? Text('No description.', style: TextStyle(color: Tokens.label2)) : MessageMarkdown(data: ticket.description!, scope: null, selectable: true),
@@ -384,12 +440,7 @@ class _TicketViewState extends State<_TicketView> {
       InsetGroup(children: [
         DetailRow(key: const ValueKey('ticket-row-title'), label: 'Title', value: ticket.title, onTap: editable ? () => _editTitle(context, ticket) : null),
         DetailRow(key: const ValueKey('ticket-row-priority'), label: 'Priority', value: ticket.priority.mark ?? 'Normal', color: priorityColor(ticket.priority), onTap: editable ? () => _editPriority(context, ticket) : null),
-        DetailRow(
-          key: const ValueKey('ticket-row-owner'),
-          label: 'Owner',
-          value: owner ?? (ticket.column == ColumnKind.backlog ? 'Dispatcher${dispatcher == null ? '' : ' ($dispatcher)'}' : 'No owner'),
-          onTap: online && (ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.todo) ? () => chooseOwner(context, ticket) : null,
-        ),
+        if (!responsibleOn) ownerRow,
         DetailRow(key: const ValueKey('ticket-row-dispatcher'), label: 'Dispatcher', value: dispatcher == null ? 'None${inactive == null ? '' : ' · $inactive'}' : '$dispatcher · ${ownDispatcher ? 'this project' : 'company default'}', onTap: () => context.push('/project/${ticket.projectId}')),
         DetailRow(
           key: const ValueKey('ticket-row-mode'),
@@ -406,13 +457,7 @@ class _TicketViewState extends State<_TicketView> {
         DetailRow(key: const ValueKey('ticket-row-labels'), label: 'Labels', value: ticket.labels.isEmpty ? 'None' : ticket.labels.join(', '), onTap: editable ? () => _editLabels(context, ticket) : null),
         DetailRow(key: const ValueKey('ticket-row-deadline'), label: 'Deadline', value: deadline?.text ?? 'None', color: deadline?.late ?? false ? Tokens.negative : null, onTap: editable ? () => _editDeadline(context, ticket) : null),
         DetailRow(label: 'Attachments', value: ticket.attachments.isEmpty ? 'None' : '${ticket.attachments.length} file${ticket.attachments.length == 1 ? '' : 's'}'),
-        DetailRow(label: 'Created by', value: '${ticket.createdByUsername} · ${DateFormat.MMMd().format(DateTime.fromMillisecondsSinceEpoch(ticket.createdAtMs))}'),
-        // MU3-10 AC4: whose subscription it uses, in words; never a choice.
-        DetailRow(
-          key: const ValueKey('ticket-row-login'),
-          label: 'Runs on',
-          value: ticket.loginUser == context.read<ConnectionBloc>().state.user?.id ? 'Your Claude login' : "${ticket.loginUsername}'s Claude login",
-        ),
+        if (!responsibleOn) ...[createdRow, loginRow],
       ]),
       GroupHeader('Tasks', caps: true, count: tree.length),
       if (tree.isEmpty)
@@ -439,6 +484,58 @@ class _TicketViewState extends State<_TicketView> {
         Padding(padding: const EdgeInsets.fromLTRB(32, 0, 32, 16), child: Text('Arrives in a later version. Until then, use the conversation.', style: TextStyle(color: Tokens.label2))),
       ],
     ];
+  }
+
+  /// Followers and the switch Following (§3.2): the responsible's stays on and
+  /// off limits (B10). A failed read says so; the switch waits for a good one.
+  List<Widget> _followRows(BuildContext context, TicketPageState page, TicketView ticket, bool online) {
+    final followers = page.followers;
+    final me = context.read<ConnectionBloc>().state.user?.id;
+    final mine = followers?.where((f) => f.userId == me).firstOrNull;
+    final following = mine != null;
+    final known = followers != null;
+    final bloc = context.read<TicketBloc>();
+    Future<void> set(bool on) async {
+      if (await followTicket(context, ticket, on: on) && !bloc.isClosed) bloc.add(const TicketRefreshed());
+    }
+
+    return [
+      DetailRow(
+        key: const ValueKey('ticket-row-followers'),
+        label: 'Followers',
+        value: page.followersFailed && !known ? 'Could not load · Try again' : known ? '${followers.length}' : '',
+        onTap: known ? () => showFollowers(context, ticket, followers) : () => bloc.add(const TicketRefreshed()),
+      ),
+      SwitchListTile.adaptive(
+        key: const ValueKey('ticket-following'),
+        title: const Text('Following'),
+        subtitle: Text(followingNote(ticket, reason: mine?.reason, me: me), key: const ValueKey('ticket-following-note'), style: TextStyle(color: Tokens.label2, fontSize: 13)),
+        value: following || !canUnfollow(ticket, me: me),
+        onChanged: online && known && canUnfollow(ticket, me: me) ? set : null,
+      ),
+    ];
+  }
+
+  /// The field Responsible (§1.4, §2.2): its picker, the disabled one's note and read-only on Done.
+  Widget _responsibleRow(BuildContext context, TicketView ticket, bool editable) {
+    final me = context.read<ConnectionBloc>().state.user?.id;
+    final disabled = ticket.responsibleDisabled ?? false;
+    final name = responsibleLabel(ticket, me: me);
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      DetailRow(key: const ValueKey('ticket-row-responsible'), label: 'Responsible', value: name ?? 'No one', onTap: editable ? () => chooseResponsible(context, ticket) : null),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(
+            disabled ? '${ticket.responsibleUsername} is disabled and gets no updates. Choose someone else.' : ticket.column == ColumnKind.done ? 'Done tickets are closed.' : responsibleExplained,
+            key: const ValueKey('ticket-responsible-note'),
+            style: TextStyle(color: Tokens.label2, fontSize: 13),
+          ),
+          if (editable && name == null)
+            TextButton(key: const ValueKey('ticket-make-me-responsible'), style: TextButton.styleFrom(padding: EdgeInsets.zero), onPressed: () => setResponsible(context, ticket, me), child: const Text('Make me responsible')),
+        ]),
+      ),
+    ]);
   }
 
   Future<void> _editTitle(BuildContext context, TicketView ticket) async {
@@ -576,7 +673,7 @@ class _Notice extends StatelessWidget {
 
 /// The glass bar at the bottom (§8): at most two buttons, the main one right.
 class _ActionBar extends StatelessWidget {
-  const _ActionBar({required this.ticket, required this.state, required this.root, required this.online, required this.onReviewPlan, this.onSendBack});
+  const _ActionBar({required this.ticket, required this.state, required this.root, required this.online, required this.onReviewPlan, this.onSendBack, this.note});
 
   final TicketView ticket;
   final TicketState state;
@@ -586,6 +683,9 @@ class _ActionBar extends StatelessWidget {
 
   /// With a discussion: Send back goes to its composer (P-27); without, the Fase 1 sheet.
   final VoidCallback? onSendBack;
+
+  /// Above the buttons when the decision is someone else's: "Bo is responsible. You can decide too."
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
@@ -643,8 +743,11 @@ class _ActionBar extends StatelessWidget {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-          child: Row(children: [
-            for (final (i, b) in buttons.indexed) ...[if (i > 0) const SizedBox(width: 8), Expanded(child: b)],
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            if (note != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(note!, key: const ValueKey('bar-others-note'), style: TextStyle(color: Tokens.label2, fontSize: 13))),
+            Row(children: [
+              for (final (i, b) in buttons.indexed) ...[if (i > 0) const SizedBox(width: 8), Expanded(child: b)],
+            ]),
           ]),
         ),
       ),
@@ -812,11 +915,14 @@ class _PlanViewState extends State<_PlanView> {
 /// back and ✓ Done. Pas aan and Send back take the composer's text as the
 /// feedback (the server puts it in the discussion) and stay off without it.
 class _Decisions extends StatefulWidget {
-  const _Decisions({required this.ticket, required this.text, required this.online});
+  const _Decisions({required this.ticket, required this.text, required this.online, this.note});
 
   final TicketView ticket;
   final TextEditingController text;
   final bool online;
+
+  /// Above the buttons when the decision is someone else's (§1.4).
+  final String? note;
 
   @override
   State<_Decisions> createState() => _DecisionsState();
@@ -889,7 +995,10 @@ class _DecisionsState extends State<_Decisions> {
           key: const ValueKey('discussion-decisions'),
           padding: const EdgeInsets.only(top: 8),
           // All of them in sight on a phone: they wrap rather than scroll.
-          child: Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: buttons),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (widget.note != null) Padding(padding: const EdgeInsets.only(bottom: 6), child: Text(widget.note!, style: TextStyle(color: Tokens.label2, fontSize: 13))),
+            Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: buttons),
+          ]),
         );
       },
     );

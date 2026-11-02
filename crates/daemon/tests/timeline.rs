@@ -122,3 +122,39 @@ async fn timeline_tells_the_story_and_notifies_once() {
     assert_eq!(client.dismiss_all_notifications().await.unwrap(), 0);
     stop(dir.path(), daemon).await;
 }
+
+/// AUR-FA-A0: over the wire, as both clients see it. A notification for everyone
+/// (made by hand: no event path is needed for what is tested) is read and
+/// dismissed per board member.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_board_members_inbox_actions_leave_the_same_notification_unread_for_another() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let alex = connect(dir.path()).await;
+    let bea = connect_as(dir.path(), "bea").await;
+    let db = rusqlite::Connection::open(dir.path().join("data/aurelius.sqlite")).unwrap();
+    for id in ["n1", "n2"] {
+        db.execute(
+            "INSERT INTO events(id, aggregate_type, aggregate_id, aggregate_version, type, schema_version, actor_kind, correlation_id, metadata_json, dedupe_key, occurred_at_ms, recorded_at_ms)
+             VALUES (?1, 'task', ?1, 1, 'task.succeeded', 1, 'system', ?1, '{}', ?1, 10, 10)",
+            [id],
+        )
+        .unwrap();
+        db.execute("INSERT INTO notifications(id, event_id, dedupe_key, severity, target_json, created_at_ms) VALUES (?1, ?1, ?1, 'info', '{}', ?2)", rusqlite::params![id, aurelius_storage::now_ms()]).unwrap();
+    }
+    drop(db);
+
+    assert_eq!(alex.mark_notifications_read().await.unwrap(), 2);
+    assert_eq!(alex.notifications().await.unwrap().unread, 0);
+    assert_eq!(bea.notifications().await.unwrap().unread, 2, "Alex read them, Bea did not");
+
+    assert_eq!(alex.dismiss_notification("n1".into()).await.unwrap(), 1);
+    assert_eq!(alex.dismiss_all_notifications().await.unwrap(), 1);
+    assert!(alex.notifications().await.unwrap().notifications.is_empty());
+    let for_bea = bea.notifications().await.unwrap();
+    assert_eq!((for_bea.notifications.len(), for_bea.unread), (2, 2), "Alex cleared them, Bea did not");
+
+    assert_eq!(bea.mark_notifications_read().await.unwrap(), 2);
+    assert_eq!(bea.notifications().await.unwrap().unread, 0);
+    stop(dir.path(), daemon).await;
+}

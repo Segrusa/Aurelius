@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
@@ -16,6 +17,12 @@ class FollowItem {
 
 /// How close to the end (in pixels) still counts as "at the end".
 const followSlack = 64.0;
+
+/// How long a row a link opened on stays marked (ui-ontwerp `aur-chat-001` §5).
+const revealFlash = Duration(milliseconds: 1500);
+
+/// At most this many screens up before a row a link opened on counts as out of reach.
+const revealStepsMax = 200;
 
 /// A conversation list that follows new text only while the reader is at the
 /// end. Scrolled up, nothing moves: new messages and a growing answer land
@@ -53,6 +60,14 @@ class FollowingListState extends State<FollowingList> {
   double? _lastMax;
   bool _toEnd = false;
 
+  /// The row [reveal] looks for, found by [_revealed] once it is built.
+  String? _revealing;
+  final _revealed = GlobalKey();
+
+  /// The row marked now, until [_flashEnd].
+  String? _flash;
+  Timer? _flashEnd;
+
   /// The last row above the anchor, once decided.
   String? _edge;
   bool _settled = false;
@@ -73,8 +88,53 @@ class FollowingListState extends State<FollowingList> {
 
   @override
   void dispose() {
+    _flashEnd?.cancel();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Scroll to the row [key] and mark it a moment (a link to a message). Rows
+  /// are built lazily and the list starts at its end, so this goes up a screen
+  /// at a time until the row exists. False when there is no such row or it
+  /// was not reached.
+  Future<bool> reveal(String key) async {
+    if (!widget.items.any((x) => x.key == key)) return false;
+    setState(() {
+      _following = false;
+      _fresh = false;
+      _revealing = key;
+      _flash = key;
+    });
+    await WidgetsBinding.instance.endOfFrame;
+    // A long history of tall rows takes as many steps as it has rows.
+    final steps = revealStepsMax + widget.items.length;
+    for (var i = 0; i < steps && mounted; i++) {
+      final row = _revealed.currentContext;
+      if (row != null) {
+        // ignore: use_build_context_synchronously
+        await Scrollable.ensureVisible(row, alignment: 0.3);
+        break;
+      }
+      if (!_controller.hasClients) break;
+      final position = _controller.position;
+      if (position.pixels <= position.minScrollExtent) break;
+      position.jumpTo(math.max(position.minScrollExtent, position.pixels - position.viewportDimension * 0.8));
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    _flashEnd?.cancel();
+    _flashEnd = Timer(revealFlash, () {
+      if (mounted) setState(() => _flash = null);
+    });
+    return _revealed.currentContext != null;
+  }
+
+  /// One row: under its own key, and marked while a link opened on it.
+  Widget _row(FollowItem item) {
+    final child = item.key == _revealing ? KeyedSubtree(key: _revealed, child: item.child) : item.child;
+    return KeyedSubtree(
+      key: ValueKey(item.key),
+      child: item.key == _flash ? _Flash(key: ValueKey('flash-${item.key}'), child: child) : child,
+    );
   }
 
   /// Back to the end and follow again (the button, or sending a message).
@@ -162,7 +222,7 @@ class FollowingListState extends State<FollowingList> {
                   padding: EdgeInsets.fromLTRB(p.left, p.top, p.right, 0),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
-                      (context, i) => KeyedSubtree(key: ValueKey(above[above.length - 1 - i].key), child: above[above.length - 1 - i].child),
+                      (context, i) => _row(above[above.length - 1 - i]),
                       childCount: above.length,
                       findChildIndexCallback: (key) {
                         final i = above.indexWhere((x) => ValueKey(x.key) == key);
@@ -176,7 +236,7 @@ class FollowingListState extends State<FollowingList> {
                   padding: EdgeInsets.fromLTRB(p.left, 0, p.right, p.bottom),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
-                      (context, i) => KeyedSubtree(key: ValueKey(below[i].key), child: below[i].child),
+                      (context, i) => _row(below[i]),
                       childCount: below.length,
                       findChildIndexCallback: (key) {
                         final i = below.indexWhere((x) => ValueKey(x.key) == key);
@@ -198,6 +258,24 @@ class FollowingListState extends State<FollowingList> {
       ],
     );
   }
+}
+
+/// The mark on a row a link opened on: the halo, with reduced motion a border
+/// that does not fade.
+class _Flash extends StatelessWidget {
+  const _Flash({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+        decoration: BoxDecoration(
+          color: MediaQuery.disableAnimationsOf(context) ? null : Tokens.accentHalo,
+          border: MediaQuery.disableAnimationsOf(context) ? Border.all(color: Tokens.accent) : null,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: child,
+      );
 }
 
 /// Glass round button back to the end; a dot when new text came in.

@@ -30,6 +30,7 @@ async fn setup(client: &Client) -> (EmployeeId, ProjectId) {
 async fn planned_ticket(client: &Client, project_id: ProjectId, owner: EmployeeId, mode: Option<AgentMode>) -> TicketId {
     let made = client
         .create_ticket(CreateTicket {
+            responsible_user_id: None,
             confirm_secret: false,
             project_id,
             title: "Export".into(),

@@ -513,7 +513,20 @@ void main() {
     expect(task.isChat, isFalse);
     expect(task.isTask, isTrue);
 
-    final append = (ServerMessage.fromJson({
+    // A deleted message that was not queued (AUR-FA): the same event, whatever its metadata says.
+    final deleted = (ServerMessage.fromJson({
+      'type': 'event',
+      'seq': 94,
+      'kind': 'message.deleted',
+      'aggregate_id': 'c',
+      'at_ms': 3,
+      'metadata': {'message_id': 'm', 'by': 'u', 'queued': false},
+    }) as ServerMessageEvent).value;
+    expect(deleted.kind, EventKind.messageDeleted);
+    expect(deleted.isChat, isTrue, reason: 'the chat reads the conversation again');
+    expect(deleted.isNoise, isFalse);
+
+    final append =(ServerMessage.fromJson({
       'type': 'stream_append',
       'run_id': 'r',
       'conversation_id': 'c',

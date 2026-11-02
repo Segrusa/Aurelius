@@ -90,6 +90,7 @@ pub mod run;
 pub mod task;
 pub mod server_name;
 pub mod ticket;
+pub(crate) mod ticket_follow;
 pub mod user;
 
 pub(crate) fn chat_next_version(tx: &Transaction<'_>, aggregate_type: &str, id: &str) -> Result<u64, StorageError> {
@@ -294,7 +295,9 @@ impl CommandService {
             | Command::UpdateBoardColumns(_)
             | Command::UpdateCompany(_)
             | Command::UseMyLogin(_)
-            | Command::SetBackgroundLogin(_) => self.ticket_command(ctx, &envelope, hash),
+            | Command::SetBackgroundLogin(_)
+            | Command::SetTicketResponsible(_) => self.ticket_command(ctx, &envelope, hash),
+            Command::FollowTicket(cmd) => self.follow_ticket(ctx, &envelope, hash, cmd),
             Command::UpdateProject(cmd) => self.update_project(ctx, &envelope, hash, cmd),
             Command::PostTicketMessage(cmd) => self.post_ticket_message(ctx, &envelope, hash, cmd),
             Command::RetryTicketSummary(cmd) => self.retry_ticket_summary(ctx, &envelope, hash, cmd),
@@ -309,6 +312,8 @@ impl CommandService {
             | Command::AddStarterGuidelines(_) => self.guideline_command(ctx, &envelope, hash),
             Command::SetServerName(cmd) => self.set_server_name(ctx, &envelope, hash, cmd),
             Command::ReactToMessage(cmd) => self.react_to_message(ctx, &envelope, hash, cmd),
+            Command::EditMessage(cmd) => self.edit_message(ctx, &envelope, hash, cmd),
+            Command::DeleteMessage(cmd) => self.delete_message(ctx, &envelope, hash, cmd),
         };
         COMMAND_METHOD.set("");
         result

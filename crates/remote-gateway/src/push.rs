@@ -46,6 +46,11 @@ impl Alert {
                 "task_id": n.task_id,
                 "project_id": project_id,
                 "notification_id": n.id,
+                "ticket_id": n.ticket_id,
+                "ticket_number": n.ticket_number,
+                "conversation_id": n.conversation_id,
+                "message_id": n.message_id,
+                "reason": n.reason,
             }),
         }
     }

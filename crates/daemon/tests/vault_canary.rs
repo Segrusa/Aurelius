@@ -345,6 +345,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
 
     // A ticket in project A, started for Forge: its run leaks into the discussion and delegates a part with the value.
     let ticket = CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: project_a,
         title: "Deploy".into(),

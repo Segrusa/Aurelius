@@ -115,6 +115,7 @@ fn closed_line() -> SystemLine {
 
 fn message(system: Option<SystemLine>) -> MessageView {
     MessageView {
+        edited_at_ms: None, deleted_at_ms: None, editable: false,
         id: MessageId::new(),
         ordinal: 4,
         role: MessageRole::Assistant,
@@ -196,7 +197,7 @@ fn a_message_an_older_server_wrote_reads_without_threads_or_reactions() {
 }
 
 /// The wire names in a JSON schema of a unit enum (its `enum` lists and `const`s, also inside `oneOf`).
-fn enum_values(schema: &serde_json::Value, out: &mut Vec<String>) {
+pub(crate) fn enum_values(schema: &serde_json::Value, out: &mut Vec<String>) {
     match schema {
         serde_json::Value::Object(map) => {
             if let Some(serde_json::Value::Array(values)) = map.get("enum") {

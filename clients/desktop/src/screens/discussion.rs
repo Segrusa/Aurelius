@@ -27,6 +27,9 @@ pub fn system_text(line: &SystemLine, text: &str) -> String {
     }
     let or = |v: &Option<String>, d: &str| v.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(d).to_string();
     let by = or(&line.by, "Aurelius");
+    if line.action.as_deref() == Some(aurelius_domain::views::system_action::RESPONSIBLE) {
+        return crate::screens::who::responsible_line_text(&by, line.from.as_deref(), line.to.as_deref());
+    }
     match line.kind {
         SystemLineKind::Delegated => format!("{} delegated a task to {}", or(&line.from, "An employee"), or(&line.to, "a colleague")),
         SystemLineKind::Reported => format!("{} reported", or(&line.from, "A colleague")),
@@ -740,12 +743,13 @@ pub fn follows(first: bool, mine: bool, grew: bool, at_bottom: bool) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use aurelius_domain::ConversationId;
 
-    fn msg(role: MessageRole, text: &str) -> MessageView {
+    pub(crate) fn msg(role: MessageRole, text: &str) -> MessageView {
         MessageView {
+            edited_at_ms: None, deleted_at_ms: None, editable: false,
             id: MessageId::new(),
             ordinal: 0,
             role,
@@ -902,6 +906,7 @@ mod tests {
 
     fn ticket(column: ColumnKind, owner: bool) -> TicketView {
         TicketView {
+            responsible_user_id: None, responsible_username: None, responsible_disabled: false,
             id: TicketId::new(),
             number: 42,
             project_id: aurelius_domain::ProjectId::new(),

@@ -10,9 +10,9 @@ use crate::{StorageError, now_ms};
 use aurelius_domain::{
     BoardColumnId, EmployeeId, ProjectId, TaskId, TicketId, UserId,
     task::{RunSettings, TaskStatus},
-    ticket::{BoardColumnCards, ColumnKind, TicketPriority, TicketView},
+    ticket::{BoardColumnCards, ColumnKind, MY_TICKETS_MAX, MyTicketsView, TicketPriority, TicketView},
 };
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
 /// `move_to`: the card to put it above is not in that column.
 pub const NOT_IN_COLUMN: &str = "not_in_column";
@@ -87,6 +87,36 @@ pub fn use_my_login(tx: &Transaction<'_>, id: TicketId, me: UserId) -> Result<bo
         "UPDATE tickets SET login_user = ?2 WHERE id = ?1 AND login_user <> ?2",
         params![id.to_string(), me.to_string()],
     )? == 1)
+}
+
+/// The board member responsible for a ticket, as a write or a notification needs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TicketResponsible {
+    pub user_id: UserId,
+    /// Disabled: the ticket counts as having no active responsible.
+    pub disabled: bool,
+}
+
+/// Make `responsible` the board member responsible for a ticket (none: nobody).
+/// False when the ticket is unknown or it already is. The version is left alone
+/// (see `touch`).
+pub fn set_responsible(tx: &Transaction<'_>, id: TicketId, responsible: Option<UserId>) -> Result<bool, StorageError> {
+    Ok(tx.execute(
+        "UPDATE tickets SET responsible_user_id = ?2 WHERE id = ?1 AND responsible_user_id IS NOT ?2",
+        params![id.to_string(), responsible.map(|u| u.to_string())],
+    )? == 1)
+}
+
+/// Who is responsible for a ticket; none when nobody is or the ticket is unknown.
+pub fn responsible(conn: &Connection, id: TicketId) -> Result<Option<TicketResponsible>, StorageError> {
+    let row: Option<(String, bool)> = conn
+        .query_row(
+            "SELECT k.responsible_user_id, u.disabled_at_ms IS NOT NULL FROM tickets k JOIN users u ON u.id = k.responsible_user_id WHERE k.id = ?1",
+            [id.to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(row.and_then(|(user, disabled)| Some(TicketResponsible { user_id: UserId::parse(&user).ok()?, disabled })))
 }
 
 /// Whether a task of the ticket (or its dispatcher's job) waits for a Claude login (`needs: login`).
@@ -318,73 +348,81 @@ const SELECT: &str = "SELECT k.id, k.number, k.project_id, p.name, k.title, db.s
         k.login_user, lu.username,
         (EXISTS (SELECT 1 FROM tasks w WHERE w.ticket_id = k.id AND w.status = 'waiting' AND w.waiting_reason = 'login')
          OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state = 'ready' AND j.last_error_code = 'login'
-                    AND json_extract(j.payload_json, '$.ticket_id') = k.id))
+                    AND json_extract(j.payload_json, '$.ticket_id') = k.id)),
+        k.responsible_user_id, ru.username, COALESCE(ru.disabled_at_ms IS NOT NULL, 0)
      FROM tickets k
      JOIN projects p ON p.id = k.project_id
      JOIN board_columns c ON c.id = k.column_id
      JOIN users u ON u.id = k.created_by_user
      JOIN users lu ON lu.id = k.login_user
+     LEFT JOIN users ru ON ru.id = k.responsible_user_id
      LEFT JOIN employees e ON e.id = k.owner_employee_id
      LEFT JOIN tasks t ON t.id = k.root_task_id
      LEFT JOIN blobs db ON db.id = k.description_blob_id
      WHERE (?1 IS NULL OR k.project_id = ?1) AND (?2 IS NULL OR c.kind = ?2) AND (?3 IS NULL OR k.id = ?3)
        AND (?4 OR k.archived_at_ms IS NULL)";
 
+/// A row of `SELECT` as a ticket, without its description, with that description's storage key.
+fn ticket_row(r: &Row<'_>) -> rusqlite::Result<(TicketView, Option<String>)> {
+    let id = parse(TicketId::parse(&r.get::<_, String>(0)?))?;
+    let description: Option<String> = r.get(5)?;
+    let run: Option<String> = r.get(14)?;
+    let labels: Option<String> = r.get(15)?;
+    let attachments: Option<String> = r.get(26)?;
+    Ok((
+        TicketView {
+            id,
+            number: r.get::<_, i64>(1)? as u32,
+            project_id: parse(ProjectId::parse(&r.get::<_, String>(2)?))?,
+            project_name: r.get(3)?,
+            title: r.get(4)?,
+            description: None,
+            column_id: parse(BoardColumnId::parse(&r.get::<_, String>(6)?))?,
+            column: ColumnKind::parse(&r.get::<_, String>(7)?).unwrap_or(ColumnKind::Backlog),
+            position: r.get(8)?,
+            priority: TicketPriority::parse(&r.get::<_, String>(9)?).unwrap_or_default(),
+            created_by_user: parse(UserId::parse(&r.get::<_, String>(10)?))?,
+            created_by_username: r.get(11)?,
+            owner_employee_id: r.get::<_, Option<String>>(12)?.and_then(|o| EmployeeId::parse(&o).ok()),
+            owner_name: r.get(13)?,
+            run: run.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default(),
+            labels: labels.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default(),
+            attachments: attachments
+                .and_then(|j| serde_json::from_str::<TaskAttachments>(&j).ok())
+                .map(|mut a| {
+                    aurelius_domain::conversation::with_upload_ids(aurelius_domain::conversation::UploadOwner::Ticket(id), &mut a.files);
+                    a.files
+                })
+                .unwrap_or_default(),
+            deadline_ms: r.get(16)?,
+            root_task_id: r.get::<_, Option<String>>(17)?.and_then(|t| TaskId::parse(&t).ok()),
+            root_task_status: r.get::<_, Option<String>>(18)?.and_then(|s| TaskStatus::parse(&s)),
+            review_feedback: r.get(19)?,
+            version: r.get::<_, i64>(20)? as u64,
+            created_at_ms: r.get(21)?,
+            updated_at_ms: r.get(22)?,
+            started_at_ms: r.get(23)?,
+            done_at_ms: r.get(24)?,
+            archived_at_ms: r.get(25)?,
+            conversation_id: r.get::<_, Option<String>>(27)?.and_then(|c| aurelius_domain::ConversationId::parse(&c).ok()),
+            login_user: parse(UserId::parse(&r.get::<_, String>(28)?))?,
+            login_username: r.get(29)?,
+            // A task of it (or its dispatcher) waits for `login_user`'s Claude login (MU3-12).
+            needs: r.get::<_, bool>(30)?.then_some(aurelius_domain::ticket::TicketNeed::Login),
+            responsible_user_id: r.get::<_, Option<String>>(31)?.and_then(|u| UserId::parse(&u).ok()),
+            responsible_username: r.get(32)?,
+            responsible_disabled: r.get(33)?,
+        },
+        description,
+    ))
+}
+
 /// Tickets in board order (column, then position).
 pub fn list(conn: &Connection, filter: &TicketFilter, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<TicketView>, StorageError> {
     let mut stmt = conn.prepare(&format!("{SELECT} ORDER BY c.position, k.position, k.number"))?;
     let rows = stmt.query_map(
         params![filter.project.map(|p| p.to_string()), filter.column.map(|c| c.as_str()), filter.ticket.map(|t| t.to_string()), filter.include_archived],
-        |r| {
-            let id = parse(TicketId::parse(&r.get::<_, String>(0)?))?;
-            let description: Option<String> = r.get(5)?;
-            let run: Option<String> = r.get(14)?;
-            let labels: Option<String> = r.get(15)?;
-            let attachments: Option<String> = r.get(26)?;
-            Ok((
-                TicketView {
-                    id,
-                    number: r.get::<_, i64>(1)? as u32,
-                    project_id: parse(ProjectId::parse(&r.get::<_, String>(2)?))?,
-                    project_name: r.get(3)?,
-                    title: r.get(4)?,
-                    description: None,
-                    column_id: parse(BoardColumnId::parse(&r.get::<_, String>(6)?))?,
-                    column: ColumnKind::parse(&r.get::<_, String>(7)?).unwrap_or(ColumnKind::Backlog),
-                    position: r.get(8)?,
-                    priority: TicketPriority::parse(&r.get::<_, String>(9)?).unwrap_or_default(),
-                    created_by_user: parse(UserId::parse(&r.get::<_, String>(10)?))?,
-                    created_by_username: r.get(11)?,
-                    owner_employee_id: r.get::<_, Option<String>>(12)?.and_then(|o| EmployeeId::parse(&o).ok()),
-                    owner_name: r.get(13)?,
-                    run: run.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default(),
-                    labels: labels.and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default(),
-                    attachments: attachments
-                        .and_then(|j| serde_json::from_str::<TaskAttachments>(&j).ok())
-                        .map(|mut a| {
-                            aurelius_domain::conversation::with_upload_ids(aurelius_domain::conversation::UploadOwner::Ticket(id), &mut a.files);
-                            a.files
-                        })
-                        .unwrap_or_default(),
-                    deadline_ms: r.get(16)?,
-                    root_task_id: r.get::<_, Option<String>>(17)?.and_then(|t| TaskId::parse(&t).ok()),
-                    root_task_status: r.get::<_, Option<String>>(18)?.and_then(|s| TaskStatus::parse(&s)),
-                    review_feedback: r.get(19)?,
-                    version: r.get::<_, i64>(20)? as u64,
-                    created_at_ms: r.get(21)?,
-                    updated_at_ms: r.get(22)?,
-                    started_at_ms: r.get(23)?,
-                    done_at_ms: r.get(24)?,
-                    archived_at_ms: r.get(25)?,
-                    conversation_id: r.get::<_, Option<String>>(27)?.and_then(|c| aurelius_domain::ConversationId::parse(&c).ok()),
-                    login_user: parse(UserId::parse(&r.get::<_, String>(28)?))?,
-                    login_username: r.get(29)?,
-                    // A task of it (or its dispatcher) waits for `login_user`'s Claude login (MU3-12).
-                    needs: r.get::<_, bool>(30)?.then_some(aurelius_domain::ticket::TicketNeed::Login),
-                },
-                description,
-            ))
-        },
+        ticket_row,
     )?;
     let needle = filter.query.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(str::to_lowercase);
     let mut out = Vec::new();
@@ -403,6 +441,38 @@ pub fn list(conn: &Connection, filter: &TicketFilter, read_blob: &dyn Fn(&str) -
         out.push(ticket);
     }
     Ok(out)
+}
+
+/// `ticket.my_tickets`: the tickets of `viewer`, whom the daemon takes from the
+/// session. Those they are responsible for, made or follow, and the open ones on
+/// their login or without an active responsible. Done and archived tickets only
+/// with `include_done`, and then not just for lacking a responsible. Highest
+/// priority first, then the latest update, at most `MY_TICKETS_MAX`.
+pub fn my_tickets(conn: &Connection, viewer: UserId, project: Option<ProjectId>, include_done: bool, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<MyTicketsView, StorageError> {
+    // ?4 of `SELECT` takes the archived tickets along.
+    let mut stmt = conn.prepare(&format!(
+        "{SELECT}
+           AND (?4 OR c.kind <> 'done')
+           AND (k.responsible_user_id = ?5 OR k.created_by_user = ?5
+                OR EXISTS (SELECT 1 FROM ticket_followers f WHERE f.ticket_id = k.id AND f.user_id = ?5)
+                OR (c.kind <> 'done' AND k.archived_at_ms IS NULL
+                    AND (k.login_user = ?5 OR k.responsible_user_id IS NULL OR ru.disabled_at_ms IS NOT NULL)))
+         ORDER BY CASE k.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, k.updated_at_ms DESC, k.number DESC
+         LIMIT ?6"
+    ))?;
+    let rows = stmt.query_map(
+        params![project.map(|p| p.to_string()), None::<String>, None::<String>, include_done, viewer.to_string(), MY_TICKETS_MAX as i64],
+        ticket_row,
+    )?;
+    let mut tickets = Vec::new();
+    for row in rows {
+        let (mut ticket, key) = row?;
+        ticket.description = key.as_deref().and_then(read_blob).filter(|d| !d.is_empty());
+        tickets.push(ticket);
+    }
+    let followed = crate::followers::following(conn, viewer)?;
+    let following = tickets.iter().map(|t| t.id).filter(|t| followed.contains(t)).collect();
+    Ok(MyTicketsView { tickets, following })
 }
 
 pub fn view(conn: &Connection, id: TicketId, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Option<TicketView>, StorageError> {

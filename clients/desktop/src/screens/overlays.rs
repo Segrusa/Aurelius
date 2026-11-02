@@ -1,5 +1,6 @@
 //! Command palette (Ctrl+K), shortcut overview (Ctrl+/), project dialog and approval review.
 
+use crate::screens::updates;
 use crate::app::{AppView, ConfirmKind, DialogKind, InboxTab, ManagerRef, NoteKind, Overlay, ProjectRef, note_kind};
 use crate::screens::approval::approval_summary;
 use crate::keymap::*;
@@ -1186,6 +1187,10 @@ impl AppView {
         let selected = self.inbox_selected.min(total.saturating_sub(1));
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
         let note_selected = selected.checked_sub(head).and_then(|i| notes.get(i)).cloned();
+        let update_selected = note_selected.clone().filter(updates::is_update);
+        if let Some(id) = update_selected.as_ref().and_then(|n| n.ticket_id) {
+            self.inbox_ask_followers(id);
+        }
         let note_task_id = note_selected.as_ref().and_then(|n| n.task_id);
         let note_conversation = note_task_id.and_then(|id| self.tasks.iter().find(|t| t.id == id)).and_then(|t| t.conversation_id);
         let proposal_selected = selected.checked_sub(pending.len()).filter(|i| *i < proposals.len());
@@ -1202,6 +1207,7 @@ impl AppView {
                 let i = guideline_selected.unwrap_or_default();
                 v().id("inbox-guideline").p(px(22.)).gap(px(12.)).overflow_y_scrollbar().child(self.guideline_proposal_body(&guideline_proposals[i], i, cx)).into_any_element()
             }
+            None if update_selected.is_some() => self.update_detail(update_selected.as_ref().unwrap_or_else(|| unreachable!()), now, cx),
             None if note_selected.is_some() => {
                 let n = note_selected.clone().unwrap_or_else(|| unreachable!());
                 let (eyebrow, color) = note_mark(&n);
@@ -1221,6 +1227,7 @@ impl AppView {
             None => {
                 let (title, about) = match tab {
                     InboxTab::NeedsYou => ("Nothing needs you.", "Approvals, questions, plans and proposals appear here, with exactly what will run."),
+                    InboxTab::Updates => (updates::NO_UPDATES, updates::NO_UPDATES_ABOUT),
                     InboxTab::Results => ("No results yet.", "Finished tasks report here."),
                     InboxTab::Failed => ("Nothing failed.", "Tasks that fail appear here, so you can follow them up."),
                     InboxTab::All => ("The inbox is empty.", "What needs you and what finished both appear here."),
@@ -1297,7 +1304,9 @@ impl AppView {
                     .into_any_element()
             }
         };
-        let tabs: Vec<AnyElement> = InboxTab::ALL.iter().enumerate().map(|(i, &t)| {
+        let unread_updates = self.inbox_notifications().iter().any(|n| updates::is_update(n) && updates::row_unread(n, &self.inbox_opened));
+        let tabs: Vec<AnyElement> = InboxTab::shown(self.personal_inbox_supported()).iter().map(|&t| {
+            let i = t as usize;
             let on = t == tab;
             h().id(("inbox-tab", i)).role(Role::Tab).aria_label(t.label()).gap(px(6.)).px(px(10.)).py(px(5.)).rounded(px(6.)).cursor_pointer()
                 .text_size(px(13.))
@@ -1305,12 +1314,13 @@ impl AppView {
                 .when(on, |el| el.bg(c(theme::SURFACE_2)))
                 .hover(|s| s.bg(c(theme::SURFACE_2)).text_color(c(theme::TEXT)))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_inbox_tab(t, cx)))
+                .when(t == InboxTab::Updates && unread_updates, |el| el.child(ui::dot(6., theme::ACCENT)))
                 .child(t.label())
                 .child(div().text_size(px(11.5)).text_color(c(if t == InboxTab::NeedsYou && counts[i] > 0 { theme::ACCENT_TEXT } else { theme::MUTED })).child(counts[i].to_string()))
                 .into_any_element()
         }).collect();
         // Clear all removes results only, so it sits on the tabs that list them all.
-        let mut clear = matches!(tab, InboxTab::Results | InboxTab::All).then(|| {
+        let mut clear = (matches!(tab, InboxTab::Results | InboxTab::All) || tab == InboxTab::Updates && !notes.is_empty()).then(|| {
             div().id("clear-results").text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).cursor_pointer()
                 .child("Clear all")
                 .on_click(cx.listener(|this, _: &ClickEvent, w, cx| {
@@ -1344,7 +1354,7 @@ impl AppView {
         };
         // What needs you first, then the results by day, each under its header.
         let mut rows: Vec<AnyElement> = Vec::new();
-        if head + notes.iter().filter(|n| note_kind(n) == NoteKind::NeedsYou).count() > 0 {
+        if head + notes.iter().filter(|n| crate::app::note_needs_you(n)).count() > 0 {
             rows.push(section("NEEDS YOU").into_any_element());
         }
         for (i, a) in pending.iter().enumerate() {
@@ -1377,13 +1387,16 @@ impl AppView {
         }
         let mut day = None;
         for (j, n) in notes.iter().enumerate() {
-            let kind = note_kind(n);
-            if kind != NoteKind::NeedsYou {
+            if !crate::app::note_needs_you(n) {
                 let group = ui::day_group(n.created_at_ms);
                 if day != Some(group) {
                     day = Some(group);
                     rows.push(section(group).children(clear.take()).into_any_element());
                 }
+            }
+            if updates::is_update(n) {
+                rows.push(self.update_row(n, j, head + j, head + j == selected, now, cx));
+                continue;
             }
             let (_, color) = note_mark(n);
             let mark = if color == theme::TEXT_2 { ui::ring(7., theme::MUTED) } else { ui::dot(7., color) }.into_any_element();
@@ -1397,7 +1410,16 @@ impl AppView {
             .child(
                 h().px(px(22.)).py(px(14.)).gap(px(18.)).border_b_1().border_color(c(theme::BORDER))
                     .child(div().flex_none().font_family(ui::serif(cx)).text_size(px(22.)).child("Inbox"))
-                    .child(h().flex_1().min_w_0().gap(px(2.)).children(tabs)),
+                    .child(h().flex_1().min_w_0().gap(px(2.)).children(tabs))
+                    .when(self.personal_inbox_supported() && self.inbox_notifications().iter().any(|n| !n.read), |el| {
+                        el.child(div().id("inbox-mark-all-read").flex_none().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).cursor_pointer()
+                            .tooltip(ui::tip(format!("Only for you. {}", updates::OTHERS_KEEP_THEIRS), None))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                let _ = this.requests.send(crate::backend::Request::MarkNotificationsRead);
+                                cx.notify();
+                            }))
+                            .child("Mark all read"))
+                    }),
             )
             .child(
                 h().items_stretch().flex_1().min_h_0()
@@ -1409,7 +1431,11 @@ impl AppView {
             )
             .child(
                 h().px(px(22.)).py(px(14.)).gap(px(8.)).border_t_1().border_color(c(theme::BORDER))
-                    .when(note_selected.is_some(), |el| {
+                    .when_some(update_selected.as_ref(), |el, n| {
+                        el.child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(ui::key_hint(&["down", "up"], "select · H L tabs", cx)))
+                            .children(self.update_actions(n, cx))
+                    })
+                    .when(note_selected.is_some() && update_selected.is_none(), |el| {
                         el.child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(ui::key_hint(&["down", "up"], "select · H L tabs", cx)))
                             .children(note_conversation.map(|id| {
                                 ui::button("open-note-conversation", "Open conversation", ButtonKind::Outline, None)
@@ -1475,8 +1501,16 @@ impl AppView {
                 "Answers that are running now are interrupted. This app reconnects by itself once the server is back.",
             ),
             ConfirmKind::ClearResults => (
-                format!("Clear all {} results?", self.inbox_counts()[1]),
-                "Every result in the inbox is removed. Approvals waiting for you are not touched.",
+                if self.personal_inbox_supported() {
+                    format!("Clear all {} results and updates?", self.inbox_notifications().iter().filter(|n| matches!(note_kind(n), NoteKind::Result | NoteKind::Failed | NoteKind::Update)).count())
+                } else {
+                    format!("Clear all {} results?", self.inbox_counts()[InboxTab::Results as usize])
+                },
+                if self.personal_inbox_supported() {
+                    "Every result and update in your inbox is removed. Approvals waiting for you are not touched. Others keep theirs."
+                } else {
+                    "Every result in the inbox is removed. Approvals waiting for you are not touched."
+                },
             ),
             ConfirmKind::ShutdownNow => (
                 format!("Shut down {}?", self.remote_name().map_or("this PC".to_string(), |h| format!("{h}'s PC"))),
@@ -1514,6 +1548,10 @@ impl AppView {
                 format!("Run #{} on your Claude login?", self.board.ticket(ticket).map_or(0, |t| t.number)),
                 "From now on this ticket and all its work use your own Claude subscription instead of its creator's. Its creator stays. Nothing else runs on your login.",
             ),
+            ConfirmKind::LinkOtherServer(link) => (
+                self.link_question(&link).0,
+                "The window starts over on that server, and the link opens there.",
+            ),
             ConfirmKind::ArchiveVaultItem(item) => (
                 crate::screens::vault::delete_title(self.vault.item(item)),
                 crate::screens::vault::DELETE_BODY,
@@ -1522,12 +1560,33 @@ impl AppView {
                 crate::screens::vault::held_title(self.vault.held.as_ref().map_or(&[][..], |h| h.names.as_slice())),
                 crate::screens::vault::held_body(self.vault.held.as_ref().map(|h| &h.command)),
             ),
+            ConfirmKind::DeleteMessage(message) => (
+                crate::screens::message_edit::DELETE_TITLE.to_string(),
+                crate::screens::message_edit::DELETE_BODY,
+            ),
             ConfirmKind::DisconnectClaude => (
                 "Disconnect your Claude login?".to_string(),
                 "Claude Code signs out on the server and your login's folder there is removed. Your tickets wait until you connect again; nothing runs on someone else's login.",
             ),
         };
+        // AUR-FA §2.4: their tickets keep them as Responsible; nothing is wiped silently.
+        let responsible_for = match kind {
+            ConfirmKind::DisableMember(user) if self.ticket_responsible_supported() => {
+                let tickets = self.board.view.iter().flat_map(|v| v.columns.iter()).flat_map(|c| c.tickets.iter());
+                crate::screens::who::disable_note(&self.member_name(user), tickets.filter(|t| t.responsible_user_id == Some(user) && t.column != aurelius_domain::ticket::ColumnKind::Done).count())
+            }
+            _ => None,
+        };
+        let responsible_for = match kind {
+            ConfirmKind::DeleteMessage(message) => self.delete_ticket_note(message),
+            _ => responsible_for,
+        };
+        let switch_label = match kind {
+            ConfirmKind::LinkOtherServer(link) => format!("Switch to {}", self.link_question(&link).1),
+            _ => String::new(),
+        };
         let confirm_label = match kind {
+            ConfirmKind::LinkOtherServer(_) => switch_label.as_str(),
             ConfirmKind::ForgetMemory(_) => "Forget",
             ConfirmKind::DeleteConversation(_) | ConfirmKind::DeleteSchedule(_) | ConfirmKind::DeleteIdea(_) => "Delete",
             ConfirmKind::RestoreBackup(_) => "Restore",
@@ -1540,7 +1599,7 @@ impl AppView {
             ConfirmKind::DisableMember(_) => "Disable",
             ConfirmKind::DisconnectClaude => "Disconnect",
             ConfirmKind::UseMyLogin(_) => "Run on my login",
-            ConfirmKind::ArchiveVaultItem(_) => "Delete",
+            ConfirmKind::ArchiveVaultItem(_) | ConfirmKind::DeleteMessage(_) => "Delete",
             ConfirmKind::LooksLikeSecret => "Send anyway",
             _ => "Archive",
         };
@@ -1550,7 +1609,8 @@ impl AppView {
             .child(
                 ui::scroll_frame(scroll, scroll_body("confirm-body", scroll, (max_h - 70.).max(120.)).p(px(22.)).gap(px(10.))
                     .child(div().font_family(ui::serif(cx)).text_size(px(21.)).child(title))
-                    .child(div().text_size(px(13.)).line_height(px(19.)).text_color(c(theme::TEXT_2)).child(body))),
+                    .child(div().text_size(px(13.)).line_height(px(19.)).text_color(c(theme::TEXT_2)).child(body))
+                    .children(responsible_for.map(|text| div().text_size(px(13.)).line_height(px(19.)).text_color(c(theme::TEXT_2)).child(text)))),
             )
             .child(
                 h().px(px(22.)).py(px(14.)).gap(px(8.)).justify_end().border_t_1().border_color(c(theme::BORDER))

@@ -61,7 +61,7 @@ fn snapshot(conn: &Connection) -> Vec<String> {
 fn migration_27_is_plain_and_additive() {
     let m = migrate::MIGRATIONS.iter().find(|m| m.version == 27).unwrap();
     assert!(!m.rebuild && m.then.is_none());
-    assert_eq!(migrate::supported_version(), 27);
+    assert!(migrate::supported_version() >= 27);
     for line in m.sql.lines().map(str::trim).filter(|l| !l.starts_with("--")) {
         let upper = line.to_ascii_uppercase();
         for word in ["DROP ", "DELETE ", " RENAME ", "UPDATE ", "INSERT ", "ALTER "] {
@@ -77,7 +77,7 @@ fn a_schema_26_store_migrates_without_losing_a_row() {
     let before = snapshot(&db(dir.path()));
     assert!(before.contains(&"m2 2 m1".to_owned()));
 
-    drop(Store::open(dir.path()).unwrap());
+    drop(Store::open_until(dir.path(), 27).unwrap());
     let conn = db(dir.path());
     assert_eq!(count(&conn, "SELECT MAX(version) FROM schema_migrations"), 27);
     assert!(strings(&conn, "SELECT \"table\" FROM pragma_foreign_key_check").is_empty());

@@ -44,6 +44,7 @@ pub fn with_role(name: &str, role: Option<&str>) -> String {
 /// Its run is what its Stop stops and what its approvals wait on; `mode` is the one it started in.
 pub(crate) fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<String>, mode: Option<aurelius_domain::autonomy::AgentMode>) -> aurelius_protocol::MessageView {
     aurelius_protocol::MessageView {
+        edited_at_ms: None, deleted_at_ms: None, editable: false,
         id,
         ordinal: 0,
         role: MessageRole::Assistant,
@@ -287,7 +288,8 @@ impl AppView {
                 self.message_cell(m.id, full, cx)
             };
             // Right-click: "Create ticket…" (fase 2 §4), and React… / Reply in thread (ui-ontwerp §5), as the hover actions do.
-            let row = v().w_full().child(el);
+            // The message a link opened: its halo, and the row the list scrolls to (AUR-FA A5a).
+            let row = v().w_full().relative().child(el).when(self.link_flashes(m.id), |el| el.rounded(px(4.)).bg(c(theme::ACCENT_HALO)).child(ui::track_bounds(self.dropdown_bounds.clone(), crate::screens::links::LINK_TARGET)));
             let row = if !self.message_menu(m, Point::default()).is_empty() {
                 let message = m.clone();
                 row.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, w, cx| {
@@ -417,7 +419,7 @@ impl AppView {
             let (folded, fold_toggle) = self.fold_view(m.id, &m.text, cx);
             let shown = folded.map_or_else(|| m.text.clone(), |(s, _)| s);
             let sent = side(v()).gap(px(6.))
-                .when(!m.text.trim().is_empty() || (m.files.is_empty() && m.uploads.is_empty()), |el| el.child(bubble(self.message_markdown(m.id, format!("user-{}", m.id), crate::screens::markdown::linked(&shown), cx).on_link_click(self.markdown_link_handler(false, cx)), mine)))
+                .when(!m.text.trim().is_empty() || (m.files.is_empty() && m.uploads.is_empty()), |el| el.child(bubble(self.message_markdown(m.id, format!("user-{}", m.id), crate::screens::markdown::linked(&self.with_link_pills(&shown)), cx).on_link_click(self.markdown_link_handler(false, cx)), mine)))
                 .children(fold_toggle)
                 .when(!m.files.is_empty(), |el| el.child(self.message_files(m.id, &m.files, cx)))
                 .when(!m.uploads.is_empty(), |el| el.child(self.message_uploads(m.id, &m.uploads, cx)))
@@ -526,7 +528,7 @@ impl AppView {
                 (folded, fold_toggle) = self.fold_view(m.id, &m.text, cx);
                 let shown = folded.map_or_else(|| m.text.clone(), |(s, _)| s);
                 div().text_size(px(13.5)).line_height(px(21.)).child(
-                    self.message_markdown(m.id, format!("upd-{}", m.id), crate::screens::markdown::linked(&shown), cx)
+                    self.message_markdown(m.id, format!("upd-{}", m.id), crate::screens::markdown::linked(&self.with_link_pills(&shown)), cx)
                         .on_link_click(self.markdown_link_handler(false, cx)),
                 ).into_any_element()
             } else {
@@ -717,13 +719,14 @@ impl AppView {
     #[allow(clippy::too_many_arguments)]
     fn feed_row(&self, m: &aurelius_protocol::MessageView, who: &crate::screens::discussion::Author, grouped: bool, mentions_me: bool, tags: AnyElement, actions: Vec<AnyElement>, content: Vec<AnyElement>, cx: &mut Context<Self>) -> AnyElement {
         let clock = feed::clock(m.created_at_ms, aurelius_host::utc_offset_minutes_at(m.created_at_ms));
-        let label = format!("{}, {}, {}{}", who.name, who.kind, ui::fmt_when(m.created_at_ms), if mentions_me { ", mentions you" } else { "" });
+        let label = crate::screens::message_edit::row_label(&who.name, &ui::fmt_when(m.created_at_ms), m, self.message_edits_supported())
+            .unwrap_or_else(|| format!("{}, {}, {}{}", who.name, who.kind, ui::fmt_when(m.created_at_ms), if mentions_me { ", mentions you" } else { "" }));
         let hover = SharedString::from(format!("feed-{}", m.id));
         let kind = if who.human { "· board member".to_string() } else { format!("— {}", who.kind) };
         let pill = self.message_ticket_pill(m.id, cx);
         let toolbar = self.row_toolbar_on();
         let (actions, bar) = if toolbar {
-            (pill.into_iter().collect::<Vec<_>>(), Some(self.row_toolbar(m, hover.clone(), actions, cx)))
+            (pill.into_iter().collect::<Vec<_>>(), (!crate::screens::message_edit::is_deleted(m)).then(|| self.row_toolbar(m, hover.clone(), actions, cx)))
         } else {
             (pill.into_iter().chain(actions).collect(), None)
         };
@@ -764,7 +767,15 @@ impl AppView {
     /// A board member's post in the feed: everyone left-aligned, yours too (ui-ontwerp §2).
     fn feed_post(&self, m: &aurelius_protocol::MessageView, grouped: bool, cx: &mut Context<Self>) -> AnyElement {
         let who = crate::screens::discussion::author(m, |_| None);
+        // A deleted message: its line, and nothing of it (no text, files, uploads, reactions or actions).
+        if crate::screens::message_edit::is_deleted(m) {
+            return self.feed_row(m, &who, grouped, false, div().into_any_element(), Vec::new(), vec![self.deleted_line(m)], cx);
+        }
         let mentions_me = crate::screens::discussion::names_me(&m.text, self.me_name().as_deref());
+        // In the field, the row shows the field instead of its text (A6).
+        if self.edit.is(m.id) {
+            return self.feed_row(m, &who, grouped, mentions_me, div().into_any_element(), Vec::new(), vec![self.edit_field(m, cx)], cx);
+        }
         let (folded, fold_toggle) = self.fold_view(m.id, &m.text, cx);
         let shown = folded.map_or_else(|| m.text.clone(), |(s, _)| s);
         let mut content: Vec<AnyElement> = Vec::new();
@@ -779,6 +790,9 @@ impl AppView {
             content.push(self.message_uploads(m.id, &m.uploads, cx));
         }
         content.extend(self.markdown_chips(m.id, &m.text, cx));
+        // A6: "edited", pressed to read the earlier versions.
+        content.extend(self.edited_tag(m, cx));
+        content.extend(self.history_block(m));
         // Sent while an answer runs and still waiting behind it (an older server queues it).
         if m.queued {
             let id = m.id;
@@ -803,7 +817,7 @@ impl AppView {
     /// Markdown of the feed with its `@names` marked (`feed::mark_mentions`).
     fn feed_markdown(&self, message: MessageId, key: String, text: &str, cx: &mut Context<Self>) -> gpui_kit::component::text::TextView {
         let marked = self.mark_mentions(text);
-        self.message_markdown(message, key, crate::screens::markdown::linked(&marked), cx).on_link_click(self.markdown_link_handler(false, cx))
+        self.message_markdown(message, key, crate::screens::markdown::linked(&self.with_link_pills(&marked)), cx).on_link_click(self.markdown_link_handler(false, cx))
     }
 
     /// `text` with the `@names` of the people here marked, the reader's own stronger.
@@ -1002,7 +1016,7 @@ impl AppView {
         let md = |this: &Self, segment: &str, n: usize, cx: &mut Context<Self>| {
             let segment = if group { this.mark_mentions(segment) } else { segment.to_string() };
             div().text_size(px(if group { 14. } else { 15. })).line_height(px(if group { 21. } else { 25.5 })).child(
-                this.message_markdown(id, format!("md-{id}-{n}"), crate::screens::markdown::linked(&segment), cx)
+                this.message_markdown(id, format!("md-{id}-{n}"), crate::screens::markdown::linked(&this.with_link_pills(&segment)), cx)
                     .on_link_click(this.markdown_link_handler(false, cx)),
             )
         };

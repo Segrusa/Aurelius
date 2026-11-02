@@ -41,6 +41,8 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, oneshot, watch};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// How often notifications older than `NOTIFICATION_KEEP_MS` are removed.
+const NOTIFICATION_PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 pub struct Shared {
     pub host_id: HostId,
@@ -264,6 +266,22 @@ pub enum Stopped {
     Restart,
 }
 
+/// Old notifications go at the start and then once a day; their events stay.
+async fn prune_notifications(shared: Arc<Shared>) {
+    let mut every = tokio::time::interval(NOTIFICATION_PRUNE_EVERY);
+    loop {
+        every.tick().await;
+        let store = shared.store().clone();
+        let pruned = tokio::task::spawn_blocking(move || store.write(|tx| aurelius_storage::timeline::prune_notifications(tx, aurelius_storage::now_ms()))).await;
+        match pruned {
+            Ok(Ok(0)) => {}
+            Ok(Ok(count)) => tracing::info!(count, "old notifications removed"),
+            Ok(Err(err)) => tracing::warn!(error = %err, "could not remove old notifications"),
+            Err(err) => tracing::warn!(error = %err, "could not remove old notifications"),
+        }
+    }
+}
+
 async fn run_inner(
     root: PathBuf,
     ready: Option<oneshot::Sender<()>>,
@@ -475,6 +493,7 @@ async fn run_inner(
     // Sessions kept for a usage limit whose run was stopped, or ended while the daemon was down.
     sessions::sweep(&shared);
     let dispatcher = tokio::spawn(dispatcher::run(shared.clone()));
+    let pruner = tokio::spawn(prune_notifications(shared.clone()));
     let mut connections = tokio::task::JoinSet::new();
     let mut bridge_connections = tokio::task::JoinSet::new();
 
@@ -508,6 +527,7 @@ async fn run_inner(
     connections.shutdown().await;
     bridge_connections.shutdown().await;
     dispatcher.abort();
+    pruner.abort();
     aurelius_host::tray::stop();
     drop(listener);
     drop(bridge_listener);

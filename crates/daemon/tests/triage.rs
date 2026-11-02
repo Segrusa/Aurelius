@@ -107,6 +107,7 @@ async fn company_dispatcher(client: &Client, employee_id: Option<EmployeeId>) {
 async fn started(client: &Client, project_id: ProjectId, title: &str) -> TicketId {
     let made = client
         .create_ticket(CreateTicket {
+            responsible_user_id: None,
             confirm_secret: false,
             project_id,
             title: title.into(),

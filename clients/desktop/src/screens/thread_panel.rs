@@ -28,6 +28,12 @@ pub enum ChatDo {
     React(MessageId, &'static str, bool),
     /// Open the message's thread in the panel.
     Reply(MessageId),
+    /// Copy the message's link (AUR-FA A5a).
+    CopyLink(MessageId),
+    /// Edit the reader's own message in place (A6).
+    Edit(MessageId),
+    /// Delete the reader's own message, after asking (A6).
+    Delete(MessageId),
 }
 
 /// The thread panel's state in a window.
@@ -262,7 +268,7 @@ impl AppView {
     // ---- Reactions -----------------------------------------------------------------
 
     /// A message of the channel or of the shown thread.
-    fn shown_message(&self, id: MessageId) -> Option<&MessageView> {
+    pub(crate) fn shown_message(&self, id: MessageId) -> Option<&MessageView> {
         let channel = self.messages.iter().flat_map(|s| s.messages.iter());
         let thread = self.thread.snapshot.iter().flat_map(|s| std::iter::once(&s.root).chain(s.replies.iter()));
         channel.chain(thread).find(|m| m.id == id)
@@ -299,14 +305,21 @@ impl AppView {
             ChatDo::Picker(message, anchor) => self.open_reaction_picker(message, anchor, window, cx),
             ChatDo::React(message, emoji, on) => self.react(message, emoji, on, cx),
             ChatDo::Reply(message) => self.open_thread_panel(message, window, cx),
+            ChatDo::CopyLink(message) => self.copy_message_link(message, cx),
+            ChatDo::Edit(message) => self.edit_start(message, window, cx),
+            ChatDo::Delete(message) => self.edit_delete_ask(message, window, cx),
         }
     }
 
     /// The actions of a message as a menu (right-click, ⋯, Enter on its action bar):
-    /// React…, Reply in thread, Create ticket…. Empty when it has none.
+    /// React…, Reply in thread, Create ticket…, Copy link. Empty when it has none.
     pub fn message_menu(&self, m: &MessageView, anchor: Point<Pixels>) -> MenuItems {
         let RowActions { react, reply } = if self.row_toolbar_on() { threads::row_actions(m, self.message_caps(m)) } else { RowActions::default() };
         let chat = |label: &str, run| Some(MenuEntry { label: label.to_string().into(), keys: None, run: MenuDo::Chat(run), danger: false, checked: false, detail: None });
+        // A deleted message has no actions: its line stays, and its thread.
+        if crate::screens::message_edit::is_deleted(m) {
+            return Vec::new();
+        }
         let mut items = Vec::new();
         if react {
             items.push(chat("React…", ChatDo::Picker(m.id, anchor)));
@@ -317,6 +330,10 @@ impl AppView {
         if self.make_ticket_action_allowed(m) {
             items.push(crate::screens::board::menu_entry("Create ticket…", crate::screens::board::BoardDo::TicketFromMessage(m.id), false, None));
         }
+        if self.message_link_allowed(m) {
+            items.push(chat("Copy link", ChatDo::CopyLink(m.id)));
+        }
+        items.extend(self.edit_menu_entries(m));
         items
     }
 
@@ -357,6 +374,12 @@ impl AppView {
                 })))
             })
             .children(actions)
+            .when(self.message_link_allowed(m), |el| {
+                el.child(ui::action_icon(SharedString::from(format!("copy-link-{id}")), "🔗", "Copy link", None, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.copy_message_link(id, cx);
+                })))
+            })
             .when(menu_items, |el| {
                 el.child(ui::action_icon(SharedString::from(format!("more-{id}")), "⋯", "More actions", None, None).on_click(cx.listener(move |this, e: &ClickEvent, w, cx| {
                     cx.stop_propagation();
@@ -372,7 +395,7 @@ impl AppView {
     /// the accent; a click toggles yours, the tooltip says who; `[☺+]` opens the picker.
     pub fn reactions_row(&self, m: &MessageView, cx: &mut Context<Self>) -> Option<AnyElement> {
         let caps = self.message_caps(m);
-        if !caps.reactions || m.reactions.is_empty() {
+        if !caps.reactions || m.reactions.is_empty() || crate::screens::message_edit::is_deleted(m) {
             return None;
         }
         let can = threads::row_actions(m, caps).react;
@@ -458,7 +481,7 @@ impl AppView {
                     rows.push(crate::screens::chat::feed_separator("thread-replies".into(), label.into(), theme::BORDER, theme::TEXT_2).pt(px(14.)).into_any_element());
                 }
                 for reply in &s.replies {
-                    rows.push(div().w_full().relative().pt(px(12.)).child(self.render_message(reply, &author, cx)).into_any_element());
+                    rows.push(div().w_full().relative().pt(px(12.)).when(self.link_flashes(reply.id), |el| el.rounded(px(4.)).bg(c(theme::ACCENT_HALO))).child(self.render_message(reply, &author, cx)).into_any_element());
                 }
                 for l in self.thread.live.iter().filter(|l| !s.replies.iter().any(|r| r.id == l.message)) {
                     let mut streaming = crate::screens::chat::streaming_answer(l.message, l.run, l.author.clone().or_else(|| self.run_author(l.run)), l.mode);

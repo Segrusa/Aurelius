@@ -733,6 +733,7 @@ async fn a_phone_with_chat_rights_cannot_delete_a_tickets_channel() {
     let created = desktop.execute(envelope(Command::CreateProject(CreateProject { name: "Orbit".into(), description: None, folder: None }), None)).await.unwrap();
     let CommandResult::ProjectCreated { project_id, .. } = created.result else { panic!("{:?}", created.result) };
     let create = CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id,
         title: "Login".into(),

@@ -69,6 +69,7 @@ fn new_ticket(s: &Setup, title: &str) -> TicketId {
     let created = run(
         s,
         Command::CreateTicket(ticket::CreateTicket {
+            responsible_user_id: None,
             confirm_secret: false,
             project_id: s.project,
             title: title.into(),
@@ -129,7 +130,7 @@ fn every_ticket_board_and_company_write_needs_a_board_member() {
     let s = setup();
     let ticket = new_ticket(&s, "Mine");
     let commands = [
-        Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: s.project, title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None }),
+        Command::CreateTicket(ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: s.project, title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None }),
         Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: ticket, title: Some("y".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }),
         Command::MoveTicket(ticket::MoveTicket { ticket_id: ticket, column_id: column(&s, ColumnKind::Todo), before_ticket_id: None }),
         Command::StartTicket(ticket::StartTicket { ticket_id: ticket, employee_id: None }),
@@ -143,6 +144,10 @@ fn every_ticket_board_and_company_write_needs_a_board_member() {
         Command::UpdateBoardColumns(ticket::UpdateBoardColumns { columns: vec![] }),
         Command::UpdateCompany(UpdateCompany { name: Some("Acme".into()), dispatcher: None, tester: None }),
         Command::UpdateProject(UpdateProject { project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: None }) }),
+        Command::SetTicketResponsible(ticket::SetTicketResponsible { ticket_id: ticket, responsible_user_id: None }),
+        Command::FollowTicket(ticket::FollowTicket { ticket_id: ticket, on: true }),
+        Command::EditMessage(aurelius_domain::group_chat::EditMessage { message_id: aurelius_domain::MessageId::new(), text: "x".into(), confirm_secret: false }),
+        Command::DeleteMessage(aurelius_domain::group_chat::DeleteMessage { message_id: aurelius_domain::MessageId::new() }),
     ];
     for command in commands {
         let method = command.method();
@@ -171,13 +176,13 @@ fn a_new_ticket_is_in_backlog_by_its_author_with_normal_priority() {
     assert_eq!(meta["created_by_user"], serde_json::json!(s.user));
     assert_eq!(meta["by"], serde_json::json!({ "kind": "board_member", "user_id": s.user }));
 
-    let err = run(&s, Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: s.project, title: " ".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None })).unwrap_err();
+    let err = run(&s, Command::CreateTicket(ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: s.project, title: " ".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None })).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation, "MU1-07 AC2: a title is needed");
-    let err = run(&s, Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: ProjectId::new(), title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None })).unwrap_err();
+    let err = run(&s, Command::CreateTicket(ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: ProjectId::new(), title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None })).unwrap_err();
     assert_eq!(err.code, ErrorCode::NotFound, "and an existing project");
 
     // `start`: straight to Todo.
-    let started = run(&s, Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: s.project, title: "Now".into(), description: None, priority: TicketPriority::Urgent, labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None })).unwrap();
+    let started = run(&s, Command::CreateTicket(ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: s.project, title: "Now".into(), description: None, priority: TicketPriority::Urgent, labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None })).unwrap();
     let CommandResult::TicketCreated { ticket_id, number } = started else { panic!() };
     assert_eq!(number, 2);
     let t = view(&s, ticket_id);
@@ -471,7 +476,7 @@ fn accept_waits_for_linked_tasks_that_still_work() {
 fn ticket_in(s: &Setup, project: ProjectId, title: &str, owner: Option<EmployeeId>, start: bool) -> TicketId {
     let created = run(
         s,
-        Command::CreateTicket(ticket::CreateTicket { confirm_secret: false, project_id: project, title: title.into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: owner, run: Default::default(), files: vec![], start, from_message: None }),
+        Command::CreateTicket(ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: project, title: title.into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: owner, run: Default::default(), files: vec![], start, from_message: None }),
     )
     .unwrap();
     let CommandResult::TicketCreated { ticket_id, .. } = created else { panic!("{created:?}") };
@@ -581,6 +586,7 @@ fn a_card_put_above_itself_stays_where_it_is() {
 fn a_deadline_must_be_a_real_moment() {
     let s = setup();
     let mut create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: "Late".into(),

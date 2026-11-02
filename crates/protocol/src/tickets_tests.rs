@@ -13,6 +13,7 @@ use aurelius_domain::{BoardColumnId, Command, CommandId, EmployeeId, ProjectId, 
 
 fn create(mode: Option<AgentMode>) -> CreateTicket {
     CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: ProjectId::new(),
         title: "Login".into(),

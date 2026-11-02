@@ -79,6 +79,7 @@ class CompanyState extends Equatable {
     this.employees = const [],
     this.proposals = const [],
     this.tasks = const [],
+    this.othersTasks = const {},
     this.followOrgChart = true,
     this.company,
     this.notice,
@@ -101,6 +102,12 @@ class CompanyState extends Equatable {
 
   /// All tasks of all projects.
   final List<TaskView> tasks;
+
+  /// Ids of main tasks whose decision is someone else's: they are not counted as waiting (freeze §5).
+  final Set<String> othersTasks;
+
+  /// What waits for this board member: what Dashboard and Inbox count.
+  List<TaskView> get waitingTasks => tasks.where((t) => t.needsYou && !othersTasks.contains(t.id)).toList();
 
   /// The server setting "Follow the org chart".
   final bool followOrgChart;
@@ -138,7 +145,7 @@ class CompanyState extends Equatable {
   }
 
   int get working => workingEmployees.length;
-  int get waiting => tasks.where((t) => t.needsYou).length;
+  int get waiting => waitingTasks.length;
 
   /// Who works in a project: employees with open tasks there.
   List<EmployeeSummary> employeesIn(String projectId) => org.workingIn(projectId, activeEmployees, tasks);
@@ -152,6 +159,7 @@ class CompanyState extends Equatable {
     List<EmployeeSummary>? employees,
     List<ProposalView>? proposals,
     List<TaskView>? tasks,
+    Set<String>? othersTasks,
     bool? followOrgChart,
     CompanyView? company,
     String? notice,
@@ -165,6 +173,7 @@ class CompanyState extends Equatable {
         employees: employees ?? this.employees,
         proposals: proposals ?? this.proposals,
         tasks: tasks ?? this.tasks,
+        othersTasks: othersTasks ?? this.othersTasks,
         followOrgChart: followOrgChart ?? this.followOrgChart,
         company: company ?? this.company,
         notice: notice,
@@ -174,7 +183,7 @@ class CompanyState extends Equatable {
       );
 
   @override
-  List<Object?> get props => [loading, projects, employees, proposals, tasks, followOrgChart, company?.dispatcherEmployeeId, company?.testerEmployeeId, company?.version, notice, createdProjectId, lastResult, order];
+  List<Object?> get props => [loading, projects, employees, proposals, tasks, othersTasks, followOrgChart, company?.dispatcherEmployeeId, company?.testerEmployeeId, company?.version, notice, createdProjectId, lastResult, order];
 }
 
 /// The company: employees, projects and their tasks, what waits
@@ -219,6 +228,7 @@ class CompanyBloc extends Bloc<CompanyEvent, CompanyState> {
       final company = await _repository.company();
       final tasks = await _repository.tasks();
       final proposals = await _repository.proposals();
+      final others = await _repository.mainTasksOfOthers(tasks);
       emit(state.copyWith(
         loading: false,
         projects: projects,
@@ -228,6 +238,7 @@ class CompanyBloc extends Bloc<CompanyEvent, CompanyState> {
         // Proposed instructions only where the server has the feature.
         proposals: proposals.where((p) => !p.isInstructions || _repository.linkState.has(Harness2.instructionProposals)).toList(),
         tasks: tasks,
+        othersTasks: others,
       ));
     } on DisconnectedException {
       emit(state.copyWith(loading: false));

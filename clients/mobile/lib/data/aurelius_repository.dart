@@ -9,6 +9,8 @@ import '../core/net/gateway_api.dart';
 import '../core/net/protocol.dart';
 import 'drafts.dart';
 import 'protocol/protocol.dart';
+import 'tickets.dart';
+import 'views.dart' show TaskViewState;
 
 /// The data layer for one host: typed queries and writes over the
 /// connection (the generated method functions), plus the change signals
@@ -59,7 +61,7 @@ class AureliusRepository {
   Stream<PowerState> get powerChanges => connection.powers;
 
   /// Company changes (projects, employees, tasks, approvals, memory, …).
-  Stream<Event> get companyChanges => events.where((e) => !e.isChat && !e.isNote);
+  Stream<Event> get companyChanges => events.where((e) => !e.isChat && !e.isNote && e.kind != EventKind.ticketFollowChanged);
 
   Future<R> _ask<R extends ResponseBody>(Map<String, dynamic> request, [Duration? timeout]) async {
     final body = timeout == null ? await connection.call(request) : await connection.call(request, timeout);
@@ -152,6 +154,19 @@ class AureliusRepository {
 
   /// One ticket with its main task and every task linked to it.
   Future<TicketDetail> ticket(String ticketId) async => (await _ask<ResponseBodyTicket>(ticketGet(ticketId: ticketId))).value;
+
+  /// Who follows a ticket (feature `ticket_follow`).
+  Future<TicketFollowersView> followers(String ticketId) async => (await _ask<ResponseBodyTicketFollowers>(ticketFollowers(ticketId: ticketId))).value;
+
+  /// The tickets of the signed-in board member (feature `my_tickets`); [includeDone] adds Done and archived ones.
+  Future<MyTicketsView> myTickets({String? projectId, bool includeDone = false}) async =>
+      (await _ask<ResponseBodyMyTickets>(ticketMyTickets(projectId: projectId, includeDone: includeDone ? true : null))).value;
+
+  /// The earlier texts of an edited message, newest first (feature `message_edits`).
+  Future<MessageHistoryView> messageEdits(String messageId) async => (await _ask<ResponseBodyMessageHistory>(messageHistory(messageId: messageId))).value;
+
+  /// Where a message is, for a link to it (feature `message_locate`).
+  Future<MessageLocation> messageLocation(String messageId) async => (await _ask<ResponseBodyMessageLocation>(messageLocate(messageId: messageId))).value;
 
   /// What changes a card or the columns: tickets, the columns, the tasks under
   /// tickets, projects and employees (dispatcher, names).
@@ -254,6 +269,9 @@ class AureliusRepository {
   Future<NotificationsSnapshot> notifications() async => (await _ask<ResponseBodyNotifications>(notificationList())).value;
 
   Future<void> markNotificationsRead() => _host(notificationMarkAllRead());
+
+  /// Mark one Inbox row read for this person (A3): opening a row does it.
+  Future<void> markNotificationRead(String id) => _host(notificationMarkRead(id: id));
 
   /// Remove one notification (swiped away).
   Future<void> dismissNotification(String id) => _host(notificationDismiss(id: id));
@@ -600,4 +618,21 @@ class AureliusRepository {
   }
 
   Future<void> unregisterPush() async => connection.api.unregisterPush(host, await connection.sessionToken());
+}
+
+/// What needs the signed-in board member, shared by the company and CarPlay.
+extension NeedsMeReads on AureliusRepository {
+  /// [othersMainTasks] of [tasks]. Reads the board only when a main task waits
+  /// on a server with a Responsible; a failed read leaves them counted as before.
+  Future<Set<String>> mainTasksOfOthers(List<TaskView> tasks) async {
+    if (!linkState.has(ticketResponsibleFeature) || !tasks.any((t) => t.isTicketMain && t.needsYou)) return const {};
+    try {
+      final read = await board();
+      return othersMainTasks(tasks, read.columns.expand((c) => c.tickets), me: linkState.user?.id);
+    } on DisconnectedException {
+      return const {};
+    } on ProtocolException {
+      return const {};
+    }
+  }
 }

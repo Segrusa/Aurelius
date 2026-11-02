@@ -100,7 +100,7 @@ pub fn reject_unparsed(value: Option<&serde_json::Value>, err: &dyn std::fmt::Di
 /// Methods whose params may hold a value, a password or a code: an error never
 /// repeats what serde said about them.
 pub fn quotes_no_params(name: &str) -> bool {
-    name.starts_with("vault.") || matches!(name, "user.login" | "user.create" | "user.set_password" | "claude_login.input" | "session.hello")
+    name.starts_with("vault.") || matches!(name, "user.login" | "user.create" | "user.set_password" | "claude_login.input" | "session.hello" | "message.edit")
 }
 
 impl<'de> Deserialize<'de> for Call {
@@ -338,6 +338,32 @@ pub mod feature {
     /// its conversation yet. It gives `ticket.updated`, and the timeline says who
     /// added how many files, with their names only.
     pub const TICKET_ADD_FILES: &str = "ticket_add_files";
+    /// A board member responsible for a ticket (protocol 5, additive; AUR-FA A1):
+    /// the write `ticket.set_responsible`, `CreateTicket::responsible_user_id`,
+    /// `TicketView::responsible_user_id`, `responsible_username` and
+    /// `responsible_disabled`, and `ticket.updated` with `changed: ["responsible"]`.
+    pub const TICKET_RESPONSIBLE: &str = "ticket_responsible";
+    /// Following a ticket (protocol 5, additive; AUR-FA A2): the write
+    /// `ticket.follow`, the read `ticket.followers`, and the event
+    /// `ticket.follow_changed`, only to connections whose `HelloParams::accepts`
+    /// names `ticket_follow`.
+    pub const TICKET_FOLLOW: &str = "ticket_follow";
+    /// A personal Inbox (protocol 5, additive; AUR-FA A3): `NotificationView`
+    /// rows per person, with `ticket_id`, `ticket_number`, `conversation_id`,
+    /// `message_id`, `reason`, `merged_count` and `needs_you`.
+    pub const PERSONAL_INBOX: &str = "personal_inbox";
+    /// My tickets (protocol 5, additive; AUR-FA A4): the read `ticket.my_tickets`.
+    pub const MY_TICKETS: &str = "my_tickets";
+    /// Links to a message (protocol 5, additive; AUR-FA A5a): the read
+    /// `message.locate { message_id }` answers `MessageLocation`, for a message
+    /// of a channel or a ticket's discussion only.
+    pub const MESSAGE_LOCATE: &str = "message_locate";
+    /// Editing and deleting one's own message (protocol 5, additive; AUR-FA A6):
+    /// the writes `message.edit` and `message.delete`, the read `message.history`,
+    /// `MessageView::edited_at_ms`, `deleted_at_ms` and `editable`, and the event
+    /// `message.edited`, only to connections whose `HelloParams::accepts` names
+    /// `message_edits`. A deletion gives the event `message.deleted` every client knows.
+    pub const MESSAGE_EDITS: &str = "message_edits";
 }
 
 /// Every feature this build has.
@@ -373,6 +399,12 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_ADD_FILES,
     feature::CHAT_THREADS,
     feature::CHAT_REACTIONS,
+    feature::MESSAGE_LOCATE,
+    feature::MY_TICKETS,
+    feature::MESSAGE_EDITS,
+    feature::TICKET_RESPONSIBLE,
+    feature::TICKET_FOLLOW,
+    feature::PERSONAL_INBOX,
 ];
 
 /// Daemon → client.
@@ -473,6 +505,14 @@ pub enum ResponseBody {
     Channels(aurelius_domain::views::ChannelsSnapshot),
     /// `thread.read`.
     Thread(aurelius_domain::views::ThreadSnapshot),
+    /// `ticket.followers`.
+    TicketFollowers(aurelius_domain::ticket::TicketFollowersView),
+    /// `ticket.my_tickets`.
+    MyTickets(aurelius_domain::ticket::MyTicketsView),
+    /// `message.locate`.
+    MessageLocation(aurelius_domain::views::MessageLocation),
+    /// `message.history`.
+    MessageHistory(aurelius_domain::views::MessageHistoryView),
     WhoAmI(aurelius_domain::user::WhoAmI),
     /// `user.login`: the session token, once.
     Login(aurelius_domain::user::LoginResult),

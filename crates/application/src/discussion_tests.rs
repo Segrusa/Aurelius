@@ -85,6 +85,7 @@ fn post(s: &Setup, ticket: TicketId, text: &str) -> Result<(Vec<EmployeeId>, Vec
 
 fn new_ticket(s: &Setup, title: &str, owner: Option<EmployeeId>) -> TicketId {
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: title.into(),
@@ -472,6 +473,7 @@ fn sent_message(s: &Setup, channel: Option<ConversationId>, text: &str) -> aurel
 
 fn ticket_from(s: &Setup, message: Option<aurelius_domain::MessageId>, user: Option<UserId>) -> Result<(TicketId, u32), AppError> {
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: "From chat".into(),
@@ -792,5 +794,44 @@ fn a_post_in_a_ticket_channel_through_group_chat_send_needs_a_board_member() {
     assert!(messages(&s, d).iter().any(|m| m.text == "signed in"));
 }
 
+/// Who follows a ticket, as (username, reason).
+fn followers(s: &Setup, ticket: TicketId) -> Vec<(String, String)> {
+    s.service.store().read(|c| aurelius_storage::followers::list(c, ticket)).unwrap().into_iter().map(|f| (f.username, f.reason)).collect()
+}
+
+#[test]
+fn what_an_employee_writes_or_a_decisions_feedback_names_makes_that_board_member_follow() {
+    let s = setup();
+    let dana = UserId::new();
+    s.service.store().write(move |tx| aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &dana.to_string(), username: "dana", created_by_user: None, now_ms: 2 }, PHC)).unwrap();
+    let (grace, named) = (("grace".to_owned(), "created".to_owned()), ("dana".to_owned(), "mentioned".to_owned()));
+    let leave = |t| s.service.execute(&ctx(Some(dana)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::FollowTicket(ticket::FollowTicket { ticket_id: t, on: false }) }).unwrap();
+    let t = new_ticket(&s, "Login", Some(s.ann));
+    let (_, runs) = post(&s, t, "@Bo what do you think?").unwrap();
+    assert_eq!(followers(&s, t), vec![grace.clone()]);
+
+    // The answer of a woken run, copied to the discussion.
+    let st = s.service.store().clone();
+    let chat = aurelius_storage_main_chat(&s, s.bo);
+    let run = runs[0];
+    s.service.store().write(move |tx| discussion::mirror_answer(tx, &st, run, chat, "Ask @dana.", None, &[], None)).unwrap();
+    assert_eq!(followers(&s, t), vec![grace.clone(), named.clone()]);
+    leave(t);
+
+    // A post of a run in the discussion.
+    let (ok, text) = post_in_discussion(&s, runs[0], "@dana have a look");
+    assert!(ok, "{text}");
+    assert_eq!(followers(&s, t), vec![grace.clone(), named.clone()]);
+    leave(t);
+
+    // The feedback of a decision, a board member's message in the discussion.
+    let (st, user) = (s.service.store().clone(), s.user);
+    s.service.store().write(move |tx| discussion::decision_feedback(tx, &st, t, user, &serde_json::json!({}), "cmd", "@dana knows this")).unwrap();
+    assert_eq!(followers(&s, t), vec![grace, named]);
+}
+
 #[path = "discussion_thread_tests.rs"]
 mod threads;
+
+#[path = "discussion_edit_tests.rs"]
+mod edits;

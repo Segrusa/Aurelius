@@ -99,6 +99,7 @@ fn delegate(s: &Setup, run: RunId, to: &str, employee: EmployeeId) -> (TaskId, R
 
 fn ticket_of(s: &Setup, by: UserId, owner: EmployeeId) -> (TicketId, TaskId) {
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: "Login".into(),
@@ -299,6 +300,7 @@ fn the_dispatchers_triage_and_the_summary_after_done_use_the_tickets_login() {
     let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }), tester: None };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: "Search".into(),
@@ -421,7 +423,7 @@ fn a_ticket_without_its_creators_login_waits_tells_them_and_resumes_once_linked(
             Ok(tx.query_row("SELECT e.seq FROM notifications n JOIN events e ON e.id = n.event_id WHERE n.user_id = ?1", [robin.to_string()], |r| r.get(0))?)
         })
         .unwrap();
-    let (found, targets) = s.service.store().read(move |c| aurelius_storage::remote::push_for_seq(c, seq as u64)).unwrap().unwrap();
+    let (found, targets) = s.service.store().read(move |c| aurelius_storage::remote::pushes_for_seq(c, seq as u64)).unwrap().pop().unwrap();
     assert_eq!(found.view.title, "Connect your Claude login");
     assert_eq!(targets.iter().map(|t| t.client_id).collect::<Vec<_>>(), [robins_phone], "no deliver to another board member's device");
 
@@ -487,6 +489,7 @@ fn the_dispatcher_waits_for_its_logins_limit_without_using_a_try() {
     let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }), tester: None };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
         owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None,
@@ -577,6 +580,7 @@ fn the_dispatcher_waits_for_the_tickets_login_without_using_a_try() {
     let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }), tester: None };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
         owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None,

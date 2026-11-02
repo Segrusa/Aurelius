@@ -21,6 +21,8 @@ pub(super) struct Accepts {
     pub server_name: bool,
     pub chat_threads: bool,
     pub chat_reactions: bool,
+    pub ticket_follow: bool,
+    pub message_edits: bool,
 }
 
 impl Accepts {
@@ -34,6 +36,8 @@ impl Accepts {
             server_name: has(f::SERVER_NAME),
             chat_threads: has(f::CHAT_THREADS),
             chat_reactions: has(f::CHAT_REACTIONS),
+            ticket_follow: has(f::TICKET_FOLLOW),
+            message_edits: has(f::MESSAGE_EDITS),
         }
     }
 }
@@ -44,9 +48,11 @@ impl Accepts {
 /// Without `team_channels` the events and streamed text of project channels are
 /// left out: an older client would show them in its one Team chat. Without
 /// `server_name` the `server.renamed` events are, and without `chat_reactions`
-/// the `message.reacted` ones: an older client cannot read an event kind it
-/// does not know. Without `chat_threads` the streamed text of an answer in a
-/// thread is: an older client would show it in the channel's own list.
+/// the `message.reacted` ones, without `ticket_follow` the `ticket.follow_changed`
+/// ones and without `message_edits` the `message.edited` ones: an older client
+/// cannot read an event kind it does not know. Without `chat_threads` the streamed
+/// text of an answer in a thread is: an older client would show it in the
+/// channel's own list.
 pub(super) async fn subscribe(
     shared: &Arc<Shared>,
     after_seq: u64,
@@ -59,7 +65,7 @@ pub(super) async fn subscribe(
     let mut streams = shared.streams.subscribe();
     let mut loads = Some(shared.admission.changes());
     let mut powers = Some(shared.power.changes());
-    let mut hidden = Hidden::new(accepts.team_channels, accepts.server_name).with_chat(accepts.chat_threads, accepts.chat_reactions);
+    let mut hidden = Hidden::new(accepts.team_channels, accepts.server_name).with_chat(accepts.chat_threads, accepts.chat_reactions).with_follow_and_edits(accepts.ticket_follow, accepts.message_edits);
     let mut cursor = replay(shared, after_seq, &out, &mut hidden).await?;
     let replayed_through_seq = cursor;
     let shared = shared.clone();
@@ -153,19 +159,22 @@ pub(super) async fn subscribe(
 /// threads (`storage_task`): the forwarder never blocks a tokio worker on SQLite.
 /// Nor does a connection without `server_name` get `server.renamed`
 /// (`client_feature::SERVER_NAME`, SN-02 AC3), one without `chat_reactions`
-/// `message.reacted`, or one without `chat_threads` the streamed text of an
-/// answer in a thread.
+/// `message.reacted`, one without `ticket_follow` `ticket.follow_changed`, one
+/// without `message_edits` `message.edited`, or one without `chat_threads` the
+/// streamed text of an answer in a thread.
 struct Hidden {
     team_channels: bool,
     server_name: bool,
     chat_threads: bool,
     chat_reactions: bool,
+    ticket_follow: bool,
+    message_edits: bool,
     known: HashMap<String, bool>,
 }
 
 impl Hidden {
     fn new(team_channels: bool, server_name: bool) -> Self {
-        Hidden { team_channels, server_name, chat_threads: false, chat_reactions: false, known: HashMap::new() }
+        Hidden { team_channels, server_name, chat_threads: false, chat_reactions: false, ticket_follow: false, message_edits: false, known: HashMap::new() }
     }
 
     /// The same, for a client that shows threads and/or reactions.
@@ -173,11 +182,18 @@ impl Hidden {
         Hidden { chat_threads, chat_reactions, ..self }
     }
 
+    /// The same, for a client that shows followers and/or edited messages.
+    fn with_follow_and_edits(self, ticket_follow: bool, message_edits: bool) -> Self {
+        Hidden { ticket_follow, message_edits, ..self }
+    }
+
     /// Event kinds this connection's client does not know.
     fn hides_kind(&self, kind: EventKind) -> bool {
         match kind {
             EventKind::ServerRenamed => !self.server_name,
             EventKind::MessageReacted => !self.chat_reactions,
+            EventKind::TicketFollowChanged => !self.ticket_follow,
+            EventKind::MessageEdited => !self.message_edits,
             _ => false,
         }
     }
@@ -332,6 +348,31 @@ mod tests {
         assert!(!Hidden::new(false, false).with_chat(false, true).hides_kind(EventKind::MessageReacted));
         // A reply in a thread is an event an older client knows.
         assert!(!Hidden::new(true, true).hides_kind(EventKind::MessageUserCommitted));
+    }
+
+    #[test]
+    fn only_a_client_that_accepts_ticket_follow_gets_ticket_follow_changed() {
+        assert!(Hidden::new(true, true).with_chat(true, true).hides_kind(EventKind::TicketFollowChanged));
+        assert!(Hidden::new(true, true).with_follow_and_edits(false, true).hides_kind(EventKind::TicketFollowChanged));
+        assert!(!Hidden::new(false, false).with_follow_and_edits(true, false).hides_kind(EventKind::TicketFollowChanged));
+    }
+
+    #[test]
+    fn only_a_client_that_accepts_message_edits_gets_message_edited() {
+        assert!(Hidden::new(true, true).with_chat(true, true).hides_kind(EventKind::MessageEdited));
+        assert!(Hidden::new(true, true).with_follow_and_edits(true, false).hides_kind(EventKind::MessageEdited));
+        assert!(!Hidden::new(false, false).with_follow_and_edits(false, true).hides_kind(EventKind::MessageEdited));
+    }
+
+    #[test]
+    fn every_client_keeps_getting_message_deleted_because_it_already_knows_it() {
+        assert!(!Hidden::new(false, false).hides_kind(EventKind::MessageDeleted));
+    }
+
+    #[test]
+    fn a_hello_names_the_follow_and_edit_flags_it_accepts() {
+        let accepts = Accepts::of(&["ticket_follow".into(), "message_edits".into()]);
+        assert_eq!(accepts, Accepts { ticket_follow: true, message_edits: true, ..Accepts::default() });
     }
 
     #[test]

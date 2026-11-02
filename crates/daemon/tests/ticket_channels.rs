@@ -79,6 +79,7 @@ async fn employee(client: &Client, name: &str) -> EmployeeId {
 async fn ticket(client: &Client, project_id: ProjectId, title: &str, owner: Option<EmployeeId>, start: bool) -> TicketId {
     let made = client
         .create_ticket(CreateTicket {
+            responsible_user_id: None,
             confirm_secret: false,
             project_id,
             title: title.into(),

@@ -183,11 +183,17 @@ extension MessageViewState on MessageView {
   bool get isUser => role == MessageRole.user;
   bool get isStreaming => status == MessageStatus.partial;
 
+  /// Replaced by a line that says it was deleted (A6); its files and uploads are not shown.
+  bool get isDeleted => deletedAtMs != null;
+
   MessageView withText(String next, {List<ActivityView>? activity, String? author}) => MessageView(
         activity: activity ?? this.activity,
         approvalId: approvalId,
         author: author ?? this.author,
         createdAtMs: createdAtMs,
+        deletedAtMs: deletedAtMs,
+        editable: editable,
+        editedAtMs: editedAtMs,
         files: files,
         id: id,
         mode: mode,
@@ -212,6 +218,9 @@ extension MessageViewState on MessageView {
         author: author,
         authorUser: authorUser,
         createdAtMs: createdAtMs,
+        deletedAtMs: deletedAtMs,
+        editable: editable,
+        editedAtMs: editedAtMs,
         files: files,
         id: id,
         mode: mode,

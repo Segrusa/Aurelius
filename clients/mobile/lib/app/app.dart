@@ -21,6 +21,7 @@ import '../features/power/power_bloc.dart';
 import '../features/pairing/pair_page.dart';
 import '../features/pairing/pairing_bloc.dart';
 import '../features/runtime/runtime_bloc.dart';
+import '../features/links/link_actions.dart' show aureliusLinkReady, pendingAureliusLink, takePendingAureliusLink;
 import '../features/team/channels_bloc.dart';
 import 'router.dart';
 
@@ -112,12 +113,28 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
     final hosts = context.read<HostsBloc>();
     _link = _connection.states.listen((s) {
       _boardMember.value = s.boardMemberStep;
+      _openPendingLink();
       // The connection stored the server's new name: the paired PCs show it too.
       if (s.hostName != null && s.hostName != hosts.state.active?.name) hosts.add(const HostsChanged());
     });
     _router = AppRouter(widget.host, boardMember: _boardMember);
+    takePendingAureliusLink = _openPendingLink;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openPendingLink());
     _push = context.read<PushService>()..attach(_repository, _router);
     WidgetsBinding.instance.addObserver(this);
+  }
+
+  /// A link that asked to switch to this server (§6.3) or came from the operating
+  /// system (A5b) opens once the server is connected and signed in here; one that
+  /// is not a valid link says so right away. Nothing is navigated before that.
+  void _openPendingLink() {
+    final raw = pendingAureliusLink;
+    if (raw == null) return;
+    final s = _connection.state;
+    if (!aureliusLinkReady(raw, online: s.isOnline, signedIn: s.user != null)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (pendingAureliusLink == raw && _router.openLink(raw)) pendingAureliusLink = null;
+    });
   }
 
   @override
@@ -129,6 +146,8 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // A newer host's app may already have taken over (the old one is disposed last).
+    if (takePendingAureliusLink == _openPendingLink) takePendingAureliusLink = null;
     _push.detach(_repository);
     _link.cancel();
     _router.dispose();

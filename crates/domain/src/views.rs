@@ -672,6 +672,54 @@ pub struct MessageView {
     /// none and by older servers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reactions: Vec<ReactionView>,
+    /// When the message was last edited (feature `message_edits`). Left out when
+    /// it never was and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_at_ms: Option<i64>,
+    /// When the message was deleted (feature `message_edits`): `text` is the
+    /// line that says so. Left out when it was not and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at_ms: Option<i64>,
+    /// The reading board member may edit and delete this message (feature
+    /// `message_edits`), per reader like `ReactionView::mine`. Left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub editable: bool,
+}
+
+/// `message.locate` (feature `message_locate`): where a message of a channel or
+/// a ticket's discussion is, so a link to it can open the right place.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MessageLocation {
+    pub message_id: MessageId,
+    pub conversation_id: ConversationId,
+    /// The ticket whose discussion it is in; none for a channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<crate::TicketId>,
+    /// The number of `ticket_id` (`#12`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_number: Option<u32>,
+    /// The message that starts the thread it replies in; none for a message of
+    /// the channel itself (also for a thread's root).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_root: Option<MessageId>,
+}
+
+/// One earlier text of an edited message (`MessageHistoryView::versions`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MessageVersionView {
+    pub text: String,
+    /// When an edit replaced this text.
+    pub replaced_at_ms: i64,
+}
+
+/// `message.history` (feature `message_edits`): the earlier texts of a message,
+/// newest first, each through the vault redactor when it goes out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MessageHistoryView {
+    /// Always empty when `deleted`: a deleted text is gone in every client, even
+    /// though the audit log keeps it.
+    pub versions: Vec<MessageVersionView>,
+    pub deleted: bool,
 }
 
 /// `thread.read` (feature `chat_threads`): one thread of a channel, its root
@@ -787,6 +835,9 @@ pub mod system_action {
     pub const TESTED_FAILED: &str = "tested_failed";
     /// Someone joined the channel (`by`: who).
     pub const JOINED: &str = "joined";
+    /// `by` chose who is responsible for the ticket (`to`: who; on a `moved` line,
+    /// so an older client shows `text` and never reads a new `SystemLineKind`).
+    pub const RESPONSIBLE: &str = "responsible";
 }
 
 impl SystemLine {
@@ -1430,6 +1481,36 @@ pub struct NotificationView {
     pub read: bool,
     pub task_id: Option<TaskId>,
     pub target_type: String,
+    /// The ticket the row is about (feature `personal_inbox`). Left out otherwise and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<crate::TicketId>,
+    /// The number of `ticket_id` (`#12`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_number: Option<u32>,
+    /// The channel or discussion the row is about (feature `personal_inbox`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<ConversationId>,
+    /// The message the row is about (feature `personal_inbox`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<MessageId>,
+    /// Why the reader gets the row (feature `personal_inbox`): `responsible`,
+    /// `mention`, `plan_review`, `review`, `sent_back`, `failed` or `login`. Text,
+    /// not an enum: a client shows an unknown reason as a plain row, so a new one
+    /// never breaks `notification.list` on an older client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// How many later events this one row stands for (feature `personal_inbox`).
+    /// Left out when none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub merged_count: u32,
+    /// The row waits for the reader, worked out when it is read so that it follows
+    /// a handover (feature `personal_inbox`). Left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_you: bool,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 /// A colleague an employee proposed; the user decides.

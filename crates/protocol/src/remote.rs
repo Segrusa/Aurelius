@@ -59,6 +59,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ChannelList
         | Method::ChannelSearch { .. }
         | Method::ThreadRead { .. }
+        | Method::MessageLocate { .. }
+        | Method::MessageHistory { .. }
         | Method::CompanyGet
         | Method::ProjectConversationList { .. }
         | Method::ApprovalList
@@ -113,6 +115,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::BoardGet { .. }
         | Method::TicketGet { .. }
         | Method::TicketList { .. }
+        | Method::TicketFollowers { .. }
+        | Method::TicketMyTickets { .. }
         // The vault: every own device of a board member lists it and its audit log
         // (one role, MU4-10); the session decides who.
         | Method::VaultList { .. }
@@ -205,7 +209,7 @@ fn host_needs(host: &HostWrite) -> Needs {
         HostWrite::SessionRevoke { .. } | HostWrite::UserSetPassword(_) | HostWrite::UserDisable { .. } => Needs::Cap(Read),
         HostWrite::ClaudeLoginLink | HostWrite::ClaudeLoginCancel { .. } | HostWrite::ClaudeLoginUnlink => Needs::Cap(Read),
         // The inbox is the user's own: reading, dismissing.
-        HostWrite::NotificationMarkAllRead | HostWrite::NotificationDismiss { .. } | HostWrite::NotificationDismissAll => Needs::Cap(Read),
+        HostWrite::NotificationMarkAllRead | HostWrite::NotificationMarkRead { .. } | HostWrite::NotificationDismiss { .. } | HostWrite::NotificationDismissAll => Needs::Cap(Read),
         HostWrite::SecretSet { .. }
         | HostWrite::McpAdd(_)
         | HostWrite::McpRemove { .. }
@@ -255,6 +259,8 @@ fn command_needs(command: &Command) -> Needs {
         | Command::SendGroupMessage(_)
         | Command::PostTicketMessage(_)
         | Command::ReactToMessage(_)
+        | Command::EditMessage(_)
+        | Command::DeleteMessage(_)
         | Command::StartProjectConversation(_)
         | Command::SendProjectMessage(_)
         | Command::ShareMessage(_)
@@ -323,6 +329,8 @@ fn command_needs(command: &Command) -> Needs {
         | Command::SendBackTicket(_)
         | Command::CancelTicket(_)
         | Command::ArchiveTicket(_)
+        | Command::SetTicketResponsible(_)
+        | Command::FollowTicket(_)
         | Command::RetryTicketSummary(_)
         // Running a ticket on one's own Claude login, or the company's background
         // jobs: the board member's own subscription, from any device that controls tasks.

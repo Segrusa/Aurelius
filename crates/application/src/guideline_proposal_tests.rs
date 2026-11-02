@@ -385,7 +385,7 @@ fn e13_the_answer_is_only_proposed_and_e15_the_notice_has_no_text() {
     assert_eq!((note.title.as_str(), note.subject.as_str()), ("A guideline is proposed", "“Small steps” by Ann"));
     // The push is the notification's title and subject (remote-gateway push::Alert).
     let seq = notices[0].seq;
-    let found = s.store().read(move |c| aurelius_storage::timeline::notification_at_seq(c, seq)).unwrap().unwrap();
+    let found = s.store().read(move |c| aurelius_storage::timeline::notifications_at_seq(c, seq)).unwrap().pop().unwrap();
     assert!(!format!("{:?}", found.view).contains("THE-PROPOSED-TEXT"));
     // Decided: no longer in Needs you.
     s.store().write(move |tx| Ok(tx.execute("UPDATE guideline_proposals SET status = 'withdrawn', decided_at_ms = 9 WHERE id = ?1", [id.to_string()])?)).unwrap();

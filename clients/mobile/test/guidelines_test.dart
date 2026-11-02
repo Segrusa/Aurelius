@@ -416,7 +416,7 @@ void main() {
 
     test('E15: the guideline.proposed notification is not a second Needs you item (the card is)', () {
       const n = NotificationView(id: 'n1', severity: 'action', title: 'Forge proposes a guideline', subject: 'Rust', createdAtMs: 0, read: false, targetType: 'guideline.proposed');
-      expect(n.needsYou, isFalse);
+      expect(n.asksYou, isFalse);
       expect(n.givesBadge, isFalse);
     });
   });

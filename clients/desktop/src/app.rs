@@ -269,17 +269,26 @@ impl NavItem {
 pub enum InboxTab {
     #[default]
     NeedsYou,
+    /// The rows per ticket or channel (feature `personal_inbox`).
+    Updates,
     Results,
     Failed,
     All,
 }
 
 impl InboxTab {
-    pub const ALL: [InboxTab; 4] = [InboxTab::NeedsYou, InboxTab::Results, InboxTab::Failed, InboxTab::All];
+    pub const ALL: [InboxTab; 5] = [InboxTab::NeedsYou, InboxTab::Updates, InboxTab::Results, InboxTab::Failed, InboxTab::All];
+    const WITHOUT_UPDATES: [InboxTab; 4] = [InboxTab::NeedsYou, InboxTab::Results, InboxTab::Failed, InboxTab::All];
+
+    /// The tabs this server has: Updates only with the personal Inbox (§4.6).
+    pub fn shown(personal_inbox: bool) -> &'static [InboxTab] {
+        if personal_inbox { &Self::ALL } else { &Self::WITHOUT_UPDATES }
+    }
 
     pub fn label(self) -> &'static str {
         match self {
             InboxTab::NeedsYou => "Needs you",
+            InboxTab::Updates => "Updates",
             InboxTab::Results => "Results",
             InboxTab::Failed => "Failed",
             InboxTab::All => "All",
@@ -295,8 +304,21 @@ impl InboxTab {
         match kind {
             NoteKind::Hidden => false,
             NoteKind::NeedsYou => self.shows_head(),
-            NoteKind::Failed => self != InboxTab::NeedsYou,
+            NoteKind::Failed => !matches!(self, InboxTab::NeedsYou | InboxTab::Updates),
             NoteKind::Result => matches!(self, InboxTab::Results | InboxTab::All),
+            NoteKind::Update => matches!(self, InboxTab::Updates | InboxTab::All),
+        }
+    }
+
+    /// Whether the tab lists this row. A row per ticket or channel is on Updates and All, with
+    /// ◆ also on Needs you, and a failed one also on Failed: never twice in one list.
+    /// `mine`: a row of a ticket's main task waits for this board member (freeze §5).
+    pub fn lists(self, n: &NotificationView, mine: bool) -> bool {
+        match note_kind(n) {
+            NoteKind::Update if self == InboxTab::NeedsYou => n.needs_you,
+            NoteKind::Update if self == InboxTab::Failed => n.reason.as_deref() == Some("failed"),
+            NoteKind::NeedsYou if self == InboxTab::NeedsYou => mine,
+            kind => self.shows(kind),
         }
     }
 }
@@ -310,12 +332,15 @@ pub enum NoteKind {
     NeedsYou,
     Failed,
     Result,
+    /// A row of the personal Inbox, per ticket or channel: it has a reason, also an unknown one.
+    Update,
 }
 
 pub fn note_kind(n: &NotificationView) -> NoteKind {
     match (n.severity.as_str(), n.target_type.as_str()) {
         // The inbox lists these itself, a guideline's proposal too (B5): one row each, gone once decided.
         ("action", "approval.requested" | "employee.proposed" | "employee.instructions_proposed" | "guideline.proposed") => NoteKind::Hidden,
+        _ if crate::screens::updates::is_update(n) => NoteKind::Update,
         ("action", _) => NoteKind::NeedsYou,
         (_, "task.failed") => NoteKind::Failed,
         _ => NoteKind::Result,
@@ -323,16 +348,52 @@ pub fn note_kind(n: &NotificationView) -> NoteKind {
 }
 
 /// The notifications a tab lists: those that need you first, then the rest newest first.
-pub fn tab_notes<'a>(tab: InboxTab, notes: &[&'a NotificationView]) -> Vec<&'a NotificationView> {
-    let mut out: Vec<&NotificationView> = notes.iter().copied().filter(|n| tab.shows(note_kind(n))).collect();
-    out.sort_by_key(|n| note_kind(n) != NoteKind::NeedsYou);
+pub fn tab_notes<'a>(tab: InboxTab, notes: &[&'a NotificationView], mine: impl Fn(&NotificationView) -> bool) -> Vec<&'a NotificationView> {
+    let mut out: Vec<&NotificationView> = notes.iter().copied().filter(|n| tab.lists(n, mine(n))).collect();
+    out.sort_by_key(|n| !note_needs_you(n));
     out
+}
+
+/// A row that waits for the reader: it stands under NEEDS YOU in a list.
+pub fn note_needs_you(n: &NotificationView) -> bool {
+    note_kind(n) == NoteKind::NeedsYou || n.needs_you
+}
+
+/// The Inbox's badge (ui-ontwerp §4.3): what is on Needs you, what failed and is unread, and the
+/// unread Updates. A row is counted once, also when it is on two tabs. Without the personal
+/// Inbox no row has a reason: Needs you and the unread Failed, as ever.
+pub fn inbox_badge(head: usize, notes: &[&NotificationView], mine: impl Fn(&NotificationView) -> bool, opened: &HashMap<String, i64>) -> usize {
+    let needs = tab_notes(InboxTab::NeedsYou, notes, &mine).len();
+    let unread = notes.iter().filter(|n| match note_kind(n) {
+        NoteKind::Failed => !n.read && mine(n),
+        NoteKind::Update => !n.needs_you && crate::screens::updates::row_unread(n, opened),
+        _ => false,
+    });
+    head + needs + unread.count()
+}
+
+/// The tab the Inbox opens on: what needs you, else unread Updates, else the results.
+pub fn first_inbox_tab(needs_you: usize, unread_updates: usize, personal_inbox: bool) -> InboxTab {
+    if needs_you > 0 {
+        InboxTab::NeedsYou
+    } else if personal_inbox && unread_updates > 0 {
+        InboxTab::Updates
+    } else {
+        InboxTab::Results
+    }
+}
+
+/// Whether opening the Inbox marks everything read: as ever, unless an unread row of the personal
+/// Inbox would go with it; that one is read when it is opened, not when the tab is seen (§4.4).
+pub fn opening_marks_all_read(notes: &[&NotificationView], opened: &HashMap<String, i64>) -> bool {
+    let unread_update = notes.iter().any(|n| note_kind(n) == NoteKind::Update && crate::screens::updates::row_unread(n, opened));
+    !unread_update && notes.iter().any(|n| !n.read)
 }
 
 /// Items per tab, in `InboxTab::ALL` order; `head` is the pending approvals and proposals.
 /// The first (Needs you) is the sidebar badge.
-pub fn tab_counts(head: usize, notes: &[&NotificationView]) -> [usize; 4] {
-    InboxTab::ALL.map(|t| if t.shows_head() { head } else { 0 } + tab_notes(t, notes).len())
+pub fn tab_counts(head: usize, notes: &[&NotificationView], mine: impl Fn(&NotificationView) -> bool) -> [usize; 5] {
+    InboxTab::ALL.map(|t| if t.shows_head() { head } else { 0 } + tab_notes(t, notes, &mine).len())
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -676,8 +737,12 @@ pub enum ConfirmKind {
     DisableMember(aurelius_domain::UserId),
     /// Disconnect the own Claude login (MU3-09 AC4).
     DisconnectClaude,
+    /// Delete one of the reader's own messages (A6): a line stays that says so.
+    DeleteMessage(aurelius_domain::MessageId),
     /// Run a ticket that waits for another's login on the own Claude login (B4).
     UseMyLogin(aurelius_domain::TicketId),
+    /// A link to another server this device is paired with: switch to it (AUR-FA A5a).
+    LinkOtherServer(crate::screens::links::AureliusLink),
     /// Delete ("archive") a vault item (MU4-11 AC2).
     ArchiveVaultItem(aurelius_domain::VaultItemId),
     /// A message held back by `looks_like_secret` (B10, `vault.held`): "Send anyway?".
@@ -972,6 +1037,12 @@ pub struct AppView {
     pub claude: crate::screens::account::Claude,
     /// The board, the open ticket and their dialogs.
     pub board: crate::screens::board::Board,
+    /// Editing and deleting your own messages (A6).
+    pub edit: crate::screens::message_edit::MessageEdit,
+    /// The part of the Board page that shows (`[ Board ] [ My tickets ]`, A4).
+    pub board_page: crate::screens::my_tickets::BoardPage,
+    /// My tickets (A4).
+    pub my: crate::screens::my_tickets::MyTickets,
     /// The Team chat's thread panel and its composer (AUR-CHAT-002).
     pub thread: crate::screens::thread_panel::ThreadPanel,
     pub adding_server: bool,
@@ -1013,6 +1084,12 @@ pub struct AppView {
     pub notifications: Option<NotificationsSnapshot>,
     /// Notifications that were unread when the inbox opened (shown as new).
     pub inbox_new: Vec<String>,
+    /// Rows of the personal Inbox opened here, with their `created_at_ms` then: read until
+    /// their next event. A row opened here is also read on the server (`notification.mark_read`,
+    /// freeze §2); this map keeps it read at once and while an older server cannot.
+    pub inbox_opened: HashMap<String, i64>,
+    /// The ticket of the selected row whose followers were asked for.
+    pub inbox_followers_asked: Option<aurelius_domain::TicketId>,
     /// Memory of the open project (B17).
     pub memory: Option<(ProjectId, Vec<aurelius_protocol::MemoryView>)>,
     memory_requested: Option<ProjectId>,
@@ -1208,6 +1285,12 @@ pub struct AppView {
     pub assign_said: HashMap<aurelius_domain::TaskId, String>,
     pub overlay_focus: FocusHandle,
     /// Scroll position of the open popup menu (keyboard selection scrolls into view).
+    /// A link on its way: waiting for the right server and the sign-in, or located. Only in memory (§6.3).
+    pub pending_link: Option<crate::screens::links::PendingLink>,
+    /// A link the OS handed over (A5b), until the server is connected.
+    pub os_link: Option<String>,
+    /// The message a link opened (its halo, ACCENT_HALO for `FLASH_MS`).
+    pub link_flash: Option<crate::screens::links::LinkFlash>,
     pub menu_scroll: ScrollHandle,
     /// Scroll position of the main content (chat, manager, project pages).
     pub scroll: ScrollHandle,
@@ -1450,6 +1533,8 @@ impl AppView {
         subscriptions.extend(members.subscriptions(window, cx));
         let claude = crate::screens::account::Claude::new(window, cx);
         subscriptions.extend(claude.subscriptions(window, cx));
+        let edit = crate::screens::message_edit::MessageEdit::new(window, cx);
+        subscriptions.extend(edit.subscriptions(window, cx));
         let board = crate::screens::board::Board::new(window, cx);
         subscriptions.extend(board.subscriptions(window, cx));
         let thread = crate::screens::thread_panel::ThreadPanel::new(window, cx);
@@ -1488,6 +1573,9 @@ impl AppView {
             members,
             claude,
             board,
+            edit,
+            board_page: Default::default(),
+            my: Default::default(),
             thread,
             vault,
             guidelines,
@@ -1561,6 +1649,8 @@ impl AppView {
             question_focus: 0,
             notifications: None,
             inbox_new: Vec::new(),
+            inbox_opened: HashMap::new(),
+            inbox_followers_asked: None,
             memory: None,
             memory_requested: None,
             ideas: None,
@@ -1669,6 +1759,9 @@ impl AppView {
             dialog_folder: None,
             assign_said: HashMap::new(),
             overlay_focus: cx.focus_handle(),
+            pending_link: None,
+            os_link: None,
+            link_flash: None,
             menu_scroll: ScrollHandle::new(),
             scroll: ScrollHandle::new(),
             page_scroll: ScrollHandle::new(),
@@ -1738,6 +1831,7 @@ impl AppView {
                 let online = matches!(connection, Connection::Online { .. }) && !matches!(self.connection, Connection::Online { .. });
                 self.members_connection(&connection, cx);
                 self.board_connection(&connection, cx);
+                self.my_connection(matches!(connection, backend::Connection::Online { .. }));
                 self.connection = connection;
                 if online {
                     // The board reads again what it missed while offline (also for the sidebar's count).
@@ -1934,7 +2028,12 @@ impl AppView {
                         self.notify_user(format!("{}{subject} · Ctrl I opens the inbox", newest.title), false, cx);
                     }
                 }
+                self.inbox_opened.retain(|id, _| snapshot.notifications.iter().any(|n| n.id == *id && !n.read));
                 self.notifications = Some(snapshot);
+            }
+            Update::RowReadFailed(id, message) => {
+                self.inbox_opened.remove(&id);
+                self.notify_user(format!("Couldn't mark this row read: {message}"), true, cx);
             }
             Update::Ideas(scope, items) => {
                 // Deleted elsewhere (`idea.deleted`): a dialog for it has nothing left to save.
@@ -3755,10 +3854,11 @@ impl AppView {
         self.close_overlay();
         self.navigate(Page::Inbox);
         // Open on what needs you; with nothing waiting, on the results.
-        self.inbox_tab = if self.inbox_counts()[0] > 0 { InboxTab::NeedsYou } else { InboxTab::Results };
+        let unread_updates = self.inbox_notifications().iter().filter(|n| note_kind(n) == NoteKind::Update && crate::screens::updates::row_unread(n, &self.inbox_opened)).count();
+        self.inbox_tab = first_inbox_tab(self.inbox_counts()[0], unread_updates, self.personal_inbox_supported());
         self.inbox_selected = 0;
-        self.inbox_new = self.inbox_notifications().iter().filter(|n| !n.read).map(|n| n.id.clone()).collect();
-        if !self.inbox_new.is_empty() {
+        self.inbox_new = self.inbox_notifications().iter().filter(|n| !n.read && note_kind(n) != NoteKind::Update).map(|n| n.id.clone()).collect();
+        if opening_marks_all_read(&self.inbox_notifications(), &self.inbox_opened) {
             let _ = self.requests.send(backend::Request::MarkNotificationsRead);
         }
         self.focus.focus(window, cx);
@@ -4520,6 +4620,10 @@ impl AppView {
 
     /// Open what the selected inbox notification is about (its task).
     fn open_inbox_notification(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(row) = self.inbox_note().filter(|n| note_kind(n) == NoteKind::Update).cloned() {
+            self.open_update_row(&row, window, cx);
+            return;
+        }
         let target = self.inbox_note().and_then(|n| n.task_id);
         let Some(task) = target.and_then(|id| self.tasks.iter().find(|t| t.id == id)).cloned() else {
             self.notify_user("This notification has no task to open.", false, cx);
@@ -5530,13 +5634,23 @@ impl AppView {
     }
 
     /// Items per inbox tab, in `InboxTab::ALL` order.
-    pub fn inbox_counts(&self) -> [usize; 4] {
-        tab_counts(self.pending_approvals().count() + self.pending_proposals().len() + self.pending_guideline_proposals().len(), &self.inbox_notifications())
+    pub fn inbox_counts(&self) -> [usize; 5] {
+        tab_counts(self.inbox_waiting_head(), &self.inbox_notifications(), |n| self.note_is_mine(n))
+    }
+
+    /// The approvals and proposals: they count for everyone.
+    pub fn inbox_waiting_head(&self) -> usize {
+        self.pending_approvals().count() + self.pending_proposals().len() + self.pending_guideline_proposals().len()
+    }
+
+    /// Whether a notification of a task counts for this board member (freeze §5).
+    pub fn note_is_mine(&self, n: &NotificationView) -> bool {
+        n.task_id.and_then(|id| self.tasks.iter().find(|t| t.id == id)).is_none_or(|t| self.task_counts_for_me(t))
     }
 
     /// The notifications the open tab lists, after its approvals and proposals.
     pub fn inbox_notes(&self) -> Vec<&NotificationView> {
-        tab_notes(self.inbox_tab, &self.inbox_notifications())
+        tab_notes(self.inbox_tab, &self.inbox_notifications(), |n| self.note_is_mine(n))
     }
 
     pub fn inbox_len(&self) -> usize {
@@ -5716,9 +5830,14 @@ impl AppView {
         } else if self.screen == Page::Projects {
             let at = ProjectsTab::ALL.iter().position(|t| *t == self.projects_tab).unwrap_or(0) as isize;
             self.set_projects_tab(ProjectsTab::ALL[(at + delta).rem_euclid(ProjectsTab::ALL.len() as isize) as usize], cx);
+        } else if self.screen == Page::Board && self.my_tickets_supported() {
+            let pages = crate::screens::my_tickets::BoardPage::ALL;
+            let at = pages.iter().position(|p| *p == self.board_page).unwrap_or(0) as isize;
+            self.set_board_page(pages[(at + delta).rem_euclid(pages.len() as isize) as usize], cx);
         } else if self.screen == Page::Inbox {
-            let at = InboxTab::ALL.iter().position(|t| *t == self.inbox_tab).unwrap_or(0) as isize;
-            self.set_inbox_tab(InboxTab::ALL[(at + delta).rem_euclid(InboxTab::ALL.len() as isize) as usize], cx);
+            let tabs = InboxTab::shown(self.personal_inbox_supported());
+            let at = tabs.iter().position(|t| *t == self.inbox_tab).unwrap_or(0) as isize;
+            self.set_inbox_tab(tabs[(at + delta).rem_euclid(tabs.len() as isize) as usize], cx);
         }
     }
 
@@ -5766,7 +5885,11 @@ impl AppView {
             NavItem::Inbox => return self.open_inbox(&OpenInbox, window, cx),
             NavItem::Settings => return self.open_settings(&OpenSettings, window, cx),
             NavItem::Dashboard => Page::Dashboard,
-            NavItem::Board => Page::Board,
+            NavItem::Board => {
+                // Ctrl+5 and the sidebar always open the board itself.
+                self.board_page = crate::screens::my_tickets::BoardPage::Board;
+                Page::Board
+            }
             NavItem::Chat => Page::GroupChat,
             NavItem::Employees => Page::Employees,
             NavItem::Projects => Page::Projects,
@@ -6479,7 +6602,7 @@ impl AppView {
                     ConfirmKind::ClearResults => {
                         // Optimistic: empty the list now; the backend then reloads the real one.
                         // Only results: what needs you, and the hidden alerts of approvals, stay.
-                        let result = |n: &NotificationView| matches!(note_kind(n), NoteKind::Result | NoteKind::Failed);
+                        let result = |n: &NotificationView| matches!(note_kind(n), NoteKind::Result | NoteKind::Failed | NoteKind::Update);
                         let ids: Vec<String> = self.inbox_notifications().into_iter().filter(|n| result(n)).map(|n| n.id.clone()).collect();
                         if let Some(n) = self.notifications.as_mut() {
                             n.notifications.retain(|n| !result(n));
@@ -6514,10 +6637,24 @@ impl AppView {
                         cx.notify();
                         return;
                     }
+                    ConfirmKind::DeleteMessage(message) => {
+                        self.edit_delete(message, cx);
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
                     ConfirmKind::UseMyLogin(ticket) => {
                         self.ticket_use_my_login(ticket, cx);
                         self.overlay = Overlay::None;
                         self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
+                    ConfirmKind::LinkOtherServer(link) => {
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        self.link_switch_server(link, cx);
                         cx.notify();
                         return;
                     }
@@ -6628,6 +6765,10 @@ impl AppView {
         }
         if self.overlay == Overlay::Menu {
             self.close_menu(window, cx);
+            return;
+        }
+        if self.edit_open() {
+            self.edit_cancel(cx);
             return;
         }
         if self.board.dialog.is_some() {
@@ -6744,6 +6885,11 @@ impl AppView {
 
     fn on_select(&mut self, delta: isize, cx: &mut Context<Self>) {
         self.preview_closed = false;
+        // My tickets is a list: j and k move its cards like the arrows.
+        if self.my_tickets_shown() {
+            self.board_step(if delta > 0 { crate::screens::board::Step::Down } else { crate::screens::board::Step::Up }, cx);
+            return;
+        }
         // Dashboard: Up and Down move through "At work now" (its employee shows in the preview pane).
         if self.screen == Page::Dashboard {
             let at_work = self.working_now().len();
@@ -6789,6 +6935,7 @@ impl AppView {
 
     fn on_filter(&mut self, filter: usize, cx: &mut Context<Self>) {
         match self.screen {
+            _ if self.my_tickets_shown() => return self.set_my_tab_index(filter, cx),
             Page::Project(_, Tab::Tasks) => self.task_filter = filter,
             Page::Project(ProjectRef::Real(_), Tab::Memory) => self.memory_filter = filter.min(2),
             _ if self.on_ideas_screen() && filter == 3 => self.ideas_author = self.ideas_author.next(),
@@ -6968,6 +7115,8 @@ impl AppView {
                 });
             }
         }
+        entries.extend(self.board_palette_entries(cx));
+        entries.extend(self.my_tickets_palette_entries());
         for shortcut in SHORTCUTS.iter().filter(|s| s.in_palette) {
             entries.push(PaletteEntry {
                 label: shortcut.label.into(),
@@ -7034,6 +7183,7 @@ impl Render for AppView {
         }
         // The same for the thread panel's thread: followed only while it shows.
         self.follow_thread();
+        self.link_step(window, cx);
         if let Some(project) = self.window_project {
             // Whatever led elsewhere (Back, Chat, an archive), a project window stays on its project.
             // Employees work company-wide: their pages may open in a project window too.
@@ -7159,6 +7309,7 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &GoTeamChat, w, cx| this.go_nav(NavItem::Chat, w, cx)))
             .on_action(cx.listener(|this, _: &GoBoard, w, cx| this.go_nav(NavItem::Board, w, cx)))
             .on_action(cx.listener(|this, _: &GoVault, w, cx| this.go_nav(NavItem::Vault, w, cx)))
+            .on_action(cx.listener(|this, _: &GoMyTickets, w, cx| this.go_my_tickets(w, cx)))
             .on_action(cx.listener(|this, _: &GoEmployees, w, cx| this.go_nav(NavItem::Employees, w, cx)))
             .on_action(cx.listener(|this, _: &GoOrgChart, w, cx| this.go_employees_tab(EmployeesTab::OrgChart, w, cx)))
             .on_action(cx.listener(|this, _: &GoGuidelines, w, cx| this.guidelines_go(crate::screens::guidelines::GuidelinesView::Library, w, cx)))
@@ -7196,6 +7347,10 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &crate::keymap::BoardOpen, w, cx| this.board_key_open(w, cx)))
             .on_action(cx.listener(|this, _: &crate::keymap::BoardStart, _, cx| this.board_key_start(cx)))
             .on_action(cx.listener(|this, _: &crate::keymap::BoardMoveTo, w, cx| this.board_key_move(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardResponsible, w, cx| this.board_key_responsible(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardFollow, _, cx| this.board_key_follow(cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardCopyLink, _, cx| this.board_key_copy_link(cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardMakeMeResponsible, _, cx| this.board_key_make_me_responsible(cx)))
             .on_action(cx.listener(|this, _: &crate::keymap::BoardPickUp, _, cx| this.board_key_pick(cx)))
             .on_action(cx.listener(|this, _: &OpenUpdates, w, cx| {
                 this.open_settings(&OpenSettings, w, cx);
@@ -7915,6 +8070,7 @@ mod tests {
     fn inbox_tabs_filter_and_count_what_they_show() {
         use super::{InboxTab, NoteKind, note_kind, tab_counts, tab_notes};
         let note = |id: &str, severity: &str, target: &str| NotificationView {
+            ticket_id: None, ticket_number: None, conversation_id: None, message_id: None, reason: None, merged_count: 0, needs_you: false,
             id: id.into(),
             severity: severity.into(),
             title: String::new(),
@@ -7936,14 +8092,79 @@ mod tests {
         let refs: Vec<&NotificationView> = notes.iter().collect();
         assert_eq!(note_kind(&notes[1]), NoteKind::Hidden, "the approval itself is listed, not its alert");
         assert_eq!(note_kind(&notes[6]), NoteKind::Hidden, "a guideline's proposal is its own row, not also its alert");
-        let ids = |tab| tab_notes(tab, &refs).iter().map(|n| n.id.as_str()).collect::<Vec<_>>();
+        let ids = |tab| tab_notes(tab, &refs, |_| true).iter().map(|n| n.id.as_str()).collect::<Vec<_>>();
         assert_eq!(ids(InboxTab::NeedsYou), ["escalated"]);
         assert_eq!(ids(InboxTab::Results), ["ok", "failed", "sign-in"]);
         assert_eq!(ids(InboxTab::Failed), ["failed"]);
         assert_eq!(ids(InboxTab::All), ["escalated", "ok", "failed", "sign-in"], "what needs you comes first");
         // Two approvals or proposals waiting; hidden alerts count nowhere.
-        assert_eq!(tab_counts(2, &refs), [3, 3, 1, 6]);
-        assert_eq!(tab_counts(0, &[]), [0, 0, 0, 0]);
+        assert_eq!(tab_counts(2, &refs, |_| true), [3, 0, 3, 1, 6]);
+        assert_eq!(tab_counts(0, &[], |_| true), [0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn without_the_personal_inbox_the_tabs_and_the_badge_are_as_before() {
+        use super::{InboxTab, first_inbox_tab, inbox_badge, opening_marks_all_read};
+        use crate::screens::updates::tests::row;
+        assert_eq!(InboxTab::shown(false), [InboxTab::NeedsYou, InboxTab::Results, InboxTab::Failed, InboxTab::All]);
+        assert_eq!(InboxTab::shown(true), InboxTab::ALL);
+        assert_eq!(first_inbox_tab(1, 0, false), InboxTab::NeedsYou);
+        assert_eq!(first_inbox_tab(0, 0, false), InboxTab::Results);
+        let result = NotificationView { reason: None, target_type: "task.succeeded".into(), ..row("ok", None) };
+        let failed = NotificationView { reason: None, severity: "warning".into(), target_type: "task.failed".into(), ..row("failed", None) };
+        let refs = [&result, &failed];
+        let none = std::collections::HashMap::new();
+        assert_eq!(inbox_badge(2, &refs, |_| true, &none), 3, "what waits, and the unread failure; a result does not count");
+        assert!(opening_marks_all_read(&refs, &none), "seeing the list reads it, as ever");
+    }
+
+    #[test]
+    fn a_row_with_a_reason_is_on_updates_and_all_with_a_mark_also_on_needs_you_never_twice() {
+        use super::{InboxTab, NoteKind, first_inbox_tab, inbox_badge, note_kind, opening_marks_all_read, tab_counts, tab_notes};
+        use crate::screens::updates::tests::row;
+        let review = NotificationView { needs_you: true, ..row("review", Some("review")) };
+        let mention = row("mention", Some("mention"));
+        let failed = NotificationView { severity: "warning".into(), ..row("failed", Some("failed")) };
+        let unknown = row("unknown", Some("something_new"));
+        let result = NotificationView { reason: None, target_type: "task.succeeded".into(), ..row("ok", None) };
+        let refs = [&mention, &review, &failed, &unknown, &result];
+        assert_eq!(note_kind(&unknown), NoteKind::Update);
+        let ids = |tab| tab_notes(tab, &refs, |_| true).iter().map(|n| n.id.as_str()).collect::<Vec<_>>();
+        assert_eq!(ids(InboxTab::NeedsYou), ["review"]);
+        assert_eq!(ids(InboxTab::Updates), ["review", "mention", "failed", "unknown"], "◆ first, then as the server sends them");
+        assert_eq!(ids(InboxTab::Results), ["ok"]);
+        assert_eq!(ids(InboxTab::Failed), ["failed"]);
+        assert_eq!(ids(InboxTab::All), ["review", "mention", "failed", "unknown", "ok"]);
+        assert_eq!(tab_counts(1, &refs, |_| true), [2, 4, 1, 1, 6]);
+        // ◆ once, the three other unread rows; a row opened here no longer counts.
+        let mut opened = std::collections::HashMap::new();
+        assert_eq!(inbox_badge(1, &refs, |_| true, &opened), 1 + 1 + 3);
+        opened.insert("mention".to_string(), mention.created_at_ms);
+        assert_eq!(inbox_badge(1, &refs, |_| true, &opened), 1 + 1 + 2);
+        // A login row: from the server, not subject to the rule of the local list.
+        let login = NotificationView { severity: "action".into(), needs_you: true, target_type: "connection.changed".into(), ..row("login", Some("login")) };
+        assert_eq!(tab_notes(InboxTab::NeedsYou, &[&login], |_| false).len(), 1);
+        // Seeing the tab does not read a row (§4.4); with no unread row left the old rule holds.
+        assert!(!opening_marks_all_read(&refs, &opened));
+        let quiet = NotificationView { read: true, ..mention.clone() };
+        assert!(opening_marks_all_read(&[&quiet, &result], &opened));
+        assert_eq!(first_inbox_tab(0, 2, true), InboxTab::Updates);
+        assert_eq!(first_inbox_tab(1, 2, true), InboxTab::NeedsYou);
+        assert_eq!(first_inbox_tab(0, 0, true), InboxTab::Results);
+    }
+
+    #[test]
+    fn a_waiting_note_of_a_main_task_is_on_needs_you_only_when_it_is_mine() {
+        use super::{InboxTab, inbox_badge, tab_notes};
+        use crate::screens::updates::tests::row;
+        let waiting = NotificationView { reason: None, severity: "action".into(), target_type: "task.waiting".into(), ..row("waiting", None) };
+        let failed = NotificationView { reason: None, severity: "warning".into(), target_type: "task.failed".into(), ..row("failed", None) };
+        let none = std::collections::HashMap::new();
+        assert_eq!(tab_notes(InboxTab::NeedsYou, &[&waiting], |_| false).len(), 0);
+        assert_eq!(tab_notes(InboxTab::NeedsYou, &[&waiting], |_| true).len(), 1);
+        assert_eq!(tab_notes(InboxTab::All, &[&waiting], |_| false).len(), 1, "it stays findable");
+        assert_eq!(inbox_badge(1, &[&waiting, &failed], |_| false, &none), 1, "only the approval counts");
+        assert_eq!(inbox_badge(1, &[&waiting, &failed], |_| true, &none), 3);
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub mod heartbeats;
 pub mod conversations;
 pub mod discussions;
 pub mod threads;
+pub mod message_edits;
 pub mod conversation_sessions;
 pub mod employees;
 pub mod company_convert;
@@ -48,6 +49,7 @@ pub mod user_sessions;
 pub mod claude_logins;
 pub mod company;
 pub mod tickets;
+pub mod followers;
 pub mod vault;
 pub mod guidelines;
 pub mod server_name;
@@ -241,6 +243,18 @@ mod schema26_tests;
 #[cfg(test)]
 mod schema27_tests;
 #[cfg(test)]
+mod schema28_tests;
+#[cfg(test)]
+mod schema29_tests;
+#[cfg(test)]
 mod threads_tests;
 #[cfg(test)]
+mod followers_tests;
+#[cfg(test)]
+mod message_edits_tests;
+#[cfg(test)]
+mod message_editable_tests;
+#[cfg(test)]
 mod guidelines_tests;
+#[cfg(test)]
+mod notifications_tests;

@@ -9,11 +9,13 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/refresh.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/links.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import 'board_bloc.dart';
+import 'my_tickets_view.dart';
 import 'ticket_actions.dart';
 import 'ticket_card.dart';
 
@@ -101,12 +103,18 @@ bool needsOwnerOf(TicketView ticket, CompanyState company, BoardState board) =>
 TicketState stateOf(TicketView ticket, CompanyState company, BoardState board, {String? me}) => ticketState(ticket,
     root: company.tasks.where((t) => t.id == ticket.rootTaskId).firstOrNull, needsOwner: needsOwnerOf(ticket, company, board), ownerUnknown: board.ownerUnknown.contains(ticket.id), me: me);
 
+/// Whether [ticket] counts as [me]'s work (B6): the ◆ on its card, the filter and the count.
+bool needsMeOf(TicketView ticket, CompanyState company, BoardState board, {String? me}) => needsMe(ticket, stateOf(ticket, company, board, me: me), me: me);
+
 class _BoardPageState extends State<BoardPage> {
   PageController? _pages;
   bool _olderDone = false;
   String? _me;
   bool _myLoginExpired = false;
   TicketView? _dragging;
+
+  /// The segmented control shows My tickets instead of the Board (A4).
+  bool _mine = false;
 
   @override
   void dispose() {
@@ -120,7 +128,7 @@ class _BoardPageState extends State<BoardPage> {
     if (board.column != null) return board.column!;
     for (final kind in [ColumnKind.review, ColumnKind.planReview, ColumnKind.todo, ColumnKind.doing]) {
       final column = board.columnOf(kind);
-      if (column != null && column.tickets.any((t) => stateOf(t, company, board, me: _me).needsYou)) return kind;
+      if (column != null && column.tickets.any((t) => needsMeOf(t, company, board, me: _me))) return kind;
     }
     return ColumnKind.doing;
   }
@@ -218,22 +226,92 @@ class _BoardPageState extends State<BoardPage> {
   /// Board members named in the creator picker, for a filter without tickets.
   final _creatorNames = <String, String>{};
 
+  /// "Responsible: Anyone / Me / No one / a board member" (P-77); below them the
+  /// disabled ones who still have tickets here, as those stay on their cards.
+  Future<void> _pickResponsible(BuildContext context, BoardState board) async {
+    final repository = context.read<AureliusRepository>();
+    final bloc = context.read<BoardBloc>();
+    final me = _me;
+    final onBoard = {for (final t in board.board?.columns.expand((c) => c.tickets) ?? const <TicketView>[]) if (t.responsibleUserId != null) t.responsibleUserId!: t.responsibleUsername ?? 'Board member'};
+    var active = <(String, String)>[];
+    var disabled = <(String, String)>[];
+    try {
+      final users = await repository.boardMembers();
+      active = [for (final u in users) if (u.disabledAtMs == null && u.id != me) (u.id, u.username)];
+      disabled = [for (final u in users) if (u.disabledAtMs != null && u.id != me && onBoard.containsKey(u.id)) (u.id, u.username)];
+    } on Object {
+      active = [for (final e in onBoard.entries) if (e.key != me) (e.key, e.value)];
+    }
+    int byName((String, String) a, (String, String) b) => a.$2.toLowerCase().compareTo(b.$2.toLowerCase());
+    active.sort(byName);
+    disabled.sort(byName);
+    _responsibleNames.addAll({for (final (id, name) in [...active, ...disabled]) id: name});
+    if (!context.mounted) return;
+    Widget? tick(String? id) => board.responsible == id ? Icon(Icons.check, color: Tokens.accentText) : null;
+    final picked = await showModalBottomSheet<(String?,)>(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.7),
+          child: ListView(shrinkWrap: true, children: [
+            Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: Eyebrow('Responsible')),
+            ListTile(key: const ValueKey('board-responsible-anyone'), title: const Text('Anyone'), trailing: tick(null), onTap: () => Navigator.pop(sheet, (null,))),
+            if (me != null) ListTile(key: const ValueKey('board-responsible-me'), title: const Text('Me'), trailing: tick(me), onTap: () => Navigator.pop(sheet, (me,))),
+            ListTile(key: const ValueKey('board-responsible-no-one'), title: const Text('No one'), trailing: tick(BoardState.noResponsible), onTap: () => Navigator.pop(sheet, (BoardState.noResponsible,))),
+            for (final (id, name) in active) ListTile(key: ValueKey('board-responsible-$id'), title: Text(name), trailing: tick(id), onTap: () => Navigator.pop(sheet, (id,))),
+            if (disabled.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 4), child: Eyebrow('Disabled')),
+            for (final (id, name) in disabled) ListTile(key: ValueKey('board-responsible-$id'), title: Text(name), trailing: tick(id), onTap: () => Navigator.pop(sheet, (id,))),
+          ]),
+        ),
+      ),
+    );
+    if (picked != null) bloc.add(BoardResponsibleChosen(picked.$1));
+  }
+
+  /// The responsible filter's name: Me, No one, the board member, or null for anyone.
+  String? _responsibleName(BoardState board) {
+    final id = board.responsible;
+    if (id == null) return null;
+    if (id == BoardState.noResponsible) return 'No one';
+    if (id == _me) return 'Me';
+    return board.board?.columns.expand((c) => c.tickets).where((t) => t.responsibleUserId == id).firstOrNull?.responsibleUsername ?? _responsibleNames[id] ?? 'Board member';
+  }
+
+  /// Board members named in the responsible picker, for a filter without tickets.
+  final _responsibleNames = <String, String>{};
+
+  /// A card of My tickets: the Board's card with the Board's columns around it; null until the Board is read.
+  Widget? _myCard(BuildContext context, BoardState board, CompanyState company, TicketView t, bool online) {
+    final columns = board.board?.columns;
+    if (columns == null) return null;
+    final own = columns.where((c) => c.column.kind == t.column).firstOrNull ?? BoardColumnCards(column: BoardColumnView(id: t.columnId, kind: t.column, name: t.column.name, position: 0, version: 1), tickets: const []);
+    final link = context.read<ConnectionBloc>().state;
+    final ctx = CardContext(columns: [for (final c in columns) c.column], column: own, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), online: online, me: _me, myLoginExpired: _myLoginExpired, responsible: link.has(ticketResponsibleFeature), follow: link.has(ticketFollowFeature), links: link.has(messageLocateFeature));
+    return TicketCard(key: ValueKey('ticket-${t.id}'), ticket: t, board: ctx);
+  }
+
   void _newTicket(BuildContext context, BoardState board) => context.push(board.projectId == null ? '/board/new' : '/board/new?project=${board.projectId}');
 
   @override
   Widget build(BuildContext context) {
     final board = context.watch<BoardBloc>().state;
     final company = context.watch<CompanyBloc>().state;
-    final online = context.select<ConnectionBloc, bool>((b) => b.state.isOnline);
-    _me = context.select<ConnectionBloc, String?>((b) => b.state.user?.id);
-    _myLoginExpired = context.select<ConnectionBloc, bool>((b) => b.state.claudeLogin?.status == ClaudeLoginStatus.expired);
+    final link = context.watch<ConnectionBloc>().state;
+    final online = link.isOnline;
+    _me = link.user?.id;
+    _myLoginExpired = link.claudeLogin?.status == ClaudeLoginStatus.expired;
     final wide = MediaQuery.sizeOf(context).width >= boardWideWidth;
-    final columns = board.columns;
-    final tickets = board.tickets;
-    final needYou = tickets.where((t) => stateOf(t, company, board, me: _me).needsYou).length;
+    final responsibleOn = link.has(ticketResponsibleFeature);
+    final columns = !responsibleOn || !board.needsMeOnly ? board.columns : [for (final c in board.columns) BoardColumnCards(column: c.column, tickets: [for (final t in c.tickets) if (needsMeOf(t, company, board, me: _me)) t])];
+    final tickets = [for (final c in columns) ...c.tickets];
+    final needYou = tickets.where((t) => needsMeOf(t, company, board, me: _me)).length;
     final project = company.project(board.projectId ?? '');
     final owner = board.owner == null ? null : board.owner == BoardState.noOwner ? 'No owner yet' : company.employee(board.owner!)?.name;
     final creator = _creatorName(board);
+    final responsible = responsibleOn ? _responsibleName(board) : null;
 
     final Widget content;
     if (board.board == null && board.error != null) {
@@ -249,19 +327,21 @@ class _BoardPageState extends State<BoardPage> {
     } else if (board.board == null) {
       content = const _Skeleton();
     } else {
-      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null);
+      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null || responsible != null || (responsibleOn && board.needsMeOnly));
       final body = wide ? _wide(context, board, company, columns, online) : _phone(context, board, company, columns, online);
       content = Column(children: [
         if (filteredEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
             child: Row(children: [
-              Expanded(child: Text('No tickets in ${(widget.inProject ? null : project?.name) ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
+              Expanded(child: Text(responsible != null && responsible != 'No one' && responsible != 'Me' ? 'No tickets for $responsible.' : 'No tickets in ${(widget.inProject ? null : project?.name) ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
               TextButton(
                 onPressed: () {
                   final bloc = context.read<BoardBloc>();
                   bloc.add(const BoardOwnerChosen(null));
                   bloc.add(const BoardCreatorChosen(null));
+                  bloc.add(const BoardResponsibleChosen(null));
+                  bloc.add(const BoardNeedsMeOnly(false));
                   if (!widget.inProject) bloc.add(const BoardProjectChosen(null));
                 },
                 child: const Text('Clear filter'),
@@ -272,9 +352,23 @@ class _BoardPageState extends State<BoardPage> {
       ]);
     }
 
+    final myTicketsOn = !widget.inProject && link.has(myTicketsFeature);
     final page = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (myTicketsOn)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: CupertinoSlidingSegmentedControl<bool>(
+              key: const ValueKey('board-switch'),
+              groupValue: _mine,
+              children: const {false: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('Board')), true: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('My tickets'))},
+              onValueChanged: (v) => setState(() => _mine = v ?? false),
+            ),
+          ),
+        if (myTicketsOn && _mine)
+          Expanded(child: MyTicketsPane(me: _me, online: online, needsMe: (t) => needsMeOf(t, company, board, me: _me), cardFor: (t) => _myCard(context, board, company, t, online)))
+        else ...[
         if (board.board != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
@@ -286,17 +380,31 @@ class _BoardPageState extends State<BoardPage> {
           ),
         SizedBox(
           height: 52,
-          child: ListView(
+          // Every filter built, as the column chips: a lazy list would leave some out for screen readers.
+          child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            children: [
+            child: Row(children: [
               if (!widget.inProject) _FilterPill(key: const ValueKey('board-filter-project'), label: project?.name ?? 'All projects', active: project != null, onTap: () => _pickProject(context, board, company)),
-              _FilterPill(key: const ValueKey('board-filter-owner'), label: owner ?? 'Anyone', active: owner != null, onTap: () => _pickOwner(context, board, company)),
+              if (responsibleOn)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    key: const ValueKey('board-filter-needs-you'),
+                    label: const Text('◆ Needs you'),
+                    selected: board.needsMeOnly,
+                    showCheckmark: false,
+                    onSelected: (on) => context.read<BoardBloc>().add(BoardNeedsMeOnly(on)),
+                  ),
+                ),
+              if (responsibleOn) _FilterPill(key: const ValueKey('board-filter-responsible'), label: 'Responsible: ${responsible ?? 'Anyone'}', active: responsible != null, onTap: () => _pickResponsible(context, board)),
+              _FilterPill(key: const ValueKey('board-filter-owner'), label: 'Owner: ${owner ?? 'Anyone'}', active: owner != null, onTap: () => _pickOwner(context, board, company)),
               _FilterPill(key: const ValueKey('board-filter-creator'), label: 'Created by: ${creator ?? 'Anyone'}', active: creator != null, onTap: () => _pickCreator(context, board)),
-            ],
+            ]),
           ),
         ),
         Expanded(child: content),
+        ],
       ],
     );
 
@@ -334,7 +442,7 @@ class _BoardPageState extends State<BoardPage> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         child: Row(children: [
-          for (final (i, c) in columns.indexed) _ColumnChip(column: c, index: i, total: columns.length, selected: i == index, onTap: () => _show(context, columns, c.column.kind)),
+          for (final (i, c) in columns.indexed) _ColumnChip(column: c, index: i, total: columns.length, selected: i == index, needsYou: c.column.kind == ColumnKind.review && c.tickets.any((t) => needsMeOf(t, company, board, me: _me)), onTap: () => _show(context, columns, c.column.kind)),
         ]),
       ),
       Expanded(
@@ -383,7 +491,7 @@ class _BoardPageState extends State<BoardPage> {
             border: allowed && dragging != null ? Border.all(color: Tokens.accent.withValues(alpha: 0.5)) : null,
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _ColumnHeader(column: c, note: refused, needsYou: c.column.kind == ColumnKind.review && c.tickets.isNotEmpty),
+            _ColumnHeader(column: c, note: refused, needsYou: c.column.kind == ColumnKind.review && c.tickets.any((t) => needsMeOf(t, company, board, me: _me))),
             Expanded(child: _columnList(context, board, company, columns, c, online, wide: true)),
           ]),
         ),
@@ -407,7 +515,7 @@ class _BoardPageState extends State<BoardPage> {
     }
     final allColumns = [for (final x in columns) x.column];
     Widget card(TicketView t) {
-      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide, me: _me, myLoginExpired: _myLoginExpired);
+      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide, me: _me, myLoginExpired: _myLoginExpired, responsible: context.read<ConnectionBloc>().state.has(ticketResponsibleFeature), follow: context.read<ConnectionBloc>().state.has(ticketFollowFeature), links: context.read<ConnectionBloc>().state.has(messageLocateFeature));
       final face = TicketCard(key: ValueKey('ticket-${t.id}'), ticket: t, board: ctx);
       if (!wide || !online || kind == ColumnKind.done) return face;
       // Drop on a card: it lands above it.
@@ -481,21 +589,21 @@ class _FilterPill extends StatelessWidget {
 }
 
 /// A column chip on the phone: name and count; Review gets a green dot while
-/// something waits; an empty Plan review is narrow and dimmed (D-04).
+/// something waits for you (B6); an empty Plan review is narrow and dimmed (D-04).
 class _ColumnChip extends StatelessWidget {
-  const _ColumnChip({required this.column, required this.index, required this.total, required this.selected, required this.onTap});
+  const _ColumnChip({required this.column, required this.index, required this.total, required this.selected, this.needsYou = false, required this.onTap});
 
   final BoardColumnCards column;
   final int index;
   final int total;
   final bool selected;
+  final bool needsYou;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final count = column.tickets.length;
     final quiet = column.column.kind == ColumnKind.planReview && count == 0 && !selected;
-    final dot = column.column.kind == ColumnKind.review && count > 0;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Semantics(
@@ -511,7 +619,7 @@ class _ColumnChip extends StatelessWidget {
             selectedColor: Tokens.accentTint,
             visualDensity: quiet ? VisualDensity.compact : null,
             label: Row(mainAxisSize: MainAxisSize.min, children: [
-              if (dot) ...[StatusDot(color: Tokens.accent, size: 7), const SizedBox(width: 6)],
+              if (needsYou) ...[StatusDot(color: Tokens.accent, size: 7), const SizedBox(width: 6)],
               Text('${column.column.name} $count', style: TextStyle(fontSize: quiet ? 12 : 14)),
             ]),
             onSelected: (_) => onTap(),

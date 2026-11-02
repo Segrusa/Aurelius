@@ -34,6 +34,11 @@ pub fn owner_choosable(t: &TicketView) -> bool {
     ticket::check_assign(t.column, t.root_task_status).is_ok()
 }
 
+/// What a link to a ticket that is not there says (P-89). A link holds no number.
+pub fn ticket_not_found_text(server: &str) -> String {
+    format!("This ticket doesn't exist on {server}. It may have been deleted from the Backlog.")
+}
+
 /// The text of a run mode; none chosen: the owner's own.
 fn mode_label(mode: Option<aurelius_domain::autonomy::AgentMode>) -> String {
     mode.map_or_else(|| "Default (the owner's)".to_string(), |m| m.label().to_string())
@@ -161,7 +166,8 @@ impl AppView {
             return;
         };
         let from_message = crate::screens::discussion::from_message(self.board.form.from_message, self.ticket_discussion_supported());
-        let create = ticket::CreateTicket { confirm_secret: false, project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start, from_message };
+        let responsible_user_id = crate::screens::who::create_responsible(self.board.form.responsible, self.active_member().map(|u| u.id), self.ticket_responsible_supported());
+        let create = ticket::CreateTicket { responsible_user_id, confirm_secret: false, project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start, from_message };
         let done = start.then(|| match owner.and_then(|e| self.employee_name(e)) {
             Some(name) => format!("Created and started with {name}."),
             None => {
@@ -352,6 +358,7 @@ impl AppView {
                 items.extend(self.employee_choices().into_iter().map(|(e, name)| menu_entry(name, BoardDo::FormOwner(Some(e)), form.owner == Some(e), None)));
                 items
             }
+            "ticket-form-responsible" => self.form_responsible_menu(),
             "ticket-form-mode" => Self::mode_menu(form.run.mode, BoardDo::FormMode),
             _ => self.model_menu_for(form.run.model.as_deref(), BoardDo::FormModel),
         }
@@ -363,6 +370,7 @@ impl AppView {
             "ticket-priority" => PRIORITIES.iter().map(|p| menu_entry(priority_label(*p), BoardDo::Priority(id, *p), t.priority == *p, None)).collect(),
             "ticket-mode" => Self::mode_menu(t.run.mode, move |m| BoardDo::Mode(id, m)),
             "ticket-model" => self.model_menu_for(t.run.model.as_deref(), move |m| BoardDo::Model(id, m)),
+            "ticket-responsible" => self.responsible_menu(t),
             _ => self.owner_menu(t),
         }
     }
@@ -402,6 +410,10 @@ impl AppView {
         };
         let dispatcher = self.dispatcher_for(t.project_id);
         let me = self.active_member().map(|u| u.id);
+        // B6: ◆ only for whom it counts; anyone else can still decide (§1.4).
+        let mine = self.ticket_needs_me(t);
+        let accent = if mine { theme::ACCENT_TEXT } else { theme::TEXT_2 };
+        let decide = |what: &str| if mine { format!("◆ {what} · only a board member decides.") } else { format!("{what} · {}", crate::screens::board::decide_too(t).unwrap_or_else(|| "only a board member decides.".into())) };
         // ui-ontwerp §5: the creator's login or quota; only the own login has a direct action.
         let wait = self.ticket_wait(t).filter(|_| matches!(t.column, ColumnKind::Todo | ColumnKind::Doing) && !failed);
         let el = match t.column {
@@ -451,27 +463,29 @@ impl AppView {
                 let choosing = self.ticket_choosing(t);
                 // B5: no dispatcher, or it chose nobody: the board member chooses.
                 let unknown = self.ticket_owner_unknown(t);
+                let lead = if mine { "◆ Needs you · " } else { "" };
                 let (text, color) = match (choosing, dispatcher.name()) {
-                    (false, Some(_)) if unknown => ("◆ Needs you · Dispatcher unknown: its activity did not load. Choose an employee.".to_string(), theme::ACCENT_TEXT),
+                    (false, Some(_)) if unknown => (format!("{lead}Dispatcher unknown: its activity did not load. Choose an employee."), accent),
                     (true, name) => (format!("{} is choosing an employee…", name.unwrap_or("The dispatcher")), theme::TEXT_2),
-                    (false, None) => (format!("◆ Needs you · {}. Choose an employee.", dispatcher.why_nobody().unwrap_or_default()), theme::ACCENT_TEXT),
-                    (false, Some(name)) => (format!("◆ Needs you · {name} could not choose. Choose an employee."), theme::ACCENT_TEXT),
+                    (false, None) => (format!("{lead}{}. Choose an employee.", dispatcher.why_nobody().unwrap_or_default()), accent),
+                    (false, Some(name)) => (format!("{lead}{name} could not choose. Choose an employee."), accent),
                 };
                 let label = if choosing { "Choose yourself" } else { "Choose employee" };
                 bar.child(line(text, color)).child(self.board_picker("ticket-todo-owner", label.into(), false, can && owner_choosable(t), Some(id), cx)).child(back(cx))
             }
             ColumnKind::Doing => {
                 let text = match (needs, &t.review_feedback) {
-                    (Some(Needs::Approval), _) => "◆ Waiting for your approval (Inbox).".to_string(),
+                    (Some(Needs::Approval), _) if mine => "◆ Waiting for your approval (Inbox).".to_string(),
+                    (Some(Needs::Approval), _) => "Waiting for approval (Inbox).".to_string(),
                     (_, Some(feedback)) => format!("{}: {}", feedback_label(self.ticket_activity(id)), feedback.lines().next().unwrap_or("")),
                     _ => root.and_then(ui::queued_wait).unwrap_or_else(|| "The owner works on it.".into()),
                 };
-                bar.child(line(text, if needs.is_some() { theme::ACCENT_TEXT } else { theme::TEXT_2 }))
+                bar.child(line(text, if mine { theme::ACCENT_TEXT } else { theme::TEXT_2 }))
                     .when(needs == Some(Needs::Approval), |el| el.child(ui::button("ticket-inbox", "Open in Inbox", ButtonKind::Outline, None).h(px(28.)).on_click(|_: &ClickEvent, w, cx| w.dispatch_action(Box::new(crate::keymap::OpenInbox), cx))))
                     .when(root_id.is_some(), |el| el.child(open_conversation(cx)))
                     .child(back(cx))
             }
-            ColumnKind::PlanReview => bar.child(line("◆ Plan review · only a board member decides.".into(), theme::ACCENT_TEXT)).when(root_id.is_some(), |el| el.child(open_conversation(cx))),
+            ColumnKind::PlanReview => bar.child(line(decide("Plan review"), accent)).when(root_id.is_some(), |el| el.child(open_conversation(cx))),
             // Ticket #5: the tester decides by running the tests; a board member can only cancel.
             ColumnKind::Testing => {
                 let tasks = self.board.detail_of(id).map(|d| d.tasks.clone()).unwrap_or_default();
@@ -484,7 +498,7 @@ impl AppView {
                     .when(root_id.is_some(), |el| el.child(open_conversation(cx)))
                     .child(back(cx))
             }
-            ColumnKind::Review => bar.child(line("◆ Review · only a board member decides.".into(), theme::ACCENT_TEXT)).when(root_id.is_some(), |el| el.child(open_conversation(cx))).child(back(cx)),
+            ColumnKind::Review => bar.child(line(decide("Review"), accent)).when(root_id.is_some(), |el| el.child(open_conversation(cx))).child(back(cx)),
             ColumnKind::Done => {
                 // MU2-12: how the summary went, from the discussion; a failure can be tried again (AC4).
                 let summary = match self.ticket_summary(t) {
@@ -531,7 +545,7 @@ impl AppView {
             .border_color(c(theme::ATTENTION_BORDER))
             .bg(c(theme::ATTENTION_BG))
             .when(!in_dialog, |el| {
-                el.child(h().gap(px(6.)).child(ui::diamond(7., theme::ACCENT_TEXT, true)).child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child("Review · only a board member decides")))
+                el.child(h().gap(px(6.)).when(self.ticket_needs_me(t), |el| el.child(ui::diamond(7., theme::ACCENT_TEXT, true))).child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child("Review · only a board member decides")))
                     .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(format!("Report from {who}")))
                     .child(div().id("ticket-report").max_h(px(260.)).overflow_y_scroll().p(px(10.)).rounded(px(6.)).bg(c(theme::SURFACE)).child(report))
                     .child(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child("Branches and commits in the report are information only: nothing is merged automatically."))
@@ -574,7 +588,7 @@ impl AppView {
             .border_1()
             .border_color(c(theme::ATTENTION_BORDER))
             .bg(c(theme::ATTENTION_BG))
-            .when(!in_dialog, |el| el.child(h().gap(px(6.)).child(ui::diamond(7., theme::ACCENT_TEXT, true)).child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child("Plan review · nothing changes until you approve"))))
+            .when(!in_dialog, |el| el.child(h().gap(px(6.)).when(self.ticket_needs_me(t), |el| el.child(ui::diamond(7., theme::ACCENT_TEXT, true))).child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child("Plan review · nothing changes until you approve"))))
             .child(div().id("ticket-plan").max_h(px(320.)).overflow_y_scroll().p(px(10.)).rounded(px(6.)).bg(c(theme::SURFACE)).child(text))
             .when(!discussion, |el| {
                 el.child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Feedback (needed for Pas aan)"))
@@ -598,6 +612,25 @@ impl AppView {
 
     pub fn render_ticket_panel(&mut self, id: TicketId, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(t) = self.board.ticket(id).cloned() else {
+            // P-89: a link to a ticket that is not there is a place with a way out, never a bare error.
+            if self.board.detail_error.as_deref() == Some(backend::TICKET_NOT_FOUND) {
+                let server = match &self.connection {
+                    backend::Connection::Online { server, .. } => server.host_name.clone(),
+                    _ => "this server".to_string(),
+                };
+                return v().size_full().bg(c(theme::BG)).border_l_1().border_color(c(theme::BORDER))
+                    .child(h().h(px(48.)).px(px(16.)).justify_end().child(ui::icon_button("ticket-close").aria_label("Close").child("×").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close_panel(cx)))))
+                    .child(
+                        v().p(px(24.)).gap(px(10.)).items_start()
+                            .child(div().text_size(px(15.)).child("Ticket not found"))
+                            .child(div().text_size(px(12.5)).text_color(c(theme::TEXT_2)).child(ticket_not_found_text(&server)))
+                            .child(ui::button("ticket-go-to-board", "Go to Board", ButtonKind::Primary, None).on_click(cx.listener(|this, _: &ClickEvent, w, cx| {
+                                this.close_panel(cx);
+                                this.go_nav(crate::app::NavItem::Board, w, cx);
+                            }))),
+                    )
+                    .into_any_element();
+            }
             let text = self.board.detail_error.clone().unwrap_or_else(|| "Loading the ticket…".into());
             return v().size_full().bg(c(theme::BG)).border_l_1().border_color(c(theme::BORDER))
                 .child(h().h(px(48.)).px(px(16.)).justify_end().child(ui::icon_button("ticket-close").aria_label("Close").child("×").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.close_panel(cx)))))
@@ -642,8 +675,9 @@ impl AppView {
                     .flex_wrap()
                     .child(pill(self.board.column_name(t.column)))
                     .children(root.as_ref().filter(|_| matches!(t.column, ColumnKind::Doing | ColumnKind::PlanReview | ColumnKind::Review)).map(|r| ui::task_mark(self.task_mark(r), "ticket-mark")))
-                    .child(h().gap(px(6.)).text_size(px(12.)).text_color(c(theme::TEXT_2)).children(t.owner_name.as_ref().map(|n| ui::monogram(n, 18., cx))).child(t.owner_name.clone().unwrap_or_else(|| "No owner".into()))),
-            );
+                    .when(!self.ticket_responsible_supported(), |el| el.child(h().gap(px(6.)).text_size(px(12.)).text_color(c(theme::TEXT_2)).children(t.owner_name.as_ref().map(|n| ui::monogram(n, 18., cx))).child(t.owner_name.clone().unwrap_or_else(|| "No owner".into())))),
+            )
+            .children(self.render_who_strip(&t, can, cx));
 
         let actions = self.render_ticket_actions(&t, root.as_ref(), needs, can, cx);
         let gate = match t.column {
@@ -657,7 +691,7 @@ impl AppView {
             self.inline_edit(field.into_any_element(), "ticket-description", cx)
         } else {
             match t.description.clone().filter(|d| !d.trim().is_empty()) {
-                Some(text) => gpui_kit::component::text::TextView::markdown(SharedString::from(format!("ticket-md-{id}-{}", t.version)), text).selectable(true).on_link_click(self.markdown_link_handler(false, cx)).into_any_element(),
+                Some(text) => gpui_kit::component::text::TextView::markdown(SharedString::from(format!("ticket-md-{id}-{}", t.version)), self.with_link_pills(&text)).selectable(true).on_link_click(self.markdown_link_handler(false, cx)).into_any_element(),
                 None => div().text_size(px(12.5)).text_color(c(theme::TEXT_2)).child("No description.").into_any_element(),
             }
         };
@@ -696,6 +730,7 @@ impl AppView {
         let body = v().id("ticket-body").flex_1().min_h_0().overflow_y_scroll().px(px(18.)).py(px(14.)).gap(px(16.))
             .children(gate)
             .child(v().gap(px(6.)).child(h().child(div().flex_1().child(ui::eyebrow("DESCRIPTION"))).when(open_edit && editing != Some(EditField::Description), |el| el.child(pencil(cx)))).child(description))
+            .children(self.render_ticket_who(&t, can, cx))
             .child(v().gap(px(6.)).child(ui::eyebrow("DETAILS")).child(details))
             .child(
                 v().gap(px(6.))
@@ -776,6 +811,41 @@ impl AppView {
             .into_any_element()
     }
 
+    /// WHO on the tab Ticket (AUR-FA §1.4): the four fields in a fixed order, each with what it
+    /// means, then the followers. Only on a server with `ticket_responsible`.
+    fn render_ticket_who(&mut self, t: &TicketView, can: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.ticket_responsible_supported() {
+            return None;
+        }
+        let me = self.active_member().map(|u| u.id);
+        let means = |value: AnyElement, text: &'static str| v().gap(px(2.)).child(value).child(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(text));
+        let name = crate::screens::who::responsible_line(t, me).name;
+        let editable = crate::screens::who::responsible_editable(t) && can;
+        let picker: AnyElement = if editable {
+            self.board_picker("ticket-responsible", name, t.responsible_user_id.is_some(), true, Some(t.id), cx).into_any_element()
+        } else {
+            div().child(name).into_any_element()
+        };
+        let responsible = self.render_responsible_value(t, picker, can, cx);
+        let owner: AnyElement = if owner_choosable(t) && can {
+            let text = t.owner_name.clone().unwrap_or_else(|| self.dispatcher_for(t.project_id).choice());
+            self.board_picker("ticket-owner", text, t.owner_employee_id.is_some(), true, Some(t.id), cx).into_any_element()
+        } else {
+            div().child(t.owner_name.clone().unwrap_or_else(|| "No owner".into())).into_any_element()
+        };
+        let login = format!("{} Claude login", ui::capitalised(&crate::screens::board::login_owner(t, me)));
+        Some(
+            v().gap(px(6.))
+                .child(ui::eyebrow("WHO"))
+                .child(row("Responsible", responsible))
+                .child(row("Owner", means(owner, crate::screens::who::OWNER_MEANS)))
+                .child(row("Runs on", means(div().child(login).into_any_element(), crate::screens::who::RUNS_ON_MEANS)))
+                .child(row("Created by", means(div().child(format!("{} · {}", t.created_by_username, ui::fmt_when(t.created_at_ms))).into_any_element(), crate::screens::who::CREATED_BY_MEANS)))
+                .when(self.ticket_follow_supported(), |el| el.child(row("Followers", self.render_followers_value(t, cx))))
+                .into_any_element(),
+        )
+    }
+
     /// The ticket's fields (§7.2): each change is saved at once.
     fn render_ticket_details(&mut self, t: &TicketView, open_edit: bool, can: bool, cx: &mut Context<Self>) -> AnyElement {
         let id = t.id;
@@ -832,19 +902,21 @@ impl AppView {
                 this.open_project_settings(p, w, cx);
             }
         }));
+        // With a Responsible these three are in WHO, above the details.
+        let who = self.ticket_responsible_supported();
         v().gap(px(4.))
             .child(row("Project", div().child(t.project_name.clone())))
             .child(row("Priority", priority))
-            .child(row("Owner", owner))
+            .when(!who, |el| el.child(row("Owner", owner)))
             .child(row("Dispatcher", v().gap(px(2.)).child(dispatcher.line()).child(settings)))
             .child(row("Mode", mode))
             .child(row("Model", model))
             .child(row("Labels", labels))
             .child(row("Deadline", deadline))
             .child(row("Attachments", attachments))
-            .child(row("Created by", div().child(format!("{} · {}", t.created_by_username, ui::fmt_when(t.created_at_ms)))))
+            .when(!who, |el| el.child(row("Created by", div().child(format!("{} · {}", t.created_by_username, ui::fmt_when(t.created_at_ms))))))
             // MU3-10 AC4: whose subscription its runs use; there is no choice of "someone's login".
-            .child(row("Runs on", div().child(format!("{} Claude login", ui::capitalised(&crate::screens::board::login_owner(t, self.active_member().map(|u| u.id)))))))
+            .when(!who, |el| el.child(row("Runs on", div().child(format!("{} Claude login", ui::capitalised(&crate::screens::board::login_owner(t, self.active_member().map(|u| u.id))))))))
             .into_any_element()
     }
 
@@ -1018,6 +1090,11 @@ impl AppView {
             .flex_wrap()
             .child(self.board_picker("ticket-form-project", format!("Project: {project}"), has_project, !busy, None, cx))
             .child(self.board_picker("ticket-form-priority", format!("Priority: {}", priority_label(priority)), priority != ticket::TicketPriority::Normal, !busy, None, cx))
+            .when(self.ticket_responsible_supported(), |el| {
+                let responsible = self.form_responsible_text();
+                let chosen = self.board.form.responsible != crate::screens::who::FormResponsible::You;
+                el.child(self.board_picker("ticket-form-responsible", format!("Responsible: {responsible}"), chosen, !busy, None, cx))
+            })
             .child(self.board_picker("ticket-form-owner", format!("Owner: {owner}"), has_owner, !busy, None, cx))
             .child(self.board_picker("ticket-form-mode", format!("Mode: {}", mode_label(mode)), mode.is_some(), !busy, None, cx))
             .child(self.board_picker("ticket-form-model", format!("Model: {model}"), has_model, !busy, None, cx));

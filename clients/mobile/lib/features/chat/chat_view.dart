@@ -22,6 +22,7 @@ import '../../data/aurelius_repository.dart';
 import '../../data/channels.dart';
 import '../../data/company.dart';
 import '../../data/discussion.dart';
+import '../../data/links.dart' show messageLocateFeature;
 import '../../data/views.dart';
 import '../../data/markdown_paths.dart';
 import '../../data/run_config.dart';
@@ -37,10 +38,12 @@ import 'chat_bloc.dart';
 import 'collapse.dart';
 import 'secret_check.dart';
 import 'file_page.dart';
+import '../links/link_actions.dart' show copyMessageLink;
 import '../markdown/links.dart';
 import '../markdown/markdown_page.dart';
 import '../markdown/mention_markdown.dart';
 import 'following_list.dart';
+import 'message_edit.dart';
 import 'live_steps.dart';
 import 'git_chip.dart';
 import 'subagent_chip.dart';
@@ -73,6 +76,16 @@ FileScope? chatFileScope(BuildContext context) {
   }
 }
 
+/// Whether a long press on [message] offers Copy link (§6.1): the server can
+/// find it again (`message_locate`, only in a channel or a ticket's discussion),
+/// and it is a finished message of someone, not a queued or streaming one.
+bool messageLinkable(BuildContext context, MessageView? message) {
+  if (message == null || message.isStreaming || message.queued || message.system != null) return false;
+  final bloc = context.read<ChatBloc>();
+  if (!bloc.group && bloc.ticketId == null) return false;
+  return context.read<AureliusRepository>().linkState.has(messageLocateFeature);
+}
+
 /// Messages and composer of one conversation (chat or employee).
 class ChatView extends StatefulWidget {
   const ChatView({
@@ -89,6 +102,7 @@ class ChatView extends StatefulWidget {
     this.draftSlot,
     this.channel,
     this.readOnlyAction,
+    this.revealMessage,
   });
 
   final String emptyTitle;
@@ -126,13 +140,16 @@ class ChatView extends StatefulWidget {
   /// After [readOnlyNote]: a link, such as "Open ticket".
   final Widget? readOnlyAction;
 
+  /// A link opened here: scroll to this message once it is read, and mark it.
+  final String? revealMessage;
+
   @override
   State<ChatView> createState() => _ChatViewState();
 }
 
 /// How a channel of the Slack-style Team chat shows (AUR-CHAT-001 §2–§4).
 class ChannelChatOptions {
-  const ChannelChatOptions({this.readThrough, required this.closedNote, this.openChannel, this.threads = false, this.reactions = false, this.openThread, this.thread = false});
+  const ChannelChatOptions({this.readThrough, required this.closedNote, this.openChannel, this.threads = false, this.reactions = false, this.openThread, this.thread = false, this.revealThread = false});
 
   /// The reader's last read message before the channel opened (`ChannelView.read_through`):
   /// "New messages" goes after it, and stays there while the channel is open.
@@ -158,6 +175,10 @@ class ChannelChatOptions {
 
   /// This list is one thread: its root on top, then "n replies" and the replies.
   final bool thread;
+
+  /// [ChatView.revealMessage] is a thread's root and a link went to a reply in
+  /// it: open that thread as well.
+  final bool revealThread;
 }
 
 class _ChatViewState extends State<ChatView> {
@@ -347,10 +368,61 @@ class _MessagesState extends State<_Messages> {
   /// The active board member: a message naming them is marked (B9).
   String? _me;
 
+  /// [ChatView.revealMessage] was acted on: once, not again on every new message.
+  bool _revealed = false;
+
+  /// The server was asked about a [ChatView.revealMessage] this read lacks: once.
+  bool _askedWhy = false;
+
+  /// Go to the message a link names once the messages are read. A read that
+  /// failed lacks it too, so it comes back here on the next read.
+  void _reveal(ChatState state) {
+    final target = widget.config.revealMessage;
+    if (target == null || _revealed || state.loading) return;
+    final message = state.messages.where((m) => m.id == target).firstOrNull;
+    if (message == null) {
+      if (!_askedWhy) {
+        _askedWhy = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_sayWhyMissing(target));
+        });
+      }
+      return;
+    }
+    _revealed = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final channel = widget.config.channel;
+      unawaited(_goTo(target));
+      if (channel != null && channel.revealThread) channel.openThread?.call(context, message);
+    });
+  }
+
+  /// The list could not get there: it is not gone, so it does not say that.
+  Future<void> _goTo(String messageId) async {
+    final reached = await _list.currentState?.reveal(messageId);
+    if (reached == false && mounted) toast(context, 'Could not show that message. Try again.');
+  }
+
+  /// Only the server knows a message is gone; anything else is not that.
+  Future<void> _sayWhyMissing(String messageId) async {
+    String text;
+    try {
+      await context.read<AureliusRepository>().messageLocation(messageId);
+      text = 'Could not show that message. Try again.';
+    } on ProtocolException catch (e) {
+      text = e.code == ErrorCode.notFound ? 'That message no longer exists.' : e.shown;
+    } on Object {
+      text = 'Could not show that message. Try again.';
+    }
+    if (mounted) toast(context, text);
+  }
+
   @override
   Widget build(BuildContext context) {
     final bloc = context.watch<ChatBloc>();
     final state = bloc.state;
+    _reveal(state);
     final blocking = context.select<InboxBloc, ApprovalView?>((b) => b.state.blocking(state.conversationId));
     // The group chat: an answer runs in its employee's own chat, so what it asks carries that run.
     final approvals = bloc.group ? context.select<InboxBloc, List<ApprovalView>>((b) => b.state.approvals) : const <ApprovalView>[];
@@ -463,14 +535,14 @@ class _MessagesState extends State<_Messages> {
     final bloc = context.read<ChatBloc>();
     final openThread = channel.threads && !channel.thread ? channel.openThread : null;
     ChannelMessageActions? actions(MessageView m) {
-      if (!writable || m.isStreaming) return null;
+      if (!writable || m.isStreaming || m.isDeleted) return null;
       final react = channel.reactions ? () => _react(context, bloc, m) : null;
       final reply = openThread != null && canStartThread(m) ? () => openThread(context, m) : null;
       return react == null && reply == null ? null : ChannelMessageActions(react: react, reply: reply);
     }
 
     Widget extras(MessageView m, Widget child) {
-      final reactions = channel.reactions && m.reactions.isNotEmpty;
+      final reactions = channel.reactions && m.reactions.isNotEmpty && !m.isDeleted;
       final line = openThread == null ? null : threadLine(m, DateTime.now());
       if (!reactions && line == null) return child;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -994,7 +1066,9 @@ class _UserBubble extends StatelessWidget {
     final ticketable = source != null && message != null;
     final react = actions?.react;
     final reply = actions?.reply;
-    if (queuedId == null && !ticketable && react == null && reply == null) {
+    final link = messageLinkable(context, message);
+    final editable = messageEditable(context, message);
+    if (queuedId == null && !ticketable && react == null && reply == null && !link && !editable) {
       Clipboard.setData(ClipboardData(text: text));
       toast(context, 'Copied.');
       return;
@@ -1005,7 +1079,10 @@ class _UserBubble extends StatelessWidget {
       if (reply != null) const GlassMenuItem('reply', 'Reply in thread'),
       if (queuedId != null) const GlassMenuItem('now', 'Send now'),
       const GlassMenuItem('copy', 'Copy'),
+      if (link) const GlassMenuItem('link', 'Copy link'),
       if (ticketable) const GlassMenuItem('ticket', 'Create ticket'),
+      if (editable) const GlassMenuItem('edit', 'Edit'),
+      if (editable) const GlassMenuItem('remove', 'Delete', danger: true),
       if (queuedId != null) const GlassMenuItem('delete', 'Delete', danger: true),
     ]);
     if (!context.mounted) return;
@@ -1014,8 +1091,14 @@ class _UserBubble extends StatelessWidget {
         react!();
       case 'reply':
         reply!();
+      case 'link':
+        await copyMessageLink(context, message!.id);
       case 'ticket':
         await createTicketFrom(context, message!, source!, already: ticket);
+      case 'edit':
+        await editOwnMessage(context, message!);
+      case 'remove':
+        await deleteOwnMessage(context, message!);
       case 'now':
         bloc.add(ChatQueuedSentNow(queuedId!));
       case 'delete':
@@ -1035,6 +1118,20 @@ class _UserBubble extends StatelessWidget {
       for (final f in unsent?.files ?? const <PendingFile>[]) (f.name, f.byteLength, null, null),
     ];
     final end = flat ? WrapAlignment.start : WrapAlignment.end;
+    // Deleted (A6): the place stays, the words, files and copy do not.
+    if (message?.isDeleted == true) {
+      return Padding(
+        padding: flat ? const EdgeInsets.only(top: 2) : const EdgeInsets.only(top: 14, left: 48),
+        child: Column(
+          crossAxisAlignment: flat ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+          children: [
+            if (!flat && author != null) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text('$author · board member', style: Tokens.monoSmall())),
+            DeletedMessageLine(message: message!, author: author ?? message!.authorUser?.username),
+            if (ticket != null) TicketPill(ticket: ticket!),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: flat ? const EdgeInsets.only(top: 2) : const EdgeInsets.only(top: 14, left: 48),
       child: Column(
@@ -1070,6 +1167,7 @@ class _UserBubble extends StatelessWidget {
             ),
           ),
           if (text.isNotEmpty) CopyButton(key: const Key('copy-user'), text: text),
+          if (messageEditedShown(context, message)) EditedMark(message: message!),
           if (ticket != null) TicketPill(ticket: ticket!),
           if (files.isNotEmpty) MessageFiles(files: files),
           if (sentFiles.isNotEmpty)
@@ -1224,6 +1322,16 @@ class _AssistantMessage extends StatelessWidget {
                 Navigator.pop(sheet);
               },
             ),
+            if (messageLinkable(context, message))
+              ListTile(
+                key: const Key('message-copy-link'),
+                leading: const Icon(Icons.link),
+                title: const Text('Copy link'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  copyMessageLink(context, message.id);
+                },
+              ),
             if (source != null && !message.isStreaming)
               ListTile(
                 key: const Key('message-create-ticket'),

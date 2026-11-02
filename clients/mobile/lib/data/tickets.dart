@@ -15,6 +15,22 @@ const boardTestingFeature = 'board_testing';
 /// Backlog (`domain::ticket::TESTING_MOVES_BY_ITSELF`).
 const testingMovesByItself = 'Testing moves on by itself when the tests have run.';
 
+/// The server keeps a board member responsible for a ticket (phase A, A1): only
+/// then does a client show or send it, and only then can a ◆ belong to one person.
+const ticketResponsibleFeature = 'ticket_responsible';
+
+/// The server keeps a personal Inbox: rows per ticket or channel (A3).
+const personalInboxFeature = 'personal_inbox';
+
+/// The server keeps who follows a ticket (phase A, A2).
+const ticketFollowFeature = 'ticket_follow';
+
+/// The server answers `ticket.my_tickets` (phase A, A4): only then is there a My tickets.
+const myTicketsFeature = 'my_tickets';
+
+/// The server lets a board member edit and delete their own messages (phase A, A6).
+const messageEditsFeature = 'message_edits';
+
 /// [board] as this client shows it: without the Testing column when the server
 /// lacks [boardTestingFeature] ([testing] false).
 BoardView boardShown(BoardView board, {required bool testing}) => testing
@@ -246,7 +262,8 @@ TicketState ticketState(TicketView ticket, {TaskView? root, bool needsOwner = fa
     };
 
 extension TicketStateView on TicketState {
-  /// Needs a board member (§5.2): the ◆ and the accent edge.
+  /// Waits for a board member (§5.2): what the card and the page show, its
+  /// button and status line. Whether the ◆ is yours: [needsMe].
   bool get needsYou => switch (this) {
         TicketState.needsOwner || TicketState.ownerUnknown || TicketState.waitingForYou || TicketState.needsYourLogin || TicketState.failed || TicketState.planReview || TicketState.review => true,
         _ => false,
@@ -254,24 +271,120 @@ extension TicketStateView on TicketState {
 
   /// The status line on a card; null where the column says enough. [login]:
   /// whose Claude login it runs on (`login_username`, "your" when it is
-  /// yours), [untilMs] when its limit resets, [tester] who runs the tests.
-  String? line({String? owner, String? dispatcher, String? tester, String? login, bool mine = false, int? untilMs, bool expired = false}) => switch (this) {
+  /// yours), [untilMs] when its limit resets, [tester] who runs the tests,
+  /// [others] the decision is not the reader's ([needsMe]): the same words as the desktop.
+  String? line({String? owner, String? dispatcher, String? tester, String? login, bool mine = false, int? untilMs, bool expired = false, bool others = false}) => switch (this) {
         TicketState.backlog => null,
         TicketState.choosing => '${dispatcher ?? 'The dispatcher'} is choosing…',
         TicketState.needsOwner => 'Choose an employee',
         TicketState.ownerUnknown => 'Dispatcher unknown · choose an employee',
         TicketState.queued => 'Queued for ${owner ?? 'its owner'}',
         TicketState.working => 'Working',
-        TicketState.waitingForYou => 'Waiting for you',
+        TicketState.waitingForYou => others ? 'Waiting for approval' : 'Waiting for you',
         TicketState.needsYourLogin => expired ? 'Waiting for your Claude login (expired)' : 'Waiting for your Claude login',
         TicketState.waitsForLogin => "Waiting for ${login ?? 'its creator'}'s Claude login",
         TicketState.waitingForLimit => limitWaitOf(mine ? 'your' : "${login ?? 'its creator'}'s", untilMs),
-        TicketState.failed => 'Failed',
-        TicketState.planReview => 'Plan to review',
+        TicketState.failed => others ? '✕ Failed' : 'Failed',
+        TicketState.planReview => others ? 'Waiting for plan review' : 'Plan to review',
         TicketState.testing => '${tester ?? 'The tester'} is testing…',
-        TicketState.review => 'Report to review',
+        TicketState.review => others ? 'Waiting for review' : 'Report to review',
         TicketState.done => 'Done',
       };
+}
+
+/// Whether a ticket in [state] counts as [me]'s work (B6, freeze §1): its ◆, the
+/// filter Needs you, the count and Waiting on me. A wait for a login is the login
+/// user's ([TicketState.needsYourLogin] already asked); the rest the responsible's,
+/// and everyone's without an active one, as on a server without a responsible.
+/// Only what counts: anyone can still decide ([TicketState.needsYou]).
+bool needsMe(TicketView ticket, TicketState state, {String? me}) {
+  if (!state.needsYou) return false;
+  if (state == TicketState.needsYourLogin) return true;
+  final responsible = ticket.responsibleUserId;
+  return responsible == null || (ticket.responsibleDisabled ?? false) || responsible == me;
+}
+
+/// Whether [ticket] in [state] waits for a decision that is someone else's: the words of [TicketStateView.line].
+bool decidedByOther(TicketView ticket, TicketState state, {String? me}) => state.needsYou && !needsMe(ticket, state, me: me);
+
+/// The ids in [tasks] of main tasks that wait for a decision that is someone
+/// else's ([needsMe], freeze §5): Dashboard, Waiting tasks and CarPlay do not
+/// count them. A main task whose ticket is not in [tickets] counts as before.
+Set<String> othersMainTasks(List<TaskView> tasks, Iterable<TicketView> tickets, {String? me}) {
+  final byId = {for (final t in tickets) t.id: t};
+  return {
+    for (final t in tasks)
+      if (t.isTicketMain && t.needsYou)
+        if (byId[t.ticketId] case final ticket? when !needsMe(ticket, ticketState(ticket, root: t, me: me), me: me)) t.id,
+  };
+}
+
+/// What the Responsible is for, under the field and in its picker (P-71).
+const responsibleExplained = 'Follows up and reviews. An employee does the work.';
+
+/// The name of [ticket]'s responsible: "You", "Alexandra (disabled)"; null without one.
+String? responsibleLabel(TicketView ticket, {String? me}) {
+  final id = ticket.responsibleUserId;
+  if (id == null) return null;
+  if (id == me) return 'You';
+  final name = ticket.responsibleUsername ?? 'A board member';
+  return (ticket.responsibleDisabled ?? false) ? '$name (disabled)' : name;
+}
+
+/// Whose Claude login [ticket] runs on, for the card's "on … login" (P-73).
+String loginOwnerOf(TicketView ticket, {String? me}) => ticket.loginUser == me ? 'your' : "${ticket.loginUsername}'s";
+
+/// The whole who-block as one sentence, for a screen reader (§1.3, §9).
+String whoSentence(TicketView ticket, {String? owner, String? me}) {
+  final responsible = responsibleLabel(ticket, me: me);
+  return [
+    owner == null ? 'No owner yet.' : '$owner does the work.',
+    'Runs on ${loginOwnerOf(ticket, me: me)} Claude login.',
+    responsible == null ? 'No one responsible.' : '${responsible == 'You' ? 'You are' : '$responsible is'} responsible: follows up and reviews.',
+    'Created by ${ticket.createdByUser == me ? 'you' : ticket.createdByUsername}.',
+  ].join(' ');
+}
+
+/// Who [me] can make responsible (§2.1): [me] first as "You", then the other
+/// active board members A–Z. A disabled one is no longer a choice (P-78).
+List<({String id, String label})> responsibleChoices(List<UserView> members, {String? me}) {
+  final others = [for (final u in members) if (u.disabledAtMs == null && u.id != me) u]..sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
+  return [
+    if (me != null) (id: me, label: 'You'),
+    for (final u in others) (id: u.id, label: u.username),
+  ];
+}
+
+/// How many open tickets on [board] have [userId] responsible: what disabling them leaves behind (§2.4).
+int openResponsibleCount(BoardView board, String userId) => board.columns.where((c) => c.column.kind != ColumnKind.done).expand((c) => c.tickets).where((t) => t.responsibleUserId == userId).length;
+
+/// Why a board member follows (`FollowerView.reason`, text, so an unknown one
+/// from a newer server just shows nothing): in the followers list.
+String? followReasonLabel(String reason) => switch (reason) {
+      'created' => 'Created it',
+      'responsible' => 'Responsible',
+      'mentioned' => '@mentioned',
+      'manual' => 'Chose to follow',
+      _ => null,
+    };
+
+/// Whether [me] may stop following [ticket]: not while responsible for it (B10).
+bool canUnfollow(TicketView ticket, {String? me}) => ticket.responsibleUserId == null || ticket.responsibleUserId != me;
+
+/// The line under the switch Following (P-79, §3.2–§3.3): why, so following by
+/// itself can be explained rather than surprise. [reason] is [me]'s, null when
+/// not following.
+String followingNote(TicketView ticket, {String? reason, String? me}) {
+  if (!canUnfollow(ticket, me: me)) return "You're responsible for #${ticket.number}. Hand it to someone else to stop following.";
+  if (ticket.column == ColumnKind.done || ticket.archivedAtMs != null) return 'Done tickets send no updates.';
+  return switch (reason) {
+    null => 'Get updates when it needs review, is sent back or fails.',
+    'created' => 'You follow because you created it.',
+    'responsible' => "You follow because you're responsible.",
+    'mentioned' => 'You follow because you were @mentioned.',
+    'manual' => 'You follow because you chose to.',
+    _ => 'You follow this ticket.',
+  };
 }
 
 /// "Waiting for Robin's limit until 16:00" (P-37: the name and the time, never

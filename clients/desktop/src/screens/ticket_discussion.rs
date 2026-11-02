@@ -326,7 +326,7 @@ impl AppView {
             if line.kind == SystemLineKind::Review {
                 let report = root.and_then(|r| r.result.clone()).filter(|r| !r.trim().is_empty());
                 return v().id(("discussion-review", i)).role(Role::Group).aria_label(d::system_label(&text, &when)).gap(px(6.)).p(px(10.)).rounded(px(8.)).border_1().border_color(c(theme::ATTENTION_BORDER)).bg(c(theme::ATTENTION_BG))
-                    .child(h().gap(px(6.)).child(ui::diamond(7., theme::ACCENT_TEXT, true)).child(div().flex_1().text_size(px(12.5)).font_weight(FontWeight::MEDIUM).child(first.clone())).children(report.as_ref().map(|_| {
+                    .child(h().gap(px(6.)).when(self.ticket_needs_me(t), |el| el.child(ui::diamond(7., theme::ACCENT_TEXT, true))).child(div().flex_1().text_size(px(12.5)).font_weight(FontWeight::MEDIUM).child(first.clone())).children(report.as_ref().map(|_| {
                         div().id(("discussion-review-toggle", i)).role(Role::Button).cursor_pointer().text_size(px(12.)).text_color(c(theme::ACCENT_TEXT)).child(if open { "Collapse" } else { "Expand" }).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             if !this.board.open_reports.remove(&message) {
                                 this.board.open_reports.insert(message);
@@ -372,9 +372,24 @@ impl AppView {
         let plan = m.update.as_deref() == Some("plan");
         let text = if plan && !self.board.open_reports.contains(&m.id) { None } else { Some(m.text.clone()) };
         let message = m.id;
-        let label = format!("{}, {}, {when}{}", who.name, who.kind, if marked { ", mentions you" } else { "" });
-        v().id(("discussion-message", i)).role(Role::Article).aria_label(label).gap(px(4.)).pl(px(if marked { 8. } else { 0. }))
+        let label = crate::screens::message_edit::row_label(&who.name, &when, m, self.message_edits_supported()).unwrap_or_else(|| format!("{}, {}, {when}{}", who.name, who.kind, if marked { ", mentions you" } else { "" }));
+        // A6: a deleted message is a line, one in the field is the field.
+        let deleted = crate::screens::message_edit::is_deleted(m);
+        let editing = self.edit.is(m.id) && !deleted;
+        let menu = self.edit_menu_entries(m);
+        // AUR-FA A5a: a message's link, on its row and with a right-click; its halo when a link opened it.
+        let copy_link = self.message_locate_supported() && crate::screens::links::linkable(m);
+        let has_menu = copy_link || !menu.is_empty();
+        v().id(("discussion-message", i)).relative().role(Role::Article).aria_label(label).gap(px(4.)).pl(px(if marked { 8. } else { 0. }))
             .when(marked, |el| el.border_l_2().border_color(c(theme::ACCENT)))
+            .when(self.link_flashes(m.id), |el| el.rounded(px(4.)).bg(c(theme::ACCENT_HALO)).child(ui::track_bounds(self.dropdown_bounds.clone(), crate::screens::links::LINK_TARGET)))
+            .when(has_menu, |el| {
+                el.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, w, cx| {
+                    cx.stop_propagation();
+                    let items = this.discussion_menu(message);
+                    this.open_menu(e.position, items, w, cx);
+                }))
+            })
             .child(
                 h().gap(px(8.))
                     .child(if who.human { ui::member_monogram(&who.name, 20., cx) } else { ui::monogram(&who.name, 20., cx) })
@@ -382,6 +397,20 @@ impl AppView {
                     .child(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(if who.human { "· board member".to_string() } else { format!("— {}", who.kind) }))
                     .when(marked, |el| el.child(div().text_size(px(11.)).text_color(c(theme::ACCENT_TEXT)).child("@ you")))
                     .child(div().flex_1())
+                    .when(copy_link && !deleted, |el| {
+                        el.child(ui::action_icon(("discussion-copy-link", i), "🔗", "Copy link", None, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.copy_message_link(message, cx);
+                        })))
+                    })
+                    .when(!menu.is_empty() && !editing, |el| {
+                        el.child(ui::action_icon(("discussion-more", i), "⋯", "More actions", None, None).on_click(cx.listener(move |this, e: &ClickEvent, w, cx| {
+                            cx.stop_propagation();
+                            let items = this.discussion_menu(message);
+                            this.open_menu(e.position(), items, w, cx);
+                        })))
+                    })
+                    .children(self.edited_tag(m, cx))
                     .child(div().text_size(px(11.)).text_color(c(theme::TEXT_2)).child(when.clone())),
             )
             // A plan in the stream (MU2-05 AC1): folded to its title, the decisions are under the composer.
@@ -390,7 +419,7 @@ impl AppView {
                 let open = text.is_some();
                 el.child(
                     h().gap(px(8.)).p(px(8.)).rounded(px(6.)).border_1().border_color(c(theme::ATTENTION_BORDER)).bg(c(theme::ATTENTION_BG))
-                        .child(div().flex_1().min_w_0().truncate().text_size(px(12.5)).child(format!("◆ Plan · {title}")))
+                        .child(div().flex_1().min_w_0().truncate().text_size(px(12.5)).child(if self.ticket_needs_me(t) { format!("◆ Plan · {title}") } else { format!("Plan · {title}") }))
                         .child(div().id(("discussion-plan", i)).role(Role::Button).cursor_pointer().text_size(px(12.)).text_color(c(theme::ACCENT_TEXT)).child(if open { "Hide plan" } else { "Review plan" }).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             if !this.board.open_reports.remove(&message) {
                                 this.board.open_reports.insert(message);
@@ -399,11 +428,26 @@ impl AppView {
                         }))),
                 )
             })
-            .when_some(text.filter(|t| !t.trim().is_empty()), |el, text| {
-                let view = gpui_kit::component::text::TextView::markdown(SharedString::from(format!("discussion-md-{}-{}", m.id, text.len())), crate::screens::markdown::linked(&text)).selectable(true).on_link_click(self.markdown_link_handler(false, cx));
+            .when(deleted, |el| el.child(div().pl(px(28.)).child(self.deleted_line(m))))
+            .when(editing, |el| el.child(div().pl(px(28.)).child(self.edit_field(m, cx))))
+            .children(self.history_block(m).map(|block| div().pl(px(28.)).child(block)))
+            .when_some(text.filter(|t| !t.trim().is_empty() && !deleted && !editing), |el, text| {
+                let view = gpui_kit::component::text::TextView::markdown(SharedString::from(format!("discussion-md-{}-{}", m.id, text.len())), crate::screens::markdown::linked(&self.with_link_pills(&text))).selectable(true).on_link_click(self.markdown_link_handler(false, cx));
                 el.child(div().pl(px(28.)).text_size(px(13.)).line_height(px(20.)).when(m.role == MessageRole::User, |el| el.text_color(c(theme::TEXT))).child(view))
             })
             .into_any_element()
+    }
+
+    /// The menu of a discussion message: Copy link when it has one, and Edit and Delete when the
+    /// server says the message is the reader's to change (A6).
+    fn discussion_menu(&self, message: MessageId) -> crate::app::MenuItems {
+        let Some(m) = self.edit_find(message) else { return Vec::new() };
+        let mut items = Vec::new();
+        if self.message_locate_supported() && crate::screens::links::linkable(&m) {
+            items.push(Some(crate::app::MenuEntry { label: "Copy link".into(), keys: None, run: crate::app::MenuDo::Chat(crate::screens::thread_panel::ChatDo::CopyLink(message)), danger: false, checked: false, detail: None }));
+        }
+        items.extend(self.edit_menu_entries(&m));
+        items
     }
 
     /// Under the messages: the composer with its suggestions and warnings, and the

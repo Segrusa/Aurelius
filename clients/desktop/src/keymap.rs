@@ -13,6 +13,7 @@ actions!(
         GoTeamChat,
         GoBoard,
         GoVault,
+        GoMyTickets,
         GoEmployees,
         GoOrgChart,
         GoGuidelines,
@@ -174,6 +175,10 @@ actions!(
         BoardStart,
         BoardMoveTo,
         BoardPickUp,
+        BoardResponsible,
+        BoardFollow,
+        BoardCopyLink,
+        BoardMakeMeResponsible,
     ]
 );
 
@@ -269,6 +274,9 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc!(&["secondary-7"], Some(APP), NONE, "Go to Tasks (all projects)", General, true, GoTasks),
     sc!(&["secondary-0"], Some(APP), NONE, "Go to Ideas (Projects tab)", General, true, GoIdeas),
     sc!(&["secondary-shift-v"], Some(APP), NONE, "Go to Vault (items of the company and its projects)", General, true, GoVault),
+    // My tickets (A4): the Board page's second part. Kept out of the palette's list: the palette adds
+    // it only for a server with the feature.
+    sc!(&["secondary-shift-i"], Some(APP), NONE, "Go to My tickets (tickets that are yours)", General, false, GoMyTickets),
     // Every Ctrl-digit is taken: the guidelines are in the palette only (Guidelines P-51).
     sc!(&[], Some(APP), NONE, "Go to Guidelines (Employees tab)", General, true, GoGuidelines),
     sc!(&[], Some(APP), NONE, "Find guideline…", General, true, FindGuideline),
@@ -497,6 +505,9 @@ fn overlay_bindings() -> Vec<KeyBinding> {
         key("s", BoardStart, Some(BOARD_KEYS)),
         key("m", BoardMoveTo, Some(BOARD_KEYS)),
         key("space", BoardPickUp, Some(BOARD_KEYS)),
+        key("a", BoardResponsible, Some(BOARD_KEYS)),
+        key("f", BoardFollow, Some(BOARD_KEYS)),
+        key("c", BoardCopyLink, Some(BOARD_KEYS)),
         key("secondary-1", GoDashboard, Some("Input")),
     ]
 }
@@ -607,7 +618,7 @@ mod tests {
             let stack: Vec<KeyContext> = stack.iter().map(|c| KeyContext::parse(c).unwrap()).collect();
             keymap.bindings_for_input(&[Keystroke::parse(key).unwrap()], &stack).0.first().map(|b| b.action().name().to_string())
         };
-        for (key, name) in [("left", "BoardLeft"), ("right", "BoardRight"), ("up", "BoardUp"), ("down", "BoardDown"), ("enter", "BoardOpen"), ("s", "BoardStart"), ("m", "BoardMoveTo"), ("space", "BoardPickUp")] {
+        for (key, name) in [("left", "BoardLeft"), ("right", "BoardRight"), ("up", "BoardUp"), ("down", "BoardDown"), ("enter", "BoardOpen"), ("s", "BoardStart"), ("m", "BoardMoveTo"), ("space", "BoardPickUp"), ("a", "BoardResponsible"), ("f", "BoardFollow"), ("c", "BoardCopyLink")] {
             assert_eq!(action(key, &[APP, &board]).as_deref(), Some(format!("aurelius::{name}").as_str()), "{key}");
             assert!(!action(key, &[APP, &board, "Input"]).is_some_and(|a| a.starts_with("aurelius::Board")), "{key} fires while typing in Find");
             assert!(!action(key, &[APP, NAV]).is_some_and(|a| a.starts_with("aurelius::Board")), "{key} is the Board's only");

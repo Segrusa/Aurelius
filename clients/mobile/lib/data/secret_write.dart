@@ -10,6 +10,7 @@ const confirmSecretMethods = {
   Methods.employeeSendMessage,
   Methods.groupChatSend,
   Methods.ticketPost,
+  Methods.messageEdit,
   Methods.projectConversationSend,
   Methods.taskCreate,
   Methods.recurringTaskCreate,

@@ -457,11 +457,13 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
         (false, None) => ("NULL", "?2 IS NULL"),
         (false, Some(_)) => ("NULL", "m.id = ?2"),
     };
+    // A store before schema 29 has no edits.
+    let edits = if has_edit_columns(conn)? { "m.edited_at_ms, m.deleted_at_ms" } else { "NULL, NULL" };
     let mut stmt = conn.prepare(&format!(
         "SELECT m.id, m.ordinal, m.role, m.status, b.storage_key, m.created_at_ms, m.run_id, m.reply_to_id,
                 c.display_name, r.model_id, json_extract(r.resolved_config_json, '$.persona_name'),
                 json_extract(m.meta_json, '$.kind'), json_extract(m.meta_json, '$.from'), json_extract(m.meta_json, '$.approval_id'), json_extract(m.meta_json, '$.files'), json_extract(m.meta_json, '$.uploads'),
-                json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system'), {parent}
+                json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system'), {parent}, {edits}
          FROM messages m LEFT JOIN blobs b ON b.id = m.content_blob_id
          LEFT JOIN runs r ON r.id = m.run_id LEFT JOIN connections c ON c.id = r.connection_id
          WHERE m.conversation_id = ?1 AND {only} ORDER BY m.ordinal"
@@ -487,17 +489,21 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             r.get::<_, Option<String>>(16)?,
             r.get::<_, Option<String>>(17)?,
             r.get::<_, Option<String>>(18)?,
+            r.get::<_, Option<i64>>(19)?,
+            r.get::<_, Option<i64>>(20)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode, system, parent) = row?;
+        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode, system, parent, edited, deleted) = row?;
         let produced_by = match (connection, model.filter(|m| !m.is_empty())) {
             (Some(c), Some(m)) => Some(format!("{c} · {m}")),
             (Some(c), None) => Some(format!("{c} · default model")),
             (None, _) => None,
         };
         let id = MessageId::parse(&id).map_err(|e| StorageError::Rejected(e.to_string()))?;
+        // A deleted message shows no attachments; the rows and blobs stay.
+        let (files, uploads) = if deleted.is_some() { (None, None) } else { (files, uploads) };
         let mut uploads: Vec<aurelius_domain::views::MessageFileView> = uploads.and_then(|f| serde_json::from_str(&f).ok()).unwrap_or_default();
         aurelius_domain::conversation::with_upload_ids(aurelius_domain::conversation::UploadOwner::Message(id), &mut uploads);
         out.push(MessageView {
@@ -528,6 +534,9 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             thread_unread: None,
             thread_repliers: Vec::new(),
             reactions: Vec::new(),
+            edited_at_ms: edited,
+            deleted_at_ms: deleted,
+            editable: false,
         });
     }
     // The board members who wrote in a discussion (schema 19).
@@ -558,6 +567,11 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
 /// Whether `messages` has `thread_parent_id` (schema 26).
 pub(crate) fn has_thread_column(conn: &Connection) -> Result<bool, StorageError> {
     Ok(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'thread_parent_id'", [], |r| r.get::<_, i64>(0))? > 0)
+}
+
+/// Whether `messages` has `edited_at_ms` and `deleted_at_ms` (schema 29).
+pub(crate) fn has_edit_columns(conn: &Connection) -> Result<bool, StorageError> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'edited_at_ms'", [], |r| r.get::<_, i64>(0))? > 0)
 }
 
 /// Tool use during one answer, in order.
@@ -908,6 +922,102 @@ pub fn delete_message(tx: &Transaction<'_>, message: MessageId) -> Result<(), St
     Ok(())
 }
 
+/// A message whose text was just replaced: where it is, and the blob that held the
+/// old text, for the event of the change to carry (the blob itself stays).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplacedText {
+    pub conversation_id: ConversationId,
+    /// None: the message had no text yet.
+    pub previous_blob: Option<String>,
+}
+
+/// Point `message` at the registered `blob` and set `column` to `at_ms`.
+/// A deleted message stays as it is: none, as for an unknown message.
+fn replace_blob(tx: &Transaction<'_>, message: MessageId, blob: &str, column: &str, at_ms: i64) -> Result<Option<ReplacedText>, StorageError> {
+    let row: Option<(String, Option<String>)> = tx
+        .query_row("SELECT conversation_id, content_blob_id FROM messages WHERE id = ?1 AND deleted_at_ms IS NULL", [message.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let Some((conversation, previous_blob)) = row else { return Ok(None) };
+    let conversation_id = ConversationId::parse(&conversation).map_err(|e| StorageError::Rejected(e.to_string()))?;
+    tx.execute(&format!("UPDATE messages SET content_blob_id = ?2, {column} = ?3 WHERE id = ?1"), params![message.to_string(), blob, at_ms])?;
+    Ok(Some(ReplacedText { conversation_id, previous_blob }))
+}
+
+/// Replace the text of `message` by the registered `blob` and mark it edited at
+/// `at_ms`. Who may do so is the command's to check. Wakes nothing, writes no event.
+pub fn replace_message_text(tx: &Transaction<'_>, message: MessageId, blob: &str, at_ms: i64) -> Result<Option<ReplacedText>, StorageError> {
+    replace_blob(tx, message, blob, "edited_at_ms", at_ms)
+}
+
+/// Mark `message` deleted at `at_ms`: its row stays, and its text becomes the
+/// registered `placeholder_blob`. Who may do so is the command's to check. Unlike
+/// `delete_message`, which removes a user message that was never answered.
+pub fn mark_message_deleted(tx: &Transaction<'_>, message: MessageId, placeholder_blob: &str, at_ms: i64) -> Result<Option<ReplacedText>, StorageError> {
+    replace_blob(tx, message, placeholder_blob, "deleted_at_ms", at_ms)
+}
+
+/// A copy of a discussion message in a task conversation (`to_owner` posts one
+/// for the ticket's owner): the copy and the storage key of its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskCopy {
+    pub message: MessageId,
+    /// None: the copy has no text.
+    pub text_key: Option<String>,
+}
+
+/// The live copies in task conversations of the discussion message `source`
+/// (those whose meta names it as `from_message`). A deleted copy is not listed.
+pub fn task_copies_of(conn: &Connection, source: MessageId) -> Result<Vec<TaskCopy>, StorageError> {
+    let deleted = if has_edit_columns(conn)? { "AND m.deleted_at_ms IS NULL" } else { "" };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT m.id, b.storage_key FROM messages m LEFT JOIN blobs b ON b.id = m.content_blob_id
+         WHERE json_extract(m.meta_json, '$.from_message') = ?1 {deleted} ORDER BY m.ordinal"
+    ))?;
+    let rows = stmt.query_map([source.to_string()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (id, text_key) = row?;
+        out.push(TaskCopy { message: MessageId::parse(&id).map_err(|e| StorageError::Rejected(e.to_string()))?, text_key });
+    }
+    Ok(out)
+}
+
+/// Drop the files and uploads kept with `message`, as a delete does: a deleted
+/// message serves no attachment (the rows and blobs stay).
+pub fn clear_message_attachments(tx: &Transaction<'_>, message: MessageId) -> Result<(), StorageError> {
+    tx.execute("UPDATE messages SET meta_json = json_remove(meta_json, '$.files', '$.uploads') WHERE id = ?1 AND meta_json IS NOT NULL", [message.to_string()])?;
+    Ok(())
+}
+
+/// The dedupe key of the event of a decision's feedback, `cmd:<id>:feedback`
+/// (`conversation::discussion::decision_feedback`), as a LIKE pattern.
+const DECISION_FEEDBACK: &str = "cmd:%:feedback";
+
+/// Whether `message` is the feedback a board member gave with a decision on a
+/// ticket. Told by the event it came from, so it also holds for older rows and
+/// after an edit (the event stays).
+pub fn is_decision_feedback(conn: &Connection, message: MessageId) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM messages m JOIN events e ON e.id = m.source_event_id WHERE m.id = ?1 AND e.dedupe_key LIKE ?2)",
+        params![message.to_string(), DECISION_FEEDBACK],
+        |r| r.get(0),
+    )?)
+}
+
+/// The messages of `conversation` for which `is_decision_feedback` holds, for a
+/// read of the whole conversation.
+pub fn decision_feedback_in(conn: &Connection, conversation: ConversationId) -> Result<std::collections::HashSet<MessageId>, StorageError> {
+    let mut stmt = conn.prepare("SELECT m.id FROM messages m JOIN events e ON e.id = m.source_event_id WHERE m.conversation_id = ?1 AND e.dedupe_key LIKE ?2")?;
+    let rows = stmt.query_map(params![conversation.to_string(), DECISION_FEEDBACK], |r| r.get::<_, String>(0))?;
+    let mut out = std::collections::HashSet::new();
+    for row in rows {
+        if let Ok(message) = MessageId::parse(&row?) {
+            out.insert(message);
+        }
+    }
+    Ok(out)
+}
+
 /// Let a queued run go first: ahead of other ready jobs and without waiting for a retry delay.
 pub fn hurry_job(tx: &Transaction<'_>, run: RunId) -> Result<(), StorageError> {
     tx.execute(
@@ -947,10 +1057,12 @@ pub fn set_message_uploads(tx: &Transaction<'_>, message: MessageId, uploads: &[
     Ok(())
 }
 
-/// The files uploaded with a message, and its conversation; none for an unknown message.
+/// The files uploaded with a message, and its conversation; none for an unknown
+/// or a deleted message (its rows and blobs stay, but nothing serves them).
 pub fn message_uploads(conn: &Connection, message: MessageId) -> Result<Option<(ConversationId, Vec<aurelius_domain::views::MessageFileView>)>, StorageError> {
+    let live = if has_edit_columns(conn)? { "AND deleted_at_ms IS NULL" } else { "" };
     let row: Option<(String, Option<String>)> = conn
-        .query_row("SELECT conversation_id, json_extract(meta_json, '$.uploads') FROM messages WHERE id = ?1", [message.to_string()], |r| {
+        .query_row(&format!("SELECT conversation_id, json_extract(meta_json, '$.uploads') FROM messages WHERE id = ?1 {live}"), [message.to_string()], |r| {
             Ok((r.get(0)?, r.get(1)?))
         })
         .optional()?;
@@ -960,12 +1072,15 @@ pub fn message_uploads(conn: &Connection, message: MessageId) -> Result<Option<(
 }
 
 /// A file kept with a message: (name, media type, storage key). Only blobs a
-/// message refers to as a file can be read this way.
+/// message refers to as a file can be read this way, and not those of a deleted message.
 pub fn message_file(conn: &Connection, id: &str) -> Result<Option<(String, String, String)>, StorageError> {
+    let live = if has_edit_columns(conn)? { "AND m.deleted_at_ms IS NULL" } else { "" };
     let found: Option<String> = conn
         .query_row(
-            "SELECT json_extract(f.value, '$.name') FROM messages m, json_each(m.meta_json, '$.files') f
-             WHERE m.meta_json IS NOT NULL AND json_extract(f.value, '$.id') = ?1 LIMIT 1",
+            &format!(
+                "SELECT json_extract(f.value, '$.name') FROM messages m, json_each(m.meta_json, '$.files') f
+                 WHERE m.meta_json IS NOT NULL {live} AND json_extract(f.value, '$.id') = ?1 LIMIT 1"
+            ),
             [id],
             |r| r.get(0),
         )

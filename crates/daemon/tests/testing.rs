@@ -107,6 +107,7 @@ async fn set_tester(client: &Client, employee_id: Option<EmployeeId>) {
 async fn ticket(client: &Client, project_id: ProjectId, title: &str, description: &str, owner: EmployeeId) -> TicketId {
     let made = client
         .create_ticket(CreateTicket {
+            responsible_user_id: None,
             confirm_secret: false,
             project_id,
             title: title.into(),

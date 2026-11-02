@@ -10,8 +10,11 @@ import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/commands.dart';
 import '../../data/guidelines.dart';
+import '../../data/links.dart';
 import '../../data/secret_write.dart';
+import '../../data/tickets.dart';
 import '../../data/views.dart';
+import 'inbox_rows.dart';
 
 sealed class InboxEvent {
   const InboxEvent();
@@ -77,6 +80,16 @@ class TaskOpened extends InboxEvent {
 
 class NotificationsMarkedRead extends InboxEvent {
   const NotificationsMarkedRead();
+}
+
+/// A row of the personal Inbox was opened: only that makes it read (§4.4). The
+/// phone shows it read at once and tells the server (`notification.mark_read`);
+/// it remembers it until the next event on the row, and sends no mark-all while
+/// others are unread.
+class InboxRowOpened extends InboxEvent {
+  const InboxRowOpened(this.row);
+
+  final NotificationView row;
 }
 
 /// A notification was swiped away.
@@ -162,6 +175,10 @@ class InboxState extends Equatable {
     this.planOutcomes = const {},
     this.variants = const {},
     this.variantsOn = false,
+    this.personalOn = false,
+    this.followOn = false,
+    this.linksOn = false,
+    this.loadFailed = false,
     this.notice,
     this.notSent,
   });
@@ -190,15 +207,32 @@ class InboxState extends Equatable {
 
   /// The server has `task_variants`: tasks with variants ready show a compare card.
   final bool variantsOn;
+
+  /// The server has `personal_inbox`: rows per ticket or channel (A3).
+  final bool personalOn;
+
+  /// The server has `ticket_follow`: a row of a ticket offers Unfollow.
+  final bool followOn;
+
+  /// The server has `message_locate`: a row offers Copy link.
+  final bool linksOn;
+
+  /// The personal Inbox could not be read: it says so, with Try again (§4.6).
+  final bool loadFailed;
   final String? notice;
 
   /// The approval whose answer or decision the board member just chose not to
   /// send (a vault value, B10): it stays open to change.
   final String? notSent;
 
+  /// The rows of the personal Inbox; none on a server without it.
+  List<NotificationView> get personalRows => personalOn ? notifications.where((n) => n.isPersonal).toList() : const [];
+
   /// The badge: decisions waiting, plus unread notifications that need you or
-  /// say a task failed. Results (finished work) give no badge.
-  int get badge => approvals.length + proposals.length + guidelineProposals.length + notifications.where((n) => n.givesBadge).length;
+  /// say a task failed, plus the rows of the personal Inbox that are unread or
+  /// wait for you. Results (finished work) give no badge.
+  int get badge =>
+      approvals.length + proposals.length + guidelineProposals.length + notifications.where((n) => n.givesBadge || (personalOn && n.isPersonal && (!n.read || n.waitsForMe))).length;
 
   ApprovalView? approval(String id) => approvals.where((a) => a.id == id).firstOrNull;
 
@@ -226,6 +260,10 @@ class InboxState extends Equatable {
     Map<String, PlanOutcome>? planOutcomes,
     Map<String, TaskVariantsView>? variants,
     bool? variantsOn,
+    bool? personalOn,
+    bool? followOn,
+    bool? linksOn,
+    bool? loadFailed,
     String? notice,
     String? notSent,
   }) =>
@@ -240,12 +278,16 @@ class InboxState extends Equatable {
         planOutcomes: planOutcomes ?? this.planOutcomes,
         variants: variants ?? this.variants,
         variantsOn: variantsOn ?? this.variantsOn,
+        personalOn: personalOn ?? this.personalOn,
+        followOn: followOn ?? this.followOn,
+        linksOn: linksOn ?? this.linksOn,
+        loadFailed: loadFailed ?? this.loadFailed,
         notice: notice,
         notSent: notSent,
       );
 
   @override
-  List<Object?> get props => [loading, approvals, proposals, guidelineProposals, notifications, unread, deciding, planOutcomes, variants, variantsOn, notice, notSent];
+  List<Object?> get props => [loading, approvals, proposals, guidelineProposals, notifications, unread, deciding, planOutcomes, variants, variantsOn, personalOn, followOn, linksOn, loadFailed, notice, notSent];
 }
 
 extension NotificationAttention on NotificationView {
@@ -255,10 +297,10 @@ extension NotificationAttention on NotificationView {
   bool get isFailure => targetType == 'task.failed';
 
   /// Needs you: an alert for something to act on that is not already a listed approval or proposal.
-  bool get needsYou => severity == 'action' && !_listedItself.contains(targetType);
+  bool get asksYou => severity == 'action' && !_listedItself.contains(targetType);
 
   /// Only Needs you and Failed, unread, give the badge; a finished result does not.
-  bool get givesBadge => !read && (isFailure || needsYou);
+  bool get givesBadge => !read && (isFailure || asksYou);
 }
 
 /// Approvals and notifications for the active PC; also drives the badge.
@@ -271,6 +313,7 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     on<PlanDecided>(_decidePlan, transformer: concurrent());
     on<NotificationsMarkedRead>(_markRead, transformer: droppable());
     on<TaskOpened>(_taskOpened, transformer: sequential());
+    on<InboxRowOpened>(_rowOpened);
     on<NotificationDismissed>(_dismiss);
     on<NotificationsCleared>(_clearAll, transformer: droppable());
     on<ProposalDecided>(_decideProposal, transformer: concurrent());
@@ -300,6 +343,14 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
   final AureliusRepository _repository;
   late final List<StreamSubscription<void>> _subs;
 
+  /// A mention is a chat event: only the personal Inbox needs those, so they are listened to once it is there.
+  StreamSubscription<void>? _chat;
+
+  /// Rows opened here, with the time of the event they were at: a later event makes them unread again.
+  final _opened = <String, int>{};
+
+  bool _isOpened(NotificationView n) => _opened[n.id] == n.createdAtMs;
+
   Future<void> _refresh(InboxRefreshed event, Emitter<InboxState> emit) async {
     try {
       final approvals = await _repository.approvals();
@@ -307,20 +358,26 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
       final proposals = await _repository.proposals();
       approvals.sort((a, b) => a.expiresAtMs.compareTo(b.expiresAtMs));
       final link = _repository.linkState;
+      final personal = link.has(personalInboxFeature);
+      if (personal) _chat ??= _repository.chatChanges.listen((_) => add(const InboxRefreshed()));
       emit(state.copyWith(
         loading: false,
         approvals: approvals.where((a) => a.isPending).toList(),
         // Proposed instructions only where the server has the feature.
         proposals: proposals.where((p) => p.isPending && (!p.isInstructions || link.has(Harness2.instructionProposals))).toList(),
         variantsOn: link.has(Harness2.variants),
-        notifications: notifications.notifications,
-        unread: notifications.unread,
+        personalOn: personal,
+        followOn: link.has(ticketFollowFeature),
+        linksOn: link.has(messageLocateFeature),
+        loadFailed: false,
+        notifications: [for (final n in notifications.notifications) _isOpened(n) ? readRow(n) : n],
+        unread: (notifications.unread - notifications.notifications.where((n) => !n.read && _isOpened(n)).length).clamp(0, 1 << 30),
         deciding: state.deciding,
       ));
     } on DisconnectedException {
       emit(state.copyWith(loading: false, deciding: state.deciding));
     } on ProtocolException catch (e) {
-      emit(state.copyWith(loading: false, notice: e.message, deciding: state.deciding));
+      emit(state.copyWith(loading: false, notice: e.message, loadFailed: _repository.linkState.has(personalInboxFeature), deciding: state.deciding));
     }
   }
 
@@ -432,6 +489,26 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     add(const InboxRefreshed());
   }
 
+  Future<void> _rowOpened(InboxRowOpened event, Emitter<InboxState> emit) async {
+    final row = event.row;
+    final again = _opened[row.id] == row.createdAtMs;
+    _opened[row.id] = row.createdAtMs;
+    if (row.read || again) return;
+    emit(state.copyWith(
+      notifications: [for (final n in state.notifications) n.id == row.id ? readRow(n) : n],
+      unread: (state.unread - 1).clamp(0, 1 << 30),
+      deciding: state.deciding,
+    ));
+    // An older server has no read per row. A failed write is not shown: the row
+    // stays read here and the next open sends it again.
+    if (!_repository.linkState.has(personalInboxFeature)) return;
+    try {
+      await _repository.markNotificationRead(row.id);
+    } catch (_) {
+      _opened.remove(row.id);
+    }
+  }
+
   Future<void> _dismiss(NotificationDismissed event, Emitter<InboxState> emit) async {
     final gone = state.notifications.where((n) => n.id == event.id).firstOrNull;
     emit(state.copyWith(
@@ -450,15 +527,23 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     final loaded = state.notifications;
     if (loaded.isEmpty) return;
     // The inbox lists "action" alerts as the live items in Needs you, not as results.
-    final results = loaded.where((n) => n.severity != 'action').length;
+    final personal = state.personalRows;
+    final results = loaded.where((n) => n.severity != 'action' && !personal.contains(n)).toList();
     emit(state.copyWith(
-      notifications: const [],
-      unread: 0,
+      // Clear all is about Done: the rows of the personal Inbox stay.
+      notifications: personal,
+      unread: personal.where((n) => !n.read).length,
       deciding: state.deciding,
-      notice: results == 1 ? 'Cleared 1 result.' : 'Cleared $results results.',
+      notice: results.length == 1 ? 'Cleared 1 result.' : 'Cleared ${results.length} results.',
     ));
     try {
-      await _repository.dismissAllNotifications();
+      if (state.personalOn) {
+        for (final n in results) {
+          await _repository.dismissNotification(n.id);
+        }
+      } else {
+        await _repository.dismissAllNotifications();
+      }
     } catch (_) {
       add(const InboxRefreshed());
     }
@@ -588,7 +673,8 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
 
   Future<void> _taskOpened(TaskOpened event, Emitter<InboxState> emit) async {
     // Alerts for something to act on stay until it is done; the rest was seen now.
-    final seen = state.notifications.where((n) => n.taskId == event.taskId && n.severity != 'action').toList();
+    // A row of the personal Inbox is read by opening that row (§4.4).
+    final seen = state.notifications.where((n) => n.taskId == event.taskId && n.severity != 'action' && !state.personalRows.contains(n)).toList();
     if (seen.isEmpty) return;
     final ids = {for (final n in seen) n.id};
     emit(state.copyWith(
@@ -607,28 +693,20 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
 
   Future<void> _markRead(NotificationsMarkedRead event, Emitter<InboxState> emit) async {
     if (state.unread == 0) return;
+    // Seeing the list counts for Done only; mark-all would read these rows as well.
+    if (state.personalRows.any((n) => !n.read)) return;
     try {
       await _repository.markNotificationsRead();
-      emit(state.copyWith(unread: 0, notifications: state.notifications.map(_read).toList(), deciding: state.deciding));
+      emit(state.copyWith(unread: 0, notifications: state.notifications.map(readRow).toList(), deciding: state.deciding));
     } catch (_) {}
   }
-
-  NotificationView _read(NotificationView n) => NotificationView(
-        id: n.id,
-        severity: n.severity,
-        title: n.title,
-        subject: n.subject,
-        createdAtMs: n.createdAtMs,
-        read: true,
-        taskId: n.taskId,
-        targetType: n.targetType,
-      );
 
   @override
   Future<void> close() async {
     for (final s in _subs) {
       await s.cancel();
     }
+    await _chat?.cancel();
     return super.close();
   }
 }

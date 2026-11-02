@@ -69,7 +69,7 @@ pub fn append(tx: &Transaction<'_>, event: NewEvent<'_>) -> Result<Appended, Sto
         ],
     )?;
     let seq = tx.last_insert_rowid() as u64;
-    if crate::timeline::notification_for(event.event_type, &event.metadata).is_some() {
+    if crate::timeline::notifies(event.event_type, &event.metadata) {
         crate::timeline::notify(tx, seq)?;
     }
     Ok(Appended { id, seq })
