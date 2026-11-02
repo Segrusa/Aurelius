@@ -678,6 +678,8 @@ pub enum ConfirmKind {
     DisconnectClaude,
     /// Run a ticket that waits for another's login on the own Claude login (B4).
     UseMyLogin(aurelius_domain::TicketId),
+    /// A link to another server this device is paired with: switch to it (AUR-FA A5a).
+    LinkOtherServer(crate::screens::links::AureliusLink),
     /// Delete ("archive") a vault item (MU4-11 AC2).
     ArchiveVaultItem(aurelius_domain::VaultItemId),
     /// A message held back by `looks_like_secret` (B10, `vault.held`): "Send anyway?".
@@ -1208,6 +1210,10 @@ pub struct AppView {
     pub assign_said: HashMap<aurelius_domain::TaskId, String>,
     pub overlay_focus: FocusHandle,
     /// Scroll position of the open popup menu (keyboard selection scrolls into view).
+    /// A link on its way: waiting for the right server and the sign-in, or located. Only in memory (§6.3).
+    pub pending_link: Option<crate::screens::links::PendingLink>,
+    /// The message a link opened (its halo, ACCENT_HALO for `FLASH_MS`).
+    pub link_flash: Option<crate::screens::links::LinkFlash>,
     pub menu_scroll: ScrollHandle,
     /// Scroll position of the main content (chat, manager, project pages).
     pub scroll: ScrollHandle,
@@ -1669,6 +1675,8 @@ impl AppView {
             dialog_folder: None,
             assign_said: HashMap::new(),
             overlay_focus: cx.focus_handle(),
+            pending_link: None,
+            link_flash: None,
             menu_scroll: ScrollHandle::new(),
             scroll: ScrollHandle::new(),
             page_scroll: ScrollHandle::new(),
@@ -6521,6 +6529,13 @@ impl AppView {
                         cx.notify();
                         return;
                     }
+                    ConfirmKind::LinkOtherServer(link) => {
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        self.link_switch_server(link, cx);
+                        cx.notify();
+                        return;
+                    }
                     ConfirmKind::ArchiveVaultItem(item) => {
                         self.vault_archive(item, cx);
                         self.overlay = Overlay::None;
@@ -6968,6 +6983,7 @@ impl AppView {
                 });
             }
         }
+        entries.extend(self.board_palette_entries(cx));
         for shortcut in SHORTCUTS.iter().filter(|s| s.in_palette) {
             entries.push(PaletteEntry {
                 label: shortcut.label.into(),
@@ -7034,6 +7050,7 @@ impl Render for AppView {
         }
         // The same for the thread panel's thread: followed only while it shows.
         self.follow_thread();
+        self.link_step(window, cx);
         if let Some(project) = self.window_project {
             // Whatever led elsewhere (Back, Chat, an archive), a project window stays on its project.
             // Employees work company-wide: their pages may open in a project window too.
@@ -7196,6 +7213,10 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &crate::keymap::BoardOpen, w, cx| this.board_key_open(w, cx)))
             .on_action(cx.listener(|this, _: &crate::keymap::BoardStart, _, cx| this.board_key_start(cx)))
             .on_action(cx.listener(|this, _: &crate::keymap::BoardMoveTo, w, cx| this.board_key_move(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardResponsible, w, cx| this.board_key_responsible(w, cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardFollow, _, cx| this.board_key_follow(cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardCopyLink, _, cx| this.board_key_copy_link(cx)))
+            .on_action(cx.listener(|this, _: &crate::keymap::BoardMakeMeResponsible, _, cx| this.board_key_make_me_responsible(cx)))
             .on_action(cx.listener(|this, _: &crate::keymap::BoardPickUp, _, cx| this.board_key_pick(cx)))
             .on_action(cx.listener(|this, _: &OpenUpdates, w, cx| {
                 this.open_settings(&OpenSettings, w, cx);

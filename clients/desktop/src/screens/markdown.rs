@@ -134,6 +134,10 @@ impl AppView {
     /// A link was clicked: `in_viewer` inside the open document (relative to it),
     /// else in a message (relative to the work folder).
     pub fn markdown_link(&mut self, url: &str, in_viewer: bool, window: &mut Window, cx: &mut Context<Self>) {
+        // Ours, valid or not: it navigates inside the app and never starts another one.
+        if crate::screens::links::is_aurelius(url) {
+            return self.open_link(url, window, cx);
+        }
         let base = if in_viewer { self.markdown.as_ref().and_then(|p| p.current_path()) } else { None };
         match resolve_link(base.as_deref(), url) {
             Some(path) if in_viewer => self.markdown_goto(path, cx),

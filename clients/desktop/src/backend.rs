@@ -110,6 +110,13 @@ pub struct ServerInfo {
     /// Reactions on channel messages: `message.react` and the event `message.reacted`
     /// (feature `chat_reactions`, AUR-CHAT-002).
     pub chat_reactions: bool,
+    /// Tickets have a Responsible: `ticket.set_responsible` and the fields on `TicketView`
+    /// (feature `ticket_responsible`, AUR-FA A1).
+    pub ticket_responsible: bool,
+    /// Tickets can be followed: `ticket.follow`, `ticket.followers` (feature `ticket_follow`, A2).
+    pub ticket_follow: bool,
+    /// `aurelius://` links open here: `message.locate` (feature `message_locate`, A5).
+    pub message_locate: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -896,6 +903,10 @@ pub enum BoardCall {
     Activity(aurelius_domain::TicketId),
     /// Whether the dispatcher gave up on a Todo ticket at this version (B5, from its timeline).
     GaveUp { ticket: aurelius_domain::TicketId, version: u64 },
+    /// Who follows a ticket (`ticket.followers`, feature `ticket_follow`).
+    Followers(aurelius_domain::TicketId),
+    /// Where a linked message is (`message.locate`, feature `message_locate`).
+    Locate(MessageId),
     /// A ticket write, `board.columns_update` (with the board's version) or
     /// `project.update`. `done`: what the board says when it worked.
     Write { command: Command, expected_version: Option<u64>, done: Option<String> },
@@ -940,6 +951,8 @@ pub fn ticket_of(command: &Command) -> Option<aurelius_domain::TicketId> {
         Command::CancelTicket(c) => c.ticket_id,
         Command::ArchiveTicket(c) => c.ticket_id,
         Command::UseMyLogin(c) => c.ticket_id,
+        Command::SetTicketResponsible(c) => c.ticket_id,
+        Command::FollowTicket(c) => c.ticket_id,
         _ => return None,
     })
 }
@@ -965,6 +978,12 @@ pub enum BoardUpdate {
     SummaryRetried { ticket: aurelius_domain::TicketId, failure: Option<String> },
     /// `gave_up`: none when the timeline did not load.
     GaveUp { ticket: aurelius_domain::TicketId, version: u64, gave_up: Option<bool> },
+    /// Who follows a ticket, or why it did not load.
+    Followers(aurelius_domain::TicketId, Result<aurelius_domain::ticket::TicketFollowersView, String>),
+    /// `ticket.follow_changed`: someone started or stopped following a ticket.
+    FollowChanged,
+    /// Where a linked message is, or what to say instead.
+    Located(Result<aurelius_domain::views::MessageLocation, String>),
     /// A write worked; `text` is what to say.
     Done { ticket: Option<aurelius_domain::TicketId>, text: Option<String> },
     /// `ticket.create` worked.
@@ -985,9 +1004,13 @@ pub const ACTIVITY_LIMIT: u32 = 60;
 /// What a lost connection during a board write tells the user.
 pub const BOARD_CONNECTION_DROPPED: &str = "The connection dropped before the server answered. The board reloads with what the server has.";
 
+/// A read of something that is not there: the panel says "Ticket not found" with a way out (P-89).
+pub const TICKET_NOT_FOUND: &str = "Not found.";
+
 /// Why the board did not load, for its page (ui-ontwerp §3.3).
 pub fn board_failure(e: &ClientError) -> String {
     match e {
+        ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::NotFound => TICKET_NOT_FOUND.into(),
         ClientError::Protocol(p) if p.code == aurelius_domain::error::ErrorCode::UnknownMethod => "This server does not have the Board yet. Update the server.".into(),
         ClientError::TimedOut(_) => "The server did not answer in time.".into(),
         e => e.to_string(),
@@ -1628,7 +1651,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
         let _ = updates.send(Update::Connection(Connection::Connecting));
         let (events_tx, mut events) = mpsc::unbounded_channel();
         let (streams_tx, mut streams) = mpsc::unbounded_channel();
-        let accepts = [aurelius_protocol::client_feature::TEAM_CHANNELS, aurelius_protocol::client_feature::TICKET_CHANNELS, aurelius_protocol::client_feature::CHAT_THREADS, aurelius_protocol::client_feature::CHAT_REACTIONS];
+        let accepts = [aurelius_protocol::client_feature::TEAM_CHANNELS, aurelius_protocol::client_feature::TICKET_CHANNELS, aurelius_protocol::client_feature::CHAT_THREADS, aurelius_protocol::client_feature::CHAT_REACTIONS, aurelius_protocol::client_feature::TICKET_FOLLOW];
         let client = match Client::open(&target, "aurelius-desktop", events_tx, Some(streams_tx), &accepts).await {
             Ok(client) => client,
             // Before `is_final`, which an update-needed error also is.
@@ -1763,6 +1786,9 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 ticket_add_files: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_ADD_FILES),
                 chat_threads: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::CHAT_THREADS),
                 chat_reactions: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::CHAT_REACTIONS),
+                ticket_responsible: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_RESPONSIBLE),
+                ticket_follow: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_FOLLOW),
+                message_locate: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::MESSAGE_LOCATE),
             },
         }));
 
@@ -3048,6 +3074,7 @@ async fn session(
                 let mut vault = false;
                 let mut guidelines = false;
                 let mut renamed = false;
+                let mut follow = false;
                 for e in std::iter::once(first).chain(std::iter::from_fn(|| events.try_recv().ok())) {
                     // 'Always allow' on an approval adds its tool to the always-allowed list.
                     approval |= e.kind.area() == "approval";
@@ -3074,16 +3101,22 @@ async fn session(
                         guidelines = true;
                     } else if e.kind == aurelius_domain::EventKind::ServerRenamed {
                         renamed = true;
+                    } else if e.kind == aurelius_domain::EventKind::TicketFollowChanged {
+                        // Only who follows changed: not the board and not the dozen of `refresh`.
+                        follow = true;
                     } else if is_artifact(&e) { artifact = true } else if is_chat(&e) { chat = true } else { other = true }
                     task |= e.kind.area() == "task";
                     users |= e.kind.area() == "user";
                     claude |= e.kind == aurelius_domain::EventKind::ClaudeLoginUpdated;
                     // A card follows its main task (the app keeps those of tickets); the dispatcher follows the company and its projects.
                     settings |= matches!(e.kind.area(), "company" | "project");
-                    tickets |= matches!(e.kind.area(), "ticket" | "board");
+                    tickets |= matches!(e.kind.area(), "ticket" | "board") && e.kind != aurelius_domain::EventKind::TicketFollowChanged;
                     if e.kind.area() == "task" && !board_tasks.contains(&e.aggregate_id) {
                         board_tasks.push(e.aggregate_id.clone());
                     }
+                }
+                if follow {
+                    let _ = updates.send(Update::Board(BoardUpdate::FollowChanged));
                 }
                 if tickets || settings || !board_tasks.is_empty() {
                     let _ = updates.send(Update::Board(BoardUpdate::Changed { tickets, settings, tasks: board_tasks }));
@@ -3509,6 +3542,20 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
             }
             let gave_up = result.ok().map(|p| crate::screens::board::dispatcher_gave_up(&p.cards));
             let _ = updates.send(Update::Board(BoardUpdate::GaveUp { ticket, version, gave_up }));
+        }
+        BoardCall::Followers(ticket_id) => {
+            let result = client.ticket_followers(ticket_id).await;
+            if let Err(e) = &result && lost(e) {
+                return Err(result.unwrap_err().into());
+            }
+            let _ = updates.send(Update::Board(BoardUpdate::Followers(ticket_id, result.map_err(|e| board_failure(&e)))));
+        }
+        BoardCall::Locate(message_id) => {
+            let result = client.message_locate(message_id).await;
+            if let Err(e) = &result && lost(e) {
+                return Err(result.unwrap_err().into());
+            }
+            let _ = updates.send(Update::Board(BoardUpdate::Located(result.map_err(|e| crate::screens::links::locate_failure(&e)))));
         }
         BoardCall::Write { mut command, expected_version, done } => {
             let ticket = ticket_of(&command);
@@ -4945,6 +4992,87 @@ mod tests {
             next(&mut app, |u| matches!(u, Update::Connection(Connection::Offline(_))).then_some(())).await;
             let message = refused(&mut app, Command::StartTicket(ticket::StartTicket { ticket_id: two, employee_id: None }), None).await;
             assert!(message.starts_with("Not connected"), "{message}");
+        }
+
+        /// AUR-FA D1 against a server without `ticket_responsible` and `ticket_follow`: the client
+        /// names none of the new fields, a ticket is made and read as before, nothing on it says
+        /// Responsible, and the new methods only refuse. `message.locate` is there: a message of a
+        /// discussion is found with its ticket, an unknown one says it no longer exists.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_server_without_the_new_features_keeps_working_and_links_find_their_message() {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let _server = daemon(&root).await;
+            let mut app = start(Some(Target::Local { root: root.clone(), spawn: false }), super::memory_tokens().0);
+            let info = next(&mut app, |u| match u {
+                Update::Connection(Connection::Online { server, .. }) => Some(server),
+                _ => None,
+            })
+            .await;
+            assert!(info.message_locate, "the server has message.locate");
+            assert!(!info.ticket_responsible && !info.ticket_follow, "F1 turns these on: then this test moves to its end-to-end test");
+            assert!(info.host_id.is_some());
+            app.requests.send(Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new("Tr0ub4dor&3-zebra-ada".into()) })).unwrap();
+            next(&mut app, |u| match u {
+                Update::Who(w) if w.user.is_some() => Some(()),
+                _ => None,
+            })
+            .await;
+            app.requests.send(Request::CreateProject { name: "Demo".into(), description: None, folder: None }).unwrap();
+            let project = next(&mut app, |u| match u {
+                Update::Created(p) => Some(p),
+                _ => None,
+            })
+            .await;
+            // What the form sends on such a server: the field stays out.
+            let responsible_user_id = crate::screens::who::create_responsible(crate::screens::who::FormResponsible::You, Some(aurelius_domain::UserId::new()), info.ticket_responsible);
+            assert_eq!(responsible_user_id, None);
+            done(&mut app, new_ticket(project, "Still works"), None).await;
+            let ticket = tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog)[0].clone();
+            assert_eq!((ticket.responsible_user_id, ticket.responsible_username.clone(), ticket.responsible_disabled), (None, None, false));
+            // B6 on such a server: for everyone, as before.
+            assert!(crate::screens::board::needs_me(Some(crate::screens::board::Needs::Review), &ticket, Some(aurelius_domain::UserId::new())));
+
+            // The methods behind the features refuse until the server has them; nothing else happens.
+            let message = refused(&mut app, Command::FollowTicket(ticket::FollowTicket { ticket_id: ticket.id, on: true }), None).await;
+            assert_eq!(message, "This server does not do this yet.");
+            let message = refused(&mut app, Command::SetTicketResponsible(ticket::SetTicketResponsible { ticket_id: ticket.id, responsible_user_id: None }), None).await;
+            assert_eq!(message, "This server does not do this yet.");
+            app.requests.send(Request::Board(BoardCall::Followers(ticket.id))).unwrap();
+            let followers = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::Followers(t, r)) if t == ticket.id => Some(r),
+                _ => None,
+            })
+            .await;
+            assert_eq!(followers.expect_err("not built yet"), "This server does not do this yet.");
+
+            // A5a: a message of the discussion is found, with its ticket; an unknown one is gone.
+            let discussion = ticket.conversation_id.expect("every ticket has its discussion");
+            let post = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket.id, text: "Find me".into(), images: vec![], files: vec![], thread_parent: None });
+            app.requests.send(Request::Board(BoardCall::Write { command: post, expected_version: None, done: None })).unwrap();
+            next(&mut app, |u| matches!(u, Update::Board(BoardUpdate::Posted { .. })).then_some(())).await;
+            app.requests.send(Request::Board(BoardCall::Discussion(Some(discussion)))).unwrap();
+            let messages = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::Discussion(c, r)) if c == discussion => Some(r.expect("it reads")),
+                _ => None,
+            })
+            .await;
+            let post = messages.iter().find(|m| m.text == "Find me").expect("the post");
+            app.requests.send(Request::Board(BoardCall::Locate(post.id))).unwrap();
+            let place = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::Located(r)) => Some(r),
+                _ => None,
+            })
+            .await
+            .expect("it is found");
+            assert_eq!((place.ticket_id, place.ticket_number, place.conversation_id, place.thread_root), (Some(ticket.id), Some(ticket.number), discussion, None));
+            app.requests.send(Request::Board(BoardCall::Locate(MessageId::new()))).unwrap();
+            let gone = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::Located(r)) => Some(r),
+                _ => None,
+            })
+            .await;
+            assert_eq!(gone.expect_err("no such message"), crate::screens::links::MESSAGE_GONE);
         }
 
         /// AUR-MU-02 end to end against the discussion engine, in two windows (ada and

@@ -174,6 +174,10 @@ actions!(
         BoardStart,
         BoardMoveTo,
         BoardPickUp,
+        BoardResponsible,
+        BoardFollow,
+        BoardCopyLink,
+        BoardMakeMeResponsible,
     ]
 );
 
@@ -497,6 +501,9 @@ fn overlay_bindings() -> Vec<KeyBinding> {
         key("s", BoardStart, Some(BOARD_KEYS)),
         key("m", BoardMoveTo, Some(BOARD_KEYS)),
         key("space", BoardPickUp, Some(BOARD_KEYS)),
+        key("a", BoardResponsible, Some(BOARD_KEYS)),
+        key("f", BoardFollow, Some(BOARD_KEYS)),
+        key("c", BoardCopyLink, Some(BOARD_KEYS)),
         key("secondary-1", GoDashboard, Some("Input")),
     ]
 }
@@ -607,7 +614,7 @@ mod tests {
             let stack: Vec<KeyContext> = stack.iter().map(|c| KeyContext::parse(c).unwrap()).collect();
             keymap.bindings_for_input(&[Keystroke::parse(key).unwrap()], &stack).0.first().map(|b| b.action().name().to_string())
         };
-        for (key, name) in [("left", "BoardLeft"), ("right", "BoardRight"), ("up", "BoardUp"), ("down", "BoardDown"), ("enter", "BoardOpen"), ("s", "BoardStart"), ("m", "BoardMoveTo"), ("space", "BoardPickUp")] {
+        for (key, name) in [("left", "BoardLeft"), ("right", "BoardRight"), ("up", "BoardUp"), ("down", "BoardDown"), ("enter", "BoardOpen"), ("s", "BoardStart"), ("m", "BoardMoveTo"), ("space", "BoardPickUp"), ("a", "BoardResponsible"), ("f", "BoardFollow"), ("c", "BoardCopyLink")] {
             assert_eq!(action(key, &[APP, &board]).as_deref(), Some(format!("aurelius::{name}").as_str()), "{key}");
             assert!(!action(key, &[APP, &board, "Input"]).is_some_and(|a| a.starts_with("aurelius::Board")), "{key} fires while typing in Find");
             assert!(!action(key, &[APP, NAV]).is_some_and(|a| a.starts_with("aurelius::Board")), "{key} is the Board's only");

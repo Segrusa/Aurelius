@@ -48,6 +48,8 @@ mod screens {
     pub mod discussion;
     pub mod team_feed;
     pub mod threads;
+    pub mod who;
+    pub mod links;
     pub mod thread_panel;
     pub mod ticket_discussion;
     pub mod vault;

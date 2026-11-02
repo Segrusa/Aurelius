@@ -288,7 +288,8 @@ impl AppView {
                 self.message_cell(m.id, full, cx)
             };
             // Right-click: "Create ticket…" (fase 2 §4), and React… / Reply in thread (ui-ontwerp §5), as the hover actions do.
-            let row = v().w_full().child(el);
+            // The message a link opened: its halo, and the row the list scrolls to (AUR-FA A5a).
+            let row = v().w_full().relative().child(el).when(self.link_flashes(m.id), |el| el.rounded(px(4.)).bg(c(theme::ACCENT_HALO)).child(ui::track_bounds(self.dropdown_bounds.clone(), crate::screens::links::LINK_TARGET)));
             let row = if !self.message_menu(m, Point::default()).is_empty() {
                 let message = m.clone();
                 row.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, w, cx| {
@@ -418,7 +419,7 @@ impl AppView {
             let (folded, fold_toggle) = self.fold_view(m.id, &m.text, cx);
             let shown = folded.map_or_else(|| m.text.clone(), |(s, _)| s);
             let sent = side(v()).gap(px(6.))
-                .when(!m.text.trim().is_empty() || (m.files.is_empty() && m.uploads.is_empty()), |el| el.child(bubble(self.message_markdown(m.id, format!("user-{}", m.id), crate::screens::markdown::linked(&shown), cx).on_link_click(self.markdown_link_handler(false, cx)), mine)))
+                .when(!m.text.trim().is_empty() || (m.files.is_empty() && m.uploads.is_empty()), |el| el.child(bubble(self.message_markdown(m.id, format!("user-{}", m.id), crate::screens::markdown::linked(&self.with_link_pills(&shown)), cx).on_link_click(self.markdown_link_handler(false, cx)), mine)))
                 .children(fold_toggle)
                 .when(!m.files.is_empty(), |el| el.child(self.message_files(m.id, &m.files, cx)))
                 .when(!m.uploads.is_empty(), |el| el.child(self.message_uploads(m.id, &m.uploads, cx)))
@@ -527,7 +528,7 @@ impl AppView {
                 (folded, fold_toggle) = self.fold_view(m.id, &m.text, cx);
                 let shown = folded.map_or_else(|| m.text.clone(), |(s, _)| s);
                 div().text_size(px(13.5)).line_height(px(21.)).child(
-                    self.message_markdown(m.id, format!("upd-{}", m.id), crate::screens::markdown::linked(&shown), cx)
+                    self.message_markdown(m.id, format!("upd-{}", m.id), crate::screens::markdown::linked(&self.with_link_pills(&shown)), cx)
                         .on_link_click(self.markdown_link_handler(false, cx)),
                 ).into_any_element()
             } else {
@@ -804,7 +805,7 @@ impl AppView {
     /// Markdown of the feed with its `@names` marked (`feed::mark_mentions`).
     fn feed_markdown(&self, message: MessageId, key: String, text: &str, cx: &mut Context<Self>) -> gpui_kit::component::text::TextView {
         let marked = self.mark_mentions(text);
-        self.message_markdown(message, key, crate::screens::markdown::linked(&marked), cx).on_link_click(self.markdown_link_handler(false, cx))
+        self.message_markdown(message, key, crate::screens::markdown::linked(&self.with_link_pills(&marked)), cx).on_link_click(self.markdown_link_handler(false, cx))
     }
 
     /// `text` with the `@names` of the people here marked, the reader's own stronger.
@@ -1003,7 +1004,7 @@ impl AppView {
         let md = |this: &Self, segment: &str, n: usize, cx: &mut Context<Self>| {
             let segment = if group { this.mark_mentions(segment) } else { segment.to_string() };
             div().text_size(px(if group { 14. } else { 15. })).line_height(px(if group { 21. } else { 25.5 })).child(
-                this.message_markdown(id, format!("md-{id}-{n}"), crate::screens::markdown::linked(&segment), cx)
+                this.message_markdown(id, format!("md-{id}-{n}"), crate::screens::markdown::linked(&this.with_link_pills(&segment)), cx)
                     .on_link_click(this.markdown_link_handler(false, cx)),
             )
         };
