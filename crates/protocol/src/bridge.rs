@@ -166,6 +166,52 @@ pub enum EmployeeTaskOp {
     /// GL-15; `guideline`: its `g:` id, id or title). Information only: it never
     /// changes the run's block, and is no rule for the run.
     ReadGuideline { guideline: String },
+    /// The board's tickets (the bridge's `list_tickets`): `project` (a name or id), else the run's
+    /// project, else every project; `column` a column's name; `query` words, or `#12`; `limit` at most 50.
+    ListTickets {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        column: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
+    /// One ticket in full (the bridge's `read_ticket`; `ticket`: `#12`, a number or an id) with the
+    /// latest `last` messages of its discussion.
+    ReadTicket { ticket: String, #[serde(default, skip_serializing_if = "Option::is_none")] last: Option<u32> },
+    /// A new ticket in Backlog (the bridge's `create_ticket`). Management only; it never starts a run.
+    CreateTicket {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<String>,
+        title: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        priority: Option<String>,
+        #[serde(default)]
+        labels: Vec<String>,
+    },
+    /// Change a ticket's title, description, priority or labels (the bridge's `update_ticket`):
+    /// management, or the employee who works on the ticket.
+    UpdateTicket {
+        ticket: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        priority: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        labels: Option<Vec<String>>,
+    },
+    /// Start a ticket (the bridge's `move_ticket`): management moves Backlog → Todo; every other
+    /// move is refused (a board member's decision, or the work's own).
+    MoveTicket { ticket: String, column: String },
+    /// A message in a ticket's discussion (the bridge's `post_to_ticket`), as `post_to_group_chat`
+    /// does in a channel.
+    PostToTicket { ticket: String, message: String },
 }
 
 fn yes() -> bool {

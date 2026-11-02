@@ -68,6 +68,9 @@ pub const CHAT_GUIDANCE: &str = "This is your own workspace, outside any project
 /// How an employee working elsewhere (a task, a project) can use the group chat.
 pub const GROUP_CHAT_GUIDANCE: &str = "The company has a group chat with the user and every employee (Team chat). read_group_chat shows it; post_to_group_chat posts a short message there under your name, only when the group needs to know (e.g. the task is done and needs a reviewer); @Name wakes that colleague. Keep posts to a few sentences.";
 
+/// The board tools in one line: what an employee may do with tickets, and what stays with the board members.
+pub const BOARD_GUIDANCE: &str = "The board has tools: list_tickets and read_ticket to look, post_to_ticket to write in a ticket's discussion, update_ticket on a ticket you work on, and for management create_ticket and move_ticket (Backlog to Todo). Done, accepting, plans, sending back and cancelling are decisions of a board member.";
+
 /// How an employee reads tasks from its chat.
 pub const CHAT_TOOLS_GUIDANCE: &str = "Use list_tasks to find tasks of every project (filter on status, employee, words or project) and read_task to read one: its goal, result and latest updates. Your earlier chats with the user: list_conversations and read_conversation.";
 
@@ -446,7 +449,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                         if work.is_some() {
                             text.push_str(&format!("\n\n{AUTONOMY_GUIDANCE}"));
                         }
-                        text.push_str(&format!("\n\n{QUICK_REPLY_GUIDANCE}"));
+                        text.push_str(&format!("\n\n{QUICK_REPLY_GUIDANCE}\n\n{BOARD_GUIDANCE}"));
                         let colleagues = crate::task::tasks::colleagues(conn, &read_blob)?;
                         let others: Vec<&crate::task::tasks::Colleague> = colleagues.iter().filter(|c| c.id != me).collect();
                         let follow = aurelius_storage::employees::follow_org_chart(conn)?;

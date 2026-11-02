@@ -11,7 +11,9 @@
 //! `list_conversations`, `read_conversation`; `set_mode` (only for management in a task whose
 //! mode is theirs to choose, `--set-mode`); `delegate_task`, `message_task`,
 //! `hand_over_task`, `add_idea`, `propose_colleague`, `propose_instructions` and `propose_guideline`;
-//! `list_guidelines` and `read_guideline` (reading the guidelines, information only); `read_group_chat`
+//! `list_guidelines` and `read_guideline` (reading the guidelines, information only); `list_tickets`,
+//! `read_ticket`, `create_ticket`, `update_ticket`, `move_ticket` and `post_to_ticket` (the board; the daemon
+//! decides who may use each); `read_group_chat`
 //! and `post_to_group_chat` (a channel of the company's group chat); `read_discussion` and
 //! `post_to_discussion` with `--discussion` (a run under a ticket); `report_test_result`
 //! with `--testing` (a ticket's test task in the Testing column). `--project` (the
@@ -128,6 +130,7 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     tools.extend(task_tool_definitions().into_iter().filter(|t| !project || t["name"] != "hand_over_task"));
     tools.extend(group_chat_tool_definitions());
     tools.extend(vault_tool_definitions());
+    tools.extend(board_tool_definitions());
     if discussion {
         tools.extend(discussion_tool_definitions());
     }
@@ -273,6 +276,10 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "post_to_group_chat" => EmployeeTaskOp::PostToGroupChat { message: text("message"), channel: optional("channel") },
         "read_discussion" if discussion => EmployeeTaskOp::ReadDiscussion { last: args["last"].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32) },
         "post_to_discussion" if discussion => EmployeeTaskOp::PostToDiscussion { message: text("message") },
+        "list_tickets" | "read_ticket" | "create_ticket" | "update_ticket" | "move_ticket" | "post_to_ticket" => match board_op(name, &args) {
+            Some(op) => op,
+            None => return None,
+        },
         "vault_list" => EmployeeTaskOp::VaultList { project: optional("project") },
         "vault_read" => EmployeeTaskOp::VaultRead { item: text("item"), project: optional("project") },
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
@@ -307,6 +314,103 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         _ => return None,
     };
     Some(act_call(client, root, run_id, op).await)
+}
+
+/// The op of one of the board tools (AUR-BOARD-TOOL-001); the daemon decides who may use it.
+/// There is no tool for accepting, approving, sending back, cancelling, archiving or deleting.
+fn board_op(name: &str, args: &Value) -> Option<EmployeeTaskOp> {
+    let text = |k: &str| args[k].as_str().unwrap_or("").to_owned();
+    let optional = |k: &str| args[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    let number = |k: &str| args[k].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32);
+    let list = |k: &str| args[k].as_array().map(|a| a.iter().filter_map(|l| l.as_str().map(str::to_owned)).collect::<Vec<_>>());
+    Some(match name {
+        "list_tickets" => EmployeeTaskOp::ListTickets { project: optional("project"), column: optional("column"), query: optional("query"), limit: number("limit") },
+        "read_ticket" => EmployeeTaskOp::ReadTicket { ticket: text("ticket"), last: number("last") },
+        "create_ticket" => EmployeeTaskOp::CreateTicket { project: optional("project"), title: text("title"), description: optional("description"), priority: optional("priority"), labels: list("labels").unwrap_or_default() },
+        "update_ticket" => EmployeeTaskOp::UpdateTicket { ticket: text("ticket"), title: optional("title"), description: args["description"].as_str().map(str::to_owned), priority: optional("priority"), labels: list("labels") },
+        "move_ticket" => EmployeeTaskOp::MoveTicket { ticket: text("ticket"), column: text("column") },
+        "post_to_ticket" => EmployeeTaskOp::PostToTicket { ticket: text("ticket"), message: text("message") },
+        _ => return None,
+    })
+}
+
+/// The names of the board tools, in the order `board_tool_definitions` lists them.
+const BOARD_TOOLS: [&str; 6] = ["list_tickets", "read_ticket", "create_ticket", "update_ticket", "move_ticket", "post_to_ticket"];
+
+/// The board tools: read tickets, and (by the daemon's rights) make, change, start and post.
+fn board_tool_definitions() -> Vec<Value> {
+    let ticket = json!({ "type": "string", "description": "The ticket: its number (#12 or 12) or id. Numbers are the company's." });
+    let priority = json!({ "type": "string", "enum": ["low", "normal", "high", "urgent"] });
+    let labels = json!({ "type": "array", "items": { "type": "string" }, "description": "The ticket's labels (they replace the current ones)." });
+    vec![
+        json!({
+            "name": "list_tickets",
+            "description": "List tickets of the board: number, column, title, project, priority, owner and responsible board member. Default: the tickets of your project, else all. Filter on project, column (backlog, todo, doing, plan_review, testing, review, done) or words (or #12).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "A project's name; default your own project, else every project." },
+                    "column": { "type": "string" },
+                    "query": { "type": "string", "description": "Words in the title or description, or #12." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "description": "At most this many (default 25)." }
+                }
+            }
+        }),
+        json!({
+            "name": "read_ticket",
+            "description": "Read one ticket: column, owner, responsible, description and the latest messages of its discussion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "ticket": ticket,
+                    "last": { "type": "integer", "minimum": 1, "maximum": 50, "description": "How many of the latest discussion messages (default and at most 50)." }
+                },
+                "required": ["ticket"]
+            }
+        }),
+        json!({
+            "name": "create_ticket",
+            "description": "Management only: make a ticket in Backlog. It starts nothing: no run, no owner; a manager starts it with move_ticket (todo) or a board member decides. Colleagues who are not management note ideas with add_idea instead.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "The project's name; default your own project." },
+                    "title": { "type": "string" },
+                    "description": { "type": "string", "description": "What and why, in markdown." },
+                    "priority": priority,
+                    "labels": labels
+                },
+                "required": ["title"]
+            }
+        }),
+        json!({
+            "name": "update_ticket",
+            "description": "Change a ticket's title, description, priority or labels. Management on any open ticket; everyone else only on a ticket they work on. Only what you give changes; a ticket in Done never changes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "ticket": ticket, "title": { "type": "string" }, "description": { "type": "string", "description": "The whole new description." }, "priority": priority, "labels": labels },
+                "required": ["ticket"]
+            }
+        }),
+        json!({
+            "name": "move_ticket",
+            "description": "Management only: start a ticket in Backlog by moving it to todo (the dispatcher then chooses its owner). Nothing else moves by hand: Done, accepting, plans, sending back and cancelling are decisions of board members, and the work moves a ticket to Doing, Testing and Review by itself.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "ticket": ticket, "column": { "type": "string", "enum": ["todo"], "description": "Only todo is accepted (or the column the ticket is in already)." } },
+                "required": ["ticket", "column"]
+            }
+        }),
+        json!({
+            "name": "post_to_ticket",
+            "description": "Post a short message in the discussion of a ticket under your name; @Name wakes that colleague (a few times in a row at most). A ticket in Done can only be read.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "ticket": ticket, "message": { "type": "string" } },
+                "required": ["ticket", "message"]
+            }
+        }),
+    ]
 }
 
 /// The tools of the dispatcher of a ticket.

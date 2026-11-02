@@ -71,6 +71,8 @@ async fn answer(shared: &Arc<Shared>, request: BridgeRequest) -> BridgeOutcome {
             EmployeeTaskOp::ReadConversation { .. } => "read_conversation",
             EmployeeTaskOp::ReadGroupChat { .. } => "read_group_chat",
             EmployeeTaskOp::ReadDiscussion { .. } => "read_discussion",
+            EmployeeTaskOp::ListTickets { .. } => "list_tickets",
+            EmployeeTaskOp::ReadTicket { .. } => "read_ticket",
             EmployeeTaskOp::VaultList { .. } => "vault_list",
             EmployeeTaskOp::VaultRead { .. } => "vault_read",
             _ => "act",
@@ -127,6 +129,14 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         EmployeeTaskOp::ReadDiscussion { last } => EmployeeAction::ReadDiscussion { last },
         EmployeeTaskOp::PostToDiscussion { message } => EmployeeAction::PostToDiscussion { message },
         EmployeeTaskOp::AssignTicket { employee, reason } => EmployeeAction::AssignTicket { employee, reason },
+        // Checked in the application (`ticket::agent`): who may read, make, change, start and post; the
+        // writes are not in the trial filter's reading list above, so a trial cannot use them.
+        EmployeeTaskOp::ListTickets { project, column, query, limit } => EmployeeAction::ListTickets { project, column, query, limit },
+        EmployeeTaskOp::ReadTicket { ticket, last } => EmployeeAction::ReadTicket { ticket, last },
+        EmployeeTaskOp::CreateTicket { project, title, description, priority, labels } => EmployeeAction::CreateTicket { project, title, description, priority, labels },
+        EmployeeTaskOp::UpdateTicket { ticket, title, description, priority, labels } => EmployeeAction::UpdateTicket { ticket, title, description, priority, labels },
+        EmployeeTaskOp::MoveTicket { ticket, column } => EmployeeAction::MoveTicket { ticket, column },
+        EmployeeTaskOp::PostToTicket { ticket, message } => EmployeeAction::PostToTicket { ticket, message },
         // Checked in the application (`testing::verdict`): only the open test task of a ticket in Testing.
         EmployeeTaskOp::ReportTestResult { passed, summary } => EmployeeAction::ReportTestResult { passed, summary },
         // B5: never in the trial filter's reading list above, so a trial is refused there (SEC0 E10).
