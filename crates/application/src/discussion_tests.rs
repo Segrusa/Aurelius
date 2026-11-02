@@ -832,3 +832,6 @@ fn what_an_employee_writes_or_a_decisions_feedback_names_makes_that_board_member
 
 #[path = "discussion_thread_tests.rs"]
 mod threads;
+
+#[path = "discussion_edit_tests.rs"]
+mod edits;

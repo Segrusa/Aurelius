@@ -400,6 +400,8 @@ pub const FEATURES: &[&str] = &[
     feature::CHAT_THREADS,
     feature::CHAT_REACTIONS,
     feature::MESSAGE_LOCATE,
+    feature::MY_TICKETS,
+    feature::MESSAGE_EDITS,
     feature::TICKET_RESPONSIBLE,
     feature::TICKET_FOLLOW,
     feature::PERSONAL_INBOX,

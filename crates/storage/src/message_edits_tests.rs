@@ -5,27 +5,27 @@
 use crate::{Store, conversations};
 use aurelius_domain::{ConversationId, MessageId};
 
-const P: &str = "00000000-0000-7000-8000-000000000001";
-const ALEX: &str = "00000000-0000-7000-8000-000000000003";
-const CHANNEL: &str = "00000000-0000-7000-8000-0000000000c1";
-const OTHER: &str = "00000000-0000-7000-8000-0000000000c2";
-const PLAIN: &str = "00000000-0000-7000-8000-0000000000a1";
-const REPLY: &str = "00000000-0000-7000-8000-0000000000a2";
-const FEEDBACK: &str = "00000000-0000-7000-8000-0000000000a3";
-const ELSEWHERE: &str = "00000000-0000-7000-8000-0000000000a4";
+pub(crate) const P: &str = "00000000-0000-7000-8000-000000000001";
+pub(crate) const ALEX: &str = "00000000-0000-7000-8000-000000000003";
+pub(crate) const CHANNEL: &str = "00000000-0000-7000-8000-0000000000c1";
+pub(crate) const OTHER: &str = "00000000-0000-7000-8000-0000000000c2";
+pub(crate) const PLAIN: &str = "00000000-0000-7000-8000-0000000000a1";
+pub(crate) const REPLY: &str = "00000000-0000-7000-8000-0000000000a2";
+pub(crate) const FEEDBACK: &str = "00000000-0000-7000-8000-0000000000a3";
+pub(crate) const ELSEWHERE: &str = "00000000-0000-7000-8000-0000000000a4";
 
-fn msg(id: &str) -> MessageId {
+pub(crate) fn msg(id: &str) -> MessageId {
     MessageId::parse(id).unwrap()
 }
 
-fn conv(id: &str) -> ConversationId {
+pub(crate) fn conv(id: &str) -> ConversationId {
     ConversationId::parse(id).unwrap()
 }
 
 /// A channel with a message, a reply in its thread and a decision's feedback
 /// (its event has the dedupe key `decision_feedback` gives it), and a second
 /// conversation with feedback of its own. A blob's storage key is its text.
-fn channel() -> (tempfile::TempDir, Store) {
+pub(crate) fn channel() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
     store

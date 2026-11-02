@@ -89,6 +89,82 @@ pub struct DeleteMessage {
     pub message_id: MessageId,
 }
 
+/// The text a deleted message shows instead of its own (`message.delete`).
+pub const MESSAGE_DELETED_TEXT: &str = "This message was deleted.";
+
+/// What `message.edit` and `message.delete` need to know about a message to decide
+/// whether a reader may change it. Storage collects it; `refusal` is the one rule,
+/// used by the read (`MessageView::editable`) and by both commands alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditFacts {
+    /// The board member who wrote it; none for an employee's, a system line, an app's.
+    pub author: Option<crate::UserId>,
+    /// It is in a channel or a ticket's discussion (not a chat, a task or a run).
+    pub in_discussion: bool,
+    /// It is a system line (a grey line that says what happened).
+    pub system: bool,
+    /// It still waits in the queue for its answer (`DeleteQueuedMessage` is for that).
+    pub queued: bool,
+    pub deleted: bool,
+    /// It is the feedback a board member gave with a decision on a ticket.
+    pub decision_feedback: bool,
+    /// The discussion is closed: an archived project's channel, a ticket on Done or archived.
+    pub read_only: bool,
+}
+
+/// Why a reader may not edit or delete a message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditRefusal {
+    /// Not the reader's own message, or the reader is no board member.
+    NotYours,
+    /// A message that is not in a channel or a ticket's discussion, or is a system line.
+    NotHere,
+    Queued,
+    Deleted,
+    DecisionFeedback,
+    ReadOnly,
+}
+
+impl EditRefusal {
+    /// The words a client may show.
+    pub fn why(self) -> &'static str {
+        match self {
+            EditRefusal::NotYours => "You can only change your own messages.",
+            EditRefusal::NotHere => "Only a message in a channel or a ticket's discussion can be changed.",
+            EditRefusal::Queued => "This message is still waiting for its answer: delete it from the queue instead.",
+            EditRefusal::Deleted => "This message was deleted.",
+            EditRefusal::DecisionFeedback => "This message is the feedback of a decision: it cannot be changed.",
+            EditRefusal::ReadOnly => "This discussion is closed: its messages can only be read.",
+        }
+    }
+}
+
+impl EditFacts {
+    /// Why `reader` (the board member of the session; none for an app) may not edit
+    /// or delete the message, or none when they may. This is the only rule.
+    pub fn refusal(&self, reader: Option<crate::UserId>) -> Option<EditRefusal> {
+        if !self.in_discussion || self.system {
+            return Some(EditRefusal::NotHere);
+        }
+        if self.author.is_none() || self.author != reader {
+            return Some(EditRefusal::NotYours);
+        }
+        if self.deleted {
+            return Some(EditRefusal::Deleted);
+        }
+        if self.queued {
+            return Some(EditRefusal::Queued);
+        }
+        if self.decision_feedback {
+            return Some(EditRefusal::DecisionFeedback);
+        }
+        if self.read_only {
+            return Some(EditRefusal::ReadOnly);
+        }
+        None
+    }
+}
+
 impl ReactToMessage {
     /// The emoji as stored: trimmed, not empty, at most `REACTION_EMOJI_MAX` bytes.
     pub fn validate(&self) -> Result<String, DomainError> {

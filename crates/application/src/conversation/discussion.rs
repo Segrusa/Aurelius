@@ -32,7 +32,7 @@ use crate::ticket_follow::Cause as FollowCause;
 use crate::{CommandContext, CommandService, Committed, domain_error, storage_error};
 use aurelius_domain::autonomy::AgentMode;
 use aurelius_domain::conversation::{MessageRole, MessageStatus};
-use aurelius_domain::group_chat::{self as group, CONTEXT_CHARS, CONTEXT_MESSAGES, GROUP_KIND, MAX_HOPS, OWNER, POST_MAX, WAKE_WINDOW_MS, WAKING_POSTS_PER_RUN, WAKING_POSTS_PER_WINDOW};
+use aurelius_domain::group_chat::{self as group, EditRefusal, CONTEXT_CHARS, CONTEXT_MESSAGES, GROUP_KIND, MAX_HOPS, OWNER, POST_MAX, WAKE_WINDOW_MS, WAKING_POSTS_PER_RUN, WAKING_POSTS_PER_WINDOW};
 use aurelius_domain::ticket::ColumnKind;
 use aurelius_domain::views::{MessageFileView, SystemLine, SystemLineKind};
 use aurelius_domain::{ActorKind, AppError, CommandEnvelope, CommandResult, ConversationId, EmployeeId, ErrorCode, EventNotice, MessageId, ProjectId, RunId, TaskId, TicketId, UserId};
@@ -289,6 +289,13 @@ pub(crate) fn context_text(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> O
 
 fn reader(store: &Store) -> impl Fn(&str) -> Option<String> + '_ {
     |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok())
+}
+
+/// What `change_message` does to the message.
+enum Change {
+    /// Replace the text by this one (already redacted).
+    Edit(String),
+    Delete,
 }
 
 /// What the discussion hears when a board member's message wakes nobody.
@@ -1168,6 +1175,76 @@ impl CommandService {
                 notices.push(notice);
             }
             Ok(Ok((CommandResult::MessageReacted { conversation_id: d.id, message_id: message, emoji, on, changed }, notices)))
+        })
+    }
+
+    /// A board member changes the text of their own message in a channel or a
+    /// ticket's discussion (`message.edit`, feature `message_edits`). The new text
+    /// goes through the vault redactor; the earlier blob is the payload of the one
+    /// `message.edited` event, so the audit log keeps it. It calls nothing of
+    /// `board_message`: no run, no mention, no follow, no notification row.
+    pub(crate) fn edit_message(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &group::EditMessage) -> Result<Committed, AppError> {
+        let user = crate::ticket::require_board_member(ctx)?;
+        let text = aurelius_domain::conversation::validate_message(&cmd.text, &[]).map_err(domain_error)?;
+        let text = aurelius_runtime::redact::string(text);
+        self.change_message(envelope, hash, user, cmd.message_id, Change::Edit(text))
+    }
+
+    /// A board member deletes their own message in a channel or a ticket's
+    /// discussion (`message.delete`, feature `message_edits`): the row stays with
+    /// `MESSAGE_DELETED_TEXT`, and the earlier blob is the payload of the one
+    /// `message.deleted` event. Nobody is woken, as for an edit.
+    pub(crate) fn delete_message(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &group::DeleteMessage) -> Result<Committed, AppError> {
+        let user = crate::ticket::require_board_member(ctx)?;
+        self.change_message(envelope, hash, user, cmd.message_id, Change::Delete)
+    }
+
+    /// The shared body of `message.edit` and `message.delete`: the same
+    /// `EditFacts::refusal` as the read's `editable`, then the new blob and the event.
+    fn change_message(&self, envelope: &CommandEnvelope, hash: String, user: UserId, message: MessageId, change: Change) -> Result<Committed, AppError> {
+        let command_id = envelope.command_id;
+        let store = self.store.clone();
+        self.commit(command_id, hash, move |tx| {
+            let Some((conversation, facts)) = aurelius_storage::message_edits::facts(tx, message)? else {
+                return Ok(Err(AppError::new(ErrorCode::NotFound, "This message does not exist.")));
+            };
+            if let Some(refusal) = facts.refusal(Some(user)) {
+                let code = match refusal {
+                    EditRefusal::ReadOnly => ErrorCode::ChannelArchived,
+                    EditRefusal::NotYours => ErrorCode::Forbidden,
+                    EditRefusal::Deleted | EditRefusal::NotHere => ErrorCode::NotFound,
+                    EditRefusal::Queued | EditRefusal::DecisionFeedback => ErrorCode::Validation,
+                };
+                return Ok(Err(AppError::new(code, refusal.why())));
+            }
+            let (text, event_type, metadata) = match &change {
+                Change::Edit(text) => (text.as_str(), "message.edited", serde_json::json!({ "message_id": message, "by": user })),
+                Change::Delete => (group::MESSAGE_DELETED_TEXT, "message.deleted", serde_json::json!({ "message_id": message, "by": user, "queued": false })),
+            };
+            let blob = store.blobs().put(text.as_bytes(), "text/markdown; charset=utf-8")?;
+            blobs::register(tx, &blob)?;
+            let at = aurelius_storage::now_ms();
+            let replaced = match change {
+                Change::Edit(_) => conv::replace_message_text(tx, message, &blob.id.to_string(), at)?,
+                Change::Delete => conv::mark_message_deleted(tx, message, &blob.id.to_string(), at)?,
+            };
+            let Some(replaced) = replaced else { return Ok(Err(AppError::new(ErrorCode::NotFound, "This message does not exist."))) };
+            let (_, notice) = emit(tx, Ev {
+                aggregate_type: "conversation",
+                aggregate_id: conversation.to_string(),
+                event_type,
+                actor: ActorKind::User,
+                actor_id: Some(user.to_string()),
+                correlation: command_id.to_string(),
+                payload: replaced.previous_blob,
+                metadata,
+                dedupe: format!("cmd:{command_id}:{}", if matches!(change, Change::Edit(_)) { "edited" } else { "deleted" }),
+            })?;
+            let result = match change {
+                Change::Edit(_) => CommandResult::MessageEdited { conversation_id: conversation, message_id: message, edited_at_ms: at },
+                Change::Delete => CommandResult::MessageDeleted { conversation_id: conversation, message_id: message, deleted_at_ms: at },
+            };
+            Ok(Ok((result, vec![notice])))
         })
     }
 
