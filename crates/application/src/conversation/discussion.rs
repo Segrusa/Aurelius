@@ -562,6 +562,9 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     Ok(Some((run, std::iter::once(posted).chain(queued).collect())))
 }
 
+/// What separates a copied message from the line that says where to answer it.
+const OWNER_FOOTER_MARK: &str = "\n\n---\n";
+
 /// A board member's message without `@Name` for the ticket's owner (B3): an
 /// update in the main task's conversation. Only while the main task runs or is
 /// in Review does a run answer it: the one already queued there, else one queued
@@ -576,10 +579,13 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
 /// never jumps its line). `None`: it does not get there, the main task has ended
 /// (e.g. failed in Doing, B6: Start makes a new one), with the hint for the discussion.
 ///
+/// The update names the discussion message it copies (`from_message` in its meta):
+/// an edit or a delete of that message reaches the copy (`change_message`).
+///
 /// A reply in a thread says so, and the update keeps the discussion and the
 /// thread (`thread_parent` in its meta): what the owner posts with
 /// `post_to_discussion` after it goes into that thread (`run_thread`).
-fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &str, text: &str, thread: Option<MessageId>) -> Result<Option<Vec<EventNotice>>, StorageError> {
+fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &str, text: &str, thread: Option<MessageId>, source: MessageId) -> Result<Option<Vec<EventNotice>>, StorageError> {
     use aurelius_domain::task::TaskStatus;
     let Some(root) = t.root_task else { return Ok(Some(vec![])) };
     let Some(row) = aurelius_storage::tasks::load_task(tx, root)? else { return Ok(Some(vec![])) };
@@ -591,12 +597,8 @@ fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &
         return Ok(Some(vec![]));
     }
     let place = if thread.is_some() { "a thread in the discussion" } else { "the discussion" };
-    let body = format!(
-        "{}\n\n---\nFrom {place} of ticket #{}. Answer the board member there with post_to_discussion.",
-        text.trim(),
-        t.number
-    );
-    let extra = serde_json::json!({ "discussion": d.id, "thread_parent": thread });
+    let body = format!("{}{OWNER_FOOTER_MARK}From {place} of ticket #{}. Answer the board member there with post_to_discussion.", text.trim(), t.number);
+    let extra = serde_json::json!({ "discussion": d.id, "thread_parent": thread, "from_message": source });
     let (message, posted) = crate::task::task_threads::post_returning_with(tx, store, conversation, root, crate::task::task_threads::Speaker::Update { kind: "message", from }, &body, extra)?;
     let mut notices = vec![posted];
     if !matches!(row.status, TaskStatus::Running | TaskStatus::Review) {
@@ -610,6 +612,54 @@ fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &
     tx.execute("UPDATE runs SET task_id = ?2 WHERE id = ?1", [run.to_string(), root.to_string()])?;
     notices.extend(queued);
     Ok(Some(notices))
+}
+
+/// What an edit or a delete of a discussion message does to its copy in the
+/// owner's task conversation (`to_owner`), in the same transaction. A delete
+/// treats the copy as the message itself: placeholder text, files and uploads
+/// gone, the earlier text only as the payload of its own `message.deleted`.
+/// An edit replaces the text of the copy by the new one, keeping the line that
+/// tells where to answer, and marks it edited: the owner then reads one version,
+/// the current one, whether it reads it now or in a run that is yet to start (a
+/// copy left with the old text would contradict the discussion, and a second
+/// "edited" message would make the context longer for nothing). Like the change
+/// itself it wakes nobody and queues no run: the notice only refreshes clients.
+fn change_owner_copy(tx: &Tx<'_>, store: &Store, copy: &conv::TaskCopy, change: &Change, placeholder: &aurelius_storage::PreparedBlob, at: i64, (user, command_id): (UserId, aurelius_domain::CommandId)) -> Result<Vec<EventNotice>, StorageError> {
+    let (blob, event_type) = match change {
+        Change::Delete => (placeholder.clone(), "message.deleted"),
+        Change::Edit(text) => {
+            let old = copy.text_key.as_deref().and_then(|k| store.blobs().read(k).ok()).and_then(|b| String::from_utf8(b).ok()).unwrap_or_default();
+            let footer = old.rsplit_once(OWNER_FOOTER_MARK).map_or(String::new(), |(_, f)| format!("{OWNER_FOOTER_MARK}{f}"));
+            let body = crate::task::task_threads::capped(&format!("{}{footer}", text.trim()));
+            let blob = store.blobs().put(body.as_bytes(), "text/markdown; charset=utf-8")?;
+            blobs::register(tx, &blob)?;
+            (blob, "message.edited")
+        }
+    };
+    let replaced = match change {
+        Change::Edit(_) => conv::replace_message_text(tx, copy.message, &blob.id.to_string(), at)?,
+        Change::Delete => {
+            conv::clear_message_attachments(tx, copy.message)?;
+            conv::mark_message_deleted(tx, copy.message, &blob.id.to_string(), at)?
+        }
+    };
+    let Some(replaced) = replaced else { return Ok(Vec::new()) };
+    let metadata = match change {
+        Change::Edit(_) => serde_json::json!({ "message_id": copy.message, "by": user }),
+        Change::Delete => serde_json::json!({ "message_id": copy.message, "by": user, "queued": false }),
+    };
+    let (_, notice) = emit(tx, Ev {
+        aggregate_type: "conversation",
+        aggregate_id: replaced.conversation_id.to_string(),
+        event_type,
+        actor: ActorKind::User,
+        actor_id: Some(user.to_string()),
+        correlation: command_id.to_string(),
+        payload: replaced.previous_blob,
+        metadata,
+        dedupe: format!("cmd:{command_id}:copy:{}", copy.message),
+    })?;
+    Ok(vec![notice])
 }
 
 /// The hint when the owner's main task has ended: the message did not reach it.
@@ -918,7 +968,7 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
     let mut sent = Sent { to: Vec::new(), run_ids: Vec::new() };
     let mut ended = None;
     if let (Some((owner, _)), Some(t)) = (named.owner, d.ticket()) {
-        match to_owner(tx, store, d, t, user.as_deref().unwrap_or(OWNER), text, thread)? {
+        match to_owner(tx, store, d, t, user.as_deref().unwrap_or(OWNER), text, thread, message)? {
             Some(n) => {
                 notices.extend(n);
                 sent.to.push(owner);
@@ -1229,6 +1279,10 @@ impl CommandService {
                 Change::Delete => conv::mark_message_deleted(tx, message, &blob.id.to_string(), at)?,
             };
             let Some(replaced) = replaced else { return Ok(Err(AppError::new(ErrorCode::NotFound, "This message does not exist."))) };
+            let mut notices = Vec::new();
+            for copy in conv::task_copies_of(tx, message)? {
+                notices.extend(change_owner_copy(tx, &store, &copy, &change, &blob, at, (user, command_id))?);
+            }
             let (_, notice) = emit(tx, Ev {
                 aggregate_type: "conversation",
                 aggregate_id: conversation.to_string(),
@@ -1244,7 +1298,8 @@ impl CommandService {
                 Change::Edit(_) => CommandResult::MessageEdited { conversation_id: conversation, message_id: message, edited_at_ms: at },
                 Change::Delete => CommandResult::MessageDeleted { conversation_id: conversation, message_id: message, deleted_at_ms: at },
             };
-            Ok(Ok((result, vec![notice])))
+            notices.insert(0, notice);
+            Ok(Ok((result, notices)))
         })
     }
 

@@ -956,6 +956,39 @@ pub fn mark_message_deleted(tx: &Transaction<'_>, message: MessageId, placeholde
     replace_blob(tx, message, placeholder_blob, "deleted_at_ms", at_ms)
 }
 
+/// A copy of a discussion message in a task conversation (`to_owner` posts one
+/// for the ticket's owner): the copy and the storage key of its text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskCopy {
+    pub message: MessageId,
+    /// None: the copy has no text.
+    pub text_key: Option<String>,
+}
+
+/// The live copies in task conversations of the discussion message `source`
+/// (those whose meta names it as `from_message`). A deleted copy is not listed.
+pub fn task_copies_of(conn: &Connection, source: MessageId) -> Result<Vec<TaskCopy>, StorageError> {
+    let deleted = if has_edit_columns(conn)? { "AND m.deleted_at_ms IS NULL" } else { "" };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT m.id, b.storage_key FROM messages m LEFT JOIN blobs b ON b.id = m.content_blob_id
+         WHERE json_extract(m.meta_json, '$.from_message') = ?1 {deleted} ORDER BY m.ordinal"
+    ))?;
+    let rows = stmt.query_map([source.to_string()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (id, text_key) = row?;
+        out.push(TaskCopy { message: MessageId::parse(&id).map_err(|e| StorageError::Rejected(e.to_string()))?, text_key });
+    }
+    Ok(out)
+}
+
+/// Drop the files and uploads kept with `message`, as a delete does: a deleted
+/// message serves no attachment (the rows and blobs stay).
+pub fn clear_message_attachments(tx: &Transaction<'_>, message: MessageId) -> Result<(), StorageError> {
+    tx.execute("UPDATE messages SET meta_json = json_remove(meta_json, '$.files', '$.uploads') WHERE id = ?1 AND meta_json IS NOT NULL", [message.to_string()])?;
+    Ok(())
+}
+
 /// The dedupe key of the event of a decision's feedback, `cmd:<id>:feedback`
 /// (`conversation::discussion::decision_feedback`), as a LIKE pattern.
 const DECISION_FEEDBACK: &str = "cmd:%:feedback";
@@ -1024,10 +1057,12 @@ pub fn set_message_uploads(tx: &Transaction<'_>, message: MessageId, uploads: &[
     Ok(())
 }
 
-/// The files uploaded with a message, and its conversation; none for an unknown message.
+/// The files uploaded with a message, and its conversation; none for an unknown
+/// or a deleted message (its rows and blobs stay, but nothing serves them).
 pub fn message_uploads(conn: &Connection, message: MessageId) -> Result<Option<(ConversationId, Vec<aurelius_domain::views::MessageFileView>)>, StorageError> {
+    let live = if has_edit_columns(conn)? { "AND deleted_at_ms IS NULL" } else { "" };
     let row: Option<(String, Option<String>)> = conn
-        .query_row("SELECT conversation_id, json_extract(meta_json, '$.uploads') FROM messages WHERE id = ?1", [message.to_string()], |r| {
+        .query_row(&format!("SELECT conversation_id, json_extract(meta_json, '$.uploads') FROM messages WHERE id = ?1 {live}"), [message.to_string()], |r| {
             Ok((r.get(0)?, r.get(1)?))
         })
         .optional()?;
@@ -1037,12 +1072,15 @@ pub fn message_uploads(conn: &Connection, message: MessageId) -> Result<Option<(
 }
 
 /// A file kept with a message: (name, media type, storage key). Only blobs a
-/// message refers to as a file can be read this way.
+/// message refers to as a file can be read this way, and not those of a deleted message.
 pub fn message_file(conn: &Connection, id: &str) -> Result<Option<(String, String, String)>, StorageError> {
+    let live = if has_edit_columns(conn)? { "AND m.deleted_at_ms IS NULL" } else { "" };
     let found: Option<String> = conn
         .query_row(
-            "SELECT json_extract(f.value, '$.name') FROM messages m, json_each(m.meta_json, '$.files') f
-             WHERE m.meta_json IS NOT NULL AND json_extract(f.value, '$.id') = ?1 LIMIT 1",
+            &format!(
+                "SELECT json_extract(f.value, '$.name') FROM messages m, json_each(m.meta_json, '$.files') f
+                 WHERE m.meta_json IS NOT NULL {live} AND json_extract(f.value, '$.id') = ?1 LIMIT 1"
+            ),
             [id],
             |r| r.get(0),
         )
