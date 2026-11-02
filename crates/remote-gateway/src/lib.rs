@@ -563,18 +563,20 @@ impl Hub {
                 let seq = notice.seq;
                 let found = tokio::task::spawn_blocking(move || {
                     // A board member's own notification goes only to their devices (MU3-12 AC2).
-                    store.read(|c| aurelius_storage::remote::push_for_seq(c, seq))
+                    store.read(|c| aurelius_storage::remote::pushes_for_seq(c, seq))
                 })
                 .await;
-                let Ok(Ok(Some((found, targets)))) = found else { continue };
-                let alert = push::Alert::for_notification(&found, notice.project_id);
-                for target in targets {
-                    let connected = hub.inner.live.lock().unwrap().get(&target.client_id).is_some_and(|l| l.connections > 0);
-                    if connected {
-                        continue;
-                    }
-                    if let Err(err) = hub.deliver(&target, &alert).await {
-                        tracing::warn!(client_id = %target.client_id, error = %err, "push failed");
+                let Ok(Ok(pushes)) = found else { continue };
+                for (found, targets) in pushes {
+                    let alert = push::Alert::for_notification(&found, notice.project_id);
+                    for target in targets {
+                        let connected = hub.inner.live.lock().unwrap().get(&target.client_id).is_some_and(|l| l.connections > 0);
+                        if connected {
+                            continue;
+                        }
+                        if let Err(err) = hub.deliver(&target, &alert).await {
+                            tracing::warn!(client_id = %target.client_id, error = %err, "push failed");
+                        }
                     }
                 }
             }

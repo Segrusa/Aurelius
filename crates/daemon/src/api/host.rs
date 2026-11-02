@@ -128,6 +128,10 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite, user: Option
             let store = shared.store().clone();
             HostResult::Count { count: storage_task(move || store.write(move |tx| aurelius_storage::timeline::mark_all_read_for(tx, user.as_deref()))).await? as u64 }
         }
+        HostWrite::NotificationMarkRead { id } => {
+            let store = shared.store().clone();
+            HostResult::Count { count: storage_task(move || store.write(move |tx| aurelius_storage::timeline::mark_read_for(tx, &id, user.as_deref()))).await? as u64 }
+        }
         HostWrite::NotificationDismiss { id } => {
             let store = shared.store().clone();
             HostResult::Count { count: storage_task(move || store.write(move |tx| aurelius_storage::timeline::dismiss_for(tx, &id, user.as_deref()))).await? as u64 }

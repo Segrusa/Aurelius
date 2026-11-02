@@ -209,7 +209,7 @@ fn host_needs(host: &HostWrite) -> Needs {
         HostWrite::SessionRevoke { .. } | HostWrite::UserSetPassword(_) | HostWrite::UserDisable { .. } => Needs::Cap(Read),
         HostWrite::ClaudeLoginLink | HostWrite::ClaudeLoginCancel { .. } | HostWrite::ClaudeLoginUnlink => Needs::Cap(Read),
         // The inbox is the user's own: reading, dismissing.
-        HostWrite::NotificationMarkAllRead | HostWrite::NotificationDismiss { .. } | HostWrite::NotificationDismissAll => Needs::Cap(Read),
+        HostWrite::NotificationMarkAllRead | HostWrite::NotificationMarkRead { .. } | HostWrite::NotificationDismiss { .. } | HostWrite::NotificationDismissAll => Needs::Cap(Read),
         HostWrite::SecretSet { .. }
         | HostWrite::McpAdd(_)
         | HostWrite::McpRemove { .. }

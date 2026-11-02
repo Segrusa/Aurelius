@@ -423,7 +423,7 @@ fn a_ticket_without_its_creators_login_waits_tells_them_and_resumes_once_linked(
             Ok(tx.query_row("SELECT e.seq FROM notifications n JOIN events e ON e.id = n.event_id WHERE n.user_id = ?1", [robin.to_string()], |r| r.get(0))?)
         })
         .unwrap();
-    let (found, targets) = s.service.store().read(move |c| aurelius_storage::remote::push_for_seq(c, seq as u64)).unwrap().unwrap();
+    let (found, targets) = s.service.store().read(move |c| aurelius_storage::remote::pushes_for_seq(c, seq as u64)).unwrap().pop().unwrap();
     assert_eq!(found.view.title, "Connect your Claude login");
     assert_eq!(targets.iter().map(|t| t.client_id).collect::<Vec<_>>(), [robins_phone], "no deliver to another board member's device");
 

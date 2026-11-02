@@ -20,6 +20,9 @@ pub struct RemoteClient {
     pub user_id: Option<String>,
 }
 
+/// The platform that has push: `push_registrations.platform` of an iPhone.
+pub const PUSH_PLATFORM: &str = "apns";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PushTarget {
     pub client_id: ClientId,
@@ -185,13 +188,17 @@ pub fn push_targets_for(conn: &Connection, user: Option<&str>) -> Result<Vec<Pus
     Ok(rows)
 }
 
-/// The notification the event at `seq` made and the devices its push goes to:
-/// a board member's own only to that board member's, one for everyone to all
-/// (MU3-12 AC2, R2 M2). `None`: the event made no notification.
-pub fn push_for_seq(conn: &Connection, seq: u64) -> Result<Option<(crate::timeline::FoundNotification, Vec<PushTarget>)>, StorageError> {
-    let Some(found) = crate::timeline::notification_at_seq(conn, seq)? else { return Ok(None) };
-    let targets = push_targets_for(conn, found.user_id.as_deref())?;
-    Ok(Some((found, targets)))
+/// What each row of the event at `seq` pushes and the devices it goes to: a board
+/// member's own only to that board member's, one for everyone to all (MU3-12 AC2,
+/// R2 M2). Only iOS has push; Android has the Inbox in the app (B5).
+pub fn pushes_for_seq(conn: &Connection, seq: u64) -> Result<Vec<(crate::timeline::FoundNotification, Vec<PushTarget>)>, StorageError> {
+    let mut out = Vec::new();
+    for found in crate::timeline::notifications_at_seq(conn, seq)? {
+        let mut targets = push_targets_for(conn, found.user_id.as_deref())?;
+        targets.retain(|t| t.platform == PUSH_PLATFORM);
+        out.push((found, targets));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

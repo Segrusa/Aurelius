@@ -563,16 +563,22 @@ impl CommandService {
             store::set_attachments(tx, id, stored.as_ref())?;
             let mut e = Events::new(&base, "ticket", id.to_string(), Some(cmd.project_id), 0);
             store::set_responsible(tx, id, cmd.responsible_user_id)?;
-            e.push(tx, EventKind::TicketCreated, json!({ "number": number, "created_by_user": user, "by": by, "responsible_user_id": cmd.responsible_user_id }))?;
+            let named = match &description {
+                Some(text) => ticket_follow::mentioned_board_members(tx, text)?,
+                None => Vec::new(),
+            };
+            let mut created = json!({ "number": number, "created_by_user": user, "by": by, "responsible_user_id": cmd.responsible_user_id });
+            if !named.is_empty() {
+                created["mentioned_users"] = json!(named);
+            }
+            e.push(tx, EventKind::TicketCreated, created)?;
             e.follow(tx, id, cmd.project_id, user, FollowReason::Created)?;
             // Choosing someone else is news for them; "You" (the default, B9) says nothing new.
             if let Some(responsible) = cmd.responsible_user_id.filter(|r| *r != user) {
                 e.responsible(tx, id, cmd.project_id, None, Some(responsible), by)?;
             }
-            if let Some(text) = &description {
-                for named in ticket_follow::mentioned_board_members(tx, text)? {
-                    e.follow(tx, id, cmd.project_id, named, FollowReason::Mentioned)?;
-                }
+            for named in named {
+                e.follow(tx, id, cmd.project_id, named, FollowReason::Mentioned)?;
             }
             // The discussion starts with a link to the message, and its chat gets "→ #N" (MU2-10 AC3).
             if let Some((message, (conversation, label))) = &source {
@@ -708,6 +714,9 @@ impl CommandService {
             // Only the names of the new files, never where they are kept.
             if !files_added.is_empty() {
                 extra["files_added"] = json!(files_added);
+            }
+            if !named.is_empty() {
+                extra["mentioned_users"] = json!(named);
             }
             e.push(tx, EventKind::TicketUpdated, extra)?;
             for user in named {

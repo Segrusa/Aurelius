@@ -275,6 +275,9 @@ abstract final class Methods {
   static const String notificationDismissAll = 'notification.dismiss_all';
   static const String notificationList = 'notification.list';
   static const String notificationMarkAllRead = 'notification.mark_all_read';
+  /// One row read, for this board member only (feature `personal_inbox`); answers
+  /// `Count`, 0 when there was nothing to read, so it can be repeated.
+  static const String notificationMarkRead = 'notification.mark_read';
   /// The plugins one employee has enabled.
   static const String pluginGetForEmployee = 'plugin.get_for_employee';
   /// The plugins a project has enabled (its project assistant loads them).
@@ -1652,6 +1655,15 @@ Map<String, dynamic> notificationDismissAll() => <String, dynamic>{
 
 Map<String, dynamic> notificationMarkAllRead() => <String, dynamic>{
   'method': Methods.notificationMarkAllRead,
+};
+
+/// One row read, for this board member only (feature `personal_inbox`); answers
+/// `Count`, 0 when there was nothing to read, so it can be repeated.
+Map<String, dynamic> notificationMarkRead({required String id}) => <String, dynamic>{
+  'method': Methods.notificationMarkRead,
+  'params': <String, dynamic>{
+    'id': id,
+  },
 };
 
 /// Install plugins (`name@marketplace`) and enable them for the given employees and projects.

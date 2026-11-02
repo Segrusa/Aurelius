@@ -343,6 +343,7 @@ mod tests {
         assert!(!may(&AppScope::ALL, &exec(Command::CreateTask(t))));
         assert!(!may(&AppScope::ALL, &exec(Command::CreateProject(CreateProject { name: "x".into(), description: None, folder: None }))));
         assert!(!may(&AppScope::ALL, &Call::Write(WriteMethod::Host(HostWrite::NotificationDismissAll))));
+        assert!(!may(&AppScope::ALL, &Call::Write(WriteMethod::Host(HostWrite::NotificationMarkRead { id: "n".into() }))));
         assert!(!may(&AppScope::ALL, &Call::Write(WriteMethod::Host(HostWrite::AppKeyRevoke { key_id: aurelius_domain::AppKeyId::new() }))));
     }
 

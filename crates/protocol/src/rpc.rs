@@ -402,6 +402,7 @@ pub const FEATURES: &[&str] = &[
     feature::MESSAGE_LOCATE,
     feature::TICKET_RESPONSIBLE,
     feature::TICKET_FOLLOW,
+    feature::PERSONAL_INBOX,
 ];
 
 /// Daemon → client.
