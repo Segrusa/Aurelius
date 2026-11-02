@@ -270,6 +270,9 @@ class AureliusRepository {
 
   Future<void> markNotificationsRead() => _host(notificationMarkAllRead());
 
+  /// Mark one Inbox row read for this person (A3): opening a row does it.
+  Future<void> markNotificationRead(String id) => _host(notificationMarkRead(id: id));
+
   /// Remove one notification (swiped away).
   Future<void> dismissNotification(String id) => _host(notificationDismiss(id: id));
 
