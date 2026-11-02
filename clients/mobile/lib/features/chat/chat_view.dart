@@ -392,9 +392,15 @@ class _MessagesState extends State<_Messages> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final channel = widget.config.channel;
-      unawaited(_list.currentState?.reveal(target));
+      unawaited(_goTo(target));
       if (channel != null && channel.revealThread) channel.openThread?.call(context, message);
     });
+  }
+
+  /// The list could not get there: it is not gone, so it does not say that.
+  Future<void> _goTo(String messageId) async {
+    final reached = await _list.currentState?.reveal(messageId);
+    if (reached == false && mounted) toast(context, 'Could not show that message. Try again.');
   }
 
   /// Only the server knows a message is gone; anything else is not that.
