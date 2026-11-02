@@ -48,6 +48,7 @@ pub mod user_sessions;
 pub mod claude_logins;
 pub mod company;
 pub mod tickets;
+pub mod followers;
 pub mod vault;
 pub mod guidelines;
 pub mod server_name;
@@ -246,6 +247,8 @@ mod schema28_tests;
 mod schema29_tests;
 #[cfg(test)]
 mod threads_tests;
+#[cfg(test)]
+mod followers_tests;
 #[cfg(test)]
 mod guidelines_tests;
 #[cfg(test)]
