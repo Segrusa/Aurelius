@@ -104,7 +104,7 @@ class CarPlayController {
       _projects = results[0] as List<ProjectSummary>;
       _employees = results[1] as List<EmployeeSummary>;
       _tasks = results[2] as List<TaskView>;
-      _needsYou = needsYouTasks(_tasks);
+      _needsYou = needsYouTasks(_tasks, others: await repository.mainTasksOfOthers(_tasks));
       _loaded = true;
     } on Exception {
       // Offline or the PC did not answer: keep what we had.

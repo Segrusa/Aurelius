@@ -19,6 +19,9 @@ const testingMovesByItself = 'Testing moves on by itself when the tests have run
 /// then does a client show or send it, and only then can a ◆ belong to one person.
 const ticketResponsibleFeature = 'ticket_responsible';
 
+/// The server keeps a personal Inbox: rows per ticket or channel (A3).
+const personalInboxFeature = 'personal_inbox';
+
 /// The server keeps who follows a ticket (phase A, A2).
 const ticketFollowFeature = 'ticket_follow';
 
@@ -297,6 +300,18 @@ bool needsMe(TicketView ticket, TicketState state, {String? me}) {
 
 /// Whether [ticket] in [state] waits for a decision that is someone else's: the words of [TicketStateView.line].
 bool decidedByOther(TicketView ticket, TicketState state, {String? me}) => state.needsYou && !needsMe(ticket, state, me: me);
+
+/// The ids in [tasks] of main tasks that wait for a decision that is someone
+/// else's ([needsMe], freeze §5): Dashboard, Waiting tasks and CarPlay do not
+/// count them. A main task whose ticket is not in [tickets] counts as before.
+Set<String> othersMainTasks(List<TaskView> tasks, Iterable<TicketView> tickets, {String? me}) {
+  final byId = {for (final t in tickets) t.id: t};
+  return {
+    for (final t in tasks)
+      if (t.isTicketMain && t.needsYou)
+        if (byId[t.ticketId] case final ticket? when !needsMe(ticket, ticketState(ticket, root: t, me: me), me: me)) t.id,
+  };
+}
 
 /// What the Responsible is for, under the field and in its picker (P-71).
 const responsibleExplained = 'Follows up and reviews. An employee does the work.';

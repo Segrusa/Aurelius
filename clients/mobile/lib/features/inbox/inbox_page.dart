@@ -14,6 +14,8 @@ import '../company_org/employee_widgets.dart' show ProposalCard;
 import '../guidelines/guideline_proposal_card.dart';
 import '../project/task_status_mark.dart';
 import 'inbox_bloc.dart';
+import 'inbox_rows.dart';
+import 'inbox_row_actions.dart';
 import 'inbox_sections.dart';
 import 'plan_review.dart';
 import 'variants_card.dart';
@@ -29,7 +31,8 @@ class _InboxPageState extends State<InboxPage> {
   @override
   void initState() {
     super.initState();
-    // Seeing the list counts as reading it (as on the desktop).
+    // Seeing the list counts as reading Done (as on the desktop); the rows of
+    // the personal Inbox only by opening them (the bloc keeps them apart).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) context.read<InboxBloc>().add(const NotificationsMarkedRead());
     });
@@ -62,9 +65,11 @@ class _InboxPageState extends State<InboxPage> {
           onRefresh: refresh,
           fill: state.loading && s.isEmpty
               ? const Center(child: CupertinoActivityIndicator())
-              : s.isEmpty
-                  ? const EmptyState('Nothing waiting', detail: 'What needs you, what runs and finished results show up here.')
-                  : null,
+              : state.loadFailed && s.isEmpty
+                  ? EmptyState('Could not load the Inbox.', key: const ValueKey('inbox-load-failed'), action: OutlinedButton(onPressed: () => bloc.add(const InboxRefreshed()), child: const Text('Try again')))
+                  : s.isEmpty
+                      ? EmptyState('Nothing waiting', detail: state.personalOn ? "You get one when you're made responsible or @mentioned, and when a ticket you follow needs review, is sent back or fails." : 'What needs you, what runs and finished results show up here.')
+                      : null,
           children: [
             GroupHeader('Needs you', key: const ValueKey('inbox-section-needs-you'), count: s.needsYou),
             if (s.needsYou == 0) const _EmptyLine('Nothing needs you.'),
@@ -89,8 +94,17 @@ class _InboxPageState extends State<InboxPage> {
                   onOpen: () => context.push('/project/${t.projectId}/task/${t.id}'),
                 ),
               ),
+            if (s.rowsNeedingYou.isNotEmpty)
+              InsetGroup(dividerIndent: 28, children: [for (final n in s.rowsNeedingYou) _swipeAway(bloc, n, _PersonalTile(row: n))]),
             if (s.waitingTasks.isNotEmpty)
               InsetGroup(children: [for (final t in s.waitingTasks) _TaskRow(task: t, company: company)]),
+            if (state.personalOn) ...[
+              GroupHeader('Updates', key: const ValueKey('inbox-section-updates'), count: s.updates.length),
+              if (s.updates.isEmpty)
+                const _EmptyLine('No updates.')
+              else
+                InsetGroup(dividerIndent: 28, children: [for (final n in s.updates) _swipeAway(bloc, n, _PersonalTile(row: n))]),
+            ],
             GroupHeader('Running', key: const ValueKey('inbox-section-running'), count: s.running),
             if (s.running == 0)
               const _EmptyLine('Nothing running.')
@@ -123,24 +137,99 @@ class _InboxPageState extends State<InboxPage> {
               InsetGroup(
                 dividerIndent: 28,
                 children: [
-                  for (final n in s.results)
-                    Dismissible(
-                      key: ValueKey('notification-${n.id}'),
-                      direction: DismissDirection.endToStart,
-                      background: Container(
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 20),
-                        color: Tokens.gray,
-                        child: const Icon(Icons.done_all, color: Colors.white),
-                      ),
-                      onDismissed: (_) => bloc.add(NotificationDismissed(n.id)),
-                      child: _NotificationTile(notification: n, company: company),
-                    ),
+                  for (final n in s.results) _swipeAway(bloc, n, _NotificationTile(notification: n, company: company)),
                 ],
               ),
           ],
         );
       },
+    );
+  }
+}
+
+/// A row that goes with a swipe to the left.
+Widget _swipeAway(InboxBloc bloc, NotificationView n, Widget child) => Dismissible(
+      key: ValueKey('notification-${n.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        color: Tokens.gray,
+        child: const Icon(Icons.done_all, color: Colors.white),
+      ),
+      onDismissed: (_) => bloc.add(NotificationDismissed(n.id)),
+      child: child,
+    );
+
+/// A row of the personal Inbox (§4.5): what it is about, why, `+n` and the time.
+/// A tap goes straight to the place, a long press offers the rest.
+class _PersonalTile extends StatelessWidget {
+  const _PersonalTile({required this.row});
+
+  final NotificationView row;
+
+  @override
+  Widget build(BuildContext context) {
+    final n = row;
+    final state = context.read<InboxBloc>().state;
+    final ticket = n.ticketId;
+    return Semantics(
+      label: '${n.spoken}, ${Fmt.ago(n.createdAtMs)}',
+      button: true,
+      excludeSemantics: true,
+      child: InkWell(
+        key: ValueKey('inbox-row-${n.id}'),
+        onTap: () => openInboxRow(context, n),
+        onLongPress: () => showInboxRowMenu(context, n, follow: state.followOn, links: state.linksOn),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 14,
+                child: n.waitsForMe
+                    ? Text('◆', key: ValueKey('inbox-row-diamond-${n.id}'), style: TextStyle(fontSize: 12, color: Tokens.accent))
+                    : n.read
+                        ? null
+                        : Padding(
+                            padding: const EdgeInsets.only(top: 5),
+                            child: Align(alignment: Alignment.topLeft, child: Container(key: ValueKey('inbox-row-unread-${n.id}'), width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: Tokens.accent))),
+                          ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (n.place.isNotEmpty) Text(n.place, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 16, height: 1.3, color: Tokens.label, fontWeight: n.read ? FontWeight.w400 : FontWeight.w600)),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Row(
+                        children: [
+                          Flexible(child: Text(n.headline, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: n.waitsForMe ? Tokens.accentText : Tokens.label2))),
+                          if (n.more > 0) ...[
+                            const SizedBox(width: 6),
+                            // On a ticket it opens the Activity; a channel has none, so the tap is the row's.
+                            GestureDetector(
+                              key: ValueKey('inbox-row-more-${n.id}'),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: ticket == null ? null : () => openInboxRowActivity(context, n),
+                              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2), child: Text('+${n.more}', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: ticket == null ? Tokens.label2 : Tokens.accentText))),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(Fmt.ago(n.createdAtMs), style: Tokens.monoSmall()),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

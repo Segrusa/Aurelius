@@ -9,7 +9,6 @@ import 'package:aurelius_mobile/data/channels.dart';
 import 'package:aurelius_mobile/data/discussion.dart';
 import 'package:aurelius_mobile/data/links.dart';
 import 'package:aurelius_mobile/data/views.dart';
-import 'package:aurelius_mobile/features/board/ticket_page.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
@@ -18,14 +17,12 @@ import 'package:aurelius_mobile/features/team/channel_link_page.dart';
 import 'package:aurelius_mobile/features/team/channels_bloc.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'support/builders.dart';
-import 'support/tickets.dart' as board;
 
 // AUR-FA-M2: "That message no longer exists." only when the server says so:
 // not when the read failed, the phone is offline or the list lacks it.

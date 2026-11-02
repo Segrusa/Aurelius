@@ -402,10 +402,13 @@ Future<bool> setResponsible(BuildContext context, TicketView ticket, String? use
 
 /// Follow or unfollow [ticket] (A2, §3.3). The server refuses to unfollow for
 /// its active responsible (B10) and says why; the toast shows that.
-Future<bool> followTicket(BuildContext context, TicketView ticket, {required bool on}) => ticketWrite(
+Future<bool> followTicket(BuildContext context, TicketView ticket, {required bool on}) => followTicketById(context, ticket.id, ticket.number, on: on);
+
+/// [followTicket] where only the id and the number are known (a row of the Inbox).
+Future<bool> followTicketById(BuildContext context, String ticketId, int number, {required bool on}) => ticketWrite(
       context,
-      ticketFollow(FollowTicket(on: on, ticketId: ticket.id)),
-      done: on ? "You'll get updates on #${ticket.number}." : 'Unfollowed #${ticket.number}. A new @mention or becoming responsible makes you follow again.',
+      ticketFollow(FollowTicket(on: on, ticketId: ticketId)),
+      done: on ? "You'll get updates on #$number." : 'Unfollowed #$number. A new @mention or becoming responsible makes you follow again.',
     );
 
 /// Whether [me] follows [ticket]; null when that could not be read.

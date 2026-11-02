@@ -45,7 +45,7 @@ Future<void> openAureliusLink(BuildContext context, String raw) async {
     case TicketLink(:final id):
       context.push('/ticket/$id');
     case MessageLink(:final id):
-      await _openMessage(context, repository, id);
+      await openMessageAt(context, repository, id);
   }
 }
 
@@ -69,7 +69,7 @@ Future<void> _otherServer(BuildContext context, AureliusLink link, String raw) a
 /// A message's place comes from the server (`message.locate`): its ticket's
 /// discussion, or its channel; a reply in a thread opens the thread too, which
 /// only the channel of a ticket has.
-Future<void> _openMessage(BuildContext context, AureliusRepository repository, String messageId) async {
+Future<void> openMessageAt(BuildContext context, AureliusRepository repository, String messageId) async {
   try {
     final at = await repository.messageLocation(messageId);
     if (!context.mounted) return;
