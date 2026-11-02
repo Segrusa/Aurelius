@@ -753,6 +753,11 @@ impl Client {
         self.read(Method::MessageLocate { message_id }, body!(MessageLocation)).await
     }
 
+    /// Who follows a ticket (`ticket.followers`, feature `ticket_follow`).
+    pub async fn ticket_followers(&self, ticket_id: aurelius_domain::TicketId) -> Result<aurelius_domain::ticket::TicketFollowersView, ClientError> {
+        self.read(Method::TicketFollowers { ticket_id }, body!(TicketFollowers)).await
+    }
+
     /// The Team chat's channels (feature `team_channels`): General first, then one per project.
     pub async fn channels(&self) -> Result<aurelius_domain::views::ChannelsSnapshot, ClientError> {
         self.read(Method::ChannelList, body!(Channels)).await
@@ -1136,6 +1141,17 @@ impl Client {
             *path = self.stage_file(Path::new(path.as_str())).await?;
         }
         self.execute(envelope(Command::UpdateTicket(ticket), expected_version)).await
+    }
+
+    /// Choose who is responsible for a ticket; none: nobody (`ticket.set_responsible`,
+    /// feature `ticket_responsible`).
+    pub async fn set_ticket_responsible(&self, ticket_id: aurelius_domain::TicketId, responsible_user_id: Option<aurelius_domain::UserId>) -> Result<CommandReceipt, ClientError> {
+        self.execute(envelope(Command::SetTicketResponsible(aurelius_domain::ticket::SetTicketResponsible { ticket_id, responsible_user_id }), None)).await
+    }
+
+    /// Start (`on`) or stop following a ticket (`ticket.follow`, feature `ticket_follow`).
+    pub async fn follow_ticket(&self, ticket_id: aurelius_domain::TicketId, on: bool) -> Result<CommandReceipt, ClientError> {
+        self.execute(envelope(Command::FollowTicket(aurelius_domain::ticket::FollowTicket { ticket_id, on }), None)).await
     }
 
     /// Any other ticket, board or company write (`Command::MoveTicket`, …) under a fresh key.
