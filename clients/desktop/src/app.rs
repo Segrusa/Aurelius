@@ -1085,7 +1085,8 @@ pub struct AppView {
     /// Notifications that were unread when the inbox opened (shown as new).
     pub inbox_new: Vec<String>,
     /// Rows of the personal Inbox opened here, with their `created_at_ms` then: read until
-    /// their next event. Kept here while the protocol has no read per row.
+    /// their next event. A row opened here is also read on the server (`notification.mark_read`,
+    /// freeze §2); this map keeps it read at once and while an older server cannot.
     pub inbox_opened: HashMap<String, i64>,
     /// The ticket of the selected row whose followers were asked for.
     pub inbox_followers_asked: Option<aurelius_domain::TicketId>,

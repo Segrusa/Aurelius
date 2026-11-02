@@ -70,6 +70,11 @@ pub fn is_deleted(m: &MessageView) -> bool {
     m.deleted_at_ms.is_some()
 }
 
+/// "#52 keeps its copy.": the line the Delete dialog adds when a ticket was made from the message.
+pub fn ticket_note(messages: &[MessageView], id: MessageId) -> Option<String> {
+    d::ticket_from(messages, id).filter(|(_, number)| number.starts_with('#')).map(|(_, number)| format!("{number} keeps its copy."))
+}
+
 /// Whether a row says "edited": it was, and the server has the feature to show it.
 pub fn shows_edited(m: &MessageView, supported: bool) -> bool {
     supported && m.edited_at_ms.is_some() && m.deleted_at_ms.is_none()
@@ -259,8 +264,7 @@ impl AppView {
 
     /// What the dialog adds when a ticket was made from the message: that ticket keeps its copy.
     pub fn delete_ticket_note(&self, id: MessageId) -> Option<String> {
-        let all = self.messages.as_ref().map(|s| &s.messages[..])?;
-        d::ticket_from(all, id).filter(|(_, number)| number.starts_with('#')).map(|(_, number)| format!("{number} keeps its copy."))
+        ticket_note(&self.messages.as_ref()?.messages, id)
     }
 
     /// The answer of `message.edit` or `message.delete`.
@@ -409,7 +413,7 @@ impl AppView {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: gpui's `test` attribute would shadow the standard one.
-    use super::{DELETE_BODY, DELETE_TITLE, DELETED, EDIT_HINT, HISTORY_TEXT_MAX, Save, can_change, history_line, is_deleted, mention_note, new_mentions, row_label, save_of, shows_edited};
+    use super::{DELETE_BODY, DELETE_TITLE, DELETED, EDIT_HINT, HISTORY_TEXT_MAX, Save, can_change, history_line, is_deleted, mention_note, new_mentions, row_label, save_of, shows_edited, ticket_note};
     use aurelius_domain::views::{MessageVersionView, MessageView};
 
     fn message() -> MessageView {
@@ -421,6 +425,21 @@ mod tests {
         assert_eq!(format!("{DELETE_TITLE} {DELETE_BODY}"), "Delete this message? A line stays that says it was deleted. The text stays in the audit log and backups, and employees that read it keep it. This doesn't erase a secret: rotate it and put it in the vault.");
         assert_eq!(EDIT_HINT, "Editing wakes no one. An employee that already read this keeps the original. This doesn't erase a secret: rotate it and put it in the vault.");
         assert_eq!(DELETED, "This message was deleted.");
+    }
+
+    #[test]
+    fn the_delete_dialog_adds_the_ticket_that_keeps_its_copy() {
+        use aurelius_domain::conversation::MessageRole;
+        use aurelius_domain::views::{SystemLine, SystemLineKind};
+        let source = crate::screens::discussion::tests::msg(MessageRole::User, "Can we add an audit export?");
+        assert_eq!(ticket_note(std::slice::from_ref(&source), source.id), None, "no ticket was made from it");
+        let mut created = crate::screens::discussion::tests::msg(MessageRole::Assistant, "alex created #52 from a message");
+        let mut line = SystemLine::new(SystemLineKind::TicketCreated);
+        line.message_id = Some(source.id);
+        created.system = Some(line);
+        let messages = vec![source.clone(), created];
+        assert_eq!(ticket_note(&messages, source.id).as_deref(), Some("#52 keeps its copy."));
+        assert_eq!(ticket_note(&messages, aurelius_domain::MessageId::new()), None, "another message");
     }
 
     #[test]
