@@ -3,7 +3,7 @@
 //! included on request ("Activity"). Keyset pagination on `seq`.
 
 use crate::{StorageError, now_ms};
-use aurelius_domain::{ProjectId, TaskId};
+use aurelius_domain::{ConversationId, EventId, MessageId, ProjectId, TaskId, TicketId, UserId};
 use aurelius_domain::views::{NotificationView, TimelineCard};
 use rusqlite::{Connection, params};
 
@@ -382,6 +382,52 @@ pub fn notify(tx: &rusqlite::Transaction<'_>, seq: u64) -> Result<bool, StorageE
     Ok(inserted == 1)
 }
 
+/// A notification row for one board member (feature `personal_inbox`).
+#[derive(Debug, Clone)]
+pub struct NewNotification<'a> {
+    /// The event it comes from; it gives the row its target.
+    pub event_id: EventId,
+    pub user: UserId,
+    /// `warning` or `info`.
+    pub severity: &'a str,
+    /// The whole sentence an older client shows too ("Marie made you responsible").
+    /// Kept in `target_json`: the table has no column for it.
+    pub title: &'a str,
+    /// `NotificationView::reason`, at most 32 characters.
+    pub reason: &'a str,
+    pub ticket: Option<TicketId>,
+    pub conversation: Option<ConversationId>,
+    pub message: Option<MessageId>,
+}
+
+/// Write one row, at most once per event and board member. Its id; none when it
+/// is there already or the event is unknown. Who gets a row, and whether it
+/// merges into an unread one, is decided before this.
+pub fn insert_notification(tx: &rusqlite::Transaction<'_>, row: &NewNotification<'_>) -> Result<Option<String>, StorageError> {
+    let id = EventId::new().to_string();
+    let inserted = tx.execute(
+        "INSERT INTO notifications(id, event_id, dedupe_key, severity, target_json, created_at_ms, user_id, ticket_id, conversation_id, message_id, reason)
+         SELECT ?1, e.id, 'event:' || e.id || ':' || ?3, ?4,
+                json_object('type', e.type, 'aggregate_type', e.aggregate_type, 'aggregate_id', e.aggregate_id, 'seq', e.seq, 'title', ?5),
+                ?6, ?3, ?7, ?8, ?9, ?10
+         FROM events e WHERE e.id = ?2
+         ON CONFLICT(dedupe_key) DO NOTHING",
+        params![
+            id,
+            row.event_id.to_string(),
+            row.user.to_string(),
+            row.severity,
+            row.title,
+            now_ms(),
+            row.ticket.map(|t| t.to_string()),
+            row.conversation.map(|c| c.to_string()),
+            row.message.map(|m| m.to_string()),
+            row.reason,
+        ],
+    )?;
+    Ok((inserted == 1).then_some(id))
+}
+
 /// Every notification, also those for one board member (push routing, tests).
 pub fn list_notifications(conn: &Connection, limit: u32) -> Result<Vec<NotificationView>, StorageError> {
     list(conn, limit, None)
@@ -416,8 +462,9 @@ fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>) -> Result
     let visible = if viewer.is_some() { visible_to(2) } else { "?2 IS NULL".to_string() };
     let mut stmt = conn.prepare(
         &format!(
-            "SELECT n.id, n.severity, n.target_json, n.created_at_ms, {read}, e.type, e.metadata_json, e.correlation_id
-             FROM notifications n JOIN events e ON e.id = n.event_id WHERE {STILL_RELEVANT} AND {visible} ORDER BY n.created_at_ms DESC LIMIT ?1",
+            "SELECT n.id, n.severity, n.target_json, n.created_at_ms, {read}, e.type, e.metadata_json, e.correlation_id,
+                    n.ticket_id, k.number, n.conversation_id, n.message_id, n.reason, n.merged_count
+             FROM notifications n JOIN events e ON e.id = n.event_id LEFT JOIN tickets k ON k.id = n.ticket_id WHERE {STILL_RELEVANT} AND {visible} ORDER BY n.created_at_ms DESC LIMIT ?1",
             read = read_by(2),
         ),
     )?;
@@ -431,19 +478,26 @@ fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>) -> Result
             r.get::<_, String>(5)?,
             r.get::<_, String>(6)?,
             r.get::<_, String>(7)?,
+            r.get::<_, Option<String>>(8)?,
+            r.get::<_, Option<i64>>(9)?,
+            r.get::<_, Option<String>>(10)?,
+            r.get::<_, Option<String>>(11)?,
+            r.get::<_, Option<String>>(12)?,
+            r.get::<_, i64>(13)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, severity, target, created, read, event_type, metadata, correlation) = row?;
+        let (id, severity, target, created, read, event_type, metadata, correlation, ticket, number, conversation, message, reason, merged) = row?;
         let metadata: serde_json::Value = serde_json::from_str(&metadata).unwrap_or_default();
-        let title = notification_for(&event_type, &metadata).map(|(_, t)| t).unwrap_or("Notification").to_string();
+        let target: serde_json::Value = serde_json::from_str(&target).unwrap_or_default();
+        // A row written by `insert_notification` carries its own sentence.
+        let title = target["title"].as_str().or(notification_for(&event_type, &metadata).map(|(_, t)| t)).unwrap_or("Notification").to_string();
         // Discreet by default: no project content beyond the task title.
         let subject = lookup(conn, "SELECT title FROM tasks WHERE id = ?1", &correlation)
             .filter(|s| !s.is_empty())
             .or_else(|| metadata["subject"].as_str().map(str::to_owned))
             .unwrap_or_default();
-        let target: serde_json::Value = serde_json::from_str(&target).unwrap_or_default();
         out.push(NotificationView {
             id,
             severity,
@@ -453,12 +507,12 @@ fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>) -> Result
             read,
             task_id: TaskId::parse(&correlation).ok().filter(|_| !lookup(conn, "SELECT id FROM tasks WHERE id = ?1", &correlation).unwrap_or_default().is_empty()),
             target_type: target["type"].as_str().unwrap_or("").to_owned(),
-            ticket_id: None,
-            ticket_number: None,
-            conversation_id: None,
-            message_id: None,
-            reason: None,
-            merged_count: 0,
+            ticket_id: ticket.and_then(|t| TicketId::parse(&t).ok()),
+            ticket_number: number.map(|n| n as u32),
+            conversation_id: conversation.and_then(|c| ConversationId::parse(&c).ok()),
+            message_id: message.and_then(|m| MessageId::parse(&m).ok()),
+            reason,
+            merged_count: merged as u32,
             needs_you: false,
         });
     }
