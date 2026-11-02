@@ -162,3 +162,108 @@ fn a_notification_for_everyone_dismissed_by_one_keeps_its_row_for_push_routing()
     let all = store.read(|c| timeline::list_notifications(c, 50)).unwrap();
     assert!(all.iter().any(|n| n.id == FOR_ALL && !n.read));
 }
+
+// ---- The rows of phase A (AUR-FA-S1) ---------------------------------------
+
+const T1: &str = "00000000-0000-7000-8000-000000000011";
+const C1: &str = "00000000-0000-7000-8000-0000000000c1";
+const M1: &str = "00000000-0000-7000-8000-0000000000a1";
+const EV: &str = "00000000-0000-7000-8000-000000000031";
+
+/// `inbox` with ticket #7, its discussion, a message in it and the event of a row.
+fn inbox_with_ticket() -> (tempfile::TempDir, Store) {
+    let (dir, store) = inbox();
+    store
+        .write(|tx| {
+            let company: String = tx.query_row("SELECT id FROM company", [], |r| r.get(0))?;
+            let global: String = tx.query_row("SELECT id FROM scopes WHERE kind = 'global'", [], |r| r.get(0))?;
+            let column: String = tx.query_row("SELECT id FROM board_columns WHERE kind = 'review'", [], |r| r.get(0))?;
+            tx.execute_batch(&format!(
+                "INSERT INTO scopes(id, kind, parent_id, owner_id) VALUES ('ps', 'project', '{global}', 'p');
+                 INSERT INTO projects(id, scope_id, name, status, version, created_at_ms, updated_at_ms) VALUES ('p', 'ps', 'Alpha', 'active', 1, 1, 1);
+                 INSERT INTO conversations(id, kind, project_id, title, version, created_at_ms) VALUES ('{C1}', 'ticket', 'p', '#7 Fix', 1, 10);
+                 INSERT INTO tickets(id, company_id, project_id, number, title, column_id, position, priority, created_by_user, version, created_at_ms, updated_at_ms, conversation_id, login_user)
+                   VALUES ('{T1}', '{company}', 'p', 7, 'Fix', '{column}', 1.0, 'normal', '{ALEX}', 1, 10, 10, '{C1}', '{ALEX}');
+                 INSERT INTO events(id, aggregate_type, aggregate_id, aggregate_version, type, schema_version, actor_kind, correlation_id, metadata_json, dedupe_key, occurred_at_ms, recorded_at_ms)
+                   VALUES ('{EV}', 'ticket', '{T1}', 1, 'ticket.updated', 1, 'user', '{T1}', '{{}}', 'ev', 11, 11);
+                 INSERT INTO messages(id, conversation_id, ordinal, role, source_event_id, status, input_kind, created_at_ms) VALUES ('{M1}', '{C1}', 1, 'user', '{EV}', 'complete', 'text', 11);"
+            ))?;
+            Ok(())
+        })
+        .unwrap();
+    (dir, store)
+}
+
+fn new_row(user: &str) -> timeline::NewNotification<'static> {
+    timeline::NewNotification {
+        event_id: aurelius_domain::EventId::parse(EV).unwrap(),
+        user: aurelius_domain::UserId::parse(user).unwrap(),
+        severity: "info",
+        title: "Marie made you responsible",
+        reason: "responsible",
+        ticket: Some(aurelius_domain::TicketId::parse(T1).unwrap()),
+        conversation: Some(aurelius_domain::ConversationId::parse(C1).unwrap()),
+        message: Some(aurelius_domain::MessageId::parse(M1).unwrap()),
+    }
+}
+
+fn read_row(store: &Store, user: &str, id: &str) -> aurelius_domain::views::NotificationView {
+    store.read(|c| timeline::list_notifications_for(c, 50, Some(user))).unwrap().into_iter().find(|n| n.id == id).unwrap()
+}
+
+#[test]
+fn a_written_row_reads_back_with_all_it_is_about_and_is_only_for_that_board_member() {
+    let (_dir, store) = inbox_with_ticket();
+    let id = store.write(|tx| timeline::insert_notification(tx, &new_row(BEA))).unwrap().unwrap();
+
+    let row = read_row(&store, BEA, &id);
+    assert_eq!(row.ticket_id.unwrap().to_string(), T1);
+    assert_eq!(row.ticket_number, Some(7));
+    assert_eq!(row.conversation_id.unwrap().to_string(), C1);
+    assert_eq!(row.message_id.unwrap().to_string(), M1);
+    assert_eq!(row.reason.as_deref(), Some("responsible"));
+    assert_eq!((row.severity.as_str(), row.title.as_str(), row.target_type.as_str()), ("info", "Marie made you responsible", "ticket.updated"));
+    assert_eq!((row.merged_count, row.needs_you, row.read), (0, false, false), "needs_you is worked out by the engine, later");
+
+    assert!(!store.read(|c| timeline::list_notifications_for(c, 50, Some(ALEX))).unwrap().iter().any(|n| n.id == id));
+}
+
+#[test]
+fn one_event_writes_one_row_per_board_member_and_never_two_for_the_same() {
+    let (_dir, store) = inbox_with_ticket();
+    assert!(store.write(|tx| timeline::insert_notification(tx, &new_row(BEA))).unwrap().is_some());
+    assert!(store.write(|tx| timeline::insert_notification(tx, &new_row(ALEX))).unwrap().is_some());
+    assert_eq!(store.write(|tx| timeline::insert_notification(tx, &new_row(BEA))).unwrap(), None);
+}
+
+#[test]
+fn a_row_for_an_event_that_does_not_exist_is_not_written() {
+    let (_dir, store) = inbox_with_ticket();
+    let row = timeline::NewNotification { event_id: aurelius_domain::EventId::new(), ..new_row(BEA) };
+    assert_eq!(store.write(move |tx| timeline::insert_notification(tx, &row)).unwrap(), None);
+}
+
+#[test]
+fn a_reason_longer_than_the_check_is_refused() {
+    let (_dir, store) = inbox_with_ticket();
+    let refused = store.write(|tx| {
+        let long = "x".repeat(33);
+        timeline::insert_notification(tx, &timeline::NewNotification { reason: &long, ..new_row(BEA) })
+    });
+    assert!(refused.is_err(), "{refused:?}");
+}
+
+#[test]
+fn the_merged_count_of_the_column_reaches_the_view() {
+    let (_dir, store) = inbox_with_ticket();
+    let id = store.write(|tx| timeline::insert_notification(tx, &new_row(BEA))).unwrap().unwrap();
+    let update = id.clone();
+    store.write(move |tx| Ok(tx.execute("UPDATE notifications SET merged_count = 3 WHERE id = ?1", [&update])?)).unwrap();
+    assert_eq!(read_row(&store, BEA, &id).merged_count, 3);
+}
+
+#[test]
+fn a_row_of_before_phase_a_keeps_the_title_of_its_event() {
+    let (_dir, store) = inbox();
+    assert_eq!(read_row(&store, ALEX, FOR_ALEX).title, "Result ready");
+}

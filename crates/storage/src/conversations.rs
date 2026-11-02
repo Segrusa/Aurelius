@@ -457,11 +457,13 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
         (false, None) => ("NULL", "?2 IS NULL"),
         (false, Some(_)) => ("NULL", "m.id = ?2"),
     };
+    // A store before schema 29 has no edits.
+    let edits = if has_edit_columns(conn)? { "m.edited_at_ms, m.deleted_at_ms" } else { "NULL, NULL" };
     let mut stmt = conn.prepare(&format!(
         "SELECT m.id, m.ordinal, m.role, m.status, b.storage_key, m.created_at_ms, m.run_id, m.reply_to_id,
                 c.display_name, r.model_id, json_extract(r.resolved_config_json, '$.persona_name'),
                 json_extract(m.meta_json, '$.kind'), json_extract(m.meta_json, '$.from'), json_extract(m.meta_json, '$.approval_id'), json_extract(m.meta_json, '$.files'), json_extract(m.meta_json, '$.uploads'),
-                json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system'), {parent}
+                json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system'), {parent}, {edits}
          FROM messages m LEFT JOIN blobs b ON b.id = m.content_blob_id
          LEFT JOIN runs r ON r.id = m.run_id LEFT JOIN connections c ON c.id = r.connection_id
          WHERE m.conversation_id = ?1 AND {only} ORDER BY m.ordinal"
@@ -487,11 +489,13 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             r.get::<_, Option<String>>(16)?,
             r.get::<_, Option<String>>(17)?,
             r.get::<_, Option<String>>(18)?,
+            r.get::<_, Option<i64>>(19)?,
+            r.get::<_, Option<i64>>(20)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode, system, parent) = row?;
+        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode, system, parent, edited, deleted) = row?;
         let produced_by = match (connection, model.filter(|m| !m.is_empty())) {
             (Some(c), Some(m)) => Some(format!("{c} · {m}")),
             (Some(c), None) => Some(format!("{c} · default model")),
@@ -528,8 +532,8 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             thread_unread: None,
             thread_repliers: Vec::new(),
             reactions: Vec::new(),
-            edited_at_ms: None,
-            deleted_at_ms: None,
+            edited_at_ms: edited,
+            deleted_at_ms: deleted,
             editable: false,
         });
     }
@@ -561,6 +565,11 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
 /// Whether `messages` has `thread_parent_id` (schema 26).
 pub(crate) fn has_thread_column(conn: &Connection) -> Result<bool, StorageError> {
     Ok(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'thread_parent_id'", [], |r| r.get::<_, i64>(0))? > 0)
+}
+
+/// Whether `messages` has `edited_at_ms` and `deleted_at_ms` (schema 29).
+fn has_edit_columns(conn: &Connection) -> Result<bool, StorageError> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'edited_at_ms'", [], |r| r.get::<_, i64>(0))? > 0)
 }
 
 /// Tool use during one answer, in order.
@@ -909,6 +918,69 @@ pub fn message_ordinal(conn: &Connection, message: MessageId) -> Result<Option<u
 pub fn delete_message(tx: &Transaction<'_>, message: MessageId) -> Result<(), StorageError> {
     tx.execute("DELETE FROM messages WHERE id = ?1 AND role = 'user'", [message.to_string()])?;
     Ok(())
+}
+
+/// A message whose text was just replaced: where it is, and the blob that held the
+/// old text, for the event of the change to carry (the blob itself stays).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplacedText {
+    pub conversation_id: ConversationId,
+    /// None: the message had no text yet.
+    pub previous_blob: Option<String>,
+}
+
+/// Point `message` at the registered `blob` and set `column` to `at_ms`.
+/// A deleted message stays as it is: none, as for an unknown message.
+fn replace_blob(tx: &Transaction<'_>, message: MessageId, blob: &str, column: &str, at_ms: i64) -> Result<Option<ReplacedText>, StorageError> {
+    let row: Option<(String, Option<String>)> = tx
+        .query_row("SELECT conversation_id, content_blob_id FROM messages WHERE id = ?1 AND deleted_at_ms IS NULL", [message.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let Some((conversation, previous_blob)) = row else { return Ok(None) };
+    let conversation_id = ConversationId::parse(&conversation).map_err(|e| StorageError::Rejected(e.to_string()))?;
+    tx.execute(&format!("UPDATE messages SET content_blob_id = ?2, {column} = ?3 WHERE id = ?1"), params![message.to_string(), blob, at_ms])?;
+    Ok(Some(ReplacedText { conversation_id, previous_blob }))
+}
+
+/// Replace the text of `message` by the registered `blob` and mark it edited at
+/// `at_ms`. Who may do so is the command's to check. Wakes nothing, writes no event.
+pub fn replace_message_text(tx: &Transaction<'_>, message: MessageId, blob: &str, at_ms: i64) -> Result<Option<ReplacedText>, StorageError> {
+    replace_blob(tx, message, blob, "edited_at_ms", at_ms)
+}
+
+/// Mark `message` deleted at `at_ms`: its row stays, and its text becomes the
+/// registered `placeholder_blob`. Who may do so is the command's to check. Unlike
+/// `delete_message`, which removes a user message that was never answered.
+pub fn mark_message_deleted(tx: &Transaction<'_>, message: MessageId, placeholder_blob: &str, at_ms: i64) -> Result<Option<ReplacedText>, StorageError> {
+    replace_blob(tx, message, placeholder_blob, "deleted_at_ms", at_ms)
+}
+
+/// The dedupe key of the event of a decision's feedback, `cmd:<id>:feedback`
+/// (`conversation::discussion::decision_feedback`), as a LIKE pattern.
+const DECISION_FEEDBACK: &str = "cmd:%:feedback";
+
+/// Whether `message` is the feedback a board member gave with a decision on a
+/// ticket. Told by the event it came from, so it also holds for older rows and
+/// after an edit (the event stays).
+pub fn is_decision_feedback(conn: &Connection, message: MessageId) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM messages m JOIN events e ON e.id = m.source_event_id WHERE m.id = ?1 AND e.dedupe_key LIKE ?2)",
+        params![message.to_string(), DECISION_FEEDBACK],
+        |r| r.get(0),
+    )?)
+}
+
+/// The messages of `conversation` for which `is_decision_feedback` holds, for a
+/// read of the whole conversation.
+pub fn decision_feedback_in(conn: &Connection, conversation: ConversationId) -> Result<std::collections::HashSet<MessageId>, StorageError> {
+    let mut stmt = conn.prepare("SELECT m.id FROM messages m JOIN events e ON e.id = m.source_event_id WHERE m.conversation_id = ?1 AND e.dedupe_key LIKE ?2")?;
+    let rows = stmt.query_map(params![conversation.to_string(), DECISION_FEEDBACK], |r| r.get::<_, String>(0))?;
+    let mut out = std::collections::HashSet::new();
+    for row in rows {
+        if let Ok(message) = MessageId::parse(&row?) {
+            out.insert(message);
+        }
+    }
+    Ok(out)
 }
 
 /// Let a queued run go first: ahead of other ready jobs and without waiting for a retry delay.
