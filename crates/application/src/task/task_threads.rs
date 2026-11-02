@@ -41,7 +41,7 @@ pub(crate) fn summary(text: &str, max: usize) -> String {
     format!("{}\n\n… (the full result is in the task)", cut[..end].trim_end())
 }
 
-fn capped(text: &str) -> String {
+pub(crate) fn capped(text: &str) -> String {
     let text = text.trim();
     if text.chars().count() <= MAX_POST {
         return text.to_owned();

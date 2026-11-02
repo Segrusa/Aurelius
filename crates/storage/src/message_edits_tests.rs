@@ -158,3 +158,25 @@ fn the_feedback_of_a_conversation_is_its_own_and_agrees_with_the_single_check() 
     let other = store.read(|c| conversations::decision_feedback_in(c, conv(OTHER))).unwrap();
     assert_eq!(other.into_iter().collect::<Vec<_>>(), [msg(ELSEWHERE)]);
 }
+
+#[test]
+fn a_deleted_message_serves_no_upload_and_no_file() {
+    use aurelius_domain::views::{FileRef, MessageFileView};
+    let (_dir, store) = channel();
+    let upload = MessageFileView { id: None, name: "secret.pdf".into(), path: ".aurelius/uploads/secret.pdf".into(), byte_length: 3 };
+    let file = FileRef { id: "b1".into(), name: "notes.txt".into(), media_type: "text/plain".into(), size: 3 };
+    store
+        .write(move |tx| {
+            conversations::set_message_uploads(tx, msg(PLAIN), &[upload])?;
+            conversations::set_message_files(tx, msg(PLAIN), &[file])
+        })
+        .unwrap();
+    let served = |store: &Store| {
+        store
+            .read(|c| Ok((conversations::message_uploads(c, msg(PLAIN))?.map(|(_, files)| files.len()), conversations::message_file(c, "b1")?.is_some())))
+            .unwrap()
+    };
+    assert_eq!(served(&store), (Some(1), true), "before the delete both are served");
+    store.write(|tx| conversations::mark_message_deleted(tx, msg(PLAIN), "gone", 600)).unwrap();
+    assert_eq!(served(&store), (None, false), "after the delete nothing is served");
+}

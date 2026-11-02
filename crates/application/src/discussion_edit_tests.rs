@@ -197,3 +197,49 @@ fn post_message(s: &Setup, ticket: TicketId, text: &str) -> MessageId {
         other => panic!("{other:?}"),
     }
 }
+
+/// A ticket whose main task has a conversation, and a board member's message to
+/// the owner that was copied into it: (ticket, discussion message, task conversation).
+fn copied_to_owner(s: &Setup, text: &str) -> (TicketId, MessageId, ConversationId) {
+    let t = new_ticket(s, "Login", Some(s.ann));
+    exec(s, Command::StartTicket(ticket::StartTicket { ticket_id: t, employee_id: None })).unwrap();
+    let root = ticket_view(s, t).root_task_id.expect("a main task");
+    let job = s.service.store().write(|tx| aurelius_storage::queries::claim_due_job(tx, "test", aurelius_storage::now_ms() + 60_000, 45_000, 4)).unwrap().expect("the task's job");
+    let task = s.service.task_context(root).unwrap().unwrap();
+    s.service.start_task_conversation(&task, job.lease_epoch).unwrap();
+    let conversation = s.service.store().read(move |c| aurelius_storage::tasks::task_conversation(c, root)).unwrap().map(|(c, _)| c).expect("its conversation");
+    let message = post_message(s, t, text);
+    (t, message, conversation)
+}
+
+#[test]
+fn a_deleted_discussion_message_is_gone_from_the_owners_task_conversation() {
+    let s = setup();
+    let (_, message, conversation) = copied_to_owner(&s, "PROBE-SECRET-1234");
+    let readable = |s: &Setup| messages(s, conversation).iter().filter(|m| m.text.contains("PROBE-SECRET-1234")).count();
+    assert_eq!(readable(&s), 1, "the owner got a copy");
+    let before = untouched(&s);
+    delete(&s, message).unwrap();
+    assert_eq!(readable(&s), 0, "deleted text still readable in the task conversation");
+    let copy = messages(&s, conversation).into_iter().find(|m| m.deleted_at_ms.is_some()).expect("the copy is marked deleted");
+    assert_eq!(copy.text, MESSAGE_DELETED_TEXT);
+    assert!(copy.files.is_empty() && copy.uploads.is_empty());
+    // The earlier text is only the payload of an event, and a delete wakes nobody.
+    let (payload, _) = last_event(&s, "message.deleted");
+    assert!(payload.is_some_and(|p| p.contains("PROBE-SECRET-1234")));
+    assert_eq!(untouched(&s), before);
+}
+
+#[test]
+fn an_edited_discussion_message_reads_as_the_new_text_in_the_owners_task_conversation() {
+    let s = setup();
+    let (_, message, conversation) = copied_to_owner(&s, "OLD-WORDS");
+    let before = untouched(&s);
+    edit(&s, message, "NEW-WORDS").unwrap();
+    let all = messages(&s, conversation);
+    assert!(all.iter().all(|m| !m.text.contains("OLD-WORDS")), "the old text is still readable");
+    let copy = all.iter().find(|m| m.text.contains("NEW-WORDS")).expect("the copy follows the edit");
+    assert!(copy.edited_at_ms.is_some());
+    assert!(copy.text.contains("post_to_discussion"), "the line that says where to answer stays: {}", copy.text);
+    assert_eq!(untouched(&s), before, "an edit wakes nobody and starts no run");
+}
