@@ -1594,6 +1594,11 @@ impl Client {
         self.host(HostWrite::NotificationMarkAllRead, |r| if let HostResult::Count { count } = r { Some(count) } else { None }).await
     }
 
+    /// Mark one notification read, for this board member only; 0 when there was nothing to read.
+    pub async fn mark_notification_read(&self, id: String) -> Result<u64, ClientError> {
+        self.host(HostWrite::NotificationMarkRead { id }, |r| if let HostResult::Count { count } = r { Some(count) } else { None }).await
+    }
+
     /// Remove one notification.
     pub async fn dismiss_notification(&self, id: String) -> Result<u64, ClientError> {
         self.host(HostWrite::NotificationDismiss { id }, |r| if let HostResult::Count { count } = r { Some(count) } else { None }).await

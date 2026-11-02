@@ -187,6 +187,10 @@ pub enum HostWrite {
     AppKeyRevoke { key_id: aurelius_domain::AppKeyId },
     #[serde(rename = "notification.mark_all_read")]
     NotificationMarkAllRead,
+    /// One row read, for this board member only (feature `personal_inbox`); answers
+    /// `Count`, 0 when there was nothing to read, so it can be repeated.
+    #[serde(rename = "notification.mark_read")]
+    NotificationMarkRead { id: String },
     #[serde(rename = "notification.dismiss")]
     NotificationDismiss { id: String },
     #[serde(rename = "notification.dismiss_all")]
@@ -430,6 +434,7 @@ impl HostWrite {
         "app_key.create",
         "app_key.revoke",
         "notification.mark_all_read",
+        "notification.mark_read",
         "notification.dismiss",
         "notification.dismiss_all",
         "backup.create",

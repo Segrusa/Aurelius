@@ -585,6 +585,21 @@ pub fn dismiss_all_for(tx: &rusqlite::Transaction<'_>, user: Option<&str>) -> Re
     Ok(own + shared)
 }
 
+/// `mark_all_read_for`, of one row. Answers 1 when it was unread and `user` can see
+/// it; 0 for an unknown id, someone else's row, a row that is no longer shown, one
+/// already read or without a board member, so a client may repeat it.
+pub fn mark_read_for(tx: &rusqlite::Transaction<'_>, id: &str, user: Option<&str>) -> Result<usize, StorageError> {
+    let Some(user) = viewer(user) else { return Ok(0) };
+    let now = now_ms();
+    let unread = format!("FROM notifications n JOIN events e ON e.id = n.event_id WHERE n.id = ?1 AND NOT {} AND {STILL_RELEVANT}", read_by(2));
+    let own = tx.execute(&format!("UPDATE notifications SET read_at_ms = ?3 WHERE id IN (SELECT n.id {unread} AND n.user_id = ?2)"), params![id, user, now])?;
+    let shared = tx.execute(
+        &format!("INSERT INTO notification_reads(notification_id, user_id, read_at_ms) SELECT n.id, ?2, ?3 {unread} AND n.user_id IS NULL AND {}", visible_to(2)),
+        params![id, user, now],
+    )?;
+    Ok(own + shared)
+}
+
 /// Mark what `user` has not read as read, for them only. Answers how many; without
 /// a board member none.
 pub fn mark_all_read_for(tx: &rusqlite::Transaction<'_>, user: Option<&str>) -> Result<usize, StorageError> {

@@ -163,6 +163,47 @@ fn a_notification_for_everyone_dismissed_by_one_keeps_its_row_for_push_routing()
     assert!(all.iter().any(|n| n.id == FOR_ALL && !n.read));
 }
 
+// ---- One row read (notification.mark_read) ------------------------------------
+
+fn mark_read(store: &Store, id: &'static str, user: &'static str) -> usize {
+    store.write(|tx| timeline::mark_read_for(tx, id, Some(user))).unwrap()
+}
+
+#[test]
+fn a_row_for_everyone_read_by_one_stays_unread_for_the_other() {
+    let (_dir, store) = inbox();
+    assert_eq!(mark_read(&store, FOR_ALL, ALEX), 1);
+    assert_eq!(shown(&store, ALEX), [row(FOR_ALEX, false), row(FOR_ALL, true)]);
+    assert_eq!(shown(&store, BEA), [row(FOR_ALL, false), row(FOR_BEA, false)]);
+    assert_eq!(unread(&store, BEA), 2);
+}
+
+#[test]
+fn only_the_row_named_is_read_and_a_second_time_counts_nothing() {
+    let (_dir, store) = inbox();
+    assert_eq!(mark_read(&store, FOR_ALEX, ALEX), 1);
+    assert_eq!(shown(&store, ALEX), [row(FOR_ALEX, true), row(FOR_ALL, false)]);
+    assert_eq!(mark_read(&store, FOR_ALEX, ALEX), 0);
+    assert_eq!(mark_read(&store, FOR_ALL, ALEX), 1);
+    assert_eq!(mark_read(&store, FOR_ALL, ALEX), 0);
+}
+
+#[test]
+fn no_one_reads_a_row_of_someone_else_or_an_unknown_one() {
+    let (_dir, store) = inbox();
+    assert_eq!(mark_read(&store, FOR_BEA, ALEX), 0);
+    assert_eq!(shown(&store, BEA), [row(FOR_ALL, false), row(FOR_BEA, false)]);
+    assert_eq!(mark_read(&store, "no-such-row", ALEX), 0);
+    assert_eq!(store.write(|tx| timeline::mark_read_for(tx, FOR_ALL, None)).unwrap(), 0);
+}
+
+#[test]
+fn a_dismissed_row_cannot_be_read() {
+    let (_dir, store) = inbox();
+    dismiss(&store, FOR_ALL, ALEX);
+    assert_eq!(mark_read(&store, FOR_ALL, ALEX), 0);
+}
+
 // ---- The rows of phase A (AUR-FA-S1) ---------------------------------------
 
 const T1: &str = "00000000-0000-7000-8000-000000000011";
