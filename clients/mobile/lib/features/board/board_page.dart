@@ -15,6 +15,7 @@ import '../../data/views.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import 'board_bloc.dart';
+import 'my_tickets_view.dart';
 import 'ticket_actions.dart';
 import 'ticket_card.dart';
 
@@ -111,6 +112,9 @@ class _BoardPageState extends State<BoardPage> {
   String? _me;
   bool _myLoginExpired = false;
   TicketView? _dragging;
+
+  /// The segmented control shows My tickets instead of the Board (A4).
+  bool _mine = false;
 
   @override
   void dispose() {
@@ -279,6 +283,16 @@ class _BoardPageState extends State<BoardPage> {
   /// Board members named in the responsible picker, for a filter without tickets.
   final _responsibleNames = <String, String>{};
 
+  /// A card of My tickets: the Board's card with the Board's columns around it; null until the Board is read.
+  Widget? _myCard(BuildContext context, BoardState board, CompanyState company, TicketView t, bool online) {
+    final columns = board.board?.columns;
+    if (columns == null) return null;
+    final own = columns.where((c) => c.column.kind == t.column).firstOrNull ?? BoardColumnCards(column: BoardColumnView(id: t.columnId, kind: t.column, name: t.column.name, position: 0, version: 1), tickets: const []);
+    final link = context.read<ConnectionBloc>().state;
+    final ctx = CardContext(columns: [for (final c in columns) c.column], column: own, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), online: online, me: _me, myLoginExpired: _myLoginExpired, responsible: link.has(ticketResponsibleFeature), follow: link.has(ticketFollowFeature), links: link.has(messageLocateFeature));
+    return TicketCard(key: ValueKey('ticket-${t.id}'), ticket: t, board: ctx);
+  }
+
   void _newTicket(BuildContext context, BoardState board) => context.push(board.projectId == null ? '/board/new' : '/board/new?project=${board.projectId}');
 
   @override
@@ -338,9 +352,23 @@ class _BoardPageState extends State<BoardPage> {
       ]);
     }
 
+    final myTicketsOn = !widget.inProject && link.has(myTicketsFeature);
     final page = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (myTicketsOn)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: CupertinoSlidingSegmentedControl<bool>(
+              key: const ValueKey('board-switch'),
+              groupValue: _mine,
+              children: const {false: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('Board')), true: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('My tickets'))},
+              onValueChanged: (v) => setState(() => _mine = v ?? false),
+            ),
+          ),
+        if (myTicketsOn && _mine)
+          Expanded(child: MyTicketsPane(me: _me, online: online, needsMe: (t) => needsMeOf(t, company, board, me: _me), cardFor: (t) => _myCard(context, board, company, t, online)))
+        else ...[
         if (board.board != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
@@ -376,6 +404,7 @@ class _BoardPageState extends State<BoardPage> {
           ),
         ),
         Expanded(child: content),
+        ],
       ],
     );
 

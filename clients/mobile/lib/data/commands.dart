@@ -67,6 +67,13 @@ abstract final class Commands {
 
   /// The board member's reaction [emoji] on a channel's message, added ([on]) or
   /// taken back (feature `chat_reactions`). Idempotent on the PC.
+  /// A new text for a message of your own (A6); the server wakes nobody. [confirmSecret]: the text may hold a vault secret's value.
+  static Map<String, dynamic> editMessage(String messageId, String text, {bool confirmSecret = false}) =>
+      messageEdit(EditMessage(messageId: messageId, text: text, confirmSecret: confirmSecret ? true : null));
+
+  /// Replaces a message of your own with a line that says it was deleted (A6).
+  static Map<String, dynamic> deleteMessage(String messageId) => messageDelete(DeleteMessage(messageId: messageId));
+
   static Map<String, dynamic> react(String messageId, String emoji, {required bool on}) => messageReact(ReactToMessage(emoji: emoji, messageId: messageId, on: on));
 
   /// A new conversation of the project. Auto, browser and screen need the Approve right.
