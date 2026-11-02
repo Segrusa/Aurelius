@@ -14,6 +14,7 @@ $menu = Join-Path ([Environment]::GetFolderPath("Programs")) "Aurelius.lnk"
 Write-Host "This removes:"
 Write-Host "  programs        $dest"
 Write-Host "  shortcut        $menu"
+Write-Host "  aurelius:// link registration (current user)"
 Write-Host "  start at sign-in (if on)"
 if ($RemoveData) {
     Write-Host "  YOUR DATA       $data  (chats, tasks, memory, backups)"
@@ -34,6 +35,7 @@ Start-Sleep -Milliseconds 800
 
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Aurelius" -ErrorAction SilentlyContinue
 if (Test-Path $menu) { Remove-Item $menu -Force }
+Remove-Item "HKCU:\Software\Classes\aurelius" -Recurse -Force -ErrorAction SilentlyContinue
 if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
 Write-Host "Programs removed."
 
