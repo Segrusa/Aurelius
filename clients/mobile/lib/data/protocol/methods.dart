@@ -250,6 +250,15 @@ abstract final class Methods {
   static const String memoryPin = 'memory.pin';
   static const String memoryRemember = 'memory.remember';
   static const String memoryRevise = 'memory.revise';
+  static const String messageDelete = 'message.delete';
+  static const String messageEdit = 'message.edit';
+  /// The earlier texts of a message, newest first (feature `message_edits`);
+  /// none for a deleted one. Not for apps.
+  static const String messageHistory = 'message.history';
+  /// Where a message is (feature `message_locate`), for a link to it: its
+  /// conversation, ticket and thread. Only a message of a channel or a ticket's
+  /// discussion; any other is `not_found`, as an unknown one. Not for apps.
+  static const String messageLocate = 'message.locate';
   static const String messageReact = 'message.react';
   /// A new note in a project; answers `Note`.
   static const String noteCreate = 'note.create';
@@ -405,6 +414,9 @@ abstract final class Methods {
   static const String ticketCancel = 'ticket.cancel';
   /// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
   static const String ticketCreate = 'ticket.create';
+  static const String ticketFollow = 'ticket.follow';
+  /// Who follows a ticket (feature `ticket_follow`). Not for apps.
+  static const String ticketFollowers = 'ticket.followers';
   /// One ticket with its main task and every task linked to it.
   static const String ticketGet = 'ticket.get';
   /// Tickets in board order (not archived); every given filter applies. `query`
@@ -420,6 +432,12 @@ abstract final class Methods {
   /// its own column stays where it is: no event, the version is unchanged.
   /// Unknown fields (such as the old `position`) are refused.
   static const String ticketMove = 'ticket.move';
+  /// The tickets of the board member of the session (feature `my_tickets`),
+  /// never of one named in a param: responsible, created or followed by them,
+  /// and open ones on their login or without an active responsible. Done and
+  /// archived ones only with `include_done`. By priority, then the latest
+  /// update; at most `MY_TICKETS_MAX`. Not for apps.
+  static const String ticketMyTickets = 'ticket.my_tickets';
   /// A board member writes in a ticket's discussion (feature `ticket_discussion`).
   /// Without `@Name` it goes to the owner while the ticket is in Todo (with an
   /// owner), Doing, Plan review, Testing or Review; else it wakes nobody. `@Name` wakes those
@@ -432,6 +450,10 @@ abstract final class Methods {
   static const String ticketRevisePlan = 'ticket.revise_plan';
   /// Review → Doing with feedback (required) for the owner.
   static const String ticketSendBack = 'ticket.send_back';
+  /// Choose the board member responsible for a ticket (`ticket.set_responsible`,
+  /// feature `ticket_responsible`). Its own command rather than a field of
+  /// `UpdateTicket`, where "nobody" and "unchanged" would need two kinds of none.
+  static const String ticketSetResponsible = 'ticket.set_responsible';
   /// The Start button: Backlog to Todo. With an employee the dispatcher is skipped.
   /// Also starts again a ticket whose main task failed.
   static const String ticketStart = 'ticket.start';
@@ -912,6 +934,25 @@ Map<String, dynamic> memoryList({String? employeeId, String? projectId}) => <Str
   },
 };
 
+/// The earlier texts of a message, newest first (feature `message_edits`);
+/// none for a deleted one. Not for apps.
+Map<String, dynamic> messageHistory({required String messageId}) => <String, dynamic>{
+  'method': Methods.messageHistory,
+  'params': <String, dynamic>{
+    'message_id': messageId,
+  },
+};
+
+/// Where a message is (feature `message_locate`), for a link to it: its
+/// conversation, ticket and thread. Only a message of a channel or a ticket's
+/// discussion; any other is `not_found`, as an unknown one. Not for apps.
+Map<String, dynamic> messageLocate({required String messageId}) => <String, dynamic>{
+  'method': Methods.messageLocate,
+  'params': <String, dynamic>{
+    'message_id': messageId,
+  },
+};
+
 /// One note with its Markdown body.
 Map<String, dynamic> noteGet({required String noteId}) => <String, dynamic>{
   'method': Methods.noteGet,
@@ -1163,6 +1204,14 @@ Map<String, dynamic> threadRead({required String messageId}) => <String, dynamic
   },
 };
 
+/// Who follows a ticket (feature `ticket_follow`). Not for apps.
+Map<String, dynamic> ticketFollowers({required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketFollowers,
+  'params': <String, dynamic>{
+    'ticket_id': ticketId,
+  },
+};
+
 /// One ticket with its main task and every task linked to it.
 Map<String, dynamic> ticketGet({required String ticketId}) => <String, dynamic>{
   'method': Methods.ticketGet,
@@ -1179,6 +1228,19 @@ Map<String, dynamic> ticketList({ColumnKind? column, String? projectId, String? 
     if (column != null) 'column': column.toJson(),
     if (projectId != null) 'project_id': projectId,
     if (query != null) 'query': query,
+  },
+};
+
+/// The tickets of the board member of the session (feature `my_tickets`),
+/// never of one named in a param: responsible, created or followed by them,
+/// and open ones on their login or without an active responsible. Done and
+/// archived ones only with `include_done`. By priority, then the latest
+/// update; at most `MY_TICKETS_MAX`. Not for apps.
+Map<String, dynamic> ticketMyTickets({bool? includeDone, String? projectId}) => <String, dynamic>{
+  'method': Methods.ticketMyTickets,
+  'params': <String, dynamic>{
+    if (includeDone != null) 'include_done': includeDone,
+    if (projectId != null) 'project_id': projectId,
   },
 };
 
@@ -2140,6 +2202,16 @@ Map<String, dynamic> memoryRevise(ReviseMemory params) => <String, dynamic>{
   'params': params.toJson(),
 };
 
+Map<String, dynamic> messageDelete(DeleteMessage params) => <String, dynamic>{
+  'method': Methods.messageDelete,
+  'params': params.toJson(),
+};
+
+Map<String, dynamic> messageEdit(EditMessage params) => <String, dynamic>{
+  'method': Methods.messageEdit,
+  'params': params.toJson(),
+};
+
 Map<String, dynamic> messageReact(ReactToMessage params) => <String, dynamic>{
   'method': Methods.messageReact,
   'params': params.toJson(),
@@ -2317,7 +2389,7 @@ Map<String, dynamic> ticketCancel({required String ticketId}) => <String, dynami
 };
 
 /// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
-Map<String, dynamic> ticketCreate({bool? confirmSecret, int? deadlineMs, String? description, List<String> files = const [], String? fromMessage, List<String> labels = const [], String? ownerEmployeeId, TicketPriority? priority, required String projectId, TaskRun? run, bool? start, required String title}) => <String, dynamic>{
+Map<String, dynamic> ticketCreate({bool? confirmSecret, int? deadlineMs, String? description, List<String> files = const [], String? fromMessage, List<String> labels = const [], String? ownerEmployeeId, TicketPriority? priority, required String projectId, String? responsibleUserId, TaskRun? run, bool? start, required String title}) => <String, dynamic>{
   'method': Methods.ticketCreate,
   'params': <String, dynamic>{
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
@@ -2329,10 +2401,16 @@ Map<String, dynamic> ticketCreate({bool? confirmSecret, int? deadlineMs, String?
     if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
     if (priority != null) 'priority': priority.toJson(),
     'project_id': projectId,
+    if (responsibleUserId != null) 'responsible_user_id': responsibleUserId,
     if (run != null) 'run': run.toJson(),
     if (start != null) 'start': start,
     'title': title,
   },
+};
+
+Map<String, dynamic> ticketFollow(FollowTicket params) => <String, dynamic>{
+  'method': Methods.ticketFollow,
+  'params': params.toJson(),
 };
 
 /// Drag a card. Within its column: only the order. To Todo: start it. To
@@ -2394,6 +2472,17 @@ Map<String, dynamic> ticketSendBack({bool? confirmSecret, required String feedba
   'params': <String, dynamic>{
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'feedback': feedback,
+    'ticket_id': ticketId,
+  },
+};
+
+/// Choose the board member responsible for a ticket (`ticket.set_responsible`,
+/// feature `ticket_responsible`). Its own command rather than a field of
+/// `UpdateTicket`, where "nobody" and "unchanged" would need two kinds of none.
+Map<String, dynamic> ticketSetResponsible({String? responsibleUserId, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketSetResponsible,
+  'params': <String, dynamic>{
+    if (responsibleUserId != null) 'responsible_user_id': responsibleUserId,
     'ticket_id': ticketId,
   },
 };

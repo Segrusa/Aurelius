@@ -1696,6 +1696,7 @@ sealed class Command {
           ownerEmployeeId: (json['owner_employee_id'] == null ? null : (json['owner_employee_id'] as String)),
           priority: (json['priority'] == null ? null : TicketPriority.fromJson(json['priority'] as String)),
           projectId: (json['project_id'] as String),
+          responsibleUserId: (json['responsible_user_id'] == null ? null : (json['responsible_user_id'] as String)),
           run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
           start: (json['start'] == null ? null : (json['start'] as bool)),
           title: (json['title'] as String),
@@ -1721,12 +1722,18 @@ sealed class Command {
         return CommandDeleteConversation(value: DeleteConversation.fromJson(json as Map<String, dynamic>));
       case 'delete_idea':
         return CommandDeleteIdea(value: DeleteIdea.fromJson(json as Map<String, dynamic>));
+      case 'delete_message':
+        return CommandDeleteMessage(value: DeleteMessage.fromJson(json as Map<String, dynamic>));
       case 'delete_queued_message':
         return CommandDeleteQueuedMessage(value: DeleteQueuedMessage.fromJson(json as Map<String, dynamic>));
       case 'delete_task_schedule':
         return CommandDeleteTaskSchedule(value: DeleteTaskSchedule.fromJson(json as Map<String, dynamic>));
       case 'discuss_task':
         return CommandDiscussTask(value: DiscussTask.fromJson(json as Map<String, dynamic>));
+      case 'edit_message':
+        return CommandEditMessage(value: EditMessage.fromJson(json as Map<String, dynamic>));
+      case 'follow_ticket':
+        return CommandFollowTicket(value: FollowTicket.fromJson(json as Map<String, dynamic>));
       case 'forget_memory':
         return CommandForgetMemory(value: ForgetMemory.fromJson(json as Map<String, dynamic>));
       case 'link_guideline':
@@ -1844,6 +1851,11 @@ sealed class Command {
         );
       case 'set_task_schedule_paused':
         return CommandSetTaskSchedulePaused(value: SetTaskSchedulePaused.fromJson(json as Map<String, dynamic>));
+      case 'set_ticket_responsible':
+        return CommandSetTicketResponsible(
+          responsibleUserId: (json['responsible_user_id'] == null ? null : (json['responsible_user_id'] as String)),
+          ticketId: (json['ticket_id'] as String),
+        );
       case 'share_message':
         return CommandShareMessage(value: ShareMessage.fromJson(json as Map<String, dynamic>));
       case 'start_idea':
@@ -2241,6 +2253,7 @@ final class CommandCreateTicket extends Command {
     this.ownerEmployeeId,
     this.priority,
     required this.projectId,
+    this.responsibleUserId,
     this.run,
     this.start,
     required this.title,
@@ -2261,6 +2274,10 @@ final class CommandCreateTicket extends Command {
   final String? ownerEmployeeId;
   final TicketPriority? priority;
   final String projectId;
+  /// The board member responsible from the start (feature `ticket_responsible`).
+  /// Left out: nobody. Optional, so a client leaves it out unless it chooses
+  /// someone: older servers refuse fields they do not know.
+  final String? responsibleUserId;
   /// Mode and model of the main task; unset fields follow the owner.
   final TaskRun? run;
   final bool? start;
@@ -2278,6 +2295,7 @@ final class CommandCreateTicket extends Command {
       if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
       if (priority != null) 'priority': priority?.toJson(),
       'project_id': projectId,
+      if (responsibleUserId != null) 'responsible_user_id': responsibleUserId,
       if (run != null) 'run': run?.toJson(),
       if (start != null) 'start': start,
       'title': title,
@@ -2401,6 +2419,20 @@ final class CommandDeleteIdea extends Command {
     };
 }
 
+final class CommandDeleteMessage extends Command {
+  const CommandDeleteMessage({
+    required this.value,
+  });
+
+  final DeleteMessage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'delete_message',
+      ...value.toJson(),
+    };
+}
+
 final class CommandDeleteQueuedMessage extends Command {
   const CommandDeleteQueuedMessage({
     required this.value,
@@ -2439,6 +2471,34 @@ final class CommandDiscussTask extends Command {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'discuss_task',
+      ...value.toJson(),
+    };
+}
+
+final class CommandEditMessage extends Command {
+  const CommandEditMessage({
+    required this.value,
+  });
+
+  final EditMessage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'edit_message',
+      ...value.toJson(),
+    };
+}
+
+final class CommandFollowTicket extends Command {
+  const CommandFollowTicket({
+    required this.value,
+  });
+
+  final FollowTicket value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'follow_ticket',
       ...value.toJson(),
     };
 }
@@ -3108,6 +3168,27 @@ final class CommandSetTaskSchedulePaused extends Command {
     };
 }
 
+/// Choose the board member responsible for a ticket (`ticket.set_responsible`,
+/// feature `ticket_responsible`). Its own command rather than a field of
+/// `UpdateTicket`, where "nobody" and "unchanged" would need two kinds of none.
+final class CommandSetTicketResponsible extends Command {
+  const CommandSetTicketResponsible({
+    this.responsibleUserId,
+    required this.ticketId,
+  });
+
+  /// None: nobody is responsible any more.
+  final String? responsibleUserId;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'set_ticket_responsible',
+      if (responsibleUserId != null) 'responsible_user_id': responsibleUserId,
+      'ticket_id': ticketId,
+    };
+}
+
 final class CommandShareMessage extends Command {
   const CommandShareMessage({
     required this.value,
@@ -3557,6 +3638,18 @@ sealed class CommandResult {
         return CommandResultMemoryStored(
           memoryId: (json['memory_id'] as String),
         );
+      case 'message_deleted':
+        return CommandResultMessageDeleted(
+          conversationId: (json['conversation_id'] as String),
+          deletedAtMs: (json['deleted_at_ms'] as num).toInt(),
+          messageId: (json['message_id'] as String),
+        );
+      case 'message_edited':
+        return CommandResultMessageEdited(
+          conversationId: (json['conversation_id'] as String),
+          editedAtMs: (json['edited_at_ms'] as num).toInt(),
+          messageId: (json['message_id'] as String),
+        );
       case 'message_reacted':
         return CommandResultMessageReacted(
           changed: (json['changed'] as bool),
@@ -3707,6 +3800,12 @@ sealed class CommandResult {
       case 'ticket_created':
         return CommandResultTicketCreated(
           number: (json['number'] as num).toInt(),
+          ticketId: (json['ticket_id'] as String),
+        );
+      case 'ticket_follow_changed':
+        return CommandResultTicketFollowChanged(
+          changed: (json['changed'] as bool),
+          on: (json['on'] as bool),
           ticketId: (json['ticket_id'] as String),
         );
       case 'ticket_message_posted':
@@ -4264,6 +4363,48 @@ final class CommandResultMemoryStored extends CommandResult {
     };
 }
 
+/// `message.delete` (feature `message_edits`).
+final class CommandResultMessageDeleted extends CommandResult {
+  const CommandResultMessageDeleted({
+    required this.conversationId,
+    required this.deletedAtMs,
+    required this.messageId,
+  });
+
+  final String conversationId;
+  final int deletedAtMs;
+  final String messageId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'message_deleted',
+      'conversation_id': conversationId,
+      'deleted_at_ms': deletedAtMs,
+      'message_id': messageId,
+    };
+}
+
+/// `message.edit` (feature `message_edits`).
+final class CommandResultMessageEdited extends CommandResult {
+  const CommandResultMessageEdited({
+    required this.conversationId,
+    required this.editedAtMs,
+    required this.messageId,
+  });
+
+  final String conversationId;
+  final int editedAtMs;
+  final String messageId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'message_edited',
+      'conversation_id': conversationId,
+      'edited_at_ms': editedAtMs,
+      'message_id': messageId,
+    };
+}
+
 /// `message.react` (feature `chat_reactions`): the reaction is as asked now.
 /// `changed` is false when it already was (on twice, off when not there).
 final class CommandResultMessageReacted extends CommandResult {
@@ -4793,6 +4934,28 @@ final class CommandResultTicketCreated extends CommandResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'ticket_created',
       'number': number,
+      'ticket_id': ticketId,
+    };
+}
+
+/// `ticket.follow` (feature `ticket_follow`): the reader follows it as asked
+/// now. `changed` is false when they already did (or did not).
+final class CommandResultTicketFollowChanged extends CommandResult {
+  const CommandResultTicketFollowChanged({
+    required this.changed,
+    required this.on,
+    required this.ticketId,
+  });
+
+  final bool changed;
+  final bool on;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'ticket_follow_changed',
+      'changed': changed,
+      'on': on,
       'ticket_id': ticketId,
     };
 }
@@ -5647,6 +5810,26 @@ final class DeleteIdea {
   };
 }
 
+/// A board member deletes their own message in a channel or a ticket's discussion
+/// (`message.delete`, feature `message_edits`): a line stays that says so. For a
+/// message still waiting for its answer see `conversation::DeleteQueuedMessage`.
+/// The text stays in the audit log: deleting does not erase a secret.
+final class DeleteMessage {
+  const DeleteMessage({
+    required this.messageId,
+  });
+
+  final String messageId;
+
+  factory DeleteMessage.fromJson(Map<String, dynamic> json) => DeleteMessage(
+    messageId: (json['message_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'message_id': messageId,
+  };
+}
+
 /// Delete a user message that still waits for its answer (1.9): its queued
 /// run is cancelled and the message is removed. Refused once that run started.
 final class DeleteQueuedMessage {
@@ -5756,6 +5939,35 @@ final class DiscussTask {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'task_id': taskId,
+  };
+}
+
+/// A board member changes the text of their own message in a channel or a
+/// ticket's discussion (`message.edit`, feature `message_edits`). It wakes nobody.
+/// The earlier text stays in the audit log: editing does not erase a secret.
+final class EditMessage {
+  const EditMessage({
+    this.confirmSecret,
+    required this.messageId,
+    required this.text,
+  });
+
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
+  final String messageId;
+  final String text;
+
+  factory EditMessage.fromJson(Map<String, dynamic> json) => EditMessage(
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
+    messageId: (json['message_id'] as String),
+    text: (json['text'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
+    'message_id': messageId,
+    'text': text,
   };
 }
 
@@ -6237,6 +6449,7 @@ enum EventKind {
   memorySuperseded('memory.superseded'),
   messageAssistantCommitted('message.assistant_committed'),
   messageDeleted('message.deleted'),
+  messageEdited('message.edited'),
   messageInterrupted('message.interrupted'),
   messageReacted('message.reacted'),
   messageSentNow('message.sent_now'),
@@ -6291,6 +6504,7 @@ enum EventKind {
   ticketCancelled('ticket.cancelled'),
   ticketCreated('ticket.created'),
   ticketDispatched('ticket.dispatched'),
+  ticketFollowChanged('ticket.follow_changed'),
   ticketMoved('ticket.moved'),
   ticketPlanApproved('ticket.plan_approved'),
   ticketPlanReview('ticket.plan_review'),
@@ -6421,6 +6635,64 @@ final class FileScopeTask extends FileScope {
       'kind': 'task',
       'task_id': taskId,
     };
+}
+
+/// The board member of the session starts (`on`) or stops following a ticket
+/// (`ticket.follow`, feature `ticket_follow`).
+final class FollowTicket {
+  const FollowTicket({
+    required this.on,
+    required this.ticketId,
+  });
+
+  final bool on;
+  final String ticketId;
+
+  factory FollowTicket.fromJson(Map<String, dynamic> json) => FollowTicket(
+    on: (json['on'] as bool),
+    ticketId: (json['ticket_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'on': on,
+    'ticket_id': ticketId,
+  };
+}
+
+/// One board member who follows a ticket (`ticket.followers`, feature `ticket_follow`).
+final class FollowerView {
+  const FollowerView({
+    required this.disabled,
+    required this.followedAtMs,
+    required this.reason,
+    required this.userId,
+    required this.username,
+  });
+
+  /// A disabled board member stays listed but gets no notifications.
+  final bool disabled;
+  final int followedAtMs;
+  /// Why they follow: `created`, `responsible`, `mentioned` or `manual`. Text,
+  /// not an enum, so a new reason never breaks an older client.
+  final String reason;
+  final String userId;
+  final String username;
+
+  factory FollowerView.fromJson(Map<String, dynamic> json) => FollowerView(
+    disabled: (json['disabled'] as bool),
+    followedAtMs: (json['followed_at_ms'] as num).toInt(),
+    reason: (json['reason'] as String),
+    userId: (json['user_id'] as String),
+    username: (json['username'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'disabled': disabled,
+    'followed_at_ms': followedAtMs,
+    'reason': reason,
+    'user_id': userId,
+    'username': username,
+  };
 }
 
 /// Remove from all future context and the search index; content is erased.
@@ -10631,6 +10903,68 @@ final class MessageFileView {
   };
 }
 
+/// `message.history` (feature `message_edits`): the earlier texts of a message,
+/// newest first, each through the vault redactor when it goes out.
+final class MessageHistoryView {
+  const MessageHistoryView({
+    required this.deleted,
+    required this.versions,
+  });
+
+  final bool deleted;
+  /// Always empty when `deleted`: a deleted text is gone in every client, even
+  /// though the audit log keeps it.
+  final List<MessageVersionView> versions;
+
+  factory MessageHistoryView.fromJson(Map<String, dynamic> json) => MessageHistoryView(
+    deleted: (json['deleted'] as bool),
+    versions: (json['versions'] as List<dynamic>).map((x0) => MessageVersionView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'deleted': deleted,
+    'versions': versions.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// `message.locate` (feature `message_locate`): where a message of a channel or
+/// a ticket's discussion is, so a link to it can open the right place.
+final class MessageLocation {
+  const MessageLocation({
+    required this.conversationId,
+    required this.messageId,
+    this.threadRoot,
+    this.ticketId,
+    this.ticketNumber,
+  });
+
+  final String conversationId;
+  final String messageId;
+  /// The message that starts the thread it replies in; none for a message of
+  /// the channel itself (also for a thread's root).
+  final String? threadRoot;
+  /// The ticket whose discussion it is in; none for a channel.
+  final String? ticketId;
+  /// The number of `ticket_id` (`#12`).
+  final int? ticketNumber;
+
+  factory MessageLocation.fromJson(Map<String, dynamic> json) => MessageLocation(
+    conversationId: (json['conversation_id'] as String),
+    messageId: (json['message_id'] as String),
+    threadRoot: (json['thread_root'] == null ? null : (json['thread_root'] as String)),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+    ticketNumber: (json['ticket_number'] == null ? null : (json['ticket_number'] as num).toInt()),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'conversation_id': conversationId,
+    'message_id': messageId,
+    if (threadRoot != null) 'thread_root': threadRoot,
+    if (ticketId != null) 'ticket_id': ticketId,
+    if (ticketNumber != null) 'ticket_number': ticketNumber,
+  };
+}
+
 enum MessageRole {
   assistant('assistant'),
   user('user');
@@ -10665,6 +10999,28 @@ enum MessageStatus {
   String toJson() => wire;
 }
 
+/// One earlier text of an edited message (`MessageHistoryView::versions`).
+final class MessageVersionView {
+  const MessageVersionView({
+    required this.replacedAtMs,
+    required this.text,
+  });
+
+  /// When an edit replaced this text.
+  final int replacedAtMs;
+  final String text;
+
+  factory MessageVersionView.fromJson(Map<String, dynamic> json) => MessageVersionView(
+    replacedAtMs: (json['replaced_at_ms'] as num).toInt(),
+    text: (json['text'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'replaced_at_ms': replacedAtMs,
+    'text': text,
+  };
+}
+
 final class MessageView {
   const MessageView({
     required this.activity,
@@ -10672,6 +11028,9 @@ final class MessageView {
     this.author,
     this.authorUser,
     required this.createdAtMs,
+    this.deletedAtMs,
+    this.editable,
+    this.editedAtMs,
     required this.files,
     required this.id,
     this.mode,
@@ -10707,6 +11066,15 @@ final class MessageView {
   /// and by older servers.
   final UserView? authorUser;
   final int createdAtMs;
+  /// When the message was deleted (feature `message_edits`): `text` is the
+  /// line that says so. Left out when it was not and by older servers.
+  final int? deletedAtMs;
+  /// The reading board member may edit and delete this message (feature
+  /// `message_edits`), per reader like `ReactionView::mine`. Left out when false.
+  final bool? editable;
+  /// When the message was last edited (feature `message_edits`). Left out when
+  /// it never was and by older servers.
+  final int? editedAtMs;
   /// Files the message mentions, kept with it (open them with `query/file`).
   final List<FileRef> files;
   final String id;
@@ -10774,6 +11142,9 @@ final class MessageView {
     author: (json['author'] == null ? null : (json['author'] as String)),
     authorUser: (json['author_user'] == null ? null : UserView.fromJson(json['author_user'] as Map<String, dynamic>)),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
+    deletedAtMs: (json['deleted_at_ms'] == null ? null : (json['deleted_at_ms'] as num).toInt()),
+    editable: (json['editable'] == null ? null : (json['editable'] as bool)),
+    editedAtMs: (json['edited_at_ms'] == null ? null : (json['edited_at_ms'] as num).toInt()),
     files: (json['files'] as List<dynamic>).map((x0) => FileRef.fromJson(x0 as Map<String, dynamic>)).toList(),
     id: (json['id'] as String),
     mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
@@ -10804,6 +11175,9 @@ final class MessageView {
     if (author != null) 'author': author,
     if (authorUser != null) 'author_user': authorUser?.toJson(),
     'created_at_ms': createdAtMs,
+    if (deletedAtMs != null) 'deleted_at_ms': deletedAtMs,
+    if (editable != null) 'editable': editable,
+    if (editedAtMs != null) 'edited_at_ms': editedAtMs,
     'files': files.map((x0) => x0.toJson()).toList(),
     'id': id,
     if (mode != null) 'mode': mode?.toJson(),
@@ -11149,6 +11523,20 @@ sealed class Method {
           projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
         );
         }
+      case 'message.history':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodMessageHistory(
+          messageId: (src['message_id'] as String),
+        );
+        }
+      case 'message.locate':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodMessageLocate(
+          messageId: (src['message_id'] as String),
+        );
+        }
       case 'note.get':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11341,6 +11729,13 @@ sealed class Method {
           messageId: (src['message_id'] as String),
         );
         }
+      case 'ticket.followers':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodTicketFollowers(
+          ticketId: (src['ticket_id'] as String),
+        );
+        }
       case 'ticket.get':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11355,6 +11750,14 @@ sealed class Method {
           column: (src['column'] == null ? null : ColumnKind.fromJson(src['column'] as String)),
           projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
           query: (src['query'] == null ? null : (src['query'] as String)),
+        );
+        }
+      case 'ticket.my_tickets':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodTicketMyTickets(
+          includeDone: (src['include_done'] == null ? null : (src['include_done'] as bool)),
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
         );
         }
       case 'timeline.list':
@@ -12177,6 +12580,43 @@ final class MethodMemoryList extends Method {
     };
 }
 
+/// The earlier texts of a message, newest first (feature `message_edits`);
+/// none for a deleted one. Not for apps.
+final class MethodMessageHistory extends Method {
+  const MethodMessageHistory({
+    required this.messageId,
+  });
+
+  final String messageId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'message.history',
+      'params': <String, dynamic>{
+      'message_id': messageId,
+    },
+    };
+}
+
+/// Where a message is (feature `message_locate`), for a link to it: its
+/// conversation, ticket and thread. Only a message of a channel or a ticket's
+/// discussion; any other is `not_found`, as an unknown one. Not for apps.
+final class MethodMessageLocate extends Method {
+  const MethodMessageLocate({
+    required this.messageId,
+  });
+
+  final String messageId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'message.locate',
+      'params': <String, dynamic>{
+      'message_id': messageId,
+    },
+    };
+}
+
 /// One note with its Markdown body.
 final class MethodNoteGet extends Method {
   const MethodNoteGet({
@@ -12711,6 +13151,23 @@ final class MethodThreadRead extends Method {
     };
 }
 
+/// Who follows a ticket (feature `ticket_follow`). Not for apps.
+final class MethodTicketFollowers extends Method {
+  const MethodTicketFollowers({
+    required this.ticketId,
+  });
+
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'ticket.followers',
+      'params': <String, dynamic>{
+      'ticket_id': ticketId,
+    },
+    };
+}
+
 /// One ticket with its main task and every task linked to it.
 final class MethodTicketGet extends Method {
   const MethodTicketGet({
@@ -12748,6 +13205,30 @@ final class MethodTicketList extends Method {
       if (column != null) 'column': column?.toJson(),
       if (projectId != null) 'project_id': projectId,
       if (query != null) 'query': query,
+    },
+    };
+}
+
+/// The tickets of the board member of the session (feature `my_tickets`),
+/// never of one named in a param: responsible, created or followed by them,
+/// and open ones on their login or without an active responsible. Done and
+/// archived ones only with `include_done`. By priority, then the latest
+/// update; at most `MY_TICKETS_MAX`. Not for apps.
+final class MethodTicketMyTickets extends Method {
+  const MethodTicketMyTickets({
+    this.includeDone,
+    this.projectId,
+  });
+
+  final bool? includeDone;
+  final String? projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'ticket.my_tickets',
+      'params': <String, dynamic>{
+      if (includeDone != null) 'include_done': includeDone,
+      if (projectId != null) 'project_id': projectId,
     },
     };
 }
@@ -13028,6 +13509,30 @@ final class MethodVaultReveal extends Method {
     };
 }
 
+/// `ticket.my_tickets` (feature `my_tickets`): the tickets of the board member
+/// of the session, at most `MY_TICKETS_MAX`. The client makes its tabs and
+/// counters from this one answer.
+final class MyTicketsView {
+  const MyTicketsView({
+    required this.following,
+    required this.tickets,
+  });
+
+  /// Which of them the reader follows: `TicketView` is the same for every reader.
+  final List<String> following;
+  final List<TicketView> tickets;
+
+  factory MyTicketsView.fromJson(Map<String, dynamic> json) => MyTicketsView(
+    following: (json['following'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    tickets: (json['tickets'] as List<dynamic>).map((x0) => TicketView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'following': following,
+    'tickets': tickets.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 /// A note of a project as `note.list` shows it.
 final class NoteSummary {
   const NoteSummary({
@@ -13147,45 +13652,85 @@ final class NotesSnapshot {
 
 final class NotificationView {
   const NotificationView({
+    this.conversationId,
     required this.createdAtMs,
     required this.id,
+    this.mergedCount,
+    this.messageId,
+    this.needsYou,
     required this.read,
+    this.reason,
     required this.severity,
     required this.subject,
     required this.targetType,
     this.taskId,
+    this.ticketId,
+    this.ticketNumber,
     required this.title,
   });
 
+  /// The channel or discussion the row is about (feature `personal_inbox`).
+  final String? conversationId;
   final int createdAtMs;
   final String id;
+  /// How many later events this one row stands for (feature `personal_inbox`).
+  /// Left out when none.
+  final int? mergedCount;
+  /// The message the row is about (feature `personal_inbox`).
+  final String? messageId;
+  /// The row waits for the reader, worked out when it is read so that it follows
+  /// a handover (feature `personal_inbox`). Left out when false.
+  final bool? needsYou;
   final bool read;
+  /// Why the reader gets the row (feature `personal_inbox`): `responsible`,
+  /// `mention`, `plan_review`, `review`, `sent_back`, `failed` or `login`. Text,
+  /// not an enum: a client shows an unknown reason as a plain row, so a new one
+  /// never breaks `notification.list` on an older client.
+  final String? reason;
   /// action | warning | info
   final String severity;
   final String subject;
   final String targetType;
   final String? taskId;
+  /// The ticket the row is about (feature `personal_inbox`). Left out otherwise and by older servers.
+  final String? ticketId;
+  /// The number of `ticket_id` (`#12`).
+  final int? ticketNumber;
   final String title;
 
   factory NotificationView.fromJson(Map<String, dynamic> json) => NotificationView(
+    conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     id: (json['id'] as String),
+    mergedCount: (json['merged_count'] == null ? null : (json['merged_count'] as num).toInt()),
+    messageId: (json['message_id'] == null ? null : (json['message_id'] as String)),
+    needsYou: (json['needs_you'] == null ? null : (json['needs_you'] as bool)),
     read: (json['read'] as bool),
+    reason: (json['reason'] == null ? null : (json['reason'] as String)),
     severity: (json['severity'] as String),
     subject: (json['subject'] as String),
     targetType: (json['target_type'] as String),
     taskId: (json['task_id'] == null ? null : (json['task_id'] as String)),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+    ticketNumber: (json['ticket_number'] == null ? null : (json['ticket_number'] as num).toInt()),
     title: (json['title'] as String),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (conversationId != null) 'conversation_id': conversationId,
     'created_at_ms': createdAtMs,
     'id': id,
+    if (mergedCount != null) 'merged_count': mergedCount,
+    if (messageId != null) 'message_id': messageId,
+    if (needsYou != null) 'needs_you': needsYou,
     'read': read,
+    if (reason != null) 'reason': reason,
     'severity': severity,
     'subject': subject,
     'target_type': targetType,
     if (taskId != null) 'task_id': taskId,
+    if (ticketId != null) 'ticket_id': ticketId,
+    if (ticketNumber != null) 'ticket_number': ticketNumber,
     'title': title,
   };
 }
@@ -14620,8 +15165,14 @@ sealed class ResponseBody {
         return ResponseBodyMemory(value: MemorySnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'memory_context':
         return ResponseBodyMemoryContext(value: MemoryContextView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'message_history':
+        return ResponseBodyMessageHistory(value: MessageHistoryView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'message_location':
+        return ResponseBodyMessageLocation(value: MessageLocation.fromJson(json['value'] as Map<String, dynamic>));
       case 'messages':
         return ResponseBodyMessages(value: MessagesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'my_tickets':
+        return ResponseBodyMyTickets(value: MyTicketsView.fromJson(json['value'] as Map<String, dynamic>));
       case 'note':
         return ResponseBodyNote(value: NoteView.fromJson(json['value'] as Map<String, dynamic>));
       case 'notes':
@@ -14700,6 +15251,8 @@ sealed class ResponseBody {
         return ResponseBodyThread(value: ThreadSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'ticket':
         return ResponseBodyTicket(value: TicketDetail.fromJson(json['value'] as Map<String, dynamic>));
+      case 'ticket_followers':
+        return ResponseBodyTicketFollowers(value: TicketFollowersView.fromJson(json['value'] as Map<String, dynamic>));
       case 'tickets':
         return ResponseBodyTickets(value: TicketsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'timeline':
@@ -15402,6 +15955,36 @@ final class ResponseBodyMemoryContext extends ResponseBody {
     };
 }
 
+/// `message.history`.
+final class ResponseBodyMessageHistory extends ResponseBody {
+  const ResponseBodyMessageHistory({
+    required this.value,
+  });
+
+  final MessageHistoryView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'message_history',
+      'value': value.toJson(),
+    };
+}
+
+/// `message.locate`.
+final class ResponseBodyMessageLocation extends ResponseBody {
+  const ResponseBodyMessageLocation({
+    required this.value,
+  });
+
+  final MessageLocation value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'message_location',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodyMessages extends ResponseBody {
   const ResponseBodyMessages({
     required this.value,
@@ -15412,6 +15995,21 @@ final class ResponseBodyMessages extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'messages',
+      'value': value.toJson(),
+    };
+}
+
+/// `ticket.my_tickets`.
+final class ResponseBodyMyTickets extends ResponseBody {
+  const ResponseBodyMyTickets({
+    required this.value,
+  });
+
+  final MyTicketsView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'my_tickets',
       'value': value.toJson(),
     };
 }
@@ -15858,6 +16456,21 @@ final class ResponseBodyTicket extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'ticket',
+      'value': value.toJson(),
+    };
+}
+
+/// `ticket.followers`.
+final class ResponseBodyTicketFollowers extends ResponseBody {
+  const ResponseBodyTicketFollowers({
+    required this.value,
+  });
+
+  final TicketFollowersView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'ticket_followers',
       'value': value.toJson(),
     };
 }
@@ -18846,6 +19459,23 @@ final class TicketDetail {
   };
 }
 
+/// `ticket.followers` (feature `ticket_follow`): who follows a ticket.
+final class TicketFollowersView {
+  const TicketFollowersView({
+    required this.followers,
+  });
+
+  final List<FollowerView> followers;
+
+  factory TicketFollowersView.fromJson(Map<String, dynamic> json) => TicketFollowersView(
+    followers: (json['followers'] as List<dynamic>).map((x0) => FollowerView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'followers': followers.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 /// Why a ticket cannot run yet (`TicketView::needs`).
 enum TicketNeed {
   /// `login_user` has no working Claude login (none, expired, or disabled):
@@ -18910,6 +19540,9 @@ final class TicketView {
     required this.priority,
     required this.projectId,
     required this.projectName,
+    this.responsibleDisabled,
+    this.responsibleUserId,
+    this.responsibleUsername,
     this.reviewFeedback,
     this.rootTaskId,
     this.rootTaskStatus,
@@ -18955,6 +19588,15 @@ final class TicketView {
   final TicketPriority priority;
   final String projectId;
   final String projectName;
+  /// The responsible board member is disabled: a client treats the ticket as
+  /// having no active responsible, without a list of board members. Left out when false.
+  final bool? responsibleDisabled;
+  /// The board member who is responsible for the ticket (feature
+  /// `ticket_responsible`), next to the employee who owns its main task. None:
+  /// nobody. Left out then and by older servers.
+  final String? responsibleUserId;
+  /// The name of `responsible_user_id`, so a card needs no list of board members.
+  final String? responsibleUsername;
   /// The last feedback of a board member (send back, revise plan).
   final String? reviewFeedback;
   /// The current main task; earlier ones stay linked through their `ticket_id`.
@@ -18991,6 +19633,9 @@ final class TicketView {
     priority: TicketPriority.fromJson(json['priority'] as String),
     projectId: (json['project_id'] as String),
     projectName: (json['project_name'] as String),
+    responsibleDisabled: (json['responsible_disabled'] == null ? null : (json['responsible_disabled'] as bool)),
+    responsibleUserId: (json['responsible_user_id'] == null ? null : (json['responsible_user_id'] as String)),
+    responsibleUsername: (json['responsible_username'] == null ? null : (json['responsible_username'] as String)),
     reviewFeedback: (json['review_feedback'] == null ? null : (json['review_feedback'] as String)),
     rootTaskId: (json['root_task_id'] == null ? null : (json['root_task_id'] as String)),
     rootTaskStatus: (json['root_task_status'] == null ? null : TaskStatus.fromJson(json['root_task_status'] as String)),
@@ -19025,6 +19670,9 @@ final class TicketView {
     'priority': priority.toJson(),
     'project_id': projectId,
     'project_name': projectName,
+    if (responsibleDisabled != null) 'responsible_disabled': responsibleDisabled,
+    if (responsibleUserId != null) 'responsible_user_id': responsibleUserId,
+    if (responsibleUsername != null) 'responsible_username': responsibleUsername,
     if (reviewFeedback != null) 'review_feedback': reviewFeedback,
     if (rootTaskId != null) 'root_task_id': rootTaskId,
     if (rootTaskStatus != null) 'root_task_status': rootTaskStatus?.toJson(),
