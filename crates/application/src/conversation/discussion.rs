@@ -28,6 +28,7 @@
 
 use crate::run::events::{Ev, emit};
 use crate::run::queue::queue_run_marked;
+use crate::ticket_follow::Cause as FollowCause;
 use crate::{CommandContext, CommandService, Committed, domain_error, storage_error};
 use aurelius_domain::autonomy::AgentMode;
 use aurelius_domain::conversation::{MessageRole, MessageStatus};
@@ -627,7 +628,12 @@ pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation
     if !files.is_empty() {
         conv::set_message_files(tx, marking.message_id, files)?;
     }
-    Ok(vec![notice])
+    let mut notices = vec![notice];
+    if let Some(d) = load(tx, marking.conversation_id)? {
+        let run = run.to_string();
+        notices.extend(follow_named(tx, &d, &text, employee_cause(&run))?);
+    }
+    Ok(notices)
 }
 
 /// What a board member's message in a discussion did (`GroupMessageSent` /
@@ -773,6 +779,7 @@ impl CommandService {
             let mut notices = vec![n];
             let from = board_name(tx, user)?;
             let sent = board_message(tx, &store, &meta, &correlation, (&d, thread), message_id, (from, user), &text, Shared { images: &kept, files: files.clone() }, &mut notices)?;
+            notices.extend(follow_named(tx, &d, &text, FollowCause { actor: ActorKind::User, actor_id: Some(actor.clone()), correlation: &correlation, meta: meta.clone() })?);
             Ok(Ok((result(&d, (message_id, sent)), notices)))
         })
     }
@@ -807,7 +814,23 @@ pub(crate) fn decision_feedback(tx: &Tx<'_>, store: &Store, ticket: TicketId, us
         run_id: None,
         reply_to: None,
     }, Some(user))?;
-    Ok(vec![notice])
+    let mut notices = vec![notice];
+    notices.extend(follow_named(tx, &d, text, FollowCause { actor: ActorKind::User, actor_id: meta.get("principal_id").and_then(|p| p.as_str()).map(str::to_owned), correlation: command_id, meta: meta.clone() })?);
+    Ok(notices)
+}
+
+/// Who a message in a ticket's discussion names follows the ticket (US-A2); nothing in
+/// a channel, whose readers do not follow anything.
+fn follow_named(tx: &Tx<'_>, d: &Discussion, text: &str, cause: FollowCause<'_>) -> Result<Vec<EventNotice>, StorageError> {
+    match d.ticket() {
+        Some(t) => crate::ticket_follow::follow_mentioned(tx, t.id, t.project, text, &cause),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// An employee's message during `run` caused a follow.
+fn employee_cause(run: &str) -> FollowCause<'_> {
+    FollowCause { actor: ActorKind::Employee, actor_id: None, correlation: run, meta: serde_json::json!({ "run_id": run }) }
 }
 
 /// The thread a reply to `parent` goes into in `d`: `parent` itself, when it is
@@ -1034,6 +1057,8 @@ pub(crate) fn post_from_run(tx: &Tx<'_>, store: &Store, run: RunId, d: &Discussi
     // An answer to a reply in a thread goes into that thread.
     let thread = run_thread(tx, run, d)?;
     let mut notices = vec![post_in(tx, store, d.id, thread, posted, GROUP_KIND, &name, text, serde_json::json!({ "run_id": run, "hop": hop, "employee_id": me, "woke": woke }))?];
+    let run_text = run.to_string();
+    notices.extend(follow_named(tx, d, text, employee_cause(&run_text))?);
     let paused = match named.paused.as_slice() {
         [] => String::new(),
         [one] => format!(" {one} is paused and will not answer."),

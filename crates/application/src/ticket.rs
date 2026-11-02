@@ -18,14 +18,25 @@ use aurelius_domain::{
 use aurelius_storage::{
     Tx as Transaction, StorageError, blobs, company as company_store,
     events::{self, NewEvent},
-    queries, tasks as task_store, tickets as store,
+    followers::FollowReason,
+    queries, tasks as task_store, tickets as store, users,
 };
 use crate::task::{plan_review, ticket_line};
+use crate::ticket_follow;
 use aurelius_domain::views::system_action;
 use serde_json::{Value, json};
 
 /// Why a paused or archived employee cannot be the tester: nobody would run the tests.
 pub(crate) const TESTER_NOT_ACTIVE: &str = "The tester must be an active employee.";
+
+/// Why nothing about a ticket on Done changes.
+const TICKET_CLOSED: &str = "A ticket in Done is closed; it can no longer change.";
+
+/// Why a disabled board member cannot become the Responsible (US-A1).
+pub(crate) const RESPONSIBLE_DISABLED: &str = "A disabled board member cannot be made responsible.";
+
+/// Why an unknown board member cannot become the Responsible.
+pub(crate) const RESPONSIBLE_UNKNOWN: &str = "This board member does not exist.";
 
 /// The board member of the connection, or `board_member_required`.
 pub(crate) fn require_board_member(ctx: &CommandContext) -> Result<UserId, AppError> {
@@ -109,6 +120,24 @@ impl Events {
         self.notices.extend(notices);
     }
 
+    /// `user` follows the ticket now, in this write's transaction.
+    fn follow(&mut self, tx: &Transaction<'_>, ticket: TicketId, project: ProjectId, user: UserId, reason: FollowReason) -> Result<(), StorageError> {
+        let cause = ticket_follow::Cause { actor: ActorKind::User, actor_id: Some(self.actor.clone()), correlation: &self.command_id, meta: self.meta.clone() };
+        self.notices.extend(ticket_follow::follow(tx, ticket, project, user, reason, &cause)?);
+        Ok(())
+    }
+
+    /// Who is responsible changed: `ticket.updated`, the new Responsible follows, and
+    /// the line in the discussion. `by` is the board member of the write.
+    fn responsible(&mut self, tx: &Transaction<'_>, ticket: TicketId, project: ProjectId, before: Option<UserId>, after: Option<UserId>, by: Actor) -> Result<(), StorageError> {
+        self.push(tx, EventKind::TicketUpdated, json!({ "changed": ["responsible"], "by": by, "responsible_user_id": after, "before": before }))?;
+        if let Some(user) = after {
+            self.follow(tx, ticket, project, user, FollowReason::Responsible)?;
+        }
+        self.line(ticket_line::responsible_line(tx, ticket, by, before, after)?);
+        Ok(())
+    }
+
     /// `ticket.moved` from → to by `by`.
     fn moved(&mut self, tx: &Transaction<'_>, from: ColumnKind, to: ColumnKind, by: Actor) -> Result<(), StorageError> {
         self.push(tx, EventKind::TicketMoved, json!({ "from": from, "to": to, "by": by }))
@@ -124,6 +153,15 @@ fn check_employee(tx: &Transaction<'_>, id: EmployeeId) -> Result<Result<(), App
     Ok(match company_store::employee_status(tx, id)?.as_deref().and_then(LifecycleStatus::parse) {
         None => Err(domain_error(DomainError::EmployeeNotFound(id))),
         Some(LifecycleStatus::Archived) => Err(domain_error(DomainError::EmployeeArchived)),
+        Some(_) => Ok(()),
+    })
+}
+
+/// A board member who can become the Responsible: exists and is not disabled.
+fn check_responsible(tx: &Transaction<'_>, user: UserId) -> Result<Result<(), AppError>, StorageError> {
+    Ok(match users::get(tx, &user.to_string())? {
+        None => Err(AppError::new(aurelius_domain::ErrorCode::NotFound, RESPONSIBLE_UNKNOWN)),
+        Some(row) if row.disabled() => Err(AppError::new(aurelius_domain::ErrorCode::Validation, RESPONSIBLE_DISABLED)),
         Some(_) => Ok(()),
     })
 }
@@ -264,6 +302,26 @@ impl CommandService {
                     finish(tx, state.id, state.column, e)
                 })
             }
+            // No version check: a handover is always possible, also while someone edits.
+            Command::SetTicketResponsible(cmd) => self.commit(command_id, hash, move |tx| {
+                let state = check!(load(tx, cmd.ticket_id, None)?);
+                if state.column == ColumnKind::Done {
+                    return rejected(DomainError::Ticket(TICKET_CLOSED.into()));
+                }
+                let before = store::responsible(tx, state.id)?.map(|r| r.user_id);
+                let after = cmd.responsible_user_id;
+                // Before the check below: a disabled Responsible stays while nobody changes it.
+                if before == after {
+                    return Ok(Ok((CommandResult::TicketChanged { ticket_id: state.id, column: state.column, version: state.version }, Vec::new())));
+                }
+                if let Some(user) = after {
+                    check!(check_responsible(tx, user)?);
+                }
+                store::set_responsible(tx, state.id, after)?;
+                let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                e.responsible(tx, state.id, state.project_id, before, after, by)?;
+                finish(tx, state.id, state.column, e)
+            }),
             Command::ApprovePlan(cmd) => {
                 let feedback = ticket::valid_note("feedback", cmd.feedback.as_deref(), ticket::FEEDBACK_MAX).map_err(domain_error)?;
                 self.commit(command_id, hash, move |tx| {
@@ -442,10 +500,6 @@ impl CommandService {
     }
 
     fn create_ticket(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: ticket::CreateTicket, user: UserId) -> Result<Committed, AppError> {
-        // The phase A freeze: refused rather than dropped until the column exists.
-        if cmd.responsible_user_id.is_some() {
-            return Err(AppError::new(aurelius_domain::ErrorCode::Validation, crate::NOT_BUILT_YET));
-        }
         let title = ticket::valid_title(&cmd.title).map_err(domain_error)?;
         let description = ticket::valid_description(cmd.description.as_deref()).map_err(domain_error)?;
         let labels = ticket::valid_labels(&cmd.labels).map_err(domain_error)?;
@@ -467,6 +521,9 @@ impl CommandService {
             }
             if let Some(owner) = cmd.owner_employee_id {
                 check!(check_employee(tx, owner)?);
+            }
+            if let Some(responsible) = cmd.responsible_user_id {
+                check!(check_responsible(tx, responsible)?);
             }
             // "Make ticket" from a chat message (MU2-10 AC1/AC3): it must exist, in a channel, a
             // ticket's discussion, a chat with an employee, the project assistant or a task;
@@ -505,7 +562,18 @@ impl CommandService {
             )?;
             store::set_attachments(tx, id, stored.as_ref())?;
             let mut e = Events::new(&base, "ticket", id.to_string(), Some(cmd.project_id), 0);
-            e.push(tx, EventKind::TicketCreated, json!({ "number": number, "created_by_user": user, "by": by }))?;
+            store::set_responsible(tx, id, cmd.responsible_user_id)?;
+            e.push(tx, EventKind::TicketCreated, json!({ "number": number, "created_by_user": user, "by": by, "responsible_user_id": cmd.responsible_user_id }))?;
+            e.follow(tx, id, cmd.project_id, user, FollowReason::Created)?;
+            // Choosing someone else is news for them; "You" (the default, B9) says nothing new.
+            if let Some(responsible) = cmd.responsible_user_id.filter(|r| *r != user) {
+                e.responsible(tx, id, cmd.project_id, None, Some(responsible), by)?;
+            }
+            if let Some(text) = &description {
+                for named in ticket_follow::mentioned_board_members(tx, text)? {
+                    e.follow(tx, id, cmd.project_id, named, FollowReason::Mentioned)?;
+                }
+            }
             // The discussion starts with a link to the message, and its chat gets "→ #N" (MU2-10 AC3).
             if let Some((message, (conversation, label))) = &source {
                 e.line(crate::conversation::discussion::created_from(tx, id, number, user, *conversation, *message, label)?);
@@ -563,7 +631,7 @@ impl CommandService {
         let committed = self.commit(envelope.command_id, hash, move |tx| {
             let state = check!(load(tx, cmd.ticket_id, expected)?);
             if state.column == ColumnKind::Done {
-                return rejected(DomainError::Ticket("A ticket in Done is closed; it can no longer change.".into()));
+                return rejected(DomainError::Ticket(TICKET_CLOSED.into()));
             }
             if cmd.run.is_some() && state.root_status == Some(aurelius_domain::task::TaskStatus::Running) {
                 return rejected(DomainError::Ticket("Mode and model change only while the main task does not run.".into()));
@@ -601,6 +669,15 @@ impl CommandService {
                 blobs::register(tx, blob)?;
             }
             let blob_id = description_blob.as_ref().map(|b| b.id.to_string());
+            // Read before it is replaced: only names that are new here make someone follow.
+            let named = match description.as_ref().and_then(|d| d.as_deref()) {
+                Some(text) => {
+                    let read = |key: &str| st.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+                    let old = store::view(tx, state.id, &read)?.and_then(|t| t.description);
+                    ticket_follow::newly_mentioned(tx, old.as_deref(), text)?
+                }
+                None => Vec::new(),
+            };
             store::update_fields(
                 tx,
                 state.id,
@@ -633,6 +710,9 @@ impl CommandService {
                 extra["files_added"] = json!(files_added);
             }
             e.push(tx, EventKind::TicketUpdated, extra)?;
+            for user in named {
+                e.follow(tx, state.id, state.project_id, user, FollowReason::Mentioned)?;
+            }
             finish_then(tx, state.id, e, |_| Ok(told))
         });
         // Copies of a command that failed or was only replayed are not kept.

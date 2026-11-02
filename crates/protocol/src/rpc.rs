@@ -400,6 +400,8 @@ pub const FEATURES: &[&str] = &[
     feature::CHAT_THREADS,
     feature::CHAT_REACTIONS,
     feature::MESSAGE_LOCATE,
+    feature::TICKET_RESPONSIBLE,
+    feature::TICKET_FOLLOW,
 ];
 
 /// Daemon → client.
