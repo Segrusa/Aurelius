@@ -41,33 +41,87 @@ pub fn pass_to_running(_data_root: &std::path::Path, _url: &str) -> bool {
     false
 }
 
-/// Listen for links from later processes and send them to `tx`. Call only when no app answered
-/// `pass_to_running`: a socket left by a crash is replaced.
+/// Connections served at once; a silent client holds a thread for the read timeout, so the cap
+/// keeps a flood from the same user cheap.
 #[cfg(unix)]
-pub fn listen(data_root: &std::path::Path, tx: UnboundedSender<String>) {
+const MAX_CLIENTS: usize = 16;
+
+/// Bind a socket that is never reachable by others and put it at `path` only when nothing is
+/// there. The socket is bound inside a private (0700) folder, made 0600, and then hard-linked
+/// to `path`: the link fails when the name is taken, so two starts at once cannot both win and
+/// the name never holds a socket with the umask's rights.
+#[cfg(unix)]
+fn bind_private(path: &std::path::Path) -> std::io::Result<std::os::unix::net::UnixListener> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let dir = path.with_file_name(format!(".link-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
+    let tmp = dir.join("s");
+    let result = (|| {
+        let listener = std::os::unix::net::UnixListener::bind(&tmp)?;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::hard_link(&tmp, path)?;
+        Ok(listener)
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+/// Listen for links from later processes and send them to `tx`; false when this process could
+/// not become the listener. Call only when no app answered `pass_to_running`. A name that
+/// is taken is replaced only when nothing answers on it (a socket left by a crash): a live
+/// listener of a concurrent start stays.
+#[cfg(unix)]
+pub fn listen(data_root: &std::path::Path, tx: UnboundedSender<String>) -> bool {
     use std::io::{BufRead, Read};
+    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
     let path = socket_path(data_root);
-    let _ = std::fs::remove_file(&path);
-    let Ok(listener) = std::os::unix::net::UnixListener::bind(&path) else { return };
-    // Only this user may write to it.
-    let _ = std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600));
-    std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
-            let mut line = String::new();
-            // Bounded, so a client that never ends its line cannot grow it.
-            if std::io::BufReader::new(stream.take(MAX_LINK as u64)).read_line(&mut line).is_ok() {
-                let url = line.trim();
-                if !url.is_empty() && tx.send(url.to_string()).is_err() {
-                    return;
-                }
+    let listener = match bind_private(&path) {
+        Ok(listener) => listener,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if std::os::unix::net::UnixStream::connect(&path).is_ok() {
+                return false;
+            }
+            let _ = std::fs::remove_file(&path);
+            match bind_private(&path) {
+                Ok(listener) => listener,
+                Err(_) => return false,
             }
         }
+        Err(_) => return false,
+    };
+    let active = Arc::new(AtomicUsize::new(0));
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            if active.fetch_add(1, Ordering::SeqCst) >= MAX_CLIENTS {
+                active.fetch_sub(1, Ordering::SeqCst);
+                continue;
+            }
+            let (tx, active) = (tx.clone(), active.clone());
+            // One thread per connection: a client that stays silent holds only its own.
+            std::thread::spawn(move || {
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                let mut line = String::new();
+                // Bounded, so a client that never ends its line cannot grow it.
+                if std::io::BufReader::new(stream.take(MAX_LINK as u64)).read_line(&mut line).is_ok() {
+                    let url = line.trim();
+                    if !url.is_empty() {
+                        let _ = tx.send(url.to_string());
+                    }
+                }
+                active.fetch_sub(1, Ordering::SeqCst);
+            });
+        }
     });
+    true
 }
 
 #[cfg(not(unix))]
-pub fn listen(_data_root: &std::path::Path, _tx: UnboundedSender<String>) {}
+pub fn listen(_data_root: &std::path::Path, _tx: UnboundedSender<String>) -> bool {
+    false
+}
 
 #[cfg(all(test, unix))]
 mod tests {
@@ -96,7 +150,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(!pass_to_running(dir.path(), LINK), "no app runs yet");
         let (tx, mut rx) = channel();
-        listen(dir.path(), tx);
+        assert!(listen(dir.path(), tx));
         assert!(pass_to_running(dir.path(), ""), "a probe finds it");
         assert!(pass_to_running(dir.path(), LINK));
         assert!(pass_to_running(dir.path(), "aurelius://nonsense"));
@@ -107,8 +161,10 @@ mod tests {
             let b = tokio::time::timeout(wait, rx.recv()).await.unwrap().unwrap();
             (a, b)
         });
-        // The probe sent nothing, and the order is kept.
-        assert_eq!(got, (LINK.to_string(), "aurelius://nonsense".to_string()));
+        // The probe sent nothing; each connection has its own thread, so the order is not fixed.
+        let mut got = [got.0, got.1];
+        got.sort();
+        assert_eq!(got, [LINK.to_string(), "aurelius://nonsense".to_string()]);
     }
 
     #[test]
@@ -117,7 +173,60 @@ mod tests {
         std::fs::write(super::socket_path(dir.path()), b"stale").unwrap();
         assert!(!pass_to_running(dir.path(), LINK));
         let (tx, _rx) = channel();
-        listen(dir.path(), tx);
+        assert!(listen(dir.path(), tx));
         assert!(pass_to_running(dir.path(), LINK));
+    }
+
+    #[test]
+    fn the_socket_is_private_from_the_first_moment_and_leaves_nothing_behind() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, _rx) = channel();
+        assert!(listen(dir.path(), tx));
+        let mode = std::fs::metadata(super::socket_path(dir.path())).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, [std::ffi::OsString::from("desktop-link.sock")], "the private folder is gone");
+    }
+
+    #[test]
+    fn a_second_start_does_not_take_the_socket_of_a_live_listener() {
+        let dir = tempfile::tempdir().unwrap();
+        let (first, mut rx) = channel();
+        assert!(listen(dir.path(), first));
+        let (second, _rx2) = channel();
+        assert!(!listen(dir.path(), second), "the live one stays");
+        assert!(pass_to_running(dir.path(), LINK));
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        let got = rt.block_on(async { tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await });
+        assert_eq!(got.unwrap().as_deref(), Some(LINK));
+    }
+
+    #[test]
+    fn many_starts_at_once_leave_exactly_one_listener() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                let path = path.clone();
+                std::thread::spawn(move || listen(&path, channel().0))
+            })
+            .collect();
+        let wins = handles.into_iter().filter(|_| true).map(|h| usize::from(h.join().unwrap())).sum::<usize>();
+        assert_eq!(wins, 1);
+        assert!(pass_to_running(dir.path(), ""));
+    }
+
+    #[test]
+    fn a_silent_client_does_not_hold_up_the_next_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tx, mut rx) = channel();
+        assert!(listen(dir.path(), tx));
+        // Connects and says nothing; the listener would read it for 2 s.
+        let _silent = std::os::unix::net::UnixStream::connect(super::socket_path(dir.path())).unwrap();
+        assert!(pass_to_running(dir.path(), LINK));
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        let got = rt.block_on(async { tokio::time::timeout(std::time::Duration::from_millis(1000), rx.recv()).await });
+        assert_eq!(got.unwrap().as_deref(), Some(LINK));
     }
 }
