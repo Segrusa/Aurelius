@@ -5306,6 +5306,92 @@ mod tests {
             assert_eq!(gone.expect_err("no such message"), crate::screens::links::MESSAGE_GONE);
         }
 
+        /// A4 and A6 against the real server (F3), as the app uses them: `ticket.my_tickets` for the
+        /// reader and its tabs; an own post is `editable`, an edit shows its new text with the
+        /// earlier one in `message.history`, nobody else may edit it, and a delete leaves the fixed
+        /// line without its files; a deleted message cannot be edited again.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn my_tickets_and_message_edits_work_end_to_end() {
+            use crate::screens::my_tickets::{MyTab, tab_tickets};
+            use crate::screens::message_edit::DELETED;
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let _server = daemon(&root).await;
+            let mut app = start(Some(Target::Local { root: root.clone(), spawn: false }), super::memory_tokens().0);
+            let info = next(&mut app, |u| match u {
+                Update::Connection(Connection::Online { server, .. }) => Some(server),
+                _ => None,
+            })
+            .await;
+            assert!(info.my_tickets && info.message_edits, "{info:?}");
+            app.requests.send(Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new("Tr0ub4dor&3-zebra-ada".into()) })).unwrap();
+            let ada = next(&mut app, |u| match u {
+                Update::Who(w) => w.user.map(|u| u.id),
+                _ => None,
+            })
+            .await;
+            app.requests.send(Request::CreateProject { name: "Demo".into(), description: None, folder: None }).unwrap();
+            let project = next(&mut app, |u| match u {
+                Update::Created(p) => Some(p),
+                _ => None,
+            })
+            .await;
+            done(&mut app, new_ticket(project, "Mine"), None).await;
+            let ticket = tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog)[0].clone();
+
+            // A4: ada made it, so it is in Created by me; nothing more claims it.
+            let my = |include_done: bool| BoardCall::MyTickets { project: Some(project), include_done };
+            app.requests.send(Request::Board(my(false))).unwrap();
+            let view = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::MyTickets { result, .. }) => Some(result.expect("it reads")),
+                _ => None,
+            })
+            .await;
+            let numbers = |tab| tab_tickets(&view, tab, ada, |_| false).iter().map(|t| t.number).collect::<Vec<_>>();
+            assert_eq!(numbers(MyTab::Created), [ticket.number]);
+
+            // A6: an own post is editable; an edit shows its new text and keeps the earlier one.
+            let discussion = ticket.conversation_id.expect("every ticket has its discussion");
+            let post = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket.id, text: "First words".into(), images: vec![], files: vec![], thread_parent: None });
+            app.requests.send(Request::Board(BoardCall::Write { command: post, expected_version: None, done: None })).unwrap();
+            next(&mut app, |u| matches!(u, Update::Board(BoardUpdate::Posted { .. })).then_some(())).await;
+            let messages = read_discussion(&mut app, discussion).await;
+            let post = messages.iter().find(|m| m.text == "First words").expect("the post").clone();
+            assert!(crate::screens::message_edit::can_change(&post, info.message_edits), "own post");
+            assert!(messages.iter().filter(|m| m.system.is_some()).all(|m| !m.editable), "a system line is nobody's");
+            let write = |command| BoardCall::Write { command, expected_version: None, done: None };
+            let written = |u: Update| match u {
+                Update::Board(BoardUpdate::MessageWritten { message, deleted, result }) => Some((message, deleted, result)),
+                _ => None,
+            };
+            app.requests.send(Request::Board(write(Command::EditMessage(aurelius_domain::group_chat::EditMessage { message_id: post.id, text: "Better words".into(), confirm_secret: false })))).unwrap();
+            assert_eq!(next(&mut app, written).await, (post.id, false, Ok(())));
+            let messages = read_discussion(&mut app, discussion).await;
+            let edited = messages.iter().find(|m| m.id == post.id).expect("still there");
+            assert_eq!(edited.text, "Better words");
+            assert!(edited.edited_at_ms.is_some() && edited.deleted_at_ms.is_none() && edited.editable);
+            app.requests.send(Request::Board(BoardCall::MessageHistory(post.id))).unwrap();
+            let history = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::MessageHistory(id, r)) if id == post.id => Some(r.expect("it reads")),
+                _ => None,
+            })
+            .await;
+            assert_eq!(history.versions.iter().map(|v| v.text.as_str()).collect::<Vec<_>>(), ["First words"]);
+            assert!(!history.deleted);
+
+            // A delete leaves the fixed line, no actions, no files; it cannot be edited again.
+            app.requests.send(Request::Board(write(Command::DeleteMessage(aurelius_domain::group_chat::DeleteMessage { message_id: post.id })))).unwrap();
+            assert_eq!(next(&mut app, written).await, (post.id, true, Ok(())));
+            let messages = read_discussion(&mut app, discussion).await;
+            let gone = messages.iter().find(|m| m.id == post.id).expect("a line stays");
+            assert_eq!(gone.text, DELETED);
+            assert!(gone.deleted_at_ms.is_some() && !gone.editable && gone.files.is_empty() && gone.uploads.is_empty());
+            assert!(crate::screens::message_edit::is_deleted(gone));
+            app.requests.send(Request::Board(write(Command::EditMessage(aurelius_domain::group_chat::EditMessage { message_id: post.id, text: "Again".into(), confirm_secret: false })))).unwrap();
+            let (_, _, result) = next(&mut app, written).await;
+            assert!(result.is_err(), "a deleted message is not editable");
+        }
+
         async fn activity(app: &mut Handle, id: aurelius_domain::TicketId) -> Vec<aurelius_protocol::TimelineCard> {
             app.requests.send(Request::Board(BoardCall::Activity(id))).unwrap();
             next(app, |u| match u {
