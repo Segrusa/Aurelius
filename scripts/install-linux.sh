@@ -139,7 +139,19 @@ echo "Aurelius $version is installed in $bin"
 # so without this the old server would keep going.
 if pgrep -u "$(id -u)" -x aurelius-daemon >/dev/null 2>&1; then
     echo "Restarting the running server on the new version ..."
-    "$bin/aurelius-ctl" restart || echo "Could not restart the server: run '$bin/aurelius-ctl restart' yourself." >&2
+    # An older server of another protocol major refuses the new aurelius-ctl
+    # ("Update needed"): then stop its process and start the new one ourselves.
+    if ! "$bin/aurelius-ctl" restart; then
+        echo "The running server did not take the restart; stopping it ..."
+        pkill -TERM -u "$(id -u)" -x aurelius-daemon || true
+        for _ in $(seq 1 50); do
+            pgrep -u "$(id -u)" -x aurelius-daemon >/dev/null 2>&1 || break
+            sleep 0.2
+        done
+        pkill -KILL -u "$(id -u)" -x aurelius-daemon 2>/dev/null || true
+        setsid "$bin/aurelius-daemon" </dev/null >/dev/null 2>&1 &
+        echo "The new server is started. Restart a running app too."
+    fi
 fi
 case ":$PATH:" in
     *":$bin:"*) ;;
