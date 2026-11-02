@@ -18,6 +18,21 @@ import '../hosts/hosts_bloc.dart';
 /// when that host's app is up. In memory only, never on disk (§6.3).
 String? pendingAureliusLink;
 
+/// Set by the running host's app: takes [pendingAureliusLink] as soon as it can be
+/// opened (the server is connected and signed in), or says it is invalid.
+void Function()? takePendingAureliusLink;
+
+/// A link the operating system handed to the app (A5b): kept in memory, never on
+/// disk, and opened by the running host's app when it can. The last one wins.
+void receiveAureliusLink(String raw) {
+  pendingAureliusLink = raw;
+  takePendingAureliusLink?.call();
+}
+
+/// Whether [raw] may be handled now: an invalid link says so at once, a valid one
+/// waits until the server is connected and a board member is signed in (A5b).
+bool aureliusLinkReady(String raw, {required bool online, required bool signedIn}) => parseAureliusLink(raw) == null || (online && signedIn);
+
 /// Copy link on a ticket: "Link to #42 copied."
 Future<void> copyTicketLink(BuildContext context, String ticketId, int number) async {
   await Clipboard.setData(ClipboardData(text: ticketLinkOf(context.read<AureliusRepository>().host.hostId, ticketId)));
