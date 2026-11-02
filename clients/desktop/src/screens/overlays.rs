@@ -1514,6 +1514,10 @@ impl AppView {
                 format!("Run #{} on your Claude login?", self.board.ticket(ticket).map_or(0, |t| t.number)),
                 "From now on this ticket and all its work use your own Claude subscription instead of its creator's. Its creator stays. Nothing else runs on your login.",
             ),
+            ConfirmKind::LinkOtherServer(link) => (
+                self.link_question(&link).0,
+                "The window starts over on that server, and the link opens there.",
+            ),
             ConfirmKind::ArchiveVaultItem(item) => (
                 crate::screens::vault::delete_title(self.vault.item(item)),
                 crate::screens::vault::DELETE_BODY,
@@ -1527,7 +1531,20 @@ impl AppView {
                 "Claude Code signs out on the server and your login's folder there is removed. Your tickets wait until you connect again; nothing runs on someone else's login.",
             ),
         };
+        // AUR-FA §2.4: their tickets keep them as Responsible; nothing is wiped silently.
+        let responsible_for = match kind {
+            ConfirmKind::DisableMember(user) if self.ticket_responsible_supported() => {
+                let tickets = self.board.view.iter().flat_map(|v| v.columns.iter()).flat_map(|c| c.tickets.iter());
+                crate::screens::who::disable_note(&self.member_name(user), tickets.filter(|t| t.responsible_user_id == Some(user) && t.column != aurelius_domain::ticket::ColumnKind::Done).count())
+            }
+            _ => None,
+        };
+        let switch_label = match kind {
+            ConfirmKind::LinkOtherServer(link) => format!("Switch to {}", self.link_question(&link).1),
+            _ => String::new(),
+        };
         let confirm_label = match kind {
+            ConfirmKind::LinkOtherServer(_) => switch_label.as_str(),
             ConfirmKind::ForgetMemory(_) => "Forget",
             ConfirmKind::DeleteConversation(_) | ConfirmKind::DeleteSchedule(_) | ConfirmKind::DeleteIdea(_) => "Delete",
             ConfirmKind::RestoreBackup(_) => "Restore",
@@ -1550,7 +1567,8 @@ impl AppView {
             .child(
                 ui::scroll_frame(scroll, scroll_body("confirm-body", scroll, (max_h - 70.).max(120.)).p(px(22.)).gap(px(10.))
                     .child(div().font_family(ui::serif(cx)).text_size(px(21.)).child(title))
-                    .child(div().text_size(px(13.)).line_height(px(19.)).text_color(c(theme::TEXT_2)).child(body))),
+                    .child(div().text_size(px(13.)).line_height(px(19.)).text_color(c(theme::TEXT_2)).child(body))
+                    .children(responsible_for.map(|text| div().text_size(px(13.)).line_height(px(19.)).text_color(c(theme::TEXT_2)).child(text)))),
             )
             .child(
                 h().px(px(22.)).py(px(14.)).gap(px(8.)).justify_end().border_t_1().border_color(c(theme::BORDER))

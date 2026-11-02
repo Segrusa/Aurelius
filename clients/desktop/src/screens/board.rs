@@ -17,6 +17,7 @@ use crate::ui::{self, ButtonKind, h, v};
 use aurelius_domain::ticket::{BoardColumnCards, BoardView, ColumnKind, TicketDetail, TicketNeed, TicketPriority, TicketView};
 use aurelius_domain::{Command, ConversationId, EmployeeId, ProjectId, TicketId, UserId, ticket};
 use aurelius_protocol::TimelineCard;
+use crate::screens::who::{FormResponsible, PREF_RESPONSIBLE, ResponsibleFilter};
 use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -114,6 +115,23 @@ impl Needs {
             Needs::Approval => "Waiting for your approval",
             Needs::ConnectLogin => "Needs you · Claude login",
         }
+    }
+
+    /// The same state for a board member it does not count for (B6): they can still decide.
+    pub fn others_label(self) -> &'static str {
+        match self {
+            Needs::Review => "Waiting for review",
+            Needs::PlanReview => "Waiting for plan review",
+            Needs::ChooseOwner => "Choose an employee",
+            Needs::Failed => "✕ Failed",
+            Needs::Approval => "Waiting for approval",
+            Needs::ConnectLogin => "Waiting for a Claude login",
+        }
+    }
+
+    /// What a card says, by whom it counts for.
+    pub fn line(self, mine: bool) -> &'static str {
+        if mine { self.label() } else { self.others_label() }
     }
 }
 
@@ -218,6 +236,23 @@ pub fn needs_you(t: &TicketView, choosing: bool, root_approvals: u32) -> Option<
         ColumnKind::Todo if t.owner_employee_id.is_none() && !choosing => Some(Needs::ChooseOwner),
         _ => None,
     }
+}
+
+/// Whether a ticket's need counts for this board member (B6, freeze §1): ◆, the filter, the
+/// badge and Waiting on me follow this; `needs` is what the card shows, and anyone can still
+/// decide. A login only for its own; anything else for the Responsible, and for everyone when
+/// nobody active is responsible. A server without Responsible sends none: for everyone.
+pub fn needs_me(needs: Option<Needs>, t: &TicketView, me: Option<UserId>) -> bool {
+    match needs {
+        None => false,
+        Some(Needs::ConnectLogin) => me == Some(t.login_user),
+        Some(_) => t.responsible_user_id.is_none() || t.responsible_disabled || t.responsible_user_id == me,
+    }
+}
+
+/// What the review and plan bars say to someone else than the Responsible (§1.4).
+pub fn decide_too(t: &TicketView) -> Option<String> {
+    t.responsible_username.as_ref().filter(|_| t.responsible_user_id.is_some() && !t.responsible_disabled).map(|name| format!("{name} is responsible. You can decide too."))
 }
 
 /// Whose Claude login a ticket runs on (MU3-10 AC4): "your" or "Alex's".
@@ -468,9 +503,10 @@ impl CreatorFilter {
     }
 }
 
-/// The cards a column shows under the filters: owner, creator, "Find" (title,
+/// The cards a column shows under the filters: owner, creator, Responsible, "Find" (title,
 /// `#number` and labels) and "Needs you only". Done: newest first, `DONE_SHOWN` unless all.
-pub fn shown_cards<'a>(column: &'a BoardColumnCards, owner: OwnerFilter, creator: Option<UserId>, query: &str, needs: impl Fn(&TicketView) -> bool, needs_only: bool, done_all: bool) -> (Vec<&'a TicketView>, usize) {
+#[allow(clippy::too_many_arguments)]
+pub fn shown_cards<'a>(column: &'a BoardColumnCards, owner: OwnerFilter, creator: Option<UserId>, responsible: Option<Option<UserId>>, query: &str, needs: impl Fn(&TicketView) -> bool, needs_only: bool, done_all: bool) -> (Vec<&'a TicketView>, usize) {
     let query = query.trim().to_lowercase();
     let number = query.trim_start_matches('#');
     let mut cards: Vec<&TicketView> = column
@@ -482,6 +518,7 @@ pub fn shown_cards<'a>(column: &'a BoardColumnCards, owner: OwnerFilter, creator
             OwnerFilter::Employee(e) => t.owner_employee_id == Some(e),
         })
         .filter(|t| creator.is_none_or(|u| t.created_by_user == u))
+        .filter(|t| crate::screens::who::responsible_matches(t, responsible))
         .filter(|t| {
             query.is_empty()
                 || t.title.to_lowercase().contains(&query)
@@ -644,6 +681,7 @@ pub fn activity_text(card: &TimelineCard) -> String {
         "ticket.cancelled" => format!("{who} put it back in Backlog"),
         "ticket.archived" => format!("{who} archived it"),
         "ticket.updated" if card.actor == "system" => "Nobody chose an owner; a board member must".into(),
+        "ticket.updated" if card.detail.contains("responsible") => format!("{who} changed who is responsible"),
         "ticket.updated" => format!("{who} changed it"),
         // Plan approved: the main task's conversation left Plan mode (D-07).
         "conversation.settings_changed" => "The main task's mode changed".into(),
@@ -780,8 +818,8 @@ pub fn held_target(grid: &Grid, held: &Held) -> Option<(ColumnKind, Option<Ticke
 }
 
 /// The one label a card has for a screen reader (§15): number, title, priority,
-/// owner, state, deadline and column.
-pub fn card_label(t: &TicketView, state: Option<&str>, deadline: Option<&str>, column: &str) -> String {
+/// owner, state, deadline and column; `who`: the who block's sentence (AUR-FA §1.3).
+pub fn card_label(t: &TicketView, state: Option<&str>, deadline: Option<&str>, column: &str, who: Option<&str>) -> String {
     let priority = match t.priority {
         TicketPriority::Urgent => "Urgent",
         TicketPriority::High => "High",
@@ -795,7 +833,11 @@ pub fn card_label(t: &TicketView, state: Option<&str>, deadline: Option<&str>, c
         chars.next().map(|f| f.to_lowercase().chain(chars).collect::<String>()).unwrap_or_default()
     }));
     parts.push(format!("in {column}"));
-    format!("{}.", parts.join(", "))
+    let label = format!("{}.", parts.join(", "));
+    match who {
+        Some(who) => format!("{label} {who}"),
+        None => label,
+    }
 }
 
 /// The cards another device or an employee moved to another column, between two
@@ -877,6 +919,14 @@ pub enum BoardDo {
     FilterProject(Option<ProjectId>),
     FilterOwner(OwnerFilter),
     FilterCreator(CreatorFilter),
+    /// The Responsible of a ticket (`None`: nobody, AUR-FA A1).
+    Responsible(TicketId, Option<UserId>),
+    /// "Set responsible…" on a card.
+    ResponsibleMenu(TicketId),
+    /// Follow (`true`) or unfollow a ticket (AUR-FA A2).
+    Follow(TicketId, bool),
+    FilterResponsible(ResponsibleFilter),
+    FormResponsible(FormResponsible),
     /// The New ticket form's dropdowns.
     FormProject(ProjectId),
     FormPriority(TicketPriority),
@@ -902,6 +952,8 @@ pub struct NewTicket {
     pub project: Option<ProjectId>,
     pub priority: TicketPriority,
     pub owner: Option<EmployeeId>,
+    /// Who follows up (feature `ticket_responsible`): You unless chosen otherwise (B9).
+    pub responsible: FormResponsible,
     pub run: aurelius_domain::task::RunSettings,
     /// Files on this computer to attach (path, size), uploaded first to a remote server (MU1-07).
     pub files: Vec<(std::path::PathBuf, u64)>,
@@ -941,6 +993,14 @@ pub struct Board {
     pub owner: OwnerFilter,
     /// "Created by" (ui-ontwerp §3).
     pub creator: CreatorFilter,
+    /// "Responsible" (AUR-FA P-77), remembered per client; counts only with `ticket_responsible`.
+    pub responsible: ResponsibleFilter,
+    /// Who follows each ticket read so far (`ticket.followers`), or why it did not load.
+    pub followers: HashMap<TicketId, Result<Vec<ticket::FollowerView>, String>>,
+    /// The names of the open ticket's followers show.
+    pub followers_open: bool,
+    /// The pointer is on the Follow button: it says Unfollow.
+    pub follow_hover: bool,
     pub needs_only: bool,
     pub find: Entity<InputState>,
     /// The ticket in the right panel, once loaded.
@@ -1055,6 +1115,10 @@ impl Board {
             project,
             owner: OwnerFilter::Anyone,
             creator: CreatorFilter::Anyone,
+            responsible: crate::app::ui_prefs()[PREF_RESPONSIBLE].as_str().map_or(ResponsibleFilter::Anyone, ResponsibleFilter::from_pref),
+            followers: HashMap::new(),
+            followers_open: false,
+            follow_hover: false,
             needs_only: false,
             find: input("Find… (title, #number, label)", window, cx),
             detail: None,
@@ -1087,6 +1151,7 @@ impl Board {
                 project: None,
                 priority: TicketPriority::Normal,
                 owner: None,
+                responsible: FormResponsible::You,
                 run: Default::default(),
                 files: Vec::new(),
                 sent: false,
@@ -1389,6 +1454,7 @@ impl AppView {
             if self.board.tab == TicketTab::Activity {
                 let _ = self.requests.send(backend::Request::Board(BoardCall::Activity(id)));
             }
+            self.ticket_read_followers(id);
         }
         if let Some(id) = self.board_dialog_reads() {
             let _ = self.requests.send(backend::Request::Board(BoardCall::Ticket(id)));
@@ -1511,6 +1577,11 @@ impl AppView {
                 }
             }
             BoardUpdate::Discussion(conversation, result) => self.discussion_loaded(conversation, result),
+            BoardUpdate::Followers(id, result) => {
+                self.board.followers.insert(id, result.map(|v| v.followers));
+            }
+            BoardUpdate::FollowChanged => self.followers_changed(),
+            BoardUpdate::Located(result) => self.link_located(result, cx),
             BoardUpdate::Posted { ticket, to } => self.discussion_posted(ticket, to, cx),
             BoardUpdate::PostFailed { ticket, message } => {
                 self.board.posting = false;
@@ -1676,7 +1747,7 @@ impl AppView {
             .iter()
             .filter(|column| column_shown(column.column.kind, testing))
             .map(|column| {
-                let (cards, _) = shown_cards(column, self.board.owner, self.board.creator.user(self.active_member().map(|u| u.id)), &query, |t| self.ticket_needs(t).is_some(), self.board.needs_only, self.board.done_all);
+                let (cards, _) = shown_cards(column, self.board.owner, self.board.creator.user(self.active_member().map(|u| u.id)), self.board_responsible_wanted(), &query, |t| self.ticket_needs_me(t), self.board.needs_only, self.board.done_all);
                 (column.column.kind, cards.into_iter().map(|t| t.id).collect())
             })
             .collect()
@@ -1699,6 +1770,9 @@ impl AppView {
             return;
         }
         self.board.focused = focus_step(&grid, self.board.focused.filter(|id| find_in(&grid, *id).is_some()), step);
+        if let Some(id) = self.board.focused {
+            self.ticket_know_followers(id);
+        }
         cx.notify();
     }
 
@@ -1756,6 +1830,69 @@ impl AppView {
         self.open_menu(at, items, window, cx);
     }
 
+    /// The card the Board's letter keys act on: the keyboard's, else the open ticket's.
+    fn board_key_card(&self, cx: &App) -> Option<TicketView> {
+        if !board_keys_live(self.board.dialog, self.overlay) || self.board.held.is_some() {
+            return None;
+        }
+        let open = match self.panel {
+            Panel::Ticket(id) => self.board.ticket(id).cloned(),
+            _ => None,
+        };
+        self.board_focused(cx).or(open)
+    }
+
+    /// A: "Set responsible…" (feature `ticket_responsible`), at the card.
+    pub fn board_key_responsible(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(t) = self.board_key_card(cx).filter(|_| self.ticket_responsible_supported()) else { return };
+        let at = self.dropdown_bounds.borrow().get(FOCUSED_CARD).map_or_else(|| point(px(320.), px(200.)), |b| b.bottom_left());
+        self.open_responsible_menu(t.id, at, window, cx);
+    }
+
+    /// F: Follow or Unfollow (feature `ticket_follow`); the Responsible hears why not.
+    pub fn board_key_follow(&mut self, cx: &mut Context<Self>) {
+        let Some(t) = self.board_key_card(cx).filter(|_| self.ticket_follow_supported()) else { return };
+        let state = self.ticket_follow_state(&t);
+        if state.locked {
+            self.notify_user(crate::screens::who::follow_tip(state, None, t.number, ColumnKind::Doing), false, cx);
+        } else if self.board_online() {
+            self.ticket_follow(t.id, !state.following, cx);
+        }
+    }
+
+    /// The palette's commands on the Board's card (AUR-FA §8), only what this server does.
+    pub fn board_palette_entries(&self, cx: &App) -> Vec<crate::app::PaletteEntry> {
+        if self.screen != crate::app::Page::Board || self.board_key_card(cx).is_none() {
+            return Vec::new();
+        }
+        let entry = |label: &'static str, keys: Option<&'static str>, action: fn() -> Box<dyn Action>| crate::app::PaletteEntry { label: label.into(), hint: "Board".into(), keys, target: crate::app::PaletteTarget::Action(action) };
+        let mut entries = vec![entry("Copy link", Some("c"), || Box::new(crate::keymap::BoardCopyLink))];
+        if self.ticket_responsible_supported() {
+            entries.push(entry("Set responsible…", Some("a"), || Box::new(crate::keymap::BoardResponsible)));
+            entries.push(entry("Make me responsible", None, || Box::new(crate::keymap::BoardMakeMeResponsible)));
+        }
+        if self.ticket_follow_supported() {
+            entries.push(entry("Follow ticket", Some("f"), || Box::new(crate::keymap::BoardFollow)));
+        }
+        entries
+    }
+
+    /// "Make me responsible" from the palette.
+    pub fn board_key_make_me_responsible(&mut self, cx: &mut Context<Self>) {
+        let me = self.active_member().map(|u| u.id);
+        let Some(t) = self.board_key_card(cx).filter(|t| self.ticket_responsible_supported() && me.is_some() && crate::screens::who::responsible_editable(t)) else { return };
+        if self.board_online() {
+            self.ticket_set_responsible(t.id, me, cx);
+        }
+    }
+
+    /// C: Copy link.
+    pub fn board_key_copy_link(&mut self, cx: &mut Context<Self>) {
+        if let Some(t) = self.board_key_card(cx) {
+            self.copy_ticket_link(t.id, cx);
+        }
+    }
+
     /// Space: pick the focused card up (not in Done), or put it back where it was.
     pub fn board_key_pick(&mut self, cx: &mut Context<Self>) {
         if !board_keys_live(self.board.dialog, self.overlay) {
@@ -1800,6 +1937,12 @@ impl AppView {
         needs_you(t, self.ticket_choosing(t), approvals)
     }
 
+    /// Whether a ticket's need counts for the board member here (B6): ◆, the filter, the badge
+    /// and Waiting on me; `ticket_needs` stays what the card shows.
+    pub fn ticket_needs_me(&self, t: &TicketView) -> bool {
+        needs_me(self.ticket_needs(t), t, self.active_member().map(|u| u.id))
+    }
+
     /// Whether the board member whose login a ticket runs on is disabled (MU3-12 AC4).
     pub fn login_disabled(&self, t: &TicketView) -> bool {
         self.members.list.iter().any(|u| u.id == t.login_user && u.disabled_at_ms.is_some())
@@ -1825,10 +1968,10 @@ impl AppView {
         cx.notify();
     }
 
-    /// Tickets that need a board member now: the sidebar badge and the board's counter.
+    /// Tickets that need this board member now: the sidebar badge and the board's counter (B6).
     pub fn board_needs_count(&self) -> usize {
         let Some(view) = &self.board.view else { return 0 };
-        view.columns.iter().flat_map(|c| c.tickets.iter()).filter(|t| self.ticket_needs(t).is_some()).count()
+        view.columns.iter().flat_map(|c| c.tickets.iter()).filter(|t| self.ticket_needs_me(t)).count()
     }
 
     pub fn employee_name(&self, id: EmployeeId) -> Option<String> {
@@ -1872,7 +2015,9 @@ impl AppView {
             self.board.editing = None;
             self.board.edit_error = None;
             self.board.edit_files.clear();
+            self.board.followers_open = false;
         }
+        self.ticket_read_followers(id);
         if self.board.feedback_for != Some(id) {
             self.board.feedback_for = Some(id);
             self.board.feedback.update(cx, |f, cx| f.set_value("", window, cx));
@@ -2054,6 +2199,23 @@ impl AppView {
             items.extend(self.employee_choices().into_iter().map(|(id, name)| menu_entry(format!("Start with {name}"), BoardDo::Start(t.id, Some(id)), false, None)));
         }
         items.push(menu_entry("Copy link", BoardDo::CopyLink(t.id), false, None));
+        if self.ticket_follow_supported() {
+            let state = self.ticket_follow_state(t);
+            if !state.following {
+                items.push(menu_entry("Follow", BoardDo::Follow(t.id, true), false, None));
+            } else if !state.locked {
+                items.push(menu_entry("Unfollow", BoardDo::Follow(t.id, false), false, None));
+            }
+        }
+        if self.ticket_responsible_supported() && crate::screens::who::responsible_editable(t) {
+            let me = self.active_member().map(|u| u.id);
+            if me.is_some() && t.responsible_user_id == me {
+                items.push(menu_entry("Remove me as responsible", BoardDo::Responsible(t.id, None), false, None));
+            } else if me.is_some() {
+                items.push(menu_entry("Make me responsible", BoardDo::Responsible(t.id, me), false, None));
+            }
+            items.push(menu_entry("Set responsible…", BoardDo::ResponsibleMenu(t.id), false, None));
+        }
         items.push(None);
         items.extend(self.ticket_move_menu(t));
         if t.column == ColumnKind::Backlog {
@@ -2092,11 +2254,18 @@ impl AppView {
                     .unwrap_or_default();
                 self.ticket_update(ticket::UpdateTicket { run: Some(run), ..empty_update(id) }, cx)
             }
-            BoardDo::CopyLink(id) => {
-                let number = self.board.ticket(id).map_or(0, |t| t.number);
-                self.copy_text(format!("ticket-{id}"), format!("#{number} (ticket {id})"), cx);
-                self.notify_user(format!("Link to #{number} copied."), false, cx);
+            BoardDo::CopyLink(id) => self.copy_ticket_link(id, cx),
+            BoardDo::Responsible(id, user) => self.ticket_set_responsible(id, user, cx),
+            BoardDo::ResponsibleMenu(id) => {
+                let at = window.mouse_position();
+                self.open_responsible_menu(id, at, window, cx);
             }
+            BoardDo::Follow(id, on) => self.ticket_follow(id, on, cx),
+            BoardDo::FilterResponsible(f) => {
+                self.board.responsible = f;
+                crate::app::set_ui_value(PREF_RESPONSIBLE, serde_json::Value::String(f.to_pref()));
+            }
+            BoardDo::FormResponsible(f) => self.board.form.responsible = f,
             BoardDo::Dialog(d) => self.board_dialog(d, window, cx),
             BoardDo::FilterProject(p) => self.set_board_project(p, cx),
             BoardDo::FilterOwner(o) => self.board.owner = o,
@@ -2158,6 +2327,9 @@ impl AppView {
             );
             return items;
         }
+        if field == "board-responsible" {
+            return self.responsible_filter_menu();
+        }
         if field == "board-creator" {
             let me = self.active_member().map(|u| u.id);
             let mut items = vec![
@@ -2202,6 +2374,7 @@ impl AppView {
         form.sent = false;
         form.error = None;
         form.owner = None;
+        form.responsible = FormResponsible::You;
         form.priority = TicketPriority::Normal;
         form.run = Default::default();
         form.files.clear();
@@ -2316,6 +2489,7 @@ impl AppView {
                 .when(!locked && project.is_some(), |el| {
                     el.child(ui::icon_button("board-project-clear").aria_label("Clear the project filter").tooltip(ui::tip("Clear filter", None)).child("×").on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.set_board_project(None, cx))))
                 })
+                .when(self.ticket_responsible_supported(), |el| el.child(picker("board-responsible", self.responsible_filter_text(), self.board.responsible != ResponsibleFilter::Anyone, cx)))
                 .child(picker("board-owner", owner, self.board.owner != OwnerFilter::Anyone, cx))
                 .child(picker("board-creator", creator, self.board.creator != CreatorFilter::Anyone, cx))
                 .child(div().w(px(200.)).child(ui::input(&self.board.find)))
@@ -2408,7 +2582,7 @@ impl AppView {
         let query = self.board.find.read(cx).value().to_string();
         // A project's own board is not filtered: its empty state is "No tickets yet".
         let locked = self.project_board().is_some();
-        let filtered = (self.board_filter().is_some() && !locked) || self.board.owner != OwnerFilter::Anyone || self.board.creator != CreatorFilter::Anyone || !query.trim().is_empty() || self.board.needs_only;
+        let filtered = (self.board_filter().is_some() && !locked) || self.board.owner != OwnerFilter::Anyone || self.board.creator != CreatorFilter::Anyone || self.board_responsible_wanted().is_some() || !query.trim().is_empty() || self.board.needs_only;
         let loading = self.board.view.is_none();
         let testing = self.board_testing_supported();
         // Before the first answer: the default columns with skeleton cards (§3.3).
@@ -2432,7 +2606,7 @@ impl AppView {
         let mut lanes: Vec<AnyElement> = Vec::new();
         for (ci, column) in columns.iter().enumerate() {
             let kind = column.column.kind;
-            let (cards, older) = shown_cards(column, self.board.owner, self.board.creator.user(self.active_member().map(|u| u.id)), &query, |t| self.ticket_needs(t).is_some(), self.board.needs_only, self.board.done_all);
+            let (cards, older) = shown_cards(column, self.board.owner, self.board.creator.user(self.active_member().map(|u| u.id)), self.board_responsible_wanted(), &query, |t| self.ticket_needs_me(t), self.board.needs_only, self.board.done_all);
             shown_any |= !cards.is_empty();
             let folded = kind == ColumnKind::PlanReview && column.tickets.is_empty() && !self.board.plan_open && held.is_none_or(|h| h.to != ci);
             let name = column.column.name.clone();
@@ -2475,7 +2649,7 @@ impl AppView {
                 .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(name.clone()))
                 .child(div().text_size(px(11.5)).text_color(c(theme::TEXT_2)).child(count.to_string()))
                 .child(div().flex_1())
-                .when(kind == ColumnKind::Review && count > 0, |el| el.child(ui::needs_you_tag("Needs you", theme::ACCENT_TEXT)))
+                .when(kind == ColumnKind::Review && column.tickets.iter().any(|t| self.ticket_needs_me(t)), |el| el.child(ui::needs_you_tag("Needs you", theme::ACCENT_TEXT)))
                 .when(kind == ColumnKind::PlanReview && column.tickets.is_empty(), |el| {
                     el.child(ui::icon_button(("board-fold", ci)).aria_label("Collapse").tooltip(ui::tip("Collapse", None)).child("‹").on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
                         this.board.plan_open = false;
@@ -2546,6 +2720,8 @@ impl AppView {
                     div().id("board-clear-filter").cursor_pointer().text_color(c(theme::ACCENT_TEXT)).child("Clear filter").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
                         this.board.owner = OwnerFilter::Anyone;
                         this.board.creator = CreatorFilter::Anyone;
+                        this.board.responsible = ResponsibleFilter::Anyone;
+                        crate::app::set_ui_value(PREF_RESPONSIBLE, serde_json::Value::String(ResponsibleFilter::Anyone.to_pref()));
                         this.board.needs_only = false;
                         this.board.find.update(cx, |i, cx| i.set_value("", w, cx));
                         if locked {
@@ -2564,6 +2740,9 @@ impl AppView {
         let id = t.id;
         let choosing = self.ticket_choosing(t);
         let needs = self.ticket_needs(t);
+        // B6: what the card shows stays; ◆ and its accent only for whom it counts.
+        let mine = self.ticket_needs_me(t);
+        let who_block = self.ticket_responsible_supported();
         let root = t.root_task_id.and_then(|r| self.tasks.iter().find(|x| x.id == r));
         let done = t.column == ColumnKind::Done;
         let offset = aurelius_host::utc_offset_minutes_at(ui::now_ms());
@@ -2603,7 +2782,7 @@ impl AppView {
         };
         let deadline = t.deadline_ms.map(|d| deadline_text(d, ui::now_ms(), done, offset));
         let state = match (needs, t.column) {
-            (Some(n), _) => Some(n.label().to_string()),
+            (Some(n), _) => Some(n.line(mine).to_string()),
             (None, ColumnKind::Todo) if choosing => Some("the dispatcher is choosing".to_string()),
             (None, ColumnKind::Todo) if t.owner_employee_id.is_some() => Some("queued".to_string()),
             (None, ColumnKind::Doing) => Some("working".to_string()),
@@ -2611,7 +2790,7 @@ impl AppView {
             (None, ColumnKind::Done) => Some("done".to_string()),
             _ => None,
         };
-        let label = SharedString::from(card_label(t, state.as_deref(), deadline.as_ref().map(|(d, _)| d.as_str()), &self.board.column_name(t.column)));
+        let label = SharedString::from(card_label(t, state.as_deref(), deadline.as_ref().map(|(d, _)| d.as_str()), &self.board.column_name(t.column), who_block.then(|| crate::screens::who::who_sentence(t, me)).as_deref()));
         let action: Option<AnyElement> = match t.column {
             // B4: someone else's login is missing; take it over on the own, explicitly.
             _ if online && take_over_offered(t, me) => Some(
@@ -2670,7 +2849,7 @@ impl AppView {
             .bg(c(if open { theme::SURFACE_2 } else { theme::SURFACE }))
             .hover(|s| s.bg(c(theme::SURFACE_2)))
             .when(done, |el| el.opacity(0.75))
-            .when(needs.is_some(), |el| el.border_l_2().border_color(c(theme::ACCENT)))
+            .when(mine, |el| el.border_l_2().border_color(c(theme::ACCENT)))
             .when(self.board.busy.contains(&id), |el| el.opacity(0.6))
             // The keyboard's card: the focus ring always shows, also while it is held (§15).
             .when(focused || held, |el| el.border_2().border_color(c(theme::FOCUS_RING)).aria_active_descendant().child(ui::track_bounds(self.dropdown_bounds.clone(), FOCUSED_CARD)))
@@ -2690,6 +2869,7 @@ impl AppView {
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, w, cx| {
                     let Some(t) = this.board.ticket(id).cloned() else { return };
+                    this.ticket_know_followers(id);
                     let items = this.card_menu(&t);
                     this.open_menu(e.position, items, w, cx);
                 }),
@@ -2718,9 +2898,19 @@ impl AppView {
                         .when(delegations > 0 && matches!(t.column, ColumnKind::Doing | ColumnKind::Review), |el| el.child(div().text_size(px(11.)).text_color(c(theme::TEXT_2)).child(format!("⑂ {delegations} tasks")))),
                 )
             })
-            .children(needs.map(|n| h().gap(px(5.)).text_size(px(11.5)).text_color(c(if n == Needs::Failed { theme::NEGATIVE } else { theme::ACCENT_TEXT })).child(ui::diamond(7., theme::ACCENT_TEXT, true)).child(n.label())))
+            .children(needs.map(|n| {
+                let color = match (n, mine) {
+                    (Needs::Failed, _) => theme::NEGATIVE,
+                    (_, true) => theme::ACCENT_TEXT,
+                    (_, false) => theme::TEXT_2,
+                };
+                h().gap(px(5.)).text_size(px(11.5)).text_color(c(color)).when(mine, |el| el.child(ui::diamond(7., theme::ACCENT_TEXT, true))).child(n.line(mine))
+            }))
             .when(done, |el| el.child(h().gap(px(5.)).text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child(ui::check(10., theme::ACCENT_TEXT)).child(format!("Done{}", t.done_at_ms.map(|d| format!(" {}", ui::fmt_day(d))).unwrap_or_default()))))
-            .child(
+            // B8: the who block; "by …" stays only for a server without Responsible (P-91).
+            .child(if who_block {
+                self.render_card_who(t, key, deadline, cx)
+            } else {
                 h().gap(px(6.))
                     .text_size(px(11.))
                     .text_color(c(theme::TEXT_2))
@@ -2728,8 +2918,9 @@ impl AppView {
                     .child(div().min_w_0().truncate().child(owner.clone().unwrap_or_else(|| "No owner".into())))
                     .child(div().flex_1())
                     .children(deadline.map(|(text, color)| div().flex_none().text_color(c(color)).child(text)))
-                    .child(h().flex_none().gap(px(4.)).child(ui::member_monogram(&t.created_by_username, 14., cx)).child(format!("by {}", t.created_by_username))),
-            )
+                    .child(h().flex_none().gap(px(4.)).child(ui::member_monogram(&t.created_by_username, 14., cx)).child(format!("by {}", t.created_by_username)))
+                    .into_any_element()
+            })
             .children(action.map(|a| h().justify_end().child(a)))
             .into_any_element()
     }
@@ -2773,6 +2964,88 @@ pub(crate) mod tests {
 
     pub(crate) fn timeline(title: &str, actor: &str) -> TimelineCard {
         TimelineCard { seq: 1, at_ms: 0, kind: "activity".into(), label: "ACTIVITY".into(), title: title.into(), detail: "ticket".into(), actor: actor.into(), correlation_id: String::new(), task_id: None }
+    }
+
+    /// B6, freeze §1: needs_me = needs exists AND (login: me == login_user; else responsible
+    /// missing OR responsible_disabled OR responsible == me). Each case of the rule.
+    #[test]
+    fn needs_me_follows_the_rule_of_the_freeze_in_each_case() {
+        use super::needs_me;
+        use aurelius_domain::UserId;
+        let (me, other, login) = (UserId::new(), UserId::new(), UserId::new());
+        let mut t = card(42, ColumnKind::Review);
+        t.login_user = login;
+        // No need: never, also for the Responsible.
+        t.responsible_user_id = Some(me);
+        assert!(!needs_me(None, &t, Some(me)));
+        for need in [Needs::Review, Needs::PlanReview, Needs::ChooseOwner, Needs::Failed, Needs::Approval] {
+            // Nobody responsible: for everyone, as a server without the feature behaves.
+            t.responsible_user_id = None;
+            t.responsible_disabled = false;
+            assert!(needs_me(Some(need), &t, Some(me)), "{need:?} without a responsible");
+            assert!(needs_me(Some(need), &t, None), "{need:?} without a responsible, nobody signed in");
+            // The Responsible, and only the Responsible.
+            t.responsible_user_id = Some(me);
+            assert!(needs_me(Some(need), &t, Some(me)), "{need:?} for the responsible");
+            assert!(!needs_me(Some(need), &t, Some(other)), "{need:?} for someone else");
+            assert!(!needs_me(Some(need), &t, None), "{need:?} with a responsible, nobody signed in");
+            // A disabled Responsible counts as nobody.
+            t.responsible_disabled = true;
+            assert!(needs_me(Some(need), &t, Some(other)), "{need:?} with a disabled responsible");
+        }
+        // The login: only its own, whoever is responsible.
+        for (responsible, disabled) in [(None, false), (Some(me), false), (Some(other), false), (Some(other), true)] {
+            t.responsible_user_id = responsible;
+            t.responsible_disabled = disabled;
+            assert!(needs_me(Some(Needs::ConnectLogin), &t, Some(login)), "the login's own");
+            assert!(!needs_me(Some(Needs::ConnectLogin), &t, Some(me)), "not the responsible's");
+            assert!(!needs_me(Some(Needs::ConnectLogin), &t, None));
+        }
+    }
+
+    /// B6: the card still says what it waits for, without ◆ words for someone else, who can still decide.
+    #[test]
+    fn someone_else_than_the_responsible_still_sees_the_state_and_can_decide() {
+        use super::decide_too;
+        assert_eq!(Needs::Review.line(true), "Needs you · review");
+        assert_eq!(Needs::Review.line(false), "Waiting for review");
+        for need in [Needs::Review, Needs::PlanReview, Needs::ChooseOwner, Needs::Failed, Needs::Approval, Needs::ConnectLogin] {
+            assert!(!need.others_label().contains("Needs you") && !need.others_label().contains("your"), "{need:?}");
+        }
+        let mut t = card(42, ColumnKind::Review);
+        assert_eq!(decide_too(&t), None);
+        t.responsible_user_id = Some(aurelius_domain::UserId::new());
+        t.responsible_username = Some("Alexandra".into());
+        assert_eq!(decide_too(&t).as_deref(), Some("Alexandra is responsible. You can decide too."));
+        t.responsible_disabled = true;
+        assert_eq!(decide_too(&t), None);
+    }
+
+    /// B6: the "Needs you" filter takes what needs me; the Responsible filter its own.
+    #[test]
+    fn the_filters_follow_needs_me_and_the_responsible() {
+        use super::needs_me;
+        use aurelius_domain::UserId;
+        let (me, other) = (UserId::new(), UserId::new());
+        let mut mine = card(1, ColumnKind::Review);
+        mine.responsible_user_id = Some(me);
+        let mut theirs = card(2, ColumnKind::Review);
+        theirs.responsible_user_id = Some(other);
+        let nobody = card(3, ColumnKind::Review);
+        let column = BoardColumnCards { column: column(ColumnKind::Review), tickets: vec![mine, theirs, nobody] };
+        let numbers = |responsible, needs_only, reader| shown_cards(&column, OwnerFilter::Anyone, None, responsible, "", |t| needs_me(needs_you(t, false, 0), t, reader), needs_only, false).0.iter().map(|t| t.number).collect::<Vec<_>>();
+        assert_eq!(numbers(None, false, Some(me)), [1, 2, 3], "without the filter a card stays on the board");
+        assert_eq!(numbers(None, true, Some(me)), [1, 3], "mine, and the one nobody is responsible for");
+        assert_eq!(numbers(None, true, Some(other)), [2, 3]);
+        assert_eq!(numbers(Some(Some(other)), false, Some(me)), [2]);
+        assert_eq!(numbers(Some(None), false, Some(me)), [3]);
+    }
+
+    /// B8: the who sentence joins the label on a server with a Responsible.
+    #[test]
+    fn the_label_of_a_card_reads_the_who_block_when_there_is_one() {
+        let t = card(42, ColumnKind::Doing);
+        assert!(card_label(&t, None, None, "Doing", Some("Forge does the work.")).ends_with("in Doing. Forge does the work."));
     }
 
     /// MU3-10 AC4, MU3-12 AC2/AC4 and B4: whose login, its wait, and who may take it over.
@@ -2945,10 +3218,10 @@ pub(crate) mod tests {
         t.title = "Login per board member".into();
         t.priority = TicketPriority::Urgent;
         t.owner_name = Some("Builder".into());
-        assert_eq!(card_label(&t, Some("working"), Some("Due Nov 3"), "Doing"), "Ticket 42, Login per board member, priority Urgent, owner Builder, working, due Nov 3, in Doing.");
+        assert_eq!(card_label(&t, Some("working"), Some("Due Nov 3"), "Doing", None), "Ticket 42, Login per board member, priority Urgent, owner Builder, working, due Nov 3, in Doing.");
         t.owner_name = None;
         t.priority = TicketPriority::Normal;
-        assert_eq!(card_label(&t, None, None, "Building"), "Ticket 42, Login per board member, priority Normal, owner none, in Building.");
+        assert_eq!(card_label(&t, None, None, "Building", None), "Ticket 42, Login per board member, priority Normal, owner none, in Building.");
     }
 
     /// §15: moves made elsewhere are told, bundled; this window's own are not told twice.
@@ -3349,7 +3622,7 @@ pub(crate) mod tests {
         column.tickets[0].title = "Login per board member".into();
         column.tickets[0].owner_employee_id = Some(lead);
         column.tickets[1].labels = vec!["UI".into()];
-        let numbers = |owner, query: &str, needs_only| shown_cards(&column, owner, None, query, |t| t.number == 7, needs_only, false).0.iter().map(|t| t.number).collect::<Vec<_>>();
+        let numbers = |owner, query: &str, needs_only| shown_cards(&column, owner, None, None, query, |t| t.number == 7, needs_only, false).0.iter().map(|t| t.number).collect::<Vec<_>>();
         assert_eq!(numbers(OwnerFilter::Anyone, "", false), [42, 7]);
         assert_eq!(numbers(OwnerFilter::Anyone, "login", false), [42]);
         assert_eq!(numbers(OwnerFilter::Anyone, "#7", false), [7]);
@@ -3370,7 +3643,7 @@ pub(crate) mod tests {
         column.tickets[0].created_by_user = alex;
         column.tickets[1].created_by_user = robin;
         column.tickets[2].created_by_user = alex;
-        let numbers = |filter: CreatorFilter, me| shown_cards(&column, OwnerFilter::Anyone, filter.user(me), "", |_| false, false, false).0.iter().map(|t| t.number).collect::<Vec<_>>();
+        let numbers = |filter: CreatorFilter, me| shown_cards(&column, OwnerFilter::Anyone, filter.user(me), None, "", |_| false, false, false).0.iter().map(|t| t.number).collect::<Vec<_>>();
         assert_eq!(numbers(CreatorFilter::Anyone, Some(alex)), [1, 2, 3]);
         assert_eq!(numbers(CreatorFilter::Me, Some(alex)), [1, 3]);
         assert_eq!(numbers(CreatorFilter::Me, Some(robin)), [2]);
@@ -3388,10 +3661,10 @@ pub(crate) mod tests {
             })
             .collect();
         let column = BoardColumnCards { column: ticket::BoardColumnView { id: aurelius_domain::BoardColumnId::new(), kind: ColumnKind::Done, name: "Done".into(), position: 5, version: 1 }, tickets };
-        let (shown, older) = shown_cards(&column, OwnerFilter::Anyone, None, "", |_| false, false, false);
+        let (shown, older) = shown_cards(&column, OwnerFilter::Anyone, None, None, "", |_| false, false, false);
         assert_eq!((shown.len(), older), (DONE_SHOWN, 3));
         assert_eq!(shown[0].number, 23, "newest first");
-        assert_eq!(shown_cards(&column, OwnerFilter::Anyone, None, "", |_| false, false, true).0.len(), 23);
+        assert_eq!(shown_cards(&column, OwnerFilter::Anyone, None, None, "", |_| false, false, true).0.len(), 23);
     }
 
     #[test]

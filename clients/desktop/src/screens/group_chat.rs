@@ -400,6 +400,11 @@ impl AppView {
             .when(!rest.is_empty(), |el| {
                 el.child(div().id("ticket-assignees-more").flex_none().child(format!("+{}", rest.len())).tooltip(ui::tip(rest.join(", "), None)))
             })
+            // AUR-FA §1.4: the Responsible, after the employees and with its word.
+            .children(detail.filter(|d| d.ticket.responsible_user_id.is_some()).map(|d| {
+                let line = crate::screens::who::responsible_line(&d.ticket, self.active_member().map(|u| u.id));
+                h().flex_none().gap(px(5.)).child(ui::member_monogram(&crate::screens::who::responsible_name(&d.ticket), 16., cx)).child(format!("{}{}", line.name, line.tail))
+            }))
             .into_any_element()
     }
 
