@@ -140,7 +140,7 @@ async fn one_board_members_inbox_actions_leave_the_same_notification_unread_for_
             [id],
         )
         .unwrap();
-        db.execute("INSERT INTO notifications(id, event_id, dedupe_key, severity, target_json, created_at_ms) VALUES (?1, ?1, ?1, 'info', '{}', 10)", [id]).unwrap();
+        db.execute("INSERT INTO notifications(id, event_id, dedupe_key, severity, target_json, created_at_ms) VALUES (?1, ?1, ?1, 'info', '{}', ?2)", rusqlite::params![id, aurelius_storage::now_ms()]).unwrap();
     }
     drop(db);
 

@@ -40,6 +40,8 @@ use aurelius_storage::conversations::{self as conv, GroupRun, NewMessage};
 use aurelius_storage::{StorageError, Store, Tx, blobs, employees};
 use rusqlite::OptionalExtension;
 
+/// The `subject` of a row about a mention in the general channel.
+const GENERAL_SUBJECT: &str = "#general";
 /// Why a reply is refused whose `thread_parent` is not a message of the discussion.
 const THREAD_NOT_HERE: &str = "The message this replies to is not in this channel.";
 /// Why a reply to a reply is refused: a thread has one level (no nested threads).
@@ -315,7 +317,7 @@ fn post_in(tx: &Tx<'_>, store: &Store, id: ConversationId, thread: Option<Messag
         actor_id: None,
         correlation: id.to_string(),
         payload: Some(blob.id.to_string()),
-        metadata: serde_json::json!({ "task_id": null, "kind": kind, "from": from, "message_id": message }),
+        metadata: with_mentions(tx, id, text, serde_json::json!({ "task_id": null, "kind": kind, "from": from, "message_id": message }))?,
         dedupe: format!("group-post:{message}"),
     })?;
     let mut meta = serde_json::json!({ "kind": kind, "from": from });
@@ -326,7 +328,27 @@ fn post_in(tx: &Tx<'_>, store: &Store, id: ConversationId, thread: Option<Messag
     if let Some(root) = thread {
         aurelius_storage::threads::set_thread_parent(tx, message, root)?;
     }
+    aurelius_storage::timeline::notify_message(tx, notice.seq, message)?;
     Ok(notice)
+}
+
+/// `metadata` of a message event, with who `text` names when it names board members,
+/// where it was written for the row (`ticket_id`, or the channel as `subject`).
+/// `notify` reads this: the text stays in its blob and never reaches a row or a push.
+fn with_mentions(conn: &rusqlite::Connection, id: ConversationId, text: &str, mut metadata: serde_json::Value) -> Result<serde_json::Value, StorageError> {
+    let named = crate::ticket_follow::mentioned_board_members(conn, text)?;
+    if named.is_empty() {
+        return Ok(metadata);
+    }
+    let Some(d) = load(conn, id)? else { return Ok(metadata) };
+    metadata["mentioned_users"] = serde_json::json!(named);
+    match &d.place {
+        Place::General => metadata["subject"] = serde_json::json!(GENERAL_SUBJECT),
+        // Stored and pushed, so through the redactor like everything else that leaves.
+        Place::Project { name, .. } => metadata["subject"] = serde_json::json!(aurelius_runtime::redact::string(format!("#{name}"))),
+        Place::Ticket(t) => metadata["ticket_id"] = serde_json::json!(t.id),
+    }
+    Ok(metadata)
 }
 
 /// A system line with its own words (`text`; none: `SystemLine::sentence`) in
@@ -757,7 +779,7 @@ impl CommandService {
                 actor_id: Some(actor.clone()),
                 correlation: correlation.clone(),
                 payload: Some(text_blob.id.to_string()),
-                metadata: meta.clone(),
+                metadata: with_mentions(tx, d.id, &text, meta.clone())?,
                 dedupe: format!("cmd:{command_id}:message"),
             })?;
             conv::insert_message_by(tx, NewMessage {
@@ -773,6 +795,7 @@ impl CommandService {
             if let Some(root) = thread {
                 aurelius_storage::threads::set_thread_parent(tx, message_id, root)?;
             }
+            aurelius_storage::timeline::notify_message(tx, n.seq, message_id)?;
             crate::conversation::message_images::keep(tx, message_id, &images)?;
             conv::set_message_uploads(tx, message_id, &uploads)?;
             let kept: Vec<aurelius_domain::views::FileRef> = images.iter().map(|i| i.file.clone()).collect();
@@ -801,11 +824,12 @@ pub(crate) fn decision_feedback(tx: &Tx<'_>, store: &Store, ticket: TicketId, us
         actor_id: meta.get("principal_id").and_then(|p| p.as_str()).map(str::to_owned),
         correlation: command_id.to_owned(),
         payload: Some(blob.id.to_string()),
-        metadata: meta.clone(),
+        metadata: with_mentions(tx, d.id, text, meta.clone())?,
         dedupe: format!("cmd:{command_id}:feedback"),
     })?;
+    let message = MessageId::new();
     conv::insert_message_by(tx, NewMessage {
-        id: MessageId::new(),
+        id: message,
         conversation_id: d.id,
         role: MessageRole::User,
         content_blob_id: Some(blob.id.to_string()),
@@ -814,6 +838,7 @@ pub(crate) fn decision_feedback(tx: &Tx<'_>, store: &Store, ticket: TicketId, us
         run_id: None,
         reply_to: None,
     }, Some(user))?;
+    aurelius_storage::timeline::notify_message(tx, notice.seq, message)?;
     let mut notices = vec![notice];
     notices.extend(follow_named(tx, &d, text, FollowCause { actor: ActorKind::User, actor_id: meta.get("principal_id").and_then(|p| p.as_str()).map(str::to_owned), correlation: command_id, meta: meta.clone() })?);
     Ok(notices)
