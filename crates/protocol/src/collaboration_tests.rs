@@ -375,7 +375,10 @@ fn an_older_client_reads_message_deleted_the_same_whatever_its_metadata_says() {
     // again. Metadata such as `queued: false` stays in the log: it is not on the wire.
     let notice = EventNotice { seq: 8, kind: EventKind::MessageDeleted, aggregate_id: ConversationId::new().to_string(), project_id: None, occurred_at_ms: 9 };
     let json = serde_json::to_value(Event::from(notice.clone())).unwrap();
-    assert_eq!(json.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["aggregate_id", "at_ms", "kind", "project_id", "seq"]);
+    // Sorted: the key order of a JSON object depends on serde_json's `preserve_order` feature, which another crate may switch on.
+    let mut keys = json.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>();
+    keys.sort_unstable();
+    assert_eq!(keys, ["aggregate_id", "at_ms", "kind", "project_id", "seq"]);
     assert_eq!(json["kind"], "message.deleted");
     // Even if a server ever added it, the event reads as before.
     let mut with_metadata = json;
