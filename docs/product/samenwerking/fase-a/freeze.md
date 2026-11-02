@@ -119,6 +119,13 @@ De client maakt de vier tabs en tellers uit dit ene antwoord. *Waiting on me* is
 - Roept `board_message` nooit aan: tests `an_edit_with_a_new_mention_wakes_nobody`, `a_deleted_message_starts_no_run`. Geen `mentioned_users`, geen volgen, geen rij.
 - Dialoogtekst (B3), letterlijk op beide clients: *"Delete this message? A line stays that says it was deleted. The text stays in the audit log and backups, and employees that read it keep it. This doesn't erase a secret: rotate it and put it in the vault."* Bewerkhint: *"Editing wakes no one. An employee that already read this keeps the original. This doesn't erase a secret: rotate it and put it in the vault."*
 
+- Een verwijderd bericht toont geen bijlagen: de read laat `files` en `uploads` weg zodra `deleted_at_ms` gezet is. De rijen en blobs blijven, net als de tekst in de audit, en de dialoog van B3 geldt ook hiervoor.
+
+**Besloten na S1, D1 en M1 (Titan, 2026-11-02):**
+- *Tellers per persoon:* de badges en tellers van Dashboard, Inbox (*Waiting tasks*) en CarPlay tellen de hoofdtaak van een ticket alleen als `needs_me` waar is. Taken zonder ticket en approvals blijven tellen zoals nu. Dit hoort bij D2/M2.
+- *Teksten voor wie niet de Responsible is* (op beide clients gelijk): *Waiting for review*, *Waiting for plan review*, *Choose an employee*, *✕ Failed*, *Waiting for approval*.
+- `ticket.updated` met `changed: ["responsible"]` geeft in de Activity *wie* en *wanneer* (US-A1). `ticket.set_responsible` heeft geen `expected_version` (handover zonder versiecontrole), en de server weigert ontvolgen door de actieve Responsible.
+
 ## 6. Eigenaars (RULE 09) en volgorde
 | Stap | Wat | Wie | Branch |
 |---|---|---|---|
