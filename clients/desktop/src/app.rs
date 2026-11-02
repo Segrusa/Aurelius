@@ -1286,6 +1286,8 @@ pub struct AppView {
     /// Scroll position of the open popup menu (keyboard selection scrolls into view).
     /// A link on its way: waiting for the right server and the sign-in, or located. Only in memory (§6.3).
     pub pending_link: Option<crate::screens::links::PendingLink>,
+    /// A link the OS handed over (A5b), until the server is connected.
+    pub os_link: Option<String>,
     /// The message a link opened (its halo, ACCENT_HALO for `FLASH_MS`).
     pub link_flash: Option<crate::screens::links::LinkFlash>,
     pub menu_scroll: ScrollHandle,
@@ -1757,6 +1759,7 @@ impl AppView {
             assign_said: HashMap::new(),
             overlay_focus: cx.focus_handle(),
             pending_link: None,
+            os_link: None,
             link_flash: None,
             menu_scroll: ScrollHandle::new(),
             scroll: ScrollHandle::new(),
