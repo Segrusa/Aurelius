@@ -71,6 +71,7 @@ if ($programs -contains "aurelius.exe") {
 $menu = Join-Path ([Environment]::GetFolderPath("Programs")) "Aurelius.lnk"
 if ($Role -eq "server") {
     if (Test-Path $menu) { Remove-Item $menu -Force }
+    Remove-Item "HKCU:\Software\Classes\aurelius" -Recurse -Force -ErrorAction SilentlyContinue
 } else {
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut($menu)
@@ -78,6 +79,14 @@ if ($Role -eq "server") {
     $link.WorkingDirectory = $dest
     $link.Description = "Aurelius"
     $link.Save()
+
+    # aurelius:// links open this app (current user only, no admin rights). The
+    # link arrives as the first argument: aurelius.exe "aurelius://<host>/ticket/42".
+    $scheme = "HKCU:\Software\Classes\aurelius"
+    New-Item -Path "$scheme\shell\open\command" -Force | Out-Null
+    Set-ItemProperty -Path $scheme -Name "(default)" -Value "URL:Aurelius link"
+    Set-ItemProperty -Path $scheme -Name "URL Protocol" -Value ""
+    Set-ItemProperty -Path "$scheme\shell\open\command" -Name "(default)" -Value ('"{0}" "%1"' -f (Join-Path $dest "aurelius.exe"))
 }
 
 $ctl = Join-Path $dest "aurelius-ctl.exe"

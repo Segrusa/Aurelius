@@ -126,12 +126,15 @@ cat > "$apps/aurelius.desktop" <<DESKTOP
 Type=Application
 Name=Aurelius
 Comment=Your own AI team on Claude Code
-Exec=$bin/aurelius
+Exec=$bin/aurelius %u
 Icon=aurelius
 Terminal=false
 Categories=Office;Utility;
+MimeType=x-scheme-handler/aurelius;
 DESKTOP
 if command -v update-desktop-database >/dev/null 2>&1; then update-desktop-database "$apps" || true; fi
+# aurelius:// links (copied from the app) open Aurelius. Only this user's default is set.
+if command -v xdg-mime >/dev/null 2>&1; then xdg-mime default aurelius.desktop x-scheme-handler/aurelius || true; fi
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then gtk-update-icon-cache -q -t "$prefix/share/icons/hicolor" || true; fi
 
 echo "Aurelius $version is installed in $bin"
