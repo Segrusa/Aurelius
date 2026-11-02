@@ -1681,6 +1681,8 @@ impl AppView {
                     self.board_refresh();
                 }
             }
+            BoardUpdate::MessageWritten { message, deleted, result } => self.apply_message_written(message, deleted, result, cx),
+            BoardUpdate::MessageHistory(id, result) => self.apply_message_history(id, result, cx),
             BoardUpdate::MyTickets { project, include_done, result } => self.apply_my_tickets(project, include_done, result, cx),
             BoardUpdate::Changed { tickets, settings, tasks } => {
                 // A task matters only when it works for a ticket (D-m3); a task this window does not know yet may.

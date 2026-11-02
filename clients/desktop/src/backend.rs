@@ -762,6 +762,7 @@ impl SecretHold {
             Command::SendEmployeeMessage(m) => &m.text,
             Command::SendGroupMessage(m) => &m.text,
             Command::PostTicketMessage(m) => &m.text,
+            Command::EditMessage(m) => &m.text,
             Command::RevisePlan(c) => &c.feedback,
             Command::SendBackTicket(c) => &c.feedback,
             Command::DecidePlan(c) => c.feedback.as_deref().unwrap_or_default(),
@@ -777,6 +778,7 @@ fn confirm_flag(command: &mut Command) -> Option<&mut bool> {
         Command::SendEmployeeMessage(m) => &mut m.confirm_secret,
         Command::SendGroupMessage(m) => &mut m.confirm_secret,
         Command::PostTicketMessage(m) => &mut m.confirm_secret,
+        Command::EditMessage(m) => &mut m.confirm_secret,
         Command::SendChatMessage(m) => &mut m.confirm_secret,
         Command::SendProjectMessage(m) => &mut m.confirm_secret,
         Command::CreateTask(c) => &mut c.confirm_secret,
@@ -917,6 +919,8 @@ pub enum BoardCall {
     Followers(aurelius_domain::TicketId),
     /// Where a linked message is (`message.locate`, feature `message_locate`).
     Locate(MessageId),
+    /// `message.history` (feature `message_edits`): the earlier texts of an edited message.
+    MessageHistory(MessageId),
     /// `ticket.my_tickets` (feature `my_tickets`): the tabs of My tickets come from this one answer.
     MyTickets { project: Option<ProjectId>, include_done: bool },
     /// A ticket write, `board.columns_update` (with the board's version) or
@@ -935,6 +939,8 @@ impl BoardCall {
         match self {
             BoardCall::Write { command: Command::PostTicketMessage(p), .. } => BoardUpdate::PostFailed { ticket: p.ticket_id, message },
             BoardCall::Write { command: Command::RetryTicketSummary(r), .. } => BoardUpdate::SummaryRetried { ticket: r.ticket_id, failure: Some(message) },
+            BoardCall::Write { command: Command::EditMessage(e), .. } => BoardUpdate::MessageWritten { message: e.message_id, deleted: false, result: Err(message) },
+            BoardCall::Write { command: Command::DeleteMessage(d), .. } => BoardUpdate::MessageWritten { message: d.message_id, deleted: true, result: Err(message) },
             _ => BoardUpdate::Failed { ticket: self.ticket(), message },
         }
     }
@@ -994,6 +1000,10 @@ pub enum BoardUpdate {
     Followers(aurelius_domain::TicketId, Result<aurelius_domain::ticket::TicketFollowersView, String>),
     /// `ticket.follow_changed`: someone started or stopped following a ticket.
     FollowChanged,
+    /// `message.edit` or `message.delete` answered: the message it was about, and why not when it failed.
+    MessageWritten { message: MessageId, deleted: bool, result: Result<(), String> },
+    /// The earlier texts of a message, or why they did not load.
+    MessageHistory(MessageId, Result<aurelius_domain::views::MessageHistoryView, String>),
     /// `ticket.my_tickets` for that project filter and `include_done`, or why it did not load.
     MyTickets { project: Option<ProjectId>, include_done: bool, result: Result<aurelius_domain::ticket::MyTicketsView, String> },
     /// Where a linked message is, or what to say instead.
@@ -1667,7 +1677,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
         let _ = updates.send(Update::Connection(Connection::Connecting));
         let (events_tx, mut events) = mpsc::unbounded_channel();
         let (streams_tx, mut streams) = mpsc::unbounded_channel();
-        let accepts = [aurelius_protocol::client_feature::TEAM_CHANNELS, aurelius_protocol::client_feature::TICKET_CHANNELS, aurelius_protocol::client_feature::CHAT_THREADS, aurelius_protocol::client_feature::CHAT_REACTIONS, aurelius_protocol::client_feature::TICKET_FOLLOW];
+        let accepts = [aurelius_protocol::client_feature::TEAM_CHANNELS, aurelius_protocol::client_feature::TICKET_CHANNELS, aurelius_protocol::client_feature::CHAT_THREADS, aurelius_protocol::client_feature::CHAT_REACTIONS, aurelius_protocol::client_feature::TICKET_FOLLOW, aurelius_protocol::client_feature::MESSAGE_EDITS];
         let client = match Client::open(&target, "aurelius-desktop", events_tx, Some(streams_tx), &accepts).await {
             Ok(client) => client,
             // Before `is_final`, which an update-needed error also is.
@@ -3584,6 +3594,46 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
             }
             let _ = updates.send(Update::Board(BoardUpdate::Followers(ticket_id, result.map_err(|e| board_failure(&e)))));
         }
+        BoardCall::MessageHistory(message_id) => {
+            let result = read(client, Method::MessageHistory { message_id }, |b| match b { ResponseBody::MessageHistory(v) => Some(v), _ => None }).await;
+            if let Err(e) = &result && lost(e) {
+                return Err(result.unwrap_err().into());
+            }
+            let _ = updates.send(Update::Board(BoardUpdate::MessageHistory(message_id, result.map_err(|e| board_failure(&e)))));
+        }
+        // A message edited or deleted (A6): its own answer, so the row can tell. B10 may hold an edit back.
+        BoardCall::Write { command: command @ (Command::EditMessage(_) | Command::DeleteMessage(_)), expected_version, done } => {
+            let (message, deleted) = match &command {
+                Command::EditMessage(e) => (e.message_id, false),
+                Command::DeleteMessage(d) => (d.message_id, true),
+                _ => return Ok(()),
+            };
+            let held = confirmed(&command);
+            let sent = held.is_none().then(|| command.clone());
+            let result = match client.execute(envelope(command, expected_version)).await {
+                Ok(_) => Ok(()),
+                Err(e) if needs_board_member(&e) => {
+                    let _ = updates.send(Update::BoardMemberRequired);
+                    Err(BOARD_MEMBER_REQUIRED.to_string())
+                }
+                Err(e) if secret_names(&e).is_some() => {
+                    let names = secret_names(&e).unwrap_or_default();
+                    let message = sent.as_ref().and_then(|c| secret_refused(c, &names)).unwrap_or_else(|| NOT_SENT_SECRET.into());
+                    if let Some(command) = held {
+                        let _ = updates.send(Update::LooksLikeSecret(SecretHold::new(names, command).on_board(expected_version, done)));
+                    }
+                    Err(message)
+                }
+                Err(e) => {
+                    if lost(&e) {
+                        let _ = updates.send(Update::Board(BoardUpdate::MessageWritten { message, deleted, result: Err(BOARD_CONNECTION_DROPPED.into()) }));
+                        return Err(e.into());
+                    }
+                    Err(board_write_failure(&e))
+                }
+            };
+            let _ = updates.send(Update::Board(BoardUpdate::MessageWritten { message, deleted, result }));
+        }
         BoardCall::MyTickets { project, include_done } => {
             let result = read(client, Method::TicketMyTickets { project_id: project, include_done }, |b| match b { ResponseBody::MyTickets(v) => Some(v), _ => None }).await;
             if let Err(e) = &result && lost(e) {
@@ -5100,7 +5150,7 @@ mod tests {
                 _ => None,
             })
             .await;
-            assert!(!info.ticket_responsible && !info.ticket_follow && !info.message_locate && !info.personal_inbox, "none of the phase's features: {info:?}");
+            assert!(!info.ticket_responsible && !info.ticket_follow && !info.message_locate && !info.personal_inbox && !info.my_tickets && !info.message_edits, "none of the phase's features: {info:?}");
             app.requests.send(Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new("Tr0ub4dor&3-zebra-ada".into()) })).unwrap();
             next(&mut app, |u| match u {
                 Update::Who(w) if w.user.is_some() => Some(()),
@@ -5912,6 +5962,26 @@ mod tests {
             assert!(!printed.contains("FAKE") && !printed.contains("c2st") && !printed.contains("Tr0ub4dor"), "{printed}");
         }
         assert!(format!("{held:?}").contains("GitHub token"), "the names may show");
+    }
+
+    /// A6: an edit may be held back as a secret and goes again confirmed as the board's write; a
+    /// failed edit or delete answers as its message, so the row can tell.
+    #[test]
+    fn an_edit_is_held_back_like_a_post_and_a_failure_names_its_message() {
+        let id = MessageId::new();
+        let edit = Command::EditMessage(aurelius_domain::group_chat::EditMessage { message_id: id, text: "token c2st".into(), confirm_secret: false });
+        let again = confirmed(&edit).expect("an edit can be held");
+        assert!(matches!(&again, Command::EditMessage(e) if e.confirm_secret));
+        assert!(confirmed(&again).is_none(), "\"Send anyway?\" is not asked twice");
+        assert_eq!(crate::screens::vault::held_in(&edit), crate::screens::vault::HeldIn::Ticket, "its field stays open on Cancel");
+        let hold = SecretHold::new(vec![], again).on_board(None, None);
+        assert_eq!(hold.text(), "token c2st");
+        assert!(matches!(hold.resend(), Request::Board(BoardCall::Write { command: Command::EditMessage(_), .. })));
+        let write = BoardCall::Write { command: edit, expected_version: None, done: None };
+        assert!(matches!(write.refused("offline".into()), BoardUpdate::MessageWritten { message, deleted: false, result: Err(_) } if message == id));
+        let delete = BoardCall::Write { command: Command::DeleteMessage(aurelius_domain::group_chat::DeleteMessage { message_id: id }), expected_version: None, done: None };
+        assert!(matches!(delete.refused("offline".into()), BoardUpdate::MessageWritten { message, deleted: true, result: Err(_) } if message == id));
+        assert!(confirmed(&Command::DeleteMessage(aurelius_domain::group_chat::DeleteMessage { message_id: id })).is_none(), "a delete carries no text");
     }
 
     /// B10: the three messages a board member writes are held back and go again with

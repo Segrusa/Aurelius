@@ -743,11 +743,11 @@ pub fn follows(first: bool, mine: bool, grew: bool, at_bottom: bool) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use aurelius_domain::ConversationId;
 
-    fn msg(role: MessageRole, text: &str) -> MessageView {
+    pub(crate) fn msg(role: MessageRole, text: &str) -> MessageView {
         MessageView {
             edited_at_ms: None, deleted_at_ms: None, editable: false,
             id: MessageId::new(),

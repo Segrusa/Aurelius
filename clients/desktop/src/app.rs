@@ -737,6 +737,8 @@ pub enum ConfirmKind {
     DisableMember(aurelius_domain::UserId),
     /// Disconnect the own Claude login (MU3-09 AC4).
     DisconnectClaude,
+    /// Delete one of the reader's own messages (A6): a line stays that says so.
+    DeleteMessage(aurelius_domain::MessageId),
     /// Run a ticket that waits for another's login on the own Claude login (B4).
     UseMyLogin(aurelius_domain::TicketId),
     /// A link to another server this device is paired with: switch to it (AUR-FA A5a).
@@ -1035,6 +1037,8 @@ pub struct AppView {
     pub claude: crate::screens::account::Claude,
     /// The board, the open ticket and their dialogs.
     pub board: crate::screens::board::Board,
+    /// Editing and deleting your own messages (A6).
+    pub edit: crate::screens::message_edit::MessageEdit,
     /// The part of the Board page that shows (`[ Board ] [ My tickets ]`, A4).
     pub board_page: crate::screens::my_tickets::BoardPage,
     /// My tickets (A4).
@@ -1526,6 +1530,8 @@ impl AppView {
         subscriptions.extend(members.subscriptions(window, cx));
         let claude = crate::screens::account::Claude::new(window, cx);
         subscriptions.extend(claude.subscriptions(window, cx));
+        let edit = crate::screens::message_edit::MessageEdit::new(window, cx);
+        subscriptions.extend(edit.subscriptions(window, cx));
         let board = crate::screens::board::Board::new(window, cx);
         subscriptions.extend(board.subscriptions(window, cx));
         let thread = crate::screens::thread_panel::ThreadPanel::new(window, cx);
@@ -1564,6 +1570,7 @@ impl AppView {
             members,
             claude,
             board,
+            edit,
             board_page: Default::default(),
             my: Default::default(),
             thread,
@@ -6626,6 +6633,13 @@ impl AppView {
                         cx.notify();
                         return;
                     }
+                    ConfirmKind::DeleteMessage(message) => {
+                        self.edit_delete(message, cx);
+                        self.overlay = Overlay::None;
+                        self.focus.focus(window, cx);
+                        cx.notify();
+                        return;
+                    }
                     ConfirmKind::UseMyLogin(ticket) => {
                         self.ticket_use_my_login(ticket, cx);
                         self.overlay = Overlay::None;
@@ -6747,6 +6761,10 @@ impl AppView {
         }
         if self.overlay == Overlay::Menu {
             self.close_menu(window, cx);
+            return;
+        }
+        if self.edit_open() {
+            self.edit_cancel(cx);
             return;
         }
         if self.board.dialog.is_some() {
