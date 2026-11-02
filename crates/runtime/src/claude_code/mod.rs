@@ -421,12 +421,25 @@ pub const ENV_DUMP_RULES: &[&str] = &[
 
 /// `--settings` of a run: its deny rules (D5, E8), and with vault values the
 /// rules against printing the environment (E17).
+#[cfg(test)]
 fn deny_settings(login: &ClaudeLogin, vault: bool) -> String {
+    deny_settings_with_plans(login, vault, None)
+}
+
+/// As `deny_settings`, with `plansDirectory`: plan mode writes its plan file
+/// there instead of in `~/.claude/plans`, which the deny rules above keep shut.
+/// The folder is the run's own, so runs do not read each other's plans; the
+/// deny rules on `~/.claude` stay as they are (AUR-PLAN-FILE-001).
+fn deny_settings_with_plans(login: &ClaudeLogin, vault: bool, plans: Option<&std::path::Path>) -> String {
     let mut deny = deny_rules(login);
     if vault {
         deny.extend(ENV_DUMP_RULES.iter().map(|r| r.to_string()));
     }
-    serde_json::json!({ "permissions": { "deny": deny } }).to_string()
+    let mut settings = serde_json::json!({ "permissions": { "deny": deny } });
+    if let Some(plans) = plans {
+        settings["plansDirectory"] = serde_json::Value::String(plans.to_string_lossy().into_owned());
+    }
+    settings.to_string()
 }
 
 /// The vault values a run gets: only names the vault may give (checked again
@@ -783,7 +796,10 @@ impl AgentRuntime for ClaudeCodeRuntime {
         // Its file tools stay out of the other logins, the database and ~/.claude (D5).
         if let Some(login) = &self.login {
             args.push("--settings".into());
-            args.push(deny_settings(login, matches!(request.profile, ToolProfile::Work { .. }) && !self.vault.is_empty()));
+            // Plan mode saves its plan in a folder of this run, not in ~/.claude/plans (denied).
+            let plans = self.run_root.join(request.run_id.to_string()).join("plans");
+            tokio::fs::create_dir_all(&plans).await.map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
+            args.push(deny_settings_with_plans(login, matches!(request.profile, ToolProfile::Work { .. }) && !self.vault.is_empty(), Some(&plans)));
             if let ToolProfile::Work { folders, .. } = &request.profile {
                 if holds_logins(folders, login) {
                     tracing::warn!(run = %request.run_id, "a work folder of this run holds the Claude login folders; only Claude Code's best effort keeps its searches out of them");
