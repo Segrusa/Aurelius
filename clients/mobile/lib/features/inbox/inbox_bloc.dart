@@ -82,9 +82,10 @@ class NotificationsMarkedRead extends InboxEvent {
   const NotificationsMarkedRead();
 }
 
-/// A row of the personal Inbox was opened: only that makes it read (§4.4). There
-/// is no read per row on the server yet, so this phone remembers it until the
-/// next event on the row, and sends no mark-all while others are unread.
+/// A row of the personal Inbox was opened: only that makes it read (§4.4). The
+/// phone shows it read at once and tells the server (`notification.mark_read`);
+/// it remembers it until the next event on the row, and sends no mark-all while
+/// others are unread.
 class InboxRowOpened extends InboxEvent {
   const InboxRowOpened(this.row);
 
@@ -488,15 +489,24 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     add(const InboxRefreshed());
   }
 
-  void _rowOpened(InboxRowOpened event, Emitter<InboxState> emit) {
+  Future<void> _rowOpened(InboxRowOpened event, Emitter<InboxState> emit) async {
     final row = event.row;
+    final again = _opened[row.id] == row.createdAtMs;
     _opened[row.id] = row.createdAtMs;
-    if (row.read) return;
+    if (row.read || again) return;
     emit(state.copyWith(
       notifications: [for (final n in state.notifications) n.id == row.id ? readRow(n) : n],
       unread: (state.unread - 1).clamp(0, 1 << 30),
       deciding: state.deciding,
     ));
+    // An older server has no read per row. A failed write is not shown: the row
+    // stays read here and the next open sends it again.
+    if (!_repository.linkState.has(personalInboxFeature)) return;
+    try {
+      await _repository.markNotificationRead(row.id);
+    } catch (_) {
+      _opened.remove(row.id);
+    }
   }
 
   Future<void> _dismiss(NotificationDismissed event, Emitter<InboxState> emit) async {

@@ -12,8 +12,10 @@ extension PersonalRow on NotificationView {
   /// How many more events the row stands for: the `+n`.
   int get more => mergedCount ?? 0;
 
-  /// What the row is about: `#42 Login per board member`, `# general`.
+  /// What the row is about: `#42 Login per board member`, `# general`. The
+  /// server's subject of a ticket row may already start with `#42`; it is not repeated.
   String get place => switch ((ticketNumber, subject.isEmpty)) {
+        (final number?, false) when subject == '#$number' || subject.startsWith('#$number ') => subject,
         (final number?, false) => '#$number $subject',
         (final number?, true) => '#$number',
         (null, false) => conversationId != null ? '# $subject' : subject,

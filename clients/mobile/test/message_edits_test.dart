@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/data/discussion.dart';
@@ -56,13 +58,13 @@ void main() {
 
   late MockRepository repo;
 
-  Future<void> open(WidgetTester tester, List<MessageView> messages, {LinkState link = _withEdits}) async {
+  Future<void> open(WidgetTester tester, List<MessageView> messages, {LinkState link = _withEdits, Stream<Event> chat = const Stream.empty()}) async {
     final ticket = TicketView.fromJson({
       ...ticketOf(column: ColumnKind.doing, ownerEmployeeId: 'forge', ownerName: 'Forge', rootTaskId: 'root').toJson(),
       'conversation_id': 'disc-1',
     });
     repo = boardRepository(detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []), messages: snapshotOf('disc-1', messages: messages), link: link);
-    when(() => repo.chatChanges).thenAnswer((_) => const Stream.empty());
+    when(() => repo.chatChanges).thenAnswer((_) => chat);
     when(() => repo.appends).thenAnswer((_) => const Stream.empty());
     when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
     when(() => repo.load()).thenAnswer((_) async => loadOf());
@@ -92,6 +94,45 @@ void main() {
       await longPress(tester, 'Keep the cost configurable.');
       expect(find.text('Edit'), findsOneWidget);
       expect(find.text('Delete'), findsOneWidget);
+    });
+
+    testWidgets('an edited message still offers Edit and Delete on a long press (also on its text, not only the bubble)', (tester) async {
+      await open(tester, [postOf('m1', 'Keep the cost configurable.', editable: true, editedAtMs: 5)]);
+      expect(find.text('edited'), findsOneWidget);
+      await longPress(tester, 'Keep the cost configurable.');
+      expect(find.text('Edit'), findsOneWidget);
+      expect(find.text('Delete'), findsOneWidget);
+    });
+
+    testWidgets('after the user edits a message and the server confirms, the long press offers Edit and Delete again', (tester) async {
+      final events = StreamController<Event>.broadcast();
+      addTearDown(events.close);
+      await open(tester, [postOf('m1', 'Keep the cost configurable.', editable: true)], chat: events.stream);
+      await longPress(tester, 'Keep the cost configurable.');
+      await tester.tap(find.text('Edit'));
+      await settleBoard(tester);
+      await tester.enterText(find.byKey(const ValueKey('message-edit-field')), 'Keep the cost configurable per tenant.');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('message-edit-save')));
+      await settleBoard(tester);
+      when(() => repo.messages(any())).thenAnswer((_) async => snapshotOf('disc-1', messages: [postOf('m1', 'Keep the cost configurable per tenant.', editable: true, editedAtMs: 7)]));
+      events.add(const Event(aggregateId: 'disc-1', atMs: 7, kind: EventKind.messageEdited, seq: 9));
+      await settleBoard(tester);
+      expect(find.text('edited'), findsOneWidget);
+      await longPress(tester, 'Keep the cost configurable per tenant.');
+      expect(find.text('Edit'), findsOneWidget);
+      expect(find.text('Delete'), findsOneWidget);
+    });
+
+    testWidgets('choosing from the menu the way the E2E does, a second long press on the same message opens the menu again', (tester) async {
+      await open(tester, [postOf('m1', 'Keep the cost configurable.', editable: true)]);
+      await longPress(tester, 'Keep the cost configurable.');
+      final copy = find.ancestor(of: find.text('Copy'), matching: find.byType(InkWell)).first;
+      tester.widget<InkWell>(copy).onTap!();
+      await settleBoard(tester);
+      expect(find.text('Edit'), findsNothing, reason: 'the menu closed');
+      await longPress(tester, 'Keep the cost configurable.');
+      expect(find.text('Edit'), findsOneWidget);
     });
 
     testWidgets('not editable (someone elses, a decision feedback): neither item, not even disabled', (tester) async {

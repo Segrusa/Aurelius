@@ -29,8 +29,8 @@ void openInboxRowActivity(BuildContext context, NotificationView row) {
   context.push(activityOf(row.ticketId!));
 }
 
-/// A long press on a row (§4.5). There is no Mark read yet: the server has no
-/// read per row. Unfollow goes to the server, which refuses it for the
+/// A long press on a row (§4.5). Opening a row reads it, so there is no Mark read
+/// here. Unfollow goes to the server, which refuses it for the
 /// Responsible and says why.
 Future<void> showInboxRowMenu(BuildContext context, NotificationView row, {required bool follow, required bool links}) async {
   final ticket = row.ticketId;

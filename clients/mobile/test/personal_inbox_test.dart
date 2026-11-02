@@ -69,6 +69,12 @@ void main() {
       expect(row('a', ticket: null, number: null, conversation: 'c1', subject: 'general').place, '# general');
     });
 
+    test('the place does not repeat a number the server subject already has', () {
+      expect(row('a', subject: '#2 Check the export', number: 2).place, '#2 Check the export');
+      expect(row('a', subject: '#2', number: 2).place, '#2');
+      expect(row('a', subject: '#22 Other', number: 2).place, '#2 #22 Other', reason: 'only the same number counts');
+    });
+
     test('review follows needs_you, so it follows a handover', () {
       expect(row('a', reason: 'review', title: 'Marie: stale', needsYou: true).headline, 'Ready for your review');
       expect(row('a', reason: 'review', title: 'Marie: stale').headline, 'Ready for review');
@@ -154,6 +160,7 @@ void main() {
       when(() => repo.proposals()).thenAnswer((_) async => []);
       when(() => repo.guidelineProposalList(status: any(named: 'status'))).thenAnswer((_) async => []);
       when(() => repo.markNotificationsRead()).thenAnswer((_) async {});
+      when(() => repo.markNotificationRead(any())).thenAnswer((_) async {});
       when(() => repo.dismissNotification(any())).thenAnswer((_) async {});
       when(() => repo.dismissAllNotifications()).thenAnswer((_) async => 0);
     });
@@ -193,6 +200,37 @@ void main() {
       expect(bloc.state.notifications.map((n) => n.read), [true, false]);
       expect(bloc.state.unread, 1);
       verifyNever(() => repo.markNotificationsRead());
+    });
+
+    test('opening a row tells the server once, and not again for the same row', () async {
+      final bloc = await loaded([row('a'), row('b', ticket: 'k43', number: 43)]);
+      final first = bloc.state.notifications.first;
+      bloc.add(InboxRowOpened(first));
+      bloc.add(InboxRowOpened(first));
+      await pumpEventQueue();
+      bloc.add(InboxRowOpened(bloc.state.notifications.first));
+      await pumpEventQueue();
+      verify(() => repo.markNotificationRead('a')).called(1);
+      verifyNever(() => repo.markNotificationRead('b'));
+    });
+
+    test('an already read row sends no write when it is opened', () async {
+      final bloc = await loaded([row('a', read: true)]);
+      bloc.add(InboxRowOpened(bloc.state.notifications.first));
+      await pumpEventQueue();
+      verifyNever(() => repo.markNotificationRead(any()));
+    });
+
+    test('a write that fails leaves the row read here and is sent again at the next open', () async {
+      when(() => repo.markNotificationRead(any())).thenThrow(const ProtocolException(ErrorCode.internal, 'no'));
+      final bloc = await loaded([row('a')]);
+      bloc.add(InboxRowOpened(bloc.state.notifications.first));
+      await pumpEventQueue();
+      expect(bloc.state.notifications.single.read, isTrue);
+      expect(bloc.state.notice, isNull);
+      bloc.add(InboxRowOpened(row('a')));
+      await pumpEventQueue();
+      verify(() => repo.markNotificationRead('a')).called(2);
     });
 
     test('a new event on an opened row makes it unread again', () async {
@@ -258,6 +296,14 @@ void main() {
         await pumpEventQueue();
         verify(() => repo.dismissAllNotifications()).called(1);
         verifyNever(() => repo.dismissNotification(any()));
+      });
+
+      test('opening a row sends no per-row write', () async {
+        final bloc = await loaded([row('a')]);
+        bloc.add(InboxRowOpened(bloc.state.notifications.first));
+        await pumpEventQueue();
+        verifyNever(() => repo.markNotificationRead(any()));
+        expect(bloc.state.notifications.single.read, isTrue);
       });
 
       test('a failed read keeps the old notice, no new screen', () async {
