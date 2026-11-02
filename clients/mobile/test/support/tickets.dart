@@ -36,6 +36,10 @@ const testLogin = ClaudeLoginView(userId: 'u-1', status: ClaudeLoginStatus.linke
 const onlineLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], boardMembersExist: true, user: testUser, claudeLogin: testLogin);
 /// [onlineLink] on a server with the Testing column and the tester (ticket #5).
 const testingLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], features: ['board_testing'], boardMembersExist: true, user: testUser, claudeLogin: testLogin);
+/// Another board member than [testUser].
+const bo = UserView(id: 'u-2', username: 'bo', createdAtMs: 0);
+/// [onlineLink] on a server of phase A: a responsible, followers and links.
+const phaseALink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], features: ['ticket_responsible', 'ticket_follow', 'message_locate'], boardMembersExist: true, user: testUser, claudeLogin: testLogin);
 const offlineLink = LinkState(status: LinkStatus.offline, boardMembersExist: true, user: testUser, claudeLogin: testLogin);
 
 /// The six columns in their default order (MU1-05 AC1).
@@ -88,6 +92,8 @@ TicketView ticketOf({
   UserView creator = testUser,
   UserView? login,
   TicketNeed? needs,
+  UserView? responsible,
+  bool? responsibleDisabled,
 }) =>
     TicketView(
       archivedAtMs: archivedAtMs,
@@ -112,6 +118,9 @@ TicketView ticketOf({
       priority: priority,
       projectId: projectId,
       projectName: projectName,
+      responsibleDisabled: responsibleDisabled,
+      responsibleUserId: responsible?.id,
+      responsibleUsername: responsible?.username,
       reviewFeedback: reviewFeedback,
       rootTaskId: rootTaskId,
       rootTaskStatus: rootTaskStatus,

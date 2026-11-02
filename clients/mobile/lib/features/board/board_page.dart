@@ -101,6 +101,9 @@ bool needsOwnerOf(TicketView ticket, CompanyState company, BoardState board) =>
 TicketState stateOf(TicketView ticket, CompanyState company, BoardState board, {String? me}) => ticketState(ticket,
     root: company.tasks.where((t) => t.id == ticket.rootTaskId).firstOrNull, needsOwner: needsOwnerOf(ticket, company, board), ownerUnknown: board.ownerUnknown.contains(ticket.id), me: me);
 
+/// Whether [ticket] counts as [me]'s work (B6): the ◆ on its card, the filter and the count.
+bool needsMeOf(TicketView ticket, CompanyState company, BoardState board, {String? me}) => needsMe(ticket, stateOf(ticket, company, board, me: me), me: me);
+
 class _BoardPageState extends State<BoardPage> {
   PageController? _pages;
   bool _olderDone = false;
@@ -120,7 +123,7 @@ class _BoardPageState extends State<BoardPage> {
     if (board.column != null) return board.column!;
     for (final kind in [ColumnKind.review, ColumnKind.planReview, ColumnKind.todo, ColumnKind.doing]) {
       final column = board.columnOf(kind);
-      if (column != null && column.tickets.any((t) => stateOf(t, company, board, me: _me).needsYou)) return kind;
+      if (column != null && column.tickets.any((t) => needsMeOf(t, company, board, me: _me))) return kind;
     }
     return ColumnKind.doing;
   }
@@ -224,13 +227,15 @@ class _BoardPageState extends State<BoardPage> {
   Widget build(BuildContext context) {
     final board = context.watch<BoardBloc>().state;
     final company = context.watch<CompanyBloc>().state;
-    final online = context.select<ConnectionBloc, bool>((b) => b.state.isOnline);
-    _me = context.select<ConnectionBloc, String?>((b) => b.state.user?.id);
-    _myLoginExpired = context.select<ConnectionBloc, bool>((b) => b.state.claudeLogin?.status == ClaudeLoginStatus.expired);
+    final link = context.watch<ConnectionBloc>().state;
+    final online = link.isOnline;
+    _me = link.user?.id;
+    _myLoginExpired = link.claudeLogin?.status == ClaudeLoginStatus.expired;
     final wide = MediaQuery.sizeOf(context).width >= boardWideWidth;
-    final columns = board.columns;
-    final tickets = board.tickets;
-    final needYou = tickets.where((t) => stateOf(t, company, board, me: _me).needsYou).length;
+    final responsibleOn = link.has(ticketResponsibleFeature);
+    final columns = !responsibleOn || !board.needsMeOnly ? board.columns : [for (final c in board.columns) BoardColumnCards(column: c.column, tickets: [for (final t in c.tickets) if (needsMeOf(t, company, board, me: _me)) t])];
+    final tickets = [for (final c in columns) ...c.tickets];
+    final needYou = tickets.where((t) => needsMeOf(t, company, board, me: _me)).length;
     final project = company.project(board.projectId ?? '');
     final owner = board.owner == null ? null : board.owner == BoardState.noOwner ? 'No owner yet' : company.employee(board.owner!)?.name;
     final creator = _creatorName(board);
@@ -249,7 +254,7 @@ class _BoardPageState extends State<BoardPage> {
     } else if (board.board == null) {
       content = const _Skeleton();
     } else {
-      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null);
+      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null || (responsibleOn && board.needsMeOnly));
       final body = wide ? _wide(context, board, company, columns, online) : _phone(context, board, company, columns, online);
       content = Column(children: [
         if (filteredEmpty)
@@ -262,6 +267,7 @@ class _BoardPageState extends State<BoardPage> {
                   final bloc = context.read<BoardBloc>();
                   bloc.add(const BoardOwnerChosen(null));
                   bloc.add(const BoardCreatorChosen(null));
+                  bloc.add(const BoardNeedsMeOnly(false));
                   if (!widget.inProject) bloc.add(const BoardProjectChosen(null));
                 },
                 child: const Text('Clear filter'),
@@ -291,6 +297,17 @@ class _BoardPageState extends State<BoardPage> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             children: [
               if (!widget.inProject) _FilterPill(key: const ValueKey('board-filter-project'), label: project?.name ?? 'All projects', active: project != null, onTap: () => _pickProject(context, board, company)),
+              if (responsibleOn)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    key: const ValueKey('board-filter-needs-you'),
+                    label: const Text('◆ Needs you'),
+                    selected: board.needsMeOnly,
+                    showCheckmark: false,
+                    onSelected: (on) => context.read<BoardBloc>().add(BoardNeedsMeOnly(on)),
+                  ),
+                ),
               _FilterPill(key: const ValueKey('board-filter-owner'), label: owner ?? 'Anyone', active: owner != null, onTap: () => _pickOwner(context, board, company)),
               _FilterPill(key: const ValueKey('board-filter-creator'), label: 'Created by: ${creator ?? 'Anyone'}', active: creator != null, onTap: () => _pickCreator(context, board)),
             ],
@@ -334,7 +351,7 @@ class _BoardPageState extends State<BoardPage> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         child: Row(children: [
-          for (final (i, c) in columns.indexed) _ColumnChip(column: c, index: i, total: columns.length, selected: i == index, onTap: () => _show(context, columns, c.column.kind)),
+          for (final (i, c) in columns.indexed) _ColumnChip(column: c, index: i, total: columns.length, selected: i == index, needsYou: c.column.kind == ColumnKind.review && c.tickets.any((t) => needsMeOf(t, company, board, me: _me)), onTap: () => _show(context, columns, c.column.kind)),
         ]),
       ),
       Expanded(
@@ -383,7 +400,7 @@ class _BoardPageState extends State<BoardPage> {
             border: allowed && dragging != null ? Border.all(color: Tokens.accent.withValues(alpha: 0.5)) : null,
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _ColumnHeader(column: c, note: refused, needsYou: c.column.kind == ColumnKind.review && c.tickets.isNotEmpty),
+            _ColumnHeader(column: c, note: refused, needsYou: c.column.kind == ColumnKind.review && c.tickets.any((t) => needsMeOf(t, company, board, me: _me))),
             Expanded(child: _columnList(context, board, company, columns, c, online, wide: true)),
           ]),
         ),
@@ -481,21 +498,21 @@ class _FilterPill extends StatelessWidget {
 }
 
 /// A column chip on the phone: name and count; Review gets a green dot while
-/// something waits; an empty Plan review is narrow and dimmed (D-04).
+/// something waits for you (B6); an empty Plan review is narrow and dimmed (D-04).
 class _ColumnChip extends StatelessWidget {
-  const _ColumnChip({required this.column, required this.index, required this.total, required this.selected, required this.onTap});
+  const _ColumnChip({required this.column, required this.index, required this.total, required this.selected, this.needsYou = false, required this.onTap});
 
   final BoardColumnCards column;
   final int index;
   final int total;
   final bool selected;
+  final bool needsYou;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final count = column.tickets.length;
     final quiet = column.column.kind == ColumnKind.planReview && count == 0 && !selected;
-    final dot = column.column.kind == ColumnKind.review && count > 0;
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Semantics(
@@ -511,7 +528,7 @@ class _ColumnChip extends StatelessWidget {
             selectedColor: Tokens.accentTint,
             visualDensity: quiet ? VisualDensity.compact : null,
             label: Row(mainAxisSize: MainAxisSize.min, children: [
-              if (dot) ...[StatusDot(color: Tokens.accent, size: 7), const SizedBox(width: 6)],
+              if (needsYou) ...[StatusDot(color: Tokens.accent, size: 7), const SizedBox(width: 6)],
               Text('${column.column.name} $count', style: TextStyle(fontSize: quiet ? 12 : 14)),
             ]),
             onSelected: (_) => onTap(),

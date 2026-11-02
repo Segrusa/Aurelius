@@ -46,6 +46,14 @@ class BoardCreatorChosen extends BoardEvent {
   final String? userId;
 }
 
+/// The filter Needs you (B6): only the tickets that count as your work. The
+/// page applies it, since it takes the company around the ticket ([needsMe]).
+class BoardNeedsMeOnly extends BoardEvent {
+  const BoardNeedsMeOnly(this.on);
+
+  final bool on;
+}
+
 /// The column the phone shows (the last one viewed is kept).
 class BoardColumnShown extends BoardEvent {
   const BoardColumnShown(this.kind);
@@ -62,6 +70,7 @@ class BoardState extends Equatable {
     this.projectId,
     this.owner,
     this.createdBy,
+    this.needsMeOnly = false,
     this.column,
     this.gaveUp = const {},
     this.ownerUnknown = const {},
@@ -84,6 +93,9 @@ class BoardState extends Equatable {
 
   /// Only tickets this board member created; null: anyone's.
   final String? createdBy;
+
+  /// The filter Needs you (B6).
+  final bool needsMeOnly;
 
   /// The column last shown on a phone; null until the user picks one.
   final ColumnKind? column;
@@ -115,7 +127,7 @@ class BoardState extends Equatable {
 
   TicketView? ticket(String id) => tickets.where((t) => t.id == id).firstOrNull;
 
-  BoardState copyWith({bool? loading, BoardView? board, String? error, bool? unsupported, String? projectId, bool clearProject = false, String? owner, bool clearOwner = false, String? createdBy, bool clearCreatedBy = false, ColumnKind? column, Set<String>? gaveUp, Set<String>? ownerUnknown}) => BoardState(
+  BoardState copyWith({bool? loading, BoardView? board, String? error, bool? unsupported, String? projectId, bool clearProject = false, String? owner, bool clearOwner = false, String? createdBy, bool clearCreatedBy = false, bool? needsMeOnly, ColumnKind? column, Set<String>? gaveUp, Set<String>? ownerUnknown}) => BoardState(
         loading: loading ?? this.loading,
         board: board ?? this.board,
         error: error,
@@ -123,13 +135,14 @@ class BoardState extends Equatable {
         projectId: clearProject ? null : projectId ?? this.projectId,
         owner: clearOwner ? null : owner ?? this.owner,
         createdBy: clearCreatedBy ? null : createdBy ?? this.createdBy,
+        needsMeOnly: needsMeOnly ?? this.needsMeOnly,
         column: column ?? this.column,
         gaveUp: gaveUp ?? this.gaveUp,
         ownerUnknown: ownerUnknown ?? this.ownerUnknown,
       );
 
   @override
-  List<Object?> get props => [loading, board?.asOfSeq, board?.projectId, [for (final t in board?.columns.expand((c) => c.tickets) ?? const <TicketView>[]) (t.id, t.version, t.columnId)], [for (final c in board?.columns ?? const <BoardColumnCards>[]) (c.column.name, c.column.version, c.column.position)], error, unsupported, projectId, owner, createdBy, column, gaveUp, ownerUnknown];
+  List<Object?> get props => [loading, board?.asOfSeq, board?.projectId, [for (final t in board?.columns.expand((c) => c.tickets) ?? const <TicketView>[]) (t.id, t.version, t.columnId)], [for (final c in board?.columns ?? const <BoardColumnCards>[]) (c.column.name, c.column.version, c.column.position)], error, unsupported, projectId, owner, createdBy, needsMeOnly, column, gaveUp, ownerUnknown];
 }
 
 /// The Board (MU1-05): `board.get` for the chosen project, again on every
@@ -147,6 +160,7 @@ class BoardBloc extends Bloc<BoardEvent, BoardState> {
     });
     on<BoardOwnerChosen>((e, emit) => emit(state.copyWith(owner: e.owner, clearOwner: e.owner == null)));
     on<BoardCreatorChosen>((e, emit) => emit(state.copyWith(createdBy: e.userId, clearCreatedBy: e.userId == null)));
+    on<BoardNeedsMeOnly>((e, emit) => emit(state.copyWith(needsMeOnly: e.on)));
     on<BoardColumnShown>((e, emit) => emit(state.copyWith(column: e.kind)));
     on<BoardShown>((e, emit) {
       _visible = e.visible;

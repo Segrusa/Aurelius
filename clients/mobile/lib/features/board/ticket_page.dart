@@ -136,7 +136,9 @@ class _TicketViewState extends State<_TicketView> {
     final owner = ticket.ownerName ?? employeeName(company, ticket.ownerEmployeeId);
     final dispatcher = dispatcherName(company, ticket.projectId);
     final expired = link.claudeLogin?.status == ClaudeLoginStatus.expired;
-    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired);
+    // The ◆ is the responsible's (B6); the buttons stay for anyone.
+    final mine = needsMe(ticket, state, me: link.user?.id);
+    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired, waitsFor: waitsForOther(ticket, state, me: link.user?.id));
     final segment = conversation == null && _segment == _Segment.discussion ? _Segment.ticket : _segment;
     final scaffold = Scaffold(
       appBar: GlassAppBar(
@@ -202,11 +204,11 @@ class _TicketViewState extends State<_TicketView> {
                   decoration: BoxDecoration(color: Tokens.cell2, borderRadius: BorderRadius.circular(999)),
                   child: Text(_columnName(page, ticket), style: const TextStyle(fontWeight: FontWeight.w600)),
                 ),
-                if (line != null && state != TicketState.done) Text(state.needsYou ? '◆ $line' : line, style: TextStyle(color: state.needsYou ? Tokens.accentText : Tokens.label2, fontWeight: state.needsYou ? FontWeight.w600 : null)),
+                if (line != null && state != TicketState.done) Text(mine ? '◆ $line' : line, style: TextStyle(color: mine ? Tokens.accentText : Tokens.label2, fontWeight: mine ? FontWeight.w600 : null)),
               ]),
             ),
             _segments(context, conversation),
-            if (segment == _Segment.ticket) ..._ticketTab(context, page, company, ticket, state, owner, dispatcher, online, conversation != null) else ..._activityTab(page),
+            if (segment == _Segment.ticket) ..._ticketTab(context, page, company, ticket, state, owner, dispatcher, online, conversation != null, mine: mine) else ..._activityTab(page),
           ],
         ),
       ),
@@ -295,7 +297,7 @@ class _TicketViewState extends State<_TicketView> {
           ]),
       ];
 
-  List<Widget> _ticketTab(BuildContext context, TicketPageState page, CompanyState company, TicketView ticket, TicketState state, String? owner, String? dispatcher, bool online, bool discussion) {
+  List<Widget> _ticketTab(BuildContext context, TicketPageState page, CompanyState company, TicketView ticket, TicketState state, String? owner, String? dispatcher, bool online, bool discussion, {required bool mine}) {
     final root = page.root;
     final editable = online && ticket.column != ColumnKind.done;
     final running = root != null && (root.status == TaskStatus.running || root.hasLiveRun);
@@ -315,8 +317,8 @@ class _TicketViewState extends State<_TicketView> {
       if (state == TicketState.needsOwner)
         _Notice(
           key: const ValueKey('ticket-needs-owner'),
-          attention: true,
-          title: '◆ Needs you · choose an owner',
+          attention: mine,
+          title: mine ? '◆ Needs you · choose an owner' : 'Choose an owner',
           body: dispatcher != null
               ? '$dispatcher could not choose an employee.'
               : '${inactive ?? 'No dispatcher is set for this project'}. Started tickets wait in Todo until you choose an owner.',
@@ -324,14 +326,14 @@ class _TicketViewState extends State<_TicketView> {
       if (state == TicketState.ownerUnknown)
         _Notice(
           key: const ValueKey('ticket-owner-unknown'),
-          attention: true,
-          title: '◆ Needs you · choose an owner',
+          attention: mine,
+          title: mine ? '◆ Needs you · choose an owner' : 'Choose an owner',
           body: 'Could not check whether ${dispatcher ?? 'the dispatcher'} is still choosing. Choose an employee yourself, or try again.',
           action: ('Try again', () => context.read<TicketBloc>().add(const TicketRefreshed())),
         ),
       if (state == TicketState.queued) _Notice(title: 'Queued for ${owner ?? 'its owner'}.'),
       if (state == TicketState.failed)
-        _Notice(key: const ValueKey('ticket-failed'), attention: true, title: '✕ The main task failed', body: root?.result ?? 'Start again for a new main task; the old one stays linked.'),
+        _Notice(key: const ValueKey('ticket-failed'), attention: mine, title: '✕ The main task failed', body: root?.result ?? 'Start again for a new main task; the old one stays linked.'),
       if (state == TicketState.needsYourLogin)
         _Notice(
           key: const ValueKey('ticket-needs-login'),
@@ -353,9 +355,9 @@ class _TicketViewState extends State<_TicketView> {
           title: '⏸ ${state.line(login: ticket.loginUsername, mine: ticket.loginUser == context.read<ConnectionBloc>().state.user?.id, untilMs: root?.waitingUntilMs)}',
           body: "Runs only on the subscription of the login it runs on. It goes on by itself after the reset.",
         ),
-      if (state == TicketState.waitingForYou) _Notice(attention: true, title: '◆ Waiting for your approval', body: 'Answer it in the Inbox.', action: ('Open Inbox', () => context.go('/inbox'))),
+      if (state == TicketState.waitingForYou) _Notice(attention: mine, title: mine ? '◆ Waiting for your approval' : 'Waiting for an approval', body: 'Answer it in the Inbox.', action: ('Open Inbox', () => context.go('/inbox'))),
       if (state == TicketState.planReview)
-        _Notice(attention: true, title: '◆ A plan waits for you', body: 'Approve it, or send it back with what needs to change.', action: ('Review plan', () => _reviewPlan(ticket))),
+        _Notice(attention: mine, title: mine ? '◆ A plan waits for you' : 'A plan waits for review', body: 'Approve it, or send it back with what needs to change.', action: ('Review plan', () => _reviewPlan(ticket))),
       if (state == TicketState.testing)
         _Notice(
           key: const ValueKey('ticket-testing'),

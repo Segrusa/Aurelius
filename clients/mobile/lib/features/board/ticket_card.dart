@@ -104,14 +104,16 @@ class TicketCard extends StatelessWidget {
     final action = cardAction(state);
     final deadline = deadlineOf(ticket);
     final done = state == TicketState.done;
-    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired);
+    // The ◆ is the responsible's (B6); the line and the button stay for anyone.
+    final mine = needsMe(ticket, state, me: board.me);
+    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired, waitsFor: waitsForOther(ticket, state, me: board.me));
 
     final summary = [
       'Ticket ${ticket.number}, ${ticket.title}',
       if (ticket.priority != TicketPriority.normal) 'priority ${ticket.priority.label}',
       owner == null ? 'no owner' : 'owner $owner',
       ?line,
-      if (state.needsYou) 'needs you',
+      if (mine) 'needs you',
       if (deadline != null) deadline.text,
       'in ${board.column.column.name}',
     ].join(', ');
@@ -158,9 +160,9 @@ class TicketCard extends StatelessWidget {
           // name and time ("Waiting for alex's limit until 13:48", QA3 M-m4).
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             if (line != null && !done) ...[
-              Padding(padding: const EdgeInsets.only(top: 2), child: _StateMark(state)),
+              Padding(padding: const EdgeInsets.only(top: 2), child: _StateMark(state, mine: mine)),
               const SizedBox(width: 6),
-              Expanded(child: Text(line, key: ValueKey('card-line-${ticket.id}'), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: state.needsYou ? Tokens.accentText : Tokens.label2, fontWeight: state.needsYou ? FontWeight.w600 : null))),
+              Expanded(child: Text(line, key: ValueKey('card-line-${ticket.id}'), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: mine ? Tokens.accentText : Tokens.label2, fontWeight: mine ? FontWeight.w600 : null))),
             ] else
               const Spacer(),
             if (delegations > 0) ...[
@@ -211,13 +213,13 @@ class TicketCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
-          side: state.needsYou ? BorderSide(color: Tokens.accent.withValues(alpha: 0.45)) : BorderSide.none,
+          side: mine ? BorderSide(color: Tokens.accent.withValues(alpha: 0.45)) : BorderSide.none,
         ),
         child: InkWell(
           onTap: () => context.push('/ticket/${ticket.id}'),
           onLongPress: board.wide ? null : () => showCardMenu(context, ticket, board, state),
           child: Container(
-            decoration: state.needsYou ? BoxDecoration(border: Border(left: BorderSide(color: Tokens.accent, width: 3))) : null,
+            decoration: mine ? BoxDecoration(border: Border(left: BorderSide(color: Tokens.accent, width: 3))) : null,
             padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
             child: body,
           ),
@@ -328,9 +330,12 @@ Future<void> startWith(BuildContext context, TicketView ticket) async {
 }
 
 class _StateMark extends StatelessWidget {
-  const _StateMark(this.state);
+  const _StateMark(this.state, {required this.mine});
 
   final TicketState state;
+
+  /// [needsMe]: the ◆.
+  final bool mine;
 
   @override
   Widget build(BuildContext context) => switch (state) {
@@ -338,7 +343,7 @@ class _StateMark extends StatelessWidget {
         TicketState.choosing => Icon(CupertinoIcons.circle_lefthalf_fill, size: 12, color: Tokens.label2),
         TicketState.failed => Text('✕', style: TextStyle(color: Tokens.negative, fontWeight: FontWeight.w700)),
         TicketState.waitingForLimit || TicketState.waitsForLogin => Text('⏸', style: TextStyle(color: Tokens.label2, fontSize: 12)),
-        _ when state.needsYou => Text('◆', style: TextStyle(color: Tokens.accent, fontSize: 12)),
+        _ when mine => Text('◆', style: TextStyle(color: Tokens.accent, fontSize: 12)),
         _ => StatusDot(color: Tokens.label3),
       };
 }

@@ -15,6 +15,13 @@ const boardTestingFeature = 'board_testing';
 /// Backlog (`domain::ticket::TESTING_MOVES_BY_ITSELF`).
 const testingMovesByItself = 'Testing moves on by itself when the tests have run.';
 
+/// The server keeps a board member responsible for a ticket (phase A, A1): only
+/// then does a client show or send it, and only then can a ◆ belong to one person.
+const ticketResponsibleFeature = 'ticket_responsible';
+
+/// The server keeps who follows a ticket (phase A, A2).
+const ticketFollowFeature = 'ticket_follow';
+
 /// [board] as this client shows it: without the Testing column when the server
 /// lacks [boardTestingFeature] ([testing] false).
 BoardView boardShown(BoardView board, {required bool testing}) => testing
@@ -246,7 +253,8 @@ TicketState ticketState(TicketView ticket, {TaskView? root, bool needsOwner = fa
     };
 
 extension TicketStateView on TicketState {
-  /// Needs a board member (§5.2): the ◆ and the accent edge.
+  /// Waits for a board member (§5.2): what the card and the page show, its
+  /// button and status line. Whether the ◆ is yours: [needsMe].
   bool get needsYou => switch (this) {
         TicketState.needsOwner || TicketState.ownerUnknown || TicketState.waitingForYou || TicketState.needsYourLogin || TicketState.failed || TicketState.planReview || TicketState.review => true,
         _ => false,
@@ -254,15 +262,16 @@ extension TicketStateView on TicketState {
 
   /// The status line on a card; null where the column says enough. [login]:
   /// whose Claude login it runs on (`login_username`, "your" when it is
-  /// yours), [untilMs] when its limit resets, [tester] who runs the tests.
-  String? line({String? owner, String? dispatcher, String? tester, String? login, bool mine = false, int? untilMs, bool expired = false}) => switch (this) {
+  /// yours), [untilMs] when its limit resets, [tester] who runs the tests,
+  /// [waitsFor] who a decision is for when that is someone else ([needsMe]).
+  String? line({String? owner, String? dispatcher, String? tester, String? login, bool mine = false, int? untilMs, bool expired = false, String? waitsFor}) => switch (this) {
         TicketState.backlog => null,
         TicketState.choosing => '${dispatcher ?? 'The dispatcher'} is choosing…',
         TicketState.needsOwner => 'Choose an employee',
         TicketState.ownerUnknown => 'Dispatcher unknown · choose an employee',
         TicketState.queued => 'Queued for ${owner ?? 'its owner'}',
         TicketState.working => 'Working',
-        TicketState.waitingForYou => 'Waiting for you',
+        TicketState.waitingForYou => waitsFor == null ? 'Waiting for you' : 'Waiting for $waitsFor',
         TicketState.needsYourLogin => expired ? 'Waiting for your Claude login (expired)' : 'Waiting for your Claude login',
         TicketState.waitsForLogin => "Waiting for ${login ?? 'its creator'}'s Claude login",
         TicketState.waitingForLimit => limitWaitOf(mine ? 'your' : "${login ?? 'its creator'}'s", untilMs),
@@ -273,6 +282,21 @@ extension TicketStateView on TicketState {
         TicketState.done => 'Done',
       };
 }
+
+/// Whether a ticket in [state] counts as [me]'s work (B6, freeze §1): its ◆, the
+/// filter Needs you, the count and Waiting on me. A wait for a login is the login
+/// user's ([TicketState.needsYourLogin] already asked); the rest the responsible's,
+/// and everyone's without an active one, as on a server without a responsible.
+/// Only what counts: anyone can still decide ([TicketState.needsYou]).
+bool needsMe(TicketView ticket, TicketState state, {String? me}) {
+  if (!state.needsYou) return false;
+  if (state == TicketState.needsYourLogin) return true;
+  final responsible = ticket.responsibleUserId;
+  return responsible == null || (ticket.responsibleDisabled ?? false) || responsible == me;
+}
+
+/// Who a decision that is not [me]'s waits for (the responsible's name); null when it is [me]'s or nobody's.
+String? waitsForOther(TicketView ticket, TicketState state, {String? me}) => state.needsYou && !needsMe(ticket, state, me: me) ? ticket.responsibleUsername : null;
 
 /// "Waiting for Robin's limit until 16:00" (P-37: the name and the time, never
 /// someone else's usage), with the day when that is not today.
