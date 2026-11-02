@@ -90,6 +90,7 @@ pub mod run;
 pub mod task;
 pub mod server_name;
 pub mod ticket;
+pub(crate) mod ticket_follow;
 pub mod user;
 
 pub(crate) fn chat_next_version(tx: &Transaction<'_>, aggregate_type: &str, id: &str) -> Result<u64, StorageError> {
@@ -129,7 +130,7 @@ pub struct CommandService {
 }
 
 /// The answer to a write of the phase A freeze whose server part is not built yet.
-pub(crate) const NOT_BUILT_YET: &str = "This server does not do this yet.";
+const NOT_BUILT_YET: &str = "This server does not do this yet.";
 
 /// A write of the phase A freeze: a board member's, and refused for now.
 fn not_built_yet(ctx: &CommandContext) -> Result<Committed, AppError> {
@@ -303,7 +304,9 @@ impl CommandService {
             | Command::UpdateBoardColumns(_)
             | Command::UpdateCompany(_)
             | Command::UseMyLogin(_)
-            | Command::SetBackgroundLogin(_) => self.ticket_command(ctx, &envelope, hash),
+            | Command::SetBackgroundLogin(_)
+            | Command::SetTicketResponsible(_) => self.ticket_command(ctx, &envelope, hash),
+            Command::FollowTicket(cmd) => self.follow_ticket(ctx, &envelope, hash, cmd),
             Command::UpdateProject(cmd) => self.update_project(ctx, &envelope, hash, cmd),
             Command::PostTicketMessage(cmd) => self.post_ticket_message(ctx, &envelope, hash, cmd),
             Command::RetryTicketSummary(cmd) => self.retry_ticket_summary(ctx, &envelope, hash, cmd),
@@ -319,7 +322,7 @@ impl CommandService {
             Command::SetServerName(cmd) => self.set_server_name(ctx, &envelope, hash, cmd),
             Command::ReactToMessage(cmd) => self.react_to_message(ctx, &envelope, hash, cmd),
             // The phase A freeze: their features are not in `FEATURES`, so no client calls them yet.
-            Command::SetTicketResponsible(_) | Command::FollowTicket(_) | Command::EditMessage(_) | Command::DeleteMessage(_) => not_built_yet(ctx),
+            Command::EditMessage(_) | Command::DeleteMessage(_) => not_built_yet(ctx),
         };
         COMMAND_METHOD.set("");
         result

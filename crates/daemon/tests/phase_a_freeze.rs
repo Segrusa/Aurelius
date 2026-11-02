@@ -9,7 +9,7 @@ use common::*;
 use aurelius_client::{Client, ClientError};
 use aurelius_domain::group_chat::{DeleteMessage, EditMessage, SendGroupMessage};
 use aurelius_domain::project::CreateProject;
-use aurelius_domain::ticket::{CreateTicket, FollowTicket, PostTicketMessage, SetTicketResponsible, TicketPriority};
+use aurelius_domain::ticket::{CreateTicket, FollowTicket, PostTicketMessage, TicketPriority};
 use aurelius_domain::{ActorKind, Command, CommandEnvelope, CommandId, CommandResult, ConversationId, ErrorCode, EventKind, MessageId, ProjectId, TicketId, UserId};
 use aurelius_host::ipc::{self, BoxStream, read_frame, write_frame};
 use aurelius_protocol::{HelloParams, Method, Outcome, Request, ResponseBody, ServerMessage, client_feature, feature};
@@ -128,18 +128,14 @@ async fn a_stub_write_refuses_with_validation_and_leaves_no_receipt() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
-    let (project, channel) = project_channel(&client, "Atlas").await;
-    let (ticket_id, _) = ticket(&client, project).await;
+    let (_, channel) = project_channel(&client, "Atlas").await;
     let message = post(&client, channel, "Hello", None).await;
     let events = || db(dir.path()).query_row("SELECT COUNT(*) FROM events", [], |r| r.get::<_, i64>(0)).unwrap();
     let before = events();
 
     for command in [
-        Command::SetTicketResponsible(SetTicketResponsible { ticket_id, responsible_user_id: None }),
-        Command::FollowTicket(FollowTicket { ticket_id, on: true }),
         Command::EditMessage(EditMessage { message_id: message, text: "Better".into(), confirm_secret: false }),
         Command::DeleteMessage(DeleteMessage { message_id: message }),
-        Command::CreateTicket(new_ticket(project, Some(UserId::new()))),
     ] {
         let key = CommandId::new();
         let refused = client.execute(CommandEnvelope { command_id: key, expected_version: None, command: command.clone() }).await.unwrap_err();
@@ -154,7 +150,7 @@ async fn a_stub_write_refuses_with_validation_and_leaves_no_receipt() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_new_write_without_a_session_is_refused_before_it_reaches_the_stub() {
+async fn a_new_write_without_a_session_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
@@ -195,7 +191,7 @@ async fn a_stub_read_refuses_with_validation() {
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let mut stream = raw(dir.path(), &[]).await;
-    for method in [Method::TicketFollowers { ticket_id: TicketId::new() }, Method::TicketMyTickets { project_id: None, include_done: false }, Method::MessageHistory { message_id: MessageId::new() }] {
+    for method in [Method::TicketMyTickets { project_id: None, include_done: false }, Method::MessageHistory { message_id: MessageId::new() }] {
         match read_outcome(&mut stream, method.clone()).await {
             Outcome::Error(err) => assert_eq!(err.code, ErrorCode::Validation, "{method:?}"),
             Outcome::Ok(body) => panic!("{method:?}: {body:?}"),
@@ -219,7 +215,7 @@ async fn replayed_kinds(stream: &mut BoxStream) -> Vec<EventKind> {
     kinds
 }
 
-/// Put an event in the log as the server part will: nothing writes these kinds yet.
+/// Put an event in the log as the server part will: nothing writes `message.edited` yet.
 fn log_event(root: &Path, kind: EventKind, aggregate_type: &'static str, aggregate_id: String, metadata: serde_json::Value) {
     let store = Store::open(root).unwrap();
     store
@@ -253,9 +249,9 @@ async fn a_connection_without_accepts_gets_neither_new_event_in_the_replay() {
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let (project, channel) = project_channel(&client, "Atlas").await;
-    let (ticket_id, _) = ticket(&client, project).await;
+    // Its creator's follow is the real `ticket.follow_changed` (A2).
+    ticket(&client, project).await;
     let message = post(&client, channel, "Hello", None).await;
-    log_event(dir.path(), EventKind::TicketFollowChanged, "ticket", ticket_id.to_string(), serde_json::json!({ "on": true }));
     log_event(dir.path(), EventKind::MessageEdited, "conversation", channel.to_string(), serde_json::json!({ "message_id": message }));
 
     let count = |kinds: &[EventKind], kind| kinds.iter().filter(|k| **k == kind).count();

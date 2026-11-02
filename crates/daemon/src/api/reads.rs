@@ -94,8 +94,9 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::TicketGet { ticket_id } => ticket(shared, ticket_id).await,
         Method::TicketList { project_id, column, query } => tickets(shared, project_id, column, query).await,
         Method::MessageLocate { message_id } => message_location(shared, message_id).await,
+        Method::TicketFollowers { ticket_id } => ticket_followers(shared, ticket_id).await,
         // Not built yet: their features are not in `FEATURES`, so no client calls them.
-        Method::TicketFollowers { .. } | Method::TicketMyTickets { .. } | Method::MessageHistory { .. } => Err(ProtocolError::new(ErrorCode::Validation, NOT_BUILT_YET)),
+        Method::TicketMyTickets { .. } | Method::MessageHistory { .. } => Err(ProtocolError::new(ErrorCode::Validation, NOT_BUILT_YET)),
         Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
         Method::ApprovalList => approvals(shared).await,
         Method::ProviderList => connections(shared).await,
@@ -573,6 +574,21 @@ async fn ticket(shared: &Arc<Shared>, ticket_id: aurelius_domain::TicketId) -> R
     .await?;
     found
         .map(ResponseBody::Ticket)
+        .ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, format!("ticket {ticket_id} does not exist")))
+}
+
+/// `ticket.followers`: who follows a ticket, also when it is closed or archived.
+async fn ticket_followers(shared: &Arc<Shared>, ticket_id: aurelius_domain::TicketId) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let followers = storage_task(move || {
+        store.read(|c| match aurelius_storage::tickets::state(c, ticket_id)? {
+            Some(_) => Ok(Some(aurelius_storage::followers::list(c, ticket_id)?)),
+            None => Ok(None),
+        })
+    })
+    .await?;
+    followers
+        .map(|followers| ResponseBody::TicketFollowers(aurelius_domain::ticket::TicketFollowersView { followers }))
         .ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, format!("ticket {ticket_id} does not exist")))
 }
 

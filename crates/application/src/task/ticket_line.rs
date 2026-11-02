@@ -30,7 +30,7 @@ use aurelius_domain::{
     ActorKind, EmployeeId, EventKind, EventNotice, ProjectId, TaskId, TicketId, UserId,
     task::{TaskStatus, WAITING_PLAN_REVIEW},
     ticket::{Actor, ColumnKind},
-    views::{SystemLine, SystemLineKind},
+    views::{SystemLine, SystemLineKind, system_action},
 };
 use aurelius_storage::{StorageError, Store, Tx, blobs, company as company_store, conversations as conv, tasks as task_store, tickets as store};
 use rusqlite::OptionalExtension;
@@ -120,6 +120,23 @@ pub(crate) fn column_line_with(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>,
     let mut line = SystemLine::new(SystemLineKind::Moved);
     (line.by, line.from, line.to) = (Some(name), Some(from_name), Some(to_name));
     line.action = action.map(str::to_owned);
+    crate::conversation::discussion::ticket_line(tx, ticket, line, &text)
+}
+
+/// The system line of a change of Responsible (US-A1): on `Moved` with its action,
+/// so an older client shows the text and never reads a new `SystemLineKind` (R1).
+pub(crate) fn responsible_line(tx: &Tx<'_>, ticket: TicketId, by: Actor, before: Option<UserId>, after: Option<UserId>) -> Result<Vec<EventNotice>, StorageError> {
+    let board_member = |user: Option<UserId>| user.map(|user_id| crate::conversation::discussion::actor_name(tx, Some(Actor::BoardMember { user_id }))).transpose();
+    let name = crate::conversation::discussion::actor_name(tx, Some(by))?;
+    let (from, to) = (board_member(before)?, board_member(after)?);
+    let text = match (&from, &to) {
+        (Some(from), Some(to)) => format!("{name} changed responsible: {from} → {to}"),
+        (None, Some(to)) => format!("{name} made {to} responsible"),
+        (Some(from), None) => format!("{name} removed {from} as responsible"),
+        (None, None) => format!("{name} changed who is responsible"),
+    };
+    let mut line = SystemLine::new(SystemLineKind::Moved).with_action(system_action::RESPONSIBLE);
+    (line.by, line.from, line.to) = (Some(name), from, to);
     crate::conversation::discussion::ticket_line(tx, ticket, line, &text)
 }
 

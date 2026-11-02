@@ -132,8 +132,9 @@ fn every_new_read_and_write_is_for_devices_and_never_for_apps() {
 #[test]
 fn only_message_locate_is_advertised_until_the_server_parts_are_built() {
     assert!(FEATURES.contains(&feature::MESSAGE_LOCATE));
+    assert!(FEATURES.contains(&feature::TICKET_RESPONSIBLE) && FEATURES.contains(&feature::TICKET_FOLLOW));
     // Whoever finishes a server part puts its feature in `FEATURES` and takes it off this list.
-    for stub in [feature::TICKET_RESPONSIBLE, feature::TICKET_FOLLOW, feature::PERSONAL_INBOX, feature::MY_TICKETS, feature::MESSAGE_EDITS] {
+    for stub in [feature::PERSONAL_INBOX, feature::MY_TICKETS, feature::MESSAGE_EDITS] {
         assert!(!FEATURES.contains(&stub), "{stub}: a client must never call a stub");
     }
 }
