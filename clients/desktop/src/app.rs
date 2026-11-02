@@ -277,6 +277,11 @@ pub enum InboxTab {
 impl InboxTab {
     pub const ALL: [InboxTab; 4] = [InboxTab::NeedsYou, InboxTab::Results, InboxTab::Failed, InboxTab::All];
 
+    /// The tabs this server has.
+    pub fn shown(_personal_inbox: bool) -> &'static [InboxTab] {
+        &Self::ALL
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             InboxTab::NeedsYou => "Needs you",

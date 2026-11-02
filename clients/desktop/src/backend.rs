@@ -117,6 +117,9 @@ pub struct ServerInfo {
     pub ticket_follow: bool,
     /// `aurelius://` links open here: `message.locate` (feature `message_locate`, A5).
     pub message_locate: bool,
+    /// A personal Inbox: notifications per person, per ticket or channel, with a reason
+    /// (feature `personal_inbox`, A3).
+    pub personal_inbox: bool,
 }
 
 /// Thumbnails are asked at this size: sharp at 2x in a 120×80 tile.
@@ -1789,6 +1792,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 ticket_responsible: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_RESPONSIBLE),
                 ticket_follow: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_FOLLOW),
                 message_locate: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::MESSAGE_LOCATE),
+                personal_inbox: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::PERSONAL_INBOX),
             },
         }));
 
@@ -4994,24 +4998,72 @@ mod tests {
             assert!(message.starts_with("Not connected"), "{message}");
         }
 
-        /// AUR-FA D1 against a server without `ticket_responsible` and `ticket_follow`: the client
-        /// names none of the new fields, a ticket is made and read as before, nothing on it says
-        /// Responsible, and the new methods only refuse. `message.locate` is there: a message of a
-        /// discussion is found with its ticket, an unknown one says it no longer exists.
+        /// A server of before phase A in front of a real daemon: every frame passes, but its
+        /// hello names none of the phase's features and its answers none of the phase's fields.
+        /// So this holds whatever `FEATURES` says today.
+        async fn older_server(daemon_root: &std::path::Path, front: &std::path::Path) -> tokio::task::JoinHandle<()> {
+            use aurelius_host::ipc;
+            const FEATURES: [&str; 6] = ["ticket_responsible", "ticket_follow", "personal_inbox", "my_tickets", "message_locate", "message_edits"];
+            const FIELDS: [&str; 10] = ["responsible_user_id", "responsible_username", "responsible_disabled", "ticket_id", "ticket_number", "reason", "merged_count", "needs_you", "edited_at_ms", "deleted_at_ms"];
+            fn old(value: &mut serde_json::Value) {
+                match value {
+                    serde_json::Value::Object(fields) => {
+                        // A task names its ticket on this server too: only a notification's rows and a ticket's new fields go.
+                        let row = fields.contains_key("target_type");
+                        fields.retain(|k, _| !FIELDS[..3].contains(&k.as_str()) && !(row && FIELDS[3..8].contains(&k.as_str())) && !FIELDS[8..].contains(&k.as_str()));
+                        if let Some(serde_json::Value::Array(list)) = fields.get_mut("features") {
+                            list.retain(|f| !f.as_str().is_some_and(|f| FEATURES.contains(&f)));
+                        }
+                        fields.values_mut().for_each(old);
+                    }
+                    serde_json::Value::Array(list) => list.iter_mut().for_each(old),
+                    _ => {}
+                }
+            }
+            let mut listener = ipc::Listener::bind(&aurelius_host::endpoint(front)).expect("the front listens");
+            let real = aurelius_host::endpoint(daemon_root);
+            tokio::spawn(async move {
+                loop {
+                    let Ok(client) = listener.accept().await else { return };
+                    let Ok(server) = ipc::connect(&real).await else { return };
+                    let (mut client_in, mut client_out) = tokio::io::split(client);
+                    let (mut server_in, mut server_out) = tokio::io::split(server);
+                    tokio::spawn(async move {
+                        while let Ok(Some(frame)) = ipc::read_frame::<serde_json::Value, _>(&mut client_in).await {
+                            if ipc::write_frame(&mut server_out, &frame).await.is_err() {
+                                break;
+                            }
+                        }
+                    });
+                    tokio::spawn(async move {
+                        while let Ok(Some(mut frame)) = ipc::read_frame::<serde_json::Value, _>(&mut server_in).await {
+                            old(&mut frame);
+                            if ipc::write_frame(&mut client_out, &frame).await.is_err() {
+                                break;
+                            }
+                        }
+                    });
+                }
+            })
+        }
+
+        /// A server without any of phase A's features: the client sends none of the new fields, a
+        /// ticket is made and read as before, nothing on it says Responsible, B6 counts for
+        /// everyone, and a notification has no reason, so the Inbox has its old tabs.
         #[tokio::test(flavor = "multi_thread")]
-        async fn a_server_without_the_new_features_keeps_working_and_links_find_their_message() {
+        async fn a_server_without_the_new_features_keeps_working() {
             let dir = tempfile::tempdir().unwrap();
-            let root = dir.path().to_path_buf();
+            let root = dir.path().join("daemon");
+            let front = dir.path().join("front");
             let _server = daemon(&root).await;
-            let mut app = start(Some(Target::Local { root: root.clone(), spawn: false }), super::memory_tokens().0);
+            let _older = older_server(&root, &front).await;
+            let mut app = start(Some(Target::Local { root: front.clone(), spawn: false }), super::memory_tokens().0);
             let info = next(&mut app, |u| match u {
                 Update::Connection(Connection::Online { server, .. }) => Some(server),
                 _ => None,
             })
             .await;
-            assert!(info.message_locate, "the server has message.locate");
-            assert!(!info.ticket_responsible && !info.ticket_follow, "F1 turns these on: then this test moves to its end-to-end test");
-            assert!(info.host_id.is_some());
+            assert!(!info.ticket_responsible && !info.ticket_follow && !info.message_locate && !info.personal_inbox, "none of the phase's features: {info:?}");
             app.requests.send(Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new("Tr0ub4dor&3-zebra-ada".into()) })).unwrap();
             next(&mut app, |u| match u {
                 Update::Who(w) if w.user.is_some() => Some(()),
@@ -5032,31 +5084,123 @@ mod tests {
             assert_eq!((ticket.responsible_user_id, ticket.responsible_username.clone(), ticket.responsible_disabled), (None, None, false));
             // B6 on such a server: for everyone, as before.
             assert!(crate::screens::board::needs_me(Some(crate::screens::board::Needs::Review), &ticket, Some(aurelius_domain::UserId::new())));
-
-            // The methods behind the features refuse until the server has them; nothing else happens.
-            let message = refused(&mut app, Command::FollowTicket(ticket::FollowTicket { ticket_id: ticket.id, on: true }), None).await;
-            assert_eq!(message, "This server does not do this yet.");
-            let message = refused(&mut app, Command::SetTicketResponsible(ticket::SetTicketResponsible { ticket_id: ticket.id, responsible_user_id: None }), None).await;
-            assert_eq!(message, "This server does not do this yet.");
-            app.requests.send(Request::Board(BoardCall::Followers(ticket.id))).unwrap();
-            let followers = next(&mut app, |u| match u {
-                Update::Board(BoardUpdate::Followers(t, r)) if t == ticket.id => Some(r),
+            // Activity worded as before, and the Inbox lists what it listed.
+            app.requests.send(Request::Board(BoardCall::Activity(ticket.id))).unwrap();
+            let cards = next(&mut app, |u| match u {
+                Update::Board(BoardUpdate::Activity(t, r)) if t == ticket.id => Some(r.expect("it reads")),
                 _ => None,
             })
             .await;
-            assert_eq!(followers.expect_err("not built yet"), "This server does not do this yet.");
+            assert_eq!(cards.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), ["ticket.created"]);
+            assert_eq!(crate::app::InboxTab::shown(info.personal_inbox), [crate::app::InboxTab::NeedsYou, crate::app::InboxTab::Results, crate::app::InboxTab::Failed, crate::app::InboxTab::All]);
+        }
+
+        /// A1 and A2 against the real engine, with what the app does on each step: the picker's
+        /// list, a ticket made with oneself as Responsible, the handover and its sentence in the
+        /// Activity, follow and unfollow live, the list of followers, B10 refused until handed over.
+        /// And A5a: `message.locate` finds a message of the discussion with its ticket.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn responsible_and_following_work_end_to_end() {
+            use crate::screens::board::{activity_detail, activity_text};
+            use crate::screens::who::{FormResponsible, create_responsible, follow_state, follower_reason_text, responsible_choices};
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().to_path_buf();
+            let _server = daemon(&root).await;
+            let mut app = start(Some(Target::Local { root: root.clone(), spawn: false }), super::memory_tokens().0);
+            let info = next(&mut app, |u| match u {
+                Update::Connection(Connection::Online { server, .. }) => Some(server),
+                _ => None,
+            })
+            .await;
+            assert!(info.ticket_responsible && info.ticket_follow && info.message_locate && info.host_id.is_some(), "{info:?}");
+            app.requests.send(Request::BoardMembers(UserCall::Create { username: "ada".into(), password: Password::new("Tr0ub4dor&3-zebra-ada".into()) })).unwrap();
+            let ada = next(&mut app, |u| match u {
+                Update::Who(w) => w.user.map(|u| u.id),
+                _ => None,
+            })
+            .await;
+            app.requests.send(Request::BoardMembers(UserCall::Create { username: "marie".into(), password: Password::new("correct-horse-battery-marie".into()) })).unwrap();
+            next(&mut app, |u| matches!(u, Update::BoardMemberCreated(_)).then_some(())).await;
+            let members = next(&mut app, |u| match u {
+                Update::BoardMembers(list) if list.len() == 2 => Some(list),
+                _ => None,
+            })
+            .await;
+            let marie = members.iter().find(|m| m.username == "marie").expect("marie").id;
+            app.requests.send(Request::CreateProject { name: "Demo".into(), description: None, folder: None }).unwrap();
+            let project = next(&mut app, |u| match u {
+                Update::Created(p) => Some(p),
+                _ => None,
+            })
+            .await;
+
+            // The picker on the form: you, then the others; nobody to remove yet.
+            let labels = |current| responsible_choices(&members, Some(ada), current).into_iter().map(|c| (c.label, c.checked)).collect::<Vec<_>>();
+            assert_eq!(labels(None), [("You".to_string(), false), ("marie".to_string(), false)]);
+
+            // Made with yourself as Responsible: `ticket.created` only, no update and no system line.
+            let Command::CreateTicket(mut create) = new_ticket(project, "Who follows up") else { unreachable!() };
+            create.responsible_user_id = create_responsible(FormResponsible::You, Some(ada), info.ticket_responsible);
+            assert_eq!(create.responsible_user_id, Some(ada));
+            done(&mut app, Command::CreateTicket(create), None).await;
+            let ticket = tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog)[0].clone();
+            assert_eq!((ticket.responsible_user_id, ticket.responsible_username.as_deref()), (Some(ada), Some("ada")));
+            assert_eq!(activity(&mut app, ticket.id).await.iter().map(|c| c.title.clone()).collect::<Vec<_>>(), ["ticket.created"]);
+            let discussion = ticket.conversation_id.expect("every ticket has its discussion");
+            let responsible_lines = |messages: &[aurelius_protocol::MessageView]| messages.iter().filter(|m| m.system.as_ref().is_some_and(|l| l.action.as_deref() == Some(aurelius_domain::views::system_action::RESPONSIBLE))).count();
+            assert_eq!(responsible_lines(&read_discussion(&mut app, discussion).await), 0);
+
+            // B10: the Responsible follows and cannot stop, on the button and on the server.
+            let list = followers(&mut app, ticket.id).await;
+            assert_eq!(list.iter().map(|f| f.username.as_str()).collect::<Vec<_>>(), ["ada"]);
+            let state = follow_state(&ticket, Some(&list), Some(ada));
+            assert!(state.following && state.locked, "{state:?}");
+            let message = refused(&mut app, Command::FollowTicket(ticket::FollowTicket { ticket_id: ticket.id, on: false }), None).await;
+            assert_eq!(message, "You are responsible for this ticket; hand it over before you unfollow it.");
+            assert_eq!(followers(&mut app, ticket.id).await.len(), 1, "nothing changed");
+
+            // The handover: the new Responsible follows, the old one still does and now can stop.
+            done(&mut app, Command::SetTicketResponsible(ticket::SetTicketResponsible { ticket_id: ticket.id, responsible_user_id: Some(marie) }), None).await;
+            let ticket = tickets(&load(&mut app, Some(project)).await, ColumnKind::Backlog)[0].clone();
+            assert_eq!((ticket.responsible_user_id, ticket.responsible_username.as_deref()), (Some(marie), Some("marie")));
+            assert_eq!(labels(Some(marie)), [("You".to_string(), false), ("marie".to_string(), true), ("No one".to_string(), false)]);
+            let list = followers(&mut app, ticket.id).await;
+            assert_eq!(list.iter().map(|f| f.username.as_str()).collect::<Vec<_>>(), ["ada", "marie"]);
+            assert_eq!(follower_reason_text(list.iter().find(|f| f.user_id == marie).expect("marie follows")), "Responsible");
+            let state = follow_state(&ticket, Some(&list), Some(ada));
+            assert!(state.following && !state.locked, "{state:?}");
+            let number = ticket.number;
+            let cards = activity(&mut app, ticket.id).await;
+            assert_eq!(activity_text(&cards[0]), format!("ada made marie responsible for #{number}"));
+            assert_eq!(activity_detail(&cards[0]), Some("ada was responsible before"));
+            assert_eq!(responsible_lines(&read_discussion(&mut app, discussion).await), 1);
+
+            // Unfollow and follow again: the event says so live, the list follows, and it reads why.
+            set_following(&mut app, ticket.id, false).await;
+            let list = followers(&mut app, ticket.id).await;
+            assert_eq!(list.iter().map(|f| f.username.as_str()).collect::<Vec<_>>(), ["marie"]);
+            assert!(!follow_state(&ticket, Some(&list), Some(ada)).following);
+            set_following(&mut app, ticket.id, true).await;
+            let list = followers(&mut app, ticket.id).await;
+            let me = list.iter().find(|f| f.user_id == ada).expect("ada follows again");
+            assert_eq!(follower_reason_text(me), "Chose to follow");
+            assert!(!cards.iter().chain(activity(&mut app, ticket.id).await.iter()).any(|c| c.title.contains("follow")), "following is not in the Activity");
+
+            // Nobody, then someone again: the sentences of the server, word for word.
+            done(&mut app, Command::SetTicketResponsible(ticket::SetTicketResponsible { ticket_id: ticket.id, responsible_user_id: None }), None).await;
+            let cards = activity(&mut app, ticket.id).await;
+            assert_eq!(activity_text(&cards[0]), format!("ada removed marie as responsible for #{number}"));
+            assert_eq!(activity_detail(&cards[0]), Some("Nobody is responsible now"));
+            done(&mut app, Command::SetTicketResponsible(ticket::SetTicketResponsible { ticket_id: ticket.id, responsible_user_id: Some(ada) }), None).await;
+            let cards = activity(&mut app, ticket.id).await;
+            assert_eq!(activity_text(&cards[0]), format!("ada made ada responsible for #{number}"));
+            assert_eq!(activity_detail(&cards[0]), Some("Nobody was responsible before"));
 
             // A5a: a message of the discussion is found, with its ticket; an unknown one is gone.
-            let discussion = ticket.conversation_id.expect("every ticket has its discussion");
             let post = Command::PostTicketMessage(ticket::PostTicketMessage { confirm_secret: false, ticket_id: ticket.id, text: "Find me".into(), images: vec![], files: vec![], thread_parent: None });
             app.requests.send(Request::Board(BoardCall::Write { command: post, expected_version: None, done: None })).unwrap();
             next(&mut app, |u| matches!(u, Update::Board(BoardUpdate::Posted { .. })).then_some(())).await;
-            app.requests.send(Request::Board(BoardCall::Discussion(Some(discussion)))).unwrap();
-            let messages = next(&mut app, |u| match u {
-                Update::Board(BoardUpdate::Discussion(c, r)) if c == discussion => Some(r.expect("it reads")),
-                _ => None,
-            })
-            .await;
+            let messages = read_discussion(&mut app, discussion).await;
             let post = messages.iter().find(|m| m.text == "Find me").expect("the post");
             app.requests.send(Request::Board(BoardCall::Locate(post.id))).unwrap();
             let place = next(&mut app, |u| match u {
@@ -5073,6 +5217,49 @@ mod tests {
             })
             .await;
             assert_eq!(gone.expect_err("no such message"), crate::screens::links::MESSAGE_GONE);
+        }
+
+        async fn activity(app: &mut Handle, id: aurelius_domain::TicketId) -> Vec<aurelius_protocol::TimelineCard> {
+            app.requests.send(Request::Board(BoardCall::Activity(id))).unwrap();
+            next(app, |u| match u {
+                Update::Board(BoardUpdate::Activity(t, r)) if t == id => Some(r.expect("it reads")),
+                _ => None,
+            })
+            .await
+        }
+
+        async fn followers(app: &mut Handle, id: aurelius_domain::TicketId) -> Vec<ticket::FollowerView> {
+            app.requests.send(Request::Board(BoardCall::Followers(id))).unwrap();
+            next(app, |u| match u {
+                Update::Board(BoardUpdate::Followers(t, r)) if t == id => Some(r.expect("it reads").followers),
+                _ => None,
+            })
+            .await
+        }
+
+        async fn read_discussion(app: &mut Handle, id: aurelius_domain::ConversationId) -> Vec<aurelius_protocol::MessageView> {
+            app.requests.send(Request::Board(BoardCall::Discussion(Some(id)))).unwrap();
+            next(app, |u| match u {
+                Update::Board(BoardUpdate::Discussion(c, r)) if c == id => Some(r.expect("it reads")),
+                _ => None,
+            })
+            .await
+        }
+
+        /// `ticket.follow`, until both its answer and its live event came.
+        async fn set_following(app: &mut Handle, id: aurelius_domain::TicketId, on: bool) {
+            app.requests.send(Request::Board(BoardCall::Write { command: Command::FollowTicket(ticket::FollowTicket { ticket_id: id, on }), expected_version: None, done: Some("ok".into()) })).unwrap();
+            let (mut answered, mut heard) = (false, false);
+            next(app, |u| {
+                match u {
+                    Update::Board(BoardUpdate::Done { .. }) => answered = true,
+                    Update::Board(BoardUpdate::Failed { message, .. }) => panic!("refused: {message}"),
+                    Update::Board(BoardUpdate::FollowChanged) => heard = true,
+                    _ => {}
+                }
+                (answered && heard).then_some(())
+            })
+            .await;
         }
 
         /// AUR-MU-02 end to end against the discussion engine, in two windows (ada and

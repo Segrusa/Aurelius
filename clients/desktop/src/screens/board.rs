@@ -681,7 +681,6 @@ pub fn activity_text(card: &TimelineCard) -> String {
         "ticket.cancelled" => format!("{who} put it back in Backlog"),
         "ticket.archived" => format!("{who} archived it"),
         "ticket.updated" if card.actor == "system" => "Nobody chose an owner; a board member must".into(),
-        "ticket.updated" if card.detail.contains("responsible") => format!("{who} changed who is responsible"),
         "ticket.updated" => format!("{who} changed it"),
         // Plan approved: the main task's conversation left Plan mode (D-07).
         "conversation.settings_changed" => "The main task's mode changed".into(),
