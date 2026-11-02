@@ -15,6 +15,7 @@ pub mod heartbeats;
 pub mod conversations;
 pub mod discussions;
 pub mod threads;
+pub mod message_edits;
 pub mod conversation_sessions;
 pub mod employees;
 pub mod company_convert;
@@ -251,6 +252,8 @@ mod threads_tests;
 mod followers_tests;
 #[cfg(test)]
 mod message_edits_tests;
+#[cfg(test)]
+mod message_editable_tests;
 #[cfg(test)]
 mod guidelines_tests;
 #[cfg(test)]

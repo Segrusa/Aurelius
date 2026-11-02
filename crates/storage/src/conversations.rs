@@ -502,6 +502,8 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             (None, _) => None,
         };
         let id = MessageId::parse(&id).map_err(|e| StorageError::Rejected(e.to_string()))?;
+        // A deleted message shows no attachments; the rows and blobs stay.
+        let (files, uploads) = if deleted.is_some() { (None, None) } else { (files, uploads) };
         let mut uploads: Vec<aurelius_domain::views::MessageFileView> = uploads.and_then(|f| serde_json::from_str(&f).ok()).unwrap_or_default();
         aurelius_domain::conversation::with_upload_ids(aurelius_domain::conversation::UploadOwner::Message(id), &mut uploads);
         out.push(MessageView {
@@ -568,7 +570,7 @@ pub(crate) fn has_thread_column(conn: &Connection) -> Result<bool, StorageError>
 }
 
 /// Whether `messages` has `edited_at_ms` and `deleted_at_ms` (schema 29).
-fn has_edit_columns(conn: &Connection) -> Result<bool, StorageError> {
+pub(crate) fn has_edit_columns(conn: &Connection) -> Result<bool, StorageError> {
     Ok(conn.query_row("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'edited_at_ms'", [], |r| r.get::<_, i64>(0))? > 0)
 }
 
