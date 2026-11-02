@@ -379,3 +379,228 @@ fn a_tickets_activity_has_the_board_writes_and_the_engines_once_in_order() {
     let (rest, _) = f.store.read(move |c| crate::timeline::cards(c, None, Some(&ticket.to_string()), next, 50, true)).unwrap();
     assert_eq!(first.iter().chain(&rest).map(|c| c.seq).collect::<Vec<_>>(), cards.iter().map(|c| c.seq).collect::<Vec<_>>());
 }
+
+// ---- Responsible and my tickets (AUR-FA-S1) --------------------------------
+
+fn second_user(f: &Fixture, name: &'static str) -> UserId {
+    let id = UserId::new();
+    f.store.write(move |tx| users::insert(tx, &users::NewUser { id: &id.to_string(), username: name, created_by_user: None, now_ms: 1 }, PHC).map(|_| ())).unwrap();
+    id
+}
+
+/// Give a ticket `priority` and put its update time on `updated`.
+fn prioritize(f: &Fixture, id: TicketId, priority: &'static str, updated: i64) {
+    f.store
+        .write(move |tx| Ok(tx.execute("UPDATE tickets SET priority = ?2, updated_at_ms = ?3 WHERE id = ?1", rusqlite::params![id.to_string(), priority, updated])?))
+        .unwrap();
+}
+
+fn make_responsible(f: &Fixture, id: TicketId, user: Option<UserId>) -> bool {
+    f.store.write(move |tx| tickets::set_responsible(tx, id, user)).unwrap()
+}
+
+fn disable(f: &Fixture, user: UserId) {
+    f.store.write(move |tx| Ok(tx.execute("UPDATE users SET disabled_at_ms = 5 WHERE id = ?1", [user.to_string()])?)).unwrap();
+}
+
+fn on_column(f: &Fixture, id: TicketId, kind: ColumnKind) {
+    f.store
+        .write(move |tx| {
+            let column = company::column_of_kind(tx, kind)?;
+            tickets::move_to(tx, id, column.id, None)
+        })
+        .unwrap();
+}
+
+fn follow(f: &Fixture, ticket: TicketId, user: UserId) {
+    f.store.write(move |tx| crate::followers::follow(tx, ticket, user, crate::followers::FollowReason::Manual, 1)).unwrap();
+}
+
+fn mine(f: &Fixture, viewer: UserId, project: Option<ProjectId>, include_done: bool) -> aurelius_domain::ticket::MyTicketsView {
+    f.store.read(|c| tickets::my_tickets(c, viewer, project, include_done, &read_blob)).unwrap()
+}
+
+fn numbers(view: &aurelius_domain::ticket::MyTicketsView) -> Vec<u32> {
+    let mut numbers: Vec<u32> = view.tickets.iter().map(|t| t.number).collect();
+    numbers.sort();
+    numbers
+}
+
+#[test]
+fn every_ticket_read_shows_the_responsible_with_name_and_disabled() {
+    let f = fixture();
+    let (id, _) = add(&f, f.atlas, "Fix");
+    let bea = second_user(&f, "bea");
+    assert!(make_responsible(&f, id, Some(bea)));
+
+    let check = |disabled: bool| {
+        let through_view = f.store.read(|c| tickets::view(c, id, &read_blob)).unwrap().unwrap();
+        let through_list = f.store.read(|c| tickets::list(c, &TicketFilter::default(), &read_blob)).unwrap().pop().unwrap();
+        let through_board = f.store.read(|c| tickets::board(c, None, &read_blob)).unwrap().into_iter().flat_map(|c| c.tickets).next().unwrap();
+        let through_mine = mine(&f, bea, None, false).tickets.pop().unwrap();
+        for t in [through_view, through_list, through_board, through_mine] {
+            assert_eq!((t.responsible_user_id, t.responsible_username.as_deref(), t.responsible_disabled), (Some(bea), Some("bea"), disabled));
+        }
+    };
+    check(false);
+    disable(&f, bea);
+    check(true);
+}
+
+#[test]
+fn a_ticket_without_a_responsible_reads_as_nobody() {
+    let f = fixture();
+    let (id, _) = add(&f, f.atlas, "Fix");
+    let t = f.store.read(|c| tickets::view(c, id, &read_blob)).unwrap().unwrap();
+    assert_eq!((t.responsible_user_id, t.responsible_username, t.responsible_disabled), (None, None, false));
+    assert_eq!(f.store.read(|c| tickets::responsible(c, id)).unwrap(), None);
+}
+
+#[test]
+fn set_responsible_says_whether_anything_changed_and_can_clear_it_and_leaves_the_version_alone() {
+    let f = fixture();
+    let (id, _) = add(&f, f.atlas, "Fix");
+    let bea = second_user(&f, "bea");
+    assert!(make_responsible(&f, id, Some(bea)));
+    assert!(!make_responsible(&f, id, Some(bea)), "already");
+    assert_eq!(f.store.read(|c| tickets::responsible(c, id)).unwrap(), Some(tickets::TicketResponsible { user_id: bea, disabled: false }));
+    disable(&f, bea);
+    assert_eq!(f.store.read(|c| tickets::responsible(c, id)).unwrap(), Some(tickets::TicketResponsible { user_id: bea, disabled: true }));
+    assert!(make_responsible(&f, id, None));
+    assert!(!make_responsible(&f, id, None), "nobody already");
+    assert!(!make_responsible(&f, TicketId::new(), None), "an unknown ticket");
+    assert_eq!(f.store.read(|c| tickets::view(c, id, &read_blob)).unwrap().unwrap().version, 1);
+}
+
+#[test]
+fn a_responsible_who_does_not_exist_is_refused() {
+    let f = fixture();
+    let (id, _) = add(&f, f.atlas, "Fix");
+    assert!(f.store.write(move |tx| tickets::set_responsible(tx, id, Some(UserId::new()))).is_err());
+}
+
+#[test]
+fn my_tickets_are_what_i_am_responsible_for_made_follow_or_on_my_login_and_what_has_no_active_responsible() {
+    let f = fixture();
+    let (me, other) = (second_user(&f, "bea"), second_user(&f, "cyd"));
+    // #1: nobody responsible, so open without an active responsible.
+    add(&f, f.atlas, "No responsible");
+    // #2: only Cyd's.
+    let (not_mine, _) = add(&f, f.atlas, "Cyd's");
+    make_responsible(&f, not_mine, Some(other));
+    // #3: I am responsible.
+    let (responsible, _) = add(&f, f.atlas, "Responsible");
+    make_responsible(&f, responsible, Some(me));
+    // #4: I follow it, Cyd is responsible.
+    let (followed, _) = add(&f, f.atlas, "Followed");
+    make_responsible(&f, followed, Some(other));
+    follow(&f, followed, me);
+    // #5: on my login, Cyd is responsible.
+    let (login, _) = add(&f, f.atlas, "On my login");
+    make_responsible(&f, login, Some(other));
+    f.store.write(move |tx| tickets::use_my_login(tx, login, me)).unwrap();
+    // #6: made by me, Cyd is responsible.
+    let (creator, project) = (TicketId::new(), f.hermes);
+    f.store
+        .write(move |tx| {
+            let backlog = company::column_of_kind(tx, ColumnKind::Backlog)?;
+            let run = RunSettings::default();
+            tickets::insert(tx, &NewTicket { id: creator, project_id: project, title: "Made by me", description_blob: None, column_id: backlog.id, priority: TicketPriority::default(), created_by_user: me, owner: None, run: &run, labels: &[], deadline_ms: None })
+        })
+        .unwrap();
+    make_responsible(&f, creator, Some(other));
+    // #7: its responsible is disabled, so no active responsible.
+    let gone = second_user(&f, "gone");
+    let (orphan, _) = add(&f, f.atlas, "Orphan");
+    make_responsible(&f, orphan, Some(gone));
+    disable(&f, gone);
+
+    let view = mine(&f, me, None, false);
+    assert_eq!(numbers(&view), [1, 3, 4, 5, 6, 7]);
+    assert_eq!(view.following, [followed], "only what the reader follows");
+    assert_eq!(numbers(&mine(&f, other, None, false)), [1, 2, 4, 5, 6, 7], "the reader decides what is mine");
+}
+
+#[test]
+fn my_tickets_filter_on_the_project() {
+    let f = fixture();
+    let (a, _) = add(&f, f.atlas, "A");
+    let (h, _) = add(&f, f.hermes, "H");
+    let ids = |project| mine(&f, f.user, project, false).tickets.iter().map(|t| t.id).collect::<Vec<_>>();
+    assert_eq!(ids(Some(f.atlas)), [a]);
+    assert_eq!(ids(Some(f.hermes)), [h]);
+    assert_eq!(ids(None).len(), 2);
+}
+
+#[test]
+fn done_and_archived_come_only_with_include_done_and_then_not_for_lacking_a_responsible() {
+    let f = fixture();
+    let reader = second_user(&f, "bea");
+    let (done_mine, _) = add(&f, f.atlas, "Done, mine");
+    make_responsible(&f, done_mine, Some(reader));
+    on_column(&f, done_mine, ColumnKind::Done);
+    let (archived_mine, _) = add(&f, f.atlas, "Archived, mine");
+    make_responsible(&f, archived_mine, Some(reader));
+    f.store.write(move |tx| tickets::mark_archived(tx, archived_mine)).unwrap();
+    let (done_nobody, _) = add(&f, f.atlas, "Done, nobody");
+    on_column(&f, done_nobody, ColumnKind::Done);
+    let (archived_nobody, _) = add(&f, f.atlas, "Archived, nobody");
+    f.store.write(move |tx| tickets::mark_archived(tx, archived_nobody)).unwrap();
+    add(&f, f.atlas, "Open, nobody");
+
+    assert_eq!(numbers(&mine(&f, reader, None, false)), [5]);
+    assert_eq!(numbers(&mine(&f, reader, None, true)), [1, 2, 5], "not another's closed ticket");
+    assert_eq!(numbers(&mine(&f, f.user, None, true)), [1, 2, 3, 4, 5], "what they made");
+}
+
+#[test]
+fn my_tickets_sort_on_priority_then_on_the_latest_update() {
+    let f = fixture();
+    let (low, _) = add(&f, f.atlas, "low");
+    let (normal_old, _) = add(&f, f.atlas, "normal old");
+    let (normal_new, _) = add(&f, f.atlas, "normal new");
+    let (high, _) = add(&f, f.atlas, "high");
+    let (urgent, _) = add(&f, f.atlas, "urgent");
+    prioritize(&f, low, "low", 900);
+    prioritize(&f, normal_old, "normal", 100);
+    prioritize(&f, normal_new, "normal", 200);
+    prioritize(&f, high, "high", 50);
+    prioritize(&f, urgent, "urgent", 10);
+    let order: Vec<String> = mine(&f, f.user, None, false).tickets.into_iter().map(|t| t.title).collect();
+    assert_eq!(order, ["urgent", "high", "normal new", "normal old", "low"]);
+}
+
+#[test]
+fn my_tickets_stop_at_the_maximum_and_keep_the_most_important() {
+    use aurelius_domain::ticket::MY_TICKETS_MAX;
+    let f = fixture();
+    let (user, project) = (f.user, f.atlas);
+    f.store
+        .write(move |tx| {
+            let backlog = company::column_of_kind(tx, ColumnKind::Backlog)?;
+            let run = RunSettings::default();
+            for n in 0..=MY_TICKETS_MAX {
+                let priority = if n == MY_TICKETS_MAX { TicketPriority::Urgent } else { TicketPriority::Low };
+                tickets::insert(tx, &NewTicket { id: TicketId::new(), project_id: project, title: "x", description_blob: None, column_id: backlog.id, priority, created_by_user: user, owner: None, run: &run, labels: &[], deadline_ms: None })?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    let view = mine(&f, user, None, false);
+    assert_eq!(view.tickets.len(), MY_TICKETS_MAX);
+    assert_eq!(view.tickets[0].priority, TicketPriority::Urgent);
+}
+
+#[test]
+fn following_names_only_the_tickets_in_the_answer() {
+    let f = fixture();
+    let reader = second_user(&f, "bea");
+    let (open, _) = add(&f, f.atlas, "Open");
+    let (done, _) = add(&f, f.atlas, "Done");
+    let (elsewhere, _) = add(&f, f.hermes, "Elsewhere");
+    on_column(&f, done, ColumnKind::Done);
+    for ticket in [open, done, elsewhere] {
+        follow(&f, ticket, reader);
+    }
+    assert_eq!(mine(&f, reader, Some(f.atlas), false).following, [open], "not the one on Done, nor another project's");
+}
