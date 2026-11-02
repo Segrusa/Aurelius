@@ -250,6 +250,8 @@ mod threads_tests;
 #[cfg(test)]
 mod followers_tests;
 #[cfg(test)]
+mod message_edits_tests;
+#[cfg(test)]
 mod guidelines_tests;
 #[cfg(test)]
 mod notifications_tests;
