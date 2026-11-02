@@ -13,6 +13,7 @@ import '../../core/widgets/dialogs.dart' show confirm;
 import '../../core/widgets/widgets.dart' show Monogram, toast;
 import '../account/account.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/tickets.dart' show openResponsibleCount, ticketResponsibleFeature;
 import '../../data/protocol/protocol.dart';
 import '../connection/connection_bloc.dart';
 
@@ -429,10 +430,21 @@ Future<void> showBoardMemberActions(BuildContext context, UserView member, List<
 /// member is refused by the server (AC4) and said so.
 Future<bool> disableBoardMember(BuildContext context, UserView member) async {
   final repository = context.read<AureliusRepository>();
+  // Nothing clears by itself (P-78): the name stays on those tickets, so it says how many.
+  var responsibleFor = 0;
+  if (repository.linkState.has(ticketResponsibleFeature)) {
+    try {
+      responsibleFor = openResponsibleCount(await repository.board(), member.id);
+    } on Object {
+      // The confirmation goes on without the count.
+    }
+    if (!context.mounted) return false;
+  }
   final ok = await confirm(
     context,
     title: 'Disable ${member.username}?',
-    body: '${member.username} is signed out on every device and cannot sign in. Their Claude login is disconnected. Their tickets keep them as creator.',
+    body: '${member.username} is signed out on every device and cannot sign in. Their Claude login is disconnected. Their tickets keep them as creator.'
+        '${responsibleFor == 0 ? '' : '\n\n${member.username} is responsible for $responsibleFor open ticket${responsibleFor == 1 ? '' : 's'}. They keep that name until someone changes it.'}',
     action: 'Disable',
     danger: true,
   );

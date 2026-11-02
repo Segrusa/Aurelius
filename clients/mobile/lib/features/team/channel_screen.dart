@@ -8,6 +8,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/channels.dart';
 import '../../data/discussion.dart';
+import '../../data/tickets.dart' show responsibleLabel;
 import '../../data/views.dart';
 import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
@@ -207,11 +208,14 @@ class _TicketLine extends StatelessWidget {
     final state = context.watch<ChannelTicketBloc>().state;
     final column = state.ticket?.column ?? channel.ticketColumn;
     final names = state.assignees;
+    // Who follows it up, after who works on it (§1.4); a server without a responsible sends none.
+    final responsible = state.ticket == null ? null : responsibleLabel(state.ticket!, me: context.read<AureliusRepository>().linkState.user?.id);
     return Semantics(
       label: [
         if (column != null) 'Status ${columnName(column)}',
         if (state.ticket != null) state.ticket!.title,
         if (names.isNotEmpty) 'assigned to ${names.join(', ')}',
+        if (responsible != null) '$responsible responsible',
       ].join(', '),
       excludeSemantics: true,
       child: Row(key: const ValueKey('channel-ticket-line'), mainAxisSize: MainAxisSize.min, children: [
@@ -220,6 +224,12 @@ class _TicketLine extends StatelessWidget {
           Text(' · ', style: TextStyle(fontSize: 12, color: Tokens.label2)),
           for (final n in names.take(2)) Padding(padding: const EdgeInsets.only(right: 3), child: Monogram(n.characters.first.toUpperCase(), size: 16)),
           Flexible(child: Text(assigneesLine(names), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: Tokens.label2))),
+        ],
+        if (responsible != null) ...[
+          Text(' · ', style: TextStyle(fontSize: 12, color: Tokens.label2)),
+          Monogram(responsible.characters.first.toUpperCase(), size: 16, member: true, dimmed: state.ticket!.responsibleDisabled ?? false),
+          const SizedBox(width: 3),
+          Flexible(child: Text('$responsible · responsible', key: const ValueKey('channel-ticket-responsible'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: Tokens.label2))),
         ],
       ]),
     );

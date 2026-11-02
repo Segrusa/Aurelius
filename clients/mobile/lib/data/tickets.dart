@@ -334,6 +334,9 @@ List<({String id, String label})> responsibleChoices(List<UserView> members, {St
   ];
 }
 
+/// How many open tickets on [board] have [userId] responsible: what disabling them leaves behind (§2.4).
+int openResponsibleCount(BoardView board, String userId) => board.columns.where((c) => c.column.kind != ColumnKind.done).expand((c) => c.tickets).where((t) => t.responsibleUserId == userId).length;
+
 /// Why a board member follows (`FollowerView.reason`, text, so an unknown one
 /// from a newer server just shows nothing): in the followers list.
 String? followReasonLabel(String reason) => switch (reason) {

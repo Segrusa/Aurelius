@@ -200,6 +200,24 @@ void main() {
     expect(find.byKey(const ValueKey('flash-m3')), findsOneWidget);
   });
 
+  group('the header of a ticket\'s channel (§1.4)', () {
+    const ticketChannel = ChannelView(archived: false, conversationId: 'c-42', kind: ChannelKind.ticket, mentions: 0, name: '#42-login', projectId: 'p1', ticketColumn: ColumnKind.review, ticketId: 'k1', ticketNumber: 42, unread: 0);
+
+    testWidgets('names who is responsible', (tester) async {
+      final ticket = board.ticketOf(id: 'k1', number: 42, column: ColumnKind.review, responsible: board.bo);
+      await pump(tester, const ChannelLinkPage(conversationId: 'c-42'), channels: const [ticketChannel], messages: const [], detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []));
+      await settle(tester, frames: 8);
+      expect(find.text('bo · responsible'), findsOneWidget);
+    });
+
+    testWidgets('a server without a responsible shows no such line', (tester) async {
+      final ticket = board.ticketOf(id: 'k1', number: 42, column: ColumnKind.review);
+      await pump(tester, const ChannelLinkPage(conversationId: 'c-42'), channels: const [ticketChannel], messages: const [], detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []));
+      await settle(tester, frames: 8);
+      expect(find.byKey(const ValueKey('channel-ticket-responsible')), findsNothing);
+    });
+  });
+
   group('Copy link on a message (§6.1)', () {
     String? clipboard;
 

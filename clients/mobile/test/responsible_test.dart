@@ -6,6 +6,7 @@ import 'package:aurelius_mobile/features/board/board_bloc.dart';
 import 'package:aurelius_mobile/features/board/board_page.dart';
 import 'package:aurelius_mobile/features/board/new_ticket_page.dart';
 import 'package:aurelius_mobile/features/board/ticket_page.dart';
+import 'package:aurelius_mobile/features/onboarding/onboarding.dart' show disableBoardMember;
 import 'package:flutter/gestures.dart' show kLongPressTimeout;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -327,6 +328,44 @@ void main() {
       expect(find.byKey(const ValueKey('new-ticket-responsible')), findsNothing);
       await tapKey(tester, 'new-ticket-create');
       expect(paramsOf(writesOf(repo).single).containsKey('responsible_user_id'), isFalse);
+    });
+  });
+
+  test('openResponsibleCount counts open tickets only', () {
+    final shown = boardOf([
+      ticketOf(id: 'a', column: ColumnKind.doing, responsible: bo),
+      ticketOf(id: 'b', column: ColumnKind.review, responsible: bo),
+      ticketOf(id: 'c', column: ColumnKind.done, responsible: bo),
+      ticketOf(id: 'd', column: ColumnKind.doing, responsible: testUser),
+    ]);
+    expect(openResponsibleCount(shown, bo.id), 2);
+  });
+
+  group('disabling a board member (§2.4)', () {
+    Future<MockRepository> open(WidgetTester tester, {LinkState link = phaseALink, bool readFails = false}) async {
+      final repo = repoWith(boardOf([ticketOf(column: ColumnKind.doing, responsible: bo)]), link: link);
+      if (readFails) when(() => repo.board(projectId: any(named: 'projectId'))).thenThrow(const ProtocolException(ErrorCode.validation, 'no'));
+      await pumpBoardPage(tester, repo, Builder(builder: (context) => Scaffold(body: TextButton(onPressed: () => disableBoardMember(context, bo), child: const Text('disable')))), link: link);
+      await tester.tap(find.text('disable'));
+      await settleBoard(tester);
+      return repo;
+    }
+
+    testWidgets('the confirmation says for how many open tickets they stay responsible', (tester) async {
+      await open(tester);
+      expect(find.textContaining('bo is responsible for 1 open ticket. They keep that name until someone changes it.'), findsOneWidget);
+    });
+
+    testWidgets('a failed read still asks, without the count', (tester) async {
+      await open(tester, readFails: true);
+      expect(find.text('Disable bo?'), findsOneWidget);
+      expect(find.textContaining('is responsible for'), findsNothing);
+    });
+
+    testWidgets('an older server: no read, no sentence', (tester) async {
+      final repo = await open(tester, link: onlineLink);
+      expect(find.textContaining('is responsible for'), findsNothing);
+      verifyNever(() => repo.board(projectId: any(named: 'projectId')));
     });
   });
 
