@@ -24,15 +24,21 @@ use rusqlite::OptionalExtension;
 /// `in_general`: the ticket was made from a message in General, whose own line
 /// there already links to it (`created_from`); General then gets no second line.
 pub(crate) fn opened(tx: &Tx<'_>, ticket: TicketId, creator: UserId, in_general: bool) -> Result<Vec<EventNotice>, StorageError> {
+    opened_by(tx, ticket, creator, Actor::BoardMember { user_id: creator }, in_general)
+}
+
+/// `opened` for a ticket that `by` made for the board member `creator` (an employee's `create_ticket`):
+/// the line in General names `by`.
+pub(crate) fn opened_by(tx: &Tx<'_>, ticket: TicketId, creator: UserId, by: Actor, in_general: bool) -> Result<Vec<EventNotice>, StorageError> {
     let Some(d) = of_ticket(tx, ticket)? else { return Ok(Vec::new()) };
     let now = aurelius_storage::now_ms();
     discussions::join(tx, d.id, Member::User(creator), now)?;
     for owner in discussions::owners(tx)? {
         discussions::join(tx, d.id, Member::User(owner), now)?;
     }
-    let mut notices = sync(tx, ticket, Some(Actor::BoardMember { user_id: creator }))?;
+    let mut notices = sync(tx, ticket, Some(by))?;
     if !in_general {
-        let by = actor_name(tx, Some(Actor::BoardMember { user_id: creator }))?;
+        let by = actor_name(tx, Some(by))?;
         notices.extend(general_line(tx, &d, SystemLineKind::TicketCreated, system_action::OPENED, &by, |n, title| format!("{by} opened #{n} “{title}”"))?);
     }
     Ok(notices)

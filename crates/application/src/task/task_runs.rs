@@ -543,6 +543,18 @@ pub enum EmployeeAction {
     /// The tester's verdict on a ticket in Testing (`testing::verdict`; only in
     /// the run of its open test task).
     ReportTestResult { passed: bool, summary: String },
+    /// The tickets of the board, filtered (`ticket::agent`); `project` none: the run's project, else all.
+    ListTickets { project: Option<String>, column: Option<String>, query: Option<String>, limit: Option<u32> },
+    /// One ticket in full with the latest messages of its discussion (`ticket` is `#12`, a number or an id).
+    ReadTicket { ticket: String, last: Option<u32> },
+    /// A new ticket in Backlog; management only, and it starts nothing.
+    CreateTicket { project: Option<String>, title: String, description: Option<String>, priority: Option<String>, labels: Vec<String> },
+    /// Title, description, priority or labels of a ticket the employee manages or works on.
+    UpdateTicket { ticket: String, title: Option<String>, description: Option<String>, priority: Option<String>, labels: Option<Vec<String>> },
+    /// Management starts a ticket in Backlog (`column` todo); no other move is for an employee.
+    MoveTicket { ticket: String, column: String },
+    /// A message in the discussion of a ticket.
+    PostToTicket { ticket: String, message: String },
 }
 
 impl CommandService {
@@ -691,6 +703,43 @@ impl CommandService {
                 })
                 .map_err(storage_error);
         }
+        if let EmployeeAction::ListTickets { project, column, query, limit } = &action {
+            return self
+                .store
+                .read(|conn| crate::ticket::agent::list(conn, &st, run, project.as_deref(), column.as_deref(), query.as_deref(), *limit))
+                .map_err(storage_error);
+        }
+        if let EmployeeAction::ReadTicket { ticket, last } = &action {
+            return self.store.read(|conn| crate::ticket::agent::read(conn, &st, run, ticket, *last)).map_err(storage_error);
+        }
+        if let EmployeeAction::CreateTicket { project, title, description, priority, labels } = &action {
+            let (project, title, description, priority, labels) = (project.clone(), title.clone(), description.clone(), priority.clone(), labels.clone());
+            return self
+                .store
+                .write(move |tx| {
+                    let input = crate::ticket::agent::CreateInput { project: project.as_deref(), title: &title, description: description.as_deref(), priority: priority.as_deref(), labels: &labels };
+                    crate::ticket::agent::create(tx, &st, run, input)
+                })
+                .map_err(storage_error);
+        }
+        if let EmployeeAction::UpdateTicket { ticket, title, description, priority, labels } = &action {
+            let (ticket, title, description, priority, labels) = (ticket.clone(), title.clone(), description.clone(), priority.clone(), labels.clone());
+            return self
+                .store
+                .write(move |tx| {
+                    let input = crate::ticket::agent::UpdateInput { ticket: &ticket, title: title.as_deref(), description: description.as_deref(), priority: priority.as_deref(), labels: labels.as_deref() };
+                    crate::ticket::agent::update(tx, &st, run, input)
+                })
+                .map_err(storage_error);
+        }
+        if let EmployeeAction::MoveTicket { ticket, column } = &action {
+            let (ticket, column) = (ticket.clone(), column.clone());
+            return self.store.write(move |tx| crate::ticket::agent::move_to(tx, &st, run, &ticket, &column)).map_err(storage_error);
+        }
+        if let EmployeeAction::PostToTicket { ticket, message } = &action {
+            let (ticket, message) = (ticket.clone(), message.clone());
+            return self.store.write(move |tx| crate::ticket::agent::post(tx, &st, run, &ticket, &message)).map_err(storage_error);
+        }
         if let EmployeeAction::ProposeColleague { name, role, title, instructions, reports_to, reason } = &action {
             let input = crate::org::ProposalInput {
                 name: name.clone(),
@@ -806,7 +855,13 @@ impl CommandService {
                     | EmployeeAction::ReadDiscussion { .. }
                     | EmployeeAction::PostToDiscussion { .. }
                     | EmployeeAction::AssignTicket { .. }
-                    | EmployeeAction::ReportTestResult { .. } => unreachable!("handled above"),
+                    | EmployeeAction::ReportTestResult { .. }
+                    | EmployeeAction::ListTickets { .. }
+                    | EmployeeAction::ReadTicket { .. }
+                    | EmployeeAction::CreateTicket { .. }
+                    | EmployeeAction::UpdateTicket { .. }
+                    | EmployeeAction::MoveTicket { .. }
+                    | EmployeeAction::PostToTicket { .. } => unreachable!("handled above"),
                     EmployeeAction::HandOver { employee, reason } => {
                         let Some(to) = find(&employee) else {
                             return Ok((false, format!("No active colleague called {employee} in the company."), vec![]));

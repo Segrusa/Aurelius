@@ -26,6 +26,8 @@ use crate::ticket_follow;
 use aurelius_domain::views::system_action;
 use serde_json::{Value, json};
 
+pub(crate) mod agent;
+
 /// Why a paused or archived employee cannot be the tester: nobody would run the tests.
 pub(crate) const TESTER_NOT_ACTIVE: &str = "The tester must be an active employee.";
 
@@ -48,6 +50,7 @@ pub(crate) fn require_board_member(ctx: &CommandContext) -> Result<UserId, AppEr
 struct Base {
     command_id: String,
     meta: Value,
+    actor_kind: ActorKind,
     actor: String,
     /// The board member of the write, as a ticket's lines name them.
     by: Option<Actor>,
@@ -56,7 +59,18 @@ struct Base {
 impl Base {
     fn of(ctx: &CommandContext, envelope: &CommandEnvelope) -> Self {
         let by = ctx.user_id.map(|user_id| Actor::BoardMember { user_id });
-        Self { command_id: envelope.command_id.to_string(), meta: ctx.metadata(), actor: ctx.principal_id.to_string(), by }
+        Self { command_id: envelope.command_id.to_string(), meta: ctx.metadata(), actor_kind: ActorKind::User, actor: ctx.principal_id.to_string(), by }
+    }
+
+    /// An employee's board action during `run`: one fresh correlation per call, the employee as actor and as `by`.
+    fn of_employee(employee: EmployeeId, run: aurelius_domain::RunId) -> Self {
+        Self {
+            command_id: format!("board_tool:{}", aurelius_domain::EventId::new()),
+            meta: json!({ "run_id": run }),
+            actor_kind: ActorKind::Employee,
+            actor: employee.to_string(),
+            by: Some(Actor::Employee { employee_id: employee }),
+        }
     }
 }
 
@@ -68,6 +82,7 @@ struct Events {
     version: u64,
     command_id: String,
     meta: Value,
+    actor_kind: ActorKind,
     actor: String,
     by: Option<Actor>,
     notices: Vec<EventNotice>,
@@ -82,6 +97,7 @@ impl Events {
             version,
             command_id: base.command_id.clone(),
             meta: base.meta.clone(),
+            actor_kind: base.actor_kind,
             actor: base.actor.clone(),
             by: base.by,
             notices: Vec::new(),
@@ -102,7 +118,7 @@ impl Events {
                 aggregate_version: self.version,
                 event_type: kind.as_str(),
                 project_id: self.project,
-                actor_kind: ActorKind::User,
+                actor_kind: self.actor_kind,
                 actor_id: Some(self.actor.clone()),
                 correlation_id: self.command_id.clone(),
                 causation_id: None,
@@ -122,7 +138,7 @@ impl Events {
 
     /// `user` follows the ticket now, in this write's transaction.
     fn follow(&mut self, tx: &Transaction<'_>, ticket: TicketId, project: ProjectId, user: UserId, reason: FollowReason) -> Result<(), StorageError> {
-        let cause = ticket_follow::Cause { actor: ActorKind::User, actor_id: Some(self.actor.clone()), correlation: &self.command_id, meta: self.meta.clone() };
+        let cause = ticket_follow::Cause { actor: self.actor_kind, actor_id: Some(self.actor.clone()), correlation: &self.command_id, meta: self.meta.clone() };
         self.notices.extend(ticket_follow::follow(tx, ticket, project, user, reason, &cause)?);
         Ok(())
     }
@@ -209,7 +225,7 @@ impl CommandService {
         let st = self.store().clone();
         match envelope.command.clone() {
             Command::CreateTicket(cmd) => self.create_ticket(base, envelope, hash, cmd, user),
-            Command::UpdateTicket(cmd) => self.update_ticket(base, envelope, hash, cmd, by),
+            Command::UpdateTicket(cmd) => self.update_ticket(base, envelope, hash, cmd),
             Command::MoveTicket(cmd) => {
                 self.commit(command_id, hash, move |tx| {
                     let state = check!(load(tx, cmd.ticket_id, expected)?);
@@ -260,20 +276,7 @@ impl CommandService {
                     check!(check_employee(tx, employee)?);
                 }
                 let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
-                let todo = company_store::column_of_kind(tx, ColumnKind::Todo)?;
-                store::move_to(tx, state.id, todo.id, None)?;
-                store::mark_started(tx, state.id)?;
-                e.moved(tx, state.column, ColumnKind::Todo, by)?;
-                e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
-                let what = match cmd.employee_id {
-                    Some(employee) => format!("started it with {} as owner", crate::conversation::discussion::employee_name(tx, employee)?),
-                    None => "started it".to_owned(),
-                };
-                e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Todo, Some(&what))?);
-                if let Some(employee) = cmd.employee_id {
-                    store::set_owner(tx, state.id, Some(employee))?;
-                    e.push(tx, EventKind::TicketDispatched, json!({ "employee_id": employee, "by": by, "reason": Value::Null }))?;
-                }
+                start_card(tx, &mut e, &state, by, cmd.employee_id)?;
                 // A new main task (also after a failed one, B6), for the owner if there is one.
                 finish_then(tx, state.id, e, |tx| ticket_line::started(tx, &st, state.id, user))
             }),
@@ -542,44 +545,25 @@ impl CommandService {
             if let Some(blob) = &description_blob {
                 blobs::register(tx, blob)?;
             }
-            let id = TicketId::new();
-            let backlog = company_store::column_of_kind(tx, ColumnKind::Backlog)?;
-            let number = store::insert(
+            let mut e = Events::new(&base, "ticket", String::new(), Some(cmd.project_id), 0);
+            let (id, number) = insert_ticket(
                 tx,
-                &store::NewTicket {
-                    id,
-                    project_id: cmd.project_id,
+                &mut e,
+                &NewCard {
+                    project: cmd.project_id,
                     title: &title,
-                    description_blob: description_blob.as_ref().map(|b| b.id.to_string()).as_deref(),
-                    column_id: backlog.id,
+                    description: description.as_deref(),
+                    description_blob: description_blob.as_ref().map(|b| b.id.to_string()),
                     priority: cmd.priority,
-                    created_by_user: user,
+                    user,
+                    responsible: cmd.responsible_user_id,
                     owner: cmd.owner_employee_id,
                     run: &cmd.run,
                     labels: &labels,
                     deadline_ms: cmd.deadline_ms,
+                    attachments: stored.as_ref(),
                 },
             )?;
-            store::set_attachments(tx, id, stored.as_ref())?;
-            let mut e = Events::new(&base, "ticket", id.to_string(), Some(cmd.project_id), 0);
-            store::set_responsible(tx, id, cmd.responsible_user_id)?;
-            let named = match &description {
-                Some(text) => ticket_follow::mentioned_board_members(tx, text)?,
-                None => Vec::new(),
-            };
-            let mut created = json!({ "number": number, "created_by_user": user, "by": by, "responsible_user_id": cmd.responsible_user_id });
-            if !named.is_empty() {
-                created["mentioned_users"] = json!(named);
-            }
-            e.push(tx, EventKind::TicketCreated, created)?;
-            e.follow(tx, id, cmd.project_id, user, FollowReason::Created)?;
-            // Choosing someone else is news for them; "You" (the default, B9) says nothing new.
-            if let Some(responsible) = cmd.responsible_user_id.filter(|r| *r != user) {
-                e.responsible(tx, id, cmd.project_id, None, Some(responsible), by)?;
-            }
-            for named in named {
-                e.follow(tx, id, cmd.project_id, named, FollowReason::Mentioned)?;
-            }
             // The discussion starts with a link to the message, and its chat gets "→ #N" (MU2-10 AC3).
             if let Some((message, (conversation, label))) = &source {
                 e.line(crate::conversation::discussion::created_from(tx, id, number, user, *conversation, *message, label)?);
@@ -615,7 +599,7 @@ impl CommandService {
         committed
     }
 
-    fn update_ticket(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: ticket::UpdateTicket, by: Actor) -> Result<Committed, AppError> {
+    fn update_ticket(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: ticket::UpdateTicket) -> Result<Committed, AppError> {
         let title = cmd.title.as_deref().map(ticket::valid_title).transpose().map_err(domain_error)?;
         let description = match cmd.description.as_deref() {
             None => None,
@@ -675,53 +659,18 @@ impl CommandService {
                 blobs::register(tx, blob)?;
             }
             let blob_id = description_blob.as_ref().map(|b| b.id.to_string());
-            // Read before it is replaced: only names that are new here make someone follow.
-            let named = match description.as_ref().and_then(|d| d.as_deref()) {
-                Some(text) => {
-                    let read = |key: &str| st.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
-                    let old = store::view(tx, state.id, &read)?.and_then(|t| t.description);
-                    ticket_follow::newly_mentioned(tx, old.as_deref(), text)?
-                }
-                None => Vec::new(),
-            };
-            store::update_fields(
-                tx,
-                state.id,
-                &store::TicketFields {
-                    title: title.as_deref(),
-                    description_blob: description.as_ref().map(|_| blob_id.as_deref()),
-                    priority: cmd.priority,
-                    labels: labels.as_deref(),
-                    deadline_ms: deadline,
-                    owner: None,
-                    run: cmd.run.as_ref(),
-                },
-            )?;
-            let changed: Vec<&str> = [
-                ("title", title.is_some()),
-                ("description", description.is_some()),
-                ("priority", cmd.priority.is_some()),
-                ("labels", labels.is_some()),
-                ("deadline", deadline.is_some()),
-                ("run", cmd.run.is_some()),
-                ("files", !files_added.is_empty()),
-            ]
-            .into_iter()
-            .filter_map(|(name, given)| given.then_some(name))
-            .collect();
             let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
-            let mut extra = json!({ "changed": changed, "by": by });
-            // Only the names of the new files, never where they are kept.
-            if !files_added.is_empty() {
-                extra["files_added"] = json!(files_added);
-            }
-            if !named.is_empty() {
-                extra["mentioned_users"] = json!(named);
-            }
-            e.push(tx, EventKind::TicketUpdated, extra)?;
-            for user in named {
-                e.follow(tx, state.id, state.project_id, user, FollowReason::Mentioned)?;
-            }
+            let change = FieldChange {
+                title: title.as_deref(),
+                description: description.as_ref().map(|d| d.as_deref()),
+                description_blob: blob_id,
+                priority: cmd.priority,
+                labels: labels.as_deref(),
+                deadline,
+                run: cmd.run.as_ref(),
+                files_added,
+            };
+            write_fields(tx, &st, &mut e, &state, &change)?;
             finish_then(tx, state.id, e, |_| Ok(told))
         });
         // Copies of a command that failed or was only replayed are not kept.
@@ -851,6 +800,158 @@ impl CommandService {
             Ok(Ok((CommandResult::ProjectUpdated { project_id: cmd.project_id, version }, e.notices)))
         })
     }
+}
+
+/// What a new ticket is made of (the shared core of `ticket.create` and an employee's `create_ticket`).
+struct NewCard<'a> {
+    project: ProjectId,
+    title: &'a str,
+    description: Option<&'a str>,
+    description_blob: Option<String>,
+    priority: ticket::TicketPriority,
+    /// The board member who owns it (`created_by_user`, its first follower).
+    user: UserId,
+    responsible: Option<UserId>,
+    owner: Option<EmployeeId>,
+    run: &'a aurelius_domain::task::RunSettings,
+    labels: &'a [String],
+    deadline_ms: Option<i64>,
+    attachments: Option<&'a task_store::TaskAttachments>,
+}
+
+/// Insert a ticket at the bottom of Backlog and write its `ticket.created` event, the creator's
+/// follow, a Responsible other than the creator and the board members its description names.
+/// `e` takes the ticket's identity here; the caller goes on with the rest of its write.
+fn insert_ticket(tx: &Transaction<'_>, e: &mut Events, card: &NewCard<'_>) -> Result<(TicketId, u32), StorageError> {
+    let id = TicketId::new();
+    let backlog = company_store::column_of_kind(tx, ColumnKind::Backlog)?;
+    let number = store::insert(
+        tx,
+        &store::NewTicket {
+            id,
+            project_id: card.project,
+            title: card.title,
+            description_blob: card.description_blob.as_deref(),
+            column_id: backlog.id,
+            priority: card.priority,
+            created_by_user: card.user,
+            owner: card.owner,
+            run: card.run,
+            labels: card.labels,
+            deadline_ms: card.deadline_ms,
+        },
+    )?;
+    store::set_attachments(tx, id, card.attachments)?;
+    e.aggregate_id = id.to_string();
+    store::set_responsible(tx, id, card.responsible)?;
+    let named = match card.description {
+        Some(text) => ticket_follow::mentioned_board_members(tx, text)?,
+        None => Vec::new(),
+    };
+    let by = e.by.unwrap_or(Actor::BoardMember { user_id: card.user });
+    let mut created = json!({ "number": number, "created_by_user": card.user, "by": by, "responsible_user_id": card.responsible });
+    if !named.is_empty() {
+        created["mentioned_users"] = json!(named);
+    }
+    e.push(tx, EventKind::TicketCreated, created)?;
+    e.follow(tx, id, card.project, card.user, FollowReason::Created)?;
+    // Choosing someone else is news for them; "You" (the default, B9) says nothing new.
+    if let Some(responsible) = card.responsible.filter(|r| *r != card.user) {
+        e.responsible(tx, id, card.project, None, Some(responsible), by)?;
+    }
+    for named in named {
+        e.follow(tx, id, card.project, named, FollowReason::Mentioned)?;
+    }
+    Ok((id, number))
+}
+
+/// The fields of a ticket update (`ticket.update` and an employee's `update_ticket`): what is
+/// given is written, with the board members the new description names following.
+struct FieldChange<'a> {
+    title: Option<&'a str>,
+    /// `Some(None)` clears the description.
+    description: Option<Option<&'a str>>,
+    description_blob: Option<String>,
+    priority: Option<ticket::TicketPriority>,
+    labels: Option<&'a [String]>,
+    /// `Some(None)` clears the deadline.
+    deadline: Option<Option<i64>>,
+    run: Option<&'a aurelius_domain::task::RunSettings>,
+    files_added: Vec<String>,
+}
+
+/// Write the changed fields of `state`'s ticket and its `ticket.updated` event; the callers check
+/// the rights and the ticket's state first.
+fn write_fields(tx: &Transaction<'_>, st: &aurelius_storage::Store, e: &mut Events, state: &store::TicketState, change: &FieldChange<'_>) -> Result<(), StorageError> {
+    // Read before it is replaced: only names that are new here make someone follow.
+    let named = match change.description.flatten() {
+        Some(text) => {
+            let read = |key: &str| st.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+            let old = store::view(tx, state.id, &read)?.and_then(|t| t.description);
+            ticket_follow::newly_mentioned(tx, old.as_deref(), text)?
+        }
+        None => Vec::new(),
+    };
+    store::update_fields(
+        tx,
+        state.id,
+        &store::TicketFields {
+            title: change.title,
+            description_blob: change.description.map(|_| change.description_blob.as_deref()),
+            priority: change.priority,
+            labels: change.labels,
+            deadline_ms: change.deadline,
+            owner: None,
+            run: change.run,
+        },
+    )?;
+    let changed: Vec<&str> = [
+        ("title", change.title.is_some()),
+        ("description", change.description.is_some()),
+        ("priority", change.priority.is_some()),
+        ("labels", change.labels.is_some()),
+        ("deadline", change.deadline.is_some()),
+        ("run", change.run.is_some()),
+        ("files", !change.files_added.is_empty()),
+    ]
+    .into_iter()
+    .filter_map(|(name, given)| given.then_some(name))
+    .collect();
+    let by = e.by;
+    let mut extra = json!({ "changed": changed, "by": by });
+    // Only the names of the new files, never where they are kept.
+    if !change.files_added.is_empty() {
+        extra["files_added"] = json!(change.files_added);
+    }
+    if !named.is_empty() {
+        extra["mentioned_users"] = json!(named);
+    }
+    e.push(tx, EventKind::TicketUpdated, extra)?;
+    for user in named {
+        e.follow(tx, state.id, state.project_id, user, FollowReason::Mentioned)?;
+    }
+    Ok(())
+}
+
+/// Put a Backlog ticket in Todo as started by `by`, with `owner` if one is chosen: the column
+/// change, `ticket.started`, the line in the discussion and `ticket.dispatched`. The caller
+/// hands over to the engine (`ticket_line::started`) in the same transaction.
+fn start_card(tx: &Transaction<'_>, e: &mut Events, state: &store::TicketState, by: Actor, owner: Option<EmployeeId>) -> Result<(), StorageError> {
+    let todo = company_store::column_of_kind(tx, ColumnKind::Todo)?;
+    store::move_to(tx, state.id, todo.id, None)?;
+    store::mark_started(tx, state.id)?;
+    e.moved(tx, state.column, ColumnKind::Todo, by)?;
+    e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
+    let what = match owner {
+        Some(employee) => format!("started it with {} as owner", crate::conversation::discussion::employee_name(tx, employee)?),
+        None => "started it".to_owned(),
+    };
+    e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Todo, Some(&what))?);
+    if let Some(employee) = owner {
+        store::set_owner(tx, state.id, Some(employee))?;
+        e.push(tx, EventKind::TicketDispatched, json!({ "employee_id": employee, "by": by, "reason": Value::Null }))?;
+    }
+    Ok(())
 }
 
 /// "‹name› put it on Done" (MU2-06 AC2).

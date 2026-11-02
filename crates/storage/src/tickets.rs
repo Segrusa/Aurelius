@@ -331,6 +331,33 @@ pub fn working_tasks(conn: &Connection, ticket: TicketId, except: Option<TaskId>
     )? as u32)
 }
 
+/// Whether `employee` works on a ticket: it owns the ticket, or has a task that has not ended in
+/// the ticket's task tree (`tasks.ticket_id`; a delegation below the main task carries it too).
+pub fn employee_works_on(conn: &Connection, ticket: TicketId, employee: EmployeeId) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM tickets WHERE id = ?1 AND owner_employee_id = ?2)
+             OR EXISTS (SELECT 1 FROM tasks WHERE ticket_id = ?1 AND employee_id = ?2 AND status NOT IN ('succeeded','failed','cancelled'))",
+        params![ticket.to_string(), employee.to_string()],
+        |r| r.get::<_, bool>(0),
+    )?)
+}
+
+/// The ticket `employee` already made in this `run` with the same title (any case), as (id, number):
+/// a repeated `create_ticket` call finds it instead of making a second one.
+pub fn created_in_run(conn: &Connection, run: aurelius_domain::RunId, employee: EmployeeId, title: &str) -> Result<Option<(TicketId, u32)>, StorageError> {
+    let row: Option<(String, i64)> = conn
+        .query_row(
+            "SELECT k.id, k.number FROM events v JOIN tickets k ON k.id = v.aggregate_id
+             WHERE v.aggregate_type = 'ticket' AND v.type = 'ticket.created' AND v.actor_id = ?2
+               AND json_extract(v.metadata_json, '$.run_id') = ?1 AND lower(k.title) = lower(?3)
+             ORDER BY v.seq LIMIT 1",
+            params![run.to_string(), employee.to_string(), title],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(row.and_then(|(id, number)| Some((TicketId::parse(&id).ok()?, number as u32))))
+}
+
 /// What `list` filters on; every given filter applies.
 #[derive(Debug, Default, Clone)]
 pub struct TicketFilter {
