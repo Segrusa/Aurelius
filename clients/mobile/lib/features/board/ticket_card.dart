@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart';
+import '../../data/aurelius_repository.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
@@ -15,7 +16,7 @@ import 'ticket_actions.dart';
 
 /// What a card needs from the board around it.
 class CardContext {
-  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false, this.responsible = false});
+  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false, this.responsible = false, this.follow = false});
 
   /// Every column in board order (Move to…).
   final List<BoardColumnView> columns;
@@ -46,6 +47,9 @@ class CardContext {
 
   /// The server has a responsible (`ticket_responsible`): the who-block, and no "by …" (B8).
   final bool responsible;
+
+  /// The server keeps followers (`ticket_follow`): Follow or Unfollow in the menu.
+  final bool follow;
 }
 
 /// The card's main action, by column (§4.2, §5.1): Start, Choose owner, Review, Start again.
@@ -246,6 +250,7 @@ class TicketCard extends StatelessWidget {
         if (action != null && board.online) CustomSemanticsAction(label: cardActionLabel(action, expired: board.myLoginExpired)): () => runCardAction(context, ticket, action),
         if (!done && board.online) const CustomSemanticsAction(label: 'Move to…'): () => showMoveSheet(context, ticket, board.columns),
         if (board.responsible && !done && board.online) const CustomSemanticsAction(label: 'Set responsible…'): () => chooseResponsible(context, ticket),
+        if (board.follow && board.online) const CustomSemanticsAction(label: 'Follow or unfollow'): () => toggleFollow(context, ticket),
       },
       child: card,
     );
@@ -321,6 +326,9 @@ Color priorityColor(TicketPriority p) => switch (p) {
 Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext board, TicketState state) async {
   final index = board.column.tickets.indexWhere((t) => t.id == ticket.id);
   final canOrder = ticket.column != ColumnKind.done && board.online;
+  // Asked now: the board does not carry who follows. Unknown leaves the item out.
+  final following = board.follow && board.online ? await followsTicket(context.read<AureliusRepository>(), ticket, me: board.me) : null;
+  if (!context.mounted) return;
   final items = <(String, IconData, Future<void> Function())>[
     ('Open', CupertinoIcons.arrow_up_right_square, () async => context.push('/ticket/${ticket.id}')),
     if (state == TicketState.backlog && board.online) ...[
@@ -335,6 +343,8 @@ Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext b
         ('Make me responsible', CupertinoIcons.person_badge_plus, () => setResponsible(context, ticket, board.me)),
       ('Set responsible…', CupertinoIcons.person_crop_circle, () => chooseResponsible(context, ticket)),
     ],
+    if (following == false) ('Follow', CupertinoIcons.bell, () => followTicket(context, ticket, on: true)),
+    if (following == true && canUnfollow(ticket, me: board.me)) ('Unfollow', CupertinoIcons.bell_slash, () => followTicket(context, ticket, on: false)),
     if (ticket.column != ColumnKind.done && board.online) ('Move to…', CupertinoIcons.arrow_right_arrow_left, () => showMoveSheet(context, ticket, board.columns)),
     if (canOrder && index > 0) ('Move up', CupertinoIcons.arrow_up, () => nudgeTicket(context, ticket, board.column, -1)),
     if (canOrder && index >= 0 && index < board.column.tickets.length - 1) ('Move down', CupertinoIcons.arrow_down, () => nudgeTicket(context, ticket, board.column, 1)),
@@ -353,14 +363,16 @@ Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext b
     context: context,
     useRootNavigator: true,
     showDragHandle: true,
+    // With Responsible and Follow it can outgrow a small phone.
+    isScrollControlled: true,
     builder: (sheet) => SafeArea(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
+      child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
         Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: Text('#${ticket.number} ${ticket.title}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600))),
         // The creator left the card (B8); it stays here.
         if (board.responsible) Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: Align(alignment: Alignment.centerLeft, child: Text('Created by ${ticket.createdByUsername}', key: const ValueKey('card-menu-creator'), style: TextStyle(color: Tokens.label2)))),
         for (final (i, item) in items.indexed)
           ListTile(key: ValueKey('card-menu-item-${item.$1}'), leading: Icon(item.$2), title: Text(item.$1), onTap: () => Navigator.pop(sheet, i)),
-      ]),
+      ])),
     ),
   );
   if (picked != null && context.mounted) await items[picked].$3();

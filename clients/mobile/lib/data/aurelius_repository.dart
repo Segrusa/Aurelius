@@ -59,7 +59,7 @@ class AureliusRepository {
   Stream<PowerState> get powerChanges => connection.powers;
 
   /// Company changes (projects, employees, tasks, approvals, memory, …).
-  Stream<Event> get companyChanges => events.where((e) => !e.isChat && !e.isNote);
+  Stream<Event> get companyChanges => events.where((e) => !e.isChat && !e.isNote && e.kind != EventKind.ticketFollowChanged);
 
   Future<R> _ask<R extends ResponseBody>(Map<String, dynamic> request, [Duration? timeout]) async {
     final body = timeout == null ? await connection.call(request) : await connection.call(request, timeout);

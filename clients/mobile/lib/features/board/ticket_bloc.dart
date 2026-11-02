@@ -18,7 +18,7 @@ class TicketRefreshed extends TicketEvent {
 }
 
 class TicketPageState extends Equatable {
-  const TicketPageState({this.loading = true, this.detail, this.error, this.activity = const [], this.activityFailed = false, this.plan, this.modeNow});
+  const TicketPageState({this.loading = true, this.detail, this.error, this.activity = const [], this.activityFailed = false, this.plan, this.modeNow, this.followers, this.followersFailed = false});
 
   final bool loading;
   final TicketDetail? detail;
@@ -37,16 +37,23 @@ class TicketPageState extends Equatable {
   /// (Auto or Accept edits), so Mode reads "Plan → Auto" (D-07). Null otherwise.
   final AgentMode? modeNow;
 
+  /// Who follows the ticket; null on a server without `ticket_follow`, or until read.
+  final List<FollowerView>? followers;
+
+  /// The last read of [followers] failed: the page says so and offers to try again.
+  final bool followersFailed;
+
   TicketView? get ticket => detail?.ticket;
   TaskView? get root => detail?.rootTask;
   bool get gaveUp => dispatcherGaveUp(activity);
 
   @override
-  List<Object?> get props => [loading, detail?.asOfSeq, detail?.ticket.version, detail?.ticket.responsibleUserId, detail?.tasks.map((t) => (t.id, t.status, t.updatedAtMs)).toList(), error, activity.map((c) => c.seq).toList(), activityFailed, plan, modeNow];
+  List<Object?> get props => [loading, detail?.asOfSeq, detail?.ticket.version, detail?.ticket.responsibleUserId, detail?.tasks.map((t) => (t.id, t.status, t.updatedAtMs)).toList(), error, activity.map((c) => c.seq).toList(), activityFailed, plan, modeNow, followers?.map((f) => (f.userId, f.reason, f.disabled)).toList(), followersFailed];
 }
 
-/// One ticket (`ticket.get`), its activity and, in Plan review, its plan;
-/// read again on every change of the board.
+/// One ticket (`ticket.get`), its activity, its followers and, in Plan review,
+/// its plan; read again on every change of the board and of who follows it
+/// (`ticket.follow_changed`).
 class TicketBloc extends Bloc<TicketEvent, TicketPageState> {
   TicketBloc(this._repository, this.ticketId) : super(const TicketPageState()) {
     on<TicketRefreshed>(_refresh, transformer: debounceRestartable());
@@ -72,11 +79,23 @@ class TicketBloc extends Bloc<TicketEvent, TicketPageState> {
         // The ticket still shows; the page says what is unknown.
         activityFailed = true;
       }
-      emit(TicketPageState(loading: false, detail: detail, activity: activity, activityFailed: activityFailed, plan: await _plan(detail), modeNow: await _modeNow(detail, activity)));
+      final (followers, followersFailed) = await _followers();
+      emit(TicketPageState(loading: false, detail: detail, activity: activity, activityFailed: activityFailed, plan: await _plan(detail), modeNow: await _modeNow(detail, activity), followers: followers, followersFailed: followersFailed));
     } on DisconnectedException catch (e) {
-      emit(TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, error: state.detail == null ? e.message : null));
+      emit(TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, followers: state.followers, followersFailed: state.followersFailed, error: state.detail == null ? e.message : null));
     } on ProtocolException catch (e) {
-      emit(TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, error: e.shown));
+      emit(TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, followers: state.followers, followersFailed: state.followersFailed, error: e.shown));
+    }
+  }
+
+  /// Who follows the ticket, when the server keeps that; on a failure the last
+  /// known list stays, marked as failed.
+  Future<(List<FollowerView>?, bool)> _followers() async {
+    if (!_repository.linkState.has(ticketFollowFeature)) return (null, false);
+    try {
+      return ((await _repository.followers(ticketId)).followers, false);
+    } on Object {
+      return (state.followers, true);
     }
   }
 

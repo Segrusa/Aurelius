@@ -141,6 +141,7 @@ class _TicketViewState extends State<_TicketView> {
     final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired, waitsFor: waitsForOther(ticket, state, me: link.user?.id));
     final segment = conversation == null && _segment == _Segment.discussion ? _Segment.ticket : _segment;
     final responsibleOn = link.has(ticketResponsibleFeature);
+    final followOn = link.has(ticketFollowFeature);
     // Yours to do or not, anyone can decide (B6, §1.4).
     final othersNote = state.needsYou && !mine ? '${responsibleLabel(ticket)} is responsible. You can decide too.' : null;
     final scaffold = Scaffold(
@@ -215,7 +216,7 @@ class _TicketViewState extends State<_TicketView> {
             // On every tab, so a reviewer sees who does what in the discussion too (P-75).
             if (responsibleOn) Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: WhoBlock(ticket: ticket, owner: owner, me: link.user?.id, keyId: 'strip')),
             _segments(context, conversation),
-            if (segment == _Segment.ticket) ..._ticketTab(context, page, company, ticket, state, owner, dispatcher, online, conversation != null, mine: mine, responsibleOn: responsibleOn) else ..._activityTab(page),
+            if (segment == _Segment.ticket) ..._ticketTab(context, page, company, ticket, state, owner, dispatcher, online, conversation != null, mine: mine, responsibleOn: responsibleOn, followOn: followOn) else ..._activityTab(page),
           ],
         ),
       ),
@@ -304,7 +305,7 @@ class _TicketViewState extends State<_TicketView> {
           ]),
       ];
 
-  List<Widget> _ticketTab(BuildContext context, TicketPageState page, CompanyState company, TicketView ticket, TicketState state, String? owner, String? dispatcher, bool online, bool discussion, {required bool mine, required bool responsibleOn}) {
+  List<Widget> _ticketTab(BuildContext context, TicketPageState page, CompanyState company, TicketView ticket, TicketState state, String? owner, String? dispatcher, bool online, bool discussion, {required bool mine, required bool responsibleOn, required bool followOn}) {
     final root = page.root;
     final editable = online && ticket.column != ColumnKind.done;
     final running = root != null && (root.status == TaskStatus.running || root.hasLiveRun);
@@ -398,13 +399,16 @@ class _TicketViewState extends State<_TicketView> {
       ],
       if (ticket.reviewFeedback != null && ticket.column != ColumnKind.done)
         _Notice(title: 'Your last feedback', body: ticket.reviewFeedback),
-      if (responsibleOn) ...[
+      if (responsibleOn || followOn) ...[
         GroupHeader('Who', caps: true),
         InsetGroup(children: [
-          _responsibleRow(context, ticket, editable),
-          ownerRow,
-          loginRow,
-          createdRow,
+          if (responsibleOn) ...[
+            _responsibleRow(context, ticket, editable),
+            ownerRow,
+            loginRow,
+            createdRow,
+          ],
+          if (followOn) ..._followRows(context, page, ticket, online),
         ]),
       ],
       GroupHeader('Description', caps: true, action: editable ? 'Edit' : null, onAction: () => _editDescription(context, ticket)),
@@ -458,6 +462,36 @@ class _TicketViewState extends State<_TicketView> {
         GroupHeader('Discussion', caps: true),
         Padding(padding: const EdgeInsets.fromLTRB(32, 0, 32, 16), child: Text('Arrives in a later version. Until then, use the conversation.', style: TextStyle(color: Tokens.label2))),
       ],
+    ];
+  }
+
+  /// Followers and the switch Following (§3.2): the responsible's stays on and
+  /// off limits (B10). A failed read says so; the switch waits for a good one.
+  List<Widget> _followRows(BuildContext context, TicketPageState page, TicketView ticket, bool online) {
+    final followers = page.followers;
+    final me = context.read<ConnectionBloc>().state.user?.id;
+    final mine = followers?.where((f) => f.userId == me).firstOrNull;
+    final following = mine != null;
+    final known = followers != null;
+    final bloc = context.read<TicketBloc>();
+    Future<void> set(bool on) async {
+      if (await followTicket(context, ticket, on: on) && !bloc.isClosed) bloc.add(const TicketRefreshed());
+    }
+
+    return [
+      DetailRow(
+        key: const ValueKey('ticket-row-followers'),
+        label: 'Followers',
+        value: page.followersFailed && !known ? 'Could not load · Try again' : known ? '${followers.length}' : '',
+        onTap: known ? () => showFollowers(context, ticket, followers) : () => bloc.add(const TicketRefreshed()),
+      ),
+      SwitchListTile.adaptive(
+        key: const ValueKey('ticket-following'),
+        title: const Text('Following'),
+        subtitle: Text(followingNote(ticket, reason: mine?.reason, me: me), key: const ValueKey('ticket-following-note'), style: TextStyle(color: Tokens.label2, fontSize: 13)),
+        value: following || !canUnfollow(ticket, me: me),
+        onChanged: online && known && canUnfollow(ticket, me: me) ? set : null,
+      ),
     ];
   }
 

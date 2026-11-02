@@ -334,6 +334,35 @@ List<({String id, String label})> responsibleChoices(List<UserView> members, {St
   ];
 }
 
+/// Why a board member follows (`FollowerView.reason`, text, so an unknown one
+/// from a newer server just shows nothing): in the followers list.
+String? followReasonLabel(String reason) => switch (reason) {
+      'created' => 'Created it',
+      'responsible' => 'Responsible',
+      'mentioned' => '@mentioned',
+      'manual' => 'Chose to follow',
+      _ => null,
+    };
+
+/// Whether [me] may stop following [ticket]: not while responsible for it (B10).
+bool canUnfollow(TicketView ticket, {String? me}) => ticket.responsibleUserId == null || ticket.responsibleUserId != me;
+
+/// The line under the switch Following (P-79, §3.2–§3.3): why, so following by
+/// itself can be explained rather than surprise. [reason] is [me]'s, null when
+/// not following.
+String followingNote(TicketView ticket, {String? reason, String? me}) {
+  if (!canUnfollow(ticket, me: me)) return "You're responsible for #${ticket.number}. Hand it to someone else to stop following.";
+  if (ticket.column == ColumnKind.done || ticket.archivedAtMs != null) return 'Done tickets send no updates.';
+  return switch (reason) {
+    null => 'Get updates when it needs review, is sent back or fails.',
+    'created' => 'You follow because you created it.',
+    'responsible' => "You follow because you're responsible.",
+    'mentioned' => 'You follow because you were @mentioned.',
+    'manual' => 'You follow because you chose to.',
+    _ => 'You follow this ticket.',
+  };
+}
+
 /// "Waiting for Robin's limit until 16:00" (P-37: the name and the time, never
 /// someone else's usage), with the day when that is not today.
 String limitWaitOf(String whose, int? untilMs, {DateTime? now}) {

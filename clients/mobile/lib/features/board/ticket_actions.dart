@@ -410,6 +410,58 @@ Future<bool> setResponsible(BuildContext context, TicketView ticket, String? use
   );
 }
 
+/// Follow or unfollow [ticket] (A2, §3.3). The server refuses to unfollow for
+/// its responsible as well (B10); this client does not offer it.
+Future<bool> followTicket(BuildContext context, TicketView ticket, {required bool on}) => ticketWrite(
+      context,
+      ticketFollow(FollowTicket(on: on, ticketId: ticket.id)),
+      done: on ? "You'll get updates on #${ticket.number}." : 'Unfollowed #${ticket.number}. A new @mention or becoming responsible makes you follow again.',
+    );
+
+/// Whether [me] follows [ticket]; null when that could not be read.
+Future<bool?> followsTicket(AureliusRepository repository, TicketView ticket, {String? me}) async {
+  try {
+    return (await repository.followers(ticket.id)).followers.any((f) => f.userId == me);
+  } on Object {
+    return null;
+  }
+}
+
+/// A screen reader's Follow on a card: what the menu's item does, without its sheet.
+Future<void> toggleFollow(BuildContext context, TicketView ticket) async {
+  final me = context.read<ConnectionBloc>().state.user?.id;
+  final following = await followsTicket(context.read<AureliusRepository>(), ticket, me: me);
+  if (!context.mounted) return;
+  if (following == null) return toast(context, 'Could not read who follows #${ticket.number}.');
+  if (following && !canUnfollow(ticket, me: me)) return toast(context, followingNote(ticket, me: me));
+  await followTicket(context, ticket, on: !following);
+}
+
+/// The sheet Followers (§3.2): names and why; only board members follow, never
+/// employees. A disabled one stays listed and gets nothing.
+Future<void> showFollowers(BuildContext context, TicketView ticket, List<FollowerView> followers) => showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.7),
+          child: ListView(shrinkWrap: true, children: [
+            Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: Eyebrow('Followers of #${ticket.number}')),
+            if (followers.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 16), child: Text('No one follows this ticket.', style: TextStyle(color: Tokens.label2))),
+            for (final f in followers)
+              ListTile(
+                key: ValueKey('follower-${f.userId}'),
+                leading: Monogram(f.username.isEmpty ? '?' : f.username.characters.first.toUpperCase(), size: 30, member: true, dimmed: f.disabled),
+                title: Text(f.disabled ? '${f.username} (disabled)' : f.username),
+                subtitle: followReasonLabel(f.reason) == null ? null : Text(followReasonLabel(f.reason)!, style: TextStyle(color: Tokens.label2)),
+              ),
+          ]),
+        ),
+      ),
+    );
+
 /// "Send #40 back to Doing" (§9.2, MU1-16 AC2/AC3): a full-height sheet with
 /// the feedback field in focus; Send back stays off until there is text.
 Future<bool> showSendBack(BuildContext context, TicketView ticket) async {
