@@ -517,3 +517,181 @@ fn a_post_wakes_only_the_colleague_it_names_within_the_budget() {
     assert!(ok && text.contains("Bo will answer there"), "{text}");
     assert_eq!(in_chats(&s), before + 1, "one run for Bo, none for Ann herself");
 }
+
+/// A run of `employee` on the login of another board member than the setup's.
+fn run_on_login_of_other(s: &Setup, employee: EmployeeId) -> RunId {
+    let other = UserId::new();
+    s.service
+        .store()
+        .write(move |tx| {
+            aurelius_storage::users::insert(
+                tx,
+                &aurelius_storage::users::NewUser {
+                    id: &other.to_string(),
+                    username: "ada",
+                    created_by_user: None,
+                    now_ms: 2,
+                },
+                PHC,
+            )
+        })
+        .unwrap();
+    let run = run_of(s, employee, false);
+    s.service
+        .store()
+        .write(move |tx| {
+            Ok(tx.execute(
+                "UPDATE runs SET login_user = ?2 WHERE id = ?1",
+                rusqlite::params![run.to_string(), other.to_string()],
+            )?)
+        })
+        .unwrap();
+    run
+}
+
+/// Put the employee's chat (and so its runs) in `mode`.
+fn set_mode(s: &Setup, employee: EmployeeId, mode: aurelius_domain::autonomy::AgentMode) {
+    s.service
+        .store()
+        .write(move |tx| {
+            let chat = aurelius_storage::employees::main_chat(tx, employee)?
+                .expect("an employee has a main chat");
+            aurelius_storage::conversations::set_agent_mode(tx, chat, mode)?;
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn a_run_on_another_board_members_login_cannot_start_a_ticket_and_nothing_is_written() {
+    let s = setup();
+    let t = new_ticket(&s, "Grace's ticket", None);
+    let other = run_on_login_of_other(&s, s.orion);
+    let before = counts(&s);
+    let (ok, text) = act(&s, other, move_action(&t.to_string(), "todo"));
+    assert!(
+        !ok && text.contains("another board member's Claude login"),
+        "{text}"
+    );
+    assert_eq!(
+        (view(&s, t).column, counts(&s)),
+        (ColumnKind::Backlog, before),
+        "a refused start moved or wrote something"
+    );
+    // The same ticket starts from a run on its own login.
+    let (ok, text) = act(
+        &s,
+        run_of(&s, s.orion, true),
+        move_action(&t.to_string(), "todo"),
+    );
+    assert!(ok, "{text}");
+    assert_eq!(view(&s, t).column, ColumnKind::Todo);
+}
+
+#[test]
+fn a_run_in_plan_mode_reads_but_cannot_create_update_move_or_post() {
+    use aurelius_domain::autonomy::AgentMode;
+    let s = setup();
+    let t = new_ticket(&s, "Plan me", Some(s.orion));
+    set_mode(&s, s.orion, AgentMode::Plan);
+    let run = run_of(&s, s.orion, true);
+    let before = counts(&s);
+    let post = EmployeeAction::PostToTicket {
+        ticket: t.to_string(),
+        message: "hello".into(),
+    };
+    for (what, action) in [
+        ("create", create_action("Nope")),
+        ("update", update_action(&t.to_string(), "New")),
+        ("move", move_action(&t.to_string(), "todo")),
+        ("post", post),
+    ] {
+        let (ok, text) = act(&s, run, action);
+        assert!(!ok && text.contains("Plan mode"), "{what}: {text}");
+    }
+    assert_eq!(
+        (view(&s, t).column, view(&s, t).title.as_str(), counts(&s)),
+        (ColumnKind::Backlog, "Plan me", before),
+        "Plan mode wrote something"
+    );
+    let (ok, text) = act(
+        &s,
+        run,
+        EmployeeAction::ListTickets {
+            project: None,
+            column: None,
+            query: None,
+            limit: None,
+        },
+    );
+    assert!(ok && text.contains("Plan me"), "{text}");
+    let (ok, _) = act(
+        &s,
+        run,
+        EmployeeAction::ReadTicket {
+            ticket: t.to_string(),
+            last: None,
+        },
+    );
+    assert!(ok);
+    // Out of Plan mode the same update goes through.
+    set_mode(&s, s.orion, AgentMode::Auto);
+    assert!(
+        act(
+            &s,
+            run_of(&s, s.orion, true),
+            update_action(&t.to_string(), "New")
+        )
+        .0
+    );
+}
+
+#[test]
+fn an_employee_cannot_change_the_text_of_a_ticket_under_review_but_may_change_its_priority() {
+    let s = setup();
+    let atlas = run_of(&s, s.atlas, true);
+    for kind in [
+        ColumnKind::PlanReview,
+        ColumnKind::Testing,
+        ColumnKind::Review,
+    ] {
+        let t = new_ticket(&s, &format!("Under {}", kind.as_str()), None);
+        engine_puts(&s, t, kind);
+        let before = counts(&s);
+        let (ok, text) = act(&s, atlas, update_action(&t.to_string(), "Rewritten"));
+        assert!(
+            !ok && text.contains("under review"),
+            "{}: {text}",
+            kind.as_str()
+        );
+        let describe = EmployeeAction::UpdateTicket {
+            ticket: t.to_string(),
+            title: None,
+            description: Some("new".into()),
+            priority: None,
+            labels: None,
+        };
+        assert!(!act(&s, atlas, describe).0, "{}", kind.as_str());
+        assert_eq!(
+            (view(&s, t).title.clone(), counts(&s)),
+            (format!("Under {}", kind.as_str()), before),
+            "{} changed something",
+            kind.as_str()
+        );
+        let priority = EmployeeAction::UpdateTicket {
+            ticket: t.to_string(),
+            title: None,
+            description: None,
+            priority: Some("high".into()),
+            labels: None,
+        };
+        assert!(
+            act(&s, atlas, priority).0,
+            "priority stays open in {}",
+            kind.as_str()
+        );
+    }
+    // In Todo the text still changes.
+    let t = new_ticket(&s, "Open", None);
+    assert!(act(&s, atlas, update_action(&t.to_string(), "Open, renamed")).0);
+}

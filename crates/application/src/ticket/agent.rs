@@ -27,6 +27,7 @@ use crate::conversation::{discussion, ticket_channel};
 use crate::task::{task_runs, ticket_line};
 use aurelius_domain::{
     EmployeeId, EventNotice, ProjectId, RunId, TicketId,
+    autonomy::AgentMode,
     ticket::{self, Actor, ColumnKind, TicketPriority, TicketView},
 };
 use aurelius_storage::{StorageError, Store, Tx, company as company_store, employees};
@@ -57,8 +58,19 @@ pub const MOVE_BACKLOG: &str = "Moving a started ticket back to Backlog cancels 
 pub const MOVE_TODO_FROM_BACKLOG: &str = "Only a ticket in Backlog can be started (moved to Todo); this one is already started.";
 /// Why the run cannot act for a board member.
 pub const NO_BOARD_MEMBER: &str = "No board member stands behind this run (it has no Claude login), so a ticket cannot be made or started from it.";
+/// Why a run in Plan mode cannot change the board.
+pub const PLAN_MODE_READ_ONLY: &str = "This run is in Plan mode: it may read tickets (list_tickets, read_ticket) but not create, change, move or post. Present your plan first; the writes follow once a board member approves it.";
+/// Why a run cannot start a ticket that runs on another board member's login.
+pub const START_OTHER_LOGIN: &str = "This ticket runs on another board member's Claude login than the one behind this run, so it cannot be started from here. Ask that board member to start it, or post in its discussion with post_to_ticket.";
+/// Why an employee cannot rewrite a ticket's text while it is under review.
+pub const UPDATE_TEXT_LOCKED: &str = "The text of a ticket in Plan review, Testing or Review is under review and cannot be changed by an employee; post in its discussion with post_to_ticket instead.";
 /// Why only an employee's run uses the board tools.
 pub const EMPLOYEES_ONLY: &str = "Only an employee's run can use the ticket tools.";
+
+/// The refusal for a run in Plan mode, else none; the board changes only outside Plan mode.
+fn plan_mode_refusal(conn: &Connection, run: RunId) -> Result<Option<&'static str>, StorageError> {
+    Ok((aurelius_storage::conversations::mode_for_run(conn, run)? == AgentMode::Plan).then_some(PLAN_MODE_READ_ONLY))
+}
 
 fn refuse<T: Default>(why: impl Into<String>) -> Result<(bool, String, T), StorageError> {
     Ok((false, why.into(), T::default()))
@@ -226,6 +238,9 @@ fn parse_priority(text: Option<&str>) -> Result<TicketPriority, String> {
 /// same ticket. It starts nothing.
 pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     let Some(me) = caller(tx, run)? else { return refuse(EMPLOYEES_ONLY) };
+    if let Some(why) = plan_mode_refusal(tx, run)? {
+        return refuse(why);
+    }
     let project = match (input.project.map(str::trim).filter(|p| !p.is_empty()), me.project) {
         (Some(named), _) => match task_runs::find_project(tx, named)? {
             Ok(p) => p,
@@ -303,6 +318,9 @@ pub(crate) struct UpdateInput<'a> {
 /// or works on. Owner, mode, files and deadline are not here.
 pub(crate) fn update(tx: &Tx<'_>, st: &Store, run: RunId, input: UpdateInput<'_>) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     let Some(me) = caller(tx, run)? else { return refuse(EMPLOYEES_ONLY) };
+    if let Some(why) = plan_mode_refusal(tx, run)? {
+        return refuse(why);
+    }
     let Some(view) = find(tx, st, input.ticket)? else { return refuse(not_found(input.ticket)) };
     let Some(state) = store::state(tx, view.id)? else { return refuse(not_found(input.ticket)) };
     if state.column == ColumnKind::Done {
@@ -310,6 +328,9 @@ pub(crate) fn update(tx: &Tx<'_>, st: &Store, run: RunId, input: UpdateInput<'_>
     }
     if !is_manager(tx, me.employee, state.project_id)? && !store::employee_works_on(tx, state.id, me.employee)? {
         return refuse(UPDATE_NOT_YOURS);
+    }
+    if (input.title.is_some() || input.description.is_some()) && matches!(state.column, ColumnKind::PlanReview | ColumnKind::Testing | ColumnKind::Review) {
+        return refuse(UPDATE_TEXT_LOCKED);
     }
     let title = match input.title.map(ticket::valid_title).transpose() {
         Ok(t) => t,
@@ -382,6 +403,9 @@ fn move_refusal(from: ColumnKind, target: ColumnKind) -> &'static str {
 /// dispatcher then chooses the owner), or leaves it where it is. Nothing else moves by hand.
 pub(crate) fn move_to(tx: &Tx<'_>, st: &Store, run: RunId, ticket_needle: &str, column: &str) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     let Some(me) = caller(tx, run)? else { return refuse(EMPLOYEES_ONLY) };
+    if let Some(why) = plan_mode_refusal(tx, run)? {
+        return refuse(why);
+    }
     let Some(view) = find(tx, st, ticket_needle)? else { return refuse(not_found(ticket_needle)) };
     let Some(state) = store::state(tx, view.id)? else { return refuse(not_found(ticket_needle)) };
     if !is_manager(tx, me.employee, state.project_id)? {
@@ -401,6 +425,9 @@ pub(crate) fn move_to(tx: &Tx<'_>, st: &Store, run: RunId, ticket_needle: &str, 
         return refuse(why.to_string());
     }
     let Some(user) = crate::run::login::of_run(tx, run)? else { return refuse(NO_BOARD_MEMBER) };
+    if store::login_user(tx, state.id)?.is_some_and(|ticket_login| ticket_login != user) {
+        return refuse(START_OTHER_LOGIN);
+    }
     let by = Actor::Employee { employee_id: me.employee };
     let base = Base::of_employee(me.employee, run);
     let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
@@ -417,6 +444,9 @@ pub(crate) fn move_to(tx: &Tx<'_>, st: &Store, run: RunId, ticket_needle: &str, 
 pub(crate) fn post(tx: &Tx<'_>, st: &Store, run: RunId, ticket_needle: &str, message: &str) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     if caller(tx, run)?.is_none() {
         return refuse(EMPLOYEES_ONLY);
+    }
+    if let Some(why) = plan_mode_refusal(tx, run)? {
+        return refuse(why);
     }
     let Some(view) = find(tx, st, ticket_needle)? else { return refuse(not_found(ticket_needle)) };
     match discussion::of_ticket(tx, view.id)? {
