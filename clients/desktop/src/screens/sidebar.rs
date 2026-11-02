@@ -52,11 +52,10 @@ pub fn sidebar_items() -> impl Iterator<Item = NavItem> {
 }
 
 impl AppView {
-    /// What the inbox badge counts: what needs you (the inbox's first tab) and what failed and is
+    /// What the inbox badge counts: what needs you (the inbox's first tab), the unread Updates and what failed and is
     /// not read yet. Results of finished tasks give no badge.
     pub fn inbox_count(&self) -> usize {
-        let failed = self.inbox_notifications().iter().filter(|n| !n.read && crate::app::note_kind(n) == crate::app::NoteKind::Failed).count();
-        self.inbox_counts()[0] + failed
+        crate::app::inbox_badge(self.inbox_waiting_head(), &self.inbox_notifications(), |n| self.note_is_mine(n), &self.inbox_opened)
     }
 
     /// Collapsed (Ctrl+B) the sidebar is gone; hovering the title strip's sidebar button

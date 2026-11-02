@@ -315,6 +315,11 @@ impl AppView {
     /// Follow or unfollow (`ticket.follow`).
     pub fn ticket_follow(&mut self, id: TicketId, on: bool, cx: &mut Context<Self>) {
         let number = self.board.ticket(id).map_or(0, |t| t.number);
+        self.ticket_follow_numbered(id, number, on, cx);
+    }
+
+    /// The same for a ticket this client may not have read (a row of the Inbox knows its number).
+    pub fn ticket_follow_numbered(&mut self, id: TicketId, number: u32, on: bool, cx: &mut Context<Self>) {
         self.board_send(Command::FollowTicket(ticket::FollowTicket { ticket_id: id, on }), Some(follow_toast(number, on)));
         cx.notify();
     }
@@ -346,6 +351,7 @@ impl AppView {
             _ => None,
         };
         self.board.followers.retain(|id, _| Some(*id) == open);
+        self.inbox_followers_asked = None;
         if let Some(id) = open {
             self.ticket_read_followers(id);
         }

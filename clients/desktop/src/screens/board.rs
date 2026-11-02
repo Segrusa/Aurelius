@@ -250,6 +250,17 @@ pub fn needs_me(needs: Option<Needs>, t: &TicketView, me: Option<UserId>) -> boo
     }
 }
 
+/// Whether a task counts on the badges (freeze §5): a ticket's main task only when its ticket
+/// needs this board member; a task without a ticket and a delegation count as ever, and so does
+/// any task on a server without Responsible. A ticket this client has not read (the board is
+/// filtered on another project) counts too: better one too many than a hidden wait.
+pub fn task_counts(task: &aurelius_protocol::TaskView, responsible_supported: bool, ticket: Option<&TicketView>, needs_me: impl Fn(&TicketView) -> bool) -> bool {
+    if !responsible_supported || task.ticket_id.is_none() || task.parent_task_id.is_some() {
+        return true;
+    }
+    ticket.is_none_or(needs_me)
+}
+
 /// What the review and plan bars say to someone else than the Responsible (§1.4).
 pub fn decide_too(t: &TicketView) -> Option<String> {
     t.responsible_username.as_ref().filter(|_| t.responsible_user_id.is_some() && !t.responsible_disabled).map(|name| format!("{name} is responsible. You can decide too."))
@@ -681,7 +692,6 @@ pub fn activity_text(card: &TimelineCard) -> String {
         "ticket.cancelled" => format!("{who} put it back in Backlog"),
         "ticket.archived" => format!("{who} archived it"),
         "ticket.updated" if card.actor == "system" => "Nobody chose an owner; a board member must".into(),
-        "ticket.updated" if card.detail.contains("responsible") => format!("{who} changed who is responsible"),
         "ticket.updated" => format!("{who} changed it"),
         // Plan approved: the main task's conversation left Plan mode (D-07).
         "conversation.settings_changed" => "The main task's mode changed".into(),
@@ -1943,6 +1953,11 @@ impl AppView {
         needs_me(self.ticket_needs(t), t, self.active_member().map(|u| u.id))
     }
 
+    /// Whether a waiting task counts on this board member's badges (freeze §5).
+    pub fn task_counts_for_me(&self, task: &aurelius_protocol::TaskView) -> bool {
+        task_counts(task, self.ticket_responsible_supported(), task.ticket_id.and_then(|id| self.board.ticket(id)), |t| self.ticket_needs_me(t))
+    }
+
     /// Whether the board member whose login a ticket runs on is disabled (MU3-12 AC4).
     pub fn login_disabled(&self, t: &TicketView) -> bool {
         self.members.list.iter().any(|u| u.id == t.login_user && u.disabled_at_ms.is_some())
@@ -3022,6 +3037,23 @@ pub(crate) mod tests {
     }
 
     /// B6: the "Needs you" filter takes what needs me; the Responsible filter its own.
+    /// Freeze §5, per kind of task.
+    #[test]
+    fn the_badges_count_a_main_task_only_when_its_ticket_needs_me() {
+        use super::task_counts;
+        use crate::screens::tasks::tests::task;
+        let t = card(1, ColumnKind::Review);
+        let plain = task(t.project_id, None, aurelius_domain::task::TaskStatus::Waiting, 1);
+        assert!(task_counts(&plain, true, None, |_| false), "a task without a ticket counts as ever");
+        let main = aurelius_protocol::TaskView { ticket_id: Some(t.id), ..plain.clone() };
+        assert!(!task_counts(&main, true, Some(&t), |_| false), "another's main task");
+        assert!(task_counts(&main, true, Some(&t), |_| true), "my main task");
+        assert!(task_counts(&main, false, Some(&t), |_| false), "a server without Responsible");
+        assert!(task_counts(&main, true, None, |_| false), "a ticket this client has not read");
+        let delegation = aurelius_protocol::TaskView { parent_task_id: Some(aurelius_domain::TaskId::new()), ..main.clone() };
+        assert!(task_counts(&delegation, true, Some(&t), |_| false), "a delegation below it is not the main task");
+    }
+
     #[test]
     fn the_filters_follow_needs_me_and_the_responsible() {
         use super::needs_me;
