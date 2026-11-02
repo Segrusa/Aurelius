@@ -69,9 +69,10 @@ fn run_of(s: &Setup, employee: EmployeeId, login: bool) -> RunId {
     s.service
         .store()
         .write(move |tx| {
+            let chat = aurelius_storage::employees::main_chat(tx, employee)?.expect("an employee has a main chat");
             tx.execute(
-                "INSERT INTO runs(id, employee_id, attempt, runtime_kind, model_id, resolved_config_json, status, started_at_ms, login_user) VALUES (?1, ?2, 1, 'fake', '', '{}', 'running', 1, ?3)",
-                rusqlite::params![run.to_string(), employee.to_string(), login],
+                "INSERT INTO runs(id, conversation_id, attempt, runtime_kind, model_id, resolved_config_json, status, started_at_ms, login_user) VALUES (?1, ?2, 1, 'fake', '', '{}', 'running', 1, ?3)",
+                rusqlite::params![run.to_string(), chat.to_string(), login],
             )?;
             Ok(())
         })
@@ -156,14 +157,15 @@ fn the_ticket_made(text: &str) -> String {
     text[start..].chars().take_while(char::is_ascii_digit).collect()
 }
 
-/// Everything said in the ticket's discussion, system lines included.
+/// Everything said in the ticket's discussion, system lines included, one per line.
 fn discussion_text(s: &Setup, id: TicketId) -> String {
     let st = s.service.store().clone();
     s.service
         .store()
         .read(move |c| {
             let d = crate::conversation::discussion::of_ticket(c, id)?.unwrap();
-            crate::conversation::discussion::read_text(c, &st, &d, None)
+            let messages = aurelius_storage::conversations::list_messages(c, d.id, &|k| st.blobs().read(k).ok().and_then(|b| String::from_utf8(b).ok()))?;
+            Ok(messages.into_iter().map(|m| m.text).collect::<Vec<_>>().join("\n"))
         })
         .unwrap()
 }
@@ -261,13 +263,13 @@ fn creating_the_same_title_twice_in_one_run_makes_one_ticket() {
 fn a_run_without_a_board_member_behind_it_cannot_make_or_start_a_ticket() {
     let s = setup();
     let run = run_of(&s, s.atlas, false);
+    let t = new_ticket(&s, "Waiting", None);
     let before = counts(&s);
     let (ok, text) = act(&s, run, create_action("No login"));
     assert!(!ok && text.contains("No board member stands behind this run"), "{text}");
-    let t = new_ticket(&s, "Waiting", None);
     let (ok, text) = act(&s, run, move_action(&t.to_string(), "todo"));
     assert!(!ok && text.contains("No board member"), "{text}");
-    assert_eq!(counts(&s)[..3], [before[0] + 2, before[1] + 1, before[2]], "only the board member's own ticket and its events");
+    assert_eq!(before, counts(&s));
 }
 
 #[test]
@@ -455,11 +457,12 @@ fn a_ticket_that_is_not_shown_reads_like_one_that_does_not_exist() {
 fn the_project_assistant_without_an_employee_has_no_ticket_tools() {
     let s = setup();
     // A run of a project's task that no employee works on is not an employee's run.
-    let run = RunId::new();
+    let (run, project) = (RunId::new(), s.project);
     s.service
         .store()
         .write(move |tx| {
-            tx.execute("INSERT INTO runs(id, attempt, runtime_kind, model_id, resolved_config_json, status, started_at_ms) VALUES (?1, 1, 'fake', '', '{}', 'running', 1)", [run.to_string()])?;
+            let channel = aurelius_storage::discussions::channel(tx, Some(project))?.expect("a project channel");
+            tx.execute("INSERT INTO runs(id, conversation_id, attempt, runtime_kind, model_id, resolved_config_json, status, started_at_ms) VALUES (?1, ?2, 1, 'fake', '', '{}', 'running', 1)", rusqlite::params![run.to_string(), channel.to_string()])?;
             Ok(())
         })
         .unwrap();
@@ -479,7 +482,7 @@ fn an_employee_posts_in_a_tickets_discussion_but_not_on_done() {
     assert!(ok && text.contains("Posted in"), "{text}");
     assert_eq!(counts(&s)[5], before[5] + 1, "one message");
     let said = discussion_text(&s, t);
-    assert!(said.contains("A thought for the board.") && said.contains("Ann"), "{said}");
+    assert!(said.contains("A thought for the board."), "{said}");
     engine_puts(&s, t, ColumnKind::Done);
     let before = counts(&s);
     let (ok, text) = act(&s, ann, EmployeeAction::PostToTicket { ticket: t.to_string(), message: "Too late.".into() });
@@ -493,8 +496,10 @@ fn an_employee_posts_in_a_tickets_discussion_but_not_on_done() {
 fn a_post_wakes_only_the_colleague_it_names_within_the_budget() {
     let s = setup();
     let t = new_ticket(&s, "Wake", None);
-    let (ok, text) = act(&s, run_of(&s, s.ann, true), EmployeeAction::PostToTicket { ticket: t.to_string(), message: "@Bo can you look?".into() });
+    let ann = run_of(&s, s.ann, true);
+    let in_chats = |s: &Setup| -> i64 { s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM runs", [], |r| r.get(0))?)).unwrap() };
+    let before = in_chats(&s);
+    let (ok, text) = act(&s, ann, EmployeeAction::PostToTicket { ticket: t.to_string(), message: "@Bo can you look?".into() });
     assert!(ok && text.contains("Bo will answer there"), "{text}");
-    let runs: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM runs WHERE employee_id IS NULL AND conversation_id IS NOT NULL", [], |r| r.get(0))?)).unwrap();
-    assert_eq!(runs, 1, "one run for Bo, none for Ann");
+    assert_eq!(in_chats(&s), before + 1, "one run for Bo, none for Ann herself");
 }

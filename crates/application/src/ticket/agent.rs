@@ -93,9 +93,10 @@ fn find(conn: &Connection, st: &Store, needle: &str) -> Result<Option<TicketView
     Ok(found.filter(|t| t.archived_at_ms.is_none()))
 }
 
-/// A column named as a person writes it (`plan review`, `Plan-Review`, `todo`).
+/// A column named as a person writes it (`plan review`, `Plan-Review`, `to do`, `todo`).
 fn parse_column(text: &str) -> Option<ColumnKind> {
-    ColumnKind::parse(&text.trim().to_lowercase().replace([' ', '-'], "_"))
+    let plain = |t: &str| t.to_lowercase().replace([' ', '-', '_'], "");
+    ColumnKind::ALL.into_iter().find(|k| plain(k.as_str()) == plain(text))
 }
 
 fn column_names() -> String {
