@@ -85,6 +85,7 @@ fn post(s: &Setup, ticket: TicketId, text: &str) -> Result<(Vec<EmployeeId>, Vec
 
 fn new_ticket(s: &Setup, title: &str, owner: Option<EmployeeId>) -> TicketId {
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: title.into(),
@@ -472,6 +473,7 @@ fn sent_message(s: &Setup, channel: Option<ConversationId>, text: &str) -> aurel
 
 fn ticket_from(s: &Setup, message: Option<aurelius_domain::MessageId>, user: Option<UserId>) -> Result<(TicketId, u32), AppError> {
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: "From chat".into(),

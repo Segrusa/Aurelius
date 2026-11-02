@@ -284,6 +284,7 @@ mod tests {
 
     fn msg(role: MessageRole, author: Option<&str>, at_ms: i64, ordinal: u32) -> MessageView {
         MessageView {
+            edited_at_ms: None, deleted_at_ms: None, editable: false,
             id: MessageId::new(),
             ordinal,
             role,

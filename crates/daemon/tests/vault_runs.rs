@@ -94,6 +94,7 @@ async fn the_audit_of_a_tickets_runs_names_the_ticket() {
     client.vault_create(VaultCreateParams { project_id: None, kind: VaultKind::Secret, name: "Deploy key".into(), env_name: "DEPLOY_KEY".into(), description: None, value: VALUE.into() }).await.unwrap();
 
     let ticket = CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id,
         title: "Ship it".into(),

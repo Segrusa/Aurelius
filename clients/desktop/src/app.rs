@@ -7915,6 +7915,7 @@ mod tests {
     fn inbox_tabs_filter_and_count_what_they_show() {
         use super::{InboxTab, NoteKind, note_kind, tab_counts, tab_notes};
         let note = |id: &str, severity: &str, target: &str| NotificationView {
+            ticket_id: None, ticket_number: None, conversation_id: None, message_id: None, reason: None, merged_count: 0, needs_you: false,
             id: id.into(),
             severity: severity.into(),
             title: String::new(),

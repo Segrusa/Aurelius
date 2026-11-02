@@ -746,6 +746,7 @@ mod tests {
 
     fn msg(role: MessageRole, text: &str) -> MessageView {
         MessageView {
+            edited_at_ms: None, deleted_at_ms: None, editable: false,
             id: MessageId::new(),
             ordinal: 0,
             role,
@@ -902,6 +903,7 @@ mod tests {
 
     fn ticket(column: ColumnKind, owner: bool) -> TicketView {
         TicketView {
+            responsible_user_id: None, responsible_username: None, responsible_disabled: false,
             id: TicketId::new(),
             number: 42,
             project_id: aurelius_domain::ProjectId::new(),

@@ -128,6 +128,15 @@ pub struct CommandService {
     projects_root: std::sync::Mutex<Option<std::path::PathBuf>>,
 }
 
+/// The answer to a write of the phase A freeze whose server part is not built yet.
+pub(crate) const NOT_BUILT_YET: &str = "This server does not do this yet.";
+
+/// A write of the phase A freeze: a board member's, and refused for now.
+fn not_built_yet(ctx: &CommandContext) -> Result<Committed, AppError> {
+    ticket::require_board_member(ctx)?;
+    Err(AppError::new(ErrorCode::Validation, NOT_BUILT_YET))
+}
+
 pub(crate) fn storage_error(err: StorageError) -> AppError {
     tracing::error!(error = %err, "storage failure");
     AppError::new(ErrorCode::StorageUnavailable, format!("Could not save: {err}"))
@@ -309,6 +318,8 @@ impl CommandService {
             | Command::AddStarterGuidelines(_) => self.guideline_command(ctx, &envelope, hash),
             Command::SetServerName(cmd) => self.set_server_name(ctx, &envelope, hash, cmd),
             Command::ReactToMessage(cmd) => self.react_to_message(ctx, &envelope, hash, cmd),
+            // The phase A freeze: their features are not in `FEATURES`, so no client calls them yet.
+            Command::SetTicketResponsible(_) | Command::FollowTicket(_) | Command::EditMessage(_) | Command::DeleteMessage(_) => not_built_yet(ctx),
         };
         COMMAND_METHOD.set("");
         result

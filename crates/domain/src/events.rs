@@ -60,8 +60,15 @@ event_kinds! {
     MessageUserCommitted => "message.user_committed",
     MessageAssistantCommitted => "message.assistant_committed",
     MessageInterrupted => "message.interrupted",
+    // A queued message was removed (`metadata.run_id`), or a board member deleted their
+    // message of a channel (feature `message_edits`; the payload is the earlier text and
+    // `metadata.queued` is false). Clients read the conversation again either way.
     MessageDeleted => "message.deleted",
     MessageSentNow => "message.sent_now",
+    // A board member edited their message of a channel (feature `message_edits`); aggregate:
+    // the channel's conversation; the payload is the earlier text, `metadata.message_id`
+    // and `by`, never text. Only to connections that accept `message_edits`.
+    MessageEdited => "message.edited",
     // A board member added or took back a reaction on a message of a channel
     // (feature `chat_reactions`); aggregate: the channel's conversation;
     // `metadata.message_id`, `emoji`, `on`. Only to connections that accept `chat_reactions`.
@@ -182,6 +189,9 @@ event_kinds! {
     TicketSentBack => "ticket.sent_back",
     TicketCancelled => "ticket.cancelled",
     TicketArchived => "ticket.archived",
+    // A board member started or stopped following a ticket (feature `ticket_follow`):
+    // `metadata.user_id`, `on`, `reason`. Only to connections that accept `ticket_follow`.
+    TicketFollowChanged => "ticket.follow_changed",
     // Names or order of the columns; the aggregate is the company.
     BoardColumnsUpdated => "board.columns_updated",
     // Name, dispatcher or tester of the company.

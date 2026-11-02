@@ -67,6 +67,28 @@ pub struct ReactToMessage {
     pub on: bool,
 }
 
+/// A board member changes the text of their own message in a channel or a
+/// ticket's discussion (`message.edit`, feature `message_edits`). It wakes nobody.
+/// The earlier text stays in the audit log: editing does not erase a secret.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EditMessage {
+    pub message_id: MessageId,
+    pub text: String,
+    /// A board member confirmed that the text may hold a vault secret's value
+    /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
+}
+
+/// A board member deletes their own message in a channel or a ticket's discussion
+/// (`message.delete`, feature `message_edits`): a line stays that says so. For a
+/// message still waiting for its answer see `conversation::DeleteQueuedMessage`.
+/// The text stays in the audit log: deleting does not erase a secret.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeleteMessage {
+    pub message_id: MessageId,
+}
+
 impl ReactToMessage {
     /// The emoji as stored: trimmed, not empty, at most `REACTION_EMOJI_MAX` bytes.
     pub fn validate(&self) -> Result<String, DomainError> {

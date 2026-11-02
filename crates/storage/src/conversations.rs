@@ -528,6 +528,9 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             thread_unread: None,
             thread_repliers: Vec::new(),
             reactions: Vec::new(),
+            edited_at_ms: None,
+            deleted_at_ms: None,
+            editable: false,
         });
     }
     // The board members who wrote in a discussion (schema 19).

@@ -62,6 +62,7 @@ fn setup() -> Setup {
 
 fn new_ticket(s: &Setup) -> TicketId {
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: "Login".into(),

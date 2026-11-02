@@ -381,6 +381,9 @@ pub fn list(conn: &Connection, filter: &TicketFilter, read_blob: &dyn Fn(&str) -
                     login_username: r.get(29)?,
                     // A task of it (or its dispatcher) waits for `login_user`'s Claude login (MU3-12).
                     needs: r.get::<_, bool>(30)?.then_some(aurelius_domain::ticket::TicketNeed::Login),
+                    responsible_user_id: None,
+                    responsible_username: None,
+                    responsible_disabled: false,
                 },
                 description,
             ))

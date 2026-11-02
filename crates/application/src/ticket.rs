@@ -442,6 +442,10 @@ impl CommandService {
     }
 
     fn create_ticket(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: ticket::CreateTicket, user: UserId) -> Result<Committed, AppError> {
+        // The phase A freeze: refused rather than dropped until the column exists.
+        if cmd.responsible_user_id.is_some() {
+            return Err(AppError::new(aurelius_domain::ErrorCode::Validation, crate::NOT_BUILT_YET));
+        }
         let title = ticket::valid_title(&cmd.title).map_err(domain_error)?;
         let description = ticket::valid_description(cmd.description.as_deref()).map_err(domain_error)?;
         let labels = ticket::valid_labels(&cmd.labels).map_err(domain_error)?;

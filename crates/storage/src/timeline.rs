@@ -453,6 +453,13 @@ fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>) -> Result
             read,
             task_id: TaskId::parse(&correlation).ok().filter(|_| !lookup(conn, "SELECT id FROM tasks WHERE id = ?1", &correlation).unwrap_or_default().is_empty()),
             target_type: target["type"].as_str().unwrap_or("").to_owned(),
+            ticket_id: None,
+            ticket_number: None,
+            conversation_id: None,
+            message_id: None,
+            reason: None,
+            merged_count: 0,
+            needs_you: false,
         });
     }
     Ok(out)

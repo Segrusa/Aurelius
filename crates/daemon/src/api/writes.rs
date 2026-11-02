@@ -73,6 +73,7 @@ pub(super) fn b10(command: Command) -> Result<Command, ProtocolError> {
         Command::SendEmployeeMessage(c) => c.confirm_secret,
         Command::SendGroupMessage(c) => c.confirm_secret,
         Command::PostTicketMessage(c) => c.confirm_secret,
+        Command::EditMessage(c) => c.confirm_secret,
         Command::SendChatMessage(c) => c.confirm_secret,
         Command::SendProjectMessage(c) => c.confirm_secret,
         Command::CreateTask(c) => c.confirm_secret,
@@ -307,5 +308,21 @@ mod tests {
 
         assert!(folder_ok, "a folder path is not an attachment");
         assert_eq!(post_refused.code, ErrorCode::LooksLikeSecret);
+    }
+
+    #[test]
+    fn b10_refuses_an_edit_with_a_vault_value_and_redacts_it_once_confirmed() {
+        use aurelius_domain::group_chat::EditMessage;
+        let owner = "b10-edit-test";
+        let value = "sk-test-FAKE-b10-edit-0000";
+        aurelius_runtime::redact::add_to_set(owner, aurelius_runtime::redact::Secret { name: "B10_EDIT".into(), label: String::new(), value: zeroize::Zeroizing::new(value.into()) });
+        let edit = |confirm_secret: bool| Command::EditMessage(EditMessage { message_id: aurelius_domain::MessageId::new(), text: format!("token {value}"), confirm_secret });
+        let refused = b10(edit(false)).map(drop).unwrap_err();
+        let confirmed = b10(edit(true));
+        aurelius_runtime::redact::install_set(owner, Vec::new());
+
+        assert_eq!(refused.code, ErrorCode::LooksLikeSecret);
+        let Ok(Command::EditMessage(kept)) = confirmed else { panic!("the `match` in b10 must let a confirmed edit through") };
+        assert!(!kept.text.contains(value), "{}", kept.text);
     }
 }

@@ -747,6 +747,12 @@ impl Client {
         self.read(Method::ThreadRead { message_id }, body!(Thread)).await
     }
 
+    /// Where a message of a channel or a ticket's discussion is, for a link to it.
+    /// Only on a server that `supports` `aurelius_protocol::feature::MESSAGE_LOCATE`.
+    pub async fn message_locate(&self, message_id: aurelius_domain::MessageId) -> Result<aurelius_domain::views::MessageLocation, ClientError> {
+        self.read(Method::MessageLocate { message_id }, body!(MessageLocation)).await
+    }
+
     /// The Team chat's channels (feature `team_channels`): General first, then one per project.
     pub async fn channels(&self) -> Result<aurelius_domain::views::ChannelsSnapshot, ClientError> {
         self.read(Method::ChannelList, body!(Channels)).await

@@ -93,6 +93,9 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         }
         Method::TicketGet { ticket_id } => ticket(shared, ticket_id).await,
         Method::TicketList { project_id, column, query } => tickets(shared, project_id, column, query).await,
+        Method::MessageLocate { message_id } => message_location(shared, message_id).await,
+        // Not built yet: their features are not in `FEATURES`, so no client calls them.
+        Method::TicketFollowers { .. } | Method::TicketMyTickets { .. } | Method::MessageHistory { .. } => Err(ProtocolError::new(ErrorCode::Validation, NOT_BUILT_YET)),
         Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
         Method::ApprovalList => approvals(shared).await,
         Method::ProviderList => connections(shared).await,
@@ -782,6 +785,20 @@ async fn guidelines(shared: &Arc<Shared>, method: Method) -> Result<ResponseBody
         }
         _ => Err(internal("not a guideline read")),
     }
+}
+
+/// The answer to a read of the phase A freeze whose server part is not built yet.
+const NOT_BUILT_YET: &str = "This server does not do this yet.";
+
+/// `message.locate { message_id }`: where a message of a channel or a ticket's
+/// discussion is. Any other message answers as an unknown one, so a link never
+/// tells that a private chat holds it.
+async fn message_location(shared: &Arc<Shared>, message: aurelius_domain::MessageId) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    storage_task(move || store.read(|c| aurelius_storage::threads::locate(c, message)))
+        .await?
+        .map(ResponseBody::MessageLocation)
+        .ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "This message does not exist."))
 }
 
 /// `thread.read { message_id }`: the thread `message_id` starts (a message of a

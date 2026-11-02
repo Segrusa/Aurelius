@@ -172,6 +172,10 @@ pub enum Command {
     AddStarterGuidelines(guideline::AddStarterGuidelines),
     SetServerName(server::SetServerName),
     ReactToMessage(group_chat::ReactToMessage),
+    SetTicketResponsible(ticket::SetTicketResponsible),
+    FollowTicket(ticket::FollowTicket),
+    EditMessage(group_chat::EditMessage),
+    DeleteMessage(group_chat::DeleteMessage),
 }
 
 /// `(type, method)` for every command: the tag in the JSON of a `Command` and
@@ -270,6 +274,10 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("add_starter_guidelines", "guideline.add_starter_set"),
     ("set_server_name", "server.set_name"),
     ("react_to_message", "message.react"),
+    ("set_ticket_responsible", "ticket.set_responsible"),
+    ("follow_ticket", "ticket.follow"),
+    ("edit_message", "message.edit"),
+    ("delete_message", "message.delete"),
 ];
 
 impl Command {

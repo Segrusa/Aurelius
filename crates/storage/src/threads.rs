@@ -11,8 +11,8 @@
 use crate::discussions::COUNTED;
 use crate::{StorageError, now_ms};
 use aurelius_domain::group_chat::OWNER;
-use aurelius_domain::views::{MessageView, ReactionView, THREAD_REPLIERS_MAX};
-use aurelius_domain::{ConversationId, MessageId, UserId};
+use aurelius_domain::views::{MessageLocation, MessageView, ReactionView, THREAD_REPLIERS_MAX};
+use aurelius_domain::{ConversationId, MessageId, TicketId, UserId};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::collections::HashMap;
 
@@ -39,6 +39,31 @@ pub fn place(conn: &Connection, message: MessageId) -> Result<Option<MessagePlac
     let Some((conversation, parent)) = row else { return Ok(None) };
     let Ok(conversation_id) = ConversationId::parse(&conversation) else { return Ok(None) };
     Ok(Some(MessagePlace { conversation_id, thread_parent: parent.and_then(|p| MessageId::parse(&p).ok()) }))
+}
+
+/// Where `message` is for a link to it (`message.locate`): its conversation, the
+/// ticket whose discussion that is, and the thread it replies in. None for an
+/// unknown message and for one outside a channel or a ticket's discussion.
+pub fn locate(conn: &Connection, message: MessageId) -> Result<Option<MessageLocation>, StorageError> {
+    type Row = (String, Option<String>, Option<String>, Option<i64>);
+    let row: Option<Row> = conn
+        .query_row(
+            "SELECT m.conversation_id, m.thread_parent_id, t.id, t.number
+             FROM messages m JOIN conversations c ON c.id = m.conversation_id LEFT JOIN tickets t ON t.conversation_id = c.id
+             WHERE m.id = ?1 AND c.kind IN ('group', 'ticket')",
+            [message.to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()?;
+    let Some((conversation, parent, ticket, number)) = row else { return Ok(None) };
+    let Ok(conversation_id) = ConversationId::parse(&conversation) else { return Ok(None) };
+    Ok(Some(MessageLocation {
+        message_id: message,
+        conversation_id,
+        ticket_id: ticket.and_then(|t| TicketId::parse(&t).ok()),
+        ticket_number: number.map(|n| n as u32),
+        thread_root: parent.and_then(|p| MessageId::parse(&p).ok()),
+    }))
 }
 
 /// Make `message` (just inserted) a reply in the thread of `root`.

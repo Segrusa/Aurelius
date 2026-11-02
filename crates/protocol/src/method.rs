@@ -88,6 +88,30 @@ pub enum Method {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         query: Option<String>,
     },
+    /// Who follows a ticket (feature `ticket_follow`). Not for apps.
+    #[serde(rename = "ticket.followers")]
+    TicketFollowers { ticket_id: aurelius_domain::TicketId },
+    /// The tickets of the board member of the session (feature `my_tickets`),
+    /// never of one named in a param: responsible, created or followed by them,
+    /// and open ones on their login or without an active responsible. Done and
+    /// archived ones only with `include_done`. By priority, then the latest
+    /// update; at most `MY_TICKETS_MAX`. Not for apps.
+    #[serde(rename = "ticket.my_tickets")]
+    TicketMyTickets {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        include_done: bool,
+    },
+    /// Where a message is (feature `message_locate`), for a link to it: its
+    /// conversation, ticket and thread. Only a message of a channel or a ticket's
+    /// discussion; any other is `not_found`, as an unknown one. Not for apps.
+    #[serde(rename = "message.locate")]
+    MessageLocate { message_id: MessageId },
+    /// The earlier texts of a message, newest first (feature `message_edits`);
+    /// none for a deleted one. Not for apps.
+    #[serde(rename = "message.history")]
+    MessageHistory { message_id: MessageId },
     /// The board members, oldest first (never a password's hash), disabled ones
     /// too (`UserView::disabled_at_ms`). Works without a session (the sign-in
     /// screen may offer the names). Apps may read it too.
@@ -575,6 +599,14 @@ pub mod client_feature {
     /// connection gets the event `message.reacted`, so an older client never
     /// reads an event kind it does not know.
     pub const CHAT_REACTIONS: &str = "chat_reactions";
+    /// The client shows who follows a ticket (feature `ticket_follow`): only such
+    /// a connection gets the event `ticket.follow_changed`, so an older client
+    /// never reads an event kind it does not know.
+    pub const TICKET_FOLLOW: &str = "ticket_follow";
+    /// The client shows edited messages (feature `message_edits`): only such a
+    /// connection gets the event `message.edited`. An older client sees the new
+    /// text at its next `conversation.get`.
+    pub const MESSAGE_EDITS: &str = "message_edits";
 }
 
 impl std::fmt::Debug for HelloParams {

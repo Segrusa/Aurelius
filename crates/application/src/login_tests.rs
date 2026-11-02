@@ -99,6 +99,7 @@ fn delegate(s: &Setup, run: RunId, to: &str, employee: EmployeeId) -> (TaskId, R
 
 fn ticket_of(s: &Setup, by: UserId, owner: EmployeeId) -> (TicketId, TaskId) {
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: "Login".into(),
@@ -299,6 +300,7 @@ fn the_dispatchers_triage_and_the_summary_after_done_use_the_tickets_login() {
     let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }), tester: None };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project,
         title: "Search".into(),
@@ -487,6 +489,7 @@ fn the_dispatcher_waits_for_its_logins_limit_without_using_a_try() {
     let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }), tester: None };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
         owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None,
@@ -577,6 +580,7 @@ fn the_dispatcher_waits_for_the_tickets_login_without_using_a_try() {
     let dispatcher = aurelius_domain::company::UpdateCompany { name: None, dispatcher: Some(aurelius_domain::ticket::SetDispatcher { employee_id: Some(s.otto.0) }), tester: None };
     exec(&s, s.alex, Command::UpdateCompany(dispatcher));
     let create = ticket::CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
         owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None,

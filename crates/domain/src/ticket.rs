@@ -164,6 +164,18 @@ pub struct TicketView {
     /// What the ticket waits for before it can run; none: nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub needs: Option<TicketNeed>,
+    /// The board member who is responsible for the ticket (feature
+    /// `ticket_responsible`), next to the employee who owns its main task. None:
+    /// nobody. Left out then and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responsible_user_id: Option<UserId>,
+    /// The name of `responsible_user_id`, so a card needs no list of board members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responsible_username: Option<String>,
+    /// The responsible board member is disabled: a client treats the ticket as
+    /// having no active responsible, without a list of board members. Left out when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub responsible_disabled: bool,
 }
 
 /// Why a ticket cannot run yet (`TicketView::needs`).
@@ -209,6 +221,38 @@ pub struct TicketsSnapshot {
     pub tickets: Vec<TicketView>,
 }
 
+/// Most tickets `ticket.my_tickets` answers with, so one read stays bounded.
+pub const MY_TICKETS_MAX: usize = 500;
+
+/// One board member who follows a ticket (`ticket.followers`, feature `ticket_follow`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FollowerView {
+    pub user_id: UserId,
+    pub username: String,
+    /// A disabled board member stays listed but gets no notifications.
+    pub disabled: bool,
+    /// Why they follow: `created`, `responsible`, `mentioned` or `manual`. Text,
+    /// not an enum, so a new reason never breaks an older client.
+    pub reason: String,
+    pub followed_at_ms: i64,
+}
+
+/// `ticket.followers` (feature `ticket_follow`): who follows a ticket.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TicketFollowersView {
+    pub followers: Vec<FollowerView>,
+}
+
+/// `ticket.my_tickets` (feature `my_tickets`): the tickets of the board member
+/// of the session, at most `MY_TICKETS_MAX`. The client makes its tabs and
+/// counters from this one answer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct MyTicketsView {
+    pub tickets: Vec<TicketView>,
+    /// Which of them the reader follows: `TicketView` is the same for every reader.
+    pub following: Vec<TicketId>,
+}
+
 // ---- Commands -------------------------------------------------------------
 
 /// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
@@ -244,6 +288,30 @@ pub struct CreateTicket {
     /// (after `looks_like_secret`, B10): it is stored with the value redacted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub confirm_secret: bool,
+    /// The board member responsible from the start (feature `ticket_responsible`).
+    /// Left out: nobody. Optional, so a client leaves it out unless it chooses
+    /// someone: older servers refuse fields they do not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responsible_user_id: Option<UserId>,
+}
+
+/// Choose the board member responsible for a ticket (`ticket.set_responsible`,
+/// feature `ticket_responsible`). Its own command rather than a field of
+/// `UpdateTicket`, where "nobody" and "unchanged" would need two kinds of none.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetTicketResponsible {
+    pub ticket_id: TicketId,
+    /// None: nobody is responsible any more.
+    pub responsible_user_id: Option<UserId>,
+}
+
+/// The board member of the session starts (`on`) or stops following a ticket
+/// (`ticket.follow`, feature `ticket_follow`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FollowTicket {
+    pub ticket_id: TicketId,
+    pub on: bool,
 }
 
 /// Change the fields of a ticket. Left out: unchanged. The creator never

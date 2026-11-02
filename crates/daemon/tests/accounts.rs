@@ -53,6 +53,7 @@ async fn project(client: &Client) -> ProjectId {
 
 fn ticket(project_id: ProjectId, title: &str) -> Command {
     Command::CreateTicket(CreateTicket {
+        responsible_user_id: None,
         confirm_secret: false,
         project_id,
         title: title.into(),

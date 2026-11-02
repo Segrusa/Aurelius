@@ -244,6 +244,7 @@ mod tests {
 
     fn msg(text: &str) -> MessageView {
         MessageView {
+            edited_at_ms: None, deleted_at_ms: None, editable: false,
             id: MessageId::new(),
             ordinal: 1,
             role: MessageRole::Assistant,

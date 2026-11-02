@@ -133,6 +133,7 @@ async fn setup(client: &Client) -> (EmployeeId, ProjectId) {
 
 fn new_ticket(project_id: ProjectId, owner: Option<EmployeeId>, description: String, mode: AgentMode, start: bool, confirm_secret: bool) -> CreateTicket {
     CreateTicket {
+        responsible_user_id: None,
         confirm_secret,
         project_id,
         title: "Deploy".into(),

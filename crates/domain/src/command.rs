@@ -310,4 +310,23 @@ pub enum CommandResult {
         on: bool,
         changed: bool,
     },
+    /// `ticket.follow` (feature `ticket_follow`): the reader follows it as asked
+    /// now. `changed` is false when they already did (or did not).
+    TicketFollowChanged {
+        ticket_id: crate::TicketId,
+        on: bool,
+        changed: bool,
+    },
+    /// `message.edit` (feature `message_edits`).
+    MessageEdited {
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        edited_at_ms: i64,
+    },
+    /// `message.delete` (feature `message_edits`).
+    MessageDeleted {
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        deleted_at_ms: i64,
+    },
 }

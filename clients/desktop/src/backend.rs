@@ -4764,6 +4764,7 @@ mod tests {
 
         fn new_ticket(project_id: ProjectId, title: &str) -> Command {
             Command::CreateTicket(ticket::CreateTicket {
+                responsible_user_id: None,
                 confirm_secret: false,
                 project_id,
                 title: title.into(),
@@ -6130,7 +6131,7 @@ mod tests {
 
             // CreateTicket (the board's write; the form waits under "Not sent") and UpdateTicket.
             let new_ticket = |description: String, files: Vec<String>| {
-                Command::CreateTicket(aurelius_domain::ticket::CreateTicket { confirm_secret: false, project_id: project, title: "Deploy".into(), description: Some(description), priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: run(), files, start: false, from_message: None })
+                Command::CreateTicket(aurelius_domain::ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: project, title: "Deploy".into(), description: Some(description), priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: run(), files, start: false, from_message: None })
             };
             let board = |command: Command, done: &str| Request::Board(BoardCall::Write { command, expected_version: None, done: Some(done.into()) });
             alex.requests.send(board(new_ticket(format!("Deploy with {D3}"), vec![]), "created")).unwrap();

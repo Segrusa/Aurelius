@@ -65,6 +65,9 @@ pub fn required(call: &Call) -> Result<Vec<AppScope>, &'static str> {
             | Method::RunGuidelines { .. } => Err(NOT_FOR_APPS),
             // The group chat is the user's own conversation with the team, like an employee's chat.
             Method::GroupChatGet { .. } | Method::ChannelList | Method::ChannelSearch { .. } | Method::ThreadRead { .. } => Err(NOT_FOR_APPS),
+            // Who follows what, one's own tickets and where a message is: a board member's
+            // (an app has none), and earlier texts stay out of apps' reach (Titan B10).
+            Method::TicketFollowers { .. } | Method::TicketMyTickets { .. } | Method::MessageLocate { .. } | Method::MessageHistory { .. } => Err(NOT_FOR_APPS),
             // The vault is the board members' and the runs' (B5): an app reads nothing of it.
             Method::VaultList { .. } | Method::VaultReveal { .. } | Method::VaultAudit { .. } | Method::VaultKeyExport(_) => Err(NOT_FOR_APPS),
             _ => Err(NOT_FOR_APPS),
@@ -109,6 +112,8 @@ fn command_needs(command: &Command) -> Result<Vec<AppScope>, &'static str> {
         // A discussion is the board members' and the employees' (like the group chat);
         // the summary again is a board member's.
         Command::SendGroupMessage(_) | Command::PostTicketMessage(_) | Command::ReactToMessage(_) | Command::RetryTicketSummary(_) => Err(NOT_FOR_APPS),
+        // A person's responsibility, following and own messages: a board member's.
+        Command::SetTicketResponsible(_) | Command::FollowTicket(_) | Command::EditMessage(_) | Command::DeleteMessage(_) => Err(NOT_FOR_APPS),
         // The review gate is a board member's, never an app's (any audience).
         Command::AcceptTicket(_) | Command::SendBackTicket(_) => Err(REVIEW_GATE),
         // Guidelines go into every run: only a board member changes them (B5).

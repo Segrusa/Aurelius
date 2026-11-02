@@ -161,7 +161,7 @@ impl AppView {
             return;
         };
         let from_message = crate::screens::discussion::from_message(self.board.form.from_message, self.ticket_discussion_supported());
-        let create = ticket::CreateTicket { confirm_secret: false, project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start, from_message };
+        let create = ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start, from_message };
         let done = start.then(|| match owner.and_then(|e| self.employee_name(e)) {
             Some(name) => format!("Created and started with {name}."),
             None => {
