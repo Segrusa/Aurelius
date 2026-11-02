@@ -9,6 +9,7 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/refresh.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/links.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
@@ -485,7 +486,7 @@ class _BoardPageState extends State<BoardPage> {
     }
     final allColumns = [for (final x in columns) x.column];
     Widget card(TicketView t) {
-      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide, me: _me, myLoginExpired: _myLoginExpired, responsible: context.read<ConnectionBloc>().state.has(ticketResponsibleFeature), follow: context.read<ConnectionBloc>().state.has(ticketFollowFeature));
+      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide, me: _me, myLoginExpired: _myLoginExpired, responsible: context.read<ConnectionBloc>().state.has(ticketResponsibleFeature), follow: context.read<ConnectionBloc>().state.has(ticketFollowFeature), links: context.read<ConnectionBloc>().state.has(messageLocateFeature));
       final face = TicketCard(key: ValueKey('ticket-${t.id}'), ticket: t, board: ctx);
       if (!wide || !online || kind == ColumnKind.done) return face;
       // Drop on a card: it lands above it.

@@ -21,6 +21,7 @@ import '../features/power/power_bloc.dart';
 import '../features/pairing/pair_page.dart';
 import '../features/pairing/pairing_bloc.dart';
 import '../features/runtime/runtime_bloc.dart';
+import '../features/links/link_actions.dart' show pendingAureliusLink;
 import '../features/team/channels_bloc.dart';
 import 'router.dart';
 
@@ -112,6 +113,12 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
     final hosts = context.read<HostsBloc>();
     _link = _connection.states.listen((s) {
       _boardMember.value = s.boardMemberStep;
+      // A link that asked to switch to this server, once signed in here (§6.3).
+      final link = pendingAureliusLink;
+      if (link != null && s.isOnline && s.user != null) {
+        pendingAureliusLink = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _router.openLink(link));
+      }
       // The connection stored the server's new name: the paired PCs show it too.
       if (s.hostName != null && s.hostName != hosts.state.active?.name) hosts.add(const HostsChanged());
     });

@@ -18,7 +18,7 @@ class TicketRefreshed extends TicketEvent {
 }
 
 class TicketPageState extends Equatable {
-  const TicketPageState({this.loading = true, this.detail, this.error, this.activity = const [], this.activityFailed = false, this.plan, this.modeNow, this.followers, this.followersFailed = false});
+  const TicketPageState({this.loading = true, this.detail, this.error, this.activity = const [], this.activityFailed = false, this.plan, this.modeNow, this.followers, this.followersFailed = false, this.notFound = false, this.denied = false});
 
   final bool loading;
   final TicketDetail? detail;
@@ -43,12 +43,18 @@ class TicketPageState extends Equatable {
   /// The last read of [followers] failed: the page says so and offers to try again.
   final bool followersFailed;
 
+  /// The server knows no such ticket (a link to one that is gone, §6.4).
+  final bool notFound;
+
+  /// The server refuses this reader the ticket.
+  final bool denied;
+
   TicketView? get ticket => detail?.ticket;
   TaskView? get root => detail?.rootTask;
   bool get gaveUp => dispatcherGaveUp(activity);
 
   @override
-  List<Object?> get props => [loading, detail?.asOfSeq, detail?.ticket.version, detail?.ticket.responsibleUserId, detail?.tasks.map((t) => (t.id, t.status, t.updatedAtMs)).toList(), error, activity.map((c) => c.seq).toList(), activityFailed, plan, modeNow, followers?.map((f) => (f.userId, f.reason, f.disabled)).toList(), followersFailed];
+  List<Object?> get props => [loading, detail?.asOfSeq, detail?.ticket.version, detail?.ticket.responsibleUserId, detail?.tasks.map((t) => (t.id, t.status, t.updatedAtMs)).toList(), error, activity.map((c) => c.seq).toList(), activityFailed, plan, modeNow, followers?.map((f) => (f.userId, f.reason, f.disabled)).toList(), followersFailed, notFound, denied];
 }
 
 /// One ticket (`ticket.get`), its activity, its followers and, in Plan review,
@@ -84,7 +90,7 @@ class TicketBloc extends Bloc<TicketEvent, TicketPageState> {
     } on DisconnectedException catch (e) {
       emit(TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, followers: state.followers, followersFailed: state.followersFailed, error: state.detail == null ? e.message : null));
     } on ProtocolException catch (e) {
-      emit(TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, followers: state.followers, followersFailed: state.followersFailed, error: e.shown));
+      emit(TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, followers: state.followers, followersFailed: state.followersFailed, error: e.shown, notFound: e.code == ErrorCode.notFound, denied: e.isForbidden));
     }
   }
 

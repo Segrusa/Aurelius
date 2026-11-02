@@ -9,8 +9,10 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/views.dart';
+import '../../data/links.dart' show isAureliusHref;
 import '../../data/markdown_paths.dart';
 import '../artifacts/artifacts.dart' show openExternalLink;
+import '../links/link_actions.dart' show openAureliusLink;
 import 'links.dart';
 
 /// What went wrong reading Markdown, in words.
@@ -42,7 +44,10 @@ Future<void> openMarkdown(BuildContext context, FileScope scope, String path) {
 MarkdownTapLinkCallback markdownLinkTap(BuildContext context, FileScope? scope, {String? from, bool Function(String href)? copied}) {
   return (text, href, title) {
     if (href == null || (copied?.call(href) ?? false)) return;
-    if (isMarkdownPath(href)) {
+    // Ours never goes to the browser, valid or not.
+    if (isAureliusHref(href)) {
+      openAureliusLink(context, href);
+    } else if (isMarkdownPath(href)) {
       if (scope != null) openMarkdown(context, scope, resolveMarkdownPath(href, from: from));
     } else if (!href.startsWith('#')) {
       openExternalLink(context, href);

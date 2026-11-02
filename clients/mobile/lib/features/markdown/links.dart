@@ -5,9 +5,11 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart';
+import '../../data/links.dart';
 import '../../data/markdown_paths.dart';
 import '../../data/views.dart';
 import '../chat/chat_view.dart' show markdownStyle;
+import '../links/link_actions.dart' show AureliusLinkLabels;
 import 'markdown_page.dart';
 import 'mention_markdown.dart';
 import 'mermaid.dart';
@@ -85,8 +87,8 @@ class _LinkGesturesState extends State<LinkGestures> {
 }
 
 /// Message or file Markdown: `.md` paths become links to the viewer, other
-/// links (also autolinks and bare URLs) open in the browser, long-press copies
-/// a link. Code is never a link. Closed ```` ```mermaid ```` blocks draw as
+/// links (also autolinks and bare URLs) open in the browser, an Aurelius link
+/// in the app under its #42, long-press copies a link. Code is never a link. Closed ```` ```mermaid ```` blocks draw as
 /// diagrams unless [diagrams] is off (while an answer streams).
 class MessageMarkdown extends StatelessWidget {
   const MessageMarkdown({super.key, required this.data, required this.scope, this.from, this.selectable = false, this.styleSheet, this.diagrams = true});
@@ -106,6 +108,13 @@ class MessageMarkdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (data.contains('aurelius://')) {
+      return AureliusLinkLabels(text: data, builder: (context, label) => _body(context, labelAureliusLinks(data, label)));
+    }
+    return _body(context, data);
+  }
+
+  Widget _body(BuildContext context, String data) {
     final style = styleSheet ?? markdownStyle(context);
     final mermaid = diagrams ? mermaidMarkdown(style, selectable: selectable) : null;
     // The Slack-style Team chat marks its @names (AUR-CHAT-001 §2).
@@ -162,6 +171,11 @@ class _LinkedTextState extends State<LinkedText> {
     final text = widget.text;
     final links = plainTextLinks(text);
     if (links.isEmpty) return Text(text, style: widget.style);
+    if (text.contains('aurelius://')) return AureliusLinkLabels(text: text, builder: (context, label) => _linked(text, links, label));
+    return _linked(text, links, null);
+  }
+
+  Widget _linked(String text, List<TextLink> links, String Function(AureliusLink)? labelOf) {
     return LinkGestures(builder: (context, copied) {
       _dropRecognizers();
       final tap = markdownLinkTap(context, widget.scope, copied: copied);
@@ -170,7 +184,9 @@ class _LinkedTextState extends State<LinkedText> {
       var at = 0;
       for (final link in links) {
         if (link.start > at) spans.add(TextSpan(text: text.substring(at, link.start)));
-        final label = text.substring(link.start, link.end);
+        final written = text.substring(link.start, link.end);
+        final ours = labelOf == null ? null : parseAureliusLink(link.target);
+        final label = ours == null ? written : labelOf!(ours);
         final recognizer = TapGestureRecognizer()..onTap = () => tap(label, link.target, '');
         _recognizers.add(recognizer);
         spans.add(TextSpan(text: label, style: linkStyle, recognizer: recognizer));

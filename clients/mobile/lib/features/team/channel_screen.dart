@@ -24,7 +24,7 @@ import 'thread_screen.dart';
 /// on a tablet. [readThrough] is the reader's last read before it opened:
 /// opening it marks it read, and "New messages" stays where it was.
 class ChannelScreen extends StatelessWidget {
-  const ChannelScreen({super.key, required this.channel, this.readThrough, this.onOpen});
+  const ChannelScreen({super.key, required this.channel, this.readThrough, this.onOpen, this.revealMessage, this.revealThread});
 
   /// The channel as it was when opened; the list's newer view of it wins.
   final ChannelView channel;
@@ -32,6 +32,12 @@ class ChannelScreen extends StatelessWidget {
 
   /// Opens another channel, as a tap in the list does (a line in General links to a ticket's).
   final ValueChanged<ChannelView>? onOpen;
+
+  /// A link opened here (A5a): the message to scroll to.
+  final String? revealMessage;
+
+  /// That message is a reply: its thread's root, opened as well.
+  final String? revealThread;
 
   /// Opens the channel [conversationId] a line links to; false when the list does not know it (yet).
   bool _openLinked(BuildContext context, String conversationId) {
@@ -46,7 +52,7 @@ class ChannelScreen extends StatelessWidget {
   /// when the thread closes.
   void _openThread(BuildContext context, ChannelView live, MessageView root) {
     final bloc = context.read<ChatBloc>();
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ThreadScreen(channel: live, root: root))).then((_) {
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => ThreadScreen(channel: live, root: root, revealMessage: root.id == revealThread ? revealMessage : null))).then((_) {
       if (!bloc.isClosed) bloc.add(const ChatRefreshed());
     });
   }
@@ -100,6 +106,7 @@ class ChannelScreen extends StatelessWidget {
           child: ChatShownWatcher(
             child: ChatView(
               key: ValueKey('team-chat-$id'),
+              revealMessage: revealThread ?? revealMessage,
               emptyTitle: isTicketChannel(live) ? 'No messages yet' : 'Talk to your team',
               emptyDetail: general
                   ? 'Write @Name to ask someone; otherwise the head of the company answers.'
@@ -119,6 +126,7 @@ class ChannelScreen extends StatelessWidget {
                 threads: threads,
                 reactions: reactions,
                 openThread: threads ? (inner, root) => _openThread(inner, live, root) : null,
+                revealThread: revealThread != null,
               ),
               source: TicketSource(from: 'Team chat · $label', projectId: live.projectId),
             ),

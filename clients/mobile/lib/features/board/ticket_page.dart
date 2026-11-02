@@ -12,6 +12,7 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/discussion.dart';
+import '../../data/links.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../chat/chat_bloc.dart';
@@ -19,6 +20,7 @@ import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../project/new_task_page.dart' show maxTaskFiles;
+import '../links/link_actions.dart';
 import '../markdown/links.dart';
 import '../team/team_page.dart' show runAuthorOf;
 import 'ticket_actions.dart';
@@ -32,17 +34,20 @@ import 'ticket_card.dart' show WhoBlock, priorityColor, startWith;
 /// Phase 2 also its discussion (ui-ontwerp Fase 2 §2), where the plan and the
 /// report are decided; [discussion] opens on it.
 class TicketPage extends StatelessWidget {
-  const TicketPage({super.key, required this.ticketId, this.discussion = false});
+  const TicketPage({super.key, required this.ticketId, this.discussion = false, this.message});
 
   final String ticketId;
   final bool discussion;
+
+  /// A link to a message of its discussion: scroll to it there.
+  final String? message;
 
   @override
   Widget build(BuildContext context) => BlocProvider(
         // Another ticket on the same route (a `go`) gets its own bloc, not the last one's.
         key: ValueKey('ticket-$ticketId'),
         create: (context) => TicketBloc(context.read<AureliusRepository>(), ticketId),
-        child: _TicketView(key: ValueKey('ticket-view-$ticketId'), discussion: discussion),
+        child: _TicketView(key: ValueKey('ticket-view-$ticketId'), discussion: discussion, message: message),
       );
 }
 
@@ -83,9 +88,10 @@ Map<String, dynamic>? ticketTextUpdate(TicketView ticket, TicketTextEdit edit, {
 final _seen = <String, int>{};
 
 class _TicketView extends StatefulWidget {
-  const _TicketView({super.key, required this.discussion});
+  const _TicketView({super.key, required this.discussion, this.message});
 
   final bool discussion;
+  final String? message;
 
   @override
   State<_TicketView> createState() => _TicketViewState();
@@ -123,7 +129,14 @@ class _TicketViewState extends State<_TicketView> {
     if (ticket == null) {
       return Scaffold(
         appBar: const GlassAppBar(title: Text('Ticket')),
-        body: page.error != null
+        body: page.notFound || page.denied
+            ? EmptyState(
+                page.notFound ? 'Ticket not found' : 'No access',
+                key: const ValueKey('ticket-unreachable'),
+                detail: page.notFound ? "This ticket doesn't exist on ${context.read<AureliusRepository>().host.name}. It may have been deleted from the Backlog." : "You don't have access to this ticket.",
+                action: FilledButton(key: const ValueKey('ticket-go-to-board'), onPressed: () => context.go('/board'), child: const Text('Go to Board')),
+              )
+            : page.error != null
             ? ErrorRetry(page.error!, onRetry: () => context.read<TicketBloc>().add(const TicketRefreshed()))
             : const Center(child: CircularProgressIndicator()),
       );
@@ -152,6 +165,7 @@ class _TicketViewState extends State<_TicketView> {
             tooltip: 'Ticket actions',
             items: () => [
               GlassMenuItem('copy', 'Copy #${ticket.number}'),
+              if (link.has(messageLocateFeature)) const GlassMenuItem('link', 'Copy link'),
               if (ticket.column != ColumnKind.backlog && ticket.column != ColumnKind.done && online) GlassMenuItem('backlog', ticket.column == ColumnKind.planReview ? 'Afwijzen' : 'Back to Backlog', danger: true),
               if ((ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.done) && online) GlassMenuItem('archive', 'Archive'),
               // P-23: the main task's own conversation stays reachable.
@@ -162,6 +176,8 @@ class _TicketViewState extends State<_TicketView> {
                 case 'copy':
                   await Clipboard.setData(ClipboardData(text: '#${ticket.number} ${ticket.title}'));
                   if (context.mounted) toast(context, 'Copied #${ticket.number}.');
+                case 'link':
+                  await copyTicketLink(context, ticket.id, ticket.number);
                 case 'main':
                   await context.push('/conversation/${root!.conversationId}?e=${root.employeeId ?? ''}');
                 case 'backlog':
@@ -265,6 +281,7 @@ class _TicketViewState extends State<_TicketView> {
     final member = context.select<ConnectionBloc, bool>((b) => b.state.user != null);
     return ChatView(
       key: ValueKey('discussion-${ticket.id}'),
+      revealMessage: widget.message,
       emptyTitle: 'Discuss the ticket here',
       emptyDetail: 'Employees join when you @mention them or when it starts.',
       composer: readOnly == null,

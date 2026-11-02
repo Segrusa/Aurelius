@@ -12,11 +12,12 @@ import '../../data/aurelius_repository.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
+import '../links/link_actions.dart';
 import 'ticket_actions.dart';
 
 /// What a card needs from the board around it.
 class CardContext {
-  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false, this.responsible = false, this.follow = false});
+  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false, this.responsible = false, this.follow = false, this.links = false});
 
   /// Every column in board order (Move to…).
   final List<BoardColumnView> columns;
@@ -50,6 +51,9 @@ class CardContext {
 
   /// The server keeps followers (`ticket_follow`): Follow or Unfollow in the menu.
   final bool follow;
+
+  /// The server can open a link (`message_locate`): Copy link in the menu.
+  final bool links;
 }
 
 /// The card's main action, by column (§4.2, §5.1): Start, Choose owner, Review, Start again.
@@ -352,6 +356,7 @@ Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext b
       await Clipboard.setData(ClipboardData(text: '#${ticket.number} ${ticket.title}'));
       if (context.mounted) toast(context, 'Copied #${ticket.number}.');
     }),
+    if (board.links) ('Copy link', CupertinoIcons.link, () => copyTicketLink(context, ticket.id, ticket.number)),
     if (ticket.column != ColumnKind.backlog && ticket.column != ColumnKind.done && board.online)
       (ticket.column == ColumnKind.planReview ? 'Afwijzen' : 'Back to Backlog', CupertinoIcons.arrow_uturn_left, () => backToBacklog(context, ticket)),
     if ((ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.done) && board.online)

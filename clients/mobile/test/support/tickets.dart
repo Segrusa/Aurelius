@@ -194,6 +194,8 @@ Future<GoRouter> pumpBoardPage(WidgetTester tester, MockRepository repo, Widget 
   final router = GoRouter(initialLocation: '/', routes: [
     GoRoute(path: '/', builder: (_, _) => page),
     GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']}'))),
+    GoRoute(path: '/channel/:cid', builder: (_, s) => Scaffold(body: Text('channel ${s.pathParameters['cid']}'))),
+    GoRoute(path: '/hosts', builder: (_, _) => const Scaffold(body: Text('hosts'))),
     GoRoute(path: '/ticket/:tid/plan', builder: (_, s) => Scaffold(body: Text('plan ${s.pathParameters['tid']}'))),
     GoRoute(path: '/ticket/:tid/report', builder: (_, s) => Scaffold(body: Text('report ${s.pathParameters['tid']}'))),
     GoRoute(path: '/board/new', builder: (_, s) => Scaffold(body: Text('new ticket ${s.uri.queryParameters['project'] ?? ''}'))),
