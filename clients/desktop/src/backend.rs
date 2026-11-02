@@ -2218,14 +2218,13 @@ impl From<ClientError> for Disconnected {
     }
 }
 
-/// The session goes on no more: the connection dropped, reconnecting can't help,
-/// or the server no longer knows this device's session.
-/// `notification.mark_read` (freeze §2). PLACEHOLDER until AUR-FA-F2 brings the write and its
-/// client method: until then the row is read only in this window (`inbox_opened`).
-async fn mark_row_read(_client: &Client, _id: &str) -> Result<(), ClientError> {
-    Ok(())
+/// Reads one Inbox row for this board member (`notification.mark_read`, freeze §2).
+async fn mark_row_read(client: &Client, id: &str) -> Result<(), ClientError> {
+    client.mark_notification_read(id.to_string()).await.map(|_| ())
 }
 
+/// The session goes on no more: the connection dropped, reconnecting can't help,
+/// or the server no longer knows this device's session.
 fn ends(e: &ClientError) -> bool {
     e.is_disconnect() || e.is_final() || signed_out(e)
 }
