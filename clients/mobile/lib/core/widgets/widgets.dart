@@ -91,22 +91,33 @@ class EmptyState extends StatelessWidget {
 /// A [member] (a board member) gets an outlined circle instead, as on the
 /// desktop.
 class Monogram extends StatelessWidget {
-  const Monogram(this.letter, {super.key, this.size = 36, this.active = false, this.member = false});
+  const Monogram(this.letter, {super.key, this.size = 36, this.active = false, this.member = false, this.employee = false, this.dimmed = false});
 
   final String letter;
   final double size;
   final bool active;
   final bool member;
 
+  /// A rounded rectangle: AI does the work, a circle follows up (P-72).
+  final bool employee;
+
+  /// A disabled board member: shape and name stay, never colour alone (P-78).
+  final bool dimmed;
+
   @override
-  Widget build(BuildContext context) => Container(
-        width: size,
-        height: size,
-        alignment: Alignment.center,
-        decoration: member
-            ? BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Tokens.text2))
-            : BoxDecoration(shape: BoxShape.circle, color: active ? Tokens.accentTint : Tokens.fill),
-        child: Text(letter, style: TextStyle(fontSize: size * 0.43, fontWeight: FontWeight.w600, color: active ? Tokens.accent : (member ? Tokens.text2 : Tokens.label))),
+  Widget build(BuildContext context) => Opacity(
+        opacity: dimmed ? 0.5 : 1,
+        child: Container(
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          decoration: member
+              ? BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Tokens.text2))
+              : employee
+                  ? BoxDecoration(borderRadius: BorderRadius.circular(size * 0.25), color: active ? Tokens.accentTint : Tokens.fill)
+                  : BoxDecoration(shape: BoxShape.circle, color: active ? Tokens.accentTint : Tokens.fill),
+          child: Text(letter, style: TextStyle(fontSize: size * 0.43, fontWeight: FontWeight.w600, color: active ? Tokens.accent : (member ? Tokens.text2 : Tokens.label))),
+        ),
       );
 }
 

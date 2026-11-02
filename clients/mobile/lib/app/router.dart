@@ -28,6 +28,8 @@ import '../features/dashboard/dashboard_page.dart';
 import '../features/more/more_page.dart';
 import '../features/more/recurring_page.dart';
 import '../features/tasks/tasks_page.dart';
+import '../features/links/link_actions.dart' show openAureliusLink;
+import '../features/team/channel_link_page.dart';
 import '../features/team/team_page.dart';
 import '../features/inbox/approval_page.dart';
 import '../features/inbox/inbox_page.dart';
@@ -113,7 +115,7 @@ class AppRouter {
       GoRoute(
         parentNavigatorKey: _root,
         path: '/ticket/:tid',
-        pageBuilder: (context, state) => routePage(state, TicketPage(ticketId: state.pathParameters['tid']!, discussion: state.uri.queryParameters['tab'] == 'discussion')),
+        pageBuilder: (context, state) => routePage(state, TicketPage(ticketId: state.pathParameters['tid']!, discussion: state.uri.queryParameters['tab'] == 'discussion', message: state.uri.queryParameters['message'])),
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'plan', pageBuilder: (context, state) => routePage(state, TicketPlanPage(ticketId: state.pathParameters['tid']!))),
           GoRoute(parentNavigatorKey: _root, path: 'report', pageBuilder: (context, state) => routePage(state, TicketReportPage(ticketId: state.pathParameters['tid']!))),
@@ -153,6 +155,12 @@ class AppRouter {
         parentNavigatorKey: _root,
         path: '/company',
         pageBuilder: (context, state) => routePage(state, CompanyOrgPage(initial: state.uri.queryParameters['view'])),
+      ),
+      // Where a link to a message in a channel lands (A5a).
+      GoRoute(
+        parentNavigatorKey: _root,
+        path: '/channel/:cid',
+        pageBuilder: (context, state) => routePage(state, ChannelLinkPage(conversationId: state.pathParameters['cid']!, message: state.uri.queryParameters['message'], thread: state.uri.queryParameters['thread'])),
       ),
       GoRoute(parentNavigatorKey: _root, path: '/projects', pageBuilder: (context, state) => routePage(state, const ProjectsPage())),
       GoRoute(parentNavigatorKey: _root, path: '/ideas', pageBuilder: (context, state) => routePage(state, const IdeasPage())),
@@ -229,6 +237,12 @@ class AppRouter {
     } else {
       config.go('/inbox');
     }
+  }
+
+  /// Open a link from outside a page, once this host's app is up (a switch of server, A5a).
+  void openLink(String raw) {
+    final context = _root.currentContext;
+    if (context != null && context.mounted) unawaited(openAureliusLink(context, raw));
   }
 
   void _openApproval(String approvalId) {

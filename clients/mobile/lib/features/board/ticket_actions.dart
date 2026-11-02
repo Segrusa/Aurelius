@@ -35,9 +35,10 @@ String ticketFailure(Object e) => switch (e) {
     };
 
 /// Send one ticket write; [done] is shown after it committed, the failure
-/// otherwise. A toast with an [action] (Undo) still goes after 5 s (§6): an
-/// action alone would keep it (`persist`). Decisions ([retry] false) are never replayed later.
-Future<bool> ticketWrite(BuildContext context, Map<String, dynamic> request, {int? expectedVersion, String? done, bool retry = true, SnackBarAction? action}) async {
+/// otherwise ([onConflict] words a version conflict itself). A toast with an
+/// [action] (Undo) still goes after 5 s (§6): an action alone would keep it
+/// (`persist`). Decisions ([retry] false) are never replayed later.
+Future<bool> ticketWrite(BuildContext context, Map<String, dynamic> request, {int? expectedVersion, String? done, bool retry = true, SnackBarAction? action, Future<String> Function()? onConflict}) async {
   final repository = context.read<AureliusRepository>();
   final messenger = ScaffoldMessenger.maybeOf(context);
   void show(String text, [SnackBarAction? action]) => messenger
@@ -50,6 +51,9 @@ Future<bool> ticketWrite(BuildContext context, Map<String, dynamic> request, {in
     if (sent == null) return false;
     if (done != null) show(done, action);
     return true;
+  } on ProtocolException catch (e) {
+    show(e.isConflict && onConflict != null ? await onConflict() : ticketFailure(e));
+    return false;
   } on Object catch (e) {
     show(ticketFailure(e));
     return false;
@@ -323,6 +327,140 @@ Future<bool> chooseOwner(BuildContext context, TicketView ticket) async {
     done: id == null ? 'The dispatcher chooses the owner of #${ticket.number}.' : '$name owns #${ticket.number}.',
   );
 }
+
+/// The sheet "Responsible for #42" (§2.1): the explanation, You, the active
+/// board members and, when someone is responsible, No one. Null: dismissed;
+/// otherwise the choice, whose id is null for No one.
+Future<(String?,)?> showResponsiblePicker(BuildContext context, {required String title, required String? current, required List<UserView> members, required String? me, bool noOne = true}) {
+  final choices = responsibleChoices(members, me: me);
+  Widget? tick(String? id) => current == id ? Icon(Icons.check, color: Tokens.accentText) : null;
+  return showModalBottomSheet<(String?,)>(
+    context: context,
+    useRootNavigator: true,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheet) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.75),
+        child: ListView(shrinkWrap: true, children: [
+          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: Eyebrow(title)),
+          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(responsibleExplained, style: TextStyle(color: Tokens.label2))),
+          for (final c in choices)
+            ListTile(
+              key: ValueKey('responsible-${c.id}'),
+              leading: Monogram(c.label.characters.first.toUpperCase(), size: 30, member: true),
+              title: Text(c.label),
+              trailing: tick(c.id),
+              onTap: () => Navigator.pop(sheet, (c.id,)),
+            ),
+          if (noOne)
+            ListTile(
+              key: const ValueKey('responsible-no-one'),
+              leading: const Icon(CupertinoIcons.circle),
+              title: const Text('No one'),
+              trailing: tick(null),
+              onTap: () => Navigator.pop(sheet, (null,)),
+            ),
+        ]),
+      ),
+    ),
+  );
+}
+
+/// Set responsible… (§2.2): any board member, at any moment but on Done (US-A1).
+/// It takes effect at once; changing it again is the way back (no Undo, README).
+Future<bool> chooseResponsible(BuildContext context, TicketView ticket) async {
+  final link = context.read<ConnectionBloc>().state;
+  final List<UserView> members;
+  try {
+    members = await context.read<AureliusRepository>().boardMembers();
+  } on Object catch (e) {
+    if (context.mounted) toast(context, ticketFailure(e));
+    return false;
+  }
+  if (!context.mounted) return false;
+  final picked = await showResponsiblePicker(context, title: 'Responsible for #${ticket.number}', current: ticket.responsibleUserId, members: members, me: link.user?.id, noOne: ticket.responsibleUserId != null);
+  if (picked == null || picked.$1 == ticket.responsibleUserId || !context.mounted) return false;
+  final name = members.where((u) => u.id == picked.$1).firstOrNull?.username;
+  return setResponsible(context, ticket, picked.$1, name: name);
+}
+
+/// The write behind every way to change who is responsible, [userId] null for
+/// no one. A version conflict says who is responsible now (§2.5); it overwrites nothing.
+Future<bool> setResponsible(BuildContext context, TicketView ticket, String? userId, {String? name}) {
+  final repository = context.read<AureliusRepository>();
+  final me = context.read<ConnectionBloc>().state.user?.id;
+  return ticketWrite(
+    context,
+    ticketSetResponsible(ticketId: ticket.id, responsibleUserId: userId),
+    expectedVersion: ticket.version,
+    done: switch (userId) {
+      null => 'No one is responsible for #${ticket.number} now.',
+      _ when userId == me => 'You are now responsible for #${ticket.number}.',
+      _ => '${name ?? 'They'} is now responsible for #${ticket.number}.',
+    },
+    onConflict: () async {
+      try {
+        final now = responsibleLabel((await repository.ticket(ticket.id)).ticket, me: me);
+        return 'Someone changed this first. ${now == null ? 'No one is' : now == 'You' ? 'You are' : '$now is'} responsible now.';
+      } on Object {
+        return 'Changed on another device. Showing the latest.';
+      }
+    },
+  );
+}
+
+/// Follow or unfollow [ticket] (A2, §3.3). The server refuses to unfollow for
+/// its responsible as well (B10); this client does not offer it.
+Future<bool> followTicket(BuildContext context, TicketView ticket, {required bool on}) => ticketWrite(
+      context,
+      ticketFollow(FollowTicket(on: on, ticketId: ticket.id)),
+      done: on ? "You'll get updates on #${ticket.number}." : 'Unfollowed #${ticket.number}. A new @mention or becoming responsible makes you follow again.',
+    );
+
+/// Whether [me] follows [ticket]; null when that could not be read.
+Future<bool?> followsTicket(AureliusRepository repository, TicketView ticket, {String? me}) async {
+  try {
+    return (await repository.followers(ticket.id)).followers.any((f) => f.userId == me);
+  } on Object {
+    return null;
+  }
+}
+
+/// A screen reader's Follow on a card: what the menu's item does, without its sheet.
+Future<void> toggleFollow(BuildContext context, TicketView ticket) async {
+  final me = context.read<ConnectionBloc>().state.user?.id;
+  final following = await followsTicket(context.read<AureliusRepository>(), ticket, me: me);
+  if (!context.mounted) return;
+  if (following == null) return toast(context, 'Could not read who follows #${ticket.number}.');
+  if (following && !canUnfollow(ticket, me: me)) return toast(context, followingNote(ticket, me: me));
+  await followTicket(context, ticket, on: !following);
+}
+
+/// The sheet Followers (§3.2): names and why; only board members follow, never
+/// employees. A disabled one stays listed and gets nothing.
+Future<void> showFollowers(BuildContext context, TicketView ticket, List<FollowerView> followers) => showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.7),
+          child: ListView(shrinkWrap: true, children: [
+            Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: Eyebrow('Followers of #${ticket.number}')),
+            if (followers.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 16), child: Text('No one follows this ticket.', style: TextStyle(color: Tokens.label2))),
+            for (final f in followers)
+              ListTile(
+                key: ValueKey('follower-${f.userId}'),
+                leading: Monogram(f.username.isEmpty ? '?' : f.username.characters.first.toUpperCase(), size: 30, member: true, dimmed: f.disabled),
+                title: Text(f.disabled ? '${f.username} (disabled)' : f.username),
+                subtitle: followReasonLabel(f.reason) == null ? null : Text(followReasonLabel(f.reason)!, style: TextStyle(color: Tokens.label2)),
+              ),
+          ]),
+        ),
+      ),
+    );
 
 /// "Send #40 back to Doing" (§9.2, MU1-16 AC2/AC3): a full-height sheet with
 /// the feedback field in focus; Send back stays off until there is text.

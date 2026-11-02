@@ -102,7 +102,8 @@ void main() {
     // server_name: only then does server.renamed come (SN-02 AC3);
     // ticket_channels: only then does channel.list list ticket channels (AUR-CHAT-001);
     // chat_threads / chat_reactions: only then do thread streams and message.reacted come (AUR-CHAT-002).
-    expect(daemon.hello?['accepts'], ['activity_changes', 'team_channels', 'server_name', 'ticket_channels', 'chat_threads', 'chat_reactions']);
+    // ticket_follow: only then does ticket.follow_changed come (AUR-FA-M1).
+    expect(daemon.hello?['accepts'], ['activity_changes', 'team_channels', 'server_name', 'ticket_channels', 'chat_threads', 'chat_reactions', 'ticket_follow']);
     final got = <List<String>?>[];
     final sub = connection.appends.listen((a) => got.add(a.activity?.map((c) => '${c.callId}:${c.ok}').toList()));
     addTearDown(sub.cancel);

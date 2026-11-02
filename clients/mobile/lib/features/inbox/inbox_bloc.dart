@@ -255,10 +255,10 @@ extension NotificationAttention on NotificationView {
   bool get isFailure => targetType == 'task.failed';
 
   /// Needs you: an alert for something to act on that is not already a listed approval or proposal.
-  bool get needsYou => severity == 'action' && !_listedItself.contains(targetType);
+  bool get asksYou => severity == 'action' && !_listedItself.contains(targetType);
 
   /// Only Needs you and Failed, unread, give the badge; a finished result does not.
-  bool get givesBadge => !read && (isFailure || needsYou);
+  bool get givesBadge => !read && (isFailure || asksYou);
 }
 
 /// Approvals and notifications for the active PC; also drives the badge.

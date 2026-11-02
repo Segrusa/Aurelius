@@ -8,14 +8,16 @@ import 'package:intl/intl.dart';
 
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart';
+import '../../data/aurelius_repository.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
+import '../links/link_actions.dart';
 import 'ticket_actions.dart';
 
 /// What a card needs from the board around it.
 class CardContext {
-  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false});
+  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false, this.responsible = false, this.follow = false, this.links = false});
 
   /// Every column in board order (Move to…).
   final List<BoardColumnView> columns;
@@ -43,6 +45,15 @@ class CardContext {
 
   /// [me]'s own Claude login expired (a Reconnect, not a Connect).
   final bool myLoginExpired;
+
+  /// The server has a responsible (`ticket_responsible`): the who-block, and no "by …" (B8).
+  final bool responsible;
+
+  /// The server keeps followers (`ticket_follow`): Follow or Unfollow in the menu.
+  final bool follow;
+
+  /// The server can open a link (`message_locate`): Copy link in the menu.
+  final bool links;
 }
 
 /// The card's main action, by column (§4.2, §5.1): Start, Choose owner, Review, Start again.
@@ -84,7 +95,8 @@ Future<void> runCardAction(BuildContext context, TicketView ticket, CardAction a
 }
 
 /// A ticket on the Board (§5, MU1-07): number, project, priority, title,
-/// labels, where it stands, owner, deadline and creator, with the column's
+/// labels, where it stands, who (the who-block, or owner and creator on an
+/// older server) and its deadline, with the column's
 /// main action. Swipe right = that action, left = Move to…; long press = the
 /// menu (§4.2). Screen readers get the same actions (§15).
 class TicketCard extends StatelessWidget {
@@ -104,14 +116,17 @@ class TicketCard extends StatelessWidget {
     final action = cardAction(state);
     final deadline = deadlineOf(ticket);
     final done = state == TicketState.done;
-    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired);
+    // The ◆ is the responsible's (B6); the line and the button stay for anyone.
+    final mine = needsMe(ticket, state, me: board.me);
+    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired, waitsFor: waitsForOther(ticket, state, me: board.me));
 
     final summary = [
       'Ticket ${ticket.number}, ${ticket.title}',
       if (ticket.priority != TicketPriority.normal) 'priority ${ticket.priority.label}',
       owner == null ? 'no owner' : 'owner $owner',
       ?line,
-      if (state.needsYou) 'needs you',
+      if (mine) 'needs you',
+      if (board.responsible) whoSentence(ticket, owner: owner, me: board.me),
       if (deadline != null) deadline.text,
       'in ${board.column.column.name}',
     ].join(', ');
@@ -158,9 +173,9 @@ class TicketCard extends StatelessWidget {
           // name and time ("Waiting for alex's limit until 13:48", QA3 M-m4).
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             if (line != null && !done) ...[
-              Padding(padding: const EdgeInsets.only(top: 2), child: _StateMark(state)),
+              Padding(padding: const EdgeInsets.only(top: 2), child: _StateMark(state, mine: mine)),
               const SizedBox(width: 6),
-              Expanded(child: Text(line, key: ValueKey('card-line-${ticket.id}'), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: state.needsYou ? Tokens.accentText : Tokens.label2, fontWeight: state.needsYou ? FontWeight.w600 : null))),
+              Expanded(child: Text(line, key: ValueKey('card-line-${ticket.id}'), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: mine ? Tokens.accentText : Tokens.label2, fontWeight: mine ? FontWeight.w600 : null))),
             ] else
               const Spacer(),
             if (delegations > 0) ...[
@@ -170,12 +185,18 @@ class TicketCard extends StatelessWidget {
           ]),
         ],
         const SizedBox(height: 6),
+        if (board.responsible) ...[
+          WhoBlock(ticket: ticket, owner: owner, me: board.me, keyId: ticket.id),
+          if (done || deadline != null) const SizedBox(height: 2),
+          if (done) Text(_doneLine(ticket), style: TextStyle(fontSize: 13, color: Tokens.label2)),
+          if (deadline != null) Text(deadline.text, style: TextStyle(fontSize: 13, color: deadline.late ? Tokens.negative : deadline.soon ? Tokens.warning : Tokens.label2)),
+        ] else
         Wrap(
           spacing: 8,
           runSpacing: 2,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (done) Text('✓ Done${ticket.doneAtMs == null ? '' : ' ${DateFormat.MMMd().format(DateTime.fromMillisecondsSinceEpoch(ticket.doneAtMs!))}'}', style: TextStyle(fontSize: 13, color: Tokens.label2)),
+            if (done) Text(_doneLine(ticket), style: TextStyle(fontSize: 13, color: Tokens.label2)),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 200),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -211,13 +232,13 @@ class TicketCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
-          side: state.needsYou ? BorderSide(color: Tokens.accent.withValues(alpha: 0.45)) : BorderSide.none,
+          side: mine ? BorderSide(color: Tokens.accent.withValues(alpha: 0.45)) : BorderSide.none,
         ),
         child: InkWell(
           onTap: () => context.push('/ticket/${ticket.id}'),
           onLongPress: board.wide ? null : () => showCardMenu(context, ticket, board, state),
           child: Container(
-            decoration: state.needsYou ? BoxDecoration(border: Border(left: BorderSide(color: Tokens.accent, width: 3))) : null,
+            decoration: mine ? BoxDecoration(border: Border(left: BorderSide(color: Tokens.accent, width: 3))) : null,
             padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
             child: body,
           ),
@@ -232,6 +253,8 @@ class TicketCard extends StatelessWidget {
         const CustomSemanticsAction(label: 'Open'): () => context.push('/ticket/${ticket.id}'),
         if (action != null && board.online) CustomSemanticsAction(label: cardActionLabel(action, expired: board.myLoginExpired)): () => runCardAction(context, ticket, action),
         if (!done && board.online) const CustomSemanticsAction(label: 'Move to…'): () => showMoveSheet(context, ticket, board.columns),
+        if (board.responsible && !done && board.online) const CustomSemanticsAction(label: 'Set responsible…'): () => chooseResponsible(context, ticket),
+        if (board.follow && board.online) const CustomSemanticsAction(label: 'Follow or unfollow'): () => toggleFollow(context, ticket),
       },
       child: card,
     );
@@ -258,6 +281,44 @@ class TicketCard extends StatelessWidget {
   }
 }
 
+String _doneLine(TicketView ticket) => '✓ Done${ticket.doneAtMs == null ? '' : ' ${DateFormat.MMMd().format(DateTime.fromMillisecondsSinceEpoch(ticket.doneAtMs!))}'}';
+
+/// Who does what (§1.2–§1.3), on a card and at the top of the ticket page: who
+/// does the work and on whose login, and who follows up. Always with the role in
+/// words; a long name gives way, "· responsible" and "on … login" never do.
+class WhoBlock extends StatelessWidget {
+  const WhoBlock({super.key, required this.ticket, required this.owner, required this.me, required this.keyId});
+
+  final TicketView ticket;
+  final String? owner;
+  final String? me;
+
+  /// Tells the two lines apart in tests.
+  final String keyId;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(fontSize: 13, color: Tokens.label2);
+    final responsible = responsibleLabel(ticket, me: me);
+    final disabled = ticket.responsibleDisabled ?? false;
+    Widget line(Key key, Widget mark, String name, String role) => Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Row(key: key, children: [
+            mark,
+            const SizedBox(width: 4),
+            Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: style)),
+            Text(role, maxLines: 1, style: style),
+          ]),
+        );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      line(ValueKey('who-work-$keyId'), owner == null ? const SizedBox(width: 18, height: 18) : Monogram(owner!.characters.first.toUpperCase(), size: 18, employee: true), owner ?? 'No owner', " · on ${loginOwnerOf(ticket, me: me)} login"),
+      responsible == null
+          ? line(ValueKey('who-responsible-$keyId'), Icon(CupertinoIcons.circle, size: 18, color: Tokens.label3), 'No one responsible', '')
+          : line(ValueKey('who-responsible-$keyId'), Monogram(responsible.characters.first.toUpperCase(), size: 18, member: true, dimmed: disabled), responsible, ' · responsible'),
+    ]);
+  }
+}
+
 Color priorityColor(TicketPriority p) => switch (p) {
       TicketPriority.urgent => Tokens.negative,
       TicketPriority.high => Tokens.warning,
@@ -269,6 +330,9 @@ Color priorityColor(TicketPriority p) => switch (p) {
 Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext board, TicketState state) async {
   final index = board.column.tickets.indexWhere((t) => t.id == ticket.id);
   final canOrder = ticket.column != ColumnKind.done && board.online;
+  // Asked now: the board does not carry who follows. Unknown leaves the item out.
+  final following = board.follow && board.online ? await followsTicket(context.read<AureliusRepository>(), ticket, me: board.me) : null;
+  if (!context.mounted) return;
   final items = <(String, IconData, Future<void> Function())>[
     ('Open', CupertinoIcons.arrow_up_right_square, () async => context.push('/ticket/${ticket.id}')),
     if (state == TicketState.backlog && board.online) ...[
@@ -276,6 +340,15 @@ Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext b
       ('Start with…', CupertinoIcons.person_crop_circle_badge_plus, () => startWith(context, ticket)),
     ],
     if (state == TicketState.choosing || state == TicketState.needsOwner || state == TicketState.ownerUnknown) ('Choose employee', CupertinoIcons.person_crop_circle, () => chooseOwner(context, ticket)),
+    if (board.responsible && ticket.column != ColumnKind.done && board.online) ...[
+      if (ticket.responsibleUserId == board.me)
+        ('Remove me as responsible', CupertinoIcons.person_badge_minus, () => setResponsible(context, ticket, null))
+      else if (board.me != null)
+        ('Make me responsible', CupertinoIcons.person_badge_plus, () => setResponsible(context, ticket, board.me)),
+      ('Set responsible…', CupertinoIcons.person_crop_circle, () => chooseResponsible(context, ticket)),
+    ],
+    if (following == false) ('Follow', CupertinoIcons.bell, () => followTicket(context, ticket, on: true)),
+    if (following == true && canUnfollow(ticket, me: board.me)) ('Unfollow', CupertinoIcons.bell_slash, () => followTicket(context, ticket, on: false)),
     if (ticket.column != ColumnKind.done && board.online) ('Move to…', CupertinoIcons.arrow_right_arrow_left, () => showMoveSheet(context, ticket, board.columns)),
     if (canOrder && index > 0) ('Move up', CupertinoIcons.arrow_up, () => nudgeTicket(context, ticket, board.column, -1)),
     if (canOrder && index >= 0 && index < board.column.tickets.length - 1) ('Move down', CupertinoIcons.arrow_down, () => nudgeTicket(context, ticket, board.column, 1)),
@@ -283,6 +356,7 @@ Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext b
       await Clipboard.setData(ClipboardData(text: '#${ticket.number} ${ticket.title}'));
       if (context.mounted) toast(context, 'Copied #${ticket.number}.');
     }),
+    if (board.links) ('Copy link', CupertinoIcons.link, () => copyTicketLink(context, ticket.id, ticket.number)),
     if (ticket.column != ColumnKind.backlog && ticket.column != ColumnKind.done && board.online)
       (ticket.column == ColumnKind.planReview ? 'Afwijzen' : 'Back to Backlog', CupertinoIcons.arrow_uturn_left, () => backToBacklog(context, ticket)),
     if ((ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.done) && board.online)
@@ -294,12 +368,16 @@ Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext b
     context: context,
     useRootNavigator: true,
     showDragHandle: true,
+    // With Responsible and Follow it can outgrow a small phone.
+    isScrollControlled: true,
     builder: (sheet) => SafeArea(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
+      child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
         Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: Text('#${ticket.number} ${ticket.title}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600))),
+        // The creator left the card (B8); it stays here.
+        if (board.responsible) Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: Align(alignment: Alignment.centerLeft, child: Text('Created by ${ticket.createdByUsername}', key: const ValueKey('card-menu-creator'), style: TextStyle(color: Tokens.label2)))),
         for (final (i, item) in items.indexed)
           ListTile(key: ValueKey('card-menu-item-${item.$1}'), leading: Icon(item.$2), title: Text(item.$1), onTap: () => Navigator.pop(sheet, i)),
-      ]),
+      ])),
     ),
   );
   if (picked != null && context.mounted) await items[picked].$3();
@@ -328,9 +406,12 @@ Future<void> startWith(BuildContext context, TicketView ticket) async {
 }
 
 class _StateMark extends StatelessWidget {
-  const _StateMark(this.state);
+  const _StateMark(this.state, {required this.mine});
 
   final TicketState state;
+
+  /// [needsMe]: the ◆.
+  final bool mine;
 
   @override
   Widget build(BuildContext context) => switch (state) {
@@ -338,7 +419,7 @@ class _StateMark extends StatelessWidget {
         TicketState.choosing => Icon(CupertinoIcons.circle_lefthalf_fill, size: 12, color: Tokens.label2),
         TicketState.failed => Text('✕', style: TextStyle(color: Tokens.negative, fontWeight: FontWeight.w700)),
         TicketState.waitingForLimit || TicketState.waitsForLogin => Text('⏸', style: TextStyle(color: Tokens.label2, fontSize: 12)),
-        _ when state.needsYou => Text('◆', style: TextStyle(color: Tokens.accent, fontSize: 12)),
+        _ when mine => Text('◆', style: TextStyle(color: Tokens.accent, fontSize: 12)),
         _ => StatusDot(color: Tokens.label3),
       };
 }

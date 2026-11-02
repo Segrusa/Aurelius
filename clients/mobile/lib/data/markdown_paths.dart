@@ -1,5 +1,7 @@
 // Pure helpers for Markdown links and paths in the in-app viewer.
 
+import 'links.dart';
+
 final _markdownExtension = RegExp(r'\.(md|markdown)$', caseSensitive: false);
 
 /// Whether a path or link target (without `#anchor` or `?query`) names a Markdown file.
@@ -94,11 +96,11 @@ final _inlineCode = RegExp(r'`[^`]*`');
 final _pathLead = RegExp('^[("\'`]*');
 final _pathTrail = RegExp('[.,;:!?)"\'`]*\$');
 
-/// The links in plain (not rendered) text, in order: http(s) and `www.` URLs
-/// and `.md` paths, like rendered messages get them. URLs inside code (fenced or
-/// inline) stay plain; `.md` paths in inline code are links, as in messages.
+/// The links in plain (not rendered) text, in order: http(s) and `www.` URLs,
+/// Aurelius links and `.md` paths, like rendered messages get them. URLs inside
+/// code (fenced or inline) stay plain; `.md` paths in inline code are links, as in messages.
 List<TextLink> plainTextLinks(String text) {
-  final links = <TextLink>[];
+  final links = <TextLink>[for (final l in bareAureliusLinks(text)) (start: l.start, end: l.end, target: l.raw)];
   var offset = 0;
   var fenced = false;
   for (final line in text.split('\n')) {

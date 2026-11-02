@@ -22,6 +22,7 @@ import '../../data/aurelius_repository.dart';
 import '../../data/channels.dart';
 import '../../data/company.dart';
 import '../../data/discussion.dart';
+import '../../data/links.dart' show messageLocateFeature;
 import '../../data/views.dart';
 import '../../data/markdown_paths.dart';
 import '../../data/run_config.dart';
@@ -37,6 +38,7 @@ import 'chat_bloc.dart';
 import 'collapse.dart';
 import 'secret_check.dart';
 import 'file_page.dart';
+import '../links/link_actions.dart' show copyMessageLink;
 import '../markdown/links.dart';
 import '../markdown/markdown_page.dart';
 import '../markdown/mention_markdown.dart';
@@ -73,6 +75,16 @@ FileScope? chatFileScope(BuildContext context) {
   }
 }
 
+/// Whether a long press on [message] offers Copy link (§6.1): the server can
+/// find it again (`message_locate`, only in a channel or a ticket's discussion),
+/// and it is a finished message of someone, not a queued or streaming one.
+bool messageLinkable(BuildContext context, MessageView? message) {
+  if (message == null || message.isStreaming || message.queued || message.system != null) return false;
+  final bloc = context.read<ChatBloc>();
+  if (!bloc.group && bloc.ticketId == null) return false;
+  return context.read<AureliusRepository>().linkState.has(messageLocateFeature);
+}
+
 /// Messages and composer of one conversation (chat or employee).
 class ChatView extends StatefulWidget {
   const ChatView({
@@ -89,6 +101,7 @@ class ChatView extends StatefulWidget {
     this.draftSlot,
     this.channel,
     this.readOnlyAction,
+    this.revealMessage,
   });
 
   final String emptyTitle;
@@ -126,13 +139,16 @@ class ChatView extends StatefulWidget {
   /// After [readOnlyNote]: a link, such as "Open ticket".
   final Widget? readOnlyAction;
 
+  /// A link opened here: scroll to this message once it is read, and mark it.
+  final String? revealMessage;
+
   @override
   State<ChatView> createState() => _ChatViewState();
 }
 
 /// How a channel of the Slack-style Team chat shows (AUR-CHAT-001 §2–§4).
 class ChannelChatOptions {
-  const ChannelChatOptions({this.readThrough, required this.closedNote, this.openChannel, this.threads = false, this.reactions = false, this.openThread, this.thread = false});
+  const ChannelChatOptions({this.readThrough, required this.closedNote, this.openChannel, this.threads = false, this.reactions = false, this.openThread, this.thread = false, this.revealThread = false});
 
   /// The reader's last read message before the channel opened (`ChannelView.read_through`):
   /// "New messages" goes after it, and stays there while the channel is open.
@@ -158,6 +174,10 @@ class ChannelChatOptions {
 
   /// This list is one thread: its root on top, then "n replies" and the replies.
   final bool thread;
+
+  /// [ChatView.revealMessage] is a thread's root and a link went to a reply in
+  /// it: open that thread as well.
+  final bool revealThread;
 }
 
 class _ChatViewState extends State<ChatView> {
@@ -347,10 +367,29 @@ class _MessagesState extends State<_Messages> {
   /// The active board member: a message naming them is marked (B9).
   String? _me;
 
+  /// [ChatView.revealMessage] was acted on: once, not again on every new message.
+  bool _revealed = false;
+
+  /// Go to the message a link names once the messages are read; it can be gone by now.
+  void _reveal(ChatState state) {
+    final target = widget.config.revealMessage;
+    if (target == null || _revealed || state.loading) return;
+    _revealed = true;
+    final message = state.messages.where((m) => m.id == target).firstOrNull;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (message == null) return toast(context, 'That message no longer exists.');
+      final channel = widget.config.channel;
+      unawaited(_list.currentState?.reveal(target));
+      if (channel != null && channel.revealThread) channel.openThread?.call(context, message);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final bloc = context.watch<ChatBloc>();
     final state = bloc.state;
+    _reveal(state);
     final blocking = context.select<InboxBloc, ApprovalView?>((b) => b.state.blocking(state.conversationId));
     // The group chat: an answer runs in its employee's own chat, so what it asks carries that run.
     final approvals = bloc.group ? context.select<InboxBloc, List<ApprovalView>>((b) => b.state.approvals) : const <ApprovalView>[];
@@ -994,7 +1033,8 @@ class _UserBubble extends StatelessWidget {
     final ticketable = source != null && message != null;
     final react = actions?.react;
     final reply = actions?.reply;
-    if (queuedId == null && !ticketable && react == null && reply == null) {
+    final link = messageLinkable(context, message);
+    if (queuedId == null && !ticketable && react == null && reply == null && !link) {
       Clipboard.setData(ClipboardData(text: text));
       toast(context, 'Copied.');
       return;
@@ -1005,6 +1045,7 @@ class _UserBubble extends StatelessWidget {
       if (reply != null) const GlassMenuItem('reply', 'Reply in thread'),
       if (queuedId != null) const GlassMenuItem('now', 'Send now'),
       const GlassMenuItem('copy', 'Copy'),
+      if (link) const GlassMenuItem('link', 'Copy link'),
       if (ticketable) const GlassMenuItem('ticket', 'Create ticket'),
       if (queuedId != null) const GlassMenuItem('delete', 'Delete', danger: true),
     ]);
@@ -1014,6 +1055,8 @@ class _UserBubble extends StatelessWidget {
         react!();
       case 'reply':
         reply!();
+      case 'link':
+        await copyMessageLink(context, message!.id);
       case 'ticket':
         await createTicketFrom(context, message!, source!, already: ticket);
       case 'now':
@@ -1224,6 +1267,16 @@ class _AssistantMessage extends StatelessWidget {
                 Navigator.pop(sheet);
               },
             ),
+            if (messageLinkable(context, message))
+              ListTile(
+                key: const Key('message-copy-link'),
+                leading: const Icon(Icons.link),
+                title: const Text('Copy link'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  copyMessageLink(context, message.id);
+                },
+              ),
             if (source != null && !message.isStreaming)
               ListTile(
                 key: const Key('message-create-ticket'),

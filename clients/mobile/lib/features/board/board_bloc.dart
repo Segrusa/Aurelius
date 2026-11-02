@@ -46,6 +46,21 @@ class BoardCreatorChosen extends BoardEvent {
   final String? userId;
 }
 
+/// The responsible filter (P-77): null anyone, [BoardState.noResponsible] tickets without one, else a board member's id.
+class BoardResponsibleChosen extends BoardEvent {
+  const BoardResponsibleChosen(this.userId);
+
+  final String? userId;
+}
+
+/// The filter Needs you (B6): only the tickets that count as your work. The
+/// page applies it, since it takes the company around the ticket ([needsMe]).
+class BoardNeedsMeOnly extends BoardEvent {
+  const BoardNeedsMeOnly(this.on);
+
+  final bool on;
+}
+
 /// The column the phone shows (the last one viewed is kept).
 class BoardColumnShown extends BoardEvent {
   const BoardColumnShown(this.kind);
@@ -62,6 +77,8 @@ class BoardState extends Equatable {
     this.projectId,
     this.owner,
     this.createdBy,
+    this.responsible,
+    this.needsMeOnly = false,
     this.column,
     this.gaveUp = const {},
     this.ownerUnknown = const {},
@@ -69,6 +86,9 @@ class BoardState extends Equatable {
 
   /// [owner] value for "No owner yet".
   static const noOwner = '';
+
+  /// [responsible] value for "No one".
+  static const noResponsible = '';
 
   /// Until the first `board.get` answered.
   final bool loading;
@@ -85,6 +105,12 @@ class BoardState extends Equatable {
   /// Only tickets this board member created; null: anyone's.
   final String? createdBy;
 
+  /// Only tickets this board member is responsible for; null: anyone's.
+  final String? responsible;
+
+  /// The filter Needs you (B6).
+  final bool needsMeOnly;
+
   /// The column last shown on a phone; null until the user picks one.
   final ColumnKind? column;
 
@@ -95,16 +121,16 @@ class BoardState extends Equatable {
   /// whether the dispatcher still chooses is unknown (M-m3): read again soon.
   final Set<String> ownerUnknown;
 
-  /// The columns left to right, with the owner and creator filters applied to their cards.
+  /// The columns left to right, with the owner, creator and responsible filters applied to their cards.
   List<BoardColumnCards> get columns => [
         for (final c in board?.columns ?? const <BoardColumnCards>[])
           BoardColumnCards(
             column: c.column,
-            tickets: owner == null && createdBy == null
+            tickets: owner == null && createdBy == null && responsible == null
                 ? c.tickets
                 : [
                     for (final t in c.tickets)
-                      if ((owner == null || (t.ownerEmployeeId ?? noOwner) == owner) && (createdBy == null || t.createdByUser == createdBy)) t,
+                      if ((owner == null || (t.ownerEmployeeId ?? noOwner) == owner) && (createdBy == null || t.createdByUser == createdBy) && (responsible == null || (t.responsibleUserId ?? noResponsible) == responsible)) t,
                   ],
           ),
       ];
@@ -115,7 +141,7 @@ class BoardState extends Equatable {
 
   TicketView? ticket(String id) => tickets.where((t) => t.id == id).firstOrNull;
 
-  BoardState copyWith({bool? loading, BoardView? board, String? error, bool? unsupported, String? projectId, bool clearProject = false, String? owner, bool clearOwner = false, String? createdBy, bool clearCreatedBy = false, ColumnKind? column, Set<String>? gaveUp, Set<String>? ownerUnknown}) => BoardState(
+  BoardState copyWith({bool? loading, BoardView? board, String? error, bool? unsupported, String? projectId, bool clearProject = false, String? owner, bool clearOwner = false, String? createdBy, bool clearCreatedBy = false, String? responsible, bool clearResponsible = false, bool? needsMeOnly, ColumnKind? column, Set<String>? gaveUp, Set<String>? ownerUnknown}) => BoardState(
         loading: loading ?? this.loading,
         board: board ?? this.board,
         error: error,
@@ -123,13 +149,15 @@ class BoardState extends Equatable {
         projectId: clearProject ? null : projectId ?? this.projectId,
         owner: clearOwner ? null : owner ?? this.owner,
         createdBy: clearCreatedBy ? null : createdBy ?? this.createdBy,
+        responsible: clearResponsible ? null : responsible ?? this.responsible,
+        needsMeOnly: needsMeOnly ?? this.needsMeOnly,
         column: column ?? this.column,
         gaveUp: gaveUp ?? this.gaveUp,
         ownerUnknown: ownerUnknown ?? this.ownerUnknown,
       );
 
   @override
-  List<Object?> get props => [loading, board?.asOfSeq, board?.projectId, [for (final t in board?.columns.expand((c) => c.tickets) ?? const <TicketView>[]) (t.id, t.version, t.columnId)], [for (final c in board?.columns ?? const <BoardColumnCards>[]) (c.column.name, c.column.version, c.column.position)], error, unsupported, projectId, owner, createdBy, column, gaveUp, ownerUnknown];
+  List<Object?> get props => [loading, board?.asOfSeq, board?.projectId, [for (final t in board?.columns.expand((c) => c.tickets) ?? const <TicketView>[]) (t.id, t.version, t.columnId, t.responsibleUserId, t.responsibleDisabled)], [for (final c in board?.columns ?? const <BoardColumnCards>[]) (c.column.name, c.column.version, c.column.position)], error, unsupported, projectId, owner, createdBy, responsible, needsMeOnly, column, gaveUp, ownerUnknown];
 }
 
 /// The Board (MU1-05): `board.get` for the chosen project, again on every
@@ -147,6 +175,8 @@ class BoardBloc extends Bloc<BoardEvent, BoardState> {
     });
     on<BoardOwnerChosen>((e, emit) => emit(state.copyWith(owner: e.owner, clearOwner: e.owner == null)));
     on<BoardCreatorChosen>((e, emit) => emit(state.copyWith(createdBy: e.userId, clearCreatedBy: e.userId == null)));
+    on<BoardResponsibleChosen>((e, emit) => emit(state.copyWith(responsible: e.userId, clearResponsible: e.userId == null)));
+    on<BoardNeedsMeOnly>((e, emit) => emit(state.copyWith(needsMeOnly: e.on)));
     on<BoardColumnShown>((e, emit) => emit(state.copyWith(column: e.kind)));
     on<BoardShown>((e, emit) {
       _visible = e.visible;
@@ -184,8 +214,8 @@ class BoardBloc extends Bloc<BoardEvent, BoardState> {
   /// Something changed while the tab was hidden.
   var _stale = false;
 
-  /// Tasks without a ticket do not touch the board.
-  bool _concerns(Event e) => !e.kind.wire.startsWith('task.') || _roots.contains(e.aggregateId) || (ticketTask?.call(e.aggregateId) ?? false);
+  /// Tasks without a ticket do not touch the board, nor does who follows a ticket.
+  bool _concerns(Event e) => e.kind != EventKind.ticketFollowChanged && (!e.kind.wire.startsWith('task.') || _roots.contains(e.aggregateId) || (ticketTask?.call(e.aggregateId) ?? false));
 
   void _changed() {
     if (isClosed) return;

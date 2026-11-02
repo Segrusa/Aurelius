@@ -59,7 +59,7 @@ class AureliusRepository {
   Stream<PowerState> get powerChanges => connection.powers;
 
   /// Company changes (projects, employees, tasks, approvals, memory, …).
-  Stream<Event> get companyChanges => events.where((e) => !e.isChat && !e.isNote);
+  Stream<Event> get companyChanges => events.where((e) => !e.isChat && !e.isNote && e.kind != EventKind.ticketFollowChanged);
 
   Future<R> _ask<R extends ResponseBody>(Map<String, dynamic> request, [Duration? timeout]) async {
     final body = timeout == null ? await connection.call(request) : await connection.call(request, timeout);
@@ -152,6 +152,12 @@ class AureliusRepository {
 
   /// One ticket with its main task and every task linked to it.
   Future<TicketDetail> ticket(String ticketId) async => (await _ask<ResponseBodyTicket>(ticketGet(ticketId: ticketId))).value;
+
+  /// Who follows a ticket (feature `ticket_follow`).
+  Future<TicketFollowersView> followers(String ticketId) async => (await _ask<ResponseBodyTicketFollowers>(ticketFollowers(ticketId: ticketId))).value;
+
+  /// Where a message is, for a link to it (feature `message_locate`).
+  Future<MessageLocation> messageLocation(String messageId) async => (await _ask<ResponseBodyMessageLocation>(messageLocate(messageId: messageId))).value;
 
   /// What changes a card or the columns: tickets, the columns, the tasks under
   /// tickets, projects and employees (dispatcher, names).

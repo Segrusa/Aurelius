@@ -18,11 +18,14 @@ import 'team_page.dart';
 /// message on top, its replies and a composer that replies in the thread
 /// (`thread_parent`). Read-only when its channel is closed (`read_only`).
 class ThreadScreen extends StatelessWidget {
-  const ThreadScreen({super.key, required this.channel, required this.root});
+  const ThreadScreen({super.key, required this.channel, required this.root, this.revealMessage});
 
   /// The channel as it was when the thread opened; the list's newer view of it wins.
   final ChannelView channel;
   final MessageView root;
+
+  /// A link opened here: the reply to scroll to.
+  final String? revealMessage;
 
   void _readChannels(BuildContext context) {
     if (!context.mounted) return;
@@ -61,6 +64,7 @@ class ThreadScreen extends StatelessWidget {
           child: ChatShownWatcher(
             child: ChatView(
               key: ValueKey('thread-chat-${root.id}'),
+              revealMessage: revealMessage,
               emptyTitle: 'No replies yet',
               composer: !live.archived,
               readOnlyNote: live.archived ? channelReadOnlyNote(live) : null,
