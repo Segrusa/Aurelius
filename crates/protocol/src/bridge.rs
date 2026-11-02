@@ -273,4 +273,68 @@ mod tests {
         assert!(matches!(&op, EmployeeTaskOp::ReadGuideline { guideline } if guideline == "Rust style"));
         assert_eq!(serde_json::from_value::<EmployeeTaskOp>(serde_json::to_value(&op).unwrap()).unwrap(), op);
     }
+
+    /// The wire name of an op, by a match that lists every variant: a new variant (say a
+    /// decision of a board member) does not compile until it is named here, where it is seen.
+    fn op_name(op: &EmployeeTaskOp) -> &'static str {
+        use EmployeeTaskOp::*;
+        match op {
+            Delegate { .. } => "delegate",
+            HandOver { .. } => "hand_over",
+            MessageTask { .. } => "message_task",
+            AddIdea { .. } => "add_idea",
+            ListTasks { .. } => "list_tasks",
+            ReadTask { .. } => "read_task",
+            ListConversations { .. } => "list_conversations",
+            ReadConversation { .. } => "read_conversation",
+            ProposeColleague { .. } => "propose_colleague",
+            ProposeInstructions { .. } => "propose_instructions",
+            SetMode { .. } => "set_mode",
+            ReadGroupChat { .. } => "read_group_chat",
+            PostToGroupChat { .. } => "post_to_group_chat",
+            ReadDiscussion { .. } => "read_discussion",
+            PostToDiscussion { .. } => "post_to_discussion",
+            VaultList { .. } => "vault_list",
+            VaultRead { .. } => "vault_read",
+            AssignTicket { .. } => "assign_ticket",
+            ReportTestResult { .. } => "report_test_result",
+            ProposeGuideline { .. } => "propose_guideline",
+            ListGuidelines { .. } => "list_guidelines",
+            ReadGuideline { .. } => "read_guideline",
+            ListTickets { .. } => "list_tickets",
+            ReadTicket { .. } => "read_ticket",
+            CreateTicket { .. } => "create_ticket",
+            UpdateTicket { .. } => "update_ticket",
+            MoveTicket { .. } => "move_ticket",
+            PostToTicket { .. } => "post_to_ticket",
+        }
+    }
+
+    #[test]
+    fn the_board_ops_parse_with_their_defaults_and_round_trip() {
+        let ops = [
+            serde_json::json!({ "op": "list_tickets" }),
+            serde_json::json!({ "op": "read_ticket", "ticket": "#12" }),
+            serde_json::json!({ "op": "create_ticket", "title": "Export" }),
+            serde_json::json!({ "op": "update_ticket", "ticket": "#12", "priority": "high" }),
+            serde_json::json!({ "op": "move_ticket", "ticket": "#12", "column": "todo" }),
+            serde_json::json!({ "op": "post_to_ticket", "ticket": "#12", "message": "hi" }),
+        ];
+        for json in ops {
+            let op: EmployeeTaskOp = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(op_name(&op), json["op"].as_str().unwrap());
+            assert_eq!(serde_json::from_value::<EmployeeTaskOp>(serde_json::to_value(&op).unwrap()).unwrap(), op);
+        }
+        let op: EmployeeTaskOp = serde_json::from_value(serde_json::json!({ "op": "create_ticket", "title": "Export" })).unwrap();
+        assert!(matches!(&op, EmployeeTaskOp::CreateTicket { project: None, description: None, priority: None, labels, .. } if labels.is_empty()));
+    }
+
+    #[test]
+    fn a_board_members_decisions_are_no_employee_op() {
+        // Nothing for accepting, plan decisions, sending back, cancelling, archiving, deleting or the Responsible.
+        for op in ["accept_ticket", "accept", "approve_plan", "revise_plan", "send_back", "send_back_ticket", "cancel_ticket", "cancel", "archive_ticket", "delete_ticket", "set_responsible", "assign", "start_ticket"] {
+            let parsed = serde_json::from_value::<EmployeeTaskOp>(serde_json::json!({ "op": op, "ticket": "#1", "feedback": "x", "employee": "Ann" }));
+            assert!(parsed.is_err(), "{op} is an employee op");
+        }
+    }
 }

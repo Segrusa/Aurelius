@@ -830,4 +830,48 @@ mod tests {
         assert_eq!(tool["inputSchema"]["required"], json!(["passed", "summary"]));
         assert_eq!(tool["inputSchema"]["properties"]["passed"]["type"], "boolean");
     }
+
+    #[test]
+    fn every_run_offers_the_six_board_tools() {
+        for (project, discussion, testing) in [(false, false, false), (true, false, false), (false, true, true)] {
+            let names: Vec<String> = tool_definitions(project, false, discussion, testing).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+            for tool in BOARD_TOOLS {
+                assert!(names.contains(&tool.to_owned()), "{tool}");
+            }
+        }
+        let names: Vec<String> = board_tool_definitions().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(names, BOARD_TOOLS);
+        assert!(!triage_tool_definitions().iter().any(|t| BOARD_TOOLS.contains(&t["name"].as_str().unwrap())), "the dispatcher keeps only assign_ticket and recall");
+    }
+
+    #[test]
+    fn the_board_tools_map_to_their_ops() {
+        let op = |name: &str, args: Value| board_op(name, &args);
+        assert_eq!(op("list_tickets", json!({ "project": "Orbit", "column": "todo", "query": "csv", "limit": 5 })), Some(EmployeeTaskOp::ListTickets { project: Some("Orbit".into()), column: Some("todo".into()), query: Some("csv".into()), limit: Some(5) }));
+        assert_eq!(op("list_tickets", json!({})), Some(EmployeeTaskOp::ListTickets { project: None, column: None, query: None, limit: None }));
+        assert_eq!(op("read_ticket", json!({ "ticket": "#12", "last": 3 })), Some(EmployeeTaskOp::ReadTicket { ticket: "#12".into(), last: Some(3) }));
+        assert_eq!(
+            op("create_ticket", json!({ "title": "Export", "description": "Why", "priority": "high", "labels": ["api", 7, "csv"] })),
+            Some(EmployeeTaskOp::CreateTicket { project: None, title: "Export".into(), description: Some("Why".into()), priority: Some("high".into()), labels: vec!["api".into(), "csv".into()] })
+        );
+        assert_eq!(
+            op("update_ticket", json!({ "ticket": "12", "title": "New", "labels": [] })),
+            Some(EmployeeTaskOp::UpdateTicket { ticket: "12".into(), title: Some("New".into()), description: None, priority: None, labels: Some(vec![]) })
+        );
+        assert_eq!(op("move_ticket", json!({ "ticket": "#12", "column": "todo" })), Some(EmployeeTaskOp::MoveTicket { ticket: "#12".into(), column: "todo".into() }));
+        assert_eq!(op("post_to_ticket", json!({ "ticket": "#12", "message": "hi" })), Some(EmployeeTaskOp::PostToTicket { ticket: "#12".into(), message: "hi".into() }));
+    }
+
+    #[test]
+    fn there_is_no_tool_for_a_board_members_decisions() {
+        let forbidden = ["accept_ticket", "approve_plan", "revise_plan", "send_back_ticket", "cancel_ticket", "archive_ticket", "delete_ticket", "set_responsible", "start_ticket", "assign_ticket", "approve_ticket", "send_back"];
+        let offered: Vec<String> = tool_definitions(false, true, true, true).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+        for tool in forbidden {
+            assert!(!offered.contains(&tool.to_owned()), "{tool} is offered");
+            assert!(board_op(tool, &json!({ "ticket": "#1", "column": "done" })).is_none(), "{tool} maps to an op");
+        }
+        // The only tool that sets a column takes one ticket and one column: no accept, no decision flags.
+        let schema = board_tool_definitions().into_iter().find(|t| t["name"] == "move_ticket").unwrap();
+        assert_eq!(schema["inputSchema"]["properties"]["column"]["enum"], json!(["todo"]));
+    }
 }

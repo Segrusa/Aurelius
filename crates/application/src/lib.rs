@@ -707,6 +707,9 @@ mod ticket_tests;
 mod ticket_files_tests;
 
 #[cfg(test)]
+mod ticket_agent_tests;
+
+#[cfg(test)]
 mod discussion_tests;
 
 #[cfg(test)]
