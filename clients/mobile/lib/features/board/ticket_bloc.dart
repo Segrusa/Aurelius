@@ -42,7 +42,7 @@ class TicketPageState extends Equatable {
   bool get gaveUp => dispatcherGaveUp(activity);
 
   @override
-  List<Object?> get props => [loading, detail?.asOfSeq, detail?.ticket.version, detail?.tasks.map((t) => (t.id, t.status, t.updatedAtMs)).toList(), error, activity.map((c) => c.seq).toList(), activityFailed, plan, modeNow];
+  List<Object?> get props => [loading, detail?.asOfSeq, detail?.ticket.version, detail?.ticket.responsibleUserId, detail?.tasks.map((t) => (t.id, t.status, t.updatedAtMs)).toList(), error, activity.map((c) => c.seq).toList(), activityFailed, plan, modeNow];
 }
 
 /// One ticket (`ticket.get`), its activity and, in Plan review, its plan;

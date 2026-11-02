@@ -298,6 +298,42 @@ bool needsMe(TicketView ticket, TicketState state, {String? me}) {
 /// Who a decision that is not [me]'s waits for (the responsible's name); null when it is [me]'s or nobody's.
 String? waitsForOther(TicketView ticket, TicketState state, {String? me}) => state.needsYou && !needsMe(ticket, state, me: me) ? ticket.responsibleUsername : null;
 
+/// What the Responsible is for, under the field and in its picker (P-71).
+const responsibleExplained = 'Follows up and reviews. An employee does the work.';
+
+/// The name of [ticket]'s responsible: "You", "Alexandra (disabled)"; null without one.
+String? responsibleLabel(TicketView ticket, {String? me}) {
+  final id = ticket.responsibleUserId;
+  if (id == null) return null;
+  if (id == me) return 'You';
+  final name = ticket.responsibleUsername ?? 'A board member';
+  return (ticket.responsibleDisabled ?? false) ? '$name (disabled)' : name;
+}
+
+/// Whose Claude login [ticket] runs on, for the card's "on … login" (P-73).
+String loginOwnerOf(TicketView ticket, {String? me}) => ticket.loginUser == me ? 'your' : "${ticket.loginUsername}'s";
+
+/// The whole who-block as one sentence, for a screen reader (§1.3, §9).
+String whoSentence(TicketView ticket, {String? owner, String? me}) {
+  final responsible = responsibleLabel(ticket, me: me);
+  return [
+    owner == null ? 'No owner yet.' : '$owner does the work.',
+    'Runs on ${loginOwnerOf(ticket, me: me)} Claude login.',
+    responsible == null ? 'No one responsible.' : '${responsible == 'You' ? 'You are' : '$responsible is'} responsible: follows up and reviews.',
+    'Created by ${ticket.createdByUser == me ? 'you' : ticket.createdByUsername}.',
+  ].join(' ');
+}
+
+/// Who [me] can make responsible (§2.1): [me] first as "You", then the other
+/// active board members A–Z. A disabled one is no longer a choice (P-78).
+List<({String id, String label})> responsibleChoices(List<UserView> members, {String? me}) {
+  final others = [for (final u in members) if (u.disabledAtMs == null && u.id != me) u]..sort((a, b) => a.username.toLowerCase().compareTo(b.username.toLowerCase()));
+  return [
+    if (me != null) (id: me, label: 'You'),
+    for (final u in others) (id: u.id, label: u.username),
+  ];
+}
+
 /// "Waiting for Robin's limit until 16:00" (P-37: the name and the time, never
 /// someone else's usage), with the day when that is not today.
 String limitWaitOf(String whose, int? untilMs, {DateTime? now}) {

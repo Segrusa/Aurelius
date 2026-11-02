@@ -31,6 +31,7 @@ import 'ticket_page.dart' show parseLabels;
 const ticketTitleMax = 160;
 
 /// "New ticket" (§10.2, MU1-07): title and project required; priority, owner,
+/// responsible (You unless chosen otherwise, B9),
 /// labels, a photo or file (also pasted into the title or description); mode
 /// and deadline under Advanced. Create puts it
 /// in Backlog; "Create and start" also starts it (D-09).
@@ -62,6 +63,9 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
   late String? _project = widget.draft?.projectId ?? widget.projectId;
   TicketPriority _priority = TicketPriority.normal;
   String? _owner;
+
+  /// Chosen in the picker; null: the default, You (B9). Its id is null for No one.
+  ({String? id, String label})? _responsible;
   AgentMode? _mode;
   DateTime? _deadline;
   final _files = <({String name, String path})>[];
@@ -132,6 +136,8 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
         description: _description.text.trim().isEmpty ? null : _description.text.trim(),
         priority: _priority == TicketPriority.normal ? null : _priority,
         ownerEmployeeId: _owner,
+        // Only a server with the feature knows it; an older one refuses unknown fields. Left out means no one.
+        responsibleUserId: repository.linkState.has(ticketResponsibleFeature) ? (_responsible == null ? repository.linkState.user?.id : _responsible!.id) : null,
         labels: parseLabels(_labels.text),
         files: [for (final f in _files) f.path],
         deadlineMs: _deadline?.millisecondsSinceEpoch,
@@ -181,6 +187,23 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
       ),
     );
     if (picked != null) setState(() => _owner = picked.$1);
+  }
+
+  Future<void> _pickResponsible() async {
+    final me = context.read<ConnectionBloc>().state.user?.id;
+    final List<UserView> members;
+    try {
+      members = await context.read<AureliusRepository>().boardMembers();
+    } on Object catch (e) {
+      if (mounted) toast(context, ticketFailure(e));
+      return;
+    }
+    if (!mounted) return;
+    final picked = await showResponsiblePicker(context, title: 'Responsible', current: _responsible == null ? me : _responsible!.id, members: members, me: me);
+    if (picked == null) return;
+    final id = picked.$1;
+    final label = id == null ? 'No one' : id == me ? 'You' : members.where((u) => u.id == id).firstOrNull?.username ?? 'Board member';
+    setState(() => _responsible = (id: id, label: label));
   }
 
   /// A photo or a file, uploaded to the PC at once and sent with the ticket.
@@ -280,6 +303,7 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
     final company = context.watch<CompanyBloc>().state;
     final online = context.select<ConnectionBloc, bool>((b) => b.state.isOnline);
     final me = context.select<ConnectionBloc, String?>((b) => b.state.user?.username);
+    final responsibleOn = context.select<ConnectionBloc, bool>((b) => b.state.has(ticketResponsibleFeature));
     final dispatcher = _project == null ? null : dispatcherName(company, _project!);
     final owner = employeeName(company, _owner);
     final can = online && !_busy && !_uploading;
@@ -351,6 +375,7 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
             const SizedBox(height: 12),
             InsetGroup(children: [
               DetailRow(key: const ValueKey('new-ticket-owner'), label: 'Owner', value: owner ?? (dispatcher == null ? 'Dispatcher' : 'Dispatcher ($dispatcher)'), onTap: () => _pickOwner(company)),
+              if (responsibleOn) DetailRow(key: const ValueKey('new-ticket-responsible'), label: 'Responsible', value: _responsible?.label ?? 'You', onTap: _pickResponsible),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: TextField(key: const ValueKey('new-ticket-labels'), controller: _labels, decoration: const InputDecoration(labelText: 'Labels', hintText: 'backend, security', border: InputBorder.none)),

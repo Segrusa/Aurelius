@@ -15,7 +15,7 @@ import 'ticket_actions.dart';
 
 /// What a card needs from the board around it.
 class CardContext {
-  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false});
+  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false, this.responsible = false});
 
   /// Every column in board order (Move to…).
   final List<BoardColumnView> columns;
@@ -43,6 +43,9 @@ class CardContext {
 
   /// [me]'s own Claude login expired (a Reconnect, not a Connect).
   final bool myLoginExpired;
+
+  /// The server has a responsible (`ticket_responsible`): the who-block, and no "by …" (B8).
+  final bool responsible;
 }
 
 /// The card's main action, by column (§4.2, §5.1): Start, Choose owner, Review, Start again.
@@ -84,7 +87,8 @@ Future<void> runCardAction(BuildContext context, TicketView ticket, CardAction a
 }
 
 /// A ticket on the Board (§5, MU1-07): number, project, priority, title,
-/// labels, where it stands, owner, deadline and creator, with the column's
+/// labels, where it stands, who (the who-block, or owner and creator on an
+/// older server) and its deadline, with the column's
 /// main action. Swipe right = that action, left = Move to…; long press = the
 /// menu (§4.2). Screen readers get the same actions (§15).
 class TicketCard extends StatelessWidget {
@@ -114,6 +118,7 @@ class TicketCard extends StatelessWidget {
       owner == null ? 'no owner' : 'owner $owner',
       ?line,
       if (mine) 'needs you',
+      if (board.responsible) whoSentence(ticket, owner: owner, me: board.me),
       if (deadline != null) deadline.text,
       'in ${board.column.column.name}',
     ].join(', ');
@@ -172,12 +177,18 @@ class TicketCard extends StatelessWidget {
           ]),
         ],
         const SizedBox(height: 6),
+        if (board.responsible) ...[
+          WhoBlock(ticket: ticket, owner: owner, me: board.me, keyId: ticket.id),
+          if (done || deadline != null) const SizedBox(height: 2),
+          if (done) Text(_doneLine(ticket), style: TextStyle(fontSize: 13, color: Tokens.label2)),
+          if (deadline != null) Text(deadline.text, style: TextStyle(fontSize: 13, color: deadline.late ? Tokens.negative : deadline.soon ? Tokens.warning : Tokens.label2)),
+        ] else
         Wrap(
           spacing: 8,
           runSpacing: 2,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (done) Text('✓ Done${ticket.doneAtMs == null ? '' : ' ${DateFormat.MMMd().format(DateTime.fromMillisecondsSinceEpoch(ticket.doneAtMs!))}'}', style: TextStyle(fontSize: 13, color: Tokens.label2)),
+            if (done) Text(_doneLine(ticket), style: TextStyle(fontSize: 13, color: Tokens.label2)),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 200),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -234,6 +245,7 @@ class TicketCard extends StatelessWidget {
         const CustomSemanticsAction(label: 'Open'): () => context.push('/ticket/${ticket.id}'),
         if (action != null && board.online) CustomSemanticsAction(label: cardActionLabel(action, expired: board.myLoginExpired)): () => runCardAction(context, ticket, action),
         if (!done && board.online) const CustomSemanticsAction(label: 'Move to…'): () => showMoveSheet(context, ticket, board.columns),
+        if (board.responsible && !done && board.online) const CustomSemanticsAction(label: 'Set responsible…'): () => chooseResponsible(context, ticket),
       },
       child: card,
     );
@@ -260,6 +272,44 @@ class TicketCard extends StatelessWidget {
   }
 }
 
+String _doneLine(TicketView ticket) => '✓ Done${ticket.doneAtMs == null ? '' : ' ${DateFormat.MMMd().format(DateTime.fromMillisecondsSinceEpoch(ticket.doneAtMs!))}'}';
+
+/// Who does what (§1.2–§1.3), on a card and at the top of the ticket page: who
+/// does the work and on whose login, and who follows up. Always with the role in
+/// words; a long name gives way, "· responsible" and "on … login" never do.
+class WhoBlock extends StatelessWidget {
+  const WhoBlock({super.key, required this.ticket, required this.owner, required this.me, required this.keyId});
+
+  final TicketView ticket;
+  final String? owner;
+  final String? me;
+
+  /// Tells the two lines apart in tests.
+  final String keyId;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(fontSize: 13, color: Tokens.label2);
+    final responsible = responsibleLabel(ticket, me: me);
+    final disabled = ticket.responsibleDisabled ?? false;
+    Widget line(Key key, Widget mark, String name, String role) => Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Row(key: key, children: [
+            mark,
+            const SizedBox(width: 4),
+            Flexible(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: style)),
+            Text(role, maxLines: 1, style: style),
+          ]),
+        );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      line(ValueKey('who-work-$keyId'), owner == null ? const SizedBox(width: 18, height: 18) : Monogram(owner!.characters.first.toUpperCase(), size: 18, employee: true), owner ?? 'No owner', " · on ${loginOwnerOf(ticket, me: me)} login"),
+      responsible == null
+          ? line(ValueKey('who-responsible-$keyId'), Icon(CupertinoIcons.circle, size: 18, color: Tokens.label3), 'No one responsible', '')
+          : line(ValueKey('who-responsible-$keyId'), Monogram(responsible.characters.first.toUpperCase(), size: 18, member: true, dimmed: disabled), responsible, ' · responsible'),
+    ]);
+  }
+}
+
 Color priorityColor(TicketPriority p) => switch (p) {
       TicketPriority.urgent => Tokens.negative,
       TicketPriority.high => Tokens.warning,
@@ -278,6 +328,13 @@ Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext b
       ('Start with…', CupertinoIcons.person_crop_circle_badge_plus, () => startWith(context, ticket)),
     ],
     if (state == TicketState.choosing || state == TicketState.needsOwner || state == TicketState.ownerUnknown) ('Choose employee', CupertinoIcons.person_crop_circle, () => chooseOwner(context, ticket)),
+    if (board.responsible && ticket.column != ColumnKind.done && board.online) ...[
+      if (ticket.responsibleUserId == board.me)
+        ('Remove me as responsible', CupertinoIcons.person_badge_minus, () => setResponsible(context, ticket, null))
+      else if (board.me != null)
+        ('Make me responsible', CupertinoIcons.person_badge_plus, () => setResponsible(context, ticket, board.me)),
+      ('Set responsible…', CupertinoIcons.person_crop_circle, () => chooseResponsible(context, ticket)),
+    ],
     if (ticket.column != ColumnKind.done && board.online) ('Move to…', CupertinoIcons.arrow_right_arrow_left, () => showMoveSheet(context, ticket, board.columns)),
     if (canOrder && index > 0) ('Move up', CupertinoIcons.arrow_up, () => nudgeTicket(context, ticket, board.column, -1)),
     if (canOrder && index >= 0 && index < board.column.tickets.length - 1) ('Move down', CupertinoIcons.arrow_down, () => nudgeTicket(context, ticket, board.column, 1)),
@@ -299,6 +356,8 @@ Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext b
     builder: (sheet) => SafeArea(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: Text('#${ticket.number} ${ticket.title}', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600))),
+        // The creator left the card (B8); it stays here.
+        if (board.responsible) Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 8), child: Align(alignment: Alignment.centerLeft, child: Text('Created by ${ticket.createdByUsername}', key: const ValueKey('card-menu-creator'), style: TextStyle(color: Tokens.label2)))),
         for (final (i, item) in items.indexed)
           ListTile(key: ValueKey('card-menu-item-${item.$1}'), leading: Icon(item.$2), title: Text(item.$1), onTap: () => Navigator.pop(sheet, i)),
       ]),

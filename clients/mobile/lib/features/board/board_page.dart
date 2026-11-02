@@ -221,6 +221,63 @@ class _BoardPageState extends State<BoardPage> {
   /// Board members named in the creator picker, for a filter without tickets.
   final _creatorNames = <String, String>{};
 
+  /// "Responsible: Anyone / Me / No one / a board member" (P-77); below them the
+  /// disabled ones who still have tickets here, as those stay on their cards.
+  Future<void> _pickResponsible(BuildContext context, BoardState board) async {
+    final repository = context.read<AureliusRepository>();
+    final bloc = context.read<BoardBloc>();
+    final me = _me;
+    final onBoard = {for (final t in board.board?.columns.expand((c) => c.tickets) ?? const <TicketView>[]) if (t.responsibleUserId != null) t.responsibleUserId!: t.responsibleUsername ?? 'Board member'};
+    var active = <(String, String)>[];
+    var disabled = <(String, String)>[];
+    try {
+      final users = await repository.boardMembers();
+      active = [for (final u in users) if (u.disabledAtMs == null && u.id != me) (u.id, u.username)];
+      disabled = [for (final u in users) if (u.disabledAtMs != null && u.id != me && onBoard.containsKey(u.id)) (u.id, u.username)];
+    } on Object {
+      active = [for (final e in onBoard.entries) if (e.key != me) (e.key, e.value)];
+    }
+    int byName((String, String) a, (String, String) b) => a.$2.toLowerCase().compareTo(b.$2.toLowerCase());
+    active.sort(byName);
+    disabled.sort(byName);
+    _responsibleNames.addAll({for (final (id, name) in [...active, ...disabled]) id: name});
+    if (!context.mounted) return;
+    Widget? tick(String? id) => board.responsible == id ? Icon(Icons.check, color: Tokens.accentText) : null;
+    final picked = await showModalBottomSheet<(String?,)>(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.7),
+          child: ListView(shrinkWrap: true, children: [
+            Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: Eyebrow('Responsible')),
+            ListTile(key: const ValueKey('board-responsible-anyone'), title: const Text('Anyone'), trailing: tick(null), onTap: () => Navigator.pop(sheet, (null,))),
+            if (me != null) ListTile(key: const ValueKey('board-responsible-me'), title: const Text('Me'), trailing: tick(me), onTap: () => Navigator.pop(sheet, (me,))),
+            ListTile(key: const ValueKey('board-responsible-no-one'), title: const Text('No one'), trailing: tick(BoardState.noResponsible), onTap: () => Navigator.pop(sheet, (BoardState.noResponsible,))),
+            for (final (id, name) in active) ListTile(key: ValueKey('board-responsible-$id'), title: Text(name), trailing: tick(id), onTap: () => Navigator.pop(sheet, (id,))),
+            if (disabled.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 4), child: Eyebrow('Disabled')),
+            for (final (id, name) in disabled) ListTile(key: ValueKey('board-responsible-$id'), title: Text(name), trailing: tick(id), onTap: () => Navigator.pop(sheet, (id,))),
+          ]),
+        ),
+      ),
+    );
+    if (picked != null) bloc.add(BoardResponsibleChosen(picked.$1));
+  }
+
+  /// The responsible filter's name: Me, No one, the board member, or null for anyone.
+  String? _responsibleName(BoardState board) {
+    final id = board.responsible;
+    if (id == null) return null;
+    if (id == BoardState.noResponsible) return 'No one';
+    if (id == _me) return 'Me';
+    return board.board?.columns.expand((c) => c.tickets).where((t) => t.responsibleUserId == id).firstOrNull?.responsibleUsername ?? _responsibleNames[id] ?? 'Board member';
+  }
+
+  /// Board members named in the responsible picker, for a filter without tickets.
+  final _responsibleNames = <String, String>{};
+
   void _newTicket(BuildContext context, BoardState board) => context.push(board.projectId == null ? '/board/new' : '/board/new?project=${board.projectId}');
 
   @override
@@ -239,6 +296,7 @@ class _BoardPageState extends State<BoardPage> {
     final project = company.project(board.projectId ?? '');
     final owner = board.owner == null ? null : board.owner == BoardState.noOwner ? 'No owner yet' : company.employee(board.owner!)?.name;
     final creator = _creatorName(board);
+    final responsible = responsibleOn ? _responsibleName(board) : null;
 
     final Widget content;
     if (board.board == null && board.error != null) {
@@ -254,19 +312,20 @@ class _BoardPageState extends State<BoardPage> {
     } else if (board.board == null) {
       content = const _Skeleton();
     } else {
-      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null || (responsibleOn && board.needsMeOnly));
+      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null || responsible != null || (responsibleOn && board.needsMeOnly));
       final body = wide ? _wide(context, board, company, columns, online) : _phone(context, board, company, columns, online);
       content = Column(children: [
         if (filteredEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
             child: Row(children: [
-              Expanded(child: Text('No tickets in ${(widget.inProject ? null : project?.name) ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
+              Expanded(child: Text(responsible != null && responsible != 'No one' && responsible != 'Me' ? 'No tickets for $responsible.' : 'No tickets in ${(widget.inProject ? null : project?.name) ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
               TextButton(
                 onPressed: () {
                   final bloc = context.read<BoardBloc>();
                   bloc.add(const BoardOwnerChosen(null));
                   bloc.add(const BoardCreatorChosen(null));
+                  bloc.add(const BoardResponsibleChosen(null));
                   bloc.add(const BoardNeedsMeOnly(false));
                   if (!widget.inProject) bloc.add(const BoardProjectChosen(null));
                 },
@@ -292,10 +351,11 @@ class _BoardPageState extends State<BoardPage> {
           ),
         SizedBox(
           height: 52,
-          child: ListView(
+          // Every filter built, as the column chips: a lazy list would leave some out for screen readers.
+          child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            children: [
+            child: Row(children: [
               if (!widget.inProject) _FilterPill(key: const ValueKey('board-filter-project'), label: project?.name ?? 'All projects', active: project != null, onTap: () => _pickProject(context, board, company)),
               if (responsibleOn)
                 Padding(
@@ -308,9 +368,10 @@ class _BoardPageState extends State<BoardPage> {
                     onSelected: (on) => context.read<BoardBloc>().add(BoardNeedsMeOnly(on)),
                   ),
                 ),
-              _FilterPill(key: const ValueKey('board-filter-owner'), label: owner ?? 'Anyone', active: owner != null, onTap: () => _pickOwner(context, board, company)),
+              if (responsibleOn) _FilterPill(key: const ValueKey('board-filter-responsible'), label: 'Responsible: ${responsible ?? 'Anyone'}', active: responsible != null, onTap: () => _pickResponsible(context, board)),
+              _FilterPill(key: const ValueKey('board-filter-owner'), label: 'Owner: ${owner ?? 'Anyone'}', active: owner != null, onTap: () => _pickOwner(context, board, company)),
               _FilterPill(key: const ValueKey('board-filter-creator'), label: 'Created by: ${creator ?? 'Anyone'}', active: creator != null, onTap: () => _pickCreator(context, board)),
-            ],
+            ]),
           ),
         ),
         Expanded(child: content),
@@ -424,7 +485,7 @@ class _BoardPageState extends State<BoardPage> {
     }
     final allColumns = [for (final x in columns) x.column];
     Widget card(TicketView t) {
-      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide, me: _me, myLoginExpired: _myLoginExpired);
+      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide, me: _me, myLoginExpired: _myLoginExpired, responsible: context.read<ConnectionBloc>().state.has(ticketResponsibleFeature));
       final face = TicketCard(key: ValueKey('ticket-${t.id}'), ticket: t, board: ctx);
       if (!wide || !online || kind == ColumnKind.done) return face;
       // Drop on a card: it lands above it.
