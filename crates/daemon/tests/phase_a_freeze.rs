@@ -1,6 +1,6 @@
-//! The protocol freeze of phase A (AUR-FA-N1): `message.locate` works, the methods
-//! whose server part is still to come refuse cleanly and leave nothing, and a
-//! connection that does not accept the new events never gets them, in the replay either.
+//! The protocol freeze of phase A (AUR-FA-N1, F3): `message.locate`, `message.edit`,
+//! `message.delete`, `message.history` and `ticket.my_tickets` work through the API,
+//! and a connection that does not accept the new events never gets them, in the replay either.
 #![cfg(unix)]
 
 mod common;
@@ -10,7 +10,7 @@ use aurelius_client::{Client, ClientError};
 use aurelius_domain::group_chat::{DeleteMessage, EditMessage, SendGroupMessage};
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::ticket::{CreateTicket, FollowTicket, PostTicketMessage, TicketPriority};
-use aurelius_domain::{ActorKind, Command, CommandEnvelope, CommandId, CommandResult, ConversationId, ErrorCode, EventKind, MessageId, ProjectId, TicketId, UserId};
+use aurelius_domain::{ActorKind, Command, CommandId, CommandResult, ConversationId, ErrorCode, EventKind, MessageId, ProjectId, TicketId, UserId};
 use aurelius_host::ipc::{self, BoxStream, read_frame, write_frame};
 use aurelius_protocol::{HelloParams, Method, Outcome, Request, ResponseBody, ServerMessage, client_feature, feature};
 use aurelius_storage::Store;
