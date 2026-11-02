@@ -363,6 +363,12 @@ fn rows_for(store: &Store, user: &str) -> Vec<aurelius_domain::views::Notificati
     store.read(|c| timeline::list_notifications_for(c, 50, Some(user))).unwrap().into_iter().filter(|n| n.ticket_id.is_some()).collect()
 }
 
+/// What was written for `user`, whether or not the Inbox still shows it: the gate of `notify` is
+/// tested on this, not on the read.
+fn written_for(store: &Store, user: &str) -> i64 {
+    store.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM notifications WHERE user_id = ?1 AND ticket_id IS NOT NULL", [user], |r| r.get(0))?)).unwrap()
+}
+
 fn put_in(store: &Store, kind: &'static str) {
     store.write(move |tx| Ok(tx.execute(&format!("UPDATE tickets SET column_id = (SELECT id FROM board_columns WHERE kind = '{kind}') WHERE id = '{T1}'"), [])?)).unwrap();
 }
@@ -385,6 +391,7 @@ fn a_disabled_follower_or_responsible_gets_no_row() {
     assert_eq!(rows_for(&store, ALEX).len(), 1);
     store.write(|tx| append(tx, "ticket.updated", 2, mention_of(BEA))).unwrap();
     assert!(rows_for(&store, BEA).is_empty(), "nor for a name in a text");
+    assert_eq!(written_for(&store, BEA), 0, "nothing is written for a disabled member");
 }
 
 #[test]
@@ -423,6 +430,8 @@ fn a_review_event_gives_no_row_when_the_ticket_is_not_in_that_column() {
     store.write(|tx| append(tx, "ticket.review", 1, employee_by())).unwrap();
     store.write(|tx| append(tx, "ticket.plan_review", 2, employee_by())).unwrap();
     assert!(rows_for(&store, BEA).is_empty());
+    assert_eq!(written_for(&store, BEA), 0, "nothing is written, the read does not hide it");
+    assert_eq!(written_for(&store, ALEX), 0);
 }
 
 #[test]
