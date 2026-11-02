@@ -11,6 +11,7 @@ use crate::ui::{self, ButtonKind, h, v};
 use aurelius_domain::ticket::{self, ColumnKind, FollowerView, TicketView};
 use aurelius_domain::user::UserView;
 use aurelius_domain::{Command, TicketId, UserId};
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -270,7 +271,17 @@ fn responsible_mark(t: &TicketView, size: f32, cx: &App) -> AnyElement {
 
 /// A who line: the name truncates first, the tail stays.
 fn line_row(mark: Option<AnyElement>, line: WhoLine) -> Div {
-    h().gap(px(6.)).min_w_0().children(mark).child(div().min_w_0().truncate().child(line.name)).when(!line.tail.is_empty(), |el| el.child(div().flex_none().child(line.tail)))
+    h().gap(px(6.)).min_w_0().overflow_hidden().children(mark).child(div().min_w_0().truncate().child(line.name)).when(!line.tail.is_empty(), |el| el.child(div().id("who-tail").test_support().flex_none().child(line.tail)))
+}
+
+/// The card's who block (§1.3): who works on whose login, who follows up, and the deadline.
+pub fn card_who(t: &TicketView, me: Option<UserId>, login_disabled: bool, key: usize, deadline: Option<(String, u32)>, cx: &App) -> AnyElement {
+    let work = line_row(t.owner_name.as_ref().map(|n| ui::monogram(n, 16., cx).into_any_element()), work_line(t, me, login_disabled));
+    let follow_up = line_row(Some(responsible_mark(t, 16., cx)), responsible_line(t, me));
+    v().id(("card-who", key)).w_full().min_w_0().gap(px(3.)).text_size(px(11.)).text_color(c(theme::TEXT_2)).tooltip(ui::tip(who_sentence(t, me), None))
+        .child(work)
+        .child(h().w_full().gap(px(6.)).child(follow_up.flex_1()).children(deadline.map(|(text, color)| div().flex_none().text_color(c(color)).child(text))))
+        .into_any_element()
 }
 
 impl AppView {
@@ -405,15 +416,9 @@ impl AppView {
         self.open_menu(at, items, window, cx);
     }
 
-    /// The card's who block (§1.3): who works on whose login, who follows up, and the deadline.
+    /// The card's who block with what this window knows.
     pub fn render_card_who(&self, t: &TicketView, key: usize, deadline: Option<(String, u32)>, cx: &mut Context<Self>) -> AnyElement {
-        let me = self.active_member().map(|u| u.id);
-        let work = line_row(t.owner_name.as_ref().map(|n| ui::monogram(n, 16., cx).into_any_element()), work_line(t, me, self.login_disabled(t)));
-        let follow_up = line_row(Some(responsible_mark(t, 16., cx)), responsible_line(t, me));
-        v().id(("card-who", key)).gap(px(3.)).text_size(px(11.)).text_color(c(theme::TEXT_2)).tooltip(ui::tip(who_sentence(t, me), None))
-            .child(work)
-            .child(h().gap(px(6.)).child(follow_up.flex_1()).children(deadline.map(|(text, color)| div().flex_none().text_color(c(color)).child(text))))
-            .into_any_element()
+        card_who(t, self.active_member().map(|u| u.id), self.login_disabled(t), key, deadline, cx)
     }
 
     /// The panel's who strip on every tab (P-75), with Follow on the right (§3.1).
@@ -515,6 +520,9 @@ mod tests {
     // Not `super::*`: gpui's `test` attribute would shadow the standard one.
     use super::{FOLLOWERS_SHOWN, FollowState, FormResponsible, ResponsibleFilter, WhoLine, create_responsible, disable_note, follow_state, follow_tip, follow_toast, follower_name, follower_reason_text, followers_shown, responsible_choices, responsible_editable, responsible_line, responsible_line_text, responsible_matches, responsible_toast, who_sentence, work_line};
     use crate::screens::board::tests::card;
+    use gpui_kit::base::TestSupportExt as _;
+    use gpui_kit::test::TestWindowExt as _;
+    use gpui_kit::{AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement, ParentElement as _, Point, Render, Styled as _, TestAppContext, Window, WindowBounds, WindowOptions, div, px, size};
     use aurelius_domain::UserId;
     use aurelius_domain::ticket::{ColumnKind, FollowerView, TicketView};
     use aurelius_domain::user::UserView;
@@ -661,6 +669,40 @@ mod tests {
         assert_eq!(disable_note("Alexandra", 0), None);
         assert_eq!(disable_note("Alexandra", 1).as_deref(), Some("Alexandra is responsible for 1 open ticket. It keeps that name until someone changes it."));
         assert_eq!(disable_note("Alexandra", 3).as_deref(), Some("Alexandra is responsible for 3 open tickets. They keep that name until someone changes it."));
+    }
+
+    struct Card(TicketView);
+
+    impl Render for Card {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(div().id("the-card").test_support().w(px(CARD_INNER)).child(super::card_who(&self.0, None, false, 0, Some(("Nov 3".into(), 0)), cx)))
+        }
+    }
+
+    /// The narrowest card's inside: 232 px wide, less its padding.
+    const CARD_INNER: f32 = 212.;
+
+    /// §1.3: long names truncate first; "· on … login" and "· responsible" stay inside the card.
+    #[gpui_kit::test]
+    fn long_names_truncate_and_the_rest_of_the_line_stays_on_the_card(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        cx.update(|cx| cx.set_global(crate::theme::Fonts::resolve(cx)));
+        let mut t = ticket();
+        t.owner_name = Some("Forge the very long named backend developer".into());
+        t.login_username = "Marie".into();
+        t.responsible_username = Some("Alexandra with a really long family name".into());
+        let (window, _) = cx.update(|cx| {
+            let bounds = Bounds { origin: Point::default(), size: size(px(500.), px(300.)) };
+            gpui_kit::open_window(WindowOptions { window_bounds: Some(WindowBounds::Windowed(bounds)), ..Default::default() }, cx, |_, cx| cx.new(|_| Card(t))).unwrap_or_else(|e| panic!("window: {e}"))
+        });
+        cx.update_window(window, |_, window, cx| {
+            window.render_frame(cx);
+            let card = window.find("the-card").bounds();
+            let tail = window.find("who-tail").bounds();
+            assert!(tail.size.width > px(0.), "{tail:?}");
+            assert!(tail.right() <= card.right(), "the tail stays on the card: {tail:?} in {card:?}");
+        })
+        .unwrap_or_else(|e| panic!("update: {e}"));
     }
 
     #[test]
