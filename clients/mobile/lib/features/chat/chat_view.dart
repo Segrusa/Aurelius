@@ -43,6 +43,7 @@ import '../markdown/links.dart';
 import '../markdown/markdown_page.dart';
 import '../markdown/mention_markdown.dart';
 import 'following_list.dart';
+import 'message_edit.dart';
 import 'live_steps.dart';
 import 'git_chip.dart';
 import 'subagent_chip.dart';
@@ -534,14 +535,14 @@ class _MessagesState extends State<_Messages> {
     final bloc = context.read<ChatBloc>();
     final openThread = channel.threads && !channel.thread ? channel.openThread : null;
     ChannelMessageActions? actions(MessageView m) {
-      if (!writable || m.isStreaming) return null;
+      if (!writable || m.isStreaming || m.isDeleted) return null;
       final react = channel.reactions ? () => _react(context, bloc, m) : null;
       final reply = openThread != null && canStartThread(m) ? () => openThread(context, m) : null;
       return react == null && reply == null ? null : ChannelMessageActions(react: react, reply: reply);
     }
 
     Widget extras(MessageView m, Widget child) {
-      final reactions = channel.reactions && m.reactions.isNotEmpty;
+      final reactions = channel.reactions && m.reactions.isNotEmpty && !m.isDeleted;
       final line = openThread == null ? null : threadLine(m, DateTime.now());
       if (!reactions && line == null) return child;
       return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1066,7 +1067,8 @@ class _UserBubble extends StatelessWidget {
     final react = actions?.react;
     final reply = actions?.reply;
     final link = messageLinkable(context, message);
-    if (queuedId == null && !ticketable && react == null && reply == null && !link) {
+    final editable = messageEditable(context, message);
+    if (queuedId == null && !ticketable && react == null && reply == null && !link && !editable) {
       Clipboard.setData(ClipboardData(text: text));
       toast(context, 'Copied.');
       return;
@@ -1079,6 +1081,8 @@ class _UserBubble extends StatelessWidget {
       const GlassMenuItem('copy', 'Copy'),
       if (link) const GlassMenuItem('link', 'Copy link'),
       if (ticketable) const GlassMenuItem('ticket', 'Create ticket'),
+      if (editable) const GlassMenuItem('edit', 'Edit'),
+      if (editable) const GlassMenuItem('remove', 'Delete', danger: true),
       if (queuedId != null) const GlassMenuItem('delete', 'Delete', danger: true),
     ]);
     if (!context.mounted) return;
@@ -1091,6 +1095,10 @@ class _UserBubble extends StatelessWidget {
         await copyMessageLink(context, message!.id);
       case 'ticket':
         await createTicketFrom(context, message!, source!, already: ticket);
+      case 'edit':
+        await editOwnMessage(context, message!);
+      case 'remove':
+        await deleteOwnMessage(context, message!);
       case 'now':
         bloc.add(ChatQueuedSentNow(queuedId!));
       case 'delete':
@@ -1110,6 +1118,20 @@ class _UserBubble extends StatelessWidget {
       for (final f in unsent?.files ?? const <PendingFile>[]) (f.name, f.byteLength, null, null),
     ];
     final end = flat ? WrapAlignment.start : WrapAlignment.end;
+    // Deleted (A6): the place stays, the words, files and copy do not.
+    if (message?.isDeleted == true) {
+      return Padding(
+        padding: flat ? const EdgeInsets.only(top: 2) : const EdgeInsets.only(top: 14, left: 48),
+        child: Column(
+          crossAxisAlignment: flat ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+          children: [
+            if (!flat && author != null) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text('$author · board member', style: Tokens.monoSmall())),
+            DeletedMessageLine(message: message!, author: author ?? message!.authorUser?.username),
+            if (ticket != null) TicketPill(ticket: ticket!),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: flat ? const EdgeInsets.only(top: 2) : const EdgeInsets.only(top: 14, left: 48),
       child: Column(
@@ -1145,6 +1167,7 @@ class _UserBubble extends StatelessWidget {
             ),
           ),
           if (text.isNotEmpty) CopyButton(key: const Key('copy-user'), text: text),
+          if (messageEditedShown(context, message)) EditedMark(message: message!),
           if (ticket != null) TicketPill(ticket: ticket!),
           if (files.isNotEmpty) MessageFiles(files: files),
           if (sentFiles.isNotEmpty)

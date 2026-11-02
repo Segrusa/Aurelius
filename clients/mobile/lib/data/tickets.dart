@@ -25,6 +25,12 @@ const personalInboxFeature = 'personal_inbox';
 /// The server keeps who follows a ticket (phase A, A2).
 const ticketFollowFeature = 'ticket_follow';
 
+/// The server answers `ticket.my_tickets` (phase A, A4): only then is there a My tickets.
+const myTicketsFeature = 'my_tickets';
+
+/// The server lets a board member edit and delete their own messages (phase A, A6).
+const messageEditsFeature = 'message_edits';
+
 /// [board] as this client shows it: without the Testing column when the server
 /// lacks [boardTestingFeature] ([testing] false).
 BoardView boardShown(BoardView board, {required bool testing}) => testing

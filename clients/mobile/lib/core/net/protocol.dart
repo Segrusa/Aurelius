@@ -97,6 +97,7 @@ extension EventKinds on Event {
         EventKind.conversationStarted ||
         EventKind.messageAssistantCommitted ||
         EventKind.messageDeleted ||
+        EventKind.messageEdited ||
         EventKind.messageInterrupted ||
         EventKind.messageReacted ||
         EventKind.messageSentNow ||

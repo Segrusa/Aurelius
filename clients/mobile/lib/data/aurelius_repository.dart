@@ -158,6 +158,13 @@ class AureliusRepository {
   /// Who follows a ticket (feature `ticket_follow`).
   Future<TicketFollowersView> followers(String ticketId) async => (await _ask<ResponseBodyTicketFollowers>(ticketFollowers(ticketId: ticketId))).value;
 
+  /// The tickets of the signed-in board member (feature `my_tickets`); [includeDone] adds Done and archived ones.
+  Future<MyTicketsView> myTickets({String? projectId, bool includeDone = false}) async =>
+      (await _ask<ResponseBodyMyTickets>(ticketMyTickets(projectId: projectId, includeDone: includeDone ? true : null))).value;
+
+  /// The earlier texts of an edited message, newest first (feature `message_edits`).
+  Future<MessageHistoryView> messageEdits(String messageId) async => (await _ask<ResponseBodyMessageHistory>(messageHistory(messageId: messageId))).value;
+
   /// Where a message is, for a link to it (feature `message_locate`).
   Future<MessageLocation> messageLocation(String messageId) async => (await _ask<ResponseBodyMessageLocation>(messageLocate(messageId: messageId))).value;
 
