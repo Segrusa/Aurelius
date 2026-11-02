@@ -189,7 +189,7 @@ async fn the_dispatcher_chooses_an_owner_and_the_work_starts() {
     let lines = discussion_lines(&b.client, id).await;
     let chose: Vec<_> = lines.iter().filter(|(_, _, t)| t.starts_with("Orion chose")).collect();
     assert_eq!(chose.len(), 1, "{lines:#?}");
-    assert_eq!((chose[0].0, chose[0].1, chose[0].2.as_str()), (aurelius_domain::views::SystemLineKind::Delegated, Some(root), "Orion chose Builder as owner: Builder knows this part"));
+    assert_eq!((chose[0].0, chose[0].1, chose[0].2.as_str()), (aurelius_domain::views::SystemLineKind::Delegated, Some(root), "Orion made Builder the owner of this ticket. Reason: Builder knows this part"));
 
     drop(b.client);
     common::stop(&b.root, b.daemon).await;
@@ -235,7 +235,7 @@ async fn without_a_dispatcher_the_ticket_waits_for_a_board_member() {
 
     // The board member chooses (MU1-10 AC4): the work starts.
     b.client.ticket_command(Command::AssignTicket(AssignTicket { ticket_id: id, employee_id: Some(builder), reason: Some("knows the export".into()) }), None).await.unwrap();
-    assert!(discussion_lines(&b.client, id).await.iter().any(|(_, _, t)| t == "grace chose Builder as owner: knows the export"), "a board member's choice");
+    assert!(discussion_lines(&b.client, id).await.iter().any(|(_, _, t)| t == "grace made Builder the owner of this ticket. Reason: knows the export"), "a board member's choice");
     // (Builder is the only active employee now, so management: its task starts in Plan and stops in Plan review.)
     let worked = until(&b.client, id, |d| d.root_task.as_ref().is_some_and(|t| t.employee_id == Some(builder) && t.status != TaskStatus::Draft && t.status != TaskStatus::Queued)).await;
     assert_ne!(worked.ticket.column, ColumnKind::Todo);

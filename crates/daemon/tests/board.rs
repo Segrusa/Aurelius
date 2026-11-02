@@ -217,9 +217,9 @@ async fn a_ticket_is_worked_reported_sent_back_and_accepted() {
     assert_eq!(reason, "accepted");
     // MU2-03 / MU2-06 AC2: sent back to Doing and put on Done, by the board member, once each.
     let texts: Vec<String> = discussion_lines(&client, id).await.into_iter().map(|(_, _, t)| t).collect();
-    assert_eq!(texts.iter().filter(|t| *t == "grace sent it back · Review → Doing").count(), 1, "{texts:#?}");
-    assert_eq!(texts.iter().filter(|t| *t == "grace put it on Done").count(), 1, "{texts:#?}");
-    assert_eq!(texts.iter().filter(|t| t.ends_with("handed in the report · Review")).count(), 2, "{texts:#?}");
+    assert_eq!(texts.iter().filter(|t| *t == "grace sent the ticket back for more work — the ticket moved from Review to Doing").count(), 1, "{texts:#?}");
+    assert_eq!(texts.iter().filter(|t| *t == "grace accepted the report and moved the ticket to Done").count(), 1, "{texts:#?}");
+    assert_eq!(texts.iter().filter(|t| t.ends_with("handed in the report. It is ready for your review")).count(), 2, "{texts:#?}");
 
     drop(client);
     common::stop(dir.path(), daemon).await;
@@ -254,8 +254,8 @@ async fn a_failed_main_task_stays_in_doing_and_starts_again() {
     assert_eq!(waiting.tasks.len(), 1);
     // MU2-03: a failed main task says so where the card stays, and a cancel says who.
     let texts: Vec<String> = discussion_lines(&client, id).await.into_iter().map(|(_, _, t)| t).collect();
-    assert_eq!(texts.iter().filter(|t| *t == "Builder could not finish the main task · Start makes a new one").count(), 2, "{texts:#?}");
-    assert!(discussion_lines(&client, other).await.iter().any(|(_, _, t)| t == "grace cancelled it · Todo → Backlog"));
+    assert_eq!(texts.iter().filter(|t| *t == "Builder could not finish the ticket's main task. Press Start to begin a new attempt.").count(), 2, "{texts:#?}");
+    assert!(discussion_lines(&client, other).await.iter().any(|(_, _, t)| t == "grace cancelled the ticket — the ticket moved from Todo to Backlog"));
 
     drop(client);
     common::stop(dir.path(), daemon).await;

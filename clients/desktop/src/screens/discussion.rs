@@ -31,20 +31,20 @@ pub fn system_text(line: &SystemLine, text: &str) -> String {
         return crate::screens::who::responsible_line_text(&by, line.from.as_deref(), line.to.as_deref());
     }
     match line.kind {
-        SystemLineKind::Delegated => format!("{} delegated a task to {}", or(&line.from, "An employee"), or(&line.to, "a colleague")),
-        SystemLineKind::Reported => format!("{} reported", or(&line.from, "A colleague")),
+        SystemLineKind::Delegated => format!("{} gave a task to {}", or(&line.from, "An employee"), or(&line.to, "a colleague")),
+        SystemLineKind::Reported => format!("{} reported back on a task", or(&line.from, "A colleague")),
         SystemLineKind::Moved => match (&line.from, &line.to) {
-            (Some(from), Some(to)) => format!("{by} moved {from} → {to}"),
-            (_, Some(to)) => format!("{by} moved to {to}"),
+            (Some(from), Some(to)) => format!("{by} moved the ticket from {from} to {to}"),
+            (_, Some(to)) => format!("{by} moved the ticket to {to}"),
             _ => format!("{by} moved the ticket"),
         },
-        SystemLineKind::Plan => format!("{} handed in a plan · waiting for a board member", or(&line.from, "The owner")),
-        SystemLineKind::Review => format!("{} handed in the report · Review", or(&line.from, "The owner")),
-        SystemLineKind::Done => format!("{by} put it on Done"),
+        SystemLineKind::Plan => format!("{} handed in a plan. It waits for a board member to approve it", or(&line.from, "The owner")),
+        SystemLineKind::Review => format!("{} finished the work and handed in the report. It is ready for your review", or(&line.from, "The owner")),
+        SystemLineKind::Done => format!("{by} accepted the report and moved the ticket to Done"),
         SystemLineKind::CreatedFrom => format!("Created from a message{}", line.by.as_deref().map(|b| format!(" · {b}")).unwrap_or_default()),
         SystemLineKind::TicketCreated => format!("{by} created a ticket from a message"),
-        SystemLineKind::Summary => "Summary saved to project memory".to_string(),
-        SystemLineKind::SummaryFailed => "The summary for project memory failed".to_string(),
+        SystemLineKind::Summary => "A summary of this ticket was saved to project memory".to_string(),
+        SystemLineKind::SummaryFailed => "The summary of this ticket could not be saved to project memory".to_string(),
         SystemLineKind::Limit => format!("Limit reached: {} was not woken.", or(&line.to, "nobody")),
     }
 }
@@ -800,18 +800,18 @@ pub(crate) mod tests {
         moved.by = Some("Forge".into());
         moved.from = Some("Doing".into());
         moved.to = Some("Review".into());
-        assert_eq!(system_text(&moved, ""), "Forge moved Doing → Review");
+        assert_eq!(system_text(&moved, ""), "Forge moved the ticket from Doing to Review");
         assert_eq!(system_text(&moved, "  Forge moved #42 Doing → Review "), "Forge moved #42 Doing → Review", "the server's text wins");
         let mut delegated = SystemLine::new(SystemLineKind::Delegated);
         delegated.from = Some("Orion".into());
         delegated.to = Some("Schema".into());
         delegated.task_id = Some(aurelius_domain::TaskId::new());
-        assert_eq!(system_text(&delegated, ""), "Orion delegated a task to Schema");
+        assert_eq!(system_text(&delegated, ""), "Orion gave a task to Schema");
         assert!(system_task(&delegated).is_some(), "a delegation links to its task (MU2-03 AC2)");
         let mut limit = SystemLine::new(SystemLineKind::Limit);
         limit.to = Some("Forge".into());
         assert_eq!(system_text(&limit, ""), "Limit reached: Forge was not woken.", "never left out silently");
-        assert_eq!(system_text(&SystemLine::new(SystemLineKind::Done), ""), "Aurelius put it on Done");
+        assert_eq!(system_text(&SystemLine::new(SystemLineKind::Done), ""), "Aurelius accepted the report and moved the ticket to Done");
         assert_eq!(system_label("Forge moved", "10:41"), "System: Forge moved at 10:41");
         assert!(system_task(&SystemLine::new(SystemLineKind::Moved)).is_none());
     }

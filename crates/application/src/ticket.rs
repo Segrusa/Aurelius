@@ -240,8 +240,8 @@ impl CommandService {
                     }
                     if target.kind != state.column {
                         let what = match effect {
-                            MoveEffect::Start => Some("started it"),
-                            MoveEffect::Cancel => Some("cancelled it"),
+                            MoveEffect::Start => Some("started the ticket"),
+                            MoveEffect::Cancel => Some("cancelled the ticket"),
                             MoveEffect::Reorder => None,
                         };
                         e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, target.kind, what)?);
@@ -266,8 +266,8 @@ impl CommandService {
                 e.moved(tx, state.column, ColumnKind::Todo, by)?;
                 e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
                 let what = match cmd.employee_id {
-                    Some(employee) => format!("started it with {} as owner", crate::conversation::discussion::employee_name(tx, employee)?),
-                    None => "started it".to_owned(),
+                    Some(employee) => format!("started the ticket with {} as owner", crate::conversation::discussion::employee_name(tx, employee)?),
+                    None => "started the ticket".to_owned(),
                 };
                 e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Todo, Some(&what))?);
                 if let Some(employee) = cmd.employee_id {
@@ -409,7 +409,7 @@ impl CommandService {
                     store::set_feedback(tx, state.id, Some(&feedback))?;
                     e.moved(tx, state.column, ColumnKind::Doing, by)?;
                     e.push(tx, EventKind::TicketSentBack, json!({ "by": by }))?;
-                    e.line(ticket_line::column_line_with(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("sent it back"), Some(system_action::SENT_BACK))?);
+                    e.line(ticket_line::column_line_with(tx, state.id, Some(by), state.column, ColumnKind::Doing, Some("sent the ticket back for more work"), Some(system_action::SENT_BACK))?);
                     // B2: the feedback goes to the main task's conversation.
                     finish_then(tx, state.id, e, |tx| {
                         let mut notices = feedback_note(tx, &st, state.id, user, &base, &feedback)?;
@@ -425,7 +425,7 @@ impl CommandService {
                 to_column(tx, state.id, ColumnKind::Backlog)?;
                 e.moved(tx, state.column, ColumnKind::Backlog, by)?;
                 e.push(tx, EventKind::TicketCancelled, json!({ "by": by }))?;
-                e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Backlog, Some("cancelled it"))?);
+                e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Backlog, Some("cancelled the ticket"))?);
                 finish_then(tx, state.id, e, |tx| ticket_line::cancel(tx, &st, state.id, &command_id.to_string()))
             }),
             Command::ArchiveTicket(cmd) => self.commit(command_id, hash, move |tx| {
@@ -591,8 +591,8 @@ impl CommandService {
                 e.moved(tx, ColumnKind::Backlog, ColumnKind::Todo, by)?;
                 e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
                 let what = match cmd.owner_employee_id {
-                    Some(employee) => format!("started it with {} as owner", crate::conversation::discussion::employee_name(tx, employee)?),
-                    None => "started it".to_owned(),
+                    Some(employee) => format!("started the ticket with {} as owner", crate::conversation::discussion::employee_name(tx, employee)?),
+                    None => "started the ticket".to_owned(),
                 };
                 e.line(ticket_line::column_line(tx, id, Some(by), ColumnKind::Backlog, ColumnKind::Todo, Some(&what))?);
             }
