@@ -60,6 +60,13 @@ De client maakt de vier tabs en tellers uit dit ene antwoord. *Waiting on me* is
 - `reason` is tekst, geen enum: `responsible`, `mention`, `plan_review`, `review`, `sent_back`, `failed`, `login`. Een client toont een onbekende waarde als gewone rij.
 - `system_action::RESPONSIBLE = "responsible"` op de bestaande `SystemLineKind::Moved`. Geen nieuwe `SystemLineKind`.
 
+### Host-writes
+| Method | Variant | Velden | Antwoord |
+|---|---|---|---|
+| `notification.mark_read` | `HostWrite::NotificationMarkRead` | `id` | `Count`: 0 bij onbekend, niet zichtbaar, al gelezen of geen board member |
+
+Geen eigen feature: clients gebruiken hem alleen als `personal_inbox` aan staat. Toegevoegd na de freeze (M2, Titan 2026-11-02), want README en ui §4.4 maken een rij pas gelezen bij het openen en daar was geen write voor.
+
 ### Events
 | Kind | Status | Oudere client |
 |---|---|---|
@@ -104,6 +111,10 @@ De client maakt de vier tabs en tellers uit dit ene antwoord. *Waiting on me* is
 - `severity` `warning` of `info`, nooit `action` (alleen de bestaande login-rij). `task_id` is de hoofdtaak als die er is. `title` is de volledige zin (*"Marie made you responsible"*), zodat een oudere client hem ook kan tonen.
 
 **Samenvoegen:** één ongelezen rij per (user, ticket), of (user, kanaal) buiten een ticket. Elke nieuwe gebeurtenis zet `created_at_ms` op nu en `merged_count + 1`. De kop is de belangrijkste reden: login > failed > review/plan_review > mention > sent_back > responsible. **Push:** voor de eerste rij en altijd voor `responsible` en `mention`; de pushregel volgt de impactanalyse B5.
+
+**Lezen:** een rij openen roept `notification.mark_read` aan, nooit `dismiss`. Dat geldt alleen voor de lezer. Een ◆-rij houdt zijn ◆ zolang `needs_you` waar is, want dat wordt bij het lezen berekend.
+
+**Push-`data`:** naast de bestaande sleutels ook `ticket_id`, `ticket_number`, `conversation_id`, `message_id` en `reason`. Bij een rij buiten een ticket staat de kanaalnaam in `subject`, door de redactor. Nooit berichttekst.
 
 **Gate:** in `notify`, op de stand ná de wijziging (test per event). Geen rij op Done of gearchiveerd. `STILL_RELEVANT` verbergt ticketrijen van gesloten tickets, `review`/`plan_review` zodra het ticket daar weg is en `failed` zodra de hoofdtaak niet meer failed is (B12).
 
