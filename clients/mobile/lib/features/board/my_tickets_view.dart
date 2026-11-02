@@ -106,6 +106,9 @@ class _MyTicketsPaneState extends State<MyTicketsPane> {
                     myTabEmptyText(tab),
                     action: tab == MyTab.created ? FilledButton(key: const ValueKey('my-tickets-new'), onPressed: () => context.push('/board/new'), child: const Text('New ticket')) : null,
                   );
+          } else if (shown.every((t) => widget.cardFor(t) == null)) {
+            // The Board's columns are not read yet: they are what a card needs around it.
+            body = const _Skeleton();
           } else {
             body = PullToRefresh(
               scrollable: true,
