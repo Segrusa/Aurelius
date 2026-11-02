@@ -34,10 +34,13 @@ import 'ticket_card.dart' show WhoBlock, priorityColor, startWith;
 /// Phase 2 also its discussion (ui-ontwerp Fase 2 §2), where the plan and the
 /// report are decided; [discussion] opens on it.
 class TicketPage extends StatelessWidget {
-  const TicketPage({super.key, required this.ticketId, this.discussion = false, this.message});
+  const TicketPage({super.key, required this.ticketId, this.discussion = false, this.activity = false, this.message});
 
   final String ticketId;
   final bool discussion;
+
+  /// Opens on the Activity: the `+n` of a row in the Inbox.
+  final bool activity;
 
   /// A link to a message of its discussion: scroll to it there.
   final String? message;
@@ -47,7 +50,7 @@ class TicketPage extends StatelessWidget {
         // Another ticket on the same route (a `go`) gets its own bloc, not the last one's.
         key: ValueKey('ticket-$ticketId'),
         create: (context) => TicketBloc(context.read<AureliusRepository>(), ticketId),
-        child: _TicketView(key: ValueKey('ticket-view-$ticketId'), discussion: discussion, message: message),
+        child: _TicketView(key: ValueKey('ticket-view-$ticketId'), discussion: discussion, activity: activity, message: message),
       );
 }
 
@@ -88,9 +91,10 @@ Map<String, dynamic>? ticketTextUpdate(TicketView ticket, TicketTextEdit edit, {
 final _seen = <String, int>{};
 
 class _TicketView extends StatefulWidget {
-  const _TicketView({super.key, required this.discussion, this.message});
+  const _TicketView({super.key, required this.discussion, this.activity = false, this.message});
 
   final bool discussion;
+  final bool activity;
   final String? message;
 
   @override
@@ -98,7 +102,7 @@ class _TicketView extends StatefulWidget {
 }
 
 class _TicketViewState extends State<_TicketView> {
-  late _Segment _segment = widget.discussion ? _Segment.discussion : _Segment.ticket;
+  late _Segment _segment = widget.activity ? _Segment.activity : widget.discussion ? _Segment.discussion : _Segment.ticket;
 
   /// The discussion's composer: Send back and Pas aan take their text from it (MU2-05/06).
   final _composer = TextEditingController();
@@ -151,7 +155,7 @@ class _TicketViewState extends State<_TicketView> {
     final expired = link.claudeLogin?.status == ClaudeLoginStatus.expired;
     // The ◆ is the responsible's (B6); the buttons stay for anyone.
     final mine = needsMe(ticket, state, me: link.user?.id);
-    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired, waitsFor: waitsForOther(ticket, state, me: link.user?.id));
+    final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == link.user?.id, untilMs: root?.waitingUntilMs, expired: expired, others: decidedByOther(ticket, state, me: link.user?.id));
     final segment = conversation == null && _segment == _Segment.discussion ? _Segment.ticket : _segment;
     final responsibleOn = link.has(ticketResponsibleFeature);
     final followOn = link.has(ticketFollowFeature);

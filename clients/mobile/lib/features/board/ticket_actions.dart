@@ -35,10 +35,10 @@ String ticketFailure(Object e) => switch (e) {
     };
 
 /// Send one ticket write; [done] is shown after it committed, the failure
-/// otherwise ([onConflict] words a version conflict itself). A toast with an
+/// otherwise. A toast with an
 /// [action] (Undo) still goes after 5 s (§6): an action alone would keep it
 /// (`persist`). Decisions ([retry] false) are never replayed later.
-Future<bool> ticketWrite(BuildContext context, Map<String, dynamic> request, {int? expectedVersion, String? done, bool retry = true, SnackBarAction? action, Future<String> Function()? onConflict}) async {
+Future<bool> ticketWrite(BuildContext context, Map<String, dynamic> request, {int? expectedVersion, String? done, bool retry = true, SnackBarAction? action}) async {
   final repository = context.read<AureliusRepository>();
   final messenger = ScaffoldMessenger.maybeOf(context);
   void show(String text, [SnackBarAction? action]) => messenger
@@ -52,7 +52,7 @@ Future<bool> ticketWrite(BuildContext context, Map<String, dynamic> request, {in
     if (done != null) show(done, action);
     return true;
   } on ProtocolException catch (e) {
-    show(e.isConflict && onConflict != null ? await onConflict() : ticketFailure(e));
+    show(ticketFailure(e));
     return false;
   } on Object catch (e) {
     show(ticketFailure(e));
@@ -386,36 +386,29 @@ Future<bool> chooseResponsible(BuildContext context, TicketView ticket) async {
 }
 
 /// The write behind every way to change who is responsible, [userId] null for
-/// no one. A version conflict says who is responsible now (§2.5); it overwrites nothing.
+/// no one. A handover has no version check on the server: the last one wins.
 Future<bool> setResponsible(BuildContext context, TicketView ticket, String? userId, {String? name}) {
-  final repository = context.read<AureliusRepository>();
   final me = context.read<ConnectionBloc>().state.user?.id;
   return ticketWrite(
     context,
     ticketSetResponsible(ticketId: ticket.id, responsibleUserId: userId),
-    expectedVersion: ticket.version,
     done: switch (userId) {
       null => 'No one is responsible for #${ticket.number} now.',
       _ when userId == me => 'You are now responsible for #${ticket.number}.',
       _ => '${name ?? 'They'} is now responsible for #${ticket.number}.',
     },
-    onConflict: () async {
-      try {
-        final now = responsibleLabel((await repository.ticket(ticket.id)).ticket, me: me);
-        return 'Someone changed this first. ${now == null ? 'No one is' : now == 'You' ? 'You are' : '$now is'} responsible now.';
-      } on Object {
-        return 'Changed on another device. Showing the latest.';
-      }
-    },
   );
 }
 
 /// Follow or unfollow [ticket] (A2, §3.3). The server refuses to unfollow for
-/// its responsible as well (B10); this client does not offer it.
-Future<bool> followTicket(BuildContext context, TicketView ticket, {required bool on}) => ticketWrite(
+/// its active responsible (B10) and says why; the toast shows that.
+Future<bool> followTicket(BuildContext context, TicketView ticket, {required bool on}) => followTicketById(context, ticket.id, ticket.number, on: on);
+
+/// [followTicket] where only the id and the number are known (a row of the Inbox).
+Future<bool> followTicketById(BuildContext context, String ticketId, int number, {required bool on}) => ticketWrite(
       context,
-      ticketFollow(FollowTicket(on: on, ticketId: ticket.id)),
-      done: on ? "You'll get updates on #${ticket.number}." : 'Unfollowed #${ticket.number}. A new @mention or becoming responsible makes you follow again.',
+      ticketFollow(FollowTicket(on: on, ticketId: ticketId)),
+      done: on ? "You'll get updates on #$number." : 'Unfollowed #$number. A new @mention or becoming responsible makes you follow again.',
     );
 
 /// Whether [me] follows [ticket]; null when that could not be read.

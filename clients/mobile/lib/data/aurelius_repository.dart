@@ -9,6 +9,8 @@ import '../core/net/gateway_api.dart';
 import '../core/net/protocol.dart';
 import 'drafts.dart';
 import 'protocol/protocol.dart';
+import 'tickets.dart';
+import 'views.dart' show TaskViewState;
 
 /// The data layer for one host: typed queries and writes over the
 /// connection (the generated method functions), plus the change signals
@@ -606,4 +608,21 @@ class AureliusRepository {
   }
 
   Future<void> unregisterPush() async => connection.api.unregisterPush(host, await connection.sessionToken());
+}
+
+/// What needs the signed-in board member, shared by the company and CarPlay.
+extension NeedsMeReads on AureliusRepository {
+  /// [othersMainTasks] of [tasks]. Reads the board only when a main task waits
+  /// on a server with a Responsible; a failed read leaves them counted as before.
+  Future<Set<String>> mainTasksOfOthers(List<TaskView> tasks) async {
+    if (!linkState.has(ticketResponsibleFeature) || !tasks.any((t) => t.isTicketMain && t.needsYou)) return const {};
+    try {
+      final read = await board();
+      return othersMainTasks(tasks, read.columns.expand((c) => c.tickets), me: linkState.user?.id);
+    } on DisconnectedException {
+      return const {};
+    } on ProtocolException {
+      return const {};
+    }
+  }
 }

@@ -95,7 +95,8 @@ class FollowingListState extends State<FollowingList> {
 
   /// Scroll to the row [key] and mark it a moment (a link to a message). Rows
   /// are built lazily and the list starts at its end, so this goes up a screen
-  /// at a time until the row exists. False when there is no such row.
+  /// at a time until the row exists. False when there is no such row or it
+  /// was not reached.
   Future<bool> reveal(String key) async {
     if (!widget.items.any((x) => x.key == key)) return false;
     setState(() {
@@ -105,7 +106,9 @@ class FollowingListState extends State<FollowingList> {
       _flash = key;
     });
     await WidgetsBinding.instance.endOfFrame;
-    for (var i = 0; i < revealStepsMax && mounted; i++) {
+    // A long history of tall rows takes as many steps as it has rows.
+    final steps = revealStepsMax + widget.items.length;
+    for (var i = 0; i < steps && mounted; i++) {
       final row = _revealed.currentContext;
       if (row != null) {
         // ignore: use_build_context_synchronously
@@ -122,7 +125,7 @@ class FollowingListState extends State<FollowingList> {
     _flashEnd = Timer(revealFlash, () {
       if (mounted) setState(() => _flash = null);
     });
-    return true;
+    return _revealed.currentContext != null;
   }
 
   /// One row: under its own key, and marked while a link opened on it.

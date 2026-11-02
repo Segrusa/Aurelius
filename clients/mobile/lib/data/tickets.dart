@@ -19,6 +19,9 @@ const testingMovesByItself = 'Testing moves on by itself when the tests have run
 /// then does a client show or send it, and only then can a ◆ belong to one person.
 const ticketResponsibleFeature = 'ticket_responsible';
 
+/// The server keeps a personal Inbox: rows per ticket or channel (A3).
+const personalInboxFeature = 'personal_inbox';
+
 /// The server keeps who follows a ticket (phase A, A2).
 const ticketFollowFeature = 'ticket_follow';
 
@@ -263,22 +266,22 @@ extension TicketStateView on TicketState {
   /// The status line on a card; null where the column says enough. [login]:
   /// whose Claude login it runs on (`login_username`, "your" when it is
   /// yours), [untilMs] when its limit resets, [tester] who runs the tests,
-  /// [waitsFor] who a decision is for when that is someone else ([needsMe]).
-  String? line({String? owner, String? dispatcher, String? tester, String? login, bool mine = false, int? untilMs, bool expired = false, String? waitsFor}) => switch (this) {
+  /// [others] the decision is not the reader's ([needsMe]): the same words as the desktop.
+  String? line({String? owner, String? dispatcher, String? tester, String? login, bool mine = false, int? untilMs, bool expired = false, bool others = false}) => switch (this) {
         TicketState.backlog => null,
         TicketState.choosing => '${dispatcher ?? 'The dispatcher'} is choosing…',
         TicketState.needsOwner => 'Choose an employee',
         TicketState.ownerUnknown => 'Dispatcher unknown · choose an employee',
         TicketState.queued => 'Queued for ${owner ?? 'its owner'}',
         TicketState.working => 'Working',
-        TicketState.waitingForYou => waitsFor == null ? 'Waiting for you' : 'Waiting for $waitsFor',
+        TicketState.waitingForYou => others ? 'Waiting for approval' : 'Waiting for you',
         TicketState.needsYourLogin => expired ? 'Waiting for your Claude login (expired)' : 'Waiting for your Claude login',
         TicketState.waitsForLogin => "Waiting for ${login ?? 'its creator'}'s Claude login",
         TicketState.waitingForLimit => limitWaitOf(mine ? 'your' : "${login ?? 'its creator'}'s", untilMs),
-        TicketState.failed => 'Failed',
-        TicketState.planReview => 'Plan to review',
+        TicketState.failed => others ? '✕ Failed' : 'Failed',
+        TicketState.planReview => others ? 'Waiting for plan review' : 'Plan to review',
         TicketState.testing => '${tester ?? 'The tester'} is testing…',
-        TicketState.review => 'Report to review',
+        TicketState.review => others ? 'Waiting for review' : 'Report to review',
         TicketState.done => 'Done',
       };
 }
@@ -295,8 +298,20 @@ bool needsMe(TicketView ticket, TicketState state, {String? me}) {
   return responsible == null || (ticket.responsibleDisabled ?? false) || responsible == me;
 }
 
-/// Who a decision that is not [me]'s waits for (the responsible's name); null when it is [me]'s or nobody's.
-String? waitsForOther(TicketView ticket, TicketState state, {String? me}) => state.needsYou && !needsMe(ticket, state, me: me) ? ticket.responsibleUsername : null;
+/// Whether [ticket] in [state] waits for a decision that is someone else's: the words of [TicketStateView.line].
+bool decidedByOther(TicketView ticket, TicketState state, {String? me}) => state.needsYou && !needsMe(ticket, state, me: me);
+
+/// The ids in [tasks] of main tasks that wait for a decision that is someone
+/// else's ([needsMe], freeze §5): Dashboard, Waiting tasks and CarPlay do not
+/// count them. A main task whose ticket is not in [tickets] counts as before.
+Set<String> othersMainTasks(List<TaskView> tasks, Iterable<TicketView> tickets, {String? me}) {
+  final byId = {for (final t in tickets) t.id: t};
+  return {
+    for (final t in tasks)
+      if (t.isTicketMain && t.needsYou)
+        if (byId[t.ticketId] case final ticket? when !needsMe(ticket, ticketState(ticket, root: t, me: me), me: me)) t.id,
+  };
+}
 
 /// What the Responsible is for, under the field and in its picker (P-71).
 const responsibleExplained = 'Follows up and reviews. An employee does the work.';

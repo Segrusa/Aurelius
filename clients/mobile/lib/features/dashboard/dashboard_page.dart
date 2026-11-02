@@ -46,7 +46,7 @@ class DashboardPage extends StatelessWidget {
           final team = state.managementTeam;
           final teamIds = {for (final m in team) m.id};
           final atWork = state.workingEmployees.where((m) => !teamIds.contains(m.id)).toList()..sort(byName);
-          final waiting = state.tasks.where((t) => t.needsYou).toList()..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
+          final waiting = state.waitingTasks..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
           final proposals = state.pendingProposals;
           return LargeTitleScaffold(
             title: 'Home',

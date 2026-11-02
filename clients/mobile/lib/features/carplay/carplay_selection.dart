@@ -43,8 +43,9 @@ ProjectSummary? loggingProject(List<ProjectSummary> projects, List<TaskView> tas
   return (active..sort((a, b) => b.createdAtMs.compareTo(a.createdAtMs))).firstOrNull;
 }
 
-/// Tasks waiting for the user, most recently changed first.
-List<TaskView> needsYouTasks(List<TaskView> tasks) => tasks.where((t) => t.needsYou && !t.isDone).toList()..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
+/// Tasks waiting for the user, most recently changed first, without the main
+/// tasks whose decision is someone else's ([others]).
+List<TaskView> needsYouTasks(List<TaskView> tasks, {Set<String> others = const {}}) => tasks.where((t) => t.needsYou && !t.isDone && !others.contains(t.id)).toList()..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs));
 
 /// A plan or an approval is decided on the phone (Inbox); input, escalations
 /// and the like can be answered by voice in the task's conversation.

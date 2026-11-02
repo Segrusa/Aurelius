@@ -239,13 +239,10 @@ void main() {
       expect(paramsOf(writesOf(repo).single), {'ticket_id': 'k1', 'responsible_user_id': 'u-1'});
     });
 
-    testWidgets('a version conflict says who is responsible now and overwrites nothing', (tester) async {
+    testWidgets('a handover sends no version: the last one wins', (tester) async {
       final repo = await open(tester, ticketOf(number: 42));
-      when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
-          .thenThrow(const ProtocolException(ErrorCode.versionConflict, 'stale'));
-      when(() => repo.ticket(any())).thenAnswer((_) async => detailOf(ticketOf(number: 42, responsible: bo)));
       await tapKey(tester, 'ticket-make-me-responsible');
-      expect(find.text('Someone changed this first. bo is responsible now.'), findsOneWidget);
+      verify(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: null, retry: any(named: 'retry'))).called(1);
     });
 
     testWidgets('on Done it is read-only and says why', (tester) async {
@@ -268,7 +265,7 @@ void main() {
       expect(find.byKey(const ValueKey('bar-done')), findsOneWidget);
       expect(find.byKey(const ValueKey('bar-send-back')), findsOneWidget);
       expect(find.text('◆ Report to review'), findsNothing);
-      expect(find.text('Report to review'), findsOneWidget);
+      expect(find.text('Waiting for review'), findsOneWidget);
     });
 
     testWidgets('my own review keeps the ◆ and no note', (tester) async {

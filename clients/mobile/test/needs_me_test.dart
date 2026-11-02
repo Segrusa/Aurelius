@@ -71,14 +71,13 @@ void main() {
     });
   });
 
-  group('waitsForOther', () {
-    test('names the responsible when the decision is theirs', () {
-      expect(waitsForOther(_ticket(responsible: bo), TicketState.waitingForYou, me: _me), 'bo');
-      expect(TicketState.waitingForYou.line(waitsFor: 'bo'), 'Waiting for bo');
+  group('decidedByOther', () {
+    test('is true when the decision is the responsible\'s', () {
+      expect(decidedByOther(_ticket(responsible: bo), TicketState.waitingForYou, me: _me), isTrue);
     });
 
-    test('is null when the decision is mine', () {
-      expect(waitsForOther(_ticket(responsible: testUser), TicketState.waitingForYou, me: _me), isNull);
+    test('is false when the decision is mine', () {
+      expect(decidedByOther(_ticket(responsible: testUser), TicketState.waitingForYou, me: _me), isFalse);
       expect(TicketState.waitingForYou.line(), 'Waiting for you');
     });
   });
