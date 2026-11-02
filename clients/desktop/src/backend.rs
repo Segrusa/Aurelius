@@ -312,6 +312,8 @@ pub enum Request {
     /// Goes to the OS credential store via `secrets/set`; never a command or event.
     SetSecret { connection_id: ProviderId, secret: String },
     MarkNotificationsRead,
+    /// Opening a row of the personal Inbox reads that row, for this reader only; it stays listed.
+    MarkRowRead(String),
     /// Clear the results (inbox notifications) with these ids; approvals are untouched.
     ClearResults(Vec<String>),
     /// Show this project's memory (kept up to date).
@@ -1447,6 +1449,8 @@ pub enum Update {
     /// The recurring tasks of every project (servers from 1.14).
     Schedules(Vec<aurelius_protocol::TaskScheduleView>),
     Notifications(aurelius_protocol::NotificationsSnapshot),
+    /// Reading this row failed: it is unread again, with what went wrong.
+    RowReadFailed(String, String),
     Memory(ProjectId, Vec<aurelius_protocol::MemoryView>),
     /// A memory or share changed; reload the list only if it is on screen.
     MemoryChanged,
@@ -2158,7 +2162,7 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         // Expanded into two commands by `session`.
         Request::UseConnection { .. } | Request::SetSecret { .. } => return None,
         // Queries, not commands.
-        Request::MarkNotificationsRead | Request::ClearResults(_) | Request::LoadMemory(_) | Request::LoadMemoryContext { .. } | Request::LoadContext(_) | Request::LoadScreenshot(_) | Request::LoadFullActivity(..) | Request::LoadFile(_) | Request::LoadUpload(_) | Request::LoadUploadThumb(_) | Request::LoadIdeas(_) | Request::LoadSubagents(_) | Request::LoadMarkdownFile(..) | Request::LoadArtifactContent { .. } | Request::LoadPreviewMessages(_) => return None,
+        Request::MarkNotificationsRead | Request::MarkRowRead(_) | Request::ClearResults(_) | Request::LoadMemory(_) | Request::LoadMemoryContext { .. } | Request::LoadContext(_) | Request::LoadScreenshot(_) | Request::LoadFullActivity(..) | Request::LoadFile(_) | Request::LoadUpload(_) | Request::LoadUploadThumb(_) | Request::LoadIdeas(_) | Request::LoadSubagents(_) | Request::LoadMarkdownFile(..) | Request::LoadArtifactContent { .. } | Request::LoadPreviewMessages(_) => return None,
         Request::AddIdea { project_id, title, note, kind, files } => envelope(Command::AddIdea(aurelius_domain::idea::AddIdea { confirm_secret: false, project_id, title, note, kind, files }), None),
         Request::UpdateIdea { idea_id, title, note, kind, add_files, remove_files } => envelope(Command::UpdateIdea(aurelius_domain::idea::UpdateIdea { confirm_secret: false, idea_id, title, note, kind, add_files, remove_files }), None),
         Request::DeleteIdea(idea_id) => envelope(Command::DeleteIdea(aurelius_domain::idea::DeleteIdea { idea_id }), None),
@@ -2216,6 +2220,12 @@ impl From<ClientError> for Disconnected {
 
 /// The session goes on no more: the connection dropped, reconnecting can't help,
 /// or the server no longer knows this device's session.
+/// `notification.mark_read` (freeze §2). PLACEHOLDER until AUR-FA-F2 brings the write and its
+/// client method: until then the row is read only in this window (`inbox_opened`).
+async fn mark_row_read(_client: &Client, _id: &str) -> Result<(), ClientError> {
+    Ok(())
+}
+
 fn ends(e: &ClientError) -> bool {
     e.is_disconnect() || e.is_final() || signed_out(e)
 }
@@ -2899,6 +2909,16 @@ async fn session(
                 }
                 if let Request::MarkNotificationsRead = request {
                     client.mark_notifications_read().await.map_err(Disconnected::from)?;
+                    let notifications = client.notifications().await.map_err(Disconnected::from)?;
+                    let _ = updates.send(Update::Notifications(notifications));
+                    continue;
+                }
+                if let Request::MarkRowRead(id) = request {
+                    match mark_row_read(client, &id).await {
+                        Ok(()) => {}
+                        Err(e) if ends(&e) => return Err(e.into()),
+                        Err(e) => { let _ = updates.send(Update::RowReadFailed(id, e.to_string())); }
+                    }
                     let notifications = client.notifications().await.map_err(Disconnected::from)?;
                     let _ = updates.send(Update::Notifications(notifications));
                     continue;

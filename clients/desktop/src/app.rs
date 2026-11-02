@@ -2013,6 +2013,10 @@ impl AppView {
                 self.inbox_opened.retain(|id, _| snapshot.notifications.iter().any(|n| n.id == *id && !n.read));
                 self.notifications = Some(snapshot);
             }
+            Update::RowReadFailed(id, message) => {
+                self.inbox_opened.remove(&id);
+                self.notify_user(format!("Couldn't mark this row read: {message}"), true, cx);
+            }
             Update::Ideas(scope, items) => {
                 // Deleted elsewhere (`idea.deleted`): a dialog for it has nothing left to save.
                 if let Overlay::Dialog(DialogKind::EditIdea { id }) | Overlay::Confirm(ConfirmKind::DeleteIdea(id)) = self.overlay {

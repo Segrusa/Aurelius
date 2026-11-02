@@ -133,9 +133,34 @@ pub fn row_link(n: &NotificationView) -> Option<LinkTarget> {
 }
 
 /// Whether a row counts as unread: not read on the server, and not opened here since its last
-/// event. `opened`: the rows opened here, with their `created_at_ms` then (a new event moves it).
+/// event. `opened`: the rows opened here, with their `created_at_ms` then, so the row does not
+/// flicker until the server's answer is in (a new event moves it).
 pub fn row_unread(n: &NotificationView, opened: &HashMap<String, i64>) -> bool {
     !n.read && opened.get(&n.id).is_none_or(|at| n.created_at_ms > *at)
+}
+
+/// The row to read on the server when it is opened: `notification.mark_read`, never a dismiss, so
+/// the row stays listed (freeze §4). Only with the personal Inbox, and only while it is unread.
+pub fn read_on_open(n: &NotificationView, supported: bool, opened: &HashMap<String, i64>) -> Option<String> {
+    (supported && is_update(n) && row_unread(n, opened)).then(|| n.id.clone())
+}
+
+/// The mark in front of a row. ◆ goes first: `needs_you` is worked out on reading, so a row that
+/// was read keeps it until the work is done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowMark {
+    NeedsYou,
+    Unread,
+    Read,
+}
+
+/// See [`RowMark`].
+pub fn row_mark(n: &NotificationView, unread: bool) -> RowMark {
+    match (n.needs_you, unread) {
+        (true, _) => RowMark::NeedsYou,
+        (false, true) => RowMark::Unread,
+        (false, false) => RowMark::Read,
+    }
 }
 
 /// The Unfollow of a row (B10).
@@ -174,9 +199,17 @@ impl AppView {
         n.ticket_id.and_then(|id| self.board.ticket(id))
     }
 
+    /// Read a row: at once here, and for this reader on the server.
+    fn read_row(&mut self, n: &NotificationView) {
+        if let Some(id) = read_on_open(n, self.personal_inbox_supported(), &self.inbox_opened) {
+            let _ = self.requests.send(backend::Request::MarkRowRead(id));
+        }
+        self.inbox_opened.insert(n.id.clone(), n.created_at_ms);
+    }
+
     /// Open a row on the right place; that reads it (§4.4).
     pub fn open_update_row(&mut self, n: &NotificationView, window: &mut Window, cx: &mut Context<Self>) {
-        self.inbox_opened.insert(n.id.clone(), n.created_at_ms);
+        self.read_row(n);
         match row_target(n, self.message_locate_supported()) {
             RowTarget::Ticket(id, tab) => self.open_row_ticket(id, tab, window, cx),
             RowTarget::Message(id) => {
@@ -190,7 +223,7 @@ impl AppView {
 
     /// `+n` opens the ticket's Activity (freeze §4: no list of events per row).
     pub fn open_row_activity(&mut self, n: &NotificationView, window: &mut Window, cx: &mut Context<Self>) {
-        self.inbox_opened.insert(n.id.clone(), n.created_at_ms);
+        self.read_row(n);
         if let Some(id) = n.ticket_id {
             self.open_row_ticket(id, TicketTab::Activity, window, cx);
         }
@@ -225,7 +258,11 @@ impl AppView {
         let unread = row_unread(n, &self.inbox_opened);
         let title = self.row_ticket(n).map(|t| t.title.as_str());
         let age = ui::relative_age(n.created_at_ms, now);
-        let mark = if n.needs_you { ui::diamond(8., theme::ACCENT_TEXT, true).into_any_element() } else if unread { ui::dot(7., theme::ACCENT).into_any_element() } else { ui::ring(7., theme::MUTED).into_any_element() };
+        let mark = match row_mark(n, unread) {
+            RowMark::NeedsYou => ui::diamond(8., theme::ACCENT_TEXT, true).into_any_element(),
+            RowMark::Unread => ui::dot(7., theme::ACCENT).into_any_element(),
+            RowMark::Read => ui::ring(7., theme::MUTED).into_any_element(),
+        };
         let row = n.clone();
         let more_button = more(n).map(|text| {
             let opens = n.ticket_id.is_some();
@@ -308,9 +345,9 @@ impl AppView {
             _ => {}
         }
         if row_unread(n, &self.inbox_opened) {
-            let (id, at) = (n.id.clone(), n.created_at_ms);
+            let row = n.clone();
             out.push(ui::button("inbox-read", "Read", ButtonKind::Outline, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.inbox_opened.insert(id.clone(), at);
+                this.read_row(&row);
                 cx.notify();
             })).into_any_element());
         }
@@ -321,7 +358,7 @@ impl AppView {
 
 #[cfg(test)]
 pub mod tests {
-    use super::{RowTarget, RowUnfollow, eyebrow, heading, is_update, more, open_label, place, row_link, row_target, row_unfollow, row_unread, spoken};
+    use super::{RowMark, RowTarget, RowUnfollow, eyebrow, heading, is_update, more, open_label, place, read_on_open, row_link, row_mark, row_target, row_unfollow, row_unread, spoken};
     use crate::screens::board::TicketTab;
     use crate::screens::links::LinkTarget;
     use aurelius_domain::ticket::FollowerView;
@@ -440,6 +477,41 @@ pub mod tests {
         assert!(row_unread(&r, &opened), "a new event puts it on unread again");
         r.read = true;
         assert!(!row_unread(&r, &HashMap::new()));
+    }
+
+    #[test]
+    fn opening_reads_a_row_once_and_only_with_the_personal_inbox() {
+        let mut r = row("a", Some("mention"));
+        let mut opened = HashMap::new();
+        assert_eq!(read_on_open(&r, true, &opened).as_deref(), Some("a"));
+        assert_eq!(read_on_open(&r, false, &opened), None, "a server without personal_inbox has no such write");
+        assert_eq!(read_on_open(&row("b", None), true, &opened), None, "a notification without a reason is not a row");
+        opened.insert("a".to_string(), r.created_at_ms);
+        assert_eq!(read_on_open(&r, true, &opened), None, "already asked");
+        r.created_at_ms += 1;
+        assert_eq!(read_on_open(&r, true, &opened).as_deref(), Some("a"), "a new event is unread again");
+        r.read = true;
+        assert_eq!(read_on_open(&r, true, &HashMap::new()), None, "read on the server");
+    }
+
+    #[test]
+    fn a_read_row_stays_listed_and_keeps_its_mark_until_the_work_is_done() {
+        use crate::app::{InboxTab, inbox_badge, tab_notes};
+        let mine = NotificationView { read: true, needs_you: true, ..row("a", Some("review")) };
+        assert_eq!(row_mark(&mine, row_unread(&mine, &HashMap::new())), RowMark::NeedsYou);
+        let refs = [&mine];
+        for tab in [InboxTab::NeedsYou, InboxTab::Updates, InboxTab::All] {
+            assert_eq!(tab_notes(tab, &refs, |_| false).len(), 1, "{tab:?}");
+        }
+        assert_eq!(inbox_badge(0, &refs, |_| false, &HashMap::new()), 1, "◆ still counts when read");
+
+        let done = NotificationView { needs_you: false, ..mine };
+        assert_eq!(row_mark(&done, row_unread(&done, &HashMap::new())), RowMark::Read, "the read after the work is done");
+        let refs = [&done];
+        assert!(tab_notes(InboxTab::NeedsYou, &refs, |_| false).is_empty());
+        assert_eq!(tab_notes(InboxTab::Updates, &refs, |_| false).len(), 1, "it stays on Updates");
+        assert_eq!(inbox_badge(0, &refs, |_| false, &HashMap::new()), 0);
+        assert_eq!(row_mark(&row("b", Some("mention")), true), RowMark::Unread);
     }
 
     #[test]
