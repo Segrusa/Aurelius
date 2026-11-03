@@ -861,6 +861,10 @@ pub struct AppView {
     /// Side panel widths the user dragged to (by panel), kept in ui.json.
     pub panel_widths: HashMap<String, f32>,
     pub panel_save: Option<Task<()>>,
+    /// The screen counter's last page and panel key, and its pending write (`screen_use.rs`).
+    screen_seen: Option<&'static str>,
+    panel_seen: Option<&'static str>,
+    screen_use_save: Option<Task<()>>,
     pub selected: usize,
     pub task_filter: usize,
     pub history_open: bool,
@@ -1468,6 +1472,9 @@ impl AppView {
             folded: folded_load(&ui_prefs()),
             panel_widths: serde_json::from_value(ui_prefs()["panel_widths"].clone()).unwrap_or_default(),
             panel_save: None,
+            screen_seen: None,
+            panel_seen: None,
+            screen_use_save: None,
             selected: 0,
             task_filter: 0,
             history_open: false,
@@ -4741,6 +4748,26 @@ impl AppView {
 
     /// Remember every change of place (called on each render), so ← and →
     /// work like a browser whatever caused the change.
+    /// The one hook of the local screen counter (`screen_use.rs`): called on every render, it
+    /// counts only when the page or the panel beside it differs from the last one, and
+    /// writes the counts a few seconds later, off the UI thread.
+    fn count_screen(&mut self, cx: &mut Context<Self>) {
+        let page = crate::screen_use::page_key(self.screen, self.employees_tab, self.projects_tab);
+        let panel = if panel_beside(self.panel, self.screen) { crate::screen_use::panel_key(self.panel) } else { None };
+        let mut counted = crate::screen_use::note(self.screen_seen, page);
+        self.screen_seen = Some(page);
+        if let Some(key) = panel {
+            counted |= crate::screen_use::note(self.panel_seen, key);
+        }
+        self.panel_seen = panel;
+        if counted {
+            self.screen_use_save = Some(cx.spawn(async move |_, cx| {
+                cx.background_executor().timer(Duration::from_millis(crate::screen_use::SCREEN_USE_SAVE_DELAY_MS)).await;
+                cx.background_executor().spawn(async { crate::screen_use::save() }).await;
+            }));
+        }
+    }
+
     fn track_place(&mut self) {
         let now = self.place();
         if let Some(last) = self.last_place.filter(|l| *l != now) {
@@ -6963,6 +6990,7 @@ impl Render for AppView {
             }
         }
         self.track_place();
+        self.count_screen(cx);
         // The webviews are native windows over the app: hidden as soon as their panel is.
         self.sync_artifact_webview();
         if let Some(text) = self.pending_placeholder.take() {
