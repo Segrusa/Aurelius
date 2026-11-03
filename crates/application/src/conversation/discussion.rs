@@ -559,9 +559,11 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     }
     // The employees of the Team chat always work in Auto.
     conv::set_agent_mode(tx, chat, AgentMode::Auto)?;
+    // Only a board member waits for the answer; a colleague's mention would just add lines.
+    let busy = if w.board.is_some() { busy_line(tx, d.id, w.thread, chat, name)? } else { None };
     let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login, thread_parent: w.thread };
     let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
-    Ok(Some((run, std::iter::once(posted).chain(queued).collect())))
+    Ok(Some((run, std::iter::once(posted).chain(busy).chain(queued).collect())))
 }
 
 /// What separates a copied message from the line that says where to answer it.
@@ -589,7 +591,7 @@ const OWNER_QUOTE_CHARS: usize = 200;
 /// A reply in a thread says so, and the update keeps the discussion and the
 /// thread (`thread_parent` in its meta): what the owner posts with
 /// `post_to_discussion` after it goes into that thread (`run_thread`).
-fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &str, text: &str, thread: Option<MessageId>, source: MessageId) -> Result<Option<Vec<EventNotice>>, StorageError> {
+fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, (from, owner_name): (&str, &str), text: &str, thread: Option<MessageId>, source: MessageId) -> Result<Option<Vec<EventNotice>>, StorageError> {
     use aurelius_domain::task::TaskStatus;
     let Some(root) = t.root_task else { return Ok(Some(vec![])) };
     let Some(row) = aurelius_storage::tasks::load_task(tx, root)? else { return Ok(Some(vec![])) };
@@ -608,6 +610,8 @@ fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &
     if !matches!(row.status, TaskStatus::Running | TaskStatus::Review) {
         return Ok(Some(notices));
     }
+    // The owner is mid-run: say so now, the answer comes when that run ends.
+    notices.extend(busy_line(tx, d.id, thread, conversation, owner_name)?);
     let runs = conv::unfinished_runs_in(tx, conversation)?;
     if runs.iter().any(|(_, status)| status == "created") {
         return Ok(Some(notices));
@@ -675,6 +679,28 @@ fn main_task_ended(tx: &Tx<'_>, t: &TicketPlace) -> Result<String, StorageError>
     };
     let what = if failed { "The main task failed" } else { "The main task has ended" };
     Ok(format!("{what} · Start makes a new one. The owner did not get this message; name a colleague with @Name to ask someone now."))
+}
+
+/// How long a run has gone, in words ("45s", "14m", "2h 5m").
+fn run_duration(ms: i64) -> String {
+    let seconds = (ms / 1000).max(0);
+    match seconds {
+        0..=59 => format!("{seconds}s"),
+        60..=3599 => format!("{}m", seconds / 60),
+        _ => format!("{}h {}m", seconds / 3600, seconds % 3600 / 60),
+    }
+}
+
+/// "X is busy with a run (14m), will answer when it ends": the line a board
+/// member sees at once when the message they posted waits behind a run going in
+/// `conversation` (a run reads only up to its own `reply_to`). Nothing when no
+/// run is going there. Call it before the run for the message is queued. It is
+/// a `Limit` system line with its own words, so old clients show it as it is.
+fn busy_line(tx: &Tx<'_>, id: ConversationId, thread: Option<MessageId>, conversation: ConversationId, name: &str) -> Result<Option<EventNotice>, StorageError> {
+    let Some(since) = conv::going_run_since(tx, conversation)? else { return Ok(None) };
+    let for_how_long = since.map_or_else(|| "just started".to_owned(), |at| run_duration(aurelius_storage::now_ms() - at));
+    let text = format!("{name} is busy with a run ({for_how_long}), will answer when it ends.");
+    Ok(Some(system_line_in(tx, id, thread, &SystemLine::new(SystemLineKind::Limit), Some(&text))?))
 }
 
 /// A line of Aurelius that tells the board member why a message reached nobody
@@ -1029,8 +1055,8 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
     let named = addressees(tx, d, text, None)?;
     let mut sent = Sent { to: Vec::new(), run_ids: Vec::new() };
     let mut ended = None;
-    if let (Some((owner, _)), Some(t)) = (named.owner, d.ticket()) {
-        match to_owner(tx, store, d, t, user.as_deref().unwrap_or(OWNER), text, thread, message)? {
+    if let (Some((owner, owner_name)), Some(t)) = (named.owner, d.ticket()) {
+        match to_owner(tx, store, d, t, (user.as_deref().unwrap_or(OWNER), &owner_name), text, thread, message)? {
             Some(n) => {
                 notices.extend(n);
                 sent.to.push(owner);
@@ -1382,6 +1408,14 @@ impl CommandService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_duration_is_said_in_seconds_minutes_or_hours() {
+        assert_eq!(run_duration(45_000), "45s");
+        assert_eq!(run_duration(14 * 60_000 + 5_000), "14m");
+        assert_eq!(run_duration(2 * 3_600_000 + 5 * 60_000), "2h 5m");
+        assert_eq!(run_duration(-5), "0s");
+    }
 
     fn place(column: ColumnKind) -> TicketPlace {
         TicketPlace { id: TicketId::new(), number: 1, title: "t".into(), project: ProjectId::new(), column, owner: Some(EmployeeId::new()), root_task: None, archived: false }

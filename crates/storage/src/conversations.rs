@@ -857,6 +857,14 @@ pub fn unfinished_runs_in(conn: &rusqlite::Connection, conversation: Conversatio
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// When the run that is going in the conversation started (milliseconds), if one
+/// is: a queued run does not count, it has not begun. `Some(None)` when it is
+/// going but has no start time yet. A message posted there waits for this run.
+pub fn going_run_since(conn: &rusqlite::Connection, conversation: ConversationId) -> Result<Option<Option<i64>>, StorageError> {
+    let mut stmt = conn.prepare("SELECT started_at_ms FROM runs WHERE conversation_id = ?1 AND status IN ('starting','running','waiting','cancelling') ORDER BY started_at_ms LIMIT 1")?;
+    Ok(stmt.query_row([conversation.to_string()], |r| r.get::<_, Option<i64>>(0)).optional()?)
+}
+
 /// Where the answer to a user message stands, for changing a waiting message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplyState {
