@@ -129,8 +129,7 @@ class _ProjectTabs extends StatelessWidget {
 typedef ProjectAdd = ({String tooltip, Future<void> Function(BuildContext) add});
 
 ProjectAdd? projectAdd(int tab) => switch (ProjectPage.tabs[tab]) {
-      'board' => (tooltip: 'New ticket', add: (context) => context.push('/board/new?project=${context.read<ProjectBloc>().projectId}')),
-      'tasks' => (tooltip: 'New task', add: createTask),
+      'board' || 'tasks' => (tooltip: 'New ticket', add: (context) => context.push('/board/new?project=${context.read<ProjectBloc>().projectId}')),
       'ideas' => (tooltip: 'New idea', add: addIdea),
       _ => null,
     };
@@ -314,13 +313,13 @@ class _Overview extends StatelessWidget {
                     trailing: TaskStatusMark(t),
                   ),
                 InkWell(
-                  onTap: () => createTask(context),
+                  onTap: () => context.push('/board/new?project=${project.id}'),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                     child: Row(children: [
                       Icon(CupertinoIcons.add, size: 20, color: Tokens.accent),
                       const SizedBox(width: 10),
-                      Text('New Task', style: TextStyle(fontSize: 17, color: Tokens.accent)),
+                      Text('New Ticket', style: TextStyle(fontSize: 17, color: Tokens.accent)),
                     ]),
                   ),
                 ),

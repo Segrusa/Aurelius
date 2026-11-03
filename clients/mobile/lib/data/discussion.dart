@@ -143,7 +143,7 @@ class TicketSource {
 
 /// What "New ticket" starts with when it is made from a message (MU2-10 AC1, Fase 1 §10.3).
 class TicketDraft {
-  const TicketDraft({required this.title, required this.description, this.projectId, this.fromMessage});
+  const TicketDraft({required this.title, required this.description, this.projectId, this.fromMessage, this.fromIdea, this.ideaFiles = 0, this.labels = '', this.ownerId});
 
   final String title;
   final String description;
@@ -151,7 +151,30 @@ class TicketDraft {
 
   /// The message it is made from (`ticket.create.from_message`).
   final String? fromMessage;
+
+  /// The idea it is made from (`ticket.create.from_idea`); the server copies its [ideaFiles] files.
+  final String? fromIdea;
+  final int ideaFiles;
+
+  /// Labels, comma separated.
+  final String labels;
+
+  /// The owner chosen beforehand (Give work).
+  final String? ownerId;
 }
+
+/// The draft for a ticket from [idea]: its title and note, in its project; a bug keeps that word as a label.
+TicketDraft draftFromIdea(IdeaView idea) => TicketDraft(
+      title: idea.title,
+      description: idea.note ?? '',
+      projectId: idea.projectId,
+      fromIdea: idea.id,
+      ideaFiles: idea.attachments.length,
+      labels: idea.kind == IdeaKind.bug ? 'bug' : '',
+    );
+
+/// An idea becomes a ticket once, and not after it became a task (an older client).
+bool ideaCanBecomeTicket(IdeaView idea) => idea.taskId == null && idea.ticketId == null;
 
 /// The longest title a ticket takes (MU1-07).
 const _titleMax = 160;

@@ -103,14 +103,11 @@ class IdeasBloc extends Bloc<IdeasEvent, IdeasState> {
   /// The project whose ideas this shows; null for the company-wide list, where each idea has its own.
   final String? projectId;
 
-  /// Auto needs the Approve right on this phone; the server refuses it otherwise.
-  bool get canStartInAuto => _repository.linkState.can('approve');
-
-  /// Whether a started idea may be tried in several ways; null hides the picker.
-  Future<VariantsSetting?> variantsSetting() => _repository.variantsSetting();
-
   /// The server keeps files with ideas and can delete an idea (`idea.delete`);
   /// older servers have neither, so their UI is hidden.
+  /// An idea can become a ticket (feature `ticket_from_idea`).
+  bool get ticketsEnabled => _repository.linkState.has('ticket_from_idea');
+
   bool get attachmentsEnabled => _repository.linkState.has('idea_attachments');
   late final List<StreamSubscription<void>> _subs;
 

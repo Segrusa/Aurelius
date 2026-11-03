@@ -196,7 +196,7 @@ ApprovalView approvalOf(
       tool: tool,
     );
 
-IdeaView ideaOf(String id, String title, {String projectId = 'p1', String author = 'You', String? employeeId, IdeaKind kind = IdeaKind.feature, IdeaStatus status = IdeaStatus.open, String? note, String? taskId, TaskStatus? taskStatus, List<MessageFileView> attachments = const []}) =>
+IdeaView ideaOf(String id, String title, {String projectId = 'p1', String author = 'You', String? employeeId, IdeaKind kind = IdeaKind.feature, IdeaStatus status = IdeaStatus.open, String? note, String? taskId, TaskStatus? taskStatus, String? ticketId, int? ticketNumber, List<MessageFileView> attachments = const []}) =>
     IdeaView(
       attachments: attachments,
       author: author,
@@ -209,6 +209,8 @@ IdeaView ideaOf(String id, String title, {String projectId = 'p1', String author
       status: status,
       taskId: taskId,
       taskStatus: taskStatus,
+      ticketId: ticketId,
+      ticketNumber: ticketNumber,
       title: title,
       updatedAtMs: 0,
     );

@@ -11,7 +11,6 @@ import '../../data/company.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
 import '../company_org/employee_widgets.dart';
-import '../project/new_task_page.dart';
 import '../project/task_status_mark.dart';
 import 'give_work.dart';
 import '../account/claude_login.dart' show ClaudeLoginCard;
@@ -117,7 +116,7 @@ class _Dot extends StatelessWidget {
 }
 
 /// "Give work": a title, who leads it (the single root unless changed) and the
-/// project. Give sends it at once; Details opens the full form.
+/// project. Give makes it a started ticket at once; Details opens the New ticket form.
 class GiveWorkBox extends StatefulWidget {
   const GiveWorkBox({super.key, required this.state});
 
@@ -169,21 +168,8 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
     final title = _title.text.trim();
     _title.clear();
     setState(() {});
-    final NewTask task = (
-      title: title,
-      goal: '',
-      criteria: const <String>[],
-      employeeId: _leadId,
-      projectId: _projectId,
-      run: const <String, String>{},
-      files: const <String>[],
-      removeFiles: const <String>[],
-      recurrence: null,
-      paused: false,
-      variants: 1,
-    );
-    // Not created (B10, offline): the title comes back to change it (QA2 m8).
-    if (!await sendTask(context, _projectId!, task) && mounted && _title.text.isEmpty) setState(() => _title.text = title);
+    // Not made (B10, offline): the title comes back to change it (QA2 m8).
+    if (!await sendGivenWork(context, _projectId!, title, _leadId) && mounted && _title.text.isEmpty) setState(() => _title.text = title);
   }
 
   Future<void> _details() async {

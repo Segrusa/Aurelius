@@ -2,19 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/theme/tokens.dart';
+import '../../data/discussion.dart';
 import '../../data/views.dart';
 import 'idea_page.dart';
 import 'ideas_bloc.dart';
 
 /// An idea in full (its note with its line breaks, its files with thumbnails)
-/// and what can be done with it. Pops with the chosen action: `start:<id>:<name>`,
+/// and what can be done with it. Pops with the chosen action: `make-ticket`, `ticket`,
 /// `task`, `edit`, `delete` or a status. Follows the [IdeasBloc], so an edit
 /// elsewhere shows at once and a deleted idea closes the sheet.
 class IdeaSheet extends StatelessWidget {
-  const IdeaSheet({super.key, required this.idea, required this.employees, this.canDelete = false});
+  const IdeaSheet({super.key, required this.idea, this.canMakeTicket = false, this.canDelete = false});
 
   final IdeaView idea;
-  final List<EmployeeSummary> employees;
+
+  /// The server takes `ticket.create { from_idea }` (feature `ticket_from_idea`).
+  final bool canMakeTicket;
 
   /// The server knows `idea.delete` (feature `idea_attachments`).
   final bool canDelete;
@@ -58,14 +61,10 @@ class IdeaSheet extends StatelessWidget {
                   ),
                 const SizedBox(height: 8),
                 const Divider(height: 1),
-                if (idea.taskId == null)
-                  for (final m in employees)
-                    ListTile(
-                      leading: CircleAvatar(child: Text(m.monogram)),
-                      title: Text('Start as a task for ${m.name}'),
-                      subtitle: Text(m.roleLine),
-                      onTap: () => Navigator.pop(context, 'start:${m.id}:${m.name}'),
-                    ),
+                if (canMakeTicket && ideaCanBecomeTicket(idea))
+                  ListTile(key: const Key('idea-make-ticket'), leading: const Icon(Icons.confirmation_number_outlined), title: const Text('Create ticket'), onTap: () => Navigator.pop(context, 'make-ticket')),
+                if (idea.ticketId != null)
+                  ListTile(key: const Key('idea-open-ticket'), leading: const Icon(Icons.confirmation_number_outlined), title: Text('Open ticket #${idea.ticketNumber ?? ''}'), onTap: () => Navigator.pop(context, 'ticket')),
                 if (idea.taskId != null) ListTile(leading: const Icon(Icons.task_alt), title: const Text('Open the task'), onTap: () => Navigator.pop(context, 'task')),
                 ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('Edit'), onTap: () => Navigator.pop(context, 'edit')),
                 if (idea.status != IdeaStatus.open) ListTile(leading: const Icon(Icons.undo), title: const Text('Reopen'), onTap: () => Navigator.pop(context, 'open')),

@@ -3,16 +3,15 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../core/net/connection.dart';
-import '../../core/net/protocol.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
-import '../../data/commands.dart';
+import '../../data/discussion.dart';
 import '../../data/secret_write.dart';
+import '../../data/tickets.dart';
 import '../../data/views.dart';
+import '../board/ticket_actions.dart';
 import '../chat/secret_check.dart';
 import '../company/company_bloc.dart';
-import '../project/new_task_page.dart';
 
 /// The project and lead work was last given to, kept on this phone per host so
 /// Give work starts there next time. Loaded once; ids that no longer exist are
@@ -68,9 +67,8 @@ extension on String {
   String? get nonEmpty => isEmpty ? null : this;
 }
 
-/// The Board gives work: the new-task screen with a project field, the last
-/// project and lead chosen preselected (else the single root employee).
-/// Creates the task and opens it.
+/// Gives work from anywhere: the New ticket form, the last project and lead
+/// chosen preselected. A task only exists under a ticket.
 /// [title], [employeeId] and [projectId] fill the form (Home's Give work box).
 Future<void> giveWork(BuildContext context, {String? title, String? employeeId, String? projectId}) async {
   final host = LastGiven.hostOf(context);
@@ -79,52 +77,30 @@ Future<void> giveWork(BuildContext context, {String? title, String? employeeId, 
   final company = context.read<CompanyBloc>().state;
   final lastLead = company.activeEmployees.any((e) => e.id == LastGiven.lead) ? LastGiven.lead : null;
   final lastProject = company.openProjects.any((p) => p.id == LastGiven.project) ? LastGiven.project : null;
-  Receipt? created;
-  final task = await NewTaskPage.open(
-    context,
-    company.activeEmployees,
-    projects: company.openProjects,
-    projectId: projectId ?? lastProject,
-    employeeId: employeeId ?? lastLead,
-    title: title,
-    submit: (form, task) async => (created = await writeTask(form, task.projectId!, task)) != null,
-  );
-  if (task == null || task.projectId == null || created == null || !context.mounted) return;
-  _created(context, task.projectId!, task, created!.command);
+  GoRouter.of(context).push('/board/new', extra: TicketDraft(title: title ?? '', description: '', projectId: projectId ?? lastProject, ownerId: employeeId ?? lastLead));
 }
 
-/// Create [task] in [projectId] and open it; false when it was not created
+/// The ticket of Home's Give work box: for [employeeId] (none: the dispatcher chooses), started at once.
+Map<String, dynamic> givenWorkTicket(String projectId, String title, String? employeeId, {String? responsibleUserId}) =>
+    ticketCreate(projectId: projectId, title: title, ownerEmployeeId: employeeId, responsibleUserId: responsibleUserId, start: true);
+
+/// Make and open the ticket of Home's Give work box; false when it was not made
 /// (a notice, or the B10 dialog), so the caller can give the typed text back.
-Future<bool> sendTask(BuildContext context, String projectId, NewTask task) async {
-  final created = await writeTask(context, projectId, task);
-  if (created == null || !context.mounted) return false;
-  _created(context, projectId, task, created.command);
-  return true;
-}
-
-/// Writes `task.create`; null when it was not created. Refused because it
-/// holds a vault value (B10, QA2 m8), it shows the dialog with the item names
-/// instead of a toast that asks without a button; Send anyway creates it with
-/// `confirm_secret` (AUR-MU-04-F5). Refused again, a notice: no loop. Either
-/// way the form keeps what was typed.
-Future<Receipt?> writeTask(BuildContext context, String projectId, NewTask task) async {
+Future<bool> sendGivenWork(BuildContext context, String projectId, String title, String? employeeId) async {
   final repository = context.read<AureliusRepository>();
+  final router = GoRouter.of(context);
+  final responsible = repository.linkState.has(ticketResponsibleFeature) ? repository.linkState.user?.id : null;
   try {
-    return await writeConfirmingSecret(
-      repository,
-      Commands.createTask(projectId, task.title, task.goal, task.criteria, employeeId: task.employeeId, run: task.run, files: task.files, variants: task.variants),
-      sendAnywayDialog(context),
-    );
-  } on NotSentException catch (e) {
-    if (context.mounted) toast(context, e.toString());
-  } on ProtocolException catch (e) {
-    if (context.mounted) toast(context, e.message);
+    final receipt = await writeConfirmingSecret(repository, givenWorkTicket(projectId, title, employeeId, responsibleUserId: responsible), sendAnywayDialog(context));
+    if (receipt == null || !context.mounted) return false;
+    if (LastGiven.hostOf(context) case final host?) LastGiven.remember(host, projectId: projectId, employeeId: employeeId);
+    if (receipt.command case CommandResultTicketCreated(:final ticketId, :final number)) {
+      toast(context, '#$number created and started.');
+      router.push('/ticket/$ticketId');
+    }
+    return true;
+  } on Object catch (e) {
+    if (context.mounted) toast(context, ticketFailure(e));
+    return false;
   }
-  return null;
-}
-
-void _created(BuildContext context, String projectId, NewTask task, CommandResult? result) {
-  if (LastGiven.hostOf(context) case final host?) LastGiven.remember(host, projectId: projectId, employeeId: task.employeeId);
-  toast(context, task.variants > 1 ? 'Task created; it is tried ${task.variants} ways first.' : 'Task created.');
-  if (result case CommandResultTaskCreated(:final taskId)) GoRouter.of(context).push('/project/$projectId/task/$taskId');
 }

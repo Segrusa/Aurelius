@@ -6,7 +6,7 @@ import '../../core/widgets/dialogs.dart';
 import '../../core/widgets/refresh.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/commands.dart';
-import '../../data/company.dart';
+import '../../data/discussion.dart';
 import '../../data/views.dart';
 import '../chat/secret_check.dart' show sendAnywayDialog;
 import '../company/company_bloc.dart';
@@ -14,7 +14,6 @@ import 'idea_list.dart';
 import 'idea_page.dart';
 import 'idea_sheet.dart';
 import 'ideas_bloc.dart';
-import 'start_mode_sheet.dart';
 
 /// "New idea" (the + in the project's app bar) for the nearest [IdeasBloc]. The company-wide
 /// list has no project of its own: pass the [projectId] the idea goes to.
@@ -37,7 +36,7 @@ Future<void> _editIdea(BuildContext context, {IdeaView? idea, String? projectId}
   ));
 }
 
-/// Ideas: note one, start it as a task for an employee, or drop it. The [IdeasBloc] comes from
+/// Ideas: note one, make a ticket of it, or drop it. The [IdeasBloc] comes from
 /// the project page (that project's ideas) or from the Ideas tab (every project's, each labelled
 /// with its project); either way an action works on the idea's own project.
 class IdeasTab extends StatelessWidget {
@@ -45,28 +44,18 @@ class IdeasTab extends StatelessWidget {
 
   Future<void> _actions(BuildContext context, IdeaView idea) async {
     final bloc = context.read<IdeasBloc>();
-    final company = context.read<CompanyBloc>().state;
-    // The management team first, then everyone else.
-    final employees = [for (final g in pickerGroups(company.activeEmployees.where((m) => m.status == LifecycleStatus.active).toList())) ...g.employees];
     final choice = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
-      builder: (sheet) => BlocProvider.value(value: bloc, child: IdeaSheet(idea: idea, employees: employees, canDelete: bloc.attachmentsEnabled)),
+      builder: (sheet) => BlocProvider.value(value: bloc, child: IdeaSheet(idea: idea, canMakeTicket: bloc.ticketsEnabled, canDelete: bloc.attachmentsEnabled)),
     );
     if (choice == null || !context.mounted) return;
     // The sheet showed the latest version; act on that one.
     final latest = bloc.state.ideas.where((i) => i.id == idea.id).firstOrNull ?? idea;
-    if (choice.startsWith('start:')) {
-      final parts = choice.split(':');
-      final name = parts.sublist(2).join(':');
-      final variants = await bloc.variantsSetting();
-      if (!context.mounted) return;
-      final picked = await pickStartMode(context, employeeName: name, canAuto: bloc.canStartInAuto, maxVariants: variants?.enabled == true ? variants!.maxVariants : 1);
-      if (picked == null) return;
-      bloc.add(IdeasCommandSent(
-        Commands.startIdea(idea.id, parts[1], mode: picked.mode, variants: picked.variants),
-        done: picked.variants > 1 ? 'Started as a task for $name, tried ${picked.variants} ways first.' : 'Started as a task for $name.',
-      ));
+    if (choice == 'make-ticket') {
+      context.push('/board/new', extra: draftFromIdea(latest));
+    } else if (choice == 'ticket') {
+      context.push('/ticket/${latest.ticketId}');
     } else if (choice == 'task') {
       context.push('/project/${idea.projectId}/task/${idea.taskId}');
     } else if (choice == 'edit') {

@@ -253,12 +253,6 @@ abstract final class Commands {
 
   static Map<String, dynamic> setIdeaStatus(String ideaId, IdeaStatus status) => ideaSetStatus(SetIdeaStatus(ideaId: ideaId, status: status));
 
-  /// The idea becomes a task for this employee. Without [mode] the task follows
-  /// the employee's own mode (Auto needs the Approve right).
-  /// [variants] as for [createTask].
-  static Map<String, dynamic> startIdea(String ideaId, String employeeId, {AgentMode? mode, int variants = 1}) =>
-      ideaStart(StartIdea(ideaId: ideaId, employeeId: employeeId, run: withVariants(mode == null ? null : TaskRun(mode: mode), variants)));
-
   /// Take variant [variant] of a task whose variants are ready; null takes the judge's pick. Needs the Approve right.
   static Map<String, dynamic> chooseVariant(String taskId, {int? variant}) => taskChooseVariant(ChooseTaskVariant(taskId: taskId, variant: variant));
 

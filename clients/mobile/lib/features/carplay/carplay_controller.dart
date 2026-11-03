@@ -322,7 +322,7 @@ class CarPlayController {
     return loggingProject(_projects, _tasks, target?.employeeId);
   }
 
-  /// Logs a dictated task (a draft without a lead, so nothing starts) or
+  /// Logs a dictated task (a ticket in Backlog, so nothing starts) or
   /// idea in [_project].
   Future<void> _log({required bool task, required int turn}) async {
     final project = _project();
@@ -344,7 +344,7 @@ class CarPlayController {
       await _voice(VoiceState.thinking);
       try {
         await repository.write(task
-            ? Commands.createTask(project.id, note.title, note.body, const [])
+            ? ticketCreate(projectId: project.id, title: note.title, description: note.body.length > note.title.length + 1 ? note.body : null)
             : Commands.addIdea(project.id, note.title, note.body.length > note.title.length + 1 ? note.body : null));
       } on NotSentException {
         await _say('Not logged: the PC was not reachable.', turn);
@@ -354,7 +354,7 @@ class CarPlayController {
         return;
       }
       if (turn != _turn) return;
-      await _say(task ? 'Task logged as a draft in ${project.name}: ${note.title}.' : 'Idea logged in ${project.name}: ${note.title}.', turn);
+      await _say(task ? 'Ticket logged in Backlog in ${project.name}: ${note.title}.' : 'Idea logged in ${project.name}: ${note.title}.', turn);
       if (turn == _turn) await _voice(VoiceState.ready);
     } finally {
       if (turn == _turn) _busy = false;

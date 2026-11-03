@@ -8,23 +8,8 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/refresh.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
-import '../dashboard/give_work.dart' show writeTask;
-import 'new_task_page.dart';
 import 'task_status_mark.dart';
 import 'project_bloc.dart';
-
-/// "New task" (the + in the project's app bar): the new-task screen with any
-/// employee of the company, then create it in the project of the nearest [ProjectBloc].
-Future<void> createTask(BuildContext context) async {
-  final project = context.read<ProjectBloc>().state.project;
-  if (project == null) return;
-  final company = context.read<CompanyBloc>().state;
-  // The form sends it itself, so a B10 refusal keeps what was typed (QA2 m8).
-  final task = await NewTaskPage.open(context, company.activeEmployees, submit: (form, task) async => await writeTask(form, project.id, task) != null);
-  if (task == null || !context.mounted) return;
-  context.read<ProjectBloc>().add(const ProjectRefreshed());
-  toast(context, task.variants > 1 ? 'Task created; it is tried ${task.variants} ways first.' : 'Task created.');
-}
 
 class TasksTab extends StatefulWidget {
   const TasksTab({super.key});
