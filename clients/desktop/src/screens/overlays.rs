@@ -1096,6 +1096,8 @@ impl AppView {
                         .child(row("Latest", app.as_ref().and_then(|a| a.latest.clone()).unwrap_or_else(|| "—".into())))
                         .child(row("Status", app_state))
                         .children(notes("notes-app", app.as_ref().and_then(|a| a.notes.clone()), Box::new(self.markdown_link_handler(false, cx))))
+                        .child(section("SCREEN USE (THIS DEVICE ONLY)"))
+                        .child(self.render_screen_use(cx))
                 )
                 .child(
                     footer
@@ -1121,6 +1123,30 @@ impl AppView {
                     .child(ui::hint("s-new", "n", "Add connection…", || Box::new(SettingsNew), cx))
                     .child(ui::hint("s-remove", "delete", "Remove", || Box::new(SettingsRemove), cx)),
             )
+    }
+
+    /// Settings → App: how often each screen opened on this device (`screen_use.rs`), most opened first.
+    fn render_screen_use(&self, cx: &mut Context<Self>) -> Div {
+        let rows = crate::screen_use::snapshot().sorted();
+        let cell = |text: String, width: f32| div().w(px(width)).flex_none().child(text);
+        v().gap(px(6.)).text_size(px(13.))
+            .child(div().text_size(px(12.)).text_color(c(theme::MUTED)).child("Counted on this computer only; nothing is sent to a server."))
+            .child(if rows.is_empty() {
+                div().text_color(c(theme::MUTED)).child("Nothing counted yet.")
+            } else {
+                v().gap(px(3.))
+                    .child(h().gap(px(12.)).text_color(c(theme::MUTED)).child(cell("Screen".into(), 200.)).child(cell("Opens".into(), 70.)).child(cell("Last opened".into(), 160.)))
+                    .children(rows.into_iter().map(|(key, u)| {
+                        h().gap(px(12.)).child(cell(key, 200.)).child(cell(u.opens.to_string(), 70.)).child(cell(ui::fmt_when(u.last_ms), 160.))
+                    }))
+            })
+            .child(h().child(
+                ui::button("screen-use-reset", "Reset counts", ButtonKind::Outline, None)
+                    .on_click(cx.listener(|_, _: &ClickEvent, _, cx| {
+                        crate::screen_use::reset();
+                        cx.notify();
+                    })),
+            ))
     }
 
     /// Claude's questions with their options, to choose from or answer in your own words:
