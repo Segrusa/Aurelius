@@ -10,6 +10,7 @@ import '../core/hosts/host.dart';
 import '../core/net/connection.dart' show BoardMemberStep;
 import '../core/net/gateway_api.dart';
 import '../core/push/push_action.dart';
+import '../core/usage/screen_usage.dart';
 import '../core/widgets/widgets.dart' show toast;
 import '../data/aurelius_repository.dart';
 import '../features/account/account.dart';
@@ -27,6 +28,7 @@ import '../features/company_org/company_org_page.dart';
 import '../features/company_org/employee_page.dart';
 import '../features/dashboard/dashboard_page.dart';
 import '../features/more/more_page.dart';
+import '../features/more/screen_use_page.dart';
 import '../features/more/recurring_page.dart';
 import '../features/tasks/tasks_page.dart';
 import '../features/links/link_actions.dart' show openAureliusLink, openMessageAt;
@@ -53,14 +55,18 @@ import 'shell.dart';
 /// [boardMember]: the onboarding gate; without an active board member only
 /// `/onboarding` and the server choice are reachable ([boardMemberRedirect]).
 class AppRouter {
-  AppRouter(this.host, {this.boardMember});
+  AppRouter(this.host, {this.boardMember, ScreenUsage? usage}) : usage = usage ?? ScreenUsage();
 
   final Host host;
+
+  /// Counts every screen that opens (this device only); see [ScreenUsage].
+  final ScreenUsage usage;
   final ValueListenable<BoardMemberStep>? boardMember;
   final _root = GlobalKey<NavigatorState>(debugLabel: 'root');
 
   late final GoRouter config = GoRouter(
     navigatorKey: _root,
+    observers: [usage],
     initialLocation: '/home',
     refreshListenable: boardMember,
     redirect: (context, state) => boardMember == null ? null : boardMemberRedirect(boardMember!.value, state.matchedLocation),
@@ -84,7 +90,7 @@ class AppRouter {
         ],
       ),
       StatefulShellRoute.indexedStack(
-        builder: (context, state, shell) => HomeShell(shell: shell),
+        builder: (context, state, shell) => HomeShell(shell: shell, usage: usage),
         branches: [
           StatefulShellBranch(routes: [
             GoRoute(path: '/home', pageBuilder: (context, state) => routePage(state, const DashboardPage())),
@@ -172,6 +178,7 @@ class AppRouter {
         pageBuilder: (context, state) => routePage(state, const SettingsPage()),
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'advanced', pageBuilder: (context, state) => routePage(state, const AdvancedPage())),
+          GoRoute(parentNavigatorKey: _root, path: 'screen-use', pageBuilder: (context, state) => routePage(state, ScreenUsePage(usage: usage))),
           GoRoute(parentNavigatorKey: _root, path: 'recurring', pageBuilder: (context, state) => routePage(state, const RecurringPage())),
           GoRoute(parentNavigatorKey: _root, path: 'board', pageBuilder: (context, state) => routePage(state, const BoardSettingsPage())),
           GoRoute(
@@ -281,12 +288,16 @@ class AppRouter {
     if (context != null && context.mounted) toast(context, result.message);
   }
 
-  void dispose() => config.dispose();
+  void dispose() {
+    config.dispose();
+    usage.dispose();
+  }
 }
 
 /// Flutter's own MaterialPage, so the theme's page transitions apply: the iOS
 /// edge swipe back and the slide. go_router 18 looks for the MaterialApp of
 /// the material_ui package; ours is Flutter's, so it would fall back to plain
-/// pages without a transition or back gesture.
+/// pages without a transition or back gesture. The page's name is the route
+/// pattern ("/ticket/:tid/plan"), which [ScreenUsage] counts by.
 Page<void> routePage(GoRouterState state, Widget child) =>
-    MaterialPage<void>(key: state.pageKey, name: state.name ?? state.path, restorationId: state.pageKey.value, child: child);
+    MaterialPage<void>(key: state.pageKey, name: state.fullPath ?? state.name ?? state.path, restorationId: state.pageKey.value, child: child);

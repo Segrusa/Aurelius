@@ -166,6 +166,7 @@ class SettingsPage extends StatelessWidget {
               chevron: true,
               onTap: () => context.push('/settings/board-members'),
             ),
+            GroupRow(key: const ValueKey('settings-screen-use'), leading: const IconTile(CupertinoIcons.chart_bar), title: 'Screen use', subtitle: 'This device only', chevron: true, onTap: () => context.push('/settings/screen-use')),
             GroupRow(leading: const IconTile(CupertinoIcons.device_laptop), title: 'Paired PCs', value: '$paired', chevron: true, onTap: () => context.push('/hosts')),
           ],
         ),
