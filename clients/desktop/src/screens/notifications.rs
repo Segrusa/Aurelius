@@ -19,9 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 /// How long a toast stays, while the mouse is not on the stack.
-pub const TOAST_MS: u64 = 6_000;
-/// And one that waits for the reader: it should not be missed.
-pub const TOAST_NEEDS_YOU_MS: u64 = 10_000;
+pub const TOAST_MS: u64 = 5_000;
 /// How many toasts are kept at once; older ones remain in the bell's list.
 pub const TOASTS_MAX: usize = 5;
 /// How often the toasts' clock advances while there are any.
@@ -527,7 +525,7 @@ impl AppView {
         if self.overlay == Overlay::Notifications || conversation.is_some_and(|id| self.conversation_in_view(id)) {
             return;
         }
-        let timeout = Duration::from_millis(if waits { TOAST_NEEDS_YOU_MS } else { TOAST_MS });
+        let timeout = Duration::from_millis(TOAST_MS);
         let key = item.key();
         self.bell.toasts.push(key, ToastCard { item, title, meta, waits }, ToastOptions { timeout: Some(timeout) }, Instant::now());
         // The oldest make way once there are too many; the bell still lists them.
