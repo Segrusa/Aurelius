@@ -4,6 +4,7 @@
 
 mod app;
 mod backend;
+mod hidden;
 mod keymap;
 mod open_link;
 mod preview;

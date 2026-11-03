@@ -235,7 +235,7 @@ impl AppView {
             let advanced_open = i == ADVANCED && current == ADVANCED;
             sections = sections.child(row(("settings-section", i), *label, i == current && !advanced_open, false, *first, cx));
             if advanced_open {
-                for (j, tab) in ADVANCED_TABS.iter().enumerate() {
+                for (j, tab) in advanced_tabs().iter().enumerate() {
                     sections = sections.child(row(("settings-tab", j), SETTINGS_SECTIONS[*tab], *tab == active, true, *tab, cx));
                 }
             }
@@ -612,13 +612,14 @@ impl AppView {
                                     )
                                     .child({
                                         let advanced = self.employee_advanced_open;
-                                        let summary = format!("Subagents, run one at a time{}, plugins{}", if self.pending_manager_sequential { " (on)" } else { "" }, if versions.is_some() { ", instruction versions" } else { "" });
+                                        let plugins = if crate::hidden::hidden(crate::hidden::Feature::Plugins) { "" } else { ", plugins" };
+                                        let summary = format!("Subagents, run one at a time{}{plugins}{}", if self.pending_manager_sequential { " (on)" } else { "" }, if versions.is_some() { ", instruction versions" } else { "" });
                                         self.more_toggle("employee-advanced", advanced, if advanced { "Advanced".into() } else { format!("Advanced: {summary}") }, |this| this.employee_advanced_open = !this.employee_advanced_open, cx)
                                     })
                                     .when(self.employee_advanced_open, |el| {
                                         el.child(self.delegation_rows(Some(id), cx))
                                             .child(self.sequential_row(cx))
-                                            .child(self.manager_plugins_section(id, cx))
+                                            .when(!crate::hidden::hidden(crate::hidden::Feature::Plugins), |el| el.child(self.manager_plugins_section(id, cx)))
                                             .children(versions)
                                     })
                             })
@@ -1782,7 +1783,7 @@ const SETTINGS_ABOUT: [&str; 14] = [
 
 /// The pages behind "Servers & PC" (a row of tabs on top of them) and behind Advanced.
 const SERVER_TABS: [usize; 3] = [crate::screens::servers::SERVERS_TAB, crate::screens::remote::REMOTE_TAB, SERVER_PC_TAB];
-const ADVANCED_TABS: [usize; 8] = [
+const ADVANCED_PAGES: [usize; 8] = [
     0,
     crate::screens::mcp::MCP_TAB,
     crate::screens::plugins::PLUGINS_TAB,
@@ -1792,6 +1793,15 @@ const ADVANCED_TABS: [usize; 8] = [
     crate::screens::load::LOAD_TAB,
     crate::screens::trace::TRACE_TAB,
 ];
+
+/// The Advanced pages that show: not Plugins or App keys while those features are hidden.
+pub(crate) fn advanced_tabs() -> Vec<usize> {
+    use crate::hidden::{hidden, Feature};
+    ADVANCED_PAGES
+        .into_iter()
+        .filter(|&t| !(t == crate::screens::plugins::PLUGINS_TAB && hidden(Feature::Plugins)) && !(t == crate::screens::app_keys::APP_KEYS_TAB && hidden(Feature::AppKeys)))
+        .collect()
+}
 
 /// The navigation: five sections, each with the page it opens first (Advanced's pages show
 /// below it while it is open).
@@ -1811,7 +1821,7 @@ const ADVANCED: usize = 4;
 pub(crate) fn nav_section(tab: usize) -> usize {
     if SERVER_TABS.contains(&tab) {
         SERVERS
-    } else if ADVANCED_TABS.contains(&tab) {
+    } else if ADVANCED_PAGES.contains(&tab) {
         ADVANCED
     } else {
         SETTINGS_NAV.iter().position(|(_, first)| *first == tab).unwrap_or(0)
@@ -1820,7 +1830,7 @@ pub(crate) fn nav_section(tab: usize) -> usize {
 
 /// The page after `tab` in the order the navigation shows them (Tab key).
 pub(crate) fn next_settings_tab(tab: usize) -> usize {
-    let order: Vec<usize> = [crate::screens::account::ACCOUNT_TAB, 1, COMPANY_TAB].into_iter().chain(SERVER_TABS).chain(ADVANCED_TABS).collect();
+    let order: Vec<usize> = [crate::screens::account::ACCOUNT_TAB, 1, COMPANY_TAB].into_iter().chain(SERVER_TABS).chain(advanced_tabs()).collect();
     let at = order.iter().position(|&t| t == tab).unwrap_or(order.len() - 1);
     order[(at + 1) % order.len()]
 }
@@ -1859,7 +1869,7 @@ fn serde_json_pretty(value: &serde_json::Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{nav_section, next_settings_tab, ADVANCED_TABS, SERVER_TABS, SETTINGS_ABOUT, SETTINGS_NAV, SETTINGS_SECTIONS};
+    use super::{advanced_tabs, nav_section, next_settings_tab, SERVER_TABS, SETTINGS_ABOUT, SETTINGS_NAV, SETTINGS_SECTIONS};
 
     #[test]
     fn tab_visits_every_settings_page_once() {
@@ -1870,14 +1880,19 @@ mod tests {
             seen.push(tab);
             tab = next_settings_tab(tab);
         }
-        assert_eq!(seen.len(), SETTINGS_SECTIONS.len());
+        // Plugins and App keys are hidden: Tab skips them.
+        assert_eq!(seen.len(), SETTINGS_SECTIONS.len() - 2);
+        assert!(!seen.contains(&crate::screens::plugins::PLUGINS_TAB) && !seen.contains(&crate::screens::app_keys::APP_KEYS_TAB));
         assert_eq!(SETTINGS_ABOUT.len(), SETTINGS_SECTIONS.len());
     }
 
     #[test]
     fn settings_has_five_sections_with_eight_advanced_pages() {
         assert_eq!(SETTINGS_NAV.len(), 5);
-        assert_eq!(ADVANCED_TABS.len(), 8);
+        assert_eq!(super::ADVANCED_PAGES.len(), 8);
+        // Plugins and App keys are hidden (`crate::hidden`): six pages show, and the nav never offers the others.
+        assert_eq!(advanced_tabs().len(), 8 - 2);
+        assert!(!advanced_tabs().contains(&crate::screens::plugins::PLUGINS_TAB) && !advanced_tabs().contains(&crate::screens::app_keys::APP_KEYS_TAB));
         assert_eq!(SERVER_TABS.len(), 3);
         for tab in 0..SETTINGS_SECTIONS.len() {
             assert!(nav_section(tab) < SETTINGS_NAV.len());

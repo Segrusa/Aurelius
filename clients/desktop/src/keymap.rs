@@ -249,6 +249,8 @@ pub struct Shortcut {
     /// Listed as a command in the palette.
     pub in_palette: bool,
     pub action: fn() -> Box<dyn Action>,
+    /// Hidden with this feature (`crate::hidden`): no binding, no palette entry.
+    pub feature: Option<crate::hidden::Feature>,
 }
 
 macro_rules! sc {
@@ -261,7 +263,11 @@ macro_rules! sc {
             section: Section::$section,
             in_palette: $palette,
             action: || Box::new($action),
+            feature: None,
         }
+    };
+    ($keys:expr, $ctx:expr, $nav:expr, $label:expr, $section:ident, $palette:expr, $action:ident, $feature:ident) => {
+        Shortcut { feature: Some(crate::hidden::Feature::$feature), ..sc!($keys, $ctx, $nav, $label, $section, $palette, $action) }
     };
 }
 
@@ -296,13 +302,15 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc!(&["secondary-b"], Some(APP), NONE, "Expand / collapse the sidebar", General, true, ToggleSidebar),
     sc!(&["secondary-."], Some(APP), NONE, "Stop answer", General, true, StopGeneration),
     sc!(&["alt-enter"], Some(APP), NONE, "Send now: interrupt the running answer with your message (Enter does the same while an answer runs; Shift+Enter queues it)", General, true, SendNow),
-    sc!(&["secondary-o"], Some(APP), NONE, "Add files (employee or project conversation)", General, true, AttachFiles),
+    // Ctrl+O stays bound (New ticket and Give work pick files with it); only the chat's entry is hidden.
+    sc!(&["secondary-o"], Some(APP), NONE, "Add files", General, false, AttachFiles),
+    sc!(&[], Some(APP), NONE, "Add files (employee or project conversation)", General, true, AttachFiles, ChatAttachments),
     sc!(&["secondary-r"], Some(APP), NONE, "Retry last answer (new version)", General, true, RetryAnswer),
     sc!(&["secondary-i", "secondary-2"], Some(APP), &["i"], "Notifications: what waits for you and what happened", General, true, OpenNotifications),
     sc!(&["secondary-m"], Some(APP), NONE, "Model and effort for this chat or task", General, true, CycleModel),
     sc!(&["secondary-u"], Some(APP), &["u"], "Show usage (subscription, tokens and costs)", General, true, OpenUsage),
     sc!(&["shift-tab"], Some(APP), NONE, "Switch this agent's mode (Ask → Accept edits → Auto → Plan → Ask)", General, true, CycleAgentMode),
-    sc!(&["alt-h"], Some(APP), NONE, "Employee heartbeat: off → every 30 min → hourly → every 4 h", Manager, true, CycleHeartbeat),
+    sc!(&["alt-h"], Some(APP), NONE, "Employee heartbeat: off → every 30 min → hourly → every 4 h", Manager, true, CycleHeartbeat, Heartbeats),
     sc!(&["alt-b"], Some(APP), NONE, "Browser on / off for this employee (your own Chrome)", Manager, true, ToggleBrowser),
     sc!(&["alt-s"], Some(APP), NONE, "Screen on / off: screenshots without asking each time", Manager, true, ToggleScreen),
     sc!(&["secondary-shift-u"], Some(APP), NONE, "Updates: check and install", General, true, OpenUpdates),
@@ -533,9 +541,14 @@ fn binding(keys: &str, action: Box<dyn Action>, context: Option<&str>) -> KeyBin
     KeyBinding::load(keys, action, predicate, false, None, &DummyKeyboardMapper).expect("valid keystroke")
 }
 
+/// Whether a shortcut is in the app: not when its feature is hidden.
+pub fn shown(shortcut: &Shortcut) -> bool {
+    !shortcut.feature.is_some_and(crate::hidden::hidden)
+}
+
 fn all_bindings() -> Vec<KeyBinding> {
     let mut bindings = Vec::new();
-    for shortcut in SHORTCUTS {
+    for shortcut in SHORTCUTS.iter().filter(|s| shown(s)) {
         for key in shortcut.keys {
             bindings.push(binding(key, (shortcut.action)(), shortcut.context));
         }
@@ -654,5 +667,16 @@ mod tests {
             assert_eq!(action(key, &[APP, SIDE_PANEL, MENTIONS, "Input"]).as_deref(), Some(format!("aurelius::{name}").as_str()), "{key}");
             assert!(!action(key, &[APP, SIDE_PANEL, "Input"]).is_some_and(|a| a.starts_with("aurelius::Mention")), "{key} without suggestions is the field's");
         }
+    }
+
+    /// Ticket #19: a hidden feature has no key and no palette entry; Ctrl+O still picks files for New ticket.
+    #[::core::prelude::v1::test]
+    fn hidden_features_lose_their_keys_and_palette_entries() {
+        let keymap = Keymap::new(all_bindings());
+        assert!(!fires(&keymap, "alt-h", &[APP]), "Alt+H (heartbeat) is hidden");
+        assert!(fires(&keymap, "secondary-o", &[APP]), "Ctrl+O stays for tickets and Give work");
+        let palette: Vec<&str> = SHORTCUTS.iter().filter(|s| s.in_palette && shown(s)).map(|s| s.label).collect();
+        assert!(!palette.iter().any(|l| l.contains("heartbeat") || l.starts_with("Add files")), "{palette:?}");
+        assert!(palette.contains(&"Go to Vault (items of the company and its projects)"));
     }
 }
