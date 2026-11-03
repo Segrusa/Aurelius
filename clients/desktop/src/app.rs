@@ -4270,9 +4270,11 @@ impl AppView {
     }
 
     /// Back from your own answer: to the decision dialog it came from, else to the page.
-    fn close_own_answer(&mut self, approval: ApprovalId, in_decision: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if in_decision && self.pending_approvals().any(|a| a.id == approval) {
-            self.open_decision(Decision::Approval(approval), window, cx);
+    fn close_own_answer(&mut self, approval: ApprovalId, index: usize, in_decision: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let pending = self.pending_approvals().any(|a| a.id == approval);
+        if let Some((decision, question)) = crate::screens::notifications::own_answer_returns_to(approval, index, in_decision, pending) {
+            self.open_decision(decision, window, cx);
+            self.question_focus = question;
             return;
         }
         self.overlay = Overlay::None;
@@ -6145,7 +6147,7 @@ impl AppView {
                 self.question_choices.remove(&(approval, index));
                 self.question_own.insert((approval, index), name);
             }
-            self.close_own_answer(approval, in_decision, window, cx);
+            self.close_own_answer(approval, index, in_decision, window, cx);
             return;
         }
         if let DialogKind::EditProposal { proposal } = kind {
@@ -6644,8 +6646,8 @@ impl AppView {
             cx.notify();
             return;
         }
-        if let Overlay::Dialog(DialogKind::QuestionAnswer { approval, in_decision, .. }) = self.overlay {
-            self.close_own_answer(approval, in_decision, window, cx);
+        if let Overlay::Dialog(DialogKind::QuestionAnswer { approval, index, in_decision }) = self.overlay {
+            self.close_own_answer(approval, index, in_decision, window, cx);
         } else if self.overlay != Overlay::None {
             self.overlay = Overlay::None;
         } else if !self.focus.is_focused(window) {

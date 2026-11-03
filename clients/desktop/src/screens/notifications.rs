@@ -133,6 +133,12 @@ impl Default for Bell {
     }
 }
 
+/// Where your own answer to question `index` goes back to: the decision dialog on that same
+/// question, while the approval still waits. None: to the page.
+pub fn own_answer_returns_to(approval: ApprovalId, index: usize, in_decision: bool, pending: bool) -> Option<(Decision, usize)> {
+    (in_decision && pending).then_some((Decision::Approval(approval), index))
+}
+
 /// Whether a notification waits for this reader. `mine`: a ticket's main task waits for them
 /// (freeze §5); a row of the personal Inbox has `needs_you` from the server.
 pub fn note_waits(n: &NotificationView, mine: bool) -> bool {
@@ -287,8 +293,9 @@ impl AppView {
             cx.notify();
             return;
         }
-        // A board dialog draws over everything: the popout would open unseen beneath it.
-        if self.board.dialog.is_some() {
+        // These draw over everything, and Esc closes them first: the popout would open unseen
+        // beneath them.
+        if self.board.dialog.is_some() || self.project_settings.is_some() || self.mcp_manage.add.is_some() || self.plugins.add.is_some() {
             return;
         }
         self.bell.selected = 0;
@@ -383,6 +390,12 @@ impl AppView {
         }
         if self.project_settings.is_some() {
             self.close_project_settings(cx);
+        }
+        if self.mcp_manage.add.is_some() {
+            self.close_add_mcp(cx);
+        }
+        if self.plugins.add.is_some() {
+            self.close_add_plugin(cx);
         }
         match item {
             Item::Approval(id) => match self.approval_home(id) {
@@ -753,7 +766,8 @@ impl AppView {
 
 #[cfg(test)]
 mod tests {
-    use super::{Item, Mark, NEEDS_YOU, Row, badge_count, badge_text, bell_label, child_of, listed_notes, new_notes, note_waits, opening_marks_all_read, popout_frame};
+    use super::{Item, Mark, NEEDS_YOU, Row, badge_count, badge_text, bell_label, child_of, listed_notes, new_notes, note_waits, opening_marks_all_read, own_answer_returns_to, popout_frame};
+    use crate::app::Decision;
     use crate::screens::updates::tests::row as update;
     use aurelius_domain::ApprovalId;
     use aurelius_protocol::NotificationView;
@@ -924,5 +938,13 @@ mod tests {
     fn each_kind_of_item_has_its_own_toast_key() {
         let id = ApprovalId::new();
         assert_ne!(Item::Approval(id).key(), Item::Note(id.to_string()).key());
+    }
+
+    #[test]
+    fn your_own_answer_returns_to_the_same_question_of_a_decision_that_still_waits() {
+        let id = ApprovalId::new();
+        assert!(own_answer_returns_to(id, 1, true, true) == Some((Decision::Approval(id), 1)));
+        assert!(own_answer_returns_to(id, 1, true, false).is_none(), "it was decided meanwhile");
+        assert!(own_answer_returns_to(id, 1, false, true).is_none(), "it came from the conversation");
     }
 }

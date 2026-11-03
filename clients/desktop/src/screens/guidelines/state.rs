@@ -138,6 +138,8 @@ pub struct Guidelines {
     pub proposals: Vec<GuidelineProposalView>,
     pub proposals_error: Option<String>,
     pub proposals_asked: bool,
+    /// A list came in since connecting; what the first one holds was already there.
+    pub proposals_loaded: bool,
     pub effective: Sets,
     pub effective_asked: HashSet<backend::EffectiveKey>,
     /// Texts of versions (a proposal's base, History, a conflict), by guideline and version.
@@ -176,6 +178,7 @@ impl Guidelines {
             proposals: Vec::new(),
             proposals_error: None,
             proposals_asked: false,
+            proposals_loaded: false,
             effective: HashMap::new(),
             effective_asked: HashSet::new(),
             texts: HashMap::new(),
@@ -302,6 +305,7 @@ impl AppView {
         g.proposals.clear();
         g.proposals_error = None;
         g.proposals_asked = false;
+        g.proposals_loaded = false;
         g.effective.clear();
         g.effective_asked.clear();
         g.texts.clear();
@@ -393,12 +397,11 @@ impl AppView {
             }
             GuidelineUpdate::Proposals(result) => match result {
                 Ok(proposals) => {
-                    let first = self.guidelines.proposals.is_empty() && self.guidelines.proposals_error.is_none();
                     let before: HashSet<GuidelineProposalId> = self.guidelines.pending().into_iter().map(|p| p.id).collect();
                     self.guidelines.proposals = proposals;
                     self.guidelines.proposals_error = None;
-                    let new = self.guidelines.pending().into_iter().any(|p| !before.contains(&p.id));
-                    if new && !first {
+                    let pending: Vec<GuidelineProposalId> = self.guidelines.pending().into_iter().map(|p| p.id).collect();
+                    if list_brings_news(&mut self.guidelines.proposals_loaded, &before, &pending) {
                         self.announce_guidelines(&before, cx);
                     }
                     self.after_waiting_changed(cx);

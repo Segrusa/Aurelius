@@ -10,7 +10,7 @@ use aurelius_domain::guideline::{
     MAX_GUIDELINE_CHARS, MAX_RUN_CHARS, MAX_TITLE_CHARS, RunGuideline, WARN_PERCENT,
 };
 use aurelius_domain::project::ProjectStatus;
-use aurelius_domain::{EmployeeId, GuidelineId, ProjectId};
+use aurelius_domain::{EmployeeId, GuidelineId, GuidelineProposalId, ProjectId};
 use aurelius_protocol::{EmployeeSummary, ProjectSummary};
 use std::collections::{HashMap, HashSet};
 
@@ -628,6 +628,13 @@ pub fn changes(original: (&str, &str), now: (&str, &str)) -> Option<(Option<Stri
     let title = (original.0.trim() != now.0.trim()).then(|| now.0.trim().to_string());
     let text = (stored(original.1) != stored(now.1)).then(|| stored(now.1).to_string());
     (title.is_some() || text.is_some()).then_some((title, text))
+}
+
+/// Whether a list of proposals brings something to announce. The first one since connecting
+/// (`loaded` false) holds what was already there, also when it is empty.
+pub fn list_brings_news(loaded: &mut bool, before: &HashSet<GuidelineProposalId>, pending: &[GuidelineProposalId]) -> bool {
+    let first = !std::mem::replace(loaded, true);
+    !first && pending.iter().any(|id| !before.contains(id))
 }
 
 #[cfg(test)]

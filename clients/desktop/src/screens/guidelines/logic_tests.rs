@@ -3,7 +3,7 @@ use crate::backend::{self, GuidelineWrite};
 use aurelius_domain::guideline::{EffectiveGuideline, GuidelineLevel};
 use aurelius_domain::proposal::ProposalStatus;
 use aurelius_domain::vault::UserRef;
-use aurelius_domain::{GuidelineProposalId, RunId};
+use aurelius_domain::RunId;
 use std::prelude::rust_2024::test;
 
 fn employee(name: &str, reports_to: Option<EmployeeId>, status: LifecycleStatus) -> EmployeeSummary {
@@ -456,4 +456,20 @@ fn approve_is_off_when_it_would_be_refused() {
     new.text = "a".repeat(7500);
     assert!(approve_problem(&new, None, &[GuidelineTarget::Employee(forge.id)], &sets, names).is_some());
     assert_eq!(approve_problem(&new, None, &[], &sets, names), None);
+}
+
+#[test]
+fn the_first_proposal_after_an_empty_first_list_is_news() {
+    let mut loaded = false;
+    let none = HashSet::new();
+    assert!(!list_brings_news(&mut loaded, &none, &[]), "the first list is empty");
+    assert!(list_brings_news(&mut loaded, &none, &[GuidelineProposalId::new()]));
+}
+
+#[test]
+fn what_the_first_list_holds_or_a_list_repeats_is_no_news() {
+    let mut loaded = false;
+    let id = GuidelineProposalId::new();
+    assert!(!list_brings_news(&mut loaded, &HashSet::new(), &[id]), "it was already there");
+    assert!(!list_brings_news(&mut loaded, &HashSet::from([id]), &[id]));
 }
