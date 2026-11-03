@@ -1,3 +1,4 @@
+import 'package:aurelius_mobile/app/mobile_core.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -290,6 +291,8 @@ void main() {
     });
 
     testWidgets('More lists the Vault only on a server that has it (ui §1)', (tester) async {
+      mobileCoreHidden = const {};
+      addTearDown(() => mobileCoreHidden = kHiddenInMobileCore);
       await pumpBoardPage(tester, vaultRepository(), const MorePage(), link: vaultLink);
       expect(find.byKey(const ValueKey('more-vault')), findsOneWidget);
       await pumpBoardPage(tester, vaultRepository(), const MorePage(), link: onlineLink);

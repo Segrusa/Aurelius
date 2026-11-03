@@ -2,14 +2,14 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/mobile_core.dart';
 import '../../core/widgets/ios.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../onboarding/onboarding.dart' show ActiveBoardMemberRow;
 
-/// The More tab: Projects, Tasks (B7: also those without a ticket), Ideas,
-/// the Vault and Guidelines (on a server that has them), the company (employees, org chart)
-/// and Settings.
+/// The More tab: the board member, Employees and Settings. Projects, Tasks, Ideas, the Vault, Guidelines
+/// and the Company are in the list too, but [kHiddenInMobileCore] leaves them out.
 class MorePage extends StatelessWidget {
   const MorePage({super.key});
 
@@ -26,6 +26,16 @@ class MorePage extends StatelessWidget {
         InsetGroup(
           dividerIndent: 60,
           children: [
+            // The way to the chat with an employee, and to Give work from an employee's page (Home is gone).
+            GroupRow(
+              key: const ValueKey('more-employees'),
+              leading: const IconTile(CupertinoIcons.person_2_fill),
+              title: 'Employees',
+              value: employees == 0 ? null : '$employees',
+              chevron: true,
+              onTap: () => context.push('/company'),
+            ),
+            if (shownInMobileCore('projects'))
             GroupRow(
               key: const ValueKey('more-projects'),
               leading: const IconTile(CupertinoIcons.folder_fill),
@@ -33,6 +43,7 @@ class MorePage extends StatelessWidget {
               chevron: true,
               onTap: () => context.push('/projects'),
             ),
+            if (shownInMobileCore('tasks'))
             GroupRow(
               key: const ValueKey('more-tasks'),
               leading: const IconTile(CupertinoIcons.checkmark_square_fill),
@@ -41,6 +52,7 @@ class MorePage extends StatelessWidget {
               chevron: true,
               onTap: () => context.push('/tasks'),
             ),
+            if (shownInMobileCore('ideas'))
             GroupRow(
               key: const ValueKey('more-ideas'),
               leading: const IconTile(CupertinoIcons.lightbulb_fill),
@@ -48,7 +60,7 @@ class MorePage extends StatelessWidget {
               chevron: true,
               onTap: () => context.push('/ideas'),
             ),
-            if (vault)
+            if (vault && shownInMobileCore('vault'))
               GroupRow(
                 key: const ValueKey('more-vault'),
                 leading: const IconTile(CupertinoIcons.lock_fill),
@@ -57,7 +69,7 @@ class MorePage extends StatelessWidget {
                 chevron: true,
                 onTap: () => context.push('/vault'),
               ),
-            if (guidelines)
+            if (guidelines && shownInMobileCore('guidelines'))
               GroupRow(
                 key: const ValueKey('more-guidelines'),
                 leading: const IconTile(CupertinoIcons.book_fill),
@@ -66,6 +78,7 @@ class MorePage extends StatelessWidget {
                 chevron: true,
                 onTap: () => context.push('/guidelines'),
               ),
+            if (shownInMobileCore('company'))
             GroupRow(
               key: const ValueKey('more-company'),
               leading: const IconTile(CupertinoIcons.person_3_fill),

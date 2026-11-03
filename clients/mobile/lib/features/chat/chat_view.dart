@@ -31,6 +31,7 @@ import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../company_org/employee_run_sheet.dart';
 import '../inbox/inbox_bloc.dart';
+import '../../app/mobile_core.dart';
 import '../load/load_widgets.dart';
 import '../team/mentions.dart';
 import 'answer_body.dart';
@@ -1360,7 +1361,7 @@ class _AssistantMessage extends StatelessWidget {
                   showShareSheet(context, bloc, message.id);
                 },
               ),
-            if (message.runId != null)
+            if (message.runId != null && shownInMobileCore('context'))
               ListTile(
                 leading: const Icon(Icons.manage_search),
                 title: const Text('What went into this answer'),

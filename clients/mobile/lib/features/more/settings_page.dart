@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../app/mobile_core.dart';
 import '../../core/push/push_service.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
@@ -116,6 +117,7 @@ class SettingsPage extends StatelessWidget {
         ),
         // Lazy: a server without the feature is never asked its name (SN-02 AC4).
         BlocProvider(create: (_) => ServerNameBloc(repository)..add(const ServerNameRefreshed()), child: ServerNameSection(link: link)),
+        if (shownInMobileCore('runtime')) ...[
         const GroupHeader('Models', caps: true),
         BlocBuilder<RuntimeBloc, RuntimeState>(
           builder: (context, runtime) => InsetGroup(
@@ -132,6 +134,7 @@ class SettingsPage extends StatelessWidget {
             ],
           ),
         ),
+        ],
         const SizedBox(height: 20),
         InsetGroup(
           dividerIndent: 60,
@@ -156,8 +159,8 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             GroupRow(key: const ValueKey('settings-board'), leading: const IconTile(CupertinoIcons.square_split_2x1), title: 'Board', subtitle: 'Columns and dispatcher', chevron: true, onTap: () => context.push('/settings/board')),
-            GroupRow(leading: const IconTile(CupertinoIcons.arrow_down_to_line), title: 'Updates', chevron: true, onTap: () => context.push('/updates')),
-            GroupRow(leading: const IconTile(CupertinoIcons.chart_bar_alt_fill), title: 'Usage', chevron: true, onTap: () => context.push('/usage')),
+            if (shownInMobileCore('updates')) GroupRow(leading: const IconTile(CupertinoIcons.arrow_down_to_line), title: 'Updates', chevron: true, onTap: () => context.push('/updates')),
+            if (shownInMobileCore('usage')) GroupRow(leading: const IconTile(CupertinoIcons.chart_bar_alt_fill), title: 'Usage', chevron: true, onTap: () => context.push('/usage')),
             GroupRow(
               key: const ValueKey('settings-board-members'),
               leading: const IconTile(CupertinoIcons.person_crop_circle_fill),
@@ -166,14 +169,16 @@ class SettingsPage extends StatelessWidget {
               chevron: true,
               onTap: () => context.push('/settings/board-members'),
             ),
+            GroupRow(key: const ValueKey('settings-screen-use'), leading: const IconTile(CupertinoIcons.chart_bar), title: 'Screen use', subtitle: 'This device only', chevron: true, onTap: () => context.push('/settings/screen-use')),
             GroupRow(leading: const IconTile(CupertinoIcons.device_laptop), title: 'Paired PCs', value: '$paired', chevron: true, onTap: () => context.push('/hosts')),
           ],
         ),
-        PowerSection(link: link, serverName: host.name),
+        if (shownInMobileCore('power')) PowerSection(link: link, serverName: host.name),
         const SizedBox(height: 20),
         InsetGroup(
           dividerIndent: 60,
           children: [
+            if (shownInMobileCore('advanced'))
             GroupRow(
               key: const ValueKey('settings-advanced'),
               leading: const IconTile(CupertinoIcons.slider_horizontal_3),
@@ -223,7 +228,8 @@ class AdvancedPage extends StatelessWidget {
         InsetGroup(
           dividerIndent: 60,
           children: [
-            GroupRow(key: const ValueKey('advanced-plugins'), leading: const IconTile(Icons.extension), title: 'Plugins', chevron: true, onTap: () => context.push('/plugins')),
+            if (shownInMobileCore('plugins')) GroupRow(key: const ValueKey('advanced-plugins'), leading: const IconTile(Icons.extension), title: 'Plugins', chevron: true, onTap: () => context.push('/plugins')),
+            if (shownInMobileCore('recurring'))
             GroupRow(
               key: const ValueKey('advanced-recurring'),
               leading: const IconTile(CupertinoIcons.repeat),
@@ -233,10 +239,10 @@ class AdvancedPage extends StatelessWidget {
             ),
           ],
         ),
-        LoadLimitsSection(link: link),
+        if (shownInMobileCore('load')) LoadLimitsSection(link: link),
         const McpSection(),
         const McpAlwaysAllowSection(),
-        const ArtifactsStatus(),
+        if (shownInMobileCore('artifacts')) const ArtifactsStatus(),
         const AutoAllowSection(),
         const AppKeysSection(),
         const ClaudeAiAccountSection(),

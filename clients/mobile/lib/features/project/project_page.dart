@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../guidelines/target_guidelines_page.dart';
+import '../../app/mobile_core.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/dialogs.dart';
 import '../../core/widgets/ios.dart';
@@ -253,7 +254,7 @@ class _Overview extends StatelessWidget {
               ),
             GroupHeader('Board', action: 'See All', onAction: () => tab('board')),
             ProjectDispatcherRow(project: project),
-            if (context.select<ConnectionBloc, bool>((b) => b.state.has('vault'))) ...[
+            if (shownInMobileCore('vault') && context.select<ConnectionBloc, bool>((b) => b.state.has('vault'))) ...[
               const SizedBox(height: 12),
               InsetGroup(children: [
                 GroupRow(

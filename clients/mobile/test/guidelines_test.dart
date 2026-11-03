@@ -1,3 +1,4 @@
+import 'package:aurelius_mobile/app/mobile_core.dart';
 import 'dart:async';
 
 import 'package:aurelius_mobile/core/net/connection.dart';
@@ -423,6 +424,8 @@ void main() {
 
   group('the screens', () {
     testWidgets('More → Guidelines only on a server that has them', (tester) async {
+      mobileCoreHidden = const {};
+      addTearDown(() => mobileCoreHidden = kHiddenInMobileCore);
       final repo = guidelineRepository();
       await pumpBoardPage(tester, repo, const MorePage(), link: guidelinesLink);
       expect(find.byKey(const ValueKey('more-guidelines')), findsOneWidget);
