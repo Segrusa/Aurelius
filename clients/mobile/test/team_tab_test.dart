@@ -1,4 +1,3 @@
-import 'package:aurelius_mobile/app/mobile_core.dart';
 import 'package:aurelius_mobile/app/router.dart';
 import 'package:aurelius_mobile/app/shell.dart';
 import 'package:aurelius_mobile/core/hosts/host.dart';
