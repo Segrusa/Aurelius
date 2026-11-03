@@ -1,3 +1,4 @@
+import '../../app/mobile_core.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -138,7 +139,7 @@ class EmployeeMenu extends StatelessWidget {
       },
       items: () => [
         const GlassMenuItem('edit', 'Edit'),
-        const GlassMenuItem('heartbeat', 'Heartbeat'),
+        if (shownInMobileCore('heartbeats')) const GlassMenuItem('heartbeat', 'Heartbeat'),
         if (m.status == LifecycleStatus.active) const GlassMenuItem('pause', 'Pause'),
         if (m.status == LifecycleStatus.paused) const GlassMenuItem('resume', 'Resume'),
         const GlassMenuItem('archive', 'Archive', danger: true),

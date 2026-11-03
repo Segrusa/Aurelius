@@ -21,6 +21,16 @@ const kHiddenInMobileCore = <String>{
   'load',
   'power',
   'runtime',
+  // Unused on this server (ticket #19): the entry points go, the data and the code stay.
+  'notes',
+  'shares',
+  'variants',
+  'dependencies',
+  'heartbeats',
+  'api_keys',
+  'app_keys',
+  // The photo and file rows behind "+" in a chat; a ticket keeps its attachments.
+  'chat_attach',
 };
 
 /// What the menus leave out right now: [kHiddenInMobileCore], except that a test of a hidden screen empties it.

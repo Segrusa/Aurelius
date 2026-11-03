@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:aurelius_mobile/app/mobile_core.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
@@ -101,6 +102,10 @@ void main() {
   });
 
   group('activity card', () {
+    // The artifact card is hidden in the mobile core (ticket #19); these tests look at the card itself.
+    setUp(() => mobileCoreHidden = const {});
+    tearDown(() => mobileCoreHidden = kHiddenInMobileCore);
+
     testWidgets('shows the artifact with Open and Copy link', (tester) async {
       captureClipboard(tester);
       await tester.pumpWidget(MaterialApp(theme: aureliusTheme(), home: Scaffold(body: ActivityCard(activity: publish()))));
@@ -225,6 +230,9 @@ void main() {
   });
 
   group('in-app view', () {
+    setUp(() => mobileCoreHidden = const {});
+    tearDown(() => mobileCoreHidden = kHiddenInMobileCore);
+
     test('HTML gets a CSP that blocks connections, in its head', () {
       expect(withArtifactCsp('<!doctype html><html><head><title>x</title></head><body></body></html>'), contains('<head><meta http-equiv="Content-Security-Policy"'));
       expect(withArtifactCsp('<!DOCTYPE html><HTML lang="en"><body>x</body></HTML>'), contains('<HTML lang="en"><head><meta'));

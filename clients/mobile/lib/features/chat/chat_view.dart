@@ -1352,7 +1352,7 @@ class _AssistantMessage extends StatelessWidget {
                   Navigator.pop(sheet);
                 },
               ),
-            if (bloc.state.conversationId != null && !message.isStreaming)
+            if (bloc.state.conversationId != null && !message.isStreaming && shownInMobileCore('shares'))
               ListTile(
                 leading: const Icon(Icons.ios_share),
                 title: const Text('Share to a project or employee'),
@@ -1761,6 +1761,9 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
 
   void _queue() => _send();
 
+  /// The photo and file rows of "+" (ticket #19): hidden in a chat, but a ticket's discussion keeps its attachments.
+  bool _canAttach(ChatBloc bloc) => shownInMobileCore('chat_attach') || bloc.ticketId != null;
+
   /// "+": a photo or file, and what this agent may use (the browser, the
   /// screen), each on or off.
   Future<void> _attach(ChatState state) async {
@@ -1779,12 +1782,14 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(enabled: !state.uploading, leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take a photo'), onTap: () => Navigator.pop(sheet, 'camera')),
-            ListTile(enabled: !state.uploading, leading: const Icon(Icons.photo_library_outlined), title: const Text('Photo library'), onTap: () => Navigator.pop(sheet, 'gallery')),
-            ListTile(enabled: !state.uploading, leading: const Icon(Icons.description_outlined), title: const Text('File'), onTap: () => Navigator.pop(sheet, 'file')),
+            if (_canAttach(bloc)) ...[
+              ListTile(enabled: !state.uploading, leading: const Icon(Icons.photo_camera_outlined), title: const Text('Take a photo'), onTap: () => Navigator.pop(sheet, 'camera')),
+              ListTile(enabled: !state.uploading, leading: const Icon(Icons.photo_library_outlined), title: const Text('Photo library'), onTap: () => Navigator.pop(sheet, 'gallery')),
+              ListTile(enabled: !state.uploading, leading: const Icon(Icons.description_outlined), title: const Text('File'), onTap: () => Navigator.pop(sheet, 'file')),
+            ],
             // In the group chat each employee answers with its own settings.
             if (!bloc.group) ...[
-              const Divider(height: 1),
+              if (_canAttach(bloc)) const Divider(height: 1),
               tool(sheet, 'browser', Icons.language, 'Browser', 'Let this agent use the browser.', state.browserAllowed),
               tool(sheet, 'screen', Icons.screenshot_monitor, 'Screen', 'Screenshots of the PC without asking.', state.screenAllowed),
             ],
@@ -2022,6 +2027,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                if (_canAttach(context.read<ChatBloc>()) || !context.read<ChatBloc>().group)
                 IconButton(
                   key: const Key('composer-plus'),
                   tooltip: 'Attach, web, browser, screen',

@@ -244,7 +244,7 @@ class AdvancedPage extends StatelessWidget {
         const McpAlwaysAllowSection(),
         if (shownInMobileCore('artifacts')) const ArtifactsStatus(),
         const AutoAllowSection(),
-        const AppKeysSection(),
+        if (shownInMobileCore('app_keys') && shownInMobileCore('api_keys')) const AppKeysSection(),
         const ClaudeAiAccountSection(),
         const SizedBox(height: 32),
       ],
