@@ -1,3 +1,4 @@
+import '../../app/mobile_core.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -346,7 +347,7 @@ class _ActivityCardState extends State<ActivityCard> {
             ),
           ),
         ),
-        if (artifact != null) ArtifactLinkCard(artifact: artifact),
+        if (artifact != null && shownInMobileCore('artifacts')) ArtifactLinkCard(artifact: artifact),
         if (_expanded)
           Container(
             margin: const EdgeInsets.only(top: 6),

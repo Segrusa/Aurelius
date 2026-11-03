@@ -46,4 +46,13 @@ void main() {
     mobileCoreHidden = kHiddenInMobileCore;
     expect(shownInMobileCore('vault'), isFalse);
   });
+
+  test('the unused features of ticket #19 are in the one list, and what stays is not', () {
+    for (final id in ['notes', 'artifacts', 'shares', 'variants', 'dependencies', 'heartbeats', 'api_keys', 'app_keys', 'plugins', 'chat_attach']) {
+      expect(shownInMobileCore(id), isFalse, reason: id);
+    }
+    for (final id in ['webhooks', 'functions', 'ticket_attachments']) {
+      expect(kHiddenInMobileCore.contains(id), isFalse, reason: id);
+    }
+  });
 }

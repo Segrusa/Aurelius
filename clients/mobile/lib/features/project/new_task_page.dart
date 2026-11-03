@@ -1,3 +1,4 @@
+import '../../app/mobile_core.dart';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -688,7 +689,7 @@ class _NewTaskPageState extends State<NewTaskPage> {
                       ],
                     ),
                   ],
-                  if (_variantsSetting != null) ...variantsPicker(context, max: _variantsSetting!.maxVariants, value: _variants, onChanged: (n) => setState(() => _variants = n)),
+                  if (_variantsSetting != null && shownInMobileCore('variants')) ...variantsPicker(context, max: _variantsSetting!.maxVariants, value: _variants, onChanged: (n) => setState(() => _variants = n)),
                   const Eyebrow('Effort for this task', padding: EdgeInsets.fromLTRB(0, 22, 0, 10)),
                   Wrap(
                     spacing: 8,

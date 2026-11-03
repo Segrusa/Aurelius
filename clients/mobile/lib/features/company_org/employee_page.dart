@@ -1,3 +1,4 @@
+import '../../app/mobile_core.dart';
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
@@ -161,7 +162,7 @@ class EmployeePage extends StatelessWidget {
                             value: m.screenAllowed,
                             onChanged: (value) => _setScreen(context, m, value),
                           ),
-                          GroupRow(title: heartbeatLine(m.heartbeat), chevron: false),
+                          if (shownInMobileCore('heartbeats')) GroupRow(title: heartbeatLine(m.heartbeat), chevron: false),
                           GroupRow(key: const ValueKey('employee-edit'), title: 'Edit', onTap: () => editEmployee(context, m)),
                           _Advanced(employee: m),
                         ],
