@@ -27,7 +27,7 @@ use crate::run::events::{Ev, emit};
 use crate::task::task_threads::{self as thread, Speaker};
 use crate::task::tasks::task_event;
 use aurelius_domain::{
-    ActorKind, EmployeeId, EventKind, EventNotice, ProjectId, TaskId, TicketId, UserId,
+    ActorKind, EmployeeId, EventKind, EventNotice, ProjectId, RunId, TaskId, TicketId, UserId,
     task::{TaskStatus, WAITING_PLAN_REVIEW},
     ticket::{Actor, ColumnKind},
     views::{SystemLine, SystemLineKind, system_action},
@@ -285,6 +285,15 @@ pub(crate) fn reported(tx: &Tx<'_>, st: &Store, task: TaskId) -> Result<Vec<Even
         return crate::task::testing::start(tx, st, task, ticket, project, &report);
     }
     review_lines(tx, ticket, project, task)
+}
+
+/// A run of the main task in Review ended: it answered a message about the report
+/// (from the discussion or the task's own conversation). The answer goes in the
+/// discussion, the report stays what the board member decides on, and nothing
+/// says again that the work is ready. `None`: the card is not in Review (Testing).
+pub(crate) fn answered_in_review(tx: &Tx<'_>, st: &Store, task: TaskId, run: RunId, answer: &str) -> Result<Option<Vec<EventNotice>>, StorageError> {
+    let Some((ticket, _, ColumnKind::Review)) = root_of(tx, task)? else { return Ok(None) };
+    Ok(Some(crate::conversation::discussion::owner_answer(tx, st, ticket, run, answer)?))
 }
 
 /// The card of the main task `root` is in Review: `ticket.review` and the

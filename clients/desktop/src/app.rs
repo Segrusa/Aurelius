@@ -8487,6 +8487,19 @@ mod tests {
     }
 
     #[test]
+    fn a_task_in_review_only_says_working_while_a_run_answers_a_message() {
+        use crate::ui::TaskMark;
+        use aurelius_domain::views::LiveRun;
+        let mut t = task(ConversationId::new(), "review", None);
+        assert_eq!(TaskMark::of(&t), TaskMark::InReview);
+        assert_eq!(TaskMark::of(&t).label(), "In review");
+        t.live_run = Some(LiveRun::Queued);
+        assert_eq!(TaskMark::of(&t), TaskMark::Queued);
+        t.live_run = Some(LiveRun::Running);
+        assert_eq!(TaskMark::of(&t), TaskMark::Working);
+    }
+
+    #[test]
     fn a_working_task_that_compacts_says_so() {
         use crate::ui::TaskMark;
         let running = task(ConversationId::new(), "running", None);

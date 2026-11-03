@@ -6,7 +6,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/views.dart';
 
 /// How a task stands at a glance, in the same words on every screen.
-enum TaskMark { done, failed, cancelled, needsYou, working, compacting, queued, waiting, draft }
+enum TaskMark { done, failed, cancelled, needsYou, working, inReview, compacting, queued, waiting, draft }
 
 TaskMark taskMark(TaskView t, {bool compacting = false}) {
   if (t.needsYou) return TaskMark.needsYou;
@@ -17,7 +17,9 @@ TaskMark taskMark(TaskView t, {bool compacting = false}) {
     TaskStatus.succeeded => TaskMark.done,
     TaskStatus.failed => TaskMark.failed,
     TaskStatus.cancelled => TaskMark.cancelled,
-    TaskStatus.running || TaskStatus.review => TaskMark.working,
+    TaskStatus.running => TaskMark.working,
+    // A run in Review answers a message about the report; older servers never say so.
+    TaskStatus.review => t.liveRun == null ? TaskMark.inReview : (t.liveRun == LiveRun.queued ? TaskMark.queued : TaskMark.working),
     TaskStatus.queued => TaskMark.queued,
     TaskStatus.waiting => TaskMark.waiting,
     TaskStatus.draft => TaskMark.draft,
@@ -65,7 +67,8 @@ class TaskStatusMark extends StatelessWidget {
       TaskMark.done => (Icon(Icons.check_circle_rounded, size: size + 3, color: Tokens.accent), 'Done', Tokens.accent, FontWeight.w600),
       TaskMark.failed => (Icon(Icons.cancel_rounded, size: size + 3, color: Tokens.negative), 'Failed', Tokens.negative, FontWeight.w600),
       TaskMark.cancelled => (Icon(Icons.block_rounded, size: size + 2, color: Tokens.muted), 'Cancelled', Tokens.muted, FontWeight.w500),
-      TaskMark.working => (StatusDot(pulse: true, size: size * 0.6), task.status == TaskStatus.review ? 'In review' : 'Working', Tokens.text2, FontWeight.w500),
+      TaskMark.working => (StatusDot(pulse: true, size: size * 0.6), 'Working', Tokens.text2, FontWeight.w500),
+      TaskMark.inReview => (StatusDot(pulse: false, size: size * 0.6), 'In review', Tokens.text2, FontWeight.w500),
       TaskMark.compacting => (StatusDot(pulse: true, size: size * 0.6), compactingLabel, Tokens.accent, FontWeight.w600),
       TaskMark.queued => (Icon(Icons.schedule_rounded, size: size + 2, color: Tokens.text2), 'Queued', Tokens.text2, FontWeight.w500),
       TaskMark.waiting => (Icon(Icons.hourglass_empty_rounded, size: size + 1, color: Tokens.muted), 'Waiting', Tokens.muted, FontWeight.w500),

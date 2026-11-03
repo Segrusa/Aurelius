@@ -18,6 +18,12 @@ void main() {
     expect(state.filtered(TaskFilter.completed).map((t) => t.id), ['d']);
   });
 
+  test('a task in Review only says working while a run answers a message', () {
+    expect(taskMark(task('r', TaskStatus.review)), TaskMark.inReview);
+    expect(taskMark(task('q', TaskStatus.review, liveRun: LiveRun.queued)), TaskMark.queued);
+    expect(taskMark(task('w', TaskStatus.review, liveRun: LiveRun.running)), TaskMark.working);
+  });
+
   test('each state has its own mark', () {
     expect(taskMark(task('a', TaskStatus.succeeded)), TaskMark.done);
     expect(taskMark(task('b', TaskStatus.failed)), TaskMark.failed);

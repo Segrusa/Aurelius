@@ -151,7 +151,7 @@ async fn a_tickets_plan_waits_for_the_board_and_is_revised_then_approved() {
     let texts: Vec<&str> = lines.iter().map(|(_, _, t)| t.as_str()).collect();
     let at = |want: &str| texts.iter().position(|t| *t == want).unwrap_or_else(|| panic!("no “{want}” in {texts:#?}"));
     assert!(at("grace sent the plan back — the ticket moved from Plan review to Doing") < at("grace approved the plan — the ticket moved from Plan review to Doing"));
-    assert!(at("grace approved the plan — the ticket moved from Plan review to Doing") < at("Planner handed in the report. It is ready for your review"));
+    assert!(at("grace approved the plan — the ticket moved from Plan review to Doing") < at("Planner finished the work and handed in the report. It is ready for your review"));
 
     drop(client);
     common::stop(dir.path(), daemon).await;

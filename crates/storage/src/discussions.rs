@@ -29,6 +29,15 @@ pub fn kind_of(conn: &Connection, conversation: ConversationId) -> Result<Option
     Ok(kind.as_deref().and_then(ConversationKind::parse))
 }
 
+/// Whether `run` itself posted a message in the conversation `discussion`.
+pub fn run_posted_in(conn: &Connection, discussion: ConversationId, run: RunId) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = ?1 AND json_extract(meta_json, '$.run_id') = ?2)",
+        [discussion.to_string(), run.to_string()],
+        |r| r.get(0),
+    )?)
+}
+
 // ---- channels ----
 
 /// The channel of a project (`Some`), or the general channel (`None`).

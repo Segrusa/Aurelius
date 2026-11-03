@@ -98,9 +98,10 @@ pub struct TaskView {
     /// A finished task (succeeded, failed or cancelled) in whose conversation a
     /// run goes on or waits to start, after the user (or a manager) wrote to it.
     /// The status does not change: clients show such a task as working or
-    /// queued, not as done. Derived, never stored; left out when there is none
-    /// and for tasks that are not finished (their `status` says it). Older
-    /// servers leave it out.
+    /// queued, not as done. A task in Review has it too: Review only says the
+    /// report is in, this says the employee is answering a message about it.
+    /// Derived, never stored; left out when there is none and for other tasks
+    /// that are not finished (their `status` says it). Older servers leave it out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_run: Option<LiveRun>,
     /// The ticket this task works for (a main task or a delegation below it), and its number.

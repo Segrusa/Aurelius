@@ -643,7 +643,7 @@ impl AppView {
         let task_total = tasks.len();
         let task_rows = tasks.into_iter().take(6).enumerate().map(|(i, t)| {
             let live = t.status.is_terminal() && t.live_run.is_some();
-            let busy = matches!(t.status, TaskStatus::Running | TaskStatus::Review) || t.live_run == Some(aurelius_domain::views::LiveRun::Running);
+            let busy = t.status == TaskStatus::Running || t.live_run == Some(aurelius_domain::views::LiveRun::Running);
             let (label, color) = match t.status {
                 _ if live => (if busy { "Running" } else { "Queued" }, if busy { theme::ACCENT_TEXT } else { theme::TEXT_2 }),
                 TaskStatus::Draft => ("Draft", theme::MUTED),
@@ -1059,7 +1059,7 @@ impl AppView {
                 let (label, color) = status_label(t);
                 let mark = self.task_mark(t);
                 let is_selected = i == selected;
-                let busy = matches!(t.status, TaskStatus::Running | TaskStatus::Review) || t.live_run == Some(aurelius_domain::views::LiveRun::Running);
+                let busy = t.status == TaskStatus::Running || t.live_run == Some(aurelius_domain::views::LiveRun::Running);
                 ui::rise(v().id(("rtask", i))
                     .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, w, cx| {
                         this.selected = i;

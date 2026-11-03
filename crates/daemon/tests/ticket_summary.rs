@@ -286,7 +286,7 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     let working = find("Builder started working on the ticket — the ticket moved from Todo to Doing");
     let delegated = find("Builder gave the task “Column names” to Helper");
     let reported = find("Helper finished the task “Column names”. Report: ");
-    let review = find("Builder handed in the report. It is ready for your review");
+    let review = find("Builder finished the work and handed in the report. It is ready for your review");
     let accepted = find("grace accepted the report and moved the ticket to Done");
     let saved = find("A summary of this ticket was saved to project memory");
     assert!(started < working && working < delegated && delegated < reported && reported < review && review < accepted && accepted < saved, "{texts:#?}");
