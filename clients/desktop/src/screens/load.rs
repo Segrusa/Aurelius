@@ -203,6 +203,11 @@ impl AppView {
 
     /// Tab / Shift+Tab between the fields; Enter on the page goes to the first.
     pub fn load_move_field(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        // A board dialog shares this key context: Tab walks its own fields.
+        if let Some(dialog) = self.board.dialog {
+            self.board_dialog_move_field(dialog, forward, window, cx);
+            return;
+        }
         if self.screen != Page::Settings || self.settings_tab != LOAD_TAB || self.server_load().is_none() {
             return;
         }
