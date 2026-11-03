@@ -5764,7 +5764,7 @@ impl AppView {
         if waiting {
             return ("Needs you", theme::ACCENT_TEXT);
         }
-        if self.tasks.iter().any(|t| t.project_id == project && (t.status == aurelius_domain::task::TaskStatus::Running || (t.status.is_terminal() && t.live_run == Some(aurelius_domain::views::LiveRun::Running)))) {
+        if self.tasks.iter().any(|t| t.project_id == project && (t.status == aurelius_domain::task::TaskStatus::Running || ((t.status.is_terminal() || t.status == aurelius_domain::task::TaskStatus::Review) && t.live_run == Some(aurelius_domain::views::LiveRun::Running)))) {
             return ("Working", theme::ACCENT);
         }
         ("Quiet", theme::MUTED)
@@ -8484,6 +8484,19 @@ mod tests {
         failed.live_run = None;
         assert_eq!((TaskMark::of(&failed), is_active(&failed)), (TaskMark::Failed, false));
         assert!(is_active(&task(ConversationId::new(), "running", None)));
+    }
+
+    #[test]
+    fn a_task_in_review_only_says_working_while_a_run_answers_a_message() {
+        use crate::ui::TaskMark;
+        use aurelius_domain::views::LiveRun;
+        let mut t = task(ConversationId::new(), "review", None);
+        assert_eq!(TaskMark::of(&t), TaskMark::InReview);
+        assert_eq!(TaskMark::of(&t).label(), "In review");
+        t.live_run = Some(LiveRun::Queued);
+        assert_eq!(TaskMark::of(&t), TaskMark::Queued);
+        t.live_run = Some(LiveRun::Running);
+        assert_eq!(TaskMark::of(&t), TaskMark::Working);
     }
 
     #[test]

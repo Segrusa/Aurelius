@@ -428,6 +428,9 @@ fn a_finished_task_with_a_run_in_its_conversation_is_live_running_or_queued() {
     set_run(&store, "running");
     store.write(move |tx| Ok(tx.execute("UPDATE tasks SET status = 'running' WHERE id = ?1", [task.to_string()])?)).unwrap();
     assert_eq!(view(&store).live_run, None);
+    // In Review the status does not say it: a run answers a message about the report.
+    store.write(move |tx| Ok(tx.execute("UPDATE tasks SET status = 'review' WHERE id = ?1", [task.to_string()])?)).unwrap();
+    assert_eq!(view(&store).live_run, Some(LiveRun::Running));
 }
 
 #[test]

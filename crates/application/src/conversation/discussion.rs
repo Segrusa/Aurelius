@@ -566,13 +566,15 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
 
 /// What separates a copied message from the line that says where to answer it.
 const OWNER_FOOTER_MARK: &str = "\n\n---\n";
+/// How much of a question typed in the task's conversation `owner_answer` quotes.
+const OWNER_QUOTE_CHARS: usize = 200;
 
 /// A board member's message without `@Name` for the ticket's owner (B3): an
 /// update in the main task's conversation. Only while the main task runs or is
 /// in Review does a run answer it: the one already queued there, else one queued
 /// behind the run that goes (its end counts for the task, as an answer in the
-/// task's own conversation does: in Review it reports again, so the answer to the
-/// report's question comes back as a new report). Otherwise nothing runs and the owner reads it when the
+/// task's own conversation does: in Review the answer comes back here as the
+/// owner's message, `owner_answer`). Otherwise nothing runs and the owner reads it when the
 /// task goes on: before its start (it starts with the discussion as context),
 /// while it waits for its turn (Queued: `start_task_conversation` goes on from
 /// its conversation), and while it waits (Waiting: for the plan's decision, a
@@ -613,6 +615,7 @@ fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &
     let (run, queued) = crate::run::queue::queue_run(tx, &serde_json::json!({ "task_id": root, "discussion": t.id }), &root.to_string(), conversation, message)?;
     tx.execute("UPDATE runs SET task_id = ?2 WHERE id = ?1", [run.to_string(), root.to_string()])?;
     notices.extend(queued);
+    notices.extend(crate::task::task_runs::live_run_notice(tx, conversation)?);
     Ok(Some(notices))
 }
 
@@ -715,6 +718,63 @@ pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation
         notices.extend(follow_named(tx, &d, &text, employee_cause(&run))?);
     }
     Ok(notices)
+}
+
+/// The answer of a run of a ticket's main task in Review, as the owner's message in
+/// the discussion: the board member reads it there, whether the message it answers
+/// came from the discussion or from the task's own conversation (then it is quoted,
+/// because the discussion does not have it). Nothing when the run's last word
+/// already went there itself. It names the responsible board member, who is told by that; it
+/// wakes nobody.
+pub(crate) fn owner_answer(tx: &Tx<'_>, store: &Store, ticket: TicketId, run: RunId, answer: &str) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(d) = of_ticket(tx, ticket)? else { return Ok(Vec::new()) };
+    if aurelius_storage::discussions::run_said_last_in(tx, d.id, run)? {
+        return Ok(Vec::new());
+    }
+    let read = reader(store);
+    let responsible = aurelius_storage::tickets::view(tx, ticket, &read)?.and_then(|v| v.responsible_username);
+    let question = aurelius_storage::conversations::typed_question_of_run(tx, run)?.and_then(|key| read(&key));
+    let body = owner_answer_text(answer, question.as_deref(), responsible.as_deref());
+    let me = crate::task::task_runs::run_owner(tx, run)?.and_then(|o| o.employee);
+    let name = match me {
+        Some(me) => employee_name(tx, me)?,
+        None => "The owner".into(),
+    };
+    let thread = run_thread(tx, run, &d)?;
+    let message = MessageId::new();
+    let mut notices = vec![post_in(tx, store, d.id, thread, message, GROUP_KIND, &name, &body, serde_json::json!({ "run_id": run, "employee_id": me, "woke": 0 }))?];
+    if let Some(answered) = conv::message_for_run(tx, run)? {
+        conv::set_message_files(tx, message, &conv::message_files(tx, answered)?)?;
+    }
+    notices.extend(follow_named(tx, &d, &body, employee_cause(&run.to_string()))?);
+    Ok(notices)
+}
+
+/// The text of `owner_answer`: the question quoted on one line, then the answer
+/// that opens with @`responsible` unless it names them already.
+fn owner_answer_text(answer: &str, question: Option<&str>, responsible: Option<&str>) -> String {
+    let answer = match answer.trim() {
+        "" => "Done.",
+        text => text,
+    };
+    let answer = match responsible {
+        Some(u) if !names(answer, u) => format!("@{u} {answer}"),
+        _ => answer.to_owned(),
+    };
+    let answer = group::shortened(&answer, crate::task::task_threads::MAX_POST);
+    match question {
+        Some(q) => {
+            let flat = q.split_whitespace().collect::<Vec<_>>().join(" ");
+            format!("> {}\n\n{answer}", group::shortened(&flat, OWNER_QUOTE_CHARS))
+        }
+        None => answer,
+    }
+}
+
+/// `text` mentions @`username` itself, not a longer name that starts with it.
+fn names(text: &str, username: &str) -> bool {
+    let (text, mention) = (text.to_lowercase(), format!("@{}", username.to_lowercase()));
+    text.match_indices(&mention).any(|(at, _)| !text[at + mention.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-'))
 }
 
 /// What a board member's message in a discussion did (`GroupMessageSent` /
@@ -1333,5 +1393,33 @@ mod tests {
         assert!(owner_answers(&place(ColumnKind::Review)));
         assert!(!owner_answers(&place(ColumnKind::Backlog)) && !owner_answers(&place(ColumnKind::Done)));
         assert!(!owner_answers(&TicketPlace { owner: None, ..place(ColumnKind::Testing) }));
+    }
+}
+
+#[cfg(test)]
+mod owner_answer_tests {
+    use super::owner_answer_text;
+
+    #[test]
+    fn an_answer_names_the_responsible_member_once() {
+        assert_eq!(owner_answer_text("It is done.", None, Some("sebastien")), "@sebastien It is done.");
+        assert_eq!(owner_answer_text("@Sebastien it is done.", None, Some("sebastien")), "@Sebastien it is done.");
+        assert_eq!(owner_answer_text("It is done.", None, None), "It is done.");
+    }
+
+    #[test]
+    fn a_longer_name_that_starts_with_the_username_does_not_count_as_naming_them() {
+        assert_eq!(owner_answer_text("Ask @sebastien.", None, Some("seb")), "@seb Ask @sebastien.");
+        assert_eq!(owner_answer_text("Ask @seb, or @sebastien.", None, Some("seb")), "Ask @seb, or @sebastien.");
+    }
+
+    #[test]
+    fn a_question_typed_in_the_task_is_quoted_on_one_line_above_the_answer() {
+        assert_eq!(owner_answer_text("No.", Some("Are these\ncards now?"), None), "> Are these cards now?\n\nNo.");
+    }
+
+    #[test]
+    fn an_empty_answer_still_tells_the_member_it_finished() {
+        assert_eq!(owner_answer_text("  ", None, None), "Done.");
     }
 }

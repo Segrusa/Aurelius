@@ -25,6 +25,14 @@ pub const TASK_GUIDANCE: &str = "This conversation is a task you took on. Start 
 /// What an employee is told when the colleagues' results are in.
 const COLLEAGUES_DONE: &str = "Your colleagues finished their parts (their results are above). Bring everything together and finish with your report.";
 
+/// `closing_text` does not stop at a closing shorter than this.
+const CLOSING_MIN_CHARS: usize = 80;
+
+/// What the discussion says when an answer about a report was stopped.
+const ANSWER_STOPPED: &str = "My answer was stopped before it was finished. Send your message again if you still need it.";
+/// What the discussion says when the run of an answer about a report could not start.
+const ANSWER_NOT_STARTED: &str = "I could not start on your message. Send it again.";
+
 /// A run of the task's conversation still going (other than `except`).
 pub(crate) fn live_run(conn: &rusqlite::Connection, task: TaskId, except: Option<RunId>) -> Result<bool, StorageError> {
     Ok(conn.query_row(
@@ -63,13 +71,13 @@ pub(crate) fn link_run(tx: &Tx<'_>, run: RunId, conversation: ConversationId) ->
 }
 
 /// A run was queued, started or ended in the conversation of a finished task
-/// (its employee's own): the task keeps its status, but `TaskView::live_run`
-/// may have changed, so clients are told to read the task again.
+/// (its employee's own) or one in Review: the task keeps its status, but
+/// `TaskView::live_run` may have changed, so clients are told to read the task again.
 pub(crate) fn live_run_notice(tx: &Tx<'_>, conversation: ConversationId) -> Result<Vec<EventNotice>, StorageError> {
     let Some(task) = store::task_for_conversation(tx, conversation)? else { return Ok(vec![]) };
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
     let owner = store::task_conversation(tx, task)?.and_then(|(_, m)| m);
-    if !row.status.is_terminal() || owner.is_none() || owner != row.employee_id {
+    if !(row.status.is_terminal() || row.status == TaskStatus::Review) || owner.is_none() || owner != row.employee_id {
         return Ok(vec![]);
     }
     Ok(vec![task_event(tx, task, row.project_id, "task.run_changed", serde_json::json!({ "conversation_id": conversation }))?])
@@ -99,8 +107,25 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
         wake_task_job(tx, task, false)?;
         return Ok(vec![]);
     }
-    // Ended, handed over meanwhile, or another run of it is still going: nothing to do.
-    if row.status.is_terminal() || handed_over || live_run(tx, task, Some(run))? {
+    // Ended or handed over meanwhile: nothing to do.
+    if row.status.is_terminal() || handed_over {
+        return Ok(vec![]);
+    }
+    let another_live = live_run(tx, task, Some(run))?;
+    // An answer about a report that fails, stops or has a run behind it: the discussion
+    // hears of it here, and the report stays what the board member decides on.
+    if row.status == TaskStatus::Review && (another_live || failed.is_some() || !completed) && crate::task::ticket_line::is_root(tx, task)? {
+        let text = match (failed, completed) {
+            (Some(why), _) => format!("I could not finish my answer ({why}). Send your message again."),
+            (None, false) => ANSWER_STOPPED.to_owned(),
+            (None, true) => closing_text(answer, &aurelius_storage::conversations::tool_offsets_of_run(tx, run)?).to_owned(),
+        };
+        if let Some(answered) = crate::task::ticket_line::answered_in_review(tx, st, task, run, &text)? {
+            return Ok(answered);
+        }
+    }
+    // Another run of it is still going: that one's end decides.
+    if another_live {
         return Ok(vec![]);
     }
     let mut notices = Vec::new();
@@ -156,8 +181,35 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
         notices.extend(review);
         return Ok(notices);
     }
+    // A ticket's board member reads the closing text; the working notes stay in the task's conversation.
+    if crate::task::ticket_line::is_root(tx, task)? {
+        let closing = closing_text(answer, &aurelius_storage::conversations::tool_offsets_of_run(tx, run)?);
+        if row.status == TaskStatus::Review
+            && let Some(answered) = crate::task::ticket_line::answered_in_review(tx, st, task, run, closing)?
+        {
+            notices.extend(answered);
+            return Ok(notices);
+        }
+        notices.extend(complete(tx, st, task, closing)?);
+        return Ok(notices);
+    }
     notices.extend(complete(tx, st, task, answer)?);
     Ok(notices)
+}
+
+/// The end of `answer` that stands on its own: from the last tool use on
+/// (`tool_offsets`, byte offsets in order), going back further while that says
+/// too little, such as "Done." after a last tool call that follows the real text.
+fn closing_text<'a>(answer: &'a str, tool_offsets: &[u32]) -> &'a str {
+    for offset in tool_offsets.iter().rev().map(|o| *o as usize) {
+        // The final redaction may have moved the text a little: an offset that no longer fits is skipped.
+        if let Some(tail) = answer.get(offset..).map(str::trim)
+            && tail.chars().count() >= CLOSING_MIN_CHARS
+        {
+            return tail;
+        }
+    }
+    answer.trim()
 }
 
 /// A run of the task's conversation could not be started (its retries are
@@ -169,6 +221,12 @@ pub(crate) fn on_run_not_started(tx: &Tx<'_>, st: &Store, run: RunId) -> Result<
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
     let employee: Option<String> = tx.query_row("SELECT c.employee_id FROM runs r JOIN conversations c ON c.id = r.conversation_id WHERE r.id = ?1", [run.to_string()], |r| r.get(0)).ok().flatten();
     let handed_over = employee.and_then(|m| EmployeeId::parse(&m).ok()) != row.employee_id;
+    // A message about a report that gets no answer: the discussion says so, the ticket stays in Review.
+    if row.status == TaskStatus::Review && !handed_over && crate::task::ticket_line::is_root(tx, task)?
+        && let Some(answered) = crate::task::ticket_line::answered_in_review(tx, st, task, run, ANSWER_NOT_STARTED)?
+    {
+        return Ok(answered);
+    }
     if row.status != TaskStatus::Running || handed_over || live_run(tx, task, Some(run))? {
         return Ok(vec![]);
     }
@@ -242,8 +300,9 @@ pub(crate) fn on_run_quota_resumed(tx: &Tx<'_>, run: RunId) -> Result<Vec<EventN
 /// member to accept or send back (`ticket_line::reported`); any other task (a
 /// delegation, a task without a ticket) is accepted at once, as before.
 ///
-/// A message in the conversation of a main task in Review gives a run whose end
-/// reports again: the ticket stays in Review with the new report.
+/// A message about a main task in Review gives a run that answers it; its answer
+/// is no new report (`ticket_line::answered_in_review`). Only while the card is in
+/// Testing does its end report again, which tests it again.
 pub(crate) fn complete(tx: &Tx<'_>, st: &Store, task: TaskId, report: &str) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
     // The report, under the task's title.
@@ -1183,5 +1242,35 @@ impl CommandService {
                 f(tx).map(Some)
             })
             .map_err(storage_error)
+    }
+}
+
+#[cfg(test)]
+mod closing_tests {
+    use super::{CLOSING_MIN_CHARS, closing_text};
+
+    #[test]
+    fn the_closing_text_starts_after_the_last_tool_use() {
+        let closing = "x".repeat(CLOSING_MIN_CHARS);
+        let answer = format!("First a note.\n\nAnother note.\n\n{closing}");
+        assert_eq!(closing_text(&answer, &[13, answer.len() as u32 - CLOSING_MIN_CHARS as u32]), closing);
+    }
+
+    #[test]
+    fn a_closing_too_short_to_stand_alone_takes_the_text_before_it() {
+        let report = "r".repeat(CLOSING_MIN_CHARS);
+        let answer = format!("A note.{report}\n\nDone.");
+        assert_eq!(closing_text(&answer, &[7, answer.len() as u32 - 5]), format!("{report}\n\nDone."));
+    }
+
+    #[test]
+    fn a_tool_use_after_the_last_text_keeps_that_text() {
+        let report = "r".repeat(CLOSING_MIN_CHARS);
+        assert_eq!(closing_text(&report, &[0, report.len() as u32]), report);
+    }
+
+    #[test]
+    fn an_offset_inside_a_character_or_past_the_end_is_skipped() {
+        assert_eq!(closing_text("é short", &[1, 500]), "é short");
     }
 }

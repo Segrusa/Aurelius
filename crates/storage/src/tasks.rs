@@ -224,7 +224,7 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
                     (SELECT MAX(qj.not_before_ms) FROM jobs qj JOIN runs r ON r.id = qj.id
                      WHERE r.task_id = t.id AND qj.state = 'ready' AND qj.last_error_code = 'quota') END,
                 j.state, j.not_before_ms, t.created_by_app_key_id, ak.name,
-                CASE WHEN t.status IN ('succeeded','failed','cancelled') AND t.conversation_id IS NOT NULL THEN
+                CASE WHEN t.status IN ('succeeded','failed','cancelled','review') AND t.conversation_id IS NOT NULL THEN
                     (SELECT CASE
                         WHEN SUM(r.status IN ('starting','running','waiting','cancelling') OR (r.status = 'created' AND rj.state = 'leased')) > 0 THEN 'running'
                         WHEN SUM(r.status = 'created') > 0 THEN 'queued' END

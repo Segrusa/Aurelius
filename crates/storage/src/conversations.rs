@@ -381,6 +381,27 @@ pub fn message_for_run(tx: &Transaction<'_>, run_id: RunId) -> Result<Option<Mes
         .and_then(|t| MessageId::parse(&t).ok()))
 }
 
+/// Where in its answer a run used its tools, as byte offsets, in order: what it
+/// said between them is working notes, what follows the last one is its closing text.
+pub fn tool_offsets_of_run(conn: &Connection, run: RunId) -> Result<Vec<u32>, StorageError> {
+    let mut stmt = conn.prepare("SELECT text_offset FROM run_activity WHERE run_id = ?1 ORDER BY text_offset")?;
+    let rows = stmt.query_map([run.to_string()], |r| Ok(r.get::<_, i64>(0)?.max(0) as u32))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The blob of what a board member typed in a task's own conversation, when `run`
+/// answers such a message (and not an update, such as a copy from a discussion).
+pub fn typed_question_of_run(conn: &Connection, run: RunId) -> Result<Option<String>, StorageError> {
+    Ok(conn
+        .query_row(
+            "SELECT b.storage_key FROM messages a JOIN messages q ON q.id = a.reply_to_id JOIN blobs b ON b.id = q.content_blob_id
+             WHERE a.run_id = ?1 AND q.role = 'user'",
+            [run.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
 /// An employee's chats (not its task conversations), most recently active first.
 pub fn employee_conversations(conn: &Connection, employee: aurelius_domain::EmployeeId) -> Result<Vec<ConversationSummary>, StorageError> {
     let mut stmt = conn.prepare(
@@ -1043,6 +1064,12 @@ pub fn set_message_files(tx: &Transaction<'_>, message: MessageId, files: &[aure
         params![message.to_string(), serde_json::to_string(files)?],
     )?;
     Ok(())
+}
+
+/// The files kept with a message (`set_message_files`).
+pub fn message_files(conn: &Connection, message: MessageId) -> Result<Vec<aurelius_domain::views::FileRef>, StorageError> {
+    let files: Option<String> = conn.query_row("SELECT json_extract(meta_json, '$.files') FROM messages WHERE id = ?1", [message.to_string()], |r| r.get(0)).optional()?.flatten();
+    Ok(files.and_then(|f| serde_json::from_str(&f).ok()).unwrap_or_default())
 }
 
 /// Keep the files the user uploaded into the work folder with their message.

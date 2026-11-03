@@ -147,6 +147,8 @@ pub enum TaskMark {
     Cancelled,
     NeedsYou,
     Working,
+    /// The report is in and the board member decides: nobody is working on it.
+    InReview,
     /// Working, and compacting the conversation's context first.
     Compacting,
     Queued,
@@ -208,7 +210,13 @@ impl TaskMark {
             Waiting if t.waiting_reason.as_deref() == Some("input") => TaskMark::NeedsYou,
             Waiting if t.waiting_reason.as_deref() == Some("quota") => TaskMark::LimitReset(t.waiting_until_ms),
             Waiting => TaskMark::Waiting,
-            Running | Review => TaskMark::Working,
+            Running => TaskMark::Working,
+            // A run in Review answers a message about the report; older servers never say so.
+            Review => match t.live_run {
+                Some(aurelius_domain::views::LiveRun::Running) => TaskMark::Working,
+                Some(aurelius_domain::views::LiveRun::Queued) => TaskMark::Queued,
+                None => TaskMark::InReview,
+            },
             Queued if t.waiting_reason.as_deref() == Some("scheduled") => TaskMark::Scheduled,
             Queued if t.waiting_reason.is_some() => TaskMark::InLine,
             Queued => TaskMark::Queued,
@@ -231,6 +239,7 @@ impl TaskMark {
             TaskMark::Cancelled => "Cancelled",
             TaskMark::NeedsYou => "Needs you",
             TaskMark::Working => "Working",
+            TaskMark::InReview => "In review",
             TaskMark::Compacting => COMPACTING,
             TaskMark::Queued => "Queued",
             TaskMark::InLine => "In line",
@@ -259,6 +268,7 @@ pub fn task_mark(mark: TaskMark, id: impl Into<ElementId>) -> Div {
         TaskMark::Cancelled => chip(theme::MUTED, theme::BG, theme::BORDER_STRONG).child(div().w(px(7.)).h(px(1.)).bg(c(theme::MUTED))).child("Cancelled"),
         TaskMark::NeedsYou => chip(theme::ACCENT_TEXT, theme::ATTENTION_BG, theme::ATTENTION_BORDER).child(diamond(7., theme::ACCENT_TEXT, true)).child("Needs you"),
         TaskMark::Working => chip(theme::TEXT_2, theme::BG, theme::BORDER).child(pulse_dot(id, 6., theme::ACCENT)).child("Working"),
+        TaskMark::InReview => chip(theme::TEXT_2, theme::BG, theme::BORDER).child(ring(6., theme::TEXT_2)).child("In review"),
         TaskMark::Compacting => chip(theme::ACCENT_TEXT, theme::ATTENTION_BG, theme::ATTENTION_BORDER).child(pulse_dot(id, 6., theme::ACCENT)).child(COMPACTING),
         TaskMark::Queued | TaskMark::InLine | TaskMark::Scheduled | TaskMark::Waiting | TaskMark::LimitReset(_) => chip(theme::TEXT_2, theme::BG, theme::BORDER).child(ring(6., theme::TEXT_2)).child(mark.label()),
         TaskMark::Draft => chip(theme::MUTED, theme::BG, theme::BORDER).child(ring(6., theme::MUTED)).child("Draft"),

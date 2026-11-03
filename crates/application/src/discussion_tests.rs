@@ -10,7 +10,7 @@ use aurelius_domain::group_chat::{MAX_HOPS, SendGroupMessage, WAKING_POSTS_PER_R
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::ticket::{self, ColumnKind, SetDispatcher};
 use aurelius_domain::views::{SystemLine, SystemLineKind};
-use aurelius_domain::{ConversationId, EmployeeId, RunId, TicketId, UserId};
+use aurelius_domain::{ConversationId, EmployeeId, RunId, TaskId, TicketId, UserId};
 
 const PHC: &str = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA";
 
@@ -343,6 +343,184 @@ fn an_answer_in_the_discussion_reaches_an_owner_whose_report_asks_a_question() {
     // A second answer while that run is queued: no extra run.
     post(&s, t, "And show it on mobile too.").unwrap();
     assert_eq!(runs_in(&s).len(), 1);
+}
+
+/// A started ticket whose owner works in Auto: its main task, that task's conversation and its run.
+fn started_ticket(s: &Setup) -> (TicketId, TaskId, ConversationId, RunId) {
+    let t = new_ticket(s, "Server name", Some(s.ann));
+    exec(s, Command::StartTicket(ticket::StartTicket { ticket_id: t, employee_id: None })).unwrap();
+    let root = ticket_view(s, t).root_task_id.expect("a main task");
+    let job = s.service.store().write(|tx| aurelius_storage::queries::claim_due_job(tx, "test", aurelius_storage::now_ms() + 60_000, 45_000, 4)).unwrap().expect("the task's job");
+    let task = s.service.task_context(root).unwrap().unwrap();
+    s.service.start_task_conversation(&task, job.lease_epoch).unwrap();
+    let conversation = s.service.store().read(move |c| aurelius_storage::tasks::task_conversation(c, root)).unwrap().map(|(c, _)| c).expect("its conversation");
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE conversations SET agent_mode = 'auto' WHERE id = ?1", [conversation.to_string()])?)).unwrap();
+    let run = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap()[0].0;
+    (t, root, conversation, run)
+}
+
+/// `started_ticket`, whose owner reported (`report`): the ticket is in Review.
+fn reported_ticket(s: &Setup, report: &str) -> (TicketId, TaskId, ConversationId) {
+    let (t, root, conversation, run) = started_ticket(s);
+    end_run(s, run, report);
+    assert_eq!(ticket_view(s, t).column, ColumnKind::Review);
+    (t, root, conversation)
+}
+
+/// The run ends with `answer`, as a dispatcher's end does for the task.
+fn end_run(s: &Setup, run: RunId, answer: &str) {
+    let st = s.service.store().clone();
+    let answer = answer.to_owned();
+    s.service.store().write(move |tx| {
+        tx.execute("UPDATE runs SET status = 'succeeded' WHERE id = ?1", [run.to_string()])?;
+        crate::task::task_runs::on_run_finished(tx, &st, run, true, None, &answer)
+    })
+    .unwrap();
+}
+
+fn result_of(s: &Setup, task: TaskId) -> Option<String> {
+    s.service.store().read(move |c| {
+        let key: Option<String> = c.query_row("SELECT b.storage_key FROM tasks t JOIN blobs b ON b.id = t.result_blob_id WHERE t.id = ?1", [task.to_string()], |r| r.get(0)).ok();
+        Ok(key)
+    }).unwrap().and_then(|k| s.service.store().blobs().read(&k).ok()).and_then(|b| String::from_utf8(b).ok())
+}
+
+#[test]
+fn an_answer_in_review_is_a_message_of_the_owner_and_no_second_report() {
+    let s = setup();
+    let (t, root, conversation) = reported_ticket(&s, "The server name is done. Which label do you want?");
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    let reviews = |s: &Setup| system_lines(s, d).iter().filter(|(k, _)| *k == SystemLineKind::Review).count();
+    assert_eq!(reviews(&s), 1);
+    let report = result_of(&s, root).unwrap();
+    post(&s, t, "The label all clients show.").unwrap();
+    let run = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap()[0].0;
+    end_run(&s, run, "Then I keep that one.");
+    assert_eq!(reviews(&s), 1, "an answer does not say again that the work is ready");
+    assert_eq!(result_of(&s, root).unwrap(), report, "the report stays what the board member decides on");
+    assert_eq!(task_status(&s, root), aurelius_domain::task::TaskStatus::Review);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
+    let last = messages(&s, d).into_iter().last().unwrap();
+    assert!(last.text.ends_with("Then I keep that one."), "{}", last.text);
+    assert_eq!(last.author.as_deref(), Some("Ann"), "under the owner's name");
+}
+
+#[test]
+fn a_run_that_posted_in_the_discussion_itself_is_not_posted_twice() {
+    let s = setup();
+    let (t, _, conversation) = reported_ticket(&s, "The server name is done.");
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    post(&s, t, "Push it.").unwrap();
+    let run = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap()[0].0;
+    let st = s.service.store().clone();
+    let discussion = s.service.store().read(move |c| crate::conversation::discussion::load(c, d)).unwrap().unwrap();
+    s.service.store().write(move |tx| crate::conversation::discussion::post_from_run(tx, &st, run, &discussion, "Pushed.").map(|_| ())).unwrap();
+    let before = messages(&s, d).len();
+    end_run(&s, run, "Pushed, and I said so in the discussion.");
+    assert_eq!(messages(&s, d).len(), before);
+}
+
+/// The ticket's report is in, and a board member's message started a run that answers it.
+fn answering_ticket(s: &Setup) -> (TicketId, TaskId, ConversationId, RunId) {
+    let (t, root, conversation) = reported_ticket(s, "The server name is done.");
+    post(s, t, "The label all clients show.").unwrap();
+    let run = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap()[0].0;
+    (t, root, ticket_view(s, t).conversation_id.unwrap(), run)
+}
+
+/// The run ends as `failed` or stopped; nothing but the discussion may hear of it.
+fn answer_breaks(s: &Setup, t: TicketId, root: TaskId, d: ConversationId, run: RunId, failed: Option<&'static str>) -> String {
+    let moved = |s: &Setup| system_lines(s, d).iter().filter(|(k, _)| *k == SystemLineKind::Moved).count();
+    let (report, moved_before) = (result_of(s, root).unwrap(), moved(s));
+    let st = s.service.store().clone();
+    s.service.store().write(move |tx| {
+        tx.execute("UPDATE runs SET status = 'failed' WHERE id = ?1", [run.to_string()])?;
+        crate::task::task_runs::on_run_finished(tx, &st, run, false, failed, "half a sent")
+    }).unwrap();
+    assert_eq!(task_status(s, root), aurelius_domain::task::TaskStatus::Review);
+    assert_eq!(ticket_view(s, t).column, ColumnKind::Review);
+    assert_eq!(result_of(s, root).unwrap(), report);
+    assert_eq!(moved(s), moved_before, "the card did not move");
+    messages(s, d).into_iter().last().unwrap().text
+}
+
+#[test]
+fn a_failed_answer_in_review_keeps_the_ticket_in_review_and_says_so_in_the_discussion() {
+    let s = setup();
+    let (t, root, d, run) = answering_ticket(&s);
+    let said = answer_breaks(&s, t, root, d, run, Some("boom"));
+    assert!(said.contains("could not finish my answer (boom)"), "{said}");
+}
+
+#[test]
+fn a_stopped_answer_in_review_keeps_the_ticket_in_review_and_says_so_in_the_discussion() {
+    let s = setup();
+    let (t, root, d, run) = answering_ticket(&s);
+    let said = answer_breaks(&s, t, root, d, run, None);
+    assert!(said.contains("was stopped") && !said.contains("half a sent"), "{said}");
+}
+
+#[test]
+fn an_answer_that_cannot_start_keeps_the_ticket_in_review_and_says_so_in_the_discussion() {
+    let s = setup();
+    let (t, root, d, run) = answering_ticket(&s);
+    let st = s.service.store().clone();
+    s.service.store().write(move |tx| {
+        tx.execute("UPDATE runs SET status = 'failed' WHERE id = ?1", [run.to_string()])?;
+        crate::task::task_runs::on_run_not_started(tx, &st, run)
+    }).unwrap();
+    assert_eq!(task_status(&s, root), aurelius_domain::task::TaskStatus::Review);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
+    let said = messages(&s, d).into_iter().last().unwrap().text;
+    assert!(said.contains("could not start"), "{said}");
+}
+
+#[test]
+fn an_answer_with_another_run_behind_it_still_reaches_the_discussion() {
+    let s = setup();
+    let (t, root, d, run) = answering_ticket(&s);
+    let conversation = s.service.store().read(move |c| aurelius_storage::tasks::task_conversation(c, root)).unwrap().unwrap().0;
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [run.to_string()])?)).unwrap();
+    post(&s, t, "And on the phone too.").unwrap();
+    let behind = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap();
+    assert_eq!(behind.len(), 2, "one more run behind the live one");
+    end_run(&s, run, "The first answer.");
+    let said = messages(&s, d).into_iter().last().unwrap().text;
+    assert!(said.ends_with("The first answer."), "{said}");
+    assert_eq!(task_status(&s, root), aurelius_domain::task::TaskStatus::Review);
+}
+
+#[test]
+fn a_run_that_works_on_after_its_post_in_the_discussion_still_answers_there() {
+    let s = setup();
+    let (_, _, d, run) = answering_ticket(&s);
+    let st = s.service.store().clone();
+    let discussion = s.service.store().read(move |c| crate::conversation::discussion::load(c, d)).unwrap().unwrap();
+    s.service.store().write(move |tx| crate::conversation::discussion::post_from_run(tx, &st, run, &discussion, "Looking at it.").map(|_| ())).unwrap();
+    let tool_later = |tool: &'static str, call: &'static str| s.service.store().write(move |tx| {
+        aurelius_storage::conversations::activity_started(tx, run, aurelius_domain::MessageId::new(), call, tool, &serde_json::json!({}), None, 0)?;
+        Ok(tx.execute("UPDATE run_activity SET started_at_ms = started_at_ms + 1000 WHERE call_id = ?1", [call])?)
+    }).unwrap();
+    // Another post is not more work: the run's last word is still in the discussion.
+    tool_later("mcp__aurelius__post_to_discussion", "call-1");
+    assert!(s.service.store().read(move |c| aurelius_storage::discussions::run_said_last_in(c, d, run)).unwrap());
+    tool_later("Read", "call-2");
+    end_run(&s, run, "Here is the real answer.");
+    let said = messages(&s, d).into_iter().last().unwrap().text;
+    assert!(said.ends_with("Here is the real answer."), "{said}");
+}
+
+#[test]
+fn a_report_is_the_closing_text_without_the_notes_before_the_last_tool_use() {
+    let s = setup();
+    let (_, root, _, run) = started_ticket(&s);
+    let notes = "I'll start by looking at the screenshot.\n\n";
+    let closing = "The server name now shows in every client; I tested the desktop and the phone, and nothing else changed.";
+    let offset = notes.len() as u32;
+    s.service.store().write(move |tx| aurelius_storage::conversations::activity_started(tx, run, aurelius_domain::MessageId::new(), "call-1", "Read", &serde_json::json!({}), None, offset)).unwrap();
+    end_run(&s, run, &format!("{notes}{closing}"));
+    let report = result_of(&s, root).unwrap();
+    assert!(report.contains(closing) && !report.contains("I'll start"), "{report}");
 }
 
 #[test]
