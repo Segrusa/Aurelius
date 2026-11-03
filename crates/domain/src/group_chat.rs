@@ -31,6 +31,11 @@ pub const WAKING_POSTS_PER_RUN: u32 = 2;
 pub const WAKING_POSTS_PER_WINDOW: u32 = 4;
 pub const WAKE_WINDOW_MS: i64 = 60 * 60 * 1000;
 
+/// What the quick answers of all employees together may cost per hour, in micro-units
+/// of the usage records (1 000 000 = 1 USD). A quick answer is an extra run next to
+/// the one an employee is busy with; at the cap none starts and the busy line stays.
+pub const QUICK_ANSWER_COST_PER_HOUR_MICRO: i64 = 1_000_000;
+
 /// A message of the user in the group chat (`group_chat.send`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SendGroupMessage {

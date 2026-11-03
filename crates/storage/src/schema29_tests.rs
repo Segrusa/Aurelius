@@ -88,7 +88,7 @@ fn upgraded() -> (tempfile::TempDir, Connection) {
 fn migration_29_rebuilds_nothing_and_only_adds() {
     let m = migrate::MIGRATIONS.iter().find(|m| m.version == 29).unwrap();
     assert!(!m.rebuild && m.then.is_none());
-    assert_eq!(migrate::supported_version(), 29);
+    assert!(migrate::supported_version() >= 29);
     let mut inserts = 0;
     for line in m.sql.lines().map(str::trim).filter(|l| !l.starts_with("--")) {
         let upper = line.to_ascii_uppercase();

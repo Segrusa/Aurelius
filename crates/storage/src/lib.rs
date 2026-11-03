@@ -247,6 +247,8 @@ mod schema28_tests;
 #[cfg(test)]
 mod schema29_tests;
 #[cfg(test)]
+mod schema30_tests;
+#[cfg(test)]
 mod threads_tests;
 #[cfg(test)]
 mod followers_tests;

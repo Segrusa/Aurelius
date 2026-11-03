@@ -520,6 +520,29 @@ struct Wake<'a> {
 fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, (employee, name): (EmployeeId, &str), w: &Wake<'_>) -> Result<Option<(RunId, Vec<EventNotice>)>, StorageError> {
     let Some(chat) = employees::main_chat(tx, employee)? else { return Ok(None) };
     let (d, from, shared, hop) = (w.discussion, w.from, &w.shared, w.hop);
+    let mut body = wake_body(w, employee);
+    let place = if w.thread.is_some() { format!("that thread of {}", d.label()) } else { d.label() };
+    body.push_str(&format!("\n\n---\n{name}: your answer is posted in {place} under your name. Keep it short."));
+    let (update, posted) = crate::task::task_threads::post_note(tx, store, chat, crate::task::task_threads::Speaker::Update { kind: GROUP_KIND, from }, &body)?;
+    // The images of the message come along, so the employee sees them (see `run::plan`).
+    if !shared.images.is_empty() {
+        conv::set_message_files(tx, update, shared.images)?;
+    }
+    // The employees of the Team chat always work in Auto.
+    conv::set_agent_mode(tx, chat, AgentMode::Auto)?;
+    // Only a board member waits for the answer; a colleague's mention would just add lines.
+    let busy = if w.board.is_some() { busy_notices(tx, store, meta, correlation, (employee, name), w, chat)? } else { Vec::new() };
+    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login, thread_parent: w.thread };
+    let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
+    Ok(Some((run, std::iter::once(posted).chain(busy).chain(queued).collect())))
+}
+
+/// The text of an update that wakes `employee` for `w`: the heading and the message
+/// (the board member's own words, or a colleague's quoted), the files, the earlier
+/// messages, and for a ticket the employee does not own, what not to take over.
+/// What tells it where its answer goes is the caller's.
+fn wake_body(w: &Wake<'_>, employee: EmployeeId) -> String {
+    let (d, from, shared) = (w.discussion, w.from, &w.shared);
     let mut body = String::new();
     if let Some(heading) = d.heading() {
         body.push_str(&heading);
@@ -550,18 +573,7 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
             t.number
         ));
     }
-    let place = if w.thread.is_some() { format!("that thread of {}", d.label()) } else { d.label() };
-    body.push_str(&format!("\n\n---\n{name}: your answer is posted in {place} under your name. Keep it short."));
-    let (update, posted) = crate::task::task_threads::post_note(tx, store, chat, crate::task::task_threads::Speaker::Update { kind: GROUP_KIND, from }, &body)?;
-    // The images of the message come along, so the employee sees them (see `run::plan`).
-    if !shared.images.is_empty() {
-        conv::set_message_files(tx, update, shared.images)?;
-    }
-    // The employees of the Team chat always work in Auto.
-    conv::set_agent_mode(tx, chat, AgentMode::Auto)?;
-    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login, thread_parent: w.thread };
-    let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
-    Ok(Some((run, std::iter::once(posted).chain(queued).collect())))
+    body
 }
 
 /// What separates a copied message from the line that says where to answer it.
@@ -589,7 +601,7 @@ const OWNER_QUOTE_CHARS: usize = 200;
 /// A reply in a thread says so, and the update keeps the discussion and the
 /// thread (`thread_parent` in its meta): what the owner posts with
 /// `post_to_discussion` after it goes into that thread (`run_thread`).
-fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &str, text: &str, thread: Option<MessageId>, source: MessageId) -> Result<Option<Vec<EventNotice>>, StorageError> {
+fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &str, text: &str, thread: Option<MessageId>, source: MessageId, busy_in: &mut Option<ConversationId>) -> Result<Option<Vec<EventNotice>>, StorageError> {
     use aurelius_domain::task::TaskStatus;
     let Some(root) = t.root_task else { return Ok(Some(vec![])) };
     let Some(row) = aurelius_storage::tasks::load_task(tx, root)? else { return Ok(Some(vec![])) };
@@ -608,6 +620,8 @@ fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &
     if !matches!(row.status, TaskStatus::Running | TaskStatus::Review) {
         return Ok(Some(notices));
     }
+    // The owner is mid-run: the caller says so now, the answer comes when that run ends.
+    *busy_in = Some(conversation);
     let runs = conv::unfinished_runs_in(tx, conversation)?;
     if runs.iter().any(|(_, status)| status == "created") {
         return Ok(Some(notices));
@@ -677,6 +691,66 @@ fn main_task_ended(tx: &Tx<'_>, t: &TicketPlace) -> Result<String, StorageError>
     Ok(format!("{what} · Start makes a new one. The owner did not get this message; name a colleague with @Name to ask someone now."))
 }
 
+/// How long a run has gone, in words ("45s", "14m", "2h 5m").
+fn run_duration(ms: i64) -> String {
+    let seconds = (ms / 1000).max(0);
+    match seconds {
+        0..=59 => format!("{seconds}s"),
+        60..=3599 => format!("{}m", seconds / 60),
+        _ => format!("{}h {}m", seconds / 3600, seconds % 3600 / 60),
+    }
+}
+
+/// What a board member sees at once when the message they posted waits behind a
+/// run going in `conversation` (a run reads only up to its own `reply_to`): a
+/// quick answer when one can start, and the busy line. Nothing when no run is
+/// going there. Call it before the run for the message is queued. The line is a
+/// `Limit` system line with its own words, so old clients show it as it is.
+fn busy_notices(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, (employee, name): (EmployeeId, &str), w: &Wake<'_>, conversation: ConversationId) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(since) = conv::going_run_since(tx, conversation)? else { return Ok(Vec::new()) };
+    let for_how_long = since.map_or_else(|| "just started".to_owned(), |at| run_duration(aurelius_storage::now_ms() - at));
+    let quick = quick_answer(tx, store, meta, correlation, (employee, name), w, &for_how_long)?;
+    let text = match quick {
+        Some(_) => format!("{name} is busy with a run ({for_how_long}): a quick answer follows now, the full answer when the run ends."),
+        None => format!("{name} is busy with a run ({for_how_long}), will answer when it ends."),
+    };
+    let mut notices = vec![system_line_in(tx, w.discussion.id, w.thread, &SystemLine::new(SystemLineKind::Limit), Some(&text))?];
+    notices.extend(quick.into_iter().flatten());
+    Ok(notices)
+}
+
+/// A quick answer for a board member whose employee is busy: a text-only run in the
+/// employee's hidden quick-answer conversation, so it does not wait behind the long
+/// run. It reads the same update as a woken employee, answers from it and what the
+/// employee knows, and its answer goes to the discussion (`mirror_answer`), waking
+/// nobody. `None` when it cannot start: the hourly cost cap is reached
+/// (`QUICK_ANSWER_COST_PER_HOUR_MICRO`) or the employee's previous quick answer is
+/// still going, then the busy line is all there is.
+fn quick_answer(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, (employee, name): (EmployeeId, &str), w: &Wake<'_>, for_how_long: &str) -> Result<Option<Vec<EventNotice>>, StorageError> {
+    if conv::quick_answer_cost_since(tx, aurelius_storage::now_ms() - group::WAKE_WINDOW_MS)? >= group::QUICK_ANSWER_COST_PER_HOUR_MICRO {
+        return Ok(None);
+    }
+    let Some(chat) = conv::quick_answer_chat(tx, employee)? else { return Ok(None) };
+    if !conv::unfinished_runs_in(tx, chat)?.is_empty() {
+        return Ok(None);
+    }
+    let d = w.discussion;
+    let place = if w.thread.is_some() { format!("that thread of {}", d.label()) } else { d.label() };
+    let mut body = wake_body(w, employee);
+    body.push_str(&format!(
+        "\n\n---\n{name}: you are in the middle of a longer run (for {for_how_long}) on your own work, so this is a quick answer from the side: you have no tools and cannot see your files or that run. \
+         Answer from this discussion and what you know, in a few sentences, and say plainly what you cannot see. Do not promise to do work now: your run goes on and follows up when it ends. \
+         Your answer is posted in {place} under your name."
+    ));
+    let (update, posted) = crate::task::task_threads::post_note(tx, store, chat, crate::task::task_threads::Speaker::Update { kind: GROUP_KIND, from: w.from }, &body)?;
+    if !w.shared.images.is_empty() {
+        conv::set_message_files(tx, update, w.shared.images)?;
+    }
+    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop: w.hop, mode: None, login_user: w.login, thread_parent: w.thread };
+    let (_, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
+    Ok(Some(std::iter::once(posted).chain(queued).collect()))
+}
+
 /// A line of Aurelius that tells the board member why a message reached nobody
 /// (or not the owner): a system line (`Limit`, without `to`; it wakes nobody),
 /// in the thread of the message when it was a reply.
@@ -699,6 +773,11 @@ pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation
     if conv::message_ordinal(tx, marking.message_id)?.is_some() {
         return Ok(Vec::new());
     }
+    // A quick answer that failed or was cut off posts nothing: the busy line stays, the long run answers.
+    let quick = conv::is_quick_answer(tx, conversation)?;
+    if quick && failed.is_some() {
+        return Ok(Vec::new());
+    }
     let name = employees::employee_for_conversation(tx, conversation)?.map(|(name, _, _)| name).unwrap_or_else(|| "Aurelius".into());
     let text = match (text.trim(), failed) {
         ("", None) => return Ok(Vec::new()),
@@ -708,12 +787,13 @@ pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation
         (text, Some("interrupted")) => format!("{}\n\n(interrupted)", group::shortened(text, crate::task::task_threads::MAX_POST)),
         (text, Some(code)) => format!("{}\n\n(interrupted: {code})", group::shortened(text, crate::task::task_threads::MAX_POST)),
     };
-    let notice = post_in(tx, store, marking.conversation_id, marking.thread_parent, marking.message_id, GROUP_KIND, &name, &text, serde_json::json!({ "run_id": run, "hop": marking.hop, "mode": mode }))?;
+    let notice = post_in(tx, store, marking.conversation_id, marking.thread_parent, marking.message_id, GROUP_KIND, &name, &text, serde_json::json!({ "run_id": run, "hop": marking.hop, "mode": mode, "quick": quick.then_some(true) }))?;
     if !files.is_empty() {
         conv::set_message_files(tx, marking.message_id, files)?;
     }
     let mut notices = vec![notice];
-    if let Some(d) = load(tx, marking.conversation_id)? {
+    // A quick answer wakes nobody: it only answers the board member.
+    if let Some(d) = load(tx, marking.conversation_id)?.filter(|_| !quick) {
         let run = run.to_string();
         notices.extend(follow_named(tx, &d, &text, employee_cause(&run))?);
     }
@@ -1029,17 +1109,22 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
     let named = addressees(tx, d, text, None)?;
     let mut sent = Sent { to: Vec::new(), run_ids: Vec::new() };
     let mut ended = None;
-    if let (Some((owner, _)), Some(t)) = (named.owner, d.ticket()) {
-        match to_owner(tx, store, d, t, user.as_deref().unwrap_or(OWNER), text, thread, message)? {
+    let mut owner_busy = None;
+    if let (Some((owner, _)), Some(t)) = (&named.owner, d.ticket()) {
+        match to_owner(tx, store, d, t, user.as_deref().unwrap_or(OWNER), text, thread, message, &mut owner_busy)? {
             Some(n) => {
                 notices.extend(n);
-                sent.to.push(owner);
+                sent.to.push(*owner);
             }
             None => ended = Some(main_task_ended(tx, t)?),
         }
     }
     let read = reader(store);
     let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, context: context_text(tx, &read, d.id, thread, Some(message))?, hop: 0, login, thread };
+    // The owner is mid-run: the board member hears it at once, and gets a quick answer.
+    if let (Some(conversation), Some((owner, owner_name))) = (owner_busy, &named.owner) {
+        notices.extend(busy_notices(tx, store, meta, correlation, (*owner, owner_name), &w, conversation)?);
+    }
     for (employee, name) in &named.awake {
         if let Some((run, n)) = wake(tx, store, meta, correlation, (*employee, name), &w)? {
             sent.to.push(*employee);
@@ -1382,6 +1467,14 @@ impl CommandService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_duration_is_said_in_seconds_minutes_or_hours() {
+        assert_eq!(run_duration(45_000), "45s");
+        assert_eq!(run_duration(14 * 60_000 + 5_000), "14m");
+        assert_eq!(run_duration(2 * 3_600_000 + 5 * 60_000), "2h 5m");
+        assert_eq!(run_duration(-5), "0s");
+    }
 
     fn place(column: ColumnKind) -> TicketPlace {
         TicketPlace { id: TicketId::new(), number: 1, title: "t".into(), project: ProjectId::new(), column, owner: Some(EmployeeId::new()), root_task: None, archived: false }

@@ -408,7 +408,7 @@ pub fn employee_conversations(conn: &Connection, employee: aurelius_domain::Empl
         "SELECT c.id, c.title, c.created_at_ms,
                 COALESCE((SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = c.id), c.created_at_ms),
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id)
-         FROM conversations c WHERE c.kind = 'employee' AND c.employee_id = ?1 AND c.archived_at_ms IS NULL
+         FROM conversations c WHERE c.kind = 'employee' AND c.employee_id = ?1 AND c.archived_at_ms IS NULL AND c.quick_answer = 0
          ORDER BY 4 DESC, c.created_at_ms DESC",
     )?;
     let rows = stmt.query_map([employee.to_string()], |r| {
@@ -855,6 +855,55 @@ pub fn unfinished_runs_in(conn: &rusqlite::Connection, conversation: Conversatio
         conn.prepare("SELECT id, status FROM runs WHERE conversation_id = ?1 AND status IN ('created','starting','running','waiting','cancelling')")?;
     let rows = stmt.query_map([conversation.to_string()], |r| Ok((RunId::parse(&r.get::<_, String>(0)?).map_err(conv_err)?, r.get::<_, String>(1)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// When the run that is going in the conversation started (milliseconds), if one
+/// is: a queued run does not count, it has not begun. `Some(None)` when it is
+/// going but has no start time yet. A message posted there waits for this run.
+pub fn going_run_since(conn: &rusqlite::Connection, conversation: ConversationId) -> Result<Option<Option<i64>>, StorageError> {
+    let mut stmt = conn.prepare("SELECT started_at_ms FROM runs WHERE conversation_id = ?1 AND status IN ('starting','running','waiting','cancelling') ORDER BY started_at_ms LIMIT 1")?;
+    Ok(stmt.query_row([conversation.to_string()], |r| r.get::<_, Option<i64>>(0)).optional()?)
+}
+
+/// The title of the hidden conversation of an employee's quick answers.
+pub const QUICK_ANSWER_TITLE: &str = "Quick answers";
+
+/// The hidden conversation an employee's quick answers run in (made on first use,
+/// then reused): its own conversation, because the dispatcher leases one run per
+/// conversation and the employee's own chat is busy. `None` for an employee
+/// without a chat. It is marked `quick_answer`, so no list shows it and its runs
+/// have no tools.
+pub fn quick_answer_chat(tx: &Transaction<'_>, employee: aurelius_domain::EmployeeId) -> Result<Option<ConversationId>, StorageError> {
+    let found: Option<String> = tx
+        .query_row("SELECT id FROM conversations WHERE employee_id = ?1 AND quick_answer = 1 ORDER BY created_at_ms, id LIMIT 1", [employee.to_string()], |r| r.get(0))
+        .optional()?;
+    if let Some(id) = found {
+        return Ok(ConversationId::parse(&id).ok());
+    }
+    let id = ConversationId::new();
+    let made = tx.execute(
+        "INSERT INTO conversations(id, kind, project_id, employee_id, title, version, created_at_ms, quick_answer)
+         SELECT ?1, 'employee', NULL, e.id, ?3, 1, ?4, 1 FROM employees e WHERE e.id = ?2
+           AND EXISTS (SELECT 1 FROM conversations c WHERE c.employee_id = e.id AND c.kind = 'employee' AND c.quick_answer = 0)",
+        params![id.to_string(), employee.to_string(), QUICK_ANSWER_TITLE, now_ms()],
+    )?;
+    Ok((made == 1).then_some(id))
+}
+
+/// Whether the conversation is an employee's hidden quick-answer conversation.
+pub fn is_quick_answer(conn: &Connection, conversation: ConversationId) -> Result<bool, StorageError> {
+    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND quick_answer = 1)", [conversation.to_string()], |r| r.get(0))?)
+}
+
+/// What the quick answers of all employees cost since `since_ms`, in micro-units
+/// of the usage records (a record without a cost counts for nothing).
+pub fn quick_answer_cost_since(conn: &Connection, since_ms: i64) -> Result<i64, StorageError> {
+    Ok(conn.query_row(
+        "SELECT COALESCE(SUM(u.cost_microunits), 0) FROM usage_records u JOIN runs r ON r.id = u.run_id
+         JOIN conversations c ON c.id = r.conversation_id WHERE c.quick_answer = 1 AND u.recorded_at_ms >= ?1",
+        [since_ms],
+        |r| r.get(0),
+    )?)
 }
 
 /// Where the answer to a user message stands, for changing a waiting message.
