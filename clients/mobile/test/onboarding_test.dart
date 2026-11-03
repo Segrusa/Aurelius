@@ -208,8 +208,8 @@ void main() {
     });
 
     test('with one the onboarding is left; before the first hello nothing is decided', () {
-      expect(boardMemberRedirect(BoardMemberStep.ready, '/onboarding'), '/home');
-      expect(boardMemberRedirect(BoardMemberStep.ready, '/onboarding/new'), '/home');
+      expect(boardMemberRedirect(BoardMemberStep.ready, '/onboarding'), '/team');
+      expect(boardMemberRedirect(BoardMemberStep.ready, '/onboarding/new'), '/team');
       expect(boardMemberRedirect(BoardMemberStep.ready, '/home'), isNull);
       expect(boardMemberRedirect(BoardMemberStep.unknown, '/home'), isNull);
     });
@@ -267,14 +267,14 @@ void main() {
       step.dispose();
     });
 
-    Future<GoRouter> pump(WidgetTester tester, LinkState initial, {String at = '/home'}) async {
+    Future<GoRouter> pump(WidgetTester tester, LinkState initial, {String at = '/team'}) async {
       setLink(initial);
       final router = GoRouter(
         initialLocation: at,
         refreshListenable: step,
         redirect: (context, state) => boardMemberRedirect(step.value, state.matchedLocation),
         routes: [
-          GoRoute(path: '/home', builder: (_, _) => const Scaffold(body: Text('page home'))),
+          GoRoute(path: '/team', builder: (_, _) => const Scaffold(body: Text('page team'))),
           GoRoute(path: '/hosts', builder: (_, _) => const Scaffold(body: Text('page hosts'))),
           GoRoute(path: '/more', builder: (_, _) => const MorePage()),
           GoRoute(path: '/onboarding', builder: (_, _) => const OnboardingPage(), routes: [
@@ -316,7 +316,7 @@ void main() {
     testWidgets('first start: only "Create the first board member"; created → the app and a welcome (MU1-20)', (tester) async {
       await pump(tester, const LinkState(status: LinkStatus.online, boardMembersExist: false));
       expect(find.text('Create the first board member'), findsWidgets);
-      expect(find.text('page home'), findsNothing);
+      expect(find.text('page team'), findsNothing);
       expect(find.text('Choose another server'), findsOneWidget);
 
       when(() => repo.createBoardMember('ada', secret)).thenAnswer((_) async {
@@ -327,7 +327,7 @@ void main() {
       expect(find.byIcon(CupertinoIcons.checkmark_alt), findsNWidgets(2), reason: 'both rules hold');
       await tapCreate(tester);
       verify(() => repo.createBoardMember('ada', secret)).called(1);
-      expect(find.text('page home'), findsOneWidget);
+      expect(find.text('page team'), findsOneWidget);
       expect(find.text('Welcome, ada.'), findsOneWidget);
     });
 
@@ -414,7 +414,7 @@ void main() {
     testWidgets('no session any more while in the app: back to the sign-in screen', (tester) async {
       members = [ada];
       await pump(tester, const LinkState(status: LinkStatus.online, boardMembersExist: true, user: ada));
-      expect(find.text('page home'), findsOneWidget);
+      expect(find.text('page team'), findsOneWidget);
       setLink(const LinkState(status: LinkStatus.online, boardMembersExist: true));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('sign-in')), findsOneWidget);

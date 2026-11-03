@@ -67,7 +67,7 @@ class AppRouter {
   late final GoRouter config = GoRouter(
     navigatorKey: _root,
     observers: [usage],
-    initialLocation: '/home',
+    initialLocation: '/team',
     refreshListenable: boardMember,
     redirect: (context, state) => boardMember == null ? null : boardMemberRedirect(boardMember!.value, state.matchedLocation),
     routes: [
@@ -93,23 +93,23 @@ class AppRouter {
         builder: (context, state, shell) => HomeShell(shell: shell, usage: usage),
         branches: [
           StatefulShellBranch(routes: [
-            GoRoute(path: '/home', pageBuilder: (context, state) => routePage(state, const DashboardPage())),
+            GoRoute(path: '/team', pageBuilder: (context, state) => routePage(state, const TeamPage())),
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/board', pageBuilder: (context, state) => routePage(state, const BoardTab())),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/team', pageBuilder: (context, state) => routePage(state, const TeamPage())),
+            GoRoute(path: '/inbox', pageBuilder: (context, state) => routePage(state, const InboxPage())),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/inbox', pageBuilder: (context, state) => routePage(state, const InboxPage())),
+            GoRoute(path: '/home', pageBuilder: (context, state) => routePage(state, const DashboardPage())),
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/more', pageBuilder: (context, state) => routePage(state, const MorePage())),
           ]),
         ],
       ),
-      // Tasks without a ticket stay reachable (B7): More → Tasks.
+      // Hidden from the menus in the mobile core (mobile_core.dart), but still reachable by link and push.
       GoRoute(parentNavigatorKey: _root, path: '/tasks', pageBuilder: (context, state) => routePage(state, const TasksPage())),
       // The vault (Fase 4): the company's, or a project's with `?project=`.
       GoRoute(parentNavigatorKey: _root, path: '/vault', pageBuilder: (context, state) => routePage(state, VaultPage(projectId: state.uri.queryParameters['project']))),
@@ -243,7 +243,7 @@ class AppRouter {
     } else if (_openPersonal(data, repository)) {
       return;
     } else if (taskId != null && projectId != null) {
-      config.go('/home');
+      config.go('/team');
       config.push('/project/$projectId/task/$taskId');
     } else {
       config.go('/inbox');

@@ -23,6 +23,7 @@ import '../features/pairing/pairing_bloc.dart';
 import '../features/runtime/runtime_bloc.dart';
 import '../features/links/link_actions.dart' show aureliusLinkReady, pendingAureliusLink, takePendingAureliusLink;
 import '../features/team/channels_bloc.dart';
+import 'mobile_core.dart';
 import 'router.dart';
 
 /// Root: paired hosts decide between onboarding and the app for the active
@@ -164,7 +165,8 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
         providers: [
           BlocProvider(create: (_) => ConnectionBloc(_repository)),
           BlocProvider(create: (_) => InboxBloc(_repository)),
-          BlocProvider(create: (_) => PowerBloc(_repository)),
+          // Only the Power banner and Settings section read it: no refresh at start while they are hidden.
+          if (shownInMobileCore('power')) BlocProvider(create: (_) => PowerBloc(_repository)),
           BlocProvider(create: (_) => CompanyBloc(_repository, order: ProjectOrderStore(widget.host.hostId))),
           BlocProvider(create: (_) => RuntimeBloc(_repository)),
           BlocProvider(create: (_) => ChannelsBloc(_repository)),

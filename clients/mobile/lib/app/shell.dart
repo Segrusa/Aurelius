@@ -8,29 +8,30 @@ import '../core/usage/screen_usage.dart';
 import '../core/widgets/ios.dart';
 import '../features/connection/connection_banner.dart';
 import '../features/connection/connection_bloc.dart';
+import 'mobile_core.dart';
 import '../features/dashboard/give_work.dart';
 import '../features/inbox/inbox_bloc.dart';
 import '../features/power/power_widgets.dart';
 import '../features/team/channels_bloc.dart';
 
 /// The route pattern of each tab, in the order of [shellTabs]; what the screen counter counts a tab by.
-const shellTabPatterns = ['/home', '/board', '/team', '/inbox', '/more'];
+const shellTabPatterns = ['/team', '/board', '/inbox', '/home', '/more'];
 
 /// The bottom tabs, in this order (branch indices of the router's shell).
-/// The Board took the place of Tasks (D-03); Tasks is under More.
+/// Team chat comes first and is where the app opens (ticket #19); Home keeps the way to the chat with an employee.
 const shellTabs = [
-  GlassTab(CupertinoIcons.house, 'Home'),
-  GlassTab(CupertinoIcons.square_split_2x1, 'Board'),
   GlassTab(CupertinoIcons.chat_bubble_2, 'Team'),
+  GlassTab(CupertinoIcons.square_split_2x1, 'Board'),
   GlassTab(CupertinoIcons.tray, 'Inbox'),
+  GlassTab(CupertinoIcons.house, 'Home'),
   GlassTab(CupertinoIcons.ellipsis_circle, 'More'),
 ];
 
 /// The inbox tab, with the badge of what waits for you (its index in [shellTabs]).
-const inboxTab = 3;
+const inboxTab = 2;
 
 /// The Team tab: the mentions of a board member over the channels, a dot for anything unread (B8).
-const teamTab = 2;
+const teamTab = 0;
 
 ({int mentions, bool unread}) _teamBadge(BuildContext context) {
   try {
@@ -40,7 +41,7 @@ const teamTab = 2;
   }
 }
 
-/// Tabs: Home · Board · Team · Inbox · More in a floating glass tab bar,
+/// Tabs: Team · Board · Inbox · Home · More in a floating glass tab bar,
 /// with the connection banner on top. Hardware keyboards (iPad, Android with a
 /// keyboard): ⌘/Ctrl+1…5 switch tabs, ⌘/Ctrl+N gives work (a new task).
 class HomeShell extends StatefulWidget {
@@ -93,7 +94,7 @@ class _HomeShellState extends State<HomeShell> {
         autofocus: true,
         child: TabScaffold(
           background: Tokens.bg,
-          banners: const [ConnectionBanner(), PowerBanner()],
+          banners: [const ConnectionBanner(), if (shownInMobileCore('power')) const PowerBanner()],
           bannerVisible: bannerVisible,
           tabBar: GlassTabBar(
             current: shell.currentIndex,

@@ -1,3 +1,4 @@
+import 'package:aurelius_mobile/app/mobile_core.dart';
 import 'package:aurelius_mobile/app/router.dart';
 import 'package:aurelius_mobile/app/shell.dart';
 import 'package:aurelius_mobile/core/hosts/host.dart';
@@ -223,10 +224,12 @@ void main() {
     setUp(() => router = AppRouter(host));
     tearDown(() => router.dispose());
 
-    test('the Board is the second tab, Team the third; Tasks moved under More (D-03, B7)', () {
+    test('Team chat is the first tab and the Board the second; hidden screens keep their routes (ticket #19)', () {
       final shell = router.config.configuration.routes.whereType<StatefulShellRoute>().single;
       final first = [for (final b in shell.branches) (b.routes.first as GoRoute).path];
-      expect(first, ['/home', '/board', '/team', '/inbox', '/more']);
+      expect(first, ['/team', '/board', '/inbox', '/home', '/more']);
+      expect(first, shellTabPatterns);
+      expect(router.config.routeInformationProvider.value.uri.path, '/team', reason: 'the app opens on the Team chat');
       final paths = pathsOf(router.config.configuration.routes);
       expect(paths, containsAll(['/tasks', '/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board']));
       expect(first.length, shellTabs.length, reason: 'one tab per branch');
@@ -250,11 +253,11 @@ void main() {
       whenListen(connection, const Stream<LinkState>.empty(), initialState: online);
       final power = MockPowerBloc();
       whenListen(power, const Stream<PowerBlocState>.empty(), initialState: const PowerBlocState());
-      final router = GoRouter(initialLocation: '/home', routes: [
+      final router = GoRouter(initialLocation: '/team', routes: [
         StatefulShellRoute.indexedStack(
           builder: (context, state, shell) => HomeShell(shell: shell),
           branches: [
-            for (final name in ['home', 'board', 'team', 'inbox', 'more'])
+            for (final name in ['team', 'board', 'inbox', 'home', 'more'])
               StatefulShellBranch(routes: [GoRoute(path: '/$name', builder: (_, _) => Scaffold(body: Center(child: Text('page $name'))))]),
           ],
         ),
@@ -283,19 +286,19 @@ void main() {
       expect((x - tester.getCenter(find.text('Team')).dx).abs(), greaterThan(10));
     });
 
-    testWidgets('a tap on Team and ⌘3 open the group chat; ⌘4 the inbox; the Board is a tab', (tester) async {
+    testWidgets('the shell opens on the group chat; ⌘3 opens the inbox, ⌘1 the chat again; the Board is a tab', (tester) async {
       await pump(tester, const InboxState(loading: false));
-      expect(find.text('page home'), findsOneWidget);
-      await tester.tap(find.text('Team'));
-      await tester.pumpAndSettle();
       expect(find.text('page team'), findsOneWidget);
+      await tester.tap(find.text('Home'));
+      await tester.pumpAndSettle();
+      expect(find.text('page home'), findsOneWidget);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit4);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
       expect(find.text('page inbox'), findsOneWidget);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
       expect(find.text('page team'), findsOneWidget);
