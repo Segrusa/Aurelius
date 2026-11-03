@@ -357,7 +357,7 @@ fn threads(conn: &Connection, project: Option<ProjectId>, reader: Option<Employe
          FROM conversations c LEFT JOIN employees mg ON mg.id = c.employee_id
          WHERE c.archived_at_ms IS NULL
            AND ((?1 IS NOT NULL AND c.project_id = ?1 AND c.kind = 'project')
-                OR (?2 IS NOT NULL AND c.kind = 'employee' AND c.employee_id = ?2
+                OR (?2 IS NOT NULL AND c.kind = 'employee' AND c.employee_id = ?2 AND c.quick_answer = 0
                     AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id)))
          ORDER BY 4 DESC, c.created_at_ms DESC LIMIT 500",
     )?;

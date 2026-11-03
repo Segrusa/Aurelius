@@ -289,7 +289,9 @@ User question:
                     .collect();
                 // Without a folder (a project without one) Claude Code still works:
                 // in a folder of the conversation's own, never in the user's files.
-                let folders = if folders.is_empty() && config.provider == Some(aurelius_domain::connection::ProviderKind::ClaudeCode) {
+                // A quick answer (an employee busy in a run) has no tools and so no folder.
+                let quick = conv::is_quick_answer(conn, conversation_id)?;
+                let folders = if folders.is_empty() && !quick && config.provider == Some(aurelius_domain::connection::ProviderKind::ClaudeCode) {
                     let own = store.root().join("workspaces").join(conversation_id.to_string());
                     if std::fs::create_dir_all(&own).is_ok() { vec![own] } else { folders }
                 } else {
@@ -306,7 +308,7 @@ User question:
                     _ => folders,
                 };
                 let mode = aurelius_storage::conversations::agent_mode(conn, conversation_id)?;
-                let work = (!folders.is_empty()).then(|| (folders.clone(), mode));
+                let work = (!folders.is_empty() && !quick).then(|| (folders.clone(), mode));
                 let browser = work.is_some() && aurelius_storage::conversations::browser_allowed(conn, conversation_id)?;
                 // One browser session per employee: all its conversations and tasks share one tab group.
                 let browser_session = match browser {

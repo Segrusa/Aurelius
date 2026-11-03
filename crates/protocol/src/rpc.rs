@@ -364,6 +364,11 @@ pub mod feature {
     /// `message.edited`, only to connections whose `HelloParams::accepts` names
     /// `message_edits`. A deletion gives the event `message.deleted` every client knows.
     pub const MESSAGE_EDITS: &str = "message_edits";
+    /// Quick answers (protocol 5, additive; ticket #15): a board member's message to
+    /// an employee who is in the middle of a run is also answered at once by a
+    /// short, text-only run of its own, besides the busy line. No new method, field
+    /// or event: the answer is an ordinary employee message in the discussion.
+    pub const QUICK_ANSWERS: &str = "quick_answers";
 }
 
 /// Every feature this build has.
@@ -405,6 +410,7 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_RESPONSIBLE,
     feature::TICKET_FOLLOW,
     feature::PERSONAL_INBOX,
+    feature::QUICK_ANSWERS,
 ];
 
 /// Daemon → client.

@@ -1,0 +1,12 @@
+-- v0.21 (protocol 5, feature `quick_answers`, ticket #15): quick answers. A board
+-- member's message to an employee who is in the middle of a run waits behind that
+-- run (a run reads only up to its own reply_to). A quick answer is a short,
+-- text-only run in a conversation of its own, one per employee, that answers at
+-- once while the long run goes on.
+--
+-- * conversations.quick_answer: 1 marks that hidden conversation. It is never the
+--   main chat (it is made after it), never listed as a chat, and its runs have no
+--   tools. Every conversation so far is 0.
+--
+-- Additive only: one column with a default. Nothing is rebuilt, changed or deleted.
+ALTER TABLE conversations ADD COLUMN quick_answer INTEGER NOT NULL DEFAULT 0 CHECK(quick_answer IN (0,1));
