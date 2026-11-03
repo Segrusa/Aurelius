@@ -71,6 +71,17 @@ pub const GROUP_CHAT_GUIDANCE: &str = "The company has a group chat with the use
 /// The board tools in one line: what an employee may do with tickets, and what stays with the board members.
 pub const BOARD_GUIDANCE: &str = "The board has tools: list_tickets and read_ticket to look, post_to_ticket to write in a ticket's discussion, update_ticket on a ticket you work on, and for management create_ticket and move_ticket (Backlog to Todo). Done, accepting, plans, sending back and cancelling are decisions of a board member.";
 
+/// What a run under a ticket is told about where board members read: the discussion, not the task chat.
+pub const DISCUSSION_FIRST_GUIDANCE: &str = "The board member responsible for this ticket does not read this task chat; they read the ticket's discussion. Everything that needs them goes there with post_to_discussion: a question, a plan or proposal, a choice between options, an explanation of what you did or found, a blocker, and the report that the work is ready. Open such a post with @username of the responsible board member so they are told. Write it so it can be read on its own: say what you need from them and, for a choice, give the options with your recommendation. Their answer arrives here as an update; do not wait for it inside a long run, finish what you can and say what is open. Keep working notes and tool output in this chat.";
+
+/// The note for a ticket's run: the general rule, and who to mention.
+fn discussion_first_note(responsible_username: Option<&str>) -> String {
+    match responsible_username {
+        Some(u) => format!("{DISCUSSION_FIRST_GUIDANCE}\nThe responsible board member of this ticket is @{u}."),
+        None => format!("{DISCUSSION_FIRST_GUIDANCE}\nThis ticket has no responsible board member yet: post without a mention."),
+    }
+}
+
 /// How an employee reads tasks from its chat.
 pub const CHAT_TOOLS_GUIDANCE: &str = "Use list_tasks to find tasks of every project (filter on status, employee, words or project) and read_task to read one: its goal, result and latest updates. Your earlier chats with the user: list_conversations and read_conversation.";
 
@@ -514,6 +525,10 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                         ));
                     }
                 }
+                if let Some(t) = ticket_discussion.as_ref().and_then(|d| d.ticket()) {
+                    let responsible = aurelius_storage::tickets::view(conn, t.id, &read_blob)?.and_then(|v| v.responsible_username);
+                    tail.push(discussion_first_note(responsible.as_deref()));
+                }
                 let discussion = ticket_discussion.is_some()
                     || conv::group_run(conn, run_id)?.is_some_and(|g| crate::conversation::discussion::load(conn, g.conversation_id).ok().flatten().is_some_and(|d| d.ticket().is_some()));
                 // The Testing column (ticket #5): with a tester the full suite runs once, in the
@@ -677,6 +692,14 @@ mod tests {
             assert!(PLAN_MODE_GUIDANCE.contains(tool), "{tool} is named as allowed in plan mode");
         }
         assert!(PLAN_MODE_GUIDANCE.contains("files, commands and external actions are refused"));
+    }
+
+    #[test]
+    fn a_ticket_run_is_told_to_ask_the_responsible_member_in_the_discussion() {
+        let note = discussion_first_note(Some("sebastien"));
+        assert!(note.contains("post_to_discussion") && note.contains("a question") && note.contains("a plan"));
+        assert!(note.ends_with("@sebastien."));
+        assert!(discussion_first_note(None).contains("no responsible board member"));
     }
 
     fn turn(role: TurnRole, text: &str) -> Turn {
