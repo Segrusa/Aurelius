@@ -723,12 +723,12 @@ pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation
 /// The answer of a run of a ticket's main task in Review, as the owner's message in
 /// the discussion: the board member reads it there, whether the message it answers
 /// came from the discussion or from the task's own conversation (then it is quoted,
-/// because the discussion does not have it). Nothing when the run already posted
-/// there itself. It names the responsible board member, who is told by that; it
+/// because the discussion does not have it). Nothing when the run's last word
+/// already went there itself. It names the responsible board member, who is told by that; it
 /// wakes nobody.
 pub(crate) fn owner_answer(tx: &Tx<'_>, store: &Store, ticket: TicketId, run: RunId, answer: &str) -> Result<Vec<EventNotice>, StorageError> {
     let Some(d) = of_ticket(tx, ticket)? else { return Ok(Vec::new()) };
-    if aurelius_storage::discussions::run_posted_in(tx, d.id, run)? {
+    if aurelius_storage::discussions::run_said_last_in(tx, d.id, run)? {
         return Ok(Vec::new());
     }
     let read = reader(store);
@@ -758,7 +758,7 @@ fn owner_answer_text(answer: &str, question: Option<&str>, responsible: Option<&
         text => text,
     };
     let answer = match responsible {
-        Some(u) if !answer.to_lowercase().contains(&format!("@{}", u.to_lowercase())) => format!("@{u} {answer}"),
+        Some(u) if !names(answer, u) => format!("@{u} {answer}"),
         _ => answer.to_owned(),
     };
     let answer = group::shortened(&answer, crate::task::task_threads::MAX_POST);
@@ -769,6 +769,12 @@ fn owner_answer_text(answer: &str, question: Option<&str>, responsible: Option<&
         }
         None => answer,
     }
+}
+
+/// `text` mentions @`username` itself, not a longer name that starts with it.
+fn names(text: &str, username: &str) -> bool {
+    let (text, mention) = (text.to_lowercase(), format!("@{}", username.to_lowercase()));
+    text.match_indices(&mention).any(|(at, _)| !text[at + mention.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_' || c == '-'))
 }
 
 /// What a board member's message in a discussion did (`GroupMessageSent` /
@@ -1399,6 +1405,12 @@ mod owner_answer_tests {
         assert_eq!(owner_answer_text("It is done.", None, Some("sebastien")), "@sebastien It is done.");
         assert_eq!(owner_answer_text("@Sebastien it is done.", None, Some("sebastien")), "@Sebastien it is done.");
         assert_eq!(owner_answer_text("It is done.", None, None), "It is done.");
+    }
+
+    #[test]
+    fn a_longer_name_that_starts_with_the_username_does_not_count_as_naming_them() {
+        assert_eq!(owner_answer_text("Ask @sebastien.", None, Some("seb")), "@seb Ask @sebastien.");
+        assert_eq!(owner_answer_text("Ask @seb, or @sebastien.", None, Some("seb")), "Ask @seb, or @sebastien.");
     }
 
     #[test]

@@ -29,10 +29,13 @@ pub fn kind_of(conn: &Connection, conversation: ConversationId) -> Result<Option
     Ok(kind.as_deref().and_then(ConversationKind::parse))
 }
 
-/// Whether `run` itself posted a message in the conversation `discussion`.
-pub fn run_posted_in(conn: &Connection, discussion: ConversationId, run: RunId) -> Result<bool, StorageError> {
+/// `run` said its last word in `discussion` itself: it posted there and used no
+/// tool after that other than another post, so what it still wrote is a sign-off.
+pub fn run_said_last_in(conn: &Connection, discussion: ConversationId, run: RunId) -> Result<bool, StorageError> {
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = ?1 AND json_extract(meta_json, '$.run_id') = ?2)",
+        "SELECT EXISTS(SELECT 1 FROM messages m WHERE m.conversation_id = ?1 AND json_extract(m.meta_json, '$.run_id') = ?2
+           AND NOT EXISTS(SELECT 1 FROM run_activity a WHERE a.run_id = ?2 AND a.started_at_ms > m.created_at_ms
+                          AND a.tool NOT LIKE '%post_to_discussion' AND a.tool NOT LIKE '%post_to_ticket'))",
         [discussion.to_string(), run.to_string()],
         |r| r.get(0),
     )?)

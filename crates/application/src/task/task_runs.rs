@@ -28,6 +28,11 @@ const COLLEAGUES_DONE: &str = "Your colleagues finished their parts (their resul
 /// `closing_text` does not stop at a closing shorter than this.
 const CLOSING_MIN_CHARS: usize = 80;
 
+/// What the discussion says when an answer about a report was stopped.
+const ANSWER_STOPPED: &str = "My answer was stopped before it was finished. Send your message again if you still need it.";
+/// What the discussion says when the run of an answer about a report could not start.
+const ANSWER_NOT_STARTED: &str = "I could not start on your message. Send it again.";
+
 /// A run of the task's conversation still going (other than `except`).
 pub(crate) fn live_run(conn: &rusqlite::Connection, task: TaskId, except: Option<RunId>) -> Result<bool, StorageError> {
     Ok(conn.query_row(
@@ -102,8 +107,25 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
         wake_task_job(tx, task, false)?;
         return Ok(vec![]);
     }
-    // Ended, handed over meanwhile, or another run of it is still going: nothing to do.
-    if row.status.is_terminal() || handed_over || live_run(tx, task, Some(run))? {
+    // Ended or handed over meanwhile: nothing to do.
+    if row.status.is_terminal() || handed_over {
+        return Ok(vec![]);
+    }
+    let another_live = live_run(tx, task, Some(run))?;
+    // An answer about a report that fails, stops or has a run behind it: the discussion
+    // hears of it here, and the report stays what the board member decides on.
+    if row.status == TaskStatus::Review && (another_live || failed.is_some() || !completed) && crate::task::ticket_line::is_root(tx, task)? {
+        let text = match (failed, completed) {
+            (Some(why), _) => format!("I could not finish my answer ({why}). Send your message again."),
+            (None, false) => ANSWER_STOPPED.to_owned(),
+            (None, true) => closing_text(answer, &aurelius_storage::conversations::tool_offsets_of_run(tx, run)?).to_owned(),
+        };
+        if let Some(answered) = crate::task::ticket_line::answered_in_review(tx, st, task, run, &text)? {
+            return Ok(answered);
+        }
+    }
+    // Another run of it is still going: that one's end decides.
+    if another_live {
         return Ok(vec![]);
     }
     let mut notices = Vec::new();
@@ -166,7 +188,6 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
             && let Some(answered) = crate::task::ticket_line::answered_in_review(tx, st, task, run, closing)?
         {
             notices.extend(answered);
-            notices.extend(live_run_notice(tx, store::task_conversation(tx, task)?.map(|(c, _)| c).expect("a run of the task ran in its conversation"))?);
             return Ok(notices);
         }
         notices.extend(complete(tx, st, task, closing)?);
@@ -200,6 +221,12 @@ pub(crate) fn on_run_not_started(tx: &Tx<'_>, st: &Store, run: RunId) -> Result<
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
     let employee: Option<String> = tx.query_row("SELECT c.employee_id FROM runs r JOIN conversations c ON c.id = r.conversation_id WHERE r.id = ?1", [run.to_string()], |r| r.get(0)).ok().flatten();
     let handed_over = employee.and_then(|m| EmployeeId::parse(&m).ok()) != row.employee_id;
+    // A message about a report that gets no answer: the discussion says so, the ticket stays in Review.
+    if row.status == TaskStatus::Review && !handed_over && crate::task::ticket_line::is_root(tx, task)?
+        && let Some(answered) = crate::task::ticket_line::answered_in_review(tx, st, task, run, ANSWER_NOT_STARTED)?
+    {
+        return Ok(answered);
+    }
     if row.status != TaskStatus::Running || handed_over || live_run(tx, task, Some(run))? {
         return Ok(vec![]);
     }

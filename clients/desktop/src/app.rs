@@ -5764,7 +5764,7 @@ impl AppView {
         if waiting {
             return ("Needs you", theme::ACCENT_TEXT);
         }
-        if self.tasks.iter().any(|t| t.project_id == project && (t.status == aurelius_domain::task::TaskStatus::Running || (t.status.is_terminal() && t.live_run == Some(aurelius_domain::views::LiveRun::Running)))) {
+        if self.tasks.iter().any(|t| t.project_id == project && (t.status == aurelius_domain::task::TaskStatus::Running || ((t.status.is_terminal() || t.status == aurelius_domain::task::TaskStatus::Review) && t.live_run == Some(aurelius_domain::views::LiveRun::Running)))) {
             return ("Working", theme::ACCENT);
         }
         ("Quiet", theme::MUTED)

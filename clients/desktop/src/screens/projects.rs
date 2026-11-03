@@ -642,7 +642,7 @@ impl AppView {
         tasks.sort_by_key(|t| (!ui::is_waiting(t) && t.pending_approvals == 0, !matches!(t.status, TaskStatus::Running | TaskStatus::Review)));
         let task_total = tasks.len();
         let task_rows = tasks.into_iter().take(6).enumerate().map(|(i, t)| {
-            let live = t.status.is_terminal() && t.live_run.is_some();
+            let live = (t.status.is_terminal() || t.status == TaskStatus::Review) && t.live_run.is_some();
             let busy = t.status == TaskStatus::Running || t.live_run == Some(aurelius_domain::views::LiveRun::Running);
             let (label, color) = match t.status {
                 _ if live => (if busy { "Running" } else { "Queued" }, if busy { theme::ACCENT_TEXT } else { theme::TEXT_2 }),
@@ -1028,7 +1028,7 @@ impl AppView {
         self.project_tasks_shown.set((key, shown));
         let status_label = |t: &aurelius_protocol::TaskView| -> (String, u32) {
             let (label, color) = match t.status {
-                _ if t.status.is_terminal() && t.live_run.is_some() => if t.live_run == Some(aurelius_domain::views::LiveRun::Running) { ("Running", theme::ACCENT_TEXT) } else { ("Queued", theme::TEXT_2) },
+                _ if (t.status.is_terminal() || t.status == TaskStatus::Review) && t.live_run.is_some() => if t.live_run == Some(aurelius_domain::views::LiveRun::Running) { ("Running", theme::ACCENT_TEXT) } else { ("Queued", theme::TEXT_2) },
                 TaskStatus::Draft => ("Draft (no employee)", theme::MUTED),
                 TaskStatus::Queued => ("Queued", theme::TEXT_2),
                 TaskStatus::Running if t.pending_approvals > 0 => ("Waiting for you in the Inbox", theme::ACCENT_TEXT),

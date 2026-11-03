@@ -290,10 +290,15 @@ pub(crate) fn reported(tx: &Tx<'_>, st: &Store, task: TaskId) -> Result<Vec<Even
 /// A run of the main task in Review ended: it answered a message about the report
 /// (from the discussion or the task's own conversation). The answer goes in the
 /// discussion, the report stays what the board member decides on, and nothing
-/// says again that the work is ready. `None`: the card is not in Review (Testing).
+/// says again that the work is ready. `answer` is the run's text, or what the board
+/// member must know when there is none. `None`: the card is not in Review (Testing).
 pub(crate) fn answered_in_review(tx: &Tx<'_>, st: &Store, task: TaskId, run: RunId, answer: &str) -> Result<Option<Vec<EventNotice>>, StorageError> {
     let Some((ticket, _, ColumnKind::Review)) = root_of(tx, task)? else { return Ok(None) };
-    Ok(Some(crate::conversation::discussion::owner_answer(tx, st, ticket, run, answer)?))
+    let mut notices = crate::conversation::discussion::owner_answer(tx, st, ticket, run, answer)?;
+    if let Some(conversation) = aurelius_storage::conversations::run_conversation(tx, run)? {
+        notices.extend(crate::task::task_runs::live_run_notice(tx, conversation)?);
+    }
+    Ok(Some(notices))
 }
 
 /// The card of the main task `root` is in Review: `ticket.review` and the
