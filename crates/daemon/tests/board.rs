@@ -382,7 +382,7 @@ async fn cancel_ends_the_delegations_of_failed_and_earlier_main_tasks() {
     let run = live_run(dir.path(), first.conversation_id.unwrap()).await;
     let bridge = BridgeClient::connect(dir.path()).await.unwrap();
     let (ok, text) = bridge
-        .employee_act(run, EmployeeTaskOp::Delegate { employee: "Helper".into(), title: "Part".into(), goal: "HOLD-PART a part".into(), criteria: vec![], project: None })
+        .employee_act(run, EmployeeTaskOp::Delegate { employee: "Helper".into(), title: "Part".into(), goal: "HOLD-PART a part".into(), criteria: vec![], project: None, ticket: None })
         .await
         .unwrap();
     assert!(ok, "{text}");

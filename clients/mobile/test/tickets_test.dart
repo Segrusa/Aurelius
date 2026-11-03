@@ -175,6 +175,9 @@ void main() {
     expect(main.canAssign, isFalse);
     expect(delegation.isTicketMain, isFalse);
     expect(delegation.canAssign, isTrue);
+    final fromAChat = taskOf(status: TaskStatus.queued, ticketId: 'k1', delegatedBy: 'Ann');
+    expect(fromAChat.isTicketMain, isFalse);
+    expect(fromAChat.canAssign, isTrue);
     expect(taskOf(status: TaskStatus.queued).isTicketMain, isFalse);
   });
 }

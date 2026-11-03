@@ -177,6 +177,7 @@ async fn a_delegated_task_runs_with_the_model_and_effort_of_the_employee_who_doe
     else {
         panic!()
     };
+    backlog_ticket(&client, project_id, "Shared work").await;
     let (jean, simon) = (employee(&client, project_id, "Jean").await, employee(&client, project_id, "Simon").await);
     let set = |scope: ConfigScope, model: &str, effort: &str| {
         let settings = RunDefaults { connection: Setting::Inherit, model: Setting::Value(model.into()), persona: Setting::Inherit, effort: Setting::Value(effort.into()) };
@@ -199,7 +200,7 @@ async fn a_delegated_task_runs_with_the_model_and_effort_of_the_employee_who_doe
         .unwrap();
     let bridge = BridgeClient::connect(dir.path()).await.unwrap();
     let (ok, text) = bridge
-        .employee_act(aurelius_domain::RunId::parse(&jean_run).unwrap(), EmployeeTaskOp::Delegate { employee: "Simon".into(), title: "Server".into(), goal: "Bouw het".into(), criteria: vec![], project: None })
+        .employee_act(aurelius_domain::RunId::parse(&jean_run).unwrap(), EmployeeTaskOp::Delegate { employee: "Simon".into(), title: "Server".into(), goal: "Bouw het".into(), criteria: vec![], project: None, ticket: Some("#1".into()) })
         .await
         .unwrap();
     assert!(ok, "{text}");

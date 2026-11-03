@@ -131,7 +131,7 @@ pub(crate) fn start(tx: &Tx<'_>, st: &Store, root: TaskId, ticket: TicketId, pro
     let title = test_title(number);
     let note = format!("(Made by the Testing column of ticket #{number}: give the verdict with report_test_result.)");
     let Some((child, title, mut notices)) =
-        crate::task::task_runs::insert_part(tx, st, project, None, &tester, &title, &test_goal(number, report), &[], &note, Some(root), None, None)?
+        crate::task::task_runs::insert_part(tx, st, project, None, &tester, &title, &test_goal(number, report), &[], &note, Some(root), None, None, None)?
     else {
         return Ok(vec![]);
     };

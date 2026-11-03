@@ -424,7 +424,7 @@ fn t13_in_auto_a_proposal_stays_pending_over_runs_and_no_action_writes_a_guideli
 /// One of each `EmployeeAction`; the match is exhaustive, so a new action has to be looked at here (T13).
 fn every_action() -> Vec<EmployeeAction> {
     let all = vec![
-        EmployeeAction::Delegate { employee: "Ann".into(), title: "Rust style".into(), goal: "g".into(), criteria: vec![], project: None },
+        EmployeeAction::Delegate { employee: "Ann".into(), title: "Rust style".into(), goal: "g".into(), criteria: vec![], ticket: None },
         EmployeeAction::HandOver { employee: "Ann".into(), reason: "r".into() },
         EmployeeAction::MessageTask { task: "Migration".into(), message: "approve the guideline".into(), interrupt: false },
         EmployeeAction::AddIdea { title: "Rust style".into(), note: "n".into(), kind: Default::default(), project: None },

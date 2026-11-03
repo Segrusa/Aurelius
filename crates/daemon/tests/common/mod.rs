@@ -166,3 +166,28 @@ pub async fn send_new(client: &Client, text: &str) -> (aurelius_domain::Conversa
         other => panic!("{other:?}"),
     }
 }
+
+/// A ticket in Backlog of `project_id`: nothing starts, but `delegate_task` can name it (work always belongs to a ticket).
+pub async fn backlog_ticket(client: &Client, project_id: aurelius_domain::ProjectId, title: &str) -> aurelius_domain::TicketId {
+    let made = client
+        .create_ticket(aurelius_domain::ticket::CreateTicket {
+            responsible_user_id: None,
+            confirm_secret: false,
+            project_id,
+            title: title.into(),
+            description: None,
+            priority: Default::default(),
+            labels: vec![],
+            deadline_ms: None,
+            owner_employee_id: None,
+            run: Default::default(),
+            files: vec![],
+            start: false,
+            from_message: None,
+            from_idea: None,
+        })
+        .await
+        .unwrap();
+    let aurelius_domain::CommandResult::TicketCreated { ticket_id, .. } = made.result else { panic!("{:?}", made.result) };
+    ticket_id
+}

@@ -213,7 +213,7 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     let run = live_run(dir.path(), main.conversation_id.unwrap()).await;
     let bridge = BridgeClient::connect(dir.path()).await.unwrap();
     let (ok, text) = bridge
-        .employee_act(run, EmployeeTaskOp::Delegate { employee: "Helper".into(), title: "Column names".into(), goal: "HOLD-PART choose the column names".into(), criteria: vec![], project: None })
+        .employee_act(run, EmployeeTaskOp::Delegate { employee: "Helper".into(), title: "Column names".into(), goal: "HOLD-PART choose the column names".into(), criteria: vec![], project: None, ticket: None })
         .await
         .unwrap();
     assert!(ok, "{text}");

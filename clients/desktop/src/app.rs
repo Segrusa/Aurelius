@@ -799,7 +799,7 @@ pub fn idea_can_become_ticket(idea: &aurelius_protocol::IdeaView) -> bool {
 /// The main task of a ticket: the Board starts, gives and stops it, not the Tasks tab
 /// (`task.assign` / `task.cancel` refuse it). A delegation below it carries the ticket too.
 pub fn is_ticket_main_task(t: &aurelius_protocol::TaskView) -> bool {
-    t.ticket_id.is_some() && t.parent_task_id.is_none()
+    t.ticket_id.is_some() && t.parent_task_id.is_none() && t.delegated_by.is_none()
 }
 
 /// Why Cancel task and Give to… do not apply to this task, if they do not.
@@ -8115,6 +8115,9 @@ mod tests {
         assert_eq!(use_the_board(&t).as_deref(), Some("This is the main task of ticket #7: assign or cancel it on the Board."));
         t.parent_task_id = Some(TaskId::new());
         assert!(!is_ticket_main_task(&t) && use_the_board(&t).is_none(), "a delegation below it carries the ticket but is a task like any other");
+        t.parent_task_id = None;
+        t.delegated_by = Some("Ann".into());
+        assert!(!is_ticket_main_task(&t) && use_the_board(&t).is_none(), "neither is a task an employee gave on the ticket from a conversation");
     }
 
     #[test]

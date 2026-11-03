@@ -269,7 +269,7 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "message_task" => EmployeeTaskOp::MessageTask { task: text("task"), message: text("message"), interrupt: args["interrupt"].as_bool().unwrap_or(true) },
         "delegate_task" => {
             let criteria = args["criteria"].as_array().map(|a| a.iter().filter_map(|c| c.as_str().map(str::to_owned)).collect()).unwrap_or_default();
-            EmployeeTaskOp::Delegate { employee: text("employee"), title: text("title"), goal: text("goal"), criteria, project: optional("project") }
+            EmployeeTaskOp::Delegate { employee: text("employee"), title: text("title"), goal: text("goal"), criteria, project: optional("project"), ticket: optional("ticket") }
         }
         "set_mode" if set_mode => EmployeeTaskOp::SetMode { mode: text("mode"), reason: text("reason") },
         "read_group_chat" => EmployeeTaskOp::ReadGroupChat { last: args["last"].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32), channel: optional("channel") },
@@ -588,7 +588,7 @@ fn task_tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "delegate_task",
-            "description": "Give work to an employee of the company: a part of your task (it stays in your task's project), or, outside a task, something from this conversation. They work on it as a task in a conversation of their own and their result comes back here. Use it for work that clearly suits them better; do the rest yourself.",
+            "description": "Give work to an employee of the company: a part of your task (it stays in your task's project), or, outside a task, something from this conversation. Work always belongs to a ticket: in a task or a ticket's discussion it is that ticket, elsewhere name it with ticket. They work on it as a task in a conversation of their own and their result comes back here. Use it for work that clearly suits them better; do the rest yourself.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -596,7 +596,7 @@ fn task_tool_definitions() -> Vec<Value> {
                     "title": { "type": "string" },
                     "goal": { "type": "string", "description": "What they must deliver." },
                     "criteria": { "type": "array", "items": { "type": "string" } },
-                    "project": { "type": "string", "description": "The project (its name) the task is for: required in your chat with the user (outside projects); ignored in a task, which keeps its project." }
+                    "ticket": { "type": "string", "description": "The ticket this work belongs to (#12 or its id; list_tickets shows them): required outside a ticket's task or discussion, ignored inside one. The task gets the ticket's project." }
                 },
                 "required": ["employee", "title", "goal"]
             }

@@ -162,9 +162,9 @@ pub(crate) fn ticket_of(conn: &rusqlite::Connection, task: TaskId) -> Result<Opt
     Ok(ticket.flatten().and_then(|t| TicketId::parse(&t).ok()))
 }
 
-/// A delegation below a ticket's task (MU2-03): who gave what to whom, with a link to the new task.
-pub(crate) fn delegated_line(tx: &Tx<'_>, parent: TaskId, child: TaskId, from: &str, to: &str, title: &str) -> Result<Vec<EventNotice>, StorageError> {
-    let Some(ticket) = ticket_of(tx, parent)? else { return Ok(vec![]) };
+/// A task given on a ticket (MU2-03), below its main task or from a conversation: who gave what to whom, with a link to the new task.
+pub(crate) fn delegated_line(tx: &Tx<'_>, child: TaskId, from: &str, to: &str, title: &str) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(ticket) = ticket_of(tx, child)? else { return Ok(vec![]) };
     let mut line = SystemLine::new(SystemLineKind::Delegated);
     (line.from, line.to, line.task_id) = (Some(from.to_owned()), Some(to.to_owned()), Some(child));
     crate::conversation::discussion::ticket_line(tx, ticket, line, &format!("{from} gave the task “{title}” to {to}"))

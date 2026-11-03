@@ -14,7 +14,7 @@ use crate::task::task_threads::{self as thread, Speaker};
 use crate::task::tasks::{TaskContext, ev, task_event};
 use crate::{CommandService, storage_error};
 use aurelius_domain::{
-    ActorKind, AppError, ConversationId, EventNotice, EmployeeId, MessageId, RunId, TaskId,
+    ActorKind, AppError, ConversationId, EventNotice, EmployeeId, MessageId, RunId, TaskId, TicketId,
     task::{self, TaskStatus},
 };
 use aurelius_storage::{StorageError, Store, Tx, blobs, employees, tasks as store};
@@ -574,7 +574,7 @@ fn latest_message(conn: &rusqlite::Connection, conversation: ConversationId) -> 
 #[derive(Debug, Clone)]
 pub enum EmployeeAction {
     /// `project` (a name or id): needed outside a project (an employee's chat); in a task it is the task's.
-    Delegate { employee: String, title: String, goal: String, criteria: Vec<String>, project: Option<String> },
+    Delegate { employee: String, title: String, goal: String, criteria: Vec<String>, ticket: Option<String> },
     HandOver { employee: String, reason: String },
     MessageTask { task: String, message: String, interrupt: bool },
     AddIdea { title: String, note: String, kind: aurelius_domain::idea::IdeaKind, project: Option<String> },
@@ -874,7 +874,7 @@ impl CommandService {
                 let find = |name: &str| find_colleague(&colleagues, Some(me), name);
                 match action {
                     // A part stays in the task's project.
-                    EmployeeAction::Delegate { employee, title, goal, criteria, .. } => {
+                    EmployeeAction::Delegate { employee, title, goal, criteria, ticket } => {
                         let Some(to) = find(&employee) else {
                             return Ok((false, format!("No active colleague called {employee} in the company."), vec![]));
                         };
@@ -890,14 +890,22 @@ impl CommandService {
                                 return Ok((false, crate::org::refuse_delegation(org, me, to.id, &colleagues), vec![]));
                             }
                         }
+                        // A part inherits the task's ticket; a task without one (recurring, from an app) names one.
+                        let named = match crate::task::ticket_line::ticket_of(tx, task)? {
+                            Some(_) => None,
+                            None => match crate::ticket::agent::for_delegation(tx, &st, ticket.as_deref(), Some(row.project_id), crate::run::login::of_run(tx, run)?)? {
+                                Ok(t) => Some(t.id),
+                                Err(why) => return Ok((false, why, vec![])),
+                            },
+                        };
                         let me_name = employees::load_employee(tx, me)?.map(|m| m.name).unwrap_or_default();
                         let note = format!("(Delegated by {me_name} as part of the task \"{}\".)", row.title);
-                        let Some((child, title, mut notices)) = insert_part(tx, &st, row.project_id, Some(me), &to, &title, &goal, &criteria, &note, Some(task), None, None)? else {
+                        let Some((child, title, mut notices)) = insert_part(tx, &st, row.project_id, Some(me), &to, &title, &goal, &criteria, &note, Some(task), None, None, named)? else {
                             return Ok((false, "Give the part a title.".to_string(), vec![]));
                         };
                         inherit_mode(tx, run, child, to.id)?;
                         notices.insert(1, task_event(tx, task, row.project_id, "task.delegated", serde_json::json!({ "child": child, "to": to.id, "subject": to.name, "title": title }))?);
-                        notices.extend(crate::task::ticket_line::delegated_line(tx, task, child, &me_name, &to.name, &title)?);
+                        notices.extend(crate::task::ticket_line::delegated_line(tx, child, &me_name, &to.name, &title)?);
                         Ok((true, format!("Delegated “{title}” to {}. Their result comes back in this conversation; finish your own part meanwhile.", to.name), notices))
                     }
                     EmployeeAction::AddIdea { .. }
@@ -1080,6 +1088,7 @@ pub(crate) fn insert_part(
     parent: Option<TaskId>,
     origin: Option<ConversationId>,
     login: Option<aurelius_domain::UserId>,
+    ticket: Option<TicketId>,
 ) -> Result<Option<(TaskId, String, Vec<EventNotice>)>, StorageError> {
     let title = title.trim().chars().take(task::TITLE_MAX).collect::<String>();
     if title.is_empty() {
@@ -1093,7 +1102,7 @@ pub(crate) fn insert_part(
     blobs::register(tx, &goal_blob)?;
     blobs::register(tx, &criteria_blob)?;
     let child = TaskId::new();
-    store::insert_task(tx, child, project, Some(to.id), &title, &goal_blob.id.to_string(), &criteria_blob.id.to_string(), TaskStatus::Queued, parent)?;
+    store::insert_ticket_task(tx, child, project, Some(to.id), &title, &goal_blob.id.to_string(), &criteria_blob.id.to_string(), TaskStatus::Queued, parent, ticket)?;
     if let Some(conversation) = origin {
         store::set_task_origin(tx, child, conversation, me)?;
         // Asked from a conversation (not a part of a task): it runs on the login
@@ -1177,27 +1186,15 @@ pub(crate) fn need_project(conn: &rusqlite::Connection, what: &str) -> Result<St
 
 /// Delegate from a conversation that is not a task's: from a project conversation
 /// (the assistant gives an employee work), an employee's chat with the user (it
-/// names the project) or its heartbeat. The colleague gets a task of its own,
-/// whose result comes back in that conversation.
+/// names the ticket) or its heartbeat. The colleague gets a task of its own on
+/// the ticket, whose result comes back in that conversation.
 fn delegate_from_conversation(tx: &Tx<'_>, st: &Store, run: RunId, action: EmployeeAction) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
-    let EmployeeAction::Delegate { employee, title, goal, criteria, project: named } = action else {
+    let EmployeeAction::Delegate { employee, title, goal, criteria, ticket } = action else {
         return Ok((false, "Handing over only works for a task you work on. Outside a task, give work to a colleague with delegate_task.".to_string(), vec![]));
     };
     let Some(RunOwner { employee: me, project, conversation: Some(conversation) }) = run_owner(tx, run)? else {
         return Ok((false, "Only an employee or the project assistant can give work to an employee.".to_string(), vec![]));
     };
-    // A project conversation gives work in its project; an employee's chat says where.
-    let project = match (project, named.as_deref().map(str::trim).filter(|n| !n.is_empty())) {
-        (Some(p), _) => p,
-        (None, Some(named)) => match find_project(tx, named)? {
-            Ok(p) => p,
-            Err(why) => return Ok((false, why, vec![])),
-        },
-        (None, None) => return Ok((false, need_project(tx, "the task")?, vec![])),
-    };
-    if !matches!(employees::project_scope(tx, project)?, Some((_, aurelius_domain::employee::LifecycleStatus::Active))) {
-        return Ok((false, "That project is paused or archived; it takes no new work.".to_string(), vec![]));
-    }
     let read = |key: &str| st.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
     let colleagues = crate::task::tasks::colleagues(tx, &read)?;
     let Some(to) = find_colleague(&colleagues, me, &employee) else {
@@ -1221,13 +1218,27 @@ fn delegate_from_conversation(tx: &Tx<'_>, st: &Store, run: RunId, action: Emplo
         }
         None => "The project assistant".to_string(),
     };
-    let note = format!("(Asked by {asked_by} from a conversation with the user.)");
     // On the login of the run that delegates, not of another run queued in the same conversation.
     let login = crate::run::login::of_run(tx, run)?;
-    let Some((child, title, notices)) = insert_part(tx, st, project, me, &to, &title, &goal, &criteria, &note, None, Some(conversation), login)? else {
+    // A ticket's discussion works for that ticket; any other conversation names one.
+    let (named, outside) = match aurelius_storage::discussions::ticket_of_conversation(tx, conversation)? {
+        Some(own) => (Some(own.to_string()), None),
+        None => (ticket, login),
+    };
+    let ticket = match crate::ticket::agent::for_delegation(tx, st, named.as_deref(), project, outside)? {
+        Ok(t) => t,
+        Err(why) => return Ok((false, why, vec![])),
+    };
+    let project = ticket.project_id;
+    if !matches!(employees::project_scope(tx, project)?, Some((_, aurelius_domain::employee::LifecycleStatus::Active))) {
+        return Ok((false, "That project is paused or archived; it takes no new work.".to_string(), vec![]));
+    }
+    let note = format!("(Asked by {asked_by} from a conversation with the user.)");
+    let Some((child, title, mut notices)) = insert_part(tx, st, project, me, &to, &title, &goal, &criteria, &note, None, Some(conversation), login, Some(ticket.id))? else {
         return Ok((false, "Give the task a title.".to_string(), vec![]));
     };
     inherit_mode(tx, run, child, to.id)?;
+    notices.extend(crate::task::ticket_line::delegated_line(tx, child, &asked_by, &to.name, &title)?);
     Ok((true, format!("Gave “{title}” to {} as a task of their own. Their result comes back in this conversation; tell the user and go on meanwhile.", to.name), notices))
 }
 

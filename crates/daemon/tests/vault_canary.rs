@@ -132,7 +132,7 @@ impl AgentRuntime for Leaky {
             // A ticket's discussion (refused outside a ticket), and once a delegated part.
             let _ = bridge.employee_act(run, EmployeeTaskOp::PostToDiscussion { message: format!("the deploy key: {value}") }).await;
             if delegate {
-                let part = EmployeeTaskOp::Delegate { employee: "Bridge".into(), title: format!("Use {value}"), goal: format!("Deploy with the key {value}"), criteria: vec![format!("{value} works")], project: None };
+                let part = EmployeeTaskOp::Delegate { employee: "Bridge".into(), title: format!("Use {value}"), goal: format!("Deploy with the key {value}"), criteria: vec![format!("{value} works")], project: None, ticket: None };
                 let _ = bridge.employee_act(run, part).await;
             }
             let listed = bridge.employee_act(run, EmployeeTaskOp::VaultList { project: None }).await.unwrap();
