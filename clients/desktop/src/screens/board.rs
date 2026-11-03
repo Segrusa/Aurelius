@@ -617,6 +617,36 @@ pub fn feedback_ready(text: &str) -> bool {
 }
 
 /// The New ticket form's problems (MU1-07 AC2): title, then project.
+/// The ticket of the Give work box: for this employee, started at once.
+pub fn given_work(project_id: ProjectId, employee: EmployeeId, title: String, goal: String, run: aurelius_domain::task::RunSettings, files: Vec<String>, responsible_user_id: Option<aurelius_domain::UserId>) -> ticket::CreateTicket {
+    ticket::CreateTicket {
+        responsible_user_id,
+        confirm_secret: false,
+        project_id,
+        title,
+        description: Some(goal),
+        priority: TicketPriority::Normal,
+        labels: vec![],
+        deadline_ms: None,
+        owner_employee_id: Some(employee),
+        run,
+        files,
+        start: true,
+        from_message: None,
+        from_idea: None,
+    }
+}
+
+/// What the New ticket form starts with when made from an idea: its title and note,
+/// and a bug keeps that word as a label.
+pub fn idea_prefill(idea: &aurelius_protocol::IdeaView) -> crate::screens::discussion::Prefill {
+    crate::screens::discussion::Prefill {
+        title: idea.title.clone(),
+        description: idea.note.clone().unwrap_or_default(),
+        labels: (idea.kind == aurelius_domain::idea::IdeaKind::Bug).then(|| "bug".to_string()).unwrap_or_default(),
+    }
+}
+
 pub fn new_ticket_problems(title: &str, project: Option<ProjectId>) -> (Option<&'static str>, Option<&'static str>) {
     let title = title.trim();
     let title_problem = if title.is_empty() {
@@ -976,6 +1006,9 @@ pub struct NewTicket {
     pub reset: bool,
     /// Made from this chat message (MU2-10): sent as `from_message`.
     pub from_message: Option<aurelius_domain::MessageId>,
+    /// Made from this idea, with how many files of its own: sent as `from_idea`
+    /// (feature `ticket_from_idea`). The server copies the files.
+    pub from_idea: Option<(aurelius_domain::IdeaId, usize)>,
     /// Fill the title and description with these on the next render (MU2-10 AC1).
     pub prefill: Option<crate::screens::discussion::Prefill>,
 }
@@ -991,6 +1024,10 @@ pub struct AnotherTicket {
 }
 
 pub struct Board {
+    /// A Give work is on its way: its ticket opens when it is made.
+    pub give_sent: bool,
+    /// The ticket to open on the next render (opening needs the window).
+    pub open_created: Option<TicketId>,
     pub view: Option<BoardView>,
     /// Why the board did not load (shown with Try again).
     pub error: Option<String>,
@@ -1118,6 +1155,8 @@ impl Board {
         let area = |placeholder: &'static str, window: &mut Window, cx: &mut Context<AppView>| cx.new(|cx| TextareaState::new(window, cx).auto_grow(3, 10).placeholder(placeholder));
         let project = crate::app::ui_prefs()[PREF_PROJECT].as_str().and_then(|s| ProjectId::parse(s).ok());
         Self {
+            give_sent: false,
+            open_created: None,
             view: None,
             error: None,
             asked: None,
@@ -1169,6 +1208,7 @@ impl Board {
                 error: None,
                 reset: false,
                 from_message: None,
+                from_idea: None,
                 prefill: None,
             },
             done_all: false,
@@ -1649,7 +1689,19 @@ impl AppView {
                 }
                 self.board_refresh();
             }
-            BoardUpdate::Created { number, text } => {
+            BoardUpdate::Created { ticket, number, text } => {
+                // From the Give work box (also when it went again after "Send anyway"): the New
+                // ticket form has no part in it. The box empties and the ticket opens.
+                let given = std::mem::take(&mut self.board.give_sent);
+                if given || self.board.dialog != Some(BoardDialog::NewTicket) {
+                    self.board.open_created = Some(ticket);
+                    self.pending_task_run = Default::default();
+                    self.pending_task_files.clear();
+                    self.give_manager = None;
+                    self.notify_user(text.unwrap_or_else(|| format!("#{number} created.")), false, cx);
+                    self.board_refresh();
+                    return;
+                }
                 self.board.form.busy = false;
                 if self.board.dialog == Some(BoardDialog::NewTicket) {
                     self.board.dialog = None;
@@ -1659,6 +1711,7 @@ impl AppView {
                 self.board_refresh();
             }
             BoardUpdate::Failed { ticket, message } => {
+                self.board.give_sent = false;
                 match ticket {
                     Some(t) => {
                         self.board.busy.remove(&t);
@@ -2401,6 +2454,7 @@ impl AppView {
     pub(crate) fn board_form_clear(&mut self) {
         let form = &mut self.board.form;
         form.from_message = None;
+        form.from_idea = None;
         form.prefill = None;
         form.sent = false;
         form.error = None;
@@ -3777,6 +3831,41 @@ pub(crate) mod tests {
         let t = card(1, ColumnKind::Todo);
         assert!(!choosing(&t, paused.name().is_some(), false));
         assert!(needs_you(&t, false, 0).is_some());
+    }
+
+    fn an_idea(kind: aurelius_domain::idea::IdeaKind, note: Option<&str>) -> aurelius_protocol::IdeaView {
+        aurelius_protocol::IdeaView {
+            id: aurelius_domain::IdeaId::new(), project_id: ProjectId::new(), title: "Dark mode".into(), note: note.map(str::to_owned), status: aurelius_domain::idea::IdeaStatus::Open, kind,
+            author: "You".into(), employee_id: None, task_id: None, task_status: None, ticket_id: None, ticket_number: None, created_at_ms: 0, updated_at_ms: 0,
+            attachments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_form_of_an_idea_starts_with_its_title_and_note_and_a_bug_keeps_that_word() {
+        use aurelius_domain::idea::IdeaKind;
+        let bug = super::idea_prefill(&an_idea(IdeaKind::Bug, Some("Line one\nLine two")));
+        assert_eq!((bug.title.as_str(), bug.description.as_str(), bug.labels.as_str()), ("Dark mode", "Line one\nLine two", "bug"));
+        let feature = super::idea_prefill(&an_idea(IdeaKind::Feature, None));
+        assert_eq!((feature.description.as_str(), feature.labels.as_str()), ("", ""));
+    }
+
+    #[test]
+    fn an_idea_becomes_a_ticket_only_once_and_not_after_it_became_a_task() {
+        let open = an_idea(Default::default(), None);
+        assert!(crate::app::idea_can_become_ticket(&open));
+        let ticketed = aurelius_protocol::IdeaView { ticket_id: Some(TicketId::new()), ..open.clone() };
+        assert!(!crate::app::idea_can_become_ticket(&ticketed));
+        let tasked = aurelius_protocol::IdeaView { task_id: Some(aurelius_domain::TaskId::new()), ..open };
+        assert!(!crate::app::idea_can_become_ticket(&tasked));
+    }
+
+    #[test]
+    fn given_work_is_a_started_ticket_for_the_chosen_employee_never_a_task() {
+        let (project, employee) = (ProjectId::new(), EmployeeId::new());
+        let made = super::given_work(project, employee, "Fix it".into(), "Fix it now".into(), Default::default(), vec!["/a".into()], None);
+        assert!(made.start, "it starts at once, as giving work did");
+        assert_eq!((made.project_id, made.owner_employee_id, made.title.as_str(), made.description.as_deref(), made.files.len()), (project, Some(employee), "Fix it", Some("Fix it now"), 1));
     }
 
     #[test]

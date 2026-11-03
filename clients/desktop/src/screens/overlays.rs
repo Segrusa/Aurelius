@@ -414,7 +414,6 @@ impl AppView {
         let (title, confirm) = match kind {
             DialogKind::NewProject => ("New project", "Create project"),
             DialogKind::NewManager => ("Add employee", "Add"),
-            DialogKind::NewTask { .. } => ("New task", "Start task"),
             DialogKind::TaskSchedule { schedule: None, .. } => ("New recurring task", "Save recurring task"),
             DialogKind::TaskSchedule { schedule: Some(_), .. } => ("Edit recurring task", "Save"),
             DialogKind::EditManager { .. } => ("Edit employee", "Save"),
@@ -440,7 +439,7 @@ impl AppView {
         };
         let is_memory = matches!(kind, DialogKind::NewMemory { .. } | DialogKind::ReviseMemory { .. });
         let is_manager = matches!(kind, DialogKind::NewManager | DialogKind::EditManager { .. });
-        let is_task = matches!(kind, DialogKind::NewTask { .. } | DialogKind::TaskSchedule { .. });
+        let is_task = matches!(kind, DialogKind::TaskSchedule { .. });
         let is_idea = matches!(kind, DialogKind::NewIdea { .. } | DialogKind::EditIdea { .. });
         let multi_field = is_manager || is_task || is_idea || kind == DialogKind::NewProject;
         // What the dialog is for and how it saves: behind an info icon next to the title.
@@ -573,11 +572,11 @@ impl AppView {
                         let goal = gpui_kit::component::input::Textarea::new(&self.goal_input).py(px(7.)).line_height(px(22.)).on_paste(move |item, _, cx| {
                             this.update(cx, |this, cx| this.paste_into_task_goal(item, cx)).unwrap_or(false)
                         });
-                        let project = match kind { DialogKind::NewTask { project } | DialogKind::TaskSchedule { project, .. } => self.projects.iter().find(|p| p.id == project).map(|p| p.name.clone()), _ => None };
+                        let project = match kind { DialogKind::TaskSchedule { project, .. } => self.projects.iter().find(|p| p.id == project).map(|p| p.name.clone()), _ => None };
                         let more = self.task_more_open;
                         let criteria = !self.role_input.read(cx).value().trim().is_empty();
                         let summary = self.task_more_summary(criteria);
-                        el.child(self.dropdown("task-manager", "For", chosen.unwrap_or_else(|| if schedule { "Choose an employee".into() } else { "No employee: saved as a draft".into() }), manager_set, "alt-m", || Box::new(CycleTaskManager), cx))
+                        el.child(self.dropdown("task-manager", "For", chosen.unwrap_or_else(|| "Choose an employee".into()), manager_set, "alt-m", || Box::new(CycleTaskManager), cx))
                             .child(h().gap(px(8.)).text_size(px(12.5)).child(div().text_color(c(theme::TEXT_2)).child("Project")).child(div().min_w_0().truncate().child(project.unwrap_or_default())))
                             .child(field("Goal", goal.into_any_element()))
                             .child(self.more_toggle("task-more", more, summary, |this| this.task_more_open = !this.task_more_open, cx))
@@ -645,7 +644,7 @@ impl AppView {
             .child(div().flex_1().min_w_0().truncate().text_color(c(theme::MUTED)).child(summary))
     }
 
-    /// New task and recurring task dialogs: the files to attach (this computer's, and for an
+    /// Recurring task dialog and Give work: the files to attach (this computer's, and for an
     /// edited recurring task the ones it has), or why files can't be attached.
     pub(crate) fn task_files_row(&self, cx: &mut Context<Self>) -> Div {
         let chip = |id: SharedString, name: String, size: u64, remove: Box<dyn Fn(&mut AppView)>, cx: &mut Context<Self>| {

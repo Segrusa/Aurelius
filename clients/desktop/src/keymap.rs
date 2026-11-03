@@ -128,7 +128,7 @@ actions!(
         ToggleAutoAllow,
         CycleReportsTo,
         CycleSubagentModel,
-        NewTask,
+        MakeTicket,
         AttachFiles,
         SettingsNextTab,
         CancelSelectedTask,
@@ -334,7 +334,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc!(&["secondary-shift-m"], Some(APP), NONE, "Add employee (opens Employees)", Manager, true, AddEmployee),
     sc!(&[], Some(APP), NONE, "Memory… (choose a project)", Project, true, OpenMemory),
     sc!(&["secondary-shift-,"], Some(APP), NONE, "Edit project: name, description, folder", Project, true, OpenProjectSettings),
-    sc!(&["secondary-t"], Some(APP), NONE, "New task · in Ideas: start the selected idea as a task", Project, true, NewTask),
+    sc!(&["secondary-t"], Some(APP), NONE, "New ticket · in Ideas: make a ticket of the selected idea", Project, true, MakeTicket),
     sc!(&["secondary-shift-x"], Some(APP), &["x"], "Cancel selected task", Project, true, CancelSelectedTask),
     sc!(&["alt-a"], Some(APP), &["d"], "Give the selected task to an employee (or make it a draft)", Project, true, AssignSelectedTask),
     sc!(&["alt-c"], Some(APP), NONE, "Open the selected task's conversation with its employee", Project, true, OpenTaskConversation),
@@ -371,7 +371,7 @@ fn overlay_bindings() -> Vec<KeyBinding> {
         key("escape", MentionClose, Some("Mentions > Input")),
         key("tab", DialogNextField, Some(dialog_input)),
         key("secondary-o", ChooseDialogFolder, Some(DIALOG)),
-        // New task dropdowns: which manager gets it (or none: a draft), and how its conversation runs
+        // Recurring task dropdowns: which manager gets it (or none: a draft), and how its conversation runs
         // (unset: as the manager). ↑↓ + Enter pick.
         key("alt-m", CycleTaskManager, Some(DIALOG)),
         key("alt-o", CycleTaskMode, Some(DIALOG)),

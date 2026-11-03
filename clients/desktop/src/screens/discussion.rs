@@ -686,6 +686,8 @@ pub const TITLE_MAX: usize = 120;
 pub struct Prefill {
     pub title: String,
     pub description: String,
+    /// Labels, comma separated; empty for a message.
+    pub labels: String,
 }
 
 pub fn prefill(text: &str, author: &str, place: &str, when: &str) -> Prefill {
@@ -693,7 +695,7 @@ pub fn prefill(text: &str, author: &str, place: &str, when: &str) -> Prefill {
     let title = if first.chars().count() > TITLE_MAX { format!("{}…", first.chars().take(TITLE_MAX - 1).collect::<String>().trim_end()) } else { first.to_string() };
     let quoted: Vec<String> = text.trim().lines().map(|l| if l.is_empty() { ">".to_string() } else { format!("> {l}") }).collect();
     let description = format!("{}\n\n— {author} in {place} · {when}", quoted.join("\n"));
-    Prefill { title, description }
+    Prefill { title, description, labels: String::new() }
 }
 
 /// The ticket already made from this message, from the conversation's `ticket_created`

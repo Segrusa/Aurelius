@@ -287,7 +287,6 @@ pub enum DialogKind {
     NewProject,
     /// Add an employee.
     NewManager,
-    NewTask { project: ProjectId },
     /// A recurring task: new (`None`) or the one being edited (protocol 1.14).
     TaskSchedule { project: ProjectId, schedule: Option<aurelius_domain::TaskScheduleId> },
     EditManager { id: EmployeeId, version: u64 },
@@ -703,8 +702,6 @@ pub enum MenuDo {
     Model(String),
     /// Use this effort level; `None` = the runtime's default.
     Effort(Option<String>),
-    /// Start this idea as a task for this manager.
-    StartIdea(aurelius_domain::IdeaId, EmployeeId),
     /// Take this project out of the sidebar.
     Unpin(ProjectId),
     /// Pin this employee under Employees in the sidebar, or take it out again.
@@ -713,10 +710,6 @@ pub enum MenuDo {
     OpenMemory(ProjectId),
     /// Make a recurring task in this project.
     NewSchedule(ProjectId),
-    /// The mode the idea's task starts in (`None`: the manager's default); the menu stays open.
-    IdeaMode(Option<aurelius_domain::autonomy::AgentMode>),
-    /// The model the idea's task runs on (`None`: the employee's default); keeps the menu open.
-    IdeaModel(Option<(aurelius_domain::ProviderId, String)>),
     /// Mark this idea open, done or dropped.
     IdeaStatus(aurelius_domain::IdeaId, aurelius_domain::idea::IdeaStatus),
     /// Give this task to this manager (`None`: a draft again).
@@ -729,7 +722,7 @@ pub enum MenuDo {
     Chat(crate::screens::thread_panel::ChatDo),
 }
 
-/// New task dialog: a value picked from one of its dropdowns (`None`: as the manager / off).
+/// Recurring task dialog: a value picked from one of its dropdowns (`None`: as the manager / off).
 #[derive(Clone)]
 pub enum TaskChoice {
     Manager(Option<EmployeeId>),
@@ -796,6 +789,11 @@ pub fn entry(label: impl Into<SharedString>, keys: &'static str, action: fn() ->
 
 pub fn call(label: impl Into<SharedString>, keys: &'static str, f: fn(&mut AppView, &mut Window, &mut Context<AppView>)) -> Option<MenuEntry> {
     Some(MenuEntry { label: label.into(), keys: (!keys.is_empty()).then_some(keys), run: MenuDo::Call(f), danger: false, checked: false, detail: None })
+}
+
+/// An idea becomes a ticket once, and not after it became a task (a client before ticket #16).
+pub fn idea_can_become_ticket(idea: &aurelius_protocol::IdeaView) -> bool {
+    idea.task_id.is_none() && idea.ticket_id.is_none()
 }
 
 /// The main task of a ticket: the Board starts, gives and stops it, not the Tasks tab
@@ -1001,14 +999,12 @@ pub struct AppView {
     pub pending_idea_kind: aurelius_domain::idea::IdeaKind,
     /// Remember dialog: a decision (else knowledge).
     pub pending_memory_decision: bool,
-    /// New task: criteria, files and run settings shown (behind "More").
+    /// Recurring task: criteria, files and run settings shown (behind "More").
     pub task_more_open: bool,
     /// Give work on the Dashboard: the same, kept apart so a dialog doesn't fold it.
     pub give_more_open: bool,
     /// Edit employee: the Advanced section shown.
     pub employee_advanced_open: bool,
-    /// Mode picked in the idea's "Start as a task" menu (`None`: the manager's default).
-    idea_start_mode: Option<aurelius_domain::autonomy::AgentMode>,
     /// 0 = current (active + proposals), 1 = proposals, 2 = history.
     pub memory_filter: usize,
     /// "In context" view: the manager picked (`None` outside the Option: not picked yet,
@@ -1106,8 +1102,6 @@ pub struct AppView {
     pub management_mode: Option<bool>,
     /// Settings → MCP & tools: safe read-only tools pass without asking; `None` while loading or on servers without `auto_allow`.
     pub auto_allow: Option<aurelius_protocol::AutoAllowSetting>,
-    /// Starting an idea: the task's model (`None`: the employee's default).
-    pub idea_start_model: Option<(aurelius_domain::ProviderId, String)>,
     /// Every recorded Claude Code artifact, newest first; `None` on servers without `artifact.list` (lists hidden).
     pub artifacts: Option<Vec<aurelius_protocol::ArtifactView>>,
     /// Settings → MCP & tools: the server-wide MCP list (fetched when Settings opens), or why not.
@@ -1126,9 +1120,9 @@ pub struct AppView {
     pub project_settings: Option<crate::screens::project_settings::ProjectSettings>,
     /// Manager to assign in the new task dialog.
     pub pending_task_manager: Option<EmployeeId>,
-    /// New task: mode, connection, model and effort of its conversation.
+    /// Recurring task and Give work: mode, connection, model and effort of its conversation.
     pub pending_task_run: aurelius_domain::task::RunSettings,
-    /// New task and recurring task dialogs: the goal (several lines, kept as typed).
+    /// Recurring task dialog: the goal (several lines, kept as typed).
     pub goal_input: Entity<TextareaState>,
     /// Dashboard "Give work": title, goal, the project (required) and who gets it
     /// (`None`: the default, the single root employee). Mode, model and effort are `pending_task_run`.
@@ -1143,8 +1137,6 @@ pub struct AppView {
     /// open while its task is not finished. Kept for the session only.
     pub tasks_folds: std::collections::HashMap<aurelius_domain::TaskId, bool>,
     pub give_manager: Option<EmployeeId>,
-    /// The task just given opens in the right panel once the server confirms it.
-    give_open_for: Option<EmployeeId>,
     /// Whom the user last gave work to (ui.json `last_given_to`): the default with several roots.
     give_last: Option<EmployeeId>,
     /// Recurring task dialog: the hours of "every N hours" and the "HH:MM" of daily and weekly.
@@ -1561,7 +1553,6 @@ impl AppView {
             task_more_open: false,
             give_more_open: false,
             employee_advanced_open: false,
-            idea_start_mode: None,
             memory_filter: 0,
             memory_ctx_manager: None,
             memory_ctx: None,
@@ -1612,7 +1603,6 @@ impl AppView {
             instruction_versions_requested: None,
             management_mode: None,
             auto_allow: None,
-            idea_start_model: None,
             artifacts: None,
             mcp: None,
             mcp_error: None,
@@ -1631,7 +1621,6 @@ impl AppView {
             tasks_shown: (Default::default(), crate::screens::tasks::ROWS_STEP),
             tasks_folds: Default::default(),
             give_manager: None,
-            give_open_for: None,
             give_last: ui_prefs()["last_given_to"].as_str().and_then(|s| EmployeeId::parse(s).ok()),
             recur_hours_input,
             recur_time_input,
@@ -1881,17 +1870,6 @@ impl AppView {
                     if conversation.is_some() && conversation != self.open_conversation {
                         self.open(conversation);
                     }
-                }
-            }
-            Update::TaskCreated(task) => {
-                if let Some(employee) = self.give_open_for.take() {
-                    self.panel = Panel::Task(task);
-                    self.manager_thread = None;
-                    let conversation = self.current_manager_thread();
-                    self.open(conversation);
-                    // The task may not be in `tasks` yet: name its employee from the form.
-                    let name = self.managers.iter().find(|m| m.id == employee).map(|m| m.name.clone());
-                    self.pending_placeholder = Some(name.map_or_else(|| "Reply…".to_string(), |n| format!("Message {n}…")));
                 }
             }
             Update::Proposals(proposals) => {
@@ -2462,6 +2440,11 @@ impl AppView {
         matches!(&self.connection, Connection::Online { server, .. } if server.ticket_discussion)
     }
 
+    /// An idea can become a ticket (feature `ticket_from_idea`).
+    pub fn ticket_from_idea_supported(&self) -> bool {
+        matches!(&self.connection, Connection::Online { server, .. } if server.ticket_from_idea)
+    }
+
     /// The board has its Testing column and the company a tester (feature `board_testing`).
     pub fn board_testing_supported(&self) -> bool {
         matches!(&self.connection, Connection::Online { server, .. } if server.board_testing)
@@ -2847,10 +2830,10 @@ impl AppView {
         self.screen == Page::Dashboard && matches!(self.overlay, Overlay::None | Overlay::Menu)
     }
 
-    /// The project of the open new task or recurring task dialog.
+    /// The project of the open recurring task dialog.
     fn task_dialog_project(&self) -> Option<ProjectId> {
         match self.overlay {
-            Overlay::Dialog(DialogKind::NewTask { project } | DialogKind::TaskSchedule { project, .. }) => Some(project),
+            Overlay::Dialog(DialogKind::TaskSchedule { project, .. }) => Some(project),
             _ => None,
         }
     }
@@ -3139,32 +3122,36 @@ impl AppView {
         ]
     }
 
-    fn on_new_task(&mut self, _: &NewTask, window: &mut Window, cx: &mut Context<Self>) {
-        // In Ideas: the selected idea becomes a task (choose the manager).
-        if self.on_ideas_screen() {
-            if self.selected_idea().is_some_and(|i| i.task_id.is_none()) {
-                let size = window.viewport_size();
-                self.open_idea_menu(point(size.width / 2. - px(160.), px(180.)), window, cx);
-                return;
-            }
+    /// Ctrl+T: in Ideas a ticket of the selected idea, anywhere else New ticket.
+    fn on_make_ticket(&mut self, _: &MakeTicket, window: &mut Window, cx: &mut Context<Self>) {
+        if self.on_ideas_screen() && self.selected_idea().is_some_and(|i| idea_can_become_ticket(&i)) && self.ticket_from_idea_supported() {
+            self.ticket_from_idea(window, cx);
+            return;
         }
+        self.new_ticket_here(window, cx);
+    }
+
+    /// New ticket, in the open project when there is one (a sample project takes none).
+    fn new_ticket_here(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.current_project() {
-            Some(ProjectRef::Real(project)) => {
-                self.open_dialog(DialogKind::NewTask { project }, window, cx);
-                // The open manager by default; Alt+M chooses another (or none: a draft).
-                self.pending_task_manager = self.task_manager(project);
-                self.pending_task_run = Default::default();
-            }
             Some(ProjectRef::Sample(_)) => self.notify_user("Sample projects are read-only.", true, cx),
-            // Elsewhere a task starts in the Dashboard's Give work box (for the open employee, if any).
-            None => {
-                if let Page::Employee(ManagerRef::Real(id)) = self.screen {
-                    self.give_manager = Some(id);
+            Some(ProjectRef::Real(project)) => {
+                self.board_new_ticket(window, cx);
+                if !self.board.form.busy {
+                    self.board.form.project = Some(project);
                 }
-                self.go_nav(NavItem::Dashboard, window, cx);
-                self.give_goal.update(cx, |i, cx| i.focus(window, cx));
             }
+            None => self.board_new_ticket(window, cx),
         }
+    }
+
+    /// The Dashboard's Give work box, for the open employee.
+    fn give_work_for_open_employee(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Page::Employee(ManagerRef::Real(id)) = self.screen {
+            self.give_manager = Some(id);
+        }
+        self.go_nav(NavItem::Dashboard, window, cx);
+        self.give_goal.update(cx, |i, cx| i.focus(window, cx));
     }
 
     /// Tasks: the selected task's conversation with its manager (plan, findings, results).
@@ -3300,7 +3287,8 @@ impl AppView {
         self.open_dropdown("give-project", items, window, cx);
     }
 
-    /// Give work: a task for the chosen employee in the chosen project; it opens in the right panel.
+    /// Give work: a ticket for the chosen employee in the chosen project, started at once
+    /// (a task only exists under a ticket); it opens in the right panel.
     pub fn give_work(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let goal = self.give_goal.read(cx).value().trim().to_string();
         if goal.is_empty() {
@@ -3318,19 +3306,23 @@ impl AppView {
             self.notify_user("Choose who gets this work (Alt+M).", true, cx);
             return;
         };
-        let run = std::mem::take(&mut self.pending_task_run);
+        // One at a time; the text, files and settings stay until the ticket is made.
+        if std::mem::replace(&mut self.board.give_sent, true) {
+            return;
+        }
+        let run = self.pending_task_run.clone();
         self.remember_mode(Some(employee_id), run.mode);
-        let files: Vec<String> = std::mem::take(&mut self.pending_task_files).into_iter().map(|(p, _)| p.display().to_string()).collect();
-        let _ = self.requests.send(backend::Request::CreateTask { project_id, employee_id: Some(employee_id), title, goal, criteria: Vec::new(), run, files });
-        self.give_open_for = Some(employee_id);
+        let files: Vec<String> = self.pending_task_files.iter().map(|(p, _)| p.display().to_string()).collect();
+        let responsible_user_id = crate::screens::who::create_responsible(crate::screens::who::FormResponsible::You, self.active_member().map(|u| u.id), self.ticket_responsible_supported());
+        let create = crate::screens::board::given_work(project_id, employee_id, title, goal, run, files, responsible_user_id);
+        let done = self.employee_name(employee_id).map(|name| format!("Created and started with {name}."));
+        let _ = self.requests.send(backend::Request::Board(backend::BoardCall::Write { command: aurelius_domain::Command::CreateTicket(create), expected_version: None, done }));
         self.give_last = Some(employee_id);
         set_ui_value("last_given_to", serde_json::json!(employee_id.to_string()));
-        self.give_manager = None;
-        self.give_goal.update(cx, |i, cx| i.set_value("", window, cx));
         cx.notify();
     }
 
-    /// New task: the models it can run on, per usable connection (connection, model, label).
+    /// Recurring task and Give work: the models it can run on, per usable connection (connection, model, label).
     pub fn task_model_options(&self) -> Vec<(aurelius_domain::ProviderId, String, String)> {
         let Some(snapshot) = &self.connections else { return vec![] };
         snapshot
@@ -3344,7 +3336,7 @@ impl AppView {
             .collect()
     }
 
-    /// The employee and project of the open New task or recurring task dialog, else of the Give work box.
+    /// The employee and project of the open recurring task dialog, else of the Give work box.
     fn task_form_target(&self) -> (Option<EmployeeId>, Option<ProjectId>) {
         match self.task_dialog_project() {
             Some(project) => (self.pending_task_manager, Some(project)),
@@ -3369,7 +3361,7 @@ impl AppView {
         (mode, model, effort)
     }
 
-    /// The line beside "More ▾" in New task and Give work: how the task runs and what else
+    /// The line beside "More ▾" in the recurring task dialog and Give work: how the task runs and what else
     /// is folded away, for example "Employee default (Opus 5.5 · High) · 2 files".
     pub fn task_more_summary(&self, criteria: bool) -> String {
         let run = &self.pending_task_run;
@@ -3719,11 +3711,11 @@ impl AppView {
         }
     }
 
-    /// Default employee for a new task: the open employee, else the single root (the Board's default).
+    /// Default employee for a new recurring task: the open employee, else the single root (the Board's default).
     fn task_manager(&self, _project: ProjectId) -> Option<EmployeeId> {
         match self.screen {
             Page::Employee(ManagerRef::Real(id)) => Some(id),
-            // With several roots the dialog leaves it open (a draft), unlike Give work.
+            // With several roots the dialog leaves it open, unlike Give work.
             _ => match crate::screens::dashboard::roots(&self.managers).as_slice() {
                 [only] => Some(*only),
                 _ => None,
@@ -4621,49 +4613,43 @@ impl AppView {
         }
     }
 
-    /// Opens the selected idea's menu on its first "Start as a task", the mode back on the manager's default.
+    /// Opens the selected idea's menu.
     pub fn open_idea_menu(&mut self, anchor: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        self.idea_start_mode = None;
-        self.idea_start_model = None;
         let items = self.idea_menu();
         self.open_menu(anchor, items, window, cx);
-        if let Some(menu) = self.menu.as_mut() {
-            if let Some(i) = menu.entries.iter().position(|e| e.as_ref().is_some_and(|e| matches!(e.run, MenuDo::StartIdea(..)))) {
-                menu.selected = i;
-            }
+    }
+
+    /// "Create ticket…" on the selected idea: the New ticket form filled in from it.
+    pub fn ticket_from_idea(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(idea) = self.selected_idea() else { return };
+        if !idea_can_become_ticket(&idea) || !self.board_online() {
+            return;
+        }
+        self.board_form_clear();
+        self.board.form.project = Some(idea.project_id);
+        self.board.form.from_idea = Some((idea.id, idea.attachments.len()));
+        self.board.form.prefill = Some(crate::screens::board::idea_prefill(&idea));
+        self.board_dialog(crate::screens::board::BoardDialog::NewTicket, window, cx);
+    }
+
+    /// The ticket the selected idea became, opened in the right panel.
+    fn open_idea_ticket(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ticket) = self.selected_idea().and_then(|i| i.ticket_id) {
+            self.open_ticket(ticket, window, cx);
         }
     }
 
-    /// The selected idea's actions (⋯, right-click): the task's mode (servers from 1.8),
-    /// start as a task for a manager, edit, done, drop.
+    /// The selected idea's actions (⋯, right-click): make a ticket of it (servers with
+    /// `ticket_from_idea`) or open the one it became, edit, done, drop.
     pub fn idea_menu(&self) -> MenuItems {
-        use aurelius_domain::{autonomy::AgentMode, idea::IdeaStatus};
+        use aurelius_domain::idea::IdeaStatus;
         let Some(idea) = self.selected_idea() else { return vec![] };
         let mut items: MenuItems = Vec::new();
-        if idea.task_id.is_none() {
-            let managers = self.assignable_managers(idea.project_id);
-            if !managers.is_empty() {
-                let current = self.idea_start_mode;
-                items.push(Some(MenuEntry { label: "Employee's default".into(), keys: None, run: MenuDo::IdeaMode(None), danger: false, checked: current.is_none(), detail: Some("Mode".into()) }));
-                for m in [AgentMode::Ask, AgentMode::AcceptEdits, AgentMode::Auto, AgentMode::Plan] {
-                    let label = format!("{} {}", crate::screens::chat::mode_icon(m), m.label());
-                    items.push(Some(MenuEntry { label: label.into(), keys: None, run: MenuDo::IdeaMode(Some(m)), danger: false, checked: current == Some(m), detail: None }));
-                }
-                items.push(None);
-                // Model: each employee's own default (named beside them below), or one for this task.
-                let model = self.idea_start_model.clone();
-                items.push(Some(MenuEntry { label: "Model: employee default".into(), keys: None, run: MenuDo::IdeaModel(None), danger: false, checked: model.is_none(), detail: Some("This task".into()) }));
-                for (c, m, label) in self.task_model_options() {
-                    let checked = model.as_ref().is_some_and(|(cc, cm)| *cc == c && *cm == m);
-                    items.push(Some(MenuEntry { label: format!("Model: {label}").into(), keys: None, run: MenuDo::IdeaModel(Some((c, m))), danger: false, checked, detail: None }));
-                }
-                items.push(None);
-            }
-            let chosen = self.idea_start_model.as_ref().map(|(_, m)| Self::friendly_model(m));
-            for (id, name, role) in managers {
-                let run = chosen.clone().unwrap_or_else(|| self.default_run_label(Some(id), Some(idea.project_id)));
-                items.push(Some(MenuEntry { label: format!("Start as a task for {name}").into(), keys: None, run: MenuDo::StartIdea(idea.id, id), danger: false, checked: false, detail: Some(format!("{role} · {run}").into()) }));
-            }
+        if let Some(number) = idea.ticket_number {
+            items.push(call(format!("Open ticket #{number}"), "", |this, w, cx| this.open_idea_ticket(w, cx)));
+            items.push(None);
+        } else if idea_can_become_ticket(&idea) && self.ticket_from_idea_supported() {
+            items.push(call("Create ticket…", "secondary-t", |this, w, cx| this.ticket_from_idea(w, cx)));
             items.push(None);
         }
         items.push(entry("Edit…", "f2", || Box::new(EditItem)));
@@ -5079,42 +5065,16 @@ impl AppView {
 
     pub fn run_menu_entry(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(entry) = self.menu.as_ref().and_then(|m| m.entries.get(index).cloned().flatten()) else { return };
-        if let MenuDo::IdeaMode(_) | MenuDo::IdeaModel(_) = entry.run {
-            // Pick the mode (model), then the manager: the menu stays open, its marks follow.
-            match entry.run {
-                MenuDo::IdeaMode(mode) => self.idea_start_mode = mode,
-                MenuDo::IdeaModel(m) => self.idea_start_model = m,
-                _ => {}
-            }
-            let entries = self.idea_menu();
-            if let Some(menu) = self.menu.as_mut() {
-                menu.entries = entries;
-                menu.selected = index;
-            }
-            cx.notify();
-            return;
-        }
         self.close_menu(window, cx);
         match entry.run {
             MenuDo::Action(make) => window.dispatch_action(make(), cx),
             MenuDo::Call(f) => f(self, window, cx),
             MenuDo::Model(model) => self.set_run_choice(Some(model), None, cx),
             MenuDo::Effort(effort) => self.set_run_choice(None, Some(effort), cx),
-            MenuDo::StartIdea(idea_id, employee_id) => {
-                let mode = std::mem::take(&mut self.idea_start_mode);
-                let model = self.idea_start_model.take();
-                let _ = self.requests.send(backend::Request::StartIdea { idea_id, employee_id, mode, model });
-                let who = self.managers.iter().find(|x| x.id == employee_id).map(|x| x.name.clone()).unwrap_or_default();
-                self.notify_user(match mode {
-                    Some(m) => format!("Started as a task for {who}, in {}.", m.label()),
-                    None => format!("Started as a task for {who}."),
-                }, false, cx);
-            }
             MenuDo::Unpin(project) => self.toggle_pin(project, cx),
             MenuDo::TogglePinEmployee(employee) => self.toggle_employee_pin(employee, cx),
             MenuDo::OpenMemory(project) => self.open_project_memory(project, window, cx),
             MenuDo::NewSchedule(project) => self.new_schedule_in(project, window, cx),
-            MenuDo::IdeaMode(_) | MenuDo::IdeaModel(_) => {}
             MenuDo::IdeaStatus(idea_id, status) => {
                 let _ = self.requests.send(backend::Request::SetIdeaStatus { idea_id, status });
             }
@@ -5926,8 +5886,8 @@ impl AppView {
     fn on_new_item(&mut self, _: &NewItem, window: &mut Window, cx: &mut Context<Self>) {
         match self.screen {
             // Work for the open employee: the Dashboard's Give work box, the employee chosen.
-            Page::Employee(ManagerRef::Real(_)) => self.on_new_task(&NewTask, window, cx),
-            Page::Project(ProjectRef::Real(_), Tab::Tasks) => self.on_new_task(&NewTask, window, cx),
+            Page::Employee(ManagerRef::Real(_)) => self.give_work_for_open_employee(window, cx),
+            Page::Project(ProjectRef::Real(_), Tab::Tasks) => self.new_ticket_here(window, cx),
             Page::Project(ProjectRef::Real(_), Tab::Board) => self.board_new_ticket(window, cx),
             Page::Project(ProjectRef::Real(project), Tab::Memory) => self.open_dialog(DialogKind::NewMemory { project }, window, cx),
             Page::Project(ProjectRef::Real(project), Tab::Ideas) => self.open_dialog(DialogKind::NewIdea { project }, window, cx),
@@ -6090,7 +6050,7 @@ impl AppView {
         self.overlay = Overlay::Dialog(kind);
         self.dialog_folder = None;
         let (name, second, third) = match kind {
-            DialogKind::NewTask { .. } | DialogKind::TaskSchedule { .. } => ("Title, for example 'Compare three options'", "", "Acceptance criteria, separated by ;"),
+            DialogKind::TaskSchedule { .. } => ("Title, for example 'Compare three options'", "", "Acceptance criteria, separated by ;"),
             DialogKind::NewMemory { .. } | DialogKind::ReviseMemory { .. } => ("For example: publishing requires a prior review", "", ""),
             DialogKind::NewIdea { .. } | DialogKind::EditIdea { .. } => ("The idea, for example 'Dark mode'", "", ""),
             DialogKind::QuestionAnswer { .. } => ("Your answer, in your own words", "", ""),
@@ -6178,7 +6138,7 @@ impl AppView {
             return;
         }
         let mut files: Vec<String> = Vec::new();
-        if (matches!(kind, DialogKind::NewTask { .. } | DialogKind::TaskSchedule { .. }) || self.idea_files_on()) && !self.pending_task_files.is_empty() {
+        if (matches!(kind, DialogKind::TaskSchedule { .. }) || self.idea_files_on()) && !self.pending_task_files.is_empty() {
             files = self.pending_task_files.iter().map(|(p, _)| p.display().to_string()).collect();
         }
         let mut follow_up: Vec<backend::Request> = Vec::new();
@@ -6255,17 +6215,6 @@ impl AppView {
                     }),
                 }
             }
-            DialogKind::NewTask { project } => {
-                let goal = self.goal_input.read(cx).value().trim().to_string();
-                let criteria: Vec<String> = role.split(';').map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
-                let employee_id = self.pending_task_manager.take();
-                if employee_id.is_none() {
-                    self.notify_user("No active employee: the task is saved as a draft.", false, cx);
-                }
-                let run = std::mem::take(&mut self.pending_task_run);
-                self.remember_mode(employee_id, run.mode);
-                backend::Request::CreateTask { project_id: project, employee_id, title: name, goal, criteria, run, files }
-            }
             DialogKind::NewManager => {
                 self.open_new_manager = true;
                 let title = self.title_input.read(cx).value().trim().to_string();
@@ -6316,7 +6265,7 @@ impl AppView {
                 }
                 return;
             }
-            Overlay::Dialog(DialogKind::NewTask { .. } | DialogKind::TaskSchedule { .. }) => {
+            Overlay::Dialog(DialogKind::TaskSchedule { .. }) => {
                 let mut handles = vec![self.name_input.read(cx).focus_handle(cx), self.goal_input.read(cx).focus_handle(cx)];
                 let mut focus: Vec<Box<dyn Fn(&mut Window, &mut App)>> = vec![
                     Box::new({ let i = self.name_input.clone(); move |w, cx| i.update(cx, |i, cx| i.focus(w, cx)) }),
@@ -7142,7 +7091,7 @@ impl Render for AppView {
             .on_action(cx.listener(Self::on_new_project))
             .on_action(cx.listener(Self::on_edit))
             .on_action(cx.listener(Self::on_add_employee))
-            .on_action(cx.listener(Self::on_new_task))
+            .on_action(cx.listener(Self::on_make_ticket))
             .on_action(cx.listener(Self::on_assign_task))
             .on_action(cx.listener(Self::on_open_task_conversation))
             .on_action(cx.listener(Self::on_cycle_task_manager))
@@ -8026,7 +7975,7 @@ mod tests {
         use aurelius_domain::{IdeaId, EmployeeId, ProjectId, idea::IdeaStatus};
         let idea = |author: &str, employee_id| aurelius_protocol::IdeaView {
             id: IdeaId::new(), project_id: ProjectId::new(), title: "t".into(), note: None, status: IdeaStatus::Open, kind: Default::default(),
-            author: author.into(), employee_id, task_id: None, task_status: None, created_at_ms: 0, updated_at_ms: 0,
+            author: author.into(), employee_id, task_id: None, task_status: None, ticket_id: None, ticket_number: None, created_at_ms: 0, updated_at_ms: 0,
             attachments: Vec::new(),
         };
         let (yours, iris, from_old_server) = (idea("You", None), idea("Iris", Some(EmployeeId::new())), idea("Iris", None));
@@ -8049,7 +7998,7 @@ mod tests {
         use aurelius_domain::{IdeaId, EmployeeId, ProjectId, idea::IdeaStatus};
         let idea = |title: &str, author: &str, employee_id| aurelius_protocol::IdeaView {
             id: IdeaId::new(), project_id: ProjectId::new(), title: title.into(), note: None, status: IdeaStatus::Open, kind: Default::default(),
-            author: author.into(), employee_id, task_id: None, task_status: None, created_at_ms: 0, updated_at_ms: 0,
+            author: author.into(), employee_id, task_id: None, task_status: None, ticket_id: None, ticket_number: None, created_at_ms: 0, updated_at_ms: 0,
             attachments: Vec::new(),
         };
         let list = [idea("a", "Iris", Some(EmployeeId::new())), idea("b", "You", None), idea("c", "Kai", None), idea("d", "You", None)];

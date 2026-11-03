@@ -614,7 +614,7 @@ impl AppView {
                 h().mb(px(8.)).justify_between()
                     .child(ui::eyebrow(if managers.is_empty() { "WHO WORKS HERE".to_string() } else { format!("WHO WORKS HERE · {}", managers.len()) })),
             )
-            .when(managers.is_empty(), |el| el.child(empty("Nobody works here yet. Give a task to an employee.")))
+            .when(managers.is_empty(), |el| el.child(empty("Nobody works here yet. Start a ticket to put someone to work.")))
             .children(managers.into_iter().enumerate().map(|(i, m)| {
                 let key = m.key;
                 let paused = m.status == aurelius_domain::employee::LifecycleStatus::Paused;
@@ -676,7 +676,7 @@ impl AppView {
         }).collect::<Vec<_>>();
         let tasks_el = card()
             .child(section("ov-tasks", if task_total > 0 { format!("TASKS · {task_total} OPEN") } else { "TASKS".into() }, Tab::Tasks, cx))
-            .when(task_rows.is_empty(), |el| el.child(div().child(empty("No open tasks.")).child(div().text_size(px(11.5)).child(ui::hint("ov-new-task", "secondary-t", "New task", || Box::new(NewTask), cx)))))
+            .when(task_rows.is_empty(), |el| el.child(div().child(empty("No open tasks.")).child(div().text_size(px(11.5)).child(ui::hint("ov-new-ticket", "secondary-t", "New ticket", || Box::new(MakeTicket), cx)))))
             .children(task_rows);
 
         // Ideas: the open ones, newest first as the Ideas tab lists them.
@@ -1007,9 +1007,9 @@ impl AppView {
             }))
             .child(div().flex_1())
             .child(
-                ui::button("new-task", "New task", ButtonKind::Outline, Some(ui::kbd("secondary-t", cx)))
+                ui::button("new-ticket", "New ticket", ButtonKind::Outline, Some(ui::kbd("secondary-t", cx)))
                     .h(px(28.))
-                    .on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(NewTask), cx))),
+                    .on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(MakeTicket), cx))),
             );
 
         let tasks = self.real_tasks(project_id);
@@ -1051,7 +1051,7 @@ impl AppView {
                 el.child(
                     v().py(px(40.)).items_center().gap(px(8.))
                         .child(div().font_family(serif.clone()).italic().text_size(px(19.)).text_color(c(theme::TEXT_2)).child("No tasks in this list."))
-                        .child(div().text_size(px(11.5)).child(ui::hint("empty-new-task", "secondary-t", "New task", || Box::new(NewTask), cx))),
+                        .child(div().text_size(px(11.5)).child(ui::hint("empty-new-ticket", "secondary-t", "New ticket", || Box::new(MakeTicket), cx))),
                 )
             })
             .children(tasks.iter().take(shown).enumerate().map(|(i, t)| {
@@ -1401,7 +1401,7 @@ impl AppView {
                 Some(s) if s.is_terminal() => format!("task {}", s.as_str()),
                 Some(s) => format!("task {}", s.as_str()),
                 None => "task".to_string(),
-            });
+            }).or_else(|| idea.ticket_number.map(|n| format!("ticket #{n}")));
             v().id(("idea", i)).relative().gap(px(5.)).px(px(14.)).py(px(12.)).rounded(px(8.)).border_1().cursor_pointer()
                 .when(by_manager, |el| el.pl(px(20.)).child(manager_bar(6.)))
                 .border_color(c(if is_selected { theme::FOCUS_RING } else { theme::BORDER }))
