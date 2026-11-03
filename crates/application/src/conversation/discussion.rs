@@ -787,6 +787,10 @@ pub(crate) fn mirror_answer(tx: &Tx<'_>, store: &Store, run: RunId, conversation
         (text, Some("interrupted")) => format!("{}\n\n(interrupted)", group::shortened(text, crate::task::task_threads::MAX_POST)),
         (text, Some(code)) => format!("{}\n\n(interrupted: {code})", group::shortened(text, crate::task::task_threads::MAX_POST)),
     };
+    // The long run answered while the quick one was thinking: the quick answer is stale and would be a second reply.
+    if quick && conv::answered_since_quick_question(tx, marking.conversation_id, conversation, &name)? {
+        return Ok(Vec::new());
+    }
     let notice = post_in(tx, store, marking.conversation_id, marking.thread_parent, marking.message_id, GROUP_KIND, &name, &text, serde_json::json!({ "run_id": run, "hop": marking.hop, "mode": mode, "quick": quick.then_some(true) }))?;
     if !files.is_empty() {
         conv::set_message_files(tx, marking.message_id, files)?;

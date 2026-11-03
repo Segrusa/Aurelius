@@ -895,6 +895,18 @@ pub fn is_quick_answer(conn: &Connection, conversation: ConversationId) -> Resul
     Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND quick_answer = 1)", [conversation.to_string()], |r| r.get(0))?)
 }
 
+/// Whether `employee` (by name) already posted a full answer in `discussion` since the
+/// message that started the quick run in `quick_chat`: then the long run has answered
+/// and a quick answer would only repeat it, late and out of date.
+pub fn answered_since_quick_question(conn: &Connection, discussion: ConversationId, quick_chat: ConversationId, employee: &str) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM messages m WHERE m.conversation_id = ?1 AND json_extract(m.meta_json, '$.from') = ?3 AND json_extract(m.meta_json, '$.quick') IS NULL
+           AND m.created_at_ms >= COALESCE((SELECT MAX(q.created_at_ms) FROM messages q WHERE q.conversation_id = ?2 AND q.role != 'assistant'), 0))",
+        rusqlite::params![discussion.to_string(), quick_chat.to_string(), employee],
+        |r| r.get(0),
+    )?)
+}
+
 /// What the quick answers of all employees cost since `since_ms`, in micro-units
 /// of the usage records (a record without a cost counts for nothing).
 pub fn quick_answer_cost_since(conn: &Connection, since_ms: i64) -> Result<i64, StorageError> {
