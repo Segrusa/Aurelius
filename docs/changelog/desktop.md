@@ -11,6 +11,8 @@ see [CHANGELOG.md](../../CHANGELOG.md).
 
 ## Unreleased: v0.9.1
 
+- **Ideas become tickets.** Right-click an idea and choose "Create ticket…" (Ctrl+T): the New ticket form opens filled in from the idea, its files go along, and the idea is marked done with a link to the ticket. "Start as a task" is gone. Needs a server with `ticket_from_idea`.
+- **No more New task.** The screens no longer create tasks: "New task" became "New ticket", and Give work on the Dashboard now makes a started ticket for the employee you chose. Recurring tasks stay. On mobile, a task dictated in CarPlay becomes a ticket in Backlog.
 - **Notifications instead of the Inbox.** The Inbox page is gone. A bell next to "Session" (Ctrl+I) opens a popout with what waits for you first and what happened after it; a click leads to the channel, ticket or conversation where the question was asked. Something new shows for a moment as a toast at the top right: hovering keeps it, a click opens it. A proposal for a colleague or guideline opens in a dialog.
 - **Mode in the Team chat.** An employee's answer shows the mode it was given in (for example "◇ Plan") next to its name, while it streams and once it is done (mobile: "Plan mode" in the answer's header). Needs a server that sends it.
 - **Team chat.** One group chat with all your employees, right under Dashboard (mobile: the Team tab). `@Name` asks those employees; without a name the CEO answers. Answers stream in live with their author, and you can stop or approve them in place. An employee's page no longer has its own chat: it shows the employee's settings and tasks, and task conversations stay writable. Needs a server with `group_chat.get`.
