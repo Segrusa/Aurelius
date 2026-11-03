@@ -1099,6 +1099,27 @@ fn a_quick_answer_that_fails_posts_nothing_and_only_one_runs_at_a_time() {
 }
 
 #[test]
+fn a_quick_answer_that_arrives_after_the_full_answer_is_dropped() {
+    let s = setup();
+    let general = general(&s);
+    send(&s, None, "@Bo first").unwrap();
+    go_running(&s, s.bo);
+    let (_, runs) = send(&s, None, "@Bo status?").unwrap();
+    let (quick_chat, quick) = quick_runs(&s, s.bo).unwrap();
+    let main = aurelius_storage_main_chat(&s, s.bo);
+    // The long run ends first and answers.
+    let (st, long) = (s.service.store().clone(), runs[0]);
+    s.service.store().write(move |tx| discussion::mirror_answer(tx, &st, long, main, "All done.", None, &[], None)).unwrap();
+    // The quick run only now finishes: its answer would be a second, stale reply.
+    let (st, run) = (s.service.store().clone(), quick[0].0);
+    let posted = s.service.store().write(move |tx| discussion::mirror_answer(tx, &st, run, quick_chat, "I am mid-run.", None, &[], None)).unwrap();
+    assert!(posted.is_empty());
+    let from_bo: Vec<_> = messages(&s, general).into_iter().filter(|m| m.author.as_deref() == Some("Bo") && m.system.is_none()).collect();
+    assert!(from_bo.iter().any(|m| m.text.starts_with("All done")), "{from_bo:?}");
+    assert!(!from_bo.iter().any(|m| m.text.starts_with("I am mid-run")), "{from_bo:?}");
+}
+
+#[test]
 fn quick_answers_stop_at_the_hourly_cost_cap_and_the_busy_line_stays() {
     let s = setup();
     let general = general(&s);
