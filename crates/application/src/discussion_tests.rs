@@ -1013,3 +1013,130 @@ mod threads;
 
 #[path = "discussion_edit_tests.rs"]
 mod edits;
+
+/// Say that `employee`'s oldest woken run in its main chat is going, since 14 minutes.
+fn go_running(s: &Setup, employee: EmployeeId) {
+    let chat = aurelius_storage_main_chat(s, employee);
+    s.service
+        .store()
+        .write(move |tx| {
+            Ok(tx.execute("UPDATE runs SET status = 'running', started_at_ms = ?2 WHERE conversation_id = ?1", rusqlite::params![chat.to_string(), aurelius_storage::now_ms() - 14 * 60_000])?)
+        })
+        .unwrap();
+}
+
+/// The hidden conversation of `employee`'s quick answers, if there is one, with its runs (run, discussion that woke it).
+fn quick_runs(s: &Setup, employee: EmployeeId) -> Option<(ConversationId, Vec<(RunId, ConversationId)>)> {
+    s.service
+        .store()
+        .read(move |c| {
+            let Some(chat) = c.query_row("SELECT id FROM conversations WHERE employee_id = ?1 AND quick_answer = 1", [employee.to_string()], |r| r.get::<_, String>(0)).ok() else { return Ok(None) };
+            let chat = ConversationId::parse(&chat).unwrap();
+            let mut stmt = c.prepare("SELECT id FROM runs WHERE conversation_id = ?1 ORDER BY rowid")?;
+            let ids: Vec<String> = stmt.query_map([chat.to_string()], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            let runs = ids
+                .iter()
+                .filter_map(|id| RunId::parse(id).ok())
+                .filter_map(|run| aurelius_storage::conversations::group_run(c, run).ok().flatten().map(|g| (run, g.conversation_id)))
+                .collect();
+            Ok(Some((chat, runs)))
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_mention_of_a_busy_employee_also_gets_a_quick_answer_that_wakes_nobody() {
+    let s = setup();
+    let general = general(&s);
+    send(&s, None, "@Bo first question").unwrap();
+    assert!(quick_runs(&s, s.bo).is_none(), "an idle employee gets no quick answer");
+    go_running(&s, s.bo);
+    // Bo is mid-run: the message waits behind it, and a quick run answers at once.
+    let (to, runs) = send(&s, None, "@Bo status?").unwrap();
+    assert_eq!(to, vec![s.bo]);
+    assert_eq!(runs.len(), 1);
+    let (quick_chat, quick) = quick_runs(&s, s.bo).expect("a quick-answer conversation");
+    assert_eq!(quick.len(), 1);
+    assert_eq!(quick[0].1, general, "its answer goes to the channel that asked");
+    assert_ne!(quick[0].0, runs[0], "it is not the run behind the long one");
+    let lines = system_lines(&s, general);
+    assert!(lines.iter().any(|(k, t)| *k == SystemLineKind::Limit && t.contains("Bo is busy with a run (14m): a quick answer follows now")), "{lines:?}");
+    // It is hidden: not among Bo's chats, never its main chat.
+    let chats = s.service.store().read(move |c| aurelius_storage::conversations::employee_conversations(c, s.bo)).unwrap();
+    assert!(chats.iter().all(|c| c.id != quick_chat), "{chats:?}");
+    assert_ne!(quick_chat, aurelius_storage_main_chat(&s, s.bo));
+    assert!(s.service.store().read(move |c| aurelius_storage::conversations::is_quick_answer(c, quick_chat)).unwrap());
+    // It has no tools: no folder, so a text-only profile.
+    let first_run = quick[0].0;
+    let job = s.service.store().read(move |c| Ok(c.query_row("SELECT payload_json FROM jobs WHERE json_extract(payload_json, '$.run_id') = ?1", [first_run.to_string()], |r| r.get::<_, String>(0))?)).unwrap();
+    let plan = s.service.prepare_chat_run(&serde_json::from_str(&job).unwrap()).unwrap().expect("a plan");
+    assert!(plan.work.is_none(), "a quick answer works without tools");
+    // Its answer lands in the channel under Bo's name and wakes the colleague it names: nobody.
+    let st = s.service.store().clone();
+    let run = quick[0].0;
+    s.service.store().write(move |tx| discussion::mirror_answer(tx, &st, run, quick_chat, "I am mid-run; @Cy has the details.", None, &[], None)).unwrap();
+    assert!(messages(&s, general).iter().any(|m| m.author.as_deref() == Some("Bo") && m.text.starts_with("I am mid-run")));
+    assert!(woken(&s, s.cy).is_empty(), "a quick answer wakes nobody");
+}
+
+#[test]
+fn a_quick_answer_that_fails_posts_nothing_and_only_one_runs_at_a_time() {
+    let s = setup();
+    let general = general(&s);
+    send(&s, None, "@Bo first").unwrap();
+    go_running(&s, s.bo);
+    send(&s, None, "@Bo second").unwrap();
+    // The first quick run is still going: the next message gets the busy line only.
+    send(&s, None, "@Bo third").unwrap();
+    let (quick_chat, quick) = quick_runs(&s, s.bo).unwrap();
+    assert_eq!(quick.len(), 1, "one quick run per employee at a time");
+    assert!(system_lines(&s, general).iter().any(|(_, t)| t.contains("Bo is busy with a run (14m), will answer when it ends.")));
+    // It fails: nothing is posted, so the busy line stays the only word.
+    let (st, run) = (s.service.store().clone(), quick[0].0);
+    let posted = s.service.store().write(move |tx| discussion::mirror_answer(tx, &st, run, quick_chat, "half an answ", Some("failed_start"), &[], None)).unwrap();
+    assert!(posted.is_empty());
+    assert!(!messages(&s, general).iter().any(|m| m.author.as_deref() == Some("Bo") && m.system.is_none() && m.text.contains("half an answ")));
+}
+
+#[test]
+fn quick_answers_stop_at_the_hourly_cost_cap_and_the_busy_line_stays() {
+    let s = setup();
+    let general = general(&s);
+    send(&s, None, "@Bo first").unwrap();
+    go_running(&s, s.bo);
+    send(&s, None, "@Bo second").unwrap();
+    let (quick_chat, quick) = quick_runs(&s, s.bo).unwrap();
+    // The quick run ended and cost the whole hour's share.
+    let run = quick[0].0;
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute("UPDATE runs SET status = 'succeeded' WHERE id = ?1", [run.to_string()])?;
+            let event: String = tx.query_row("SELECT id FROM events LIMIT 1", [], |r| r.get(0))?;
+            let usage = aurelius_storage::usage::NewUsage { input_tokens: 1, output_tokens: 1, cached_tokens: 0, cache_creation_tokens: 0, cost_micro_usd: Some(aurelius_domain::group_chat::QUICK_ANSWER_COST_PER_HOUR_MICRO), estimate: true };
+            aurelius_storage::usage::insert(tx, run, aurelius_domain::EventId::parse(&event).unwrap(), &usage)
+        })
+        .unwrap();
+    send(&s, None, "@Bo third").unwrap();
+    assert_eq!(quick_runs(&s, s.bo).unwrap().1.len(), 1, "capped: no new quick run");
+    assert_eq!(quick_runs(&s, s.bo).unwrap().0, quick_chat);
+    assert!(system_lines(&s, general).iter().filter(|(_, t)| t.contains("will answer when it ends.")).count() >= 1);
+}
+
+#[test]
+fn a_message_to_a_busy_owner_gets_a_quick_answer_in_the_ticket() {
+    let s = setup();
+    let (t, _root, conversation, run) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.expect("a discussion");
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running', started_at_ms = ?2 WHERE id = ?1", rusqlite::params![run.to_string(), aurelius_storage::now_ms() - 14 * 60_000])?)).unwrap();
+    let before = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap().len();
+    let (to, _) = post(&s, t, "status?").unwrap();
+    assert_eq!(to, vec![s.ann]);
+    let (_, quick) = quick_runs(&s, s.ann).expect("a quick answer for the owner");
+    assert_eq!(quick.len(), 1);
+    assert_eq!(quick[0].1, d, "its answer goes to the ticket's discussion");
+    assert!(system_lines(&s, d).iter().any(|(_, t)| t.contains("Ann is busy with a run (14m): a quick answer follows now")), "{:?}", system_lines(&s, d));
+    // The owner's own run in the task goes on as before: the message still reaches it.
+    let after = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap().len();
+    assert!(after >= before);
+}
