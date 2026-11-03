@@ -1,7 +1,7 @@
 //! Ideas per project (see `aurelius_domain::idea`).
 
 use crate::{StorageError, now_ms, tasks::TaskAttachments};
-use aurelius_domain::{IdeaId, EmployeeId, ProjectId, TaskId, idea::{IdeaKind, IdeaStatus}, task::TaskStatus};
+use aurelius_domain::{IdeaId, EmployeeId, ProjectId, TaskId, TicketId, idea::{IdeaKind, IdeaStatus}, task::TaskStatus};
 use aurelius_domain::views::IdeaView;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -12,6 +12,7 @@ pub struct IdeaRow {
     pub status: IdeaStatus,
     pub kind: IdeaKind,
     pub task_id: Option<TaskId>,
+    pub ticket_id: Option<TicketId>,
     pub attachments: Option<TaskAttachments>,
 }
 
@@ -26,7 +27,7 @@ pub fn insert(tx: &Transaction<'_>, id: IdeaId, project: ProjectId, title: &str,
 
 pub fn load(conn: &Connection, id: IdeaId) -> Result<Option<IdeaRow>, StorageError> {
     Ok(conn
-        .query_row("SELECT project_id, title, note, status, task_id, kind, attachments_json FROM ideas WHERE id = ?1", [id.to_string()], |r| {
+        .query_row("SELECT project_id, title, note, status, task_id, kind, attachments_json, ticket_id FROM ideas WHERE id = ?1", [id.to_string()], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -35,10 +36,11 @@ pub fn load(conn: &Connection, id: IdeaId) -> Result<Option<IdeaRow>, StorageErr
                 r.get::<_, Option<String>>(4)?,
                 r.get::<_, String>(5)?,
                 r.get::<_, Option<String>>(6)?,
+                r.get::<_, Option<String>>(7)?,
             ))
         })
         .optional()?
-        .and_then(|(p, title, note, status, task, kind, attachments)| {
+        .and_then(|(p, title, note, status, task, kind, attachments, ticket)| {
             Some(IdeaRow {
                 project_id: ProjectId::parse(&p).ok()?,
                 title,
@@ -46,6 +48,7 @@ pub fn load(conn: &Connection, id: IdeaId) -> Result<Option<IdeaRow>, StorageErr
                 status: IdeaStatus::parse(&status)?,
                 kind: IdeaKind::parse(&kind).unwrap_or_default(),
                 task_id: task.and_then(|t| TaskId::parse(&t).ok()),
+                ticket_id: ticket.and_then(|t| TicketId::parse(&t).ok()),
                 attachments: attachments.and_then(|a| serde_json::from_str(&a).ok()),
             })
         }))
@@ -80,6 +83,15 @@ pub fn set_status(tx: &Transaction<'_>, id: IdeaId, status: IdeaStatus, task: Op
     Ok(())
 }
 
+/// The idea became this ticket: it is done and points at the ticket.
+pub fn set_ticket(tx: &Transaction<'_>, id: IdeaId, ticket: TicketId) -> Result<(), StorageError> {
+    tx.execute(
+        "UPDATE ideas SET status = 'done', ticket_id = ?2, version = version + 1, updated_at_ms = ?3 WHERE id = ?1",
+        params![id.to_string(), ticket.to_string(), now_ms()],
+    )?;
+    Ok(())
+}
+
 /// A project's ideas: open ones first, then the rest, newest first.
 pub fn list(conn: &Connection, project: ProjectId) -> Result<Vec<IdeaView>, StorageError> {
     query(conn, Some(project))
@@ -92,8 +104,8 @@ pub fn list_all(conn: &Connection) -> Result<Vec<IdeaView>, StorageError> {
 
 fn query(conn: &Connection, project: Option<ProjectId>) -> Result<Vec<IdeaView>, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT i.id, i.title, i.note, i.status, m.name, i.task_id, t.status, i.created_at_ms, i.updated_at_ms, i.employee_id, i.kind, i.attachments_json, i.project_id
-         FROM ideas i LEFT JOIN employees m ON m.id = i.employee_id LEFT JOIN tasks t ON t.id = i.task_id
+        "SELECT i.id, i.title, i.note, i.status, m.name, i.task_id, t.status, i.created_at_ms, i.updated_at_ms, i.employee_id, i.kind, i.attachments_json, i.project_id, i.ticket_id, k.number
+         FROM ideas i LEFT JOIN employees m ON m.id = i.employee_id LEFT JOIN tasks t ON t.id = i.task_id LEFT JOIN tickets k ON k.id = i.ticket_id
          WHERE (?1 IS NULL OR i.project_id = ?1) ORDER BY i.status = 'open' DESC, i.created_at_ms DESC LIMIT 1000",
     )?;
     let rows = stmt.query_map([project.map(|p| p.to_string())], |r| {
@@ -111,11 +123,13 @@ fn query(conn: &Connection, project: Option<ProjectId>) -> Result<Vec<IdeaView>,
             r.get::<_, String>(10)?,
             r.get::<_, Option<String>>(11)?,
             r.get::<_, String>(12)?,
+            r.get::<_, Option<String>>(13)?,
+            r.get::<_, Option<u32>>(14)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, title, note, status, employee, task, task_status, created, updated, employee_id, kind, attachments, project_id) = row?;
+        let (id, title, note, status, employee, task, task_status, created, updated, employee_id, kind, attachments, project_id, ticket, ticket_number) = row?;
         let (Ok(id), Ok(project_id)) = (IdeaId::parse(&id), ProjectId::parse(&project_id)) else { continue };
         let mut attachments: Vec<aurelius_domain::views::MessageFileView> =
             attachments.and_then(|a| serde_json::from_str::<TaskAttachments>(&a).ok()).map(|a| a.files).unwrap_or_default();
@@ -138,6 +152,8 @@ fn query(conn: &Connection, project: Option<ProjectId>) -> Result<Vec<IdeaView>,
             employee_id,
             task_id: task.and_then(|t| TaskId::parse(&t).ok()),
             task_status: task_status.and_then(|s| TaskStatus::parse(&s)),
+            ticket_id: ticket.and_then(|t| TicketId::parse(&t).ok()),
+            ticket_number,
             created_at_ms: created,
             updated_at_ms: updated,
             attachments,

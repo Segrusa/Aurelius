@@ -98,6 +98,7 @@ fn new_ticket(s: &Setup, title: &str, owner: Option<EmployeeId>) -> TicketId {
         files: vec![],
         start: false,
         from_message: None,
+        from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(s, Command::CreateTicket(create)).unwrap() else { panic!() };
     ticket_id
@@ -664,6 +665,7 @@ fn ticket_from(s: &Setup, message: Option<aurelius_domain::MessageId>, user: Opt
         files: vec![],
         start: false,
         from_message: message,
+        from_idea: None,
     };
     let envelope = CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateTicket(create) };
     match s.service.execute(&ctx(user), envelope)?.receipt.result {

@@ -47,6 +47,7 @@ fn new_ticket(project_id: ProjectId, responsible_user_id: Option<UserId>) -> Cre
         files: vec![],
         start: false,
         from_message: None,
+        from_idea: None,
         responsible_user_id,
     }
 }

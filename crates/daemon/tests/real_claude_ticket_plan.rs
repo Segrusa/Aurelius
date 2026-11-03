@@ -113,6 +113,7 @@ async fn a_real_ticket_plan_stops_after_the_deny_and_goes_on_once_approved() {
             files: vec![],
             start: true,
             from_message: None,
+            from_idea: None,
         })
         .await
         .unwrap();

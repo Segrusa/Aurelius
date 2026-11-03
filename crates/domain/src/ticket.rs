@@ -8,7 +8,7 @@
 //! (starting the main task, the dispatcher, report and accept, plan review,
 //! the tester's run of the full test suite) moves cards by itself and is not decided here.
 
-use crate::{BoardColumnId, ConversationId, DomainError, EmployeeId, MessageId, ProjectId, TaskId, TicketId, UserId, optional_text, require_text};
+use crate::{BoardColumnId, ConversationId, DomainError, EmployeeId, IdeaId, MessageId, ProjectId, TaskId, TicketId, UserId, optional_text, require_text};
 use crate::task::{RunSettings, TaskStatus};
 use crate::views::{MessageFileView, TaskView};
 use serde::{Deserialize, Serialize};
@@ -293,6 +293,11 @@ pub struct CreateTicket {
     /// someone: older servers refuse fields they do not know.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub responsible_user_id: Option<UserId>,
+    /// Made from this idea (feature `ticket_from_idea`): the ticket gets copies of
+    /// the idea's files, and the idea is done and points at the ticket. Optional,
+    /// as above: older servers refuse fields they do not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_idea: Option<IdeaId>,
 }
 
 /// Choose the board member responsible for a ticket (`ticket.set_responsible`,

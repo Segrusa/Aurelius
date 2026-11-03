@@ -112,6 +112,7 @@ fn ticket_of(s: &Setup, by: UserId, owner: EmployeeId) -> (TicketId, TaskId) {
         files: vec![],
         start: false,
         from_message: None,
+        from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(s, by, Command::CreateTicket(create)) else { panic!() };
     exec(s, by, Command::StartTicket(StartTicket { ticket_id, employee_id: None }));
@@ -313,6 +314,7 @@ fn the_dispatchers_triage_and_the_summary_after_done_use_the_tickets_login() {
         files: vec![],
         start: true,
         from_message: None,
+        from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(&s, s.robin, Command::CreateTicket(create)) else { panic!() };
     let root = s.service.store().read(|c| aurelius_storage::tickets::state(c, ticket_id)).unwrap().unwrap().root_task_id.unwrap();
@@ -492,7 +494,7 @@ fn the_dispatcher_waits_for_its_logins_limit_without_using_a_try() {
         responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
-        owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None,
+        owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None, from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(&s, s.robin, Command::CreateTicket(create)) else { panic!() };
     let root = s.service.store().read(|c| aurelius_storage::tickets::state(c, ticket_id)).unwrap().unwrap().root_task_id.unwrap();
@@ -583,7 +585,7 @@ fn the_dispatcher_waits_for_the_tickets_login_without_using_a_try() {
         responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
-        owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None,
+        owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None, from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(&s, s.robin, Command::CreateTicket(create)) else { panic!() };
     let root = s.service.store().read(|c| aurelius_storage::tickets::state(c, ticket_id)).unwrap().unwrap().root_task_id.unwrap();

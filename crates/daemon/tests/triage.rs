@@ -120,6 +120,7 @@ async fn started(client: &Client, project_id: ProjectId, title: &str) -> TicketI
             files: vec![],
             start: true,
             from_message: None,
+            from_idea: None,
         })
         .await
         .unwrap();

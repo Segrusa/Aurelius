@@ -358,6 +358,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
         files: vec![],
         start: true,
         from_message: None,
+        from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = client.create_ticket(ticket).await.unwrap().result else { panic!() };
     // B10 on the discussion and on a task's title: refused with the name; the post confirmed, kept redacted.

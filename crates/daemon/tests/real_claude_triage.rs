@@ -110,6 +110,7 @@ async fn a_real_dispatcher_assigns_the_ticket() {
             files: vec![],
             start: true,
             from_message: None,
+            from_idea: None,
         })
         .await
         .unwrap();

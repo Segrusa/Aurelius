@@ -43,6 +43,7 @@ async fn planned_ticket(client: &Client, project_id: ProjectId, owner: EmployeeI
             files: vec![],
             start: true,
             from_message: None,
+            from_idea: None,
         })
         .await
         .unwrap();

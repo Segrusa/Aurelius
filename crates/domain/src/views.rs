@@ -280,6 +280,12 @@ pub struct IdeaView {
     /// The task it became, and that task's title and status.
     pub task_id: Option<TaskId>,
     pub task_status: Option<TaskStatus>,
+    /// The ticket made from it and that ticket's number (feature `ticket_from_idea`);
+    /// left out when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<crate::TicketId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_number: Option<u32>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     /// Files attached to the idea, each with an `id` for `upload.get` (feature

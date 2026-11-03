@@ -49,6 +49,7 @@ async fn create(client: &Client, project_id: ProjectId, title: &str, priority: T
             files: vec![],
             start: false,
             from_message: None,
+            from_idea: None,
         })
         .await
         .unwrap();
@@ -219,6 +220,7 @@ async fn a_board_member_adds_files_to_an_existing_ticket() {
             files: vec![path(&shot)],
             start: false,
             from_message: None,
+            from_idea: None,
         })
         .await
         .unwrap();

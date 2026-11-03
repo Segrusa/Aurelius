@@ -1,4 +1,4 @@
-//! Ideas per project: noted by the user or an employee, started as a task, or dropped.
+//! Ideas per project: noted by the user or an employee, made into a ticket or started as a task, or dropped.
 
 mod common;
 
@@ -11,6 +11,7 @@ use aurelius_domain::{
     employee::CreateEmployee,
     project::CreateProject,
     task::{RunSettings, TaskStatus},
+    ticket::CreateTicket,
 };
 use aurelius_protocol::{CommandResult, EmployeeTaskOp};
 use common::*;
@@ -171,5 +172,99 @@ async fn ideas_keep_files_that_go_with_them_into_the_task() {
     assert!(!uploads.join("notes.txt").exists() && uploads.join("notes (2).txt").exists());
     assert!(client.upload(&format!("i:{idea_id}:0")).await.is_err());
     assert!(client.execute(envelope(Command::DeleteIdea(DeleteIdea { idea_id }), None)).await.is_err(), "gone");
+    stop(dir.path(), daemon).await;
+}
+
+fn ticket_from(project_id: aurelius_domain::ProjectId, idea: aurelius_domain::IdeaId, title: &str, start: bool) -> Command {
+    Command::CreateTicket(CreateTicket {
+        responsible_user_id: None,
+        confirm_secret: false,
+        project_id,
+        title: title.into(),
+        description: Some("From the idea".into()),
+        priority: Default::default(),
+        labels: vec![],
+        deadline_ms: None,
+        owner_employee_id: None,
+        run: Default::default(),
+        files: vec![],
+        start,
+        from_message: None,
+        from_idea: Some(idea),
+    })
+}
+
+/// "Create ticket" on an idea (ticket #16): one transaction makes the ticket, closes
+/// the idea and links them; the ticket has its own copies of the idea's files.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_idea_becomes_a_ticket_once_with_copies_of_its_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    assert!(client.supports(aurelius_protocol::feature::TICKET_FROM_IDEA));
+    let CommandResult::ProjectCreated { project_id, .. } =
+        client.execute(envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }), None)).await.unwrap().result
+    else {
+        panic!()
+    };
+    let notes = dir.path().join("notes.txt");
+    std::fs::write(&notes, b"the notes").unwrap();
+    let add = |title: &str, files: Vec<String>| Command::AddIdea(AddIdea { confirm_secret: false, project_id, title: title.into(), note: Some("Its note".into()), kind: Default::default(), files });
+    let CommandResult::IdeaAdded { idea_id } = client.execute(envelope(add("Dark mode", vec![notes.display().to_string()]), None)).await.unwrap().result else { panic!() };
+
+    let CommandResult::TicketCreated { ticket_id, number } = client.execute(envelope(ticket_from(project_id, idea_id, "Dark mode", false), None)).await.unwrap().result else { panic!() };
+
+    let idea = client.ideas(project_id).await.unwrap().ideas.into_iter().find(|i| i.id == idea_id).unwrap();
+    assert_eq!((idea.status, idea.ticket_id, idea.ticket_number, idea.task_id), (IdeaStatus::Done, Some(ticket_id), Some(number), None));
+    let ticket = client.ticket(ticket_id).await.unwrap();
+    assert_eq!(ticket.ticket.attachments.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["notes (2).txt"], "its own copy, next to the idea's");
+    assert_eq!(ticket.ticket.description.as_deref(), Some("From the idea"));
+
+    // Its copy outlives the idea.
+    client.execute(envelope(Command::DeleteIdea(DeleteIdea { idea_id }), None)).await.unwrap();
+    let kept = client.ticket(ticket_id).await.unwrap().ticket.attachments[0].id.clone().expect("an upload id");
+    assert_eq!(client.upload(&kept).await.unwrap().2, b"the notes", "the ticket keeps its own copy");
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_ticket_leaves_the_idea_open_and_an_idea_with_a_ticket_or_task_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let project = |name: &str| Command::CreateProject(CreateProject { name: name.into(), description: None, folder: None });
+    let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(project("Atlas"), None)).await.unwrap().result else { panic!() };
+    let CommandResult::ProjectCreated { project_id: other, .. } = client.execute(envelope(project("Zeta"), None)).await.unwrap().result else { panic!() };
+    let CommandResult::EmployeeCreated { employee_id, .. } = client
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .await
+        .unwrap()
+        .result
+    else {
+        panic!()
+    };
+    let add = |title: &str| Command::AddIdea(AddIdea { confirm_secret: false, project_id, title: title.into(), note: None, kind: Default::default(), files: vec![] });
+    let CommandResult::IdeaAdded { idea_id } = client.execute(envelope(add("One"), None)).await.unwrap().result else { panic!() };
+
+    // Another project, or an idea that does not exist: refused, and nothing changed.
+    let wrong = client.execute(envelope(ticket_from(other, idea_id, "One", false), None)).await.unwrap_err().to_string();
+    assert!(wrong.contains("another project"), "{wrong}");
+    assert!(client.execute(envelope(ticket_from(project_id, aurelius_domain::IdeaId::new(), "None", false), None)).await.is_err());
+    let open = client.ideas(project_id).await.unwrap().ideas.into_iter().find(|i| i.id == idea_id).unwrap();
+    assert_eq!((open.status, open.ticket_id), (IdeaStatus::Open, None));
+    assert!(client.board(None).await.unwrap().columns.iter().all(|c| c.tickets.is_empty()), "no ticket was made");
+
+    // Started: it goes to Todo, and the idea closes with it. A second ticket or a task (an older client) is refused.
+    client.execute(envelope(ticket_from(project_id, idea_id, "One", true), None)).await.unwrap();
+    let twice = client.execute(envelope(ticket_from(project_id, idea_id, "One again", false), None)).await.unwrap_err().to_string();
+    assert!(twice.contains("already became a ticket"), "{twice}");
+    let task = client.execute(envelope(Command::StartIdea(StartIdea { idea_id, employee_id, run: Default::default() }), None)).await.unwrap_err().to_string();
+    assert!(task.contains("already became a ticket"), "{task}");
+
+    // An idea that became a task before keeps that link: no ticket on top of it.
+    let CommandResult::IdeaAdded { idea_id: started } = client.execute(envelope(add("Two"), None)).await.unwrap().result else { panic!() };
+    client.execute(envelope(Command::StartIdea(StartIdea { idea_id: started, employee_id, run: Default::default() }), None)).await.unwrap();
+    let on_task = client.execute(envelope(ticket_from(project_id, started, "Two", false), None)).await.unwrap_err().to_string();
+    assert!(on_task.contains("already became a task"), "{on_task}");
     stop(dir.path(), daemon).await;
 }

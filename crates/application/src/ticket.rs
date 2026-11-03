@@ -512,8 +512,15 @@ impl CommandService {
             Some(text) => Some(blobs.put(text.as_bytes(), "text/markdown; charset=utf-8").map_err(storage_error)?),
             None => None,
         };
-        let attachments = self.attach_files(cmd.project_id, None, &cmd.files, None)?;
+        // Made from an idea: the ticket gets its own copies of the idea's files too.
+        let mut files = cmd.files.clone();
+        if let Some(idea) = cmd.from_idea {
+            let row = self.store().read(|c| aurelius_storage::ideas::load(c, idea)).map_err(storage_error)?.ok_or_else(|| domain_error(DomainError::IdeaNotFound(idea)))?;
+            files.extend(crate::task::ideas::files_of(&row));
+        }
+        let attachments = self.attach_files(cmd.project_id, None, &files, None)?;
         let stored = attachments.clone();
+        let command_id = envelope.command_id;
         let by = Actor::BoardMember { user_id: user };
         let st = self.store().clone();
         let committed = self.commit(envelope.command_id, hash, move |tx| {
@@ -542,6 +549,9 @@ impl CommandService {
                 },
                 None => None,
             };
+            if let Some(idea) = cmd.from_idea {
+                check!(crate::task::ideas::check_for_ticket(tx, idea, cmd.project_id)?);
+            }
             if let Some(blob) = &description_blob {
                 blobs::register(tx, blob)?;
             }
@@ -586,6 +596,9 @@ impl CommandService {
             }
             store::touch(tx, id, e.version)?;
             let mut notices = e.notices;
+            if let Some(idea) = cmd.from_idea {
+                notices.push(crate::task::ideas::became_ticket(tx, idea, cmd.project_id, id, &title, command_id.to_string())?);
+            }
             if cmd.start {
                 notices.extend(ticket_line::started(tx, &st, id, user)?);
             }

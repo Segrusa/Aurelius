@@ -26,6 +26,7 @@ fn create(mode: Option<AgentMode>) -> CreateTicket {
         files: vec![],
         start: false,
         from_message: None,
+        from_idea: None,
     }
 }
 

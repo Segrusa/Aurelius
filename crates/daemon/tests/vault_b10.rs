@@ -146,6 +146,7 @@ fn new_ticket(project_id: ProjectId, owner: Option<EmployeeId>, description: Str
         files: vec![],
         start,
         from_message: None,
+        from_idea: None,
     }
 }
 
