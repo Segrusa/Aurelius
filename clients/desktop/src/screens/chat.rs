@@ -1201,7 +1201,7 @@ impl AppView {
                             this.open_screenshot(id.clone(), w, cx);
                         })))
                     })
-                    .when_some(artifact, |el, url| {
+                    .when_some(artifact.filter(|_| !crate::hidden::hidden(crate::hidden::Feature::Artifacts)), |el, url| {
                         let open = url.clone();
                         let kept = self.artifacts.iter().flatten().any(|x| x.url == url && crate::screens::artifact::can_view(x));
                         let view = url.clone();
@@ -1650,7 +1650,7 @@ fn status_row(view: &AppView, cx: &mut Context<AppView>) -> impl IntoElement {
     v().w_full().child(
         h().pt(px(8.)).px(px(4.)).gap(px(10.)).gap_y(px(4.)).flex_wrap().min_w_0().text_size(px(12.5)).text_color(c(theme::TEXT_2))
             .when_some(mode, |el, mode| el.child(mode_chip("mode-chip", mode, Some("shift-tab"), cx, |_, w, cx| w.dispatch_action(Box::new(CycleAgentMode), cx))))
-            .when(view.takes_manager_files(), |el| {
+            .when(view.chat_takes_files(), |el| {
                 el.child(
                     chip("upload-chip").text_color(c(theme::MUTED))
                         .tooltip(ui::tip("Add files for the employee (or drop them here)", Some("secondary-o")))

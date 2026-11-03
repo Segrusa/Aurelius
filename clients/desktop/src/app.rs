@@ -2869,7 +2869,7 @@ impl AppView {
             self.pick_task_files(cx);
             return;
         }
-        if !self.takes_manager_files() {
+        if !self.chat_takes_files() {
             self.notify_user("Open an employee conversation to add files.", false, cx);
             return;
         }
@@ -2888,6 +2888,11 @@ impl AppView {
         matches!(self.thread_screen(), Page::Employee(ManagerRef::Real(_)) | Page::GroupChat) && self.current_manager_thread().is_some()
     }
 
+    /// A chat takes files with a message and the feature is not hidden (`crate::hidden`).
+    pub fn chat_takes_files(&self) -> bool {
+        !crate::hidden::hidden(crate::hidden::Feature::ChatAttachments) && self.takes_manager_files()
+    }
+
     /// Files dropped on the conversation wait beside the composer like picked ones.
     pub fn drop_files(&mut self, paths: &[std::path::PathBuf], cx: &mut Context<Self>) {
         let paths: Vec<_> = paths.iter().filter(|p| p.is_file()).cloned().collect();
@@ -2897,7 +2902,7 @@ impl AppView {
         }
         if self.give_work_open() {
             self.add_task_files(paths, cx);
-        } else if self.takes_manager_files() {
+        } else if self.chat_takes_files() {
             self.add_files(paths, cx);
         } else {
             self.notify_user("Open an employee conversation to add files.", false, cx);
@@ -4977,11 +4982,16 @@ impl AppView {
             }),
             _ => None,
         };
-        vec![
+        let heartbeat = entry("Heartbeat: off / 30 min / 1 h / 4 h", "alt-h", || Box::new(CycleHeartbeat)).filter(|_| !crate::hidden::hidden(crate::hidden::Feature::Heartbeats));
+        // No `None` for a hidden entry: that would be a separator.
+        [
             entry("Edit employee…", "f2", || Box::new(EditItem)),
             pin_entry,
             entry("Switch mode", "shift-tab", || Box::new(CycleAgentMode)),
-            entry("Heartbeat: off / 30 min / 1 h / 4 h", "alt-h", || Box::new(CycleHeartbeat)),
+        ]
+        .into_iter()
+        .chain(heartbeat.map(Some))
+        .chain([
             entry("Browser on / off", "alt-b", || Box::new(ToggleBrowser)),
             entry("Screen on / off", "alt-s", || Box::new(ToggleScreen)),
             None,
@@ -4991,7 +5001,8 @@ impl AppView {
             None,
             entry(if paused { "Resume employee" } else { "Pause employee" }, "secondary-shift-p", || Box::new(TogglePause)),
             danger(entry("Archive employee…", "secondary-shift-backspace", || Box::new(ArchiveItem))),
-        ]
+        ])
+        .collect()
     }
 
     pub fn task_menu(&self) -> MenuItems {
@@ -5961,7 +5972,9 @@ impl AppView {
                 self.pending_reports_to = m.reports_to;
                 let title = m.title.clone().unwrap_or_default();
                 self.title_input.update(cx, |input, cx| input.set_value(title, window, cx));
-                self.plugins_for_manager(m.id);
+                if !crate::hidden::hidden(crate::hidden::Feature::Plugins) {
+                    self.plugins_for_manager(m.id);
+                }
                 self.name_input.update(cx, |input, cx| input.set_value(m.name.clone(), window, cx));
                 self.role_input.update(cx, |input, cx| input.set_value(m.role.clone(), window, cx));
                 let instructions = m.instructions.clone().unwrap_or_default();
@@ -6907,7 +6920,7 @@ impl AppView {
         }
         entries.extend(self.board_palette_entries(cx));
         entries.extend(self.my_tickets_palette_entries());
-        for shortcut in SHORTCUTS.iter().filter(|s| s.in_palette) {
+        for shortcut in SHORTCUTS.iter().filter(|s| s.in_palette && crate::keymap::shown(s)) {
             entries.push(PaletteEntry {
                 label: shortcut.label.into(),
                 hint: shortcut.section.title().into(),

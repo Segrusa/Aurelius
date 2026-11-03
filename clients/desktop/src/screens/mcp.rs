@@ -100,7 +100,7 @@ impl AppView {
                         .children(about.map(|text| ui::info("browser-about", text)))
                         .children(note.map(|text| div().flex_1().min_w_0().text_color(c(theme::MUTED)).child(text)))
                 })
-                .when_some(self.artifacts_enabled, |el, on| {
+                .when_some(self.artifacts_enabled.filter(|_| !crate::hidden::hidden(crate::hidden::Feature::Artifacts)), |el, on| {
                     el.child(section("CLAUDE ARTIFACTS")).child(
                         h().gap(px(12.)).items_center().text_size(px(13.))
                             .child(div().w(px(130.)).flex_none().text_color(c(theme::MUTED)).child(ui::label_with_info(
@@ -132,8 +132,7 @@ impl AppView {
                         )
                     })
                 })
-                .child(section("CLAUDE.AI ACCOUNT"))
-                .child(
+                .when(!crate::hidden::hidden(crate::hidden::Feature::Artifacts), |el| el.child(section("CLAUDE.AI ACCOUNT")).child(
                     h().gap(px(12.)).items_center().text_size(px(13.))
                         .child(div().w(px(130.)).flex_none().text_color(c(theme::MUTED)).child("claude.ai account"))
                         .child(ui::button("claude-ai-sign-in", "Sign in", ButtonKind::Outline, None).on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
@@ -141,7 +140,7 @@ impl AppView {
                         })))
                         .child(ui::button("claude-ai-sign-out", "Sign out", ButtonKind::Outline, None).on_click(cx.listener(|this, _: &ClickEvent, window, cx| this.claude_sign_out(window, cx))))
                         .child(ui::info("claude-ai-about", "Docs, Slides, Design and Dashboards from claude.ai open inside Aurelius once you sign in here (Google works). The sign-in stays on this PC, apart from your browser.")),
-                )
+                ))
                 .child(div().mt(px(8.)).pt(px(14.)).border_t_1().border_color(c(theme::BORDER)).child(h().gap(px(6.)).items_center().child(ui::eyebrow("MCP SERVERS")).child(ui::info(
                     "mcp-servers-about",
                     "On = every chat, conversation, employee and task can use the server. Applies from the next run.",
