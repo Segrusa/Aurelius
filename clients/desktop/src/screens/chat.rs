@@ -847,21 +847,33 @@ impl AppView {
         let channel = line.channel_id.filter(|id| Some(*id) != open && self.channels.iter().flatten().any(|c| c.conversation_id == *id));
         let task = crate::screens::discussion::system_task(line);
         let color = if mark.failed { theme::NEGATIVE } else { theme::TEXT_2 };
-        h().id(SharedString::from(format!("system-{}", m.id))).w_full().justify_center().flex_wrap().gap(px(8.)).px(px(24.)).role(Role::Note).aria_label(crate::screens::discussion::system_label(&text, &ui::fmt_when(m.created_at_ms)))
-            .child(div().text_size(px(11.5)).line_height(px(17.)).text_color(c(color)).text_center().child(format!("┄ {}{} · {clock} ┄", mark.mark, text.lines().next().unwrap_or_default())))
-            .when(connect, |el| {
-                el.child(div().id(SharedString::from(format!("system-connect-{}", m.id))).role(Role::Button).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child(crate::screens::board::connect_label(self.claude.view.as_ref())).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.claude_connect(cx))))
-            })
-            .when_some(ticket, |el, id| {
-                el.child(div().id(SharedString::from(format!("system-open-{}", m.id))).role(Role::Link).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child("Open ticket").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket(id, w, cx))))
-            })
-            .when_some(channel, |el, id| {
-                el.child(div().id(SharedString::from(format!("system-channel-{}", m.id))).role(Role::Link).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child("Open channel").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.go_to_channel(id, w, cx))))
-            })
-            .when_some(task, |el, task| {
-                el.child(div().id(SharedString::from(format!("system-task-{}", m.id))).role(Role::Link).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child("Open task").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket_task(task, w, cx))))
-            })
-            .into_any_element()
+        // The first line is the event; a long "Reason: …" follows as a quieter, clamped second line.
+        let first = text.lines().next().unwrap_or_default().to_string();
+        let (head, reason) = match first.split_once(" Reason:") {
+            Some((h, r)) => (h.trim().to_string(), Some(format!("Reason:{r}").trim().to_string())),
+            None => (first, None),
+        };
+        let link = |id: String, label: &'static str| div().id(SharedString::from(id)).role(Role::Link).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).hover(|s| s.underline()).child(label);
+        let has_links = connect || ticket.is_some() || channel.is_some() || task.is_some();
+        let border = if mark.failed { theme::NEGATIVE } else { theme::BORDER };
+        let card = h().id(SharedString::from(format!("system-{}", m.id))).w_full().max_w(px(560.)).items_start().gap(px(10.)).px(px(12.)).py(px(7.)).rounded(px(8.)).border_1().border_color(c(border)).bg(c(theme::SURFACE)).role(Role::Note).aria_label(crate::screens::discussion::system_label(&text, &ui::fmt_when(m.created_at_ms)))
+            .child(div().flex_none().w(px(22.)).text_size(px(11.5)).line_height(px(18.)).text_color(c(color)).text_right().child(mark.mark.trim().to_string()))
+            .child(
+                v().flex_1().min_w_0().gap(px(2.))
+                    .child(div().text_size(px(12.5)).line_height(px(18.)).text_color(c(color)).child(head))
+                    .when_some(reason, |el, r| el.child(div().text_size(px(11.5)).line_height(px(16.)).text_color(c(theme::MUTED)).line_clamp(2).child(r)))
+                    .when(has_links, |el| {
+                        el.child(
+                            h().gap(px(12.)).pt(px(1.))
+                                .when(connect, |el| el.child(div().id(SharedString::from(format!("system-connect-{}", m.id))).role(Role::Button).cursor_pointer().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child(crate::screens::board::connect_label(self.claude.view.as_ref())).on_click(cx.listener(|this, _: &ClickEvent, _, cx| this.claude_connect(cx)))))
+                                .when_some(ticket, |el, id| el.child(link(format!("system-open-{}", m.id), "Open ticket").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket(id, w, cx)))))
+                                .when_some(channel, |el, id| el.child(link(format!("system-channel-{}", m.id), "Open channel").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.go_to_channel(id, w, cx)))))
+                                .when_some(task, |el, task| el.child(link(format!("system-task-{}", m.id), "Open task").on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_ticket_task(task, w, cx))))),
+                        )
+                    }),
+            )
+            .child(div().flex_none().text_size(px(11.)).line_height(px(18.)).text_color(c(theme::MUTED)).child(clock));
+        h().w_full().px(px(24.)).py(px(3.)).child(card).into_any_element()
     }
 }
 
