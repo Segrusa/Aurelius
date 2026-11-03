@@ -1,4 +1,4 @@
-//! The fixed left sidebar: Dashboard, Team chat, Inbox, Tasks, Employees and Projects (the last two foldable,
+//! The fixed left sidebar: Dashboard, Team chat, Tasks, Employees and Projects (the last two foldable,
 //! with their pinned employees or projects) and the server picker at the bottom (a click on it opens Settings).
 
 use crate::app::{AppView, ManagerRef, MenuDo, MenuEntry, MenuItems, NavItem, Page, ProjectRef};
@@ -32,8 +32,6 @@ fn nav_icon(nav: NavItem, color: u32) -> Div {
         // Three columns (D-02).
         NavItem::Board => boxed.child(h().gap(px(2.)).items_start().child(fill(3., 12., 1.)).child(fill(3., 8., 1.)).child(fill(3., 10., 1.))),
         NavItem::Chat => boxed.child(frame(14., 11., 3.).flex_col().justify_center().items_start().gap(px(2.)).pl(px(2.5)).child(fill(7., 1.5, 1.)).child(fill(5., 1.5, 1.))),
-        // A tray: a box with a slot line.
-        NavItem::Inbox => boxed.child(frame(14., 10., 2.).items_end().justify_center().pb(px(2.)).child(fill(6., 1.5, 1.))),
         // A checkbox.
         NavItem::Tasks => boxed.child(frame(11., 11., 2.).items_center().justify_center().child(fill(5., 5., 1.))),
         // A person: head over shoulders.
@@ -52,12 +50,6 @@ pub fn sidebar_items() -> impl Iterator<Item = NavItem> {
 }
 
 impl AppView {
-    /// What the inbox badge counts: what needs you (the inbox's first tab), the unread Updates and what failed and is
-    /// not read yet. Results of finished tasks give no badge.
-    pub fn inbox_count(&self) -> usize {
-        crate::app::inbox_badge(self.inbox_waiting_head(), &self.inbox_notifications(), |n| self.note_is_mine(n), &self.inbox_opened)
-    }
-
     /// Collapsed (Ctrl+B) the sidebar is gone; hovering the title strip's sidebar button
     /// then shows it whole over the page (`peek`) for as long as the mouse stays in it.
     pub fn render_sidebar(&self, peek: bool, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -66,7 +58,6 @@ impl AppView {
             Page::Project(ProjectRef::Real(id), _) => Some(id),
             _ => None,
         };
-        let inbox = self.inbox_count();
         // The board's "Needs you": Review, Plan review and tickets without an owner (B5).
         let board = self.board_needs_count();
         // The Team chat counts mentions only, with a dot while anything is unread (B8, P-24).
@@ -101,9 +92,6 @@ impl AppView {
                 })
                 .when(nav == NavItem::Chat && mentions == 0 && unread && current != nav, |el| {
                     el.aria_label(format!("{}, unread", nav.label())).child(div().size(px(7.)).rounded_full().bg(c(theme::TEXT_2)))
-                })
-                .when(nav == NavItem::Inbox && inbox > 0, |el| {
-                    el.child(div().px(px(6.)).rounded(px(8.)).bg(c(theme::ACCENT)).text_color(c(theme::BG)).text_size(px(11.)).font_weight(FontWeight::BOLD).child(inbox.to_string()))
                 })
                 .child(ui::kbd(nav.keys(), cx).opacity(0.).group_hover(group, |s| s.opacity(0.6)))
                 .when(matches!(nav, NavItem::Employees | NavItem::Projects), |el| {
@@ -306,7 +294,7 @@ mod tests {
     #[test]
     fn team_chat_sits_right_under_dashboard() {
         let rows: Vec<NavItem> = sidebar_items().collect();
-        assert_eq!(rows, [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Vault]);
+        assert_eq!(rows, [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Vault]);
         assert_eq!(NavItem::Chat.label(), "Team chat");
         assert_eq!(NavItem::of(Page::GroupChat), NavItem::Chat, "the group chat page lights up its row");
     }

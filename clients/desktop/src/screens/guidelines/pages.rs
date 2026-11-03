@@ -1,5 +1,5 @@
 //! Where else guidelines show: what an employee gets, a project's block, the trace's
-//! line and the proposal card in the Inbox.
+//! line and the proposal card in its dialog.
 
 use super::logic::*;
 use super::state::*;
@@ -209,7 +209,7 @@ impl AppView {
         )
     }
 
-    /// A guideline proposal's inbox row: its title and who proposed it.
+    /// A guideline proposal's row under the bell: its title and who proposed it.
     pub fn guideline_proposal_row(&self, p: &GuidelineProposalView) -> (String, String) {
         let title = match p.guideline_id.and_then(|g| self.guidelines.guideline(g)) {
             Some(g) => format!("Guideline: {}", g.title),
@@ -218,7 +218,7 @@ impl AppView {
         (title, format!("Proposed by {}", self.gl_names().employee(p.proposed_by)))
     }
 
-    /// The Inbox card of a guideline proposal (§7.1): who, what, why, the diff against the
+    /// The card of a guideline proposal (§7.1): who, what, why, the diff against the
     /// version it rests on, the limits after Approve, and Reject / Edit and approve… / Approve.
     pub fn guideline_proposal_body(&mut self, p: &GuidelineProposalView, i: usize, cx: &mut Context<Self>) -> Div {
         let id = p.id;

@@ -1,5 +1,5 @@
 //! What an approval asks, readable: the command, the file and its change, the
-//! URL. Shown inline in the chat, on the ASKED card and in the inbox.
+//! URL. Shown inline in the chat, on the ASKED card and in the decision dialog.
 
 use crate::app::AppView;
 use crate::theme::{self, c};
@@ -10,7 +10,7 @@ use gpui_kit::*;
 
 /// Lines shown before "Show all".
 const FOLDED_LINES: usize = 10;
-/// Lines shown after "Show all" (beyond this the inbox details have it all).
+/// Lines shown after "Show all" (beyond this the details have it all).
 const FULL_LINES: usize = 400;
 /// A single line is cut here.
 const LINE_CHARS: usize = 300;
@@ -86,7 +86,7 @@ pub fn tool_name(tool: &str) -> &str {
     tool.strip_prefix("claude.").unwrap_or(tool)
 }
 
-/// "Alex wants to run a command", for the inbox headline.
+/// "Alex wants to run a command", for a headline.
 pub fn sentence(a: &ApprovalView) -> String {
     let who = &a.requester;
     match tool_name(&a.tool) {

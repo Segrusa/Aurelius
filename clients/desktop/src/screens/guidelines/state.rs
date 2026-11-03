@@ -138,6 +138,8 @@ pub struct Guidelines {
     pub proposals: Vec<GuidelineProposalView>,
     pub proposals_error: Option<String>,
     pub proposals_asked: bool,
+    /// A list came in since connecting; what the first one holds was already there.
+    pub proposals_loaded: bool,
     pub effective: Sets,
     pub effective_asked: HashSet<backend::EffectiveKey>,
     /// Texts of versions (a proposal's base, History, a conflict), by guideline and version.
@@ -176,6 +178,7 @@ impl Guidelines {
             proposals: Vec::new(),
             proposals_error: None,
             proposals_asked: false,
+            proposals_loaded: false,
             effective: HashMap::new(),
             effective_asked: HashSet::new(),
             texts: HashMap::new(),
@@ -302,6 +305,7 @@ impl AppView {
         g.proposals.clear();
         g.proposals_error = None;
         g.proposals_asked = false;
+        g.proposals_loaded = false;
         g.effective.clear();
         g.effective_asked.clear();
         g.texts.clear();
@@ -317,7 +321,7 @@ impl AppView {
         g.fill = Some((String::new(), String::new()));
     }
 
-    /// Ask once for what shows: the list of the filter and the proposals (the Inbox counts them).
+    /// Ask once for what shows: the list of the filter and the proposals (the bell counts them).
     pub fn guidelines_want(&mut self) {
         if !self.guidelines_ready() {
             return;
@@ -393,15 +397,14 @@ impl AppView {
             }
             GuidelineUpdate::Proposals(result) => match result {
                 Ok(proposals) => {
-                    let first = self.guidelines.proposals.is_empty() && self.guidelines.proposals_error.is_none();
                     let before: HashSet<GuidelineProposalId> = self.guidelines.pending().into_iter().map(|p| p.id).collect();
                     self.guidelines.proposals = proposals;
                     self.guidelines.proposals_error = None;
-                    let new = self.guidelines.pending().into_iter().any(|p| !before.contains(&p.id));
-                    if new && !first {
-                        self.notify_user("An employee proposed a guideline. Ctrl I opens the inbox.", false, cx);
+                    let pending: Vec<GuidelineProposalId> = self.guidelines.pending().into_iter().map(|p| p.id).collect();
+                    if list_brings_news(&mut self.guidelines.proposals_loaded, &before, &pending) {
+                        self.announce_guidelines(&before, cx);
                     }
-                    self.inbox_selected = self.inbox_selected.min(self.inbox_len().saturating_sub(1));
+                    self.after_waiting_changed(cx);
                 }
                 Err(why) => self.guidelines.proposals_error = Some(why),
             },
@@ -902,7 +905,7 @@ impl AppView {
         cx.notify();
     }
 
-    /// The inbox's keyboard: Approve only when the card allows it; Reject asks for the note.
+    /// The decision dialog's keyboard: Approve only when the card allows it; Reject asks for the note.
     pub fn guideline_decide_selected(&mut self, id: GuidelineProposalId, approve: bool, window: &mut Window, cx: &mut Context<Self>) {
         if !approve {
             self.guidelines.clear_note = true;
@@ -948,15 +951,18 @@ impl AppView {
         }
     }
 
-    /// The guideline proposals the Inbox lists after the other proposals.
+    /// The guideline proposals the bell lists after the other proposals.
     pub fn pending_guideline_proposals(&self) -> Vec<&GuidelineProposalView> {
         if self.guidelines_ready() { self.guidelines.pending() } else { Vec::new() }
     }
 
-    /// The selected inbox item, when it is a guideline proposal.
-    pub fn inbox_guideline_proposal(&self) -> Option<&GuidelineProposalView> {
-        let i = self.inbox_selected.checked_sub(self.pending_approvals().count() + self.pending_proposals().len()).filter(|_| self.inbox_tab.shows_head())?;
-        self.pending_guideline_proposals().get(i).copied()
+    /// The guideline proposals changed: a toast for each that is new since `before`.
+    fn announce_guidelines(&mut self, before: &HashSet<GuidelineProposalId>, cx: &mut Context<Self>) {
+        let new: Vec<GuidelineProposalView> = self.pending_guideline_proposals().into_iter().filter(|p| !before.contains(&p.id)).cloned().collect();
+        for p in new {
+            let (title, meta) = self.guideline_proposal_row(&p);
+            self.announce(crate::screens::notifications::Item::Guideline(p.id), title, meta, true, None, cx);
+        }
     }
 
     /// The sets of the effective view, for tests and views.

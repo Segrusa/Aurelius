@@ -99,7 +99,7 @@ pub enum Needs {
     ChooseOwner,
     /// The main task failed (B6): start again or back to Backlog.
     Failed,
-    /// The main task waits for an approval (in the Inbox).
+    /// The main task waits for an approval (in its conversation).
     Approval,
     /// It waits for the own Claude login (missing or expired): Connect (MU3-12 AC2).
     ConnectLogin,

@@ -1,8 +1,6 @@
 //! Command palette (Ctrl+K), shortcut overview (Ctrl+/), project dialog and approval review.
 
-use crate::screens::updates;
-use crate::app::{AppView, ConfirmKind, DialogKind, InboxTab, ManagerRef, NoteKind, Overlay, ProjectRef, note_kind};
-use crate::screens::approval::approval_summary;
+use crate::app::{AppView, ConfirmKind, Decision, DialogKind, ManagerRef, NoteKind, Overlay, ProjectRef, note_kind};
 use crate::keymap::*;
 use crate::preview;
 use crate::theme::{self, c};
@@ -53,6 +51,9 @@ impl AppView {
             self.overlay = Overlay::Menu;
             return div().absolute().top_0().left_0().size_full().child(under).child(menu).into_any_element();
         }
+        if self.overlay == Overlay::Notifications {
+            return self.render_notifications(window, cx);
+        }
         if self.overlay == Overlay::Screenshot {
             return self.render_screenshot_panel(cx);
         }
@@ -89,7 +90,8 @@ impl AppView {
             Overlay::ConnectClaude => self.render_connect_dialog(max_h, cx).into_any_element(),
             Overlay::SignedOut => self.render_signed_out(cx).into_any_element(),
             Overlay::Guidelines => self.render_guidelines_dialog(max_h, cx),
-            Overlay::None | Overlay::PlanApproval(_) | Overlay::Menu | Overlay::Screenshot | Overlay::Markdown | Overlay::Trace | Overlay::Artifact => div().into_any_element(),
+            Overlay::Decision(decision) => self.render_decision(decision, max_h, &scroll, cx),
+            Overlay::None | Overlay::PlanApproval(_) | Overlay::Menu | Overlay::Notifications | Overlay::Screenshot | Overlay::Markdown | Overlay::Trace | Overlay::Artifact => div().into_any_element(),
         };
         deferred(ui::fade_in(
             div()
@@ -134,13 +136,9 @@ impl AppView {
         h().size_full().min_w_0().items_stretch().child(self.settings_nav(narrow, cx)).child(section).into_any_element()
     }
 
-    pub fn render_inbox_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        self.render_inbox(cx).into_any_element()
-    }
-
-    /// "Employee · Project · Task" of an inbox row, from its task when it has one
+    /// "Employee · Project · Task" of a notification, from its task when it has one
     /// (else `fallback`, the notification's subject).
-    fn inbox_meta(&self, who: Option<&str>, task: Option<aurelius_domain::TaskId>, fallback: &str) -> String {
+    pub fn notification_meta(&self, who: Option<&str>, task: Option<aurelius_domain::TaskId>, fallback: &str) -> String {
         let task = task.and_then(|id| self.tasks.iter().find(|t| t.id == id));
         let who = who.map(str::to_owned).or_else(|| task.and_then(|t| t.employee_name.clone()));
         let project = task.and_then(|t| self.projects.iter().find(|p| p.id == t.project_id)).map(|p| p.name.clone());
@@ -150,7 +148,7 @@ impl AppView {
 
     /// The detail's context: who asked, the project and the task (each opens what it names),
     /// the conversation, and when ("Today 14:05 · 5m ago").
-    fn inbox_context(&self, who: Option<String>, task: Option<aurelius_domain::TaskId>, conversation: Option<aurelius_domain::ConversationId>, at_ms: i64, now: i64, cx: &mut Context<Self>) -> Div {
+    fn decision_context(&self, who: Option<String>, task: Option<aurelius_domain::TaskId>, conversation: Option<aurelius_domain::ConversationId>, at_ms: i64, now: i64, cx: &mut Context<Self>) -> Div {
         let task = task.and_then(|id| self.tasks.iter().find(|t| t.id == id));
         let who = who.filter(|w| !w.is_empty()).or_else(|| task.and_then(|t| t.employee_name.clone()));
         let employee = task.and_then(|t| t.employee_id).or_else(|| who.as_ref().and_then(|w| self.managers.iter().find(|m| &m.name == w)).map(|m| m.id));
@@ -160,24 +158,31 @@ impl AppView {
         let mut parts: Vec<AnyElement> = Vec::new();
         if let Some(who) = who {
             parts.push(match employee {
-                Some(id) => link("inbox-employee", who).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_manager(ManagerRef::Real(id), w, cx))).into_any_element(),
+                Some(id) => link("decision-employee", who).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                    this.close_overlay_now();
+                    this.open_manager(ManagerRef::Real(id), w, cx);
+                })).into_any_element(),
                 None => div().child(who).into_any_element(),
             });
         }
         if let Some(p) = project {
             let id = p.id;
-            parts.push(link("inbox-project", p.name.clone()).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_project(ProjectRef::Real(id), w, cx))).into_any_element());
+            parts.push(link("decision-project", p.name.clone()).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                this.close_overlay_now();
+                this.open_project(ProjectRef::Real(id), w, cx);
+            })).into_any_element());
         }
         if let Some(t) = task {
             let id = t.id;
-            parts.push(link("inbox-task", t.title.clone()).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+            parts.push(link("decision-task", t.title.clone()).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+                this.close_overlay_now();
                 this.show_task(id, w, cx);
                 this.focus.focus(w, cx);
                 cx.notify();
             })).into_any_element());
         }
         if let Some(id) = conversation {
-            parts.push(link("inbox-conversation", "Open conversation".into()).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
+            parts.push(link("decision-conversation", "Open conversation".into()).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
                 this.open_conversation_anywhere(id, w, cx);
                 cx.notify();
             })).into_any_element());
@@ -1119,13 +1124,11 @@ impl AppView {
             )
     }
 
-    /// Inbox: every pending approval with the exact operation, then
-    /// notifications (results, failures, decisions needed). Spec §12.5.
     /// Claude's questions with their options, to choose from or answer in your own words:
-    /// in the inbox (`focus` is the focused question, with its keys) or in the conversation.
+    /// in the decision dialog (`focus` is the focused question, with its keys) or in the conversation.
     pub fn question_form(&self, a: &aurelius_protocol::ApprovalView, focus: Option<usize>, cx: &mut Context<Self>) -> impl IntoElement {
         let id = a.id;
-        let in_inbox = focus.is_some();
+        let in_decision = focus.is_some();
         v().gap(px(10.)).children(crate::app::questions_of(a).into_iter().enumerate().map(|(i, q)| {
             let chosen = self.question_choices.get(&(id, i)).cloned().unwrap_or_default();
             let own = self.question_own.get(&(id, i)).cloned();
@@ -1133,7 +1136,7 @@ impl AppView {
             let multi = q.multi;
             v().id(SharedString::from(format!("question-{id}-{i}"))).gap(px(8.)).p(px(12.)).rounded(px(8.)).border_1()
                 .border_color(c(if focused { theme::FOCUS_RING } else { theme::BORDER }))
-                .when(in_inbox, |el| el.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.focus_question(i, cx))))
+                .when(in_decision, |el| el.on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.focus_question(i, cx))))
                 .child(h().flex_wrap().gap(px(8.))
                     .when(!q.header.is_empty(), |el| el.child(div().px(px(6.)).py(px(1.)).rounded(px(4.)).bg(c(theme::SURFACE_2)).text_size(px(11.)).text_color(c(theme::TEXT_2)).child(q.header.clone())))
                     .when(multi, |el| el.child(div().text_size(px(11.)).text_color(c(theme::MUTED)).child("choose one or more"))))
@@ -1144,7 +1147,7 @@ impl AppView {
                     h().id(SharedString::from(format!("option-{id}-{i}-{n}"))).gap(px(10.)).items_start().px(px(8.)).py(px(6.)).rounded(px(6.)).cursor_pointer()
                         .when(on, |el| el.bg(c(theme::SURFACE_2)))
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                            if in_inbox {
+                            if in_decision {
                                 this.question_focus = i;
                                 this.choose_option(n, cx);
                             } else {
@@ -1161,10 +1164,10 @@ impl AppView {
                     h().id(SharedString::from(format!("own-{id}-{i}"))).gap(px(10.)).items_start().px(px(8.)).py(px(6.)).rounded(px(6.)).cursor_pointer()
                         .when(own.is_some(), |el| el.bg(c(theme::SURFACE_2)))
                         .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
-                            if in_inbox {
+                            if in_decision {
                                 this.question_focus = i;
                             }
-                            this.open_own_answer(id, i, in_inbox, w, cx);
+                            this.open_own_answer(id, i, in_decision, w, cx);
                         }))
                         .child(div().w(px(14.)).flex_none().text_color(c(if own.is_some() { theme::ACCENT_TEXT } else { theme::MUTED })).child(if own.is_some() { "●" } else { "○" }))
                         .child(div().flex_1().min_w_0().text_size(px(13.)).text_color(c(if own.is_some() { theme::TEXT } else { theme::TEXT_2 })).child(own.unwrap_or_else(|| "Something else…".into())))
@@ -1173,79 +1176,46 @@ impl AppView {
         }))
     }
 
-    fn render_inbox(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The dialog of something to decide on: what has no conversation to show it (a proposal), or
+    /// an approval with all it holds. Proposals bring their own buttons; an approval's are below.
+    fn render_decision(&mut self, decision: Decision, max_h: f32, scroll: &ScrollHandle, cx: &mut Context<Self>) -> AnyElement {
+        let approval = match decision {
+            Decision::Approval(id) => self.pending_approvals().find(|a| a.id == id).cloned(),
+            _ => None,
+        };
+        let body_h = (max_h - if approval.is_some() { 70. } else { 0. }).max(120.);
+        let body = match decision {
+            Decision::Approval(_) => approval.as_ref().map(|a| self.decision_approval_body(a, cx)),
+            Decision::Proposal(id) => {
+                let proposal = self.pending_proposals().into_iter().find(|p| p.id == id).cloned();
+                proposal.map(|p| v().p(px(22.)).gap(px(12.)).child(self.proposal_body(&p, 0, cx)).into_any_element())
+            }
+            Decision::Guideline(id) => {
+                let proposal = self.pending_guideline_proposals().into_iter().find(|p| p.id == id).cloned();
+                proposal.map(|p| v().p(px(22.)).gap(px(12.)).child(self.guideline_proposal_body(&p, 0, cx)).into_any_element())
+            }
+        };
+        let footer = approval.as_ref().map(|a| self.decision_approval_footer(a, cx));
+        card(640.)
+            .track_focus(&self.overlay_focus)
+            .key_context(DECISION)
+            .child(ui::scroll_frame(scroll, scroll_body("decision-body", scroll, body_h).children(body)))
+            .children(footer)
+            .into_any_element()
+    }
+
+    /// What an approval asks, with exactly what will run.
+    fn decision_approval_body(&mut self, a: &aurelius_protocol::ApprovalView, cx: &mut Context<Self>) -> AnyElement {
         let mono = ui::mono(cx);
-        let tab = self.inbox_tab;
-        let counts = self.inbox_counts();
-        let pending: Vec<_> = if tab.shows_head() { self.pending_approvals().cloned().collect() } else { Vec::new() };
-        let notes: Vec<aurelius_protocol::NotificationView> = self.inbox_notes().into_iter().cloned().collect();
-        // A colleague a manager proposed sits between the approvals and the results.
-        let proposals: Vec<aurelius_protocol::ProposalView> = if tab.shows_head() { self.pending_proposals().into_iter().cloned().collect() } else { Vec::new() };
-        // Then the guidelines employees proposed (B5), beside the instruction proposals.
-        let guideline_proposals: Vec<aurelius_domain::guideline::GuidelineProposalView> = if tab.shows_head() { self.pending_guideline_proposals().into_iter().cloned().collect() } else { Vec::new() };
-        let head = pending.len() + proposals.len() + guideline_proposals.len();
-        let total = head + notes.len();
-        let selected = self.inbox_selected.min(total.saturating_sub(1));
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
-        let note_selected = selected.checked_sub(head).and_then(|i| notes.get(i)).cloned();
-        let update_selected = note_selected.clone().filter(updates::is_update);
-        if let Some(id) = update_selected.as_ref().and_then(|n| n.ticket_id) {
-            self.inbox_ask_followers(id);
-        }
-        let note_task_id = note_selected.as_ref().and_then(|n| n.task_id);
-        let note_conversation = note_task_id.and_then(|id| self.tasks.iter().find(|t| t.id == id)).and_then(|t| t.conversation_id);
-        let proposal_selected = selected.checked_sub(pending.len()).filter(|i| *i < proposals.len());
-        let guideline_selected = selected.checked_sub(pending.len() + proposals.len()).filter(|i| *i < guideline_proposals.len());
-        let question_selected = pending.get(selected).is_some_and(|a| a.tool == crate::app::QUESTION_TOOL);
-        let plan_selected = pending.get(selected).is_some_and(|a| a.tool == crate::app::PLAN_TOOL);
-        let always = pending.get(selected).and_then(|a| self.always_allow_button(a, "inbox", cx));
-        let detail: AnyElement = match pending.get(selected) {
-            None if proposal_selected.is_some() => {
-                let i = proposal_selected.unwrap_or_default();
-                v().p(px(22.)).gap(px(12.)).child(self.proposal_body(&proposals[i], i, cx)).into_any_element()
-            }
-            None if guideline_selected.is_some() => {
-                let i = guideline_selected.unwrap_or_default();
-                v().id("inbox-guideline").p(px(22.)).gap(px(12.)).overflow_y_scrollbar().child(self.guideline_proposal_body(&guideline_proposals[i], i, cx)).into_any_element()
-            }
-            None if update_selected.is_some() => self.update_detail(update_selected.as_ref().unwrap_or_else(|| unreachable!()), now, cx),
-            None if note_selected.is_some() => {
-                let n = note_selected.clone().unwrap_or_else(|| unreachable!());
-                let (eyebrow, color) = note_mark(&n);
-                let task = n.task_id.and_then(|id| self.tasks.iter().find(|t| t.id == id)).cloned();
-                v().p(px(22.)).gap(px(12.))
-                    .child(h().gap(px(8.)).child(ui::dot(8., color)).child(ui::eyebrow(eyebrow)))
-                    .child(div().font_family(ui::serif(cx)).text_size(px(21.)).child(n.title.clone()))
-                    .when(!n.subject.is_empty() && task.is_none(), |el| el.child(div().text_size(px(14.)).text_color(c(theme::TEXT_2)).child(n.subject.clone())))
-                    .child(self.inbox_context(None, n.task_id, None, n.created_at_ms, now, cx))
-                    // What the task last reported: its result, or why it failed.
-                    .children(task.as_ref().and_then(|t| t.result.clone()).filter(|r| !r.trim().is_empty()).map(|r| {
-                        v().gap(px(4.)).child(ui::eyebrow("LAST ACTIVITY"))
-                            .child(div().text_size(px(13.)).line_height(px(19.)).text_color(c(theme::TEXT_2)).line_clamp(6).child(r))
-                    }))
-                    .into_any_element()
-            }
-            None => {
-                let (title, about) = match tab {
-                    InboxTab::NeedsYou => ("Nothing needs you.", "Approvals, questions, plans and proposals appear here, with exactly what will run."),
-                    InboxTab::Updates => (updates::NO_UPDATES, updates::NO_UPDATES_ABOUT),
-                    InboxTab::Results => ("No results yet.", "Finished tasks report here."),
-                    InboxTab::Failed => ("Nothing failed.", "Tasks that fail appear here, so you can follow them up."),
-                    InboxTab::All => ("The inbox is empty.", "What needs you and what finished both appear here."),
-                };
-                v().p(px(22.)).gap(px(8.))
-                    .child(h().gap(px(8.)).items_center()
-                        .child(div().font_family(ui::serif(cx)).italic().text_size(px(19.)).text_color(c(theme::TEXT_2)).child(title))
-                        .child(ui::info("inbox-empty-about", about)))
-                    .into_any_element()
-            }
-            Some(a) if a.tool == crate::app::PLAN_TOOL => {
+        let now = ui::now_ms();
+        match a {
+            a if a.tool == crate::app::PLAN_TOOL => {
                 let minutes = ((a.expires_at_ms - now).max(0) / 60_000) as i64;
                 let plan = a.clone();
                 v().p(px(22.)).gap(px(12.))
                     .child(h().gap(px(8.)).child(ui::diamond(10., theme::ACCENT_TEXT, true)).child(ui::eyebrow("PLAN · WAITING FOR YOU")))
                     .child(div().font_family(ui::serif(cx)).text_size(px(21.)).child(format!("{} has a plan", a.requester)))
-                    .child(self.inbox_context(Some(a.requester.clone()), a.task_id, a.conversation_id, a.requested_at_ms, now, cx))
+                    .child(self.decision_context(Some(a.requester.clone()), a.task_id, a.conversation_id, a.requested_at_ms, now, cx))
                     .child(div().text_size(px(14.)).line_height(px(20.)).text_color(c(theme::TEXT_2)).child(crate::app::plan_headline_of(a)))
                     .child(
                         h().child(
@@ -1256,19 +1226,19 @@ impl AppView {
                     .child(h().gap(px(6.)).items_center().text_size(px(11.5)).text_color(c(theme::MUTED)).child(format!("Expires in {minutes} min")).child(ui::info("plan-expiry-about", "Nothing has run yet. Expiry never counts as permission.")))
                     .into_any_element()
             }
-            Some(a) if a.tool == crate::app::QUESTION_TOOL => {
+            a if a.tool == crate::app::QUESTION_TOOL => {
                 let questions = crate::app::questions_of(a);
                 let focus = self.question_focus.min(questions.len().saturating_sub(1));
                 let minutes = ((a.expires_at_ms - now).max(0) / 60_000) as i64;
                 v().p(px(22.)).gap(px(14.))
                     .child(h().gap(px(8.)).child(ui::diamond(10., theme::ACCENT_TEXT, false)).child(ui::eyebrow("QUESTION")))
                     .child(div().font_family(ui::serif(cx)).text_size(px(21.)).child(format!("{} asks you", a.requester)))
-                    .child(self.inbox_context(Some(a.requester.clone()), a.task_id, a.conversation_id, a.requested_at_ms, now, cx))
+                    .child(self.decision_context(Some(a.requester.clone()), a.task_id, a.conversation_id, a.requested_at_ms, now, cx))
                     .child(self.question_form(a, Some(focus), cx))
                     .child(h().gap(px(6.)).items_center().text_size(px(11.5)).text_color(c(theme::MUTED)).child(format!("Expires in {minutes} min")).child(ui::info("question-expiry-about", "After that, Claude continues on its own judgment.")))
                     .into_any_element()
             }
-            Some(a) => {
+            a => {
                 let minutes = ((a.expires_at_ms - now).max(0) / 60_000) as i64;
                 let row = |label: &'static str, value: String| {
                     h().gap(px(12.)).items_start().text_size(px(13.)).child(div().w(px(110.)).flex_none().text_color(c(theme::MUTED)).child(label)).child(div().flex_1().min_w_0().child(value))
@@ -1277,12 +1247,12 @@ impl AppView {
                 v().p(px(22.)).gap(px(12.))
                     .child(h().gap(px(8.)).child(ui::diamond(10., theme::ACCENT_TEXT, false)).child(ui::eyebrow("APPROVAL NEEDED")))
                     .child(div().font_family(ui::serif(cx)).text_size(px(21.)).child(crate::screens::approval::sentence(a)))
-                    .child(self.inbox_context(Some(a.requester.clone()), a.task_id, a.conversation_id, a.requested_at_ms, now, cx))
-                    .child(self.approval_detail(a, "inbox", cx))
+                    .child(self.decision_context(Some(a.requester.clone()), a.task_id, a.conversation_id, a.requested_at_ms, now, cx))
+                    .child(self.approval_detail(a, "decision", cx))
                     .when(!a.reasons.is_empty(), |el| el.child(row("Why it asks", a.reasons.join(" "))))
                     .child(h().gap(px(12.)).items_start().text_size(px(13.)).child(div().w(px(110.)).flex_none().text_color(c(theme::MUTED)).child(ui::label_with_info("Expires", "Expiry never counts as permission."))).child(div().flex_1().min_w_0().child(format!("in {minutes} min"))))
                     // Everything as the policy sees it, folded away.
-                    .child(h().id("inbox-raw").gap(px(6.)).cursor_pointer().text_size(px(12.)).text_color(c(theme::TEXT_2)).hover(|s| s.text_color(c(theme::TEXT)))
+                    .child(h().id("decision-raw").gap(px(6.)).cursor_pointer().text_size(px(12.)).text_color(c(theme::TEXT_2)).hover(|s| s.text_color(c(theme::TEXT)))
                         .child(if raw { "▾ Details" } else { "▸ Details" })
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                             if !this.approval_raw.remove(&id) {
@@ -1304,166 +1274,32 @@ impl AppView {
                     })
                     .into_any_element()
             }
-        };
-        let unread_updates = self.inbox_notifications().iter().any(|n| updates::is_update(n) && updates::row_unread(n, &self.inbox_opened));
-        let tabs: Vec<AnyElement> = InboxTab::shown(self.personal_inbox_supported()).iter().map(|&t| {
-            let i = t as usize;
-            let on = t == tab;
-            h().id(("inbox-tab", i)).role(Role::Tab).aria_label(t.label()).gap(px(6.)).px(px(10.)).py(px(5.)).rounded(px(6.)).cursor_pointer()
-                .text_size(px(13.))
-                .text_color(c(if on { theme::TEXT } else { theme::TEXT_2 }))
-                .when(on, |el| el.bg(c(theme::SURFACE_2)))
-                .hover(|s| s.bg(c(theme::SURFACE_2)).text_color(c(theme::TEXT)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.set_inbox_tab(t, cx)))
-                .when(t == InboxTab::Updates && unread_updates, |el| el.child(ui::dot(6., theme::ACCENT)))
-                .child(t.label())
-                .child(div().text_size(px(11.5)).text_color(c(if t == InboxTab::NeedsYou && counts[i] > 0 { theme::ACCENT_TEXT } else { theme::MUTED })).child(counts[i].to_string()))
-                .into_any_element()
-        }).collect();
-        // Clear all removes results only, so it sits on the tabs that list them all.
-        let mut clear = (matches!(tab, InboxTab::Results | InboxTab::All) || tab == InboxTab::Updates && !notes.is_empty()).then(|| {
-            div().id("clear-results").text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).cursor_pointer()
-                .child("Clear all")
-                .on_click(cx.listener(|this, _: &ClickEvent, w, cx| {
-                    this.overlay = Overlay::Confirm(ConfirmKind::ClearResults);
-                    this.overlay_focus.focus(w, cx);
-                    cx.notify();
-                }))
-        });
-        let section = |label: &'static str| h().px(px(10.)).pt(px(10.)).pb(px(4.)).items_center().child(div().flex_1().child(ui::eyebrow(label)));
-        // One row: mark, title with unread dot and age, an optional gist, who/project/task, urgency.
-        let row = |id: ElementId, i: usize, mark: AnyElement, title: String, unread: bool, gist: Option<String>, meta: String, age: String, urgent: Option<String>| -> AnyElement {
-            h().id(id).gap(px(8.)).items_start().px(px(10.)).py(px(8.)).rounded(px(6.)).cursor_pointer()
-                .when(i == selected, |el| el.bg(c(theme::SURFACE_2)))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.inbox_selected = i;
-                    this.question_focus = 0;
-                    cx.notify();
-                }))
-                .child(h().w(px(10.)).h(px(18.)).flex_none().justify_center().items_center().child(mark))
-                .child(
-                    v().flex_1().min_w_0().gap(px(1.))
-                        .child(h().gap(px(6.))
-                            .child(div().flex_1().min_w_0().truncate().text_size(px(13.)).when(unread, |el| el.font_weight(FontWeight::MEDIUM)).child(title))
-                            .when(unread, |el| el.child(ui::dot(6., theme::ACCENT)))
-                            .child(div().flex_none().text_size(px(11.)).text_color(c(theme::MUTED)).child(age)))
-                        .children(gist.map(|g| div().text_size(px(12.)).text_color(c(theme::TEXT_2)).font_family(mono.clone()).truncate().child(g)))
-                        .when(!meta.is_empty(), |el| el.child(div().text_size(px(11.5)).truncate().text_color(c(theme::MUTED)).child(meta)))
-                        .children(urgent.map(|u| div().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).child(u))),
-                )
-                .into_any_element()
-        };
-        // What needs you first, then the results by day, each under its header.
-        let mut rows: Vec<AnyElement> = Vec::new();
-        if head + notes.iter().filter(|n| crate::app::note_needs_you(n)).count() > 0 {
-            rows.push(section("NEEDS YOU").into_any_element());
         }
-        for (i, a) in pending.iter().enumerate() {
-            let (title, gist) = if a.tool == crate::app::QUESTION_TOOL {
-                ("Question".to_string(), String::new())
-            } else if a.tool == crate::app::PLAN_TOOL {
-                ("Plan".to_string(), crate::app::plan_headline_of(a))
-            } else {
-                let summary = approval_summary(a, &self.approval_folders(a));
-                (summary.title, summary.gist)
-            };
-            let left = a.expires_at_ms - now;
-            let urgent = (left < 10 * 60_000).then(|| format!("Expires in {} min", left.max(0) / 60_000));
-            let mark = ui::diamond(8., theme::ACCENT_TEXT, a.tool == crate::app::PLAN_TOOL).into_any_element();
-            rows.push(row(("inbox", i).into(), i, mark, title, false, (!gist.is_empty()).then_some(gist), self.inbox_meta(Some(&a.requester), a.task_id, ""), ui::relative_age(a.requested_at_ms, now), urgent));
+    }
+
+    /// The buttons under an approval: send, or decide on just this one.
+    fn decision_approval_footer(&mut self, a: &aurelius_protocol::ApprovalView, cx: &mut Context<Self>) -> AnyElement {
+        let bar = h().px(px(22.)).py(px(14.)).gap(px(8.)).border_t_1().border_color(c(theme::BORDER));
+        let hint = |el: Div| div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(el);
+        if a.tool == crate::app::QUESTION_TOOL {
+            return bar
+                .child(hint(ui::key_hint(&["1", "4"], "choose · Tab next question · T your own answer", cx)))
+                .child(ui::button("skip-question", "Skip", ButtonKind::Outline, Some(ui::kbd("secondary-backspace", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(RejectApproval), cx))))
+                .child(ui::button("send-answer", "Send answer", ButtonKind::Primary, Some(ui::kbd("secondary-enter", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(ConfirmPrimary), cx))))
+                .into_any_element();
         }
-        for (j, p) in proposals.iter().enumerate() {
-            let title = if p.kind == aurelius_domain::proposal::ProposalKind::Instructions {
-                format!("Instructions: {}", p.target_employee_name.clone().unwrap_or_else(|| p.name.clone()))
-            } else {
-                format!("Colleague: {}", p.name)
-            };
-            let mark = ui::dot(7., theme::MANAGER_MARK).into_any_element();
-            rows.push(row(("inbox-proposal", j).into(), pending.len() + j, mark, title, false, None, format!("Proposed by {}", p.proposed_by_name), ui::relative_age(p.created_at_ms, now), None));
+        if a.tool == crate::app::PLAN_TOOL {
+            return bar
+                .child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child("You decide on the plan in its panel."))
+                .child(ui::button("open-plan-approval", "Review plan", ButtonKind::Primary, Some(ui::kbd("secondary-enter", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(ConfirmPrimary), cx))))
+                .into_any_element();
         }
-        for (j, p) in guideline_proposals.iter().enumerate() {
-            let (title, meta) = self.guideline_proposal_row(p);
-            let mark = ui::dot(7., theme::MANAGER_MARK).into_any_element();
-            rows.push(row(("inbox-guideline-proposal", j).into(), pending.len() + proposals.len() + j, mark, title, false, None, meta, ui::relative_age(p.created_at_ms, now), None));
-        }
-        let mut day = None;
-        for (j, n) in notes.iter().enumerate() {
-            if !crate::app::note_needs_you(n) {
-                let group = ui::day_group(n.created_at_ms);
-                if day != Some(group) {
-                    day = Some(group);
-                    rows.push(section(group).children(clear.take()).into_any_element());
-                }
-            }
-            if updates::is_update(n) {
-                rows.push(self.update_row(n, j, head + j, head + j == selected, now, cx));
-                continue;
-            }
-            let (_, color) = note_mark(n);
-            let mark = if color == theme::TEXT_2 { ui::ring(7., theme::MUTED) } else { ui::dot(7., color) }.into_any_element();
-            let meta = self.inbox_meta(None, n.task_id, &n.subject);
-            rows.push(row(("inbox-note", j).into(), head + j, mark, n.title.clone(), self.inbox_new.contains(&n.id), None, meta, ui::relative_age(n.created_at_ms, now), None));
-        }
-        v().size_full()
-            .min_w_0()
-            .track_focus(&self.focus)
-            .key_context(INBOX)
-            .child(
-                h().px(px(22.)).py(px(14.)).gap(px(18.)).border_b_1().border_color(c(theme::BORDER))
-                    .child(div().flex_none().font_family(ui::serif(cx)).text_size(px(22.)).child("Inbox"))
-                    .child(h().flex_1().min_w_0().gap(px(2.)).children(tabs))
-                    .when(self.personal_inbox_supported() && self.inbox_notifications().iter().any(|n| !n.read), |el| {
-                        el.child(div().id("inbox-mark-all-read").flex_none().text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT)).cursor_pointer()
-                            .tooltip(ui::tip(format!("Only for you. {}", updates::OTHERS_KEEP_THEIRS), None))
-                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                                let _ = this.requests.send(crate::backend::Request::MarkNotificationsRead);
-                                cx.notify();
-                            }))
-                            .child("Mark all read"))
-                    }),
-            )
-            .child(
-                h().items_stretch().flex_1().min_h_0()
-                    .child(
-                        v().id("inbox-list").w(px(340.)).flex_shrink(1.).min_w(px(200.)).overflow_y_scrollbar().p(px(8.)).gap(px(2.)).border_r_1().border_color(c(theme::BORDER))
-                            .children(rows),
-                    )
-                    .child(div().id("inbox-detail").flex_1().min_w_0().overflow_y_scrollbar().child(detail)),
-            )
-            .child(
-                h().px(px(22.)).py(px(14.)).gap(px(8.)).border_t_1().border_color(c(theme::BORDER))
-                    .when_some(update_selected.as_ref(), |el, n| {
-                        el.child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(ui::key_hint(&["down", "up"], "select · H L tabs", cx)))
-                            .children(self.update_actions(n, cx))
-                    })
-                    .when(note_selected.is_some() && update_selected.is_none(), |el| {
-                        el.child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(ui::key_hint(&["down", "up"], "select · H L tabs", cx)))
-                            .children(note_conversation.map(|id| {
-                                ui::button("open-note-conversation", "Open conversation", ButtonKind::Outline, None)
-                                    .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_conversation_anywhere(id, w, cx)))
-                            }))
-                            .when(note_task_id.is_some(), |el| el.child(ui::button("open-note", "Open task", ButtonKind::Primary, Some(ui::kbd("enter", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(OpenSelected), cx)))))
-                    })
-                    .when(question_selected, |el| {
-                        el.child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(ui::key_hint(&["1", "4"], "choose · Tab next question · T your own answer", cx)))
-                            .child(ui::button("skip-question", "Skip", ButtonKind::Outline, Some(ui::kbd("secondary-backspace", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(RejectApproval), cx))))
-                            .child(ui::button("send-answer", "Send answer", ButtonKind::Primary, Some(ui::kbd("secondary-enter", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(ConfirmPrimary), cx))))
-                    })
-                    .when(plan_selected, |el| {
-                        el.child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(ui::key_hint(&["down", "up"], "select", cx)).child(ui::info("plan-footer-about", "You decide on the plan in its panel.")))
-                            .child(ui::button("open-plan-approval", "Review plan", ButtonKind::Primary, Some(ui::kbd("secondary-enter", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(ConfirmPrimary), cx))))
-                    })
-                    .when(proposal_selected.is_some(), |el| {
-                        el.child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(ui::key_hint(&["down", "up"], "select", cx)).child(ui::info("proposal-footer-about", "Nothing changes until you approve.")))
-                            .child(ui::button("decline-proposal", "Decline", ButtonKind::Outline, Some(ui::kbd("secondary-backspace", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(RejectApproval), cx))))
-                            .child(ui::button("approve-proposal", "Approve", ButtonKind::Primary, Some(ui::kbd("secondary-enter", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(ConfirmPrimary), cx))))
-                    })
-                    .when(note_selected.is_none() && proposal_selected.is_none() && !question_selected && !plan_selected, |el| el
-                    .child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(ui::key_hint(&["down", "up"], "select", cx)).child(ui::info("approve-footer-about", if always.is_some() { "Approve once allows only this exact action." } else { "Only this exact action; there is no 'always allow'." })))
-                    .child(ui::button("reject-approval", "Reject", ButtonKind::Outline, Some(ui::kbd("secondary-backspace", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(RejectApproval), cx))))
-                    .children(always)
-                    .child(ui::button("approve-once", "Approve once", ButtonKind::Primary, Some(ui::kbd("secondary-enter", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(ConfirmPrimary), cx))))),
-            )
+        let always = self.always_allow_button(a, "decision", cx);
+        bar.child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c(theme::MUTED)).child(if always.is_some() { "Approve once allows only this exact action." } else { "Only this exact action; there is no 'always allow'." }))
+            .child(ui::button("reject-approval", "Reject", ButtonKind::Outline, Some(ui::kbd("secondary-backspace", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(RejectApproval), cx))))
+            .children(always)
+            .child(ui::button("approve-once", "Approve once", ButtonKind::Primary, Some(ui::kbd("secondary-enter", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(ConfirmPrimary), cx))))
+            .into_any_element()
     }
 
     fn render_confirm(&mut self, kind: ConfirmKind, max_h: f32, scroll: &ScrollHandle, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1503,14 +1339,14 @@ impl AppView {
             ),
             ConfirmKind::ClearResults => (
                 if self.personal_inbox_supported() {
-                    format!("Clear all {} results and updates?", self.inbox_notifications().iter().filter(|n| matches!(note_kind(n), NoteKind::Result | NoteKind::Failed | NoteKind::Update)).count())
+                    format!("Clear all {} results and updates?", self.all_notifications().iter().filter(|n| matches!(note_kind(n), NoteKind::Result | NoteKind::Failed | NoteKind::Update)).count())
                 } else {
-                    format!("Clear all {} results?", self.inbox_counts()[InboxTab::Results as usize])
+                    format!("Clear all {} results?", self.all_notifications().iter().filter(|n| matches!(note_kind(n), NoteKind::Result | NoteKind::Failed)).count())
                 },
                 if self.personal_inbox_supported() {
-                    "Every result and update in your inbox is removed. Approvals waiting for you are not touched. Others keep theirs."
+                    "Every result and update in your notifications is removed. Approvals waiting for you are not touched. Others keep theirs."
                 } else {
-                    "Every result in the inbox is removed. Approvals waiting for you are not touched."
+                    "Every result in your notifications is removed. Approvals waiting for you are not touched."
                 },
             ),
             ConfirmKind::ShutdownNow => (
@@ -1672,7 +1508,7 @@ impl AppView {
         let mono = ui::mono(cx);
         let serif = ui::serif(cx);
         let Some(usage) = self.usage.clone() else {
-            return card(760.).track_focus(&self.overlay_focus).key_context(INBOX).child(div().p(px(22.)).text_color(c(theme::MUTED)).child("Loading usage…"));
+            return card(760.).track_focus(&self.overlay_focus).key_context(INFO_CARD).child(div().p(px(22.)).text_color(c(theme::MUTED)).child("Loading usage…"));
         };
         let cost_text = |cost: Option<i64>, estimate: bool| match cost {
             Some(0) => "no cost".to_string(),
@@ -1729,7 +1565,7 @@ impl AppView {
         }));
         card(820.)
             .track_focus(&self.overlay_focus)
-            .key_context(INBOX)
+            .key_context(INFO_CARD)
             .child(
                 h().px(px(22.)).py(px(14.)).border_b_1().border_color(c(theme::BORDER))
                     .child(h().flex_1().gap(px(10.)).child(ui::usage_glyph(theme::ACCENT)).child(div().font_family(serif.clone()).text_size(px(20.)).child("Usage")))
@@ -1854,7 +1690,7 @@ impl AppView {
         let used = view.items.iter().filter(|i| i.included).count();
         card(760.)
             .track_focus(&self.overlay_focus)
-            .key_context(INBOX)
+            .key_context(INFO_CARD)
             .child(
                 h().px(px(22.)).py(px(14.)).border_b_1().border_color(c(theme::BORDER))
                     .child(v().flex_1().gap(px(2.))
@@ -1994,16 +1830,6 @@ fn field(label: &'static str, input: AnyElement) -> Div {
 
 fn serde_json_pretty(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_default()
-}
-
-/// Eyebrow and colour of a notification in the inbox.
-fn note_mark(n: &aurelius_protocol::NotificationView) -> (&'static str, u32) {
-    match note_kind(n) {
-        NoteKind::NeedsYou => ("NEEDS YOU", theme::ACCENT_TEXT),
-        NoteKind::Failed => ("TASK FAILED", theme::NEGATIVE),
-        _ if n.severity == "warning" => ("ATTENTION", theme::ACCENT_TEXT),
-        _ => ("RESULT", theme::TEXT_2),
-    }
 }
 
 #[cfg(test)]
