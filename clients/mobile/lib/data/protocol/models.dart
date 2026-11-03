@@ -1691,6 +1691,7 @@ sealed class Command {
           deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
           description: (json['description'] == null ? null : (json['description'] as String)),
           files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+          fromIdea: (json['from_idea'] == null ? null : (json['from_idea'] as String)),
           fromMessage: (json['from_message'] == null ? null : (json['from_message'] as String)),
           labels: (json['labels'] == null ? const [] : (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           ownerEmployeeId: (json['owner_employee_id'] == null ? null : (json['owner_employee_id'] as String)),
@@ -2248,6 +2249,7 @@ final class CommandCreateTicket extends Command {
     this.deadlineMs,
     this.description,
     this.files = const [],
+    this.fromIdea,
     this.fromMessage,
     this.labels = const [],
     this.ownerEmployeeId,
@@ -2266,6 +2268,10 @@ final class CommandCreateTicket extends Command {
   final String? description;
   /// Files to copy into the project's uploads area, as for a task.
   final List<String> files;
+  /// Made from this idea (feature `ticket_from_idea`): the ticket gets copies of
+  /// the idea's files, and the idea is done and points at the ticket. Optional,
+  /// as above: older servers refuse fields they do not know.
+  final String? fromIdea;
   /// Made from this chat message ("Make ticket", feature `ticket_discussion`):
   /// the discussion starts with a link to it, and its chat gets a link to the ticket.
   final String? fromMessage;
@@ -2290,6 +2296,7 @@ final class CommandCreateTicket extends Command {
       if (deadlineMs != null) 'deadline_ms': deadlineMs,
       if (description != null) 'description': description,
       'files': files,
+      if (fromIdea != null) 'from_idea': fromIdea,
       if (fromMessage != null) 'from_message': fromMessage,
       'labels': labels,
       if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
@@ -6431,6 +6438,7 @@ enum EventKind {
   ideaDeleted('idea.deleted'),
   ideaStarted('idea.started'),
   ideaStatusChanged('idea.status_changed'),
+  ideaTicketCreated('idea.ticket_created'),
   ideaUpdated('idea.updated'),
   mcpAuthChanged('mcp.auth_changed'),
   mcpLoginFinished('mcp.login_finished'),
@@ -9693,6 +9701,8 @@ final class IdeaView {
     required this.status,
     this.taskId,
     this.taskStatus,
+    this.ticketId,
+    this.ticketNumber,
     required this.title,
     required this.updatedAtMs,
   });
@@ -9714,6 +9724,10 @@ final class IdeaView {
   /// The task it became, and that task's title and status.
   final String? taskId;
   final TaskStatus? taskStatus;
+  /// The ticket made from it and that ticket's number (feature `ticket_from_idea`);
+  /// left out when there is none.
+  final String? ticketId;
+  final int? ticketNumber;
   final String title;
   final int updatedAtMs;
 
@@ -9729,6 +9743,8 @@ final class IdeaView {
     status: IdeaStatus.fromJson(json['status'] as String),
     taskId: (json['task_id'] == null ? null : (json['task_id'] as String)),
     taskStatus: (json['task_status'] == null ? null : TaskStatus.fromJson(json['task_status'] as String)),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+    ticketNumber: (json['ticket_number'] == null ? null : (json['ticket_number'] as num).toInt()),
     title: (json['title'] as String),
     updatedAtMs: (json['updated_at_ms'] as num).toInt(),
   );
@@ -9745,6 +9761,8 @@ final class IdeaView {
     'status': status.toJson(),
     if (taskId != null) 'task_id': taskId,
     if (taskStatus != null) 'task_status': taskStatus?.toJson(),
+    if (ticketId != null) 'ticket_id': ticketId,
+    if (ticketNumber != null) 'ticket_number': ticketNumber,
     'title': title,
     'updated_at_ms': updatedAtMs,
   };

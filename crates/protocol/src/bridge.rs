@@ -39,9 +39,10 @@ pub enum BridgeCall {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EmployeeTaskOp {
-    /// A part for a colleague: a sub-task whose result comes back. `project` (a
-    /// name or id) is required from an employee's chat (no project there); in a
-    /// task the part stays in the task's project.
+    /// A part for a colleague: a sub-task whose result comes back. Work always
+    /// belongs to a ticket: in a task or a ticket's discussion it is that ticket,
+    /// elsewhere `ticket` (`#12` or an id) names it and the task gets its project.
+    /// `project` is what older callers still send; it decides nothing any more.
     Delegate {
         employee: String,
         title: String,
@@ -51,6 +52,8 @@ pub enum EmployeeTaskOp {
         criteria: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ticket: Option<String>,
     },
     /// The whole task to a colleague who suits it better.
     HandOver { employee: String, #[serde(default)] reason: String },

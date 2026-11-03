@@ -75,6 +75,7 @@ fn new_ticket(s: &Setup) -> TicketId {
         files: vec![],
         start: false,
         from_message: None,
+        from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(s, Command::CreateTicket(create)).unwrap() else { panic!() };
     ticket_id

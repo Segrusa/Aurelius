@@ -73,6 +73,7 @@ fn ticket(project_id: ProjectId, title: &str) -> Command {
         files: vec![],
         start: false,
         from_message: None,
+        from_idea: None,
     })
 }
 

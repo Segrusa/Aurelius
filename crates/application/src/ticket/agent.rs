@@ -19,6 +19,9 @@
 //!   other move is a decision of a board member or of the work itself.
 //! - **Posting**: any employee's run on any shown ticket (`discussion::post_from_run`).
 //!
+//! - **Delegating**: `delegate_task` follows the org chart, not these rules, but its task always
+//!   lands on a ticket that is shown and not Done (`for_delegation`).
+//!
 //! There is no tool for accepting, approving or revising a plan, sending back, cancelling,
 //! archiving, deleting, choosing the Responsible or assigning an owner.
 
@@ -26,7 +29,7 @@ use super::{Base, Events, FieldChange, NewCard, insert_ticket, start_card, store
 use crate::conversation::{discussion, ticket_channel};
 use crate::task::{task_runs, ticket_line};
 use aurelius_domain::{
-    EmployeeId, EventNotice, ProjectId, RunId, TicketId,
+    EmployeeId, EventNotice, ProjectId, RunId, TicketId, UserId,
     autonomy::AgentMode,
     ticket::{self, Actor, ColumnKind, TicketPriority, TicketView},
 };
@@ -64,6 +67,12 @@ pub const PLAN_MODE_READ_ONLY: &str = "This run is in Plan mode: it may read tic
 pub const START_OTHER_LOGIN: &str = "This ticket runs on another board member's Claude login than the one behind this run, so it cannot be started from here. Ask that board member to start it, or post in its discussion with post_to_ticket.";
 /// Why an employee cannot rewrite a ticket's text while it is under review.
 pub const UPDATE_TEXT_LOCKED: &str = "The text of a ticket in Plan review, Testing or Review is under review and cannot be changed by an employee; post in its discussion with post_to_ticket instead.";
+/// Why a task is refused without a ticket.
+pub const DELEGATE_NEEDS_TICKET: &str = "Work always belongs to a ticket and this conversation has none: name it with ticket (#12; list_tickets shows the tickets). If none fits, management creates one with create_ticket, or ask a board member for one; then delegate again.";
+/// Why a finished ticket takes no new task.
+pub const DELEGATE_TICKET_DONE: &str = "That ticket is Done and takes no new work; name an open ticket.";
+/// Why a run cannot put work on a ticket that runs on another board member's login.
+pub const DELEGATE_OTHER_LOGIN: &str = "This ticket runs on another board member's Claude login than the one behind this run, so work cannot be added to it from here. Post in its discussion with post_to_ticket, or name a ticket of this board member.";
 /// Why only an employee's run uses the board tools.
 pub const EMPLOYEES_ONLY: &str = "Only an employee's run can use the ticket tools.";
 
@@ -126,6 +135,23 @@ pub(crate) fn is_manager(conn: &Connection, employee: EmployeeId, project: Proje
     }
     let org = employees::org(conn)?;
     Ok(org.boss(employee).is_none() && !org.reports(employee).is_empty())
+}
+
+/// The ticket a new task of `delegate_task` lands on, or why it cannot: named, shown, not Done, in the
+/// project the run works in when it works in one (a task stays in its project). `login` is the run's,
+/// when it stands outside the ticket: the task will run on the ticket's login, so it must be the same.
+pub(crate) fn for_delegation(conn: &Connection, st: &Store, named: Option<&str>, project: Option<ProjectId>, login: Option<UserId>) -> Result<Result<TicketView, String>, StorageError> {
+    let Some(named) = named.map(str::trim).filter(|n| !n.is_empty()) else { return Ok(Err(DELEGATE_NEEDS_TICKET.to_owned())) };
+    let Some(found) = find(conn, st, named)? else { return Ok(Err(not_found(named))) };
+    Ok(if found.column == ColumnKind::Done {
+        Err(DELEGATE_TICKET_DONE.to_owned())
+    } else if project.is_some_and(|p| p != found.project_id) {
+        Err(format!("Ticket #{} is in another project than the work here; name a ticket of this project.", found.number))
+    } else if login.is_some_and(|l| l != found.login_user) {
+        Err(DELEGATE_OTHER_LOGIN.to_owned())
+    } else {
+        Ok(found)
+    })
 }
 
 /// `list_tickets`: tickets in board order. `project` (a name or id) else the run's project, else every project.

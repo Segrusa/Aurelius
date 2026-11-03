@@ -166,8 +166,9 @@ impl AppView {
             return;
         };
         let from_message = crate::screens::discussion::from_message(self.board.form.from_message, self.ticket_discussion_supported());
+        let from_idea = self.board.form.from_idea.map(|(idea, _)| idea);
         let responsible_user_id = crate::screens::who::create_responsible(self.board.form.responsible, self.active_member().map(|u| u.id), self.ticket_responsible_supported());
-        let create = ticket::CreateTicket { responsible_user_id, confirm_secret: false, project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start, from_message };
+        let create = ticket::CreateTicket { responsible_user_id, confirm_secret: false, project_id, title, description: Some(description).filter(|d| !d.is_empty()), priority, labels, deadline_ms, owner_employee_id: owner, run, files, start, from_message, from_idea };
         let done = start.then(|| match owner.and_then(|e| self.employee_name(e)) {
             Some(name) => format!("Created and started with {name}."),
             None => {
@@ -922,6 +923,10 @@ impl AppView {
     // ---- Dialogs ------------------------------------------------------------
 
     pub fn render_board_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(ticket) = self.board.open_created.take() {
+            self.give_goal.update(cx, |i, cx| i.set_value("", window, cx));
+            self.open_ticket(ticket, window, cx);
+        }
         let Some(dialog) = self.board.dialog else { return div().into_any_element() };
         if self.board.form.reset {
             self.board.form.reset = false;
@@ -934,6 +939,7 @@ impl AppView {
         if let Some(fill) = self.board.form.prefill.take() {
             self.board.form.title.update(cx, |i, cx| i.set_value(fill.title, window, cx));
             self.board.form.description.update(cx, |i, cx| i.set_value(fill.description, window, cx));
+            self.board.form.labels.update(cx, |i, cx| i.set_value(fill.labels, window, cx));
         }
         // After a conflict the columns show what the server has now (D-m2); the message stays.
         if self.board.columns_reload.take_rebuild() && dialog == BoardDialog::Columns {
@@ -1072,6 +1078,8 @@ impl AppView {
         let (title_problem, project_problem) = new_ticket_problems(&title_text, form.project);
         let count = title_text.trim().chars().count();
         let (sent, busy) = (form.sent, form.busy);
+        // A ticket from an idea stays in the idea's project, and takes the idea's files along.
+        let from_idea = form.from_idea;
         let project = form.project.and_then(|p| self.projects.iter().find(|x| x.id == p)).map_or_else(|| "Choose a project".to_string(), |p| p.name.clone());
         let owner = match form.owner.and_then(|e| self.employee_name(e)) {
             Some(n) => n,
@@ -1087,7 +1095,7 @@ impl AppView {
         let counter = (count >= 140).then(|| div().text_size(px(11.5)).text_color(c(if count > 160 { theme::NEGATIVE } else { theme::TEXT_2 })).child(format!("{count} / 160")));
         let pickers = h().gap(px(8.))
             .flex_wrap()
-            .child(self.board_picker("ticket-form-project", format!("Project: {project}"), has_project, !busy, None, cx))
+            .child(self.board_picker("ticket-form-project", format!("Project: {project}"), has_project, !busy && from_idea.is_none(), None, cx))
             .child(self.board_picker("ticket-form-priority", format!("Priority: {}", priority_label(priority)), priority != ticket::TicketPriority::Normal, !busy, None, cx))
             .when(self.ticket_responsible_supported(), |el| {
                 let responsible = self.form_responsible_text();
@@ -1108,8 +1116,11 @@ impl AppView {
             .when(mode == Some(aurelius_domain::autonomy::AgentMode::Plan), |el| el.child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child("Stops in Plan review with a plan before anything changes.")))
             .child(h().gap(px(10.)).child(div().flex_1().child(field("Labels (comma separated)", ui::input(&labels).into_any_element(), None))).child(div().w(px(220.)).child(field("Deadline", ui::input(&deadline).into_any_element(), None))))
             .child(self.render_ticket_files(busy, cx))
+            .children(from_idea.and_then(|(_, files)| idea_files_note(files)).map(|note| div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(note)))
             .children(error.map(|e| div().text_size(px(12.)).text_color(c(theme::NEGATIVE)).child(e)))
             .child(div().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(match me {
+                Some(name) if from_idea.is_some() => format!("Lands in Backlog. Nothing starts until you press Start. The idea is marked done. Created by {name}."),
+                None if from_idea.is_some() => "Lands in Backlog. Nothing starts until you press Start. The idea is marked done.".to_string(),
                 Some(name) => format!("Lands in Backlog. Nothing starts until you press Start. Created by {name}."),
                 None => "Lands in Backlog. Nothing starts until you press Start.".to_string(),
             }));
@@ -1275,5 +1286,14 @@ mod tests {
     #[test]
     fn every_column_shows_its_fixed_role() {
         assert_eq!(ColumnKind::ALL.map(column_role), ["Start", "Dispatch", "Work", "Plan gate", "Test gate", "Review gate", "Closed"]);
+    }
+}
+
+/// The line on the New ticket form about the files an idea brings along; none without files.
+fn idea_files_note(files: usize) -> Option<String> {
+    match files {
+        0 => None,
+        1 => Some("The idea's file goes along.".to_string()),
+        n => Some(format!("The idea's {n} files go along.")),
     }
 }

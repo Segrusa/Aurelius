@@ -210,6 +210,10 @@ pub mod feature {
     /// `AddIdea::files`, `UpdateIdea::add_files` / `remove_files`, and
     /// `idea.delete`. Starting an idea gives the task copies of them.
     pub const IDEA_ATTACHMENTS: &str = "idea_attachments";
+    /// A ticket made from an idea: `ticket.create { from_idea }`, `IdeaView::ticket_id`
+    /// and `ticket_number`, and the event `idea.ticket_created`. A client offers
+    /// "Create ticket" on an idea only when the server has this.
+    pub const TICKET_FROM_IDEA: &str = "ticket_from_idea";
     /// Tokens per answer (`MessageView::usage`), `usage.get_totals` per conversation
     /// or task, and cache writes apart (`cache_creation_tokens` in the usage views).
     pub const RUN_USAGE: &str = "run_usage";
@@ -411,6 +415,7 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_FOLLOW,
     feature::PERSONAL_INBOX,
     feature::QUICK_ANSWERS,
+    feature::TICKET_FROM_IDEA,
 ];
 
 /// Daemon → client.

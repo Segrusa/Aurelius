@@ -77,6 +77,7 @@ fn a_ticket_create_without_a_responsible_is_written_as_before() {
         files: vec![],
         start: false,
         from_message: None,
+        from_idea: None,
         responsible_user_id: None,
     };
     let json = serde_json::to_value(&create).unwrap();

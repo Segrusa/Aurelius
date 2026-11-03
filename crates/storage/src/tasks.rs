@@ -53,7 +53,7 @@ pub fn insert_ticket_task(
     tx.execute(
         "INSERT INTO tasks(id, project_id, parent_task_id, employee_id, title, brief_blob_id, acceptance_blob_id, status, priority, version, created_at_ms, updated_at_ms, ticket_id)
          VALUES (?1, ?2, ?9, ?3, ?4, ?5, ?6, ?7, 0, 1, ?8, ?8,
-                 CASE WHEN ?9 IS NULL THEN ?10 ELSE (SELECT p.ticket_id FROM tasks p WHERE p.id = ?9) END)",
+                 COALESCE((SELECT p.ticket_id FROM tasks p WHERE p.id = ?9), ?10))",
         params![
             id.to_string(),
             project.to_string(),

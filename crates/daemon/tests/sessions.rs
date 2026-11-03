@@ -487,7 +487,7 @@ async fn running(root: &Path, column: &str, id: String) -> RunId {
 }
 
 async fn delegate(root: &Path, run: RunId, to: &str, title: &str) {
-    let op = EmployeeTaskOp::Delegate { employee: to.into(), title: title.into(), goal: format!("Werk aan {title}"), criteria: vec![], project: None };
+    let op = EmployeeTaskOp::Delegate { employee: to.into(), title: title.into(), goal: format!("Werk aan {title}"), criteria: vec![], project: None, ticket: Some("#1".into()) };
     let (ok, text) = BridgeClient::connect(root).await.unwrap().employee_act(run, op).await.unwrap();
     assert!(ok, "{text}");
 }
@@ -506,6 +506,7 @@ async fn after_a_colleagues_result_the_employee_goes_on_in_its_session() {
     else {
         panic!()
     };
+    backlog_ticket(&client, project_id, "Shared work").await;
     let mut alex = None;
     for name in ["Alex", "Iris"] {
         let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };

@@ -7,7 +7,7 @@ use aurelius_domain::company::UpdateCompany;
 use aurelius_domain::employee::CreateEmployee;
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::ticket::{self, ColumnKind, SetDispatcher};
-use aurelius_domain::{EmployeeId, RunId, TicketId, UserId};
+use aurelius_domain::{ConversationId, EmployeeId, RunId, TicketId, UserId};
 
 const PHC: &str = "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA";
 
@@ -113,6 +113,7 @@ fn new_ticket(s: &Setup, title: &str, owner: Option<EmployeeId>) -> TicketId {
         files: vec![],
         start: false,
         from_message: None,
+        from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(s, Command::CreateTicket(create)) else { panic!() };
     ticket_id
@@ -694,4 +695,104 @@ fn an_employee_cannot_change_the_text_of_a_ticket_under_review_but_may_change_it
     // In Todo the text still changes.
     let t = new_ticket(&s, "Open", None);
     assert!(act(&s, atlas, update_action(&t.to_string(), "Open, renamed")).0);
+}
+
+// ── delegate_task lands on a ticket ─────────────────────────────────────
+
+fn delegate_action(ticket: Option<&str>) -> EmployeeAction {
+    EmployeeAction::Delegate { employee: "Ann".into(), title: "A part".into(), goal: "Do the part".into(), criteria: vec![], ticket: ticket.map(str::to_owned) }
+}
+
+/// A running run of `employee` in `conversation` on `login`.
+fn run_in(s: &Setup, employee: EmployeeId, conversation: ConversationId, login: Option<UserId>) -> RunId {
+    let run = RunId::new();
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute(
+                "INSERT INTO runs(id, conversation_id, employee_id, attempt, runtime_kind, model_id, resolved_config_json, status, started_at_ms, login_user) VALUES (?1, ?2, ?3, 1, 'fake', '', '{}', 'running', 1, ?4)",
+                rusqlite::params![run.to_string(), conversation.to_string(), employee.to_string(), login.map(|l| l.to_string())],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    run
+}
+
+/// The tasks of the company: (ticket, parent, project, requested_by), newest first.
+fn given_tasks(s: &Setup) -> Vec<(Option<String>, Option<String>, String, Option<String>)> {
+    s.service
+        .store()
+        .read(|c| {
+            let mut q = c.prepare("SELECT ticket_id, parent_task_id, project_id, requested_by FROM tasks WHERE title = 'A part' ORDER BY rowid DESC")?;
+            let rows = q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<_, _>>()?;
+            Ok(rows)
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_task_from_a_chat_without_a_ticket_is_refused_and_nothing_is_written() {
+    let s = setup();
+    let run = run_of(&s, s.atlas, true);
+    assert_eq!(act(&s, run, delegate_action(None)), (false, crate::ticket::agent::DELEGATE_NEEDS_TICKET.to_owned()));
+    let (ok, text) = act(&s, run, delegate_action(Some("#42")));
+    assert!(!ok && text.contains("No ticket #42"), "{text}");
+    assert!(given_tasks(&s).is_empty());
+}
+
+#[test]
+fn a_task_from_a_chat_lands_on_the_ticket_it_names_and_is_not_its_main_task() {
+    let s = setup();
+    let ticket = new_ticket(&s, "Logo", None);
+    let number = view(&s, ticket).number;
+    let (ok, text) = act(&s, run_of(&s, s.atlas, true), delegate_action(Some(&format!("#{number}"))));
+    assert!(ok, "{text}");
+    let given = given_tasks(&s);
+    assert_eq!(given.len(), 1);
+    assert_eq!(given[0], (Some(ticket.to_string()), None, s.project.to_string(), Some(s.atlas.to_string())));
+    assert_eq!(view(&s, ticket).root_task_id, None, "it is not the ticket's main task");
+}
+
+#[test]
+fn a_ticket_on_done_takes_no_new_task() {
+    let s = setup();
+    let ticket = new_ticket(&s, "Finished", None);
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute("UPDATE tickets SET column_id = (SELECT id FROM board_columns WHERE kind = 'done') WHERE id = ?1", [ticket.to_string()])?;
+            Ok(())
+        })
+        .unwrap();
+    let number = view(&s, ticket).number;
+    assert_eq!(act(&s, run_of(&s, s.atlas, true), delegate_action(Some(&format!("#{number}")))), (false, crate::ticket::agent::DELEGATE_TICKET_DONE.to_owned()));
+    assert!(given_tasks(&s).is_empty());
+}
+
+#[test]
+fn a_run_on_another_login_cannot_add_work_to_a_ticket_it_only_names() {
+    let s = setup();
+    let ticket = new_ticket(&s, "Grace's", None);
+    let number = view(&s, ticket).number;
+    let other = UserId::new();
+    s.service.store().write(move |tx| aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &other.to_string(), username: "linus", created_by_user: None, now_ms: 1 }, PHC)).unwrap();
+    let chat = s.service.store().read(|c| aurelius_storage::employees::main_chat(c, s.atlas)).unwrap().unwrap();
+    assert_eq!(act(&s, run_in(&s, s.atlas, chat, Some(other)), delegate_action(Some(&format!("#{number}")))), (false, crate::ticket::agent::DELEGATE_OTHER_LOGIN.to_owned()));
+    assert!(given_tasks(&s).is_empty());
+}
+
+#[test]
+fn a_run_in_a_tickets_discussion_gives_work_on_that_ticket_without_naming_it() {
+    let s = setup();
+    let ticket = new_ticket(&s, "Discussed", None);
+    let other = new_ticket(&s, "Elsewhere", None);
+    let discussion = view(&s, ticket).conversation_id.expect("a ticket has a discussion");
+    // Woken there by another board member: the ticket's work stays on the ticket's login.
+    let writer = UserId::new();
+    s.service.store().write(move |tx| aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &writer.to_string(), username: "linus", created_by_user: None, now_ms: 1 }, PHC)).unwrap();
+    let elsewhere = format!("#{}", view(&s, other).number);
+    let (ok, text) = act(&s, run_in(&s, s.atlas, discussion, Some(writer)), delegate_action(Some(&elsewhere)));
+    assert!(ok, "{text}");
+    assert_eq!(given_tasks(&s)[0].0, Some(ticket.to_string()), "its own ticket wins over a name");
 }

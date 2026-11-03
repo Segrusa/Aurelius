@@ -56,7 +56,7 @@ impl AgentRuntime for Worker {
                 let bridge = BridgeClient::connect(&root).await.unwrap();
                 let _ = bridge.employee_act(run, EmployeeTaskOp::VaultList { project: None }).await;
                 if delegate {
-                    let part = EmployeeTaskOp::Delegate { employee: "Bridge".into(), title: "A part".into(), goal: "Do the part".into(), criteria: vec![], project: None };
+                    let part = EmployeeTaskOp::Delegate { employee: "Bridge".into(), title: "A part".into(), goal: "Do the part".into(), criteria: vec![], project: None, ticket: None };
                     let _ = bridge.employee_act(run, part).await;
                 }
             }
@@ -107,6 +107,7 @@ async fn the_audit_of_a_tickets_runs_names_the_ticket() {
         files: vec![],
         start: true,
         from_message: None,
+        from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = client.create_ticket(ticket).await.unwrap().result else { panic!() };
 

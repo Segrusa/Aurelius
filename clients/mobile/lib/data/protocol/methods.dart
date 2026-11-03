@@ -2401,13 +2401,14 @@ Map<String, dynamic> ticketCancel({required String ticketId}) => <String, dynami
 };
 
 /// A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
-Map<String, dynamic> ticketCreate({bool? confirmSecret, int? deadlineMs, String? description, List<String> files = const [], String? fromMessage, List<String> labels = const [], String? ownerEmployeeId, TicketPriority? priority, required String projectId, String? responsibleUserId, TaskRun? run, bool? start, required String title}) => <String, dynamic>{
+Map<String, dynamic> ticketCreate({bool? confirmSecret, int? deadlineMs, String? description, List<String> files = const [], String? fromIdea, String? fromMessage, List<String> labels = const [], String? ownerEmployeeId, TicketPriority? priority, required String projectId, String? responsibleUserId, TaskRun? run, bool? start, required String title}) => <String, dynamic>{
   'method': Methods.ticketCreate,
   'params': <String, dynamic>{
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
     if (deadlineMs != null) 'deadline_ms': deadlineMs,
     if (description != null) 'description': description,
     'files': files,
+    if (fromIdea != null) 'from_idea': fromIdea,
     if (fromMessage != null) 'from_message': fromMessage,
     'labels': labels,
     if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,

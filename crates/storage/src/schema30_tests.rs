@@ -23,7 +23,7 @@ fn a_schema_29_store_upgrades_and_none_of_its_conversations_is_a_quick_answer() 
     let store = Store::open(dir.path()).unwrap();
     let (after, quick): (i64, i64) = store.read(|c| Ok((c.query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))?, c.query_row("SELECT COUNT(*) FROM conversations WHERE quick_answer = 1", [], |r| r.get(0))?))).unwrap();
     assert_eq!((after, quick), (before, 0));
-    assert_eq!(migrate::supported_version(), 30);
+    assert!(migrate::supported_version() >= 30);
 }
 
 #[test]

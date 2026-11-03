@@ -72,10 +72,11 @@ class _IdeaRow extends StatelessWidget {
           ),
           if (project != null)
             Text(project!, key: ValueKey('idea-project-${idea.id}'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Tokens.label2, fontSize: 13)),
-          if (idea.taskId != null || idea.note != null || idea.attachments.isNotEmpty)
+          if (idea.taskId != null || idea.ticketNumber != null || idea.note != null || idea.attachments.isNotEmpty)
             Text(
               [
                 if (idea.taskId != null) 'task ${idea.taskStatus?.name ?? ''}'.trim(),
+                if (idea.ticketNumber case final number?) 'ticket #$number',
                 if (idea.attachments.isNotEmpty) idea.attachments.length == 1 ? '1 file' : '${idea.attachments.length} files',
                 if (idea.note != null) idea.note!,
               ].join(' · '),

@@ -78,6 +78,8 @@ pub struct ServerInfo {
     pub webhooks: bool,
     /// Ideas have files and can be deleted (feature `idea_attachments`).
     pub idea_attachments: bool,
+    /// An idea can become a ticket (feature `ticket_from_idea`).
+    pub ticket_from_idea: bool,
     /// Tokens per answer and `usage.get_totals` (feature `run_usage`).
     pub run_usage: bool,
     /// Trace mode and `run.get_trace` (feature `run_trace`).
@@ -301,7 +303,6 @@ pub enum Request {
     UseConnection { connection_id: ProviderId, model: Option<String> },
     SetDefaults { scope: ConfigScope, purpose: Purpose, settings: RunDefaults },
     /// `files`: files on this computer, attached to the task (protocol 1.14).
-    CreateTask { project_id: ProjectId, employee_id: Option<EmployeeId>, title: String, goal: String, criteria: Vec<String>, run: aurelius_domain::task::RunSettings, files: Vec<String> },
     /// Recurring tasks (protocol 1.14); files on this computer are uploaded first.
     /// Keys of outside apps (feature `app_keys`, owner right).
     AppKeys(AppKeyCall),
@@ -332,8 +333,6 @@ pub enum Request {
     UpdateIdea { idea_id: aurelius_domain::IdeaId, title: String, note: Option<String>, kind: Option<aurelius_domain::idea::IdeaKind>, add_files: Vec<String>, remove_files: Vec<String> },
     DeleteIdea(aurelius_domain::IdeaId),
     SetIdeaStatus { idea_id: aurelius_domain::IdeaId, status: aurelius_domain::idea::IdeaStatus },
-    /// `mode`: `None` follows the manager (and is all a server before 1.8 gets).
-    StartIdea { idea_id: aurelius_domain::IdeaId, employee_id: EmployeeId, mode: Option<aurelius_domain::autonomy::AgentMode>, model: Option<(aurelius_domain::ProviderId, String)> },
     /// Context manifest of one answer (context inspector).
     LoadContext(RunId),
     /// A screenshot the agent took (side panel).
@@ -1011,7 +1010,7 @@ pub enum BoardUpdate {
     /// A write worked; `text` is what to say.
     Done { ticket: Option<aurelius_domain::TicketId>, text: Option<String> },
     /// `ticket.create` worked.
-    Created { number: u32, text: Option<String> },
+    Created { ticket: aurelius_domain::TicketId, number: u32, text: Option<String> },
     /// A write failed: the server's reason, or a lost connection.
     Failed { ticket: Option<aurelius_domain::TicketId>, message: String },
     /// An event changed the board, a ticket, the company, a project or a task:
@@ -1580,8 +1579,6 @@ pub enum Update {
     Projects(Vec<ProjectSummary>),
     Jobs(Vec<JobSummary>),
     Created(ProjectId),
-    /// A task was created (the Dashboard opens the one it gave in the right panel).
-    TaskCreated(aurelius_domain::TaskId),
     Error(String),
     /// Deleting this waiting message was refused: show it again.
     QueuedDeleteFailed(MessageId),
@@ -1714,9 +1711,6 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                             Some(Request::SendManager { ref files, .. } | Request::SendGroup { ref files, .. }) if !files.is_empty() => {
                                 let _ = updates.send(Update::Error("Not connected to the server; send the message with its files again when it is back.".into()));
                             }
-                            Some(Request::CreateTask { ref files, .. }) if !files.is_empty() => {
-                                let _ = updates.send(Update::Error("Not connected to the server; create the task with its files again when it is back.".into()));
-                            }
                             Some(Request::CreateSchedule(ref s)) if !s.files.is_empty() => {
                                 let _ = updates.send(Update::Error("Not connected to the server; save the recurring task with its files again when it is back.".into()));
                             }
@@ -1798,6 +1792,7 @@ async fn run(target: Option<Target>, tokens: Tokens, mut requests: mpsc::Unbound
                 management_channel: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::MANAGEMENT_CHANNEL),
                 webhooks: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::WEBHOOKS),
                 idea_attachments: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::IDEA_ATTACHMENTS),
+                ticket_from_idea: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::TICKET_FROM_IDEA),
                 run_usage: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::RUN_USAGE),
                 run_trace: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::RUN_TRACE),
                 instruction_proposals: client.hello.features.iter().any(|f| f == aurelius_protocol::feature::INSTRUCTION_PROPOSALS),
@@ -2164,10 +2159,6 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
             Command::AddProvider(connection::AddProvider { provider, display_name: name, runtime_path, default_model: None }),
             None,
         ),
-        Request::CreateTask { project_id, employee_id, title, goal, criteria, run, files } => envelope(
-            Command::CreateTask(aurelius_domain::task::CreateTask { confirm_secret: false, files, project_id, employee_id, title, goal, acceptance_criteria: criteria, depends_on: vec![], run }),
-            None,
-        ),
         Request::CreateSchedule(schedule) => envelope(Command::CreateTaskSchedule(schedule), None),
         Request::UpdateSchedule(schedule) => envelope(Command::UpdateTaskSchedule(schedule), None),
         Request::DeleteSchedule(schedule_id) => envelope(Command::DeleteTaskSchedule(aurelius_domain::schedule::DeleteTaskSchedule { schedule_id }), None),
@@ -2188,11 +2179,6 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         Request::UpdateIdea { idea_id, title, note, kind, add_files, remove_files } => envelope(Command::UpdateIdea(aurelius_domain::idea::UpdateIdea { confirm_secret: false, idea_id, title, note, kind, add_files, remove_files }), None),
         Request::DeleteIdea(idea_id) => envelope(Command::DeleteIdea(aurelius_domain::idea::DeleteIdea { idea_id }), None),
         Request::SetIdeaStatus { idea_id, status } => envelope(Command::SetIdeaStatus(aurelius_domain::idea::SetIdeaStatus { idea_id, status }), None),
-        Request::StartIdea { idea_id, employee_id, mode, model } => {
-            let (connection_id, model) = model.unzip();
-            let run = aurelius_domain::task::RunSettings { mode, connection_id, model, ..Default::default() };
-            envelope(Command::StartIdea(aurelius_domain::idea::StartIdea { idea_id, employee_id, run }), None)
-        }
         Request::Remember { project_id, kind, content } => envelope(
             Command::Remember(aurelius_domain::memory::Remember { scope: aurelius_domain::memory::MemoryScope::Project(project_id), kind, content, pinned: false }),
             None,
@@ -3046,7 +3032,6 @@ async fn session(
                 }
                 // Task files: as they are for the local service, uploaded for a remote one.
                 let files = match &mut request {
-                    Request::CreateTask { files, .. } if !files.is_empty() => Some(files),
                     Request::CreateSchedule(s) if !s.files.is_empty() => Some(&mut s.files),
                     Request::UpdateSchedule(s) if !s.add_files.is_empty() => Some(&mut s.add_files),
                     Request::AddIdea { files, .. } if !files.is_empty() => Some(files),
@@ -3678,7 +3663,7 @@ async fn board(client: &Client, call: BoardCall, updates: &mpsc::UnboundedSender
             match client.execute(envelope(command, expected_version)).await {
                 Ok(receipt) => {
                     let _ = updates.send(Update::Board(match receipt.result {
-                        CommandResult::TicketCreated { number, .. } => BoardUpdate::Created { number, text: done },
+                        CommandResult::TicketCreated { ticket_id, number } => BoardUpdate::Created { ticket: ticket_id, number, text: done },
                         _ => BoardUpdate::Done { ticket, text: done },
                     }));
                 }
@@ -4233,10 +4218,6 @@ async fn send(client: &Client, envelope: CommandEnvelope, updates: &mpsc::Unboun
                 }
                 CommandResult::MemoryForgotten { .. } => {
                     let _ = updates.send(Update::Info("Forgotten: no longer in context or the search index; content erased.".into()));
-                }
-                CommandResult::TaskCreated { task_id } => {
-                    let _ = updates.send(Update::Info("Task created.".into()));
-                    let _ = updates.send(Update::TaskCreated(task_id));
                 }
                 CommandResult::EmployeeReportsToSet { reports_to, .. } => {
                     let _ = updates.send(Update::Info(if reports_to.is_some() { "Reporting line updated." } else { "This employee is now a root of the org chart." }.into()));
@@ -4915,6 +4896,7 @@ mod tests {
                 files: vec![],
                 start: false,
                 from_message: None,
+                from_idea: None,
             })
         }
 
@@ -6126,7 +6108,7 @@ mod tests {
         let (project_id, employee_id, ticket_id, approval_id) = (ProjectId::new(), EmployeeId::new(), aurelius_domain::TicketId::new(), aurelius_domain::ApprovalId::new());
         let feedback = || "x".to_string();
         let commands = [
-            to_envelope(Request::CreateTask { project_id, employee_id: None, title: "x".into(), goal: "x".into(), criteria: vec![], run: RunSettings::default(), files: vec![] }).unwrap().command,
+            Command::CreateTask(aurelius_domain::task::CreateTask { confirm_secret: false, files: vec![], project_id, employee_id: None, title: "x".into(), goal: "x".into(), acceptance_criteria: vec![], depends_on: vec![], run: RunSettings::default() }),
             Command::CreateTaskSchedule(CreateTaskSchedule { confirm_secret: false, project_id, employee_id, title: "x".into(), goal: "x".into(), acceptance_criteria: vec![], files: vec![], run: RunSettings::default(), recurrence: Recurrence::Daily { at_minute: 1 }, paused: true }),
             Command::UpdateTaskSchedule(UpdateTaskSchedule { confirm_secret: false, schedule_id: aurelius_domain::TaskScheduleId::new(), employee_id, title: "x".into(), goal: "x".into(), acceptance_criteria: vec![], add_files: vec![], remove_files: vec![], run: RunSettings::default(), recurrence: Recurrence::Daily { at_minute: 1 } }),
             to_envelope(Request::AddIdea { project_id, title: "x".into(), note: None, kind: Default::default(), files: vec![] }).unwrap().command,
@@ -6578,13 +6560,6 @@ mod tests {
             let ideas = |app: &mut Handle| app.requests.send(Request::LoadIdeas(Some(project))).unwrap();
             let run = RunSettings::default;
 
-            // CreateTask: a draft task, created once sent anyway.
-            let task = |files: Vec<String>| Request::CreateTask { project_id: project, employee_id: None, title: "Rotate".into(), goal: format!("Rotate {D3}"), criteria: vec![], run: run(), files };
-            let hold = held(&mut alex, task(vec![])).await;
-            sent_anyway(&mut alex, hold, |u| matches!(u, Update::TaskCreated(_)).then_some(())).await;
-            let hold = held(&mut alex, task(vec![notes.clone()])).await;
-            assert_eq!(refused_again(&mut alex, hold).await, secret_in_file_refusal(&["D3 token".into()]));
-
             // CreateTaskSchedule and UpdateTaskSchedule: stored without the value.
             let schedule = |goal: String, files: Vec<String>| CreateTaskSchedule { confirm_secret: false, project_id: project, employee_id: builder, title: "Nightly".into(), goal, acceptance_criteria: vec![], files, run: run(), recurrence: Recurrence::Daily { at_minute: 120 }, paused: true };
             let hold = held(&mut alex, Request::CreateSchedule(schedule(format!("Check {D3}"), vec![]))).await;
@@ -6638,7 +6613,7 @@ mod tests {
 
             // CreateTicket (the board's write; the form waits under "Not sent") and UpdateTicket.
             let new_ticket = |description: String, files: Vec<String>| {
-                Command::CreateTicket(aurelius_domain::ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: project, title: "Deploy".into(), description: Some(description), priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: run(), files, start: false, from_message: None })
+                Command::CreateTicket(aurelius_domain::ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: project, title: "Deploy".into(), description: Some(description), priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: run(), files, start: false, from_message: None, from_idea: None })
             };
             let board = |command: Command, done: &str| Request::Board(BoardCall::Write { command, expected_version: None, done: Some(done.into()) });
             alex.requests.send(board(new_ticket(format!("Deploy with {D3}"), vec![]), "created")).unwrap();
@@ -6654,7 +6629,7 @@ mod tests {
             .await;
             assert_eq!(hold.names, vec!["D3 token".to_string()]);
             let number = sent_anyway(&mut alex, hold, |u| match u {
-                Update::Board(BoardUpdate::Created { number, text }) => Some((number, text)),
+                Update::Board(BoardUpdate::Created { number, text, .. }) => Some((number, text)),
                 _ => None,
             })
             .await;

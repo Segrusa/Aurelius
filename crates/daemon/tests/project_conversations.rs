@@ -142,14 +142,15 @@ async fn the_assistant_gives_work_to_an_employee_and_the_result_comes_back() {
         panic!()
     };
     employee(&client, project_id, "Alex").await;
+    backlog_ticket(&client, project_id, "Dark mode").await;
     let CommandResult::ProjectMessageSent { conversation_id, run_id, .. } = client.send_project_message(send(project_id, None, "Laat Alex dark mode bouwen")).await.unwrap().result else { panic!() };
     answers(&client, conversation_id, 1).await;
 
     // The assistant's tools (the bridge calls these with the run).
     let bridge = BridgeClient::connect(dir.path()).await.unwrap();
-    let (ok, text) = bridge.employee_act(run_id, EmployeeTaskOp::Delegate { employee: "Alex".into(), title: "Dark mode".into(), goal: "Maak het donkere thema".into(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, text) = bridge.employee_act(run_id, EmployeeTaskOp::Delegate { employee: "Alex".into(), title: "Dark mode".into(), goal: "Maak het donkere thema".into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok && text.contains("Gave “Dark mode” to Alex"), "{text}");
-    let (ok, _) = bridge.employee_act(run_id, EmployeeTaskOp::Delegate { employee: "Nobody".into(), title: "x".into(), goal: String::new(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, _) = bridge.employee_act(run_id, EmployeeTaskOp::Delegate { employee: "Nobody".into(), title: "x".into(), goal: String::new(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(!ok, "no such employee");
     let (ok, text) = bridge.employee_act(run_id, EmployeeTaskOp::HandOver { employee: "Alex".into(), reason: "x".into() }).await.unwrap();
     assert!(!ok && text.contains("delegate_task"), "the assistant cannot hand over: {text}");

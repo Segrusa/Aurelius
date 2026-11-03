@@ -250,7 +250,7 @@ pub(crate) fn assistant_system(
     if employees.is_empty() {
         text.push_str("\n\nThe company has no employees yet, so there is nobody to delegate to; tell the user if work needs one.");
     } else {
-        text.push_str(&format!("\n\nThe company's employees (give work to them with delegate_task):\n{}", crate::task::tasks::colleague_lines(&employees)));
+        text.push_str(&format!("\n\nThe company's employees (give work to them with delegate_task, on a ticket: name it with ticket):\n{}", crate::task::tasks::colleague_lines(&employees)));
     }
     if tools {
         text.push_str(&format!("\n\n{}", crate::conversation::overview::TOOLS_GUIDANCE));

@@ -132,7 +132,7 @@ impl AgentRuntime for Leaky {
             // A ticket's discussion (refused outside a ticket), and once a delegated part.
             let _ = bridge.employee_act(run, EmployeeTaskOp::PostToDiscussion { message: format!("the deploy key: {value}") }).await;
             if delegate {
-                let part = EmployeeTaskOp::Delegate { employee: "Bridge".into(), title: format!("Use {value}"), goal: format!("Deploy with the key {value}"), criteria: vec![format!("{value} works")], project: None };
+                let part = EmployeeTaskOp::Delegate { employee: "Bridge".into(), title: format!("Use {value}"), goal: format!("Deploy with the key {value}"), criteria: vec![format!("{value} works")], project: None, ticket: None };
                 let _ = bridge.employee_act(run, part).await;
             }
             let listed = bridge.employee_act(run, EmployeeTaskOp::VaultList { project: None }).await.unwrap();
@@ -358,6 +358,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
         files: vec![],
         start: true,
         from_message: None,
+        from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = client.create_ticket(ticket).await.unwrap().result else { panic!() };
     // B10 on the discussion and on a task's title: refused with the name; the post confirmed, kept redacted.

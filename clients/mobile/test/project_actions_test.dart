@@ -103,7 +103,7 @@ void main() {
     expect(find.text('Managers'), findsNothing);
     expect(find.text('Employees'), findsNothing);
 
-    for (final (tab, tooltip) in [('board', 'New ticket'), ('tasks', 'New task'), ('ideas', 'New idea')]) {
+    for (final (tab, tooltip) in [('board', 'New ticket'), ('tasks', 'New ticket'), ('ideas', 'New idea')]) {
       await show(tester, tab);
       expect(inAppBar(find.byKey(ValueKey('project-add-$tab'))), findsOneWidget, reason: tab);
       // The only add button of the tab is the one up there.

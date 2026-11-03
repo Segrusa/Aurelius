@@ -746,6 +746,7 @@ async fn a_phone_with_chat_rights_cannot_delete_a_tickets_channel() {
         files: vec![],
         start: false,
         from_message: None,
+        from_idea: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = desktop.create_ticket(create).await.unwrap().result else { panic!("no ticket") };
     let channel = desktop.ticket(ticket_id).await.unwrap().ticket.conversation_id.expect("a channel");

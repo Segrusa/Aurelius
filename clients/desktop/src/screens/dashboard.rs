@@ -82,7 +82,8 @@ impl AppView {
     }
 
     /// "Give work": only the text (the title follows from it), files as chips, and a bar with who
-    /// gets it, the project, model and mode. Ctrl+Enter gives it and opens it in the right panel.
+    /// gets it, the project, model and mode. Ctrl+Enter makes it a started ticket and opens that
+    /// in the right panel.
     fn give_work_box(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let who = self.give_assignee().and_then(|id| self.managers.iter().find(|m| m.id == id));
         let who_label = who.map_or_else(|| "Choose who".to_string(), |m| m.name.clone());

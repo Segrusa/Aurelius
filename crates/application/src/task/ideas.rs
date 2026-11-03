@@ -1,10 +1,11 @@
 //! Ideas per project: noted by the user or by an employee while working; an
-//! idea becomes a task for an employee, is marked done, or dropped.
+//! idea becomes a ticket (or, from older clients, a task for an employee), is
+//! marked done, or dropped.
 
 use crate::run::events::{Ev, emit};
 use crate::{CommandService, Committed, domain_error, storage_error};
 use aurelius_domain::{
-    ActorKind, DomainError, IdeaId, EmployeeId, ProjectId, TaskId,
+    ActorKind, DomainError, IdeaId, EmployeeId, ProjectId, TaskId, TicketId,
     idea::{self, AddIdea, DeleteIdea, IdeaKind, IdeaStatus, SetIdeaStatus, StartIdea, UpdateIdea},
     employee::LifecycleStatus,
     task::TaskStatus,
@@ -27,6 +28,42 @@ fn idea_event(tx: &Tx<'_>, id: IdeaId, project: ProjectId, event_type: &'static 
     })?;
     n.project_id = Some(project);
     Ok(n)
+}
+
+/// What a ticket made from an idea needs before its transaction: the files on the
+/// server to copy to it. Files gone meanwhile are skipped, as when starting an idea.
+pub(crate) fn files_of(row: &store::IdeaRow) -> Vec<String> {
+    row.attachments
+        .as_ref()
+        .map(|a| a.files.iter().map(|f| Path::new(&a.folder).join(&f.path)).filter(|p| p.is_file()).map(|p| p.display().to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// Why an idea cannot become something new: it already became a task or a ticket.
+fn already_became(row: &store::IdeaRow) -> Option<&'static str> {
+    match (row.task_id, row.ticket_id) {
+        (Some(_), _) => Some("This idea already became a task."),
+        (_, Some(_)) => Some("This idea already became a ticket."),
+        (None, None) => None,
+    }
+}
+
+/// In a ticket's transaction: the idea it is made from, or why it cannot be.
+pub(crate) fn check_for_ticket(tx: &Tx<'_>, id: IdeaId, project: ProjectId) -> Result<Result<(), AppError>, StorageError> {
+    let Some(row) = store::load(tx, id)? else { return Ok(Err(domain_error(DomainError::IdeaNotFound(id)))) };
+    if row.project_id != project {
+        return Ok(Err(domain_error(DomainError::Ticket("The idea belongs to another project: make the ticket in that project.".into()))));
+    }
+    Ok(match already_became(&row) {
+        Some(why) => Err(domain_error(DomainError::Ticket(why.into()))),
+        None => Ok(()),
+    })
+}
+
+/// The idea became this ticket: done, with a link to it.
+pub(crate) fn became_ticket(tx: &Tx<'_>, id: IdeaId, project: ProjectId, ticket: TicketId, title: &str, correlation: String) -> Result<EventNotice, StorageError> {
+    store::set_ticket(tx, id, ticket)?;
+    idea_event(tx, id, project, "idea.ticket_created", ActorKind::User, None, correlation, serde_json::json!({ "ticket_id": ticket, "title": title }))
 }
 
 /// Note an idea in a project (by the user, or an employee: `employee`).
@@ -157,19 +194,15 @@ impl CommandService {
         let (id, employee) = (cmd.idea_id, cmd.employee_id);
         let run = cmd.run.validated().map_err(domain_error)?;
         let row = self.store.read(|c| store::load(c, id)).map_err(storage_error)?.ok_or_else(|| domain_error(DomainError::IdeaNotFound(id)))?;
-        if row.task_id.is_some() {
-            return Err(domain_error(DomainError::Memory("This idea already became a task.".into())));
+        if let Some(why) = already_became(&row) {
+            return Err(domain_error(DomainError::Memory(why.into())));
         }
         let goal = row.note.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| row.title.clone());
         let goal_blob = self.store.blobs().put(goal.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;
         let criteria_blob = self.store.blobs().put_json(&Vec::<String>::new()).map_err(storage_error)?;
         // The task gets its own copies of the idea's files, in its work folder,
         // as if the user had attached them to the task (files gone meanwhile are skipped).
-        let sources: Vec<String> = row
-            .attachments
-            .as_ref()
-            .map(|a| a.files.iter().map(|f| Path::new(&a.folder).join(&f.path)).filter(|p| p.is_file()).map(|p| p.display().to_string()).collect())
-            .unwrap_or_default();
+        let sources = files_of(&row);
         let attachments = self.attach_files(row.project_id, Some(employee), &sources, None)?;
         let stored = attachments.clone();
         let command_id = envelope.command_id;

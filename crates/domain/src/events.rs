@@ -142,6 +142,7 @@ event_kinds! {
     IdeaUpdated => "idea.updated",
     IdeaStatusChanged => "idea.status_changed",
     IdeaStarted => "idea.started",
+    IdeaTicketCreated => "idea.ticket_created",
     IdeaDeleted => "idea.deleted",
     ShareGranted => "share.granted",
     ShareRevoked => "share.revoked",

@@ -112,9 +112,9 @@ fn start_task(s: &CommandService, task: TaskId, employee: EmployeeId) -> RunId {
         .unwrap()
 }
 
-/// From a chat the work goes to the project Atlas; in a task it stays in the task's.
+/// From a chat the work lands on ticket #1 (of Atlas); in a task without a ticket too.
 fn delegate(s: &CommandService, run: RunId, to: &str) -> (bool, String) {
-    let action = EmployeeAction::Delegate { employee: to.into(), title: "A part".into(), goal: "Do the part".into(), criteria: vec![], project: Some("Atlas".into()) };
+    let action = EmployeeAction::Delegate { employee: to.into(), title: "A part".into(), goal: "Do the part".into(), criteria: vec![], ticket: Some("#1".into()) };
     let (ok, text, _) = s.employee_action(run, action).unwrap();
     (ok, text)
 }
@@ -168,12 +168,47 @@ struct Team {
     max: (EmployeeId, ConversationId),
 }
 
+/// Ticket #1 of the project, in Backlog: work given with `delegate` lands on it.
+fn shared_ticket(s: &CommandService, project_id: ProjectId) -> aurelius_domain::TicketId {
+    let user = aurelius_domain::UserId::new();
+    s.store()
+        .write(move |tx| aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &user.to_string(), username: "grace", created_by_user: None, now_ms: 1 }, "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA"))
+        .unwrap();
+    let create = aurelius_domain::ticket::CreateTicket {
+        responsible_user_id: None,
+        confirm_secret: false,
+        project_id,
+        title: "Shared work".into(),
+        description: None,
+        priority: Default::default(),
+        labels: vec![],
+        deadline_ms: None,
+        owner_employee_id: None,
+        run: Default::default(),
+        files: vec![],
+        start: false,
+        from_message: None,
+        from_idea: None,
+    };
+    let by = CommandContext { user_id: Some(user), ..ctx() };
+    match s.execute(&by, CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateTicket(create) }).unwrap().receipt.result {
+        CommandResult::TicketCreated { ticket_id, .. } => ticket_id,
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+/// The id of ticket #1.
+fn shared_ticket_of(s: &CommandService) -> String {
+    s.store().read(|c| Ok(c.query_row("SELECT id FROM tickets WHERE number = 1", [], |r| r.get(0))?)).unwrap()
+}
+
 fn team(s: &CommandService) -> Team {
     let project = project(s);
     let jean = hire(s, project, "Jean", Some("Head"), None);
     let simon = hire(s, project, "Simon", Some("Lead"), Some(jean.0));
     let dean = hire(s, project, "Dean", None, Some(simon.0));
     let max = hire(s, project, "Max", None, Some(simon.0));
+    shared_ticket(s, project);
     Team { project, jean, simon, dean, max }
 }
 
@@ -313,12 +348,12 @@ fn delegation_goes_to_direct_reports_only_while_the_chart_is_followed() {
     // Off: anyone may give work to anyone.
     follow(&s, t.project, false);
     assert!(delegate(&s, dean_run, "Max").0);
-    // From a chat the task needs a project.
-    let action = EmployeeAction::Delegate { employee: "Max".into(), title: "A part".into(), goal: "Do it".into(), criteria: vec![], project: None };
+    // From a chat the task needs a ticket.
+    let action = EmployeeAction::Delegate { employee: "Max".into(), title: "A part".into(), goal: "Do it".into(), criteria: vec![], ticket: None };
     let (ok, text, _) = s.employee_action(dean_run, action).unwrap();
-    assert!(!ok && text.contains("name the project") && text.contains("Atlas"), "{text}");
-    let action = EmployeeAction::Delegate { employee: "Max".into(), title: "A part".into(), goal: "Do it".into(), criteria: vec![], project: Some("Nowhere".into()) };
-    assert!(!s.employee_action(dean_run, action).unwrap().0, "an unknown project");
+    assert!(!ok && text == crate::ticket::agent::DELEGATE_NEEDS_TICKET, "{text}");
+    let action = EmployeeAction::Delegate { employee: "Max".into(), title: "A part".into(), goal: "Do it".into(), criteria: vec![], ticket: Some("#99".into()) };
+    assert!(!s.employee_action(dean_run, action).unwrap().0, "an unknown ticket");
     follow(&s, t.project, true);
     let before = tasks(&s).len();
     let (ok, text) = delegate(&s, dean_run, "Max");
@@ -368,6 +403,7 @@ fn a_task_is_handed_over_to_the_boss_or_a_peer_only() {
 fn work_goes_down_a_six_level_chart_to_the_bottom() {
     let (_d, s) = setup();
     let p = project(&s);
+    shared_ticket(&s, p);
     let mut chain: Vec<EmployeeId> = Vec::new();
     for i in 1..=6 {
         let (m, _) = hire(&s, p, &format!("M{i}"), None, chain.last().copied());
@@ -389,6 +425,19 @@ fn work_goes_down_a_six_level_chart_to_the_bottom() {
 }
 
 // ── Escalation ──────────────────────────────────────────────────────────
+
+#[test]
+fn an_escalation_stays_on_the_ticket_of_the_task_it_comes_from() {
+    let (_d, s) = setup();
+    let t = team(&s);
+    follow(&s, t.project, true);
+    let ticket = shared_ticket_of(&s);
+    let (task, run_id) = task_run(&s, t.project, t.simon.0, "Fix it");
+    s.store().write(move |tx| Ok(tx.execute("UPDATE tasks SET ticket_id = ?2 WHERE id = ?1", [task.to_string(), ticket.clone()]).map(drop)?)).unwrap();
+    end_run(&s, run_id, false, Some("provider_error"));
+    let on: Option<String> = s.store().read(|c| Ok(c.query_row("SELECT ticket_id FROM tasks WHERE title LIKE 'Escalated:%'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(on, Some(shared_ticket_of(&s)));
+}
 
 #[test]
 fn a_failed_task_goes_to_the_boss_first_with_the_chart_on() {
@@ -847,6 +896,7 @@ fn set_mode_is_refused_while_a_plan_waits_for_the_user() {
 fn delegation_to_management_inherits_no_mode_but_to_others_it_does() {
     let (_d, s) = setup();
     let (p, ann, bob, _dan) = mode_company(&s);
+    shared_ticket(&s, p);
     let child_mode = |s: &CommandService| -> Option<AgentMode> {
         s.store()
             .read(|c| {

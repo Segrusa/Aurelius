@@ -422,8 +422,6 @@ void main() {
       // 1 sends nothing, as servers without the feature expect.
       expect(paramsOf(Commands.createTask('p', 'T', 'G', const [])).containsKey('run'), isFalse);
       expect(paramsOf(Commands.createTask('p', 'T', 'G', const [], run: {'mode': 'auto'}, variants: 3))['run'], {'mode': 'auto', 'variants': 3});
-      expect(paramsOf(Commands.startIdea('i', 'm', variants: 2))['run'], {'variants': 2});
-      expect(paramsOf(Commands.startIdea('i', 'm', mode: AgentMode.plan))['run'], {'mode': 'plan'});
       expect(Commands.chooseVariant('t', variant: 2), {
         'method': 'task.choose_variant',
         'params': {'task_id': 't', 'variant': 2},

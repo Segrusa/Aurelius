@@ -59,6 +59,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId, EmployeeId) {
     };
     let alex = employee(client, project_id, "Alex", "Backend developer").await;
     let iris = employee(client, project_id, "Iris", "Frontend designer").await;
+    backlog_ticket(client, project_id, "Shared work").await;
     (project_id, alex, iris)
 }
 
@@ -162,11 +163,11 @@ async fn a_employee_delegates_a_part_and_finishes_with_everything() {
     let run = running_run(dir.path(), parent).await;
     let at_work = client.employees().await.unwrap().employees.into_iter().find(|m| m.id == alex).unwrap();
     assert!(at_work.agents.iter().any(|a| a.kind == "conversation"), "{:?}", at_work.agents);
-    let (ok, text) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "iris".into(), title: "Dark mode UI".into(), goal: "Maak het donkere thema".into(), criteria: vec![], project: None })
+    let (ok, text) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "iris".into(), title: "Dark mode UI".into(), goal: "Maak het donkere thema".into(), criteria: vec![], project: None, ticket: Some("#1".into()) })
         .await
         .unwrap();
     assert!(ok, "{text}");
-    let (ok, _) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Nobody".into(), title: "x".into(), goal: String::new(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, _) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Nobody".into(), title: "x".into(), goal: String::new(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(!ok, "only colleagues of the project");
     release.notify_one();
 
@@ -233,14 +234,14 @@ async fn a_employee_that_may_not_delegate_does_it_itself() {
     let (project, alex, _) = setup(&client).await;
     let id = create(&client, project, Some(alex), "Eigen werk").await;
     let run = running_run(dir.path(), id).await;
-    let (ok, _) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Een".into(), goal: String::new(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, _) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Een".into(), goal: String::new(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok, "delegation is allowed by default");
 
     rusqlite::Connection::open(dir.path().join("data/aurelius.sqlite"))
         .unwrap()
         .execute("UPDATE employees SET config_json = json_set(config_json, '$.task_policy.delegation_allowed', json('false')) WHERE id = ?1", [alex.to_string()])
         .unwrap();
-    let (ok, _) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Nog een".into(), goal: String::new(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, _) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Nog een".into(), goal: String::new(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(!ok, "delegation is not allowed for Alex");
     assert!(client.tasks(None).await.unwrap().tasks.iter().all(|t| t.title != "Nog een"));
     release.notify_one();
@@ -264,7 +265,7 @@ async fn two_tasks_given_from_one_conversation_are_answered_in_one_run() {
     let conn = db(dir.path());
     let runs = || conn.query_row("SELECT COUNT(*) FROM runs WHERE conversation_id = ?1", [conversation_id.to_string()], |r| r.get::<_, i64>(0)).unwrap();
     for (to, title) in [("Iris", "Logo"), ("Bob", "Icoon")] {
-        let (ok, text) = act(dir.path(), first_run, EmployeeTaskOp::Delegate { employee: to.into(), title: title.into(), goal: title.into(), criteria: vec![], project: None }).await.unwrap();
+        let (ok, text) = act(dir.path(), first_run, EmployeeTaskOp::Delegate { employee: to.into(), title: title.into(), goal: title.into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
         assert!(ok, "{text}");
     }
     let named = |title: &'static str| {
@@ -361,7 +362,7 @@ async fn delegated_work_starts_in_the_mode_of_the_one_who_gave_it() {
     set_mode(alex_conv, AgentMode::Auto).await.unwrap();
 
     // Alex gives the logo to Iris: her task starts in Auto and her commands go ahead unasked.
-    let (ok, text) = act(dir.path(), alex_run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Logo".into(), goal: "Maak een logo".into(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, text) = act(dir.path(), alex_run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Logo".into(), goal: "Maak een logo".into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok, "{text}");
     let logo = task_named("Logo").await;
     assert_eq!(mode_of(logo).await, AgentMode::Auto);
@@ -371,7 +372,7 @@ async fn delegated_work_starts_in_the_mode_of_the_one_who_gave_it() {
     assert!(client.approvals().await.unwrap().approvals.iter().all(|a| a.status != aurelius_domain::approval::ApprovalStatus::Pending));
 
     // And on down the chain: Iris gives a part to Bob, also in Auto; the user can still change it.
-    let (ok, text) = act(dir.path(), iris_run, EmployeeTaskOp::Delegate { employee: "Bob".into(), title: "Icoon".into(), goal: "Teken het icoon".into(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, text) = act(dir.path(), iris_run, EmployeeTaskOp::Delegate { employee: "Bob".into(), title: "Icoon".into(), goal: "Teken het icoon".into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok, "{text}");
     let icon = task_named("Icoon").await;
     assert_eq!(mode_of(icon).await, AgentMode::Auto);
@@ -383,7 +384,7 @@ async fn delegated_work_starts_in_the_mode_of_the_one_who_gave_it() {
 
     // Plan is not passed on: the colleague starts as usual, in Ask.
     set_mode(alex_conv, AgentMode::Plan).await.unwrap();
-    let (ok, text) = act(dir.path(), alex_run, EmployeeTaskOp::Delegate { employee: "Dana".into(), title: "Huisstijl".into(), goal: "Kies kleuren".into(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, text) = act(dir.path(), alex_run, EmployeeTaskOp::Delegate { employee: "Dana".into(), title: "Huisstijl".into(), goal: "Kies kleuren".into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok, "{text}");
     assert_eq!(mode_of(task_named("Huisstijl").await).await, AgentMode::Ask);
 
@@ -461,7 +462,7 @@ async fn delegated_tasks_and_subagents_run_on_their_own_defaults() {
     let alex_run = running_run(dir.path(), own).await;
 
     // A delegated task runs on the colleague's own model, effort and subagent model.
-    let (ok, text) = act(dir.path(), alex_run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Gedeeld".into(), goal: "Deel een".into(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, text) = act(dir.path(), alex_run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Gedeeld".into(), goal: "Deel een".into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok, "{text}");
     let delegated = config(task_named("Gedeeld").await, iris).await;
     assert_eq!((delegated["model"].as_str(), delegated["effort"].as_str()), (Some("fake-iris-own"), Some("high")), "{delegated}");
@@ -492,7 +493,7 @@ async fn a_result_that_comes_in_while_the_employee_works_is_not_lost() {
     let (project, alex, _) = setup(&client).await;
     let parent = create(&client, project, Some(alex), "Dark mode").await;
     let run = running_run(dir.path(), parent).await;
-    let (ok, text) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Dark mode UI".into(), goal: "Thema".into(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, text) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Dark mode UI".into(), goal: "Thema".into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok, "{text}");
     // Iris finishes while Alex' first run still goes.
     let child = wait_task(&client, parent, |t| t.children.len() == 1).await.children[0];
@@ -543,7 +544,7 @@ async fn a_task_whose_run_cannot_start_after_its_colleagues_waits_for_the_user_a
     let (project, alex, _) = setup(&client).await;
     let parent = create(&client, project, Some(alex), "Dark mode").await;
     let run = running_run(dir.path(), parent).await;
-    let (ok, text) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Dark mode UI".into(), goal: "Thema".into(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, text) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Dark mode UI".into(), goal: "Thema".into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok, "{text}");
     // Alex finishes his own part first and waits for Iris.
     release.notify_one();
@@ -852,7 +853,7 @@ async fn waiting_for_colleagues_passes_the_turn_on_and_the_task_goes_on_after() 
     let parent = create(&client, project, Some(alex), "Dark mode").await;
     let run = running_run(dir.path(), parent).await;
     let other = create(&client, project, Some(alex), "Logboek").await;
-    let (ok, text) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Dark mode UI".into(), goal: "Thema".into(), criteria: vec![], project: None }).await.unwrap();
+    let (ok, text) = act(dir.path(), run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Dark mode UI".into(), goal: "Thema".into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok, "{text}");
     let child = wait_task(&client, parent, |t| t.children.len() == 1).await.children[0];
     running_run(dir.path(), child).await;
@@ -916,7 +917,7 @@ async fn delegated_to_iris(root: &Path) -> (Client, tokio::task::JoinHandle<anyh
     let (project, alex, _) = setup(&client).await;
     let parent = create(&client, project, Some(alex), "Dark mode").await;
     let alex_run = running_run(root, parent).await;
-    let (ok, text) = act(root, alex_run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Dark mode UI".into(), goal: "Maak het donkere thema".into(), criteria: vec![], project: None })
+    let (ok, text) = act(root, alex_run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Dark mode UI".into(), goal: "Maak het donkere thema".into(), criteria: vec![], project: None, ticket: Some("#1".into()) })
         .await
         .unwrap();
     assert!(ok, "{text}");
@@ -989,5 +990,42 @@ async fn a_employee_can_only_message_tasks_it_delegated() {
     // An ended task takes no more messages.
     let (ok, text) = act(dir.path(), alex_run, msg("Dark mode UI")).await.unwrap();
     assert!(!ok && text.contains("already ended"), "{text}");
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn work_given_outside_a_ticket_names_one_and_lands_on_it() {
+    use aurelius_domain::{conversation::ChatStart, project_conversation::SendProjectMessage};
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_with_delay(dir.path(), 1).await;
+    let client = connect(dir.path()).await;
+    let (project, _, _) = setup(&client).await;
+    let CommandResult::ProjectCreated { project_id: elsewhere, .. } =
+        client.execute(envelope(Command::CreateProject(CreateProject { name: "Elders".into(), description: None, folder: None }), None)).await.unwrap().result
+    else {
+        panic!()
+    };
+    let other = backlog_ticket(&client, elsewhere, "Not here").await;
+    let send = SendProjectMessage { confirm_secret: false, project_id: project, text: "Een logo graag".into(), conversation_id: None, images: Vec::new(), files: Vec::new(), interrupt: false, start: ChatStart::default() };
+    let CommandResult::ProjectMessageSent { run_id: run, .. } = client.send_project_message(send).await.unwrap().result else { panic!() };
+    let give = |ticket: Option<String>| EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Logo".into(), goal: "Maak het".into(), criteria: vec![], project: None, ticket };
+
+    // Without a ticket, or with another project's: refused and no task.
+    let (ok, text) = act(dir.path(), run, give(None)).await.unwrap();
+    assert!(!ok && text.contains("Work always belongs to a ticket"), "{text}");
+    let (ok, text) = act(dir.path(), run, give(Some(other.to_string()))).await.unwrap();
+    assert!(!ok && text.contains("another project"), "{text}");
+    assert!(client.tasks(None).await.unwrap().tasks.iter().all(|t| t.title != "Logo"));
+
+    // On the ticket it names: linked to it, without a parent and not the main task.
+    let (ok, text) = act(dir.path(), run, give(Some("#1".into()))).await.unwrap();
+    assert!(ok, "{text}");
+    let task = client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.title == "Logo").expect("the task");
+    assert_eq!((task.ticket_number, task.parent_task_id, task.project_id), (Some(1), None, project));
+    assert!(task.delegated_by.is_some(), "clients tell it from the ticket's main task by this");
+    // The ticket's discussion says who gave what, with a link to the task.
+    let discussion: String = db(dir.path()).query_row("SELECT conversation_id FROM tickets WHERE number = 1", [], |r| r.get(0)).unwrap();
+    let lines = client.messages(aurelius_domain::ConversationId::parse(&discussion).unwrap()).await.unwrap().messages;
+    assert!(lines.iter().any(|m| m.system.as_ref().is_some_and(|s| s.task_id == Some(task.id)) && m.text.contains("gave the task “Logo” to Iris")), "{lines:?}");
     stop(dir.path(), daemon).await;
 }

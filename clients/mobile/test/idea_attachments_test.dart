@@ -115,7 +115,7 @@ void main() {
               onPressed: () async => picked.add(await showModalBottomSheet<String>(
                 context: context,
                 isScrollControlled: true,
-                builder: (_) => BlocProvider.value(value: bloc, child: IdeaSheet(idea: idea, employees: const [], canDelete: canDelete)),
+                builder: (_) => BlocProvider.value(value: bloc, child: IdeaSheet(idea: idea, canMakeTicket: true, canDelete: canDelete)),
               )),
               child: const Text('open'),
             ),

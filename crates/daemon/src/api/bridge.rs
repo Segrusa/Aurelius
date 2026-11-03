@@ -111,7 +111,7 @@ async fn answer(shared: &Arc<Shared>, request: BridgeRequest) -> BridgeOutcome {
 
 async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: EmployeeTaskOp) -> Result<BridgeOutcome, aurelius_protocol::ProtocolError> {
     let action = match op {
-        EmployeeTaskOp::Delegate { employee, title, goal, criteria, project } => EmployeeAction::Delegate { employee, title, goal, criteria, project },
+        EmployeeTaskOp::Delegate { employee, title, goal, criteria, ticket, .. } => EmployeeAction::Delegate { employee, title, goal, criteria, ticket },
         EmployeeTaskOp::HandOver { employee, reason } => EmployeeAction::HandOver { employee, reason },
         EmployeeTaskOp::MessageTask { task, message, interrupt } => EmployeeAction::MessageTask { task, message, interrupt },
         EmployeeTaskOp::AddIdea { title, note, kind, project } => EmployeeAction::AddIdea { title, note, kind, project },

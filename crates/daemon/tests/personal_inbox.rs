@@ -78,6 +78,7 @@ fn new_ticket(project_id: ProjectId, owner: Option<EmployeeId>, description: Opt
         files: vec![],
         start,
         from_message: None,
+        from_idea: None,
     }
 }
 

@@ -37,6 +37,7 @@ const MEANINGFUL: &[&str] = &[
     "memory.remembered",
     "idea.added",
     "idea.started",
+    "idea.ticket_created",
     "approval.requested",
     "approval.approved",
     "approval.answered",
@@ -138,6 +139,7 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
             ("minor", "IDEA", format!("{who} noted an idea: {}", s(&m["title"])), String::new(), who)
         }
         "idea.started" => ("start", "IDEA → TASK", format!("You started the idea “{}”", s(&m["title"])), String::new(), "You".into()),
+        "idea.ticket_created" => ("start", "IDEA → TICKET", format!("You made a ticket of the idea “{}”", s(&m["title"])), String::new(), "You".into()),
         "memory.remembered" => {
             let who = lookup(conn, "SELECT name FROM employees WHERE id = ?1", &s(&m["employee_id"])).unwrap_or_else(|| "You".into());
             ("minor", "MEMORY", format!("{who} noted a {}", s(&m["kind"]).replace('_', " ")), String::new(), who)

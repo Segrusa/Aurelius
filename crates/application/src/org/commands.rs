@@ -201,9 +201,12 @@ pub(crate) fn escalate(tx: &Tx<'_>, st: &Store, task: TaskId, row: &store::TaskR
     let note = format!("(Escalated by {} because of the org chart.)", me_row.name);
     // On the escalated task's login.
     let login = crate::run::login::of_task(tx, task)?;
-    let Some((_, _, notices)) = insert_part(tx, st, row.project_id, Some(me), &colleague, &format!("Escalated: {}", row.title), &text, &[], &note, None, Some(conversation), login)? else {
+    // On the escalated task's ticket, if it has one: an escalation is never refused for lack of one.
+    let ticket = crate::task::ticket_line::ticket_of(tx, task)?;
+    let Some((child, title, mut notices)) = insert_part(tx, st, row.project_id, Some(me), &colleague, &format!("Escalated: {}", row.title), &text, &[], &note, None, Some(conversation), login, ticket)? else {
         return Ok(None);
     };
+    notices.extend(crate::task::ticket_line::delegated_line(tx, child, &me_row.name, &boss_row.name, &title)?);
     Ok(Some((boss_row.name, notices)))
 }
 

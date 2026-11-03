@@ -92,9 +92,9 @@ extension TaskViewState on TaskView {
   bool get canAssign => !isTicketMain && (status == TaskStatus.draft || status == TaskStatus.queued || status == TaskStatus.waiting);
 
   /// The main task of a ticket (a delegation inherits the ticket, but has a
-  /// parent). The server refuses task.assign and task.cancel for it: Give to…
+  /// parent or, given from a conversation, a delegator). The server refuses task.assign and task.cancel for it: Give to…
   /// and Cancel task go through the board (owner, Back to Backlog).
-  bool get isTicketMain => ticketId != null && parentTaskId == null;
+  bool get isTicketMain => ticketId != null && parentTaskId == null && delegatedBy == null;
 
   bool get isDone => status == TaskStatus.succeeded || status == TaskStatus.failed || status == TaskStatus.cancelled;
 
