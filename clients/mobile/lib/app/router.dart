@@ -26,7 +26,6 @@ import '../features/ideas/ideas_page.dart';
 import '../features/company/projects_page.dart';
 import '../features/company_org/company_org_page.dart';
 import '../features/company_org/employee_page.dart';
-import '../features/dashboard/dashboard_page.dart';
 import '../features/more/more_page.dart';
 import '../features/more/screen_use_page.dart';
 import '../features/more/recurring_page.dart';
@@ -100,9 +99,6 @@ class AppRouter {
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/inbox', pageBuilder: (context, state) => routePage(state, const InboxPage())),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/home', pageBuilder: (context, state) => routePage(state, const DashboardPage())),
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/more', pageBuilder: (context, state) => routePage(state, const MorePage())),

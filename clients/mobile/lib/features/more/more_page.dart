@@ -8,7 +8,7 @@ import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../onboarding/onboarding.dart' show ActiveBoardMemberRow;
 
-/// The More tab: the board member and Settings. Projects, Tasks, Ideas, the Vault, Guidelines
+/// The More tab: the board member, Employees and Settings. Projects, Tasks, Ideas, the Vault, Guidelines
 /// and the Company are in the list too, but [kHiddenInMobileCore] leaves them out.
 class MorePage extends StatelessWidget {
   const MorePage({super.key});
@@ -26,6 +26,15 @@ class MorePage extends StatelessWidget {
         InsetGroup(
           dividerIndent: 60,
           children: [
+            // The way to the chat with an employee, and to Give work from an employee's page (Home is gone).
+            GroupRow(
+              key: const ValueKey('more-employees'),
+              leading: const IconTile(CupertinoIcons.person_2_fill),
+              title: 'Employees',
+              value: employees == 0 ? null : '$employees',
+              chevron: true,
+              onTap: () => context.push('/company'),
+            ),
             if (shownInMobileCore('projects'))
             GroupRow(
               key: const ValueKey('more-projects'),

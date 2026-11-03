@@ -226,7 +226,7 @@ void main() {
     test('Team chat is the first tab and the Board the second; hidden screens keep their routes (ticket #19)', () {
       final shell = router.config.configuration.routes.whereType<StatefulShellRoute>().single;
       final first = [for (final b in shell.branches) (b.routes.first as GoRoute).path];
-      expect(first, ['/team', '/board', '/inbox', '/home', '/more']);
+      expect(first, ['/team', '/board', '/inbox', '/more']);
       expect(first, shellTabPatterns);
       expect(router.config.routeInformationProvider.value.uri.path, '/team', reason: 'the app opens on the Team chat');
       final paths = pathsOf(router.config.configuration.routes);
@@ -256,7 +256,7 @@ void main() {
         StatefulShellRoute.indexedStack(
           builder: (context, state, shell) => HomeShell(shell: shell),
           branches: [
-            for (final name in ['team', 'board', 'inbox', 'home', 'more'])
+            for (final name in ['team', 'board', 'inbox', 'more'])
               StatefulShellBranch(routes: [GoRoute(path: '/$name', builder: (_, _) => Scaffold(body: Center(child: Text('page $name'))))]),
           ],
         ),
@@ -288,9 +288,7 @@ void main() {
     testWidgets('the shell opens on the group chat; ⌘3 opens the inbox, ⌘1 the chat again; the Board is a tab', (tester) async {
       await pump(tester, const InboxState(loading: false));
       expect(find.text('page team'), findsOneWidget);
-      await tester.tap(find.text('Home'));
-      await tester.pumpAndSettle();
-      expect(find.text('page home'), findsOneWidget);
+      expect(find.text('Home'), findsNothing, reason: 'the Home tab is gone');
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);

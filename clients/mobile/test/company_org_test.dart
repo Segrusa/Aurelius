@@ -146,8 +146,8 @@ void main() {
     });
   });
 
-  test('the bottom tabs: Team, Board, Inbox, Home, More (Team chat first, ticket #19)', () {
-    expect(shellTabs.map((t) => t.label), ['Team', 'Board', 'Inbox', 'Home', 'More']);
+  test('the bottom tabs: Team, Board, Inbox, More (Team chat first, ticket #19)', () {
+    expect(shellTabs.map((t) => t.label), ['Team', 'Board', 'Inbox', 'More']);
     expect(inboxTab, 2, reason: 'the inbox badge follows the Inbox tab');
     expect(teamTab, 0, reason: 'the Team badge follows the Team tab');
   });
@@ -192,20 +192,23 @@ void main() {
       ],
     );
 
-    testWidgets('More lists only Settings in the mobile core; the hidden entries are one constant away (ticket #19)', (tester) async {
+    testWidgets('More lists only Employees and Settings in the mobile core; the hidden entries are one constant away (ticket #19)', (tester) async {
       await show(tester, state, const MorePage());
-      expect(find.byType(GroupRow), findsNWidgets(1), reason: 'Settings');
+      expect(find.byType(GroupRow), findsNWidgets(2), reason: 'Employees and Settings');
       for (final key in ['projects', 'tasks', 'ideas', 'company', 'vault', 'guidelines']) {
         expect(find.byKey(ValueKey('more-$key')), findsNothing, reason: key);
       }
       expect(find.byKey(const ValueKey('more-settings')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('more-employees')));
+      await tester.pumpAndSettle();
+      expect(find.text('company page'), findsOneWidget, reason: 'the list of employees, where a chat starts');
     });
 
-    testWidgets('More lists Projects, Tasks, Ideas, Company and Settings when nothing is hidden', (tester) async {
+    testWidgets('More lists Projects, Tasks, Ideas, Company, Employees and Settings when nothing is hidden', (tester) async {
       mobileCoreHidden = const {};
       addTearDown(() => mobileCoreHidden = kHiddenInMobileCore);
       await show(tester, state, const MorePage());
-      expect(find.byType(GroupRow), findsNWidgets(5));
+      expect(find.byType(GroupRow), findsNWidgets(6));
       expect(find.byKey(const ValueKey('more-tasks')), findsOneWidget, reason: 'tasks without a ticket stay reachable (B7)');
       expect(find.text('Activity'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('more-projects')));

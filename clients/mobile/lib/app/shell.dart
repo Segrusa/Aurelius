@@ -15,15 +15,14 @@ import '../features/power/power_widgets.dart';
 import '../features/team/channels_bloc.dart';
 
 /// The route pattern of each tab, in the order of [shellTabs]; what the screen counter counts a tab by.
-const shellTabPatterns = ['/team', '/board', '/inbox', '/home', '/more'];
+const shellTabPatterns = ['/team', '/board', '/inbox', '/more'];
 
 /// The bottom tabs, in this order (branch indices of the router's shell).
-/// Team chat comes first and is where the app opens (ticket #19); Home keeps the way to the chat with an employee.
+/// Team chat comes first and is where the app opens (ticket #19); the way to the chat with an employee is More › Employees.
 const shellTabs = [
   GlassTab(CupertinoIcons.chat_bubble_2, 'Team'),
   GlassTab(CupertinoIcons.square_split_2x1, 'Board'),
   GlassTab(CupertinoIcons.tray, 'Inbox'),
-  GlassTab(CupertinoIcons.house, 'Home'),
   GlassTab(CupertinoIcons.ellipsis_circle, 'More'),
 ];
 
@@ -41,9 +40,9 @@ const teamTab = 0;
   }
 }
 
-/// Tabs: Team · Board · Inbox · Home · More in a floating glass tab bar,
+/// Tabs: Team · Board · Inbox · More in a floating glass tab bar,
 /// with the connection banner on top. Hardware keyboards (iPad, Android with a
-/// keyboard): ⌘/Ctrl+1…5 switch tabs, ⌘/Ctrl+N gives work (a new task).
+/// keyboard): ⌘/Ctrl+1…4 switch tabs, ⌘/Ctrl+N gives work (a new task).
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.shell, this.usage});
 
@@ -79,7 +78,7 @@ class _HomeShellState extends State<HomeShell> {
     final badge = context.select<InboxBloc, int>((b) => b.state.badge);
     final team = _teamBadge(context);
     final bannerVisible = context.select<ConnectionBloc, bool>((b) => ConnectionBanner.visible(b.state));
-    final digits = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3, LogicalKeyboardKey.digit4, LogicalKeyboardKey.digit5];
+    final digits = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3, LogicalKeyboardKey.digit4];
     final shortcuts = <ShortcutActivator, VoidCallback>{
       for (final (i, key) in digits.indexed) ...{
         SingleActivator(key, meta: true): () => _go(i),
