@@ -921,6 +921,15 @@ pub enum TicketTab {
 
 // ---- State ------------------------------------------------------------------
 
+/// The field Tab (`forward`) or Shift+Tab moves to, wrapping; the first one when none has the focus.
+fn next_field(focused: Option<usize>, count: usize, forward: bool) -> usize {
+    match focused {
+        Some(i) if forward => (i + 1) % count,
+        Some(i) => (i + count - 1) % count,
+        None => 0,
+    }
+}
+
 /// A board dialog over the page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoardDialog {
@@ -2240,6 +2249,35 @@ impl AppView {
         cx.notify();
     }
 
+    /// Tab / Shift+Tab between the text fields of a board dialog (New ticket, the columns).
+    pub fn board_dialog_move_field(&mut self, dialog: BoardDialog, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let mut fields: Vec<(FocusHandle, Box<dyn Fn(&mut Window, &mut App)>)> = Vec::new();
+        fn input(fields: &mut Vec<(FocusHandle, Box<dyn Fn(&mut Window, &mut App)>)>, i: &Entity<InputState>, cx: &App) {
+            let i = i.clone();
+            fields.push((i.read(cx).focus_handle(cx), Box::new(move |w: &mut Window, cx: &mut App| i.update(cx, |i, cx| i.focus(w, cx)))));
+        }
+        match dialog {
+            BoardDialog::NewTicket => {
+                input(&mut fields, &self.board.form.title, cx);
+                let d = self.board.form.description.clone();
+                fields.push((d.read(cx).focus_handle(cx), Box::new(move |w: &mut Window, cx: &mut App| d.update(cx, |i, cx| i.focus(w, cx)))));
+                input(&mut fields, &self.board.form.labels, cx);
+                input(&mut fields, &self.board.form.deadline, cx);
+            }
+            BoardDialog::Columns => {
+                for (_, field) in &self.board.columns {
+                    input(&mut fields, field, cx);
+                }
+            }
+            _ => return,
+        }
+        if fields.is_empty() {
+            return;
+        }
+        let next = next_field(fields.iter().position(|(h, _)| h.is_focused(window)), fields.len(), forward);
+        fields[next].1(window, cx);
+    }
+
     pub fn board_close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.board.dialog = None;
         self.board.dialog_detail = None;
@@ -3020,11 +3058,20 @@ impl AppView {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[::core::prelude::v1::test]
+    fn tab_walks_the_fields_of_a_dialog_and_wraps() {
+        assert_eq!(next_field(Some(0), 4, true), 1);
+        assert_eq!(next_field(Some(3), 4, true), 0);
+        assert_eq!(next_field(Some(0), 4, false), 3);
+        assert_eq!(next_field(Some(2), 4, false), 1);
+        assert_eq!(next_field(None, 4, true), 0);
+    }
+
     // Not `super::*`: gpui's `test` attribute would shadow the standard one.
     use super::{
         BoardColumnCards, BoardDialog, CreatorFilter, ColumnsReload, DAY_MS, DONE_SHOWN, DoneCheck, dialog_reads, done_check, expected_version_for, newest_version, board_changed, board_scope, load_now, load_on_show, plan_to_read, default_columns, Grid, Step, TimelineCard, activity_detail, activity_text, feedback_label, mode_text, card_label, focus_step, held_step, held_target, moved_elsewhere, moves_announcement, pick_up, Dispatcher, Drop, HIGH, Needs, OwnerFilter, PRIORITIES, before_for, choosing, dispatcher_gave_up, dispatcher_stopped, forget_unknown, gave_up_to_read, owner_unknown, columns_edit, days_from_civil, deadline_input, deadline_text, dispatcher_of, drop_effect, empty_text, feedback_ready, move_column,
         board_keys_live, needs_you, new_ticket_problems, parse_deadline, pasted_add_files, parse_labels, priority_label, priority_mark, shown_cards, theme, ticket,
-        NO_TESTER, column_shown, company_tester_command, test_task, tester_set_text, testing_line, testing_note,
+        NO_TESTER, next_field, column_shown, company_tester_command, test_task, tester_set_text, testing_line, testing_note,
     };
     use aurelius_domain::task::TaskStatus;
     use aurelius_domain::ticket::{ColumnKind, TicketPriority, TicketView};
