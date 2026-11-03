@@ -204,7 +204,7 @@ impl AppView {
         self.copy_ticket_link_numbered(id, number, cx);
     }
 
-    /// The same for a ticket this client may not have read (a row of the Inbox knows its number).
+    /// The same for a ticket this client may not have read (a notification knows its number).
     pub fn copy_ticket_link_numbered(&mut self, id: TicketId, number: u32, cx: &mut Context<Self>) {
         let text = match self.link_host().filter(|_| self.message_locate_supported()) {
             Some(host) => ticket_link(host, id),

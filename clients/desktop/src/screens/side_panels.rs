@@ -181,6 +181,14 @@ impl AppView {
         }
     }
 
+    /// Whether this client knows where a conversation lives, so it can be shown.
+    pub fn conversation_can_open(&self, conversation: ConversationId) -> bool {
+        Some(conversation) == self.group_conversation
+            || self.is_main_chat(conversation)
+            || self.tasks.iter().any(|t| t.conversation_id == Some(conversation) && t.employee_id.is_some())
+            || self.managers.iter().any(|m| m.conversation_id == conversation || m.conversations.iter().any(|t| t.id == conversation))
+    }
+
     /// Show a conversation where it lives: with its project or its employee.
     pub fn open_conversation_anywhere(&mut self, conversation: ConversationId, window: &mut Window, cx: &mut Context<Self>) {
         self.overlay = Overlay::None;

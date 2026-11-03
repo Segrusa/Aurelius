@@ -484,9 +484,9 @@ impl AppView {
         // An employee's message in the group chat reads as an answer under its name.
         if let Some(kind) = m.update.clone().filter(|k| k != aurelius_domain::group_chat::GROUP_KIND) {
             // A task update: the task itself, or what a worker, subagent or colleague reports back.
-            // Something a worker asks: decided right here (or in the inbox) while it is pending.
+            // Something a worker asks: decided right here while it is pending.
             let pending = m.approval_id.and_then(|id| self.pending_approvals().find(|a| a.id == id).cloned());
-            // Claude's question: answered right here (or in the inbox) while it is pending.
+            // Claude's question: answered right here while it is pending.
             let question = pending.as_ref().filter(|a| a.tool == crate::app::QUESTION_TOOL);
             let asked_question = m.approval_id.is_some_and(|id| self.approvals.iter().any(|a| a.id == id && a.tool == crate::app::QUESTION_TOOL));
             let (label, accent) = match kind.as_str() {
@@ -571,7 +571,6 @@ impl AppView {
                 .text_color(c(theme::ACCENT_TEXT))
                 .child(ui::diamond(8., theme::ACCENT_TEXT, false))
                 .child(if self.pending_approvals().any(|a| Some(a.run_id) == m.run_id && a.tool == crate::app::QUESTION_TOOL) { "Waiting for your answer above" } else if self.pending_approvals().any(|a| Some(a.run_id) == m.run_id && a.tool == crate::app::PLAN_TOOL) { "Waiting for your decision on the plan" } else { "Waiting for your approval" })
-                .child(ui::hint(SharedString::from(format!("inbox-{}", m.id)), "secondary-i", "Open inbox", || Box::new(OpenInbox), cx))
                 .children(self.pending_approvals().filter(|a| Some(a.run_id) == m.run_id && a.tool == crate::app::PLAN_TOOL).cloned().map(|a| {
                     ui::button(SharedString::from(format!("review-plan-{}", a.id)), "Review plan", ButtonKind::Primary, None).ml(px(8.)).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
                         this.open_plan_approval(a.clone(), w, cx);

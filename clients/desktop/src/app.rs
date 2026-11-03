@@ -92,8 +92,6 @@ pub enum Page {
     Project(ProjectRef, Tab),
     /// Every task of every project, with filters.
     Tasks,
-    /// Approvals, questions, plans, proposals and results across all projects.
-    Inbox,
     Settings,
     /// The vault of the company and its projects (feature `vault`, Fase 4).
     Vault,
@@ -199,7 +197,6 @@ pub enum NavItem {
     Board,
     /// The group chat, right under Dashboard.
     Chat,
-    Inbox,
     Tasks,
     Employees,
     Projects,
@@ -214,14 +211,13 @@ impl NavItem {
         if self == NavItem::Employees { "employees" } else { "projects" }
     }
 
-    pub const ALL: [NavItem; 9] = [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Inbox, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Vault, NavItem::Settings];
+    pub const ALL: [NavItem; 8] = [NavItem::Dashboard, NavItem::Board, NavItem::Chat, NavItem::Tasks, NavItem::Employees, NavItem::Projects, NavItem::Vault, NavItem::Settings];
 
     pub fn label(self) -> &'static str {
         match self {
             NavItem::Dashboard => "Dashboard",
             NavItem::Board => "Board",
             NavItem::Chat => "Team chat",
-            NavItem::Inbox => "Inbox",
             NavItem::Tasks => "Tasks",
             NavItem::Employees => "Employees",
             NavItem::Projects => "Projects",
@@ -238,7 +234,6 @@ impl NavItem {
             NavItem::Dashboard => "secondary-1",
             NavItem::Board => "secondary-5",
             NavItem::Chat => "secondary-8",
-            NavItem::Inbox => "secondary-2",
             NavItem::Employees => "secondary-3",
             NavItem::Projects => "secondary-6",
             NavItem::Tasks => "secondary-7",
@@ -257,76 +252,16 @@ impl NavItem {
             Page::Employees | Page::Employee(..) => NavItem::Employees,
             Page::Projects | Page::Project(..) => NavItem::Projects,
             Page::Tasks => NavItem::Tasks,
-            Page::Inbox => NavItem::Inbox,
             Page::Settings => NavItem::Settings,
             Page::Vault => NavItem::Vault,
         }
     }
 }
 
-/// The inbox's filter tabs.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum InboxTab {
-    #[default]
-    NeedsYou,
-    /// The rows per ticket or channel (feature `personal_inbox`).
-    Updates,
-    Results,
-    Failed,
-    All,
-}
-
-impl InboxTab {
-    pub const ALL: [InboxTab; 5] = [InboxTab::NeedsYou, InboxTab::Updates, InboxTab::Results, InboxTab::Failed, InboxTab::All];
-    const WITHOUT_UPDATES: [InboxTab; 4] = [InboxTab::NeedsYou, InboxTab::Results, InboxTab::Failed, InboxTab::All];
-
-    /// The tabs this server has: Updates only with the personal Inbox (§4.6).
-    pub fn shown(personal_inbox: bool) -> &'static [InboxTab] {
-        if personal_inbox { &Self::ALL } else { &Self::WITHOUT_UPDATES }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            InboxTab::NeedsYou => "Needs you",
-            InboxTab::Updates => "Updates",
-            InboxTab::Results => "Results",
-            InboxTab::Failed => "Failed",
-            InboxTab::All => "All",
-        }
-    }
-
-    /// Whether the tab lists the pending approvals and proposals.
-    pub fn shows_head(self) -> bool {
-        matches!(self, InboxTab::NeedsYou | InboxTab::All)
-    }
-
-    pub fn shows(self, kind: NoteKind) -> bool {
-        match kind {
-            NoteKind::Hidden => false,
-            NoteKind::NeedsYou => self.shows_head(),
-            NoteKind::Failed => !matches!(self, InboxTab::NeedsYou | InboxTab::Updates),
-            NoteKind::Result => matches!(self, InboxTab::Results | InboxTab::All),
-            NoteKind::Update => matches!(self, InboxTab::Updates | InboxTab::All),
-        }
-    }
-
-    /// Whether the tab lists this row. A row per ticket or channel is on Updates and All, with
-    /// ◆ also on Needs you, and a failed one also on Failed: never twice in one list.
-    /// `mine`: a row of a ticket's main task waits for this board member (freeze §5).
-    pub fn lists(self, n: &NotificationView, mine: bool) -> bool {
-        match note_kind(n) {
-            NoteKind::Update if self == InboxTab::NeedsYou => n.needs_you,
-            NoteKind::Update if self == InboxTab::Failed => n.reason.as_deref() == Some("failed"),
-            NoteKind::NeedsYou if self == InboxTab::NeedsYou => mine,
-            kind => self.shows(kind),
-        }
-    }
-}
-
-/// What an inbox notification is to the user.
+/// What a notification is to the user.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum NoteKind {
-    /// An alert about an approval or proposal, which the inbox lists itself.
+    /// An alert about an approval or proposal, which the bell lists itself.
     Hidden,
     /// Waits for the user (an escalated task).
     NeedsYou,
@@ -338,62 +273,13 @@ pub enum NoteKind {
 
 pub fn note_kind(n: &NotificationView) -> NoteKind {
     match (n.severity.as_str(), n.target_type.as_str()) {
-        // The inbox lists these itself, a guideline's proposal too (B5): one row each, gone once decided.
+        // The bell lists these itself, a guideline's proposal too (B5): one row each, gone once decided.
         ("action", "approval.requested" | "employee.proposed" | "employee.instructions_proposed" | "guideline.proposed") => NoteKind::Hidden,
         _ if crate::screens::updates::is_update(n) => NoteKind::Update,
         ("action", _) => NoteKind::NeedsYou,
         (_, "task.failed") => NoteKind::Failed,
         _ => NoteKind::Result,
     }
-}
-
-/// The notifications a tab lists: those that need you first, then the rest newest first.
-pub fn tab_notes<'a>(tab: InboxTab, notes: &[&'a NotificationView], mine: impl Fn(&NotificationView) -> bool) -> Vec<&'a NotificationView> {
-    let mut out: Vec<&NotificationView> = notes.iter().copied().filter(|n| tab.lists(n, mine(n))).collect();
-    out.sort_by_key(|n| !note_needs_you(n));
-    out
-}
-
-/// A row that waits for the reader: it stands under NEEDS YOU in a list.
-pub fn note_needs_you(n: &NotificationView) -> bool {
-    note_kind(n) == NoteKind::NeedsYou || n.needs_you
-}
-
-/// The Inbox's badge (ui-ontwerp §4.3): what is on Needs you, what failed and is unread, and the
-/// unread Updates. A row is counted once, also when it is on two tabs. Without the personal
-/// Inbox no row has a reason: Needs you and the unread Failed, as ever.
-pub fn inbox_badge(head: usize, notes: &[&NotificationView], mine: impl Fn(&NotificationView) -> bool, opened: &HashMap<String, i64>) -> usize {
-    let needs = tab_notes(InboxTab::NeedsYou, notes, &mine).len();
-    let unread = notes.iter().filter(|n| match note_kind(n) {
-        NoteKind::Failed => !n.read && mine(n),
-        NoteKind::Update => !n.needs_you && crate::screens::updates::row_unread(n, opened),
-        _ => false,
-    });
-    head + needs + unread.count()
-}
-
-/// The tab the Inbox opens on: what needs you, else unread Updates, else the results.
-pub fn first_inbox_tab(needs_you: usize, unread_updates: usize, personal_inbox: bool) -> InboxTab {
-    if needs_you > 0 {
-        InboxTab::NeedsYou
-    } else if personal_inbox && unread_updates > 0 {
-        InboxTab::Updates
-    } else {
-        InboxTab::Results
-    }
-}
-
-/// Whether opening the Inbox marks everything read: as ever, unless an unread row of the personal
-/// Inbox would go with it; that one is read when it is opened, not when the tab is seen (§4.4).
-pub fn opening_marks_all_read(notes: &[&NotificationView], opened: &HashMap<String, i64>) -> bool {
-    let unread_update = notes.iter().any(|n| note_kind(n) == NoteKind::Update && crate::screens::updates::row_unread(n, opened));
-    !unread_update && notes.iter().any(|n| !n.read)
-}
-
-/// Items per tab, in `InboxTab::ALL` order; `head` is the pending approvals and proposals.
-/// The first (Needs you) is the sidebar badge.
-pub fn tab_counts(head: usize, notes: &[&NotificationView], mine: impl Fn(&NotificationView) -> bool) -> [usize; 5] {
-    InboxTab::ALL.map(|t| if t.shows_head() { head } else { 0 } + tab_notes(t, notes, &mine).len())
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -409,9 +295,9 @@ pub enum DialogKind {
     NewIdea { project: ProjectId },
     EditIdea { id: aurelius_domain::IdeaId },
     ReviseMemory { id: aurelius_domain::MemoryId },
-    /// The user's own answer to question `index` of a question in the inbox.
-    /// `in_inbox`: opened from the inbox (else from the question's card in the conversation).
-    QuestionAnswer { approval: ApprovalId, index: usize, in_inbox: bool },
+    /// The user's own answer to question `index` of a pending question.
+    /// `in_decision`: opened from its dialog (else from the question's card in the conversation).
+    QuestionAnswer { approval: ApprovalId, index: usize, in_decision: bool },
     /// Approve an instruction proposal with the user's edits (feature `instruction_proposals`).
     EditProposal { proposal: aurelius_domain::ProposalId },
 }
@@ -528,7 +414,7 @@ pub enum PlanStatus {
     Expired,
 }
 
-/// One of Claude's questions (AskUserQuestion), as shown in the inbox.
+/// One of Claude's questions (AskUserQuestion), as shown on its card.
 #[derive(Clone, Debug)]
 pub struct Question {
     pub text: String,
@@ -727,7 +613,7 @@ pub enum ConfirmKind {
     RestartServer,
     /// Shut down the PC that runs the connected server, after a short countdown.
     ShutdownNow,
-    /// Clear every result (inbox notification); approvals stay.
+    /// Clear every result and update (notifications); approvals stay.
     ClearResults,
     /// End a session (MU3-04): its device, and whose list it is in (none: the own).
     RevokeSession(aurelius_domain::SessionId, Option<aurelius_domain::UserId>),
@@ -793,6 +679,18 @@ pub enum Overlay {
     SignedOut,
     /// A guideline dialog: Links, Add starter set, Reject with a note, a confirmation.
     Guidelines,
+    /// The bell's popout (`screens/notifications.rs`).
+    Notifications,
+    /// Something to decide on, in a dialog: what has no conversation of its own to show it.
+    Decision(Decision),
+}
+
+/// What the decision dialog is about.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Decision {
+    Approval(ApprovalId),
+    Proposal(aurelius_domain::ProposalId),
+    Guideline(aurelius_domain::GuidelineProposalId),
 }
 
 /// What a menu entry does: dispatch an action (same as its shortcut) or call
@@ -992,7 +890,7 @@ pub struct AppView {
     pub pending_files: Vec<(std::path::PathBuf, u64)>,
     /// Feedback on the plan in the drawer.
     pub plan_input: Entity<InputState>,
-    /// The plan in the drawer as it was when opened (it may leave the inbox while open).
+    /// The plan in the drawer as it was when opened (it may be decided elsewhere while open).
     pub plan_snapshot: Option<ApprovalView>,
     /// Inline comments on the plan in review: quoted fragment + comment. Cleared after a decision.
     pub plan_comments: Vec<PlanComment>,
@@ -1075,23 +973,15 @@ pub struct AppView {
     /// Agent functions, their calls and API keys.
     /// 0 = connections, 1 = folders
     pub settings_tab: usize,
-    pub inbox_selected: usize,
-    pub inbox_tab: InboxTab,
-    /// Answers being composed in the inbox, per (question approval, question):
+    /// The bell: its popout and toasts.
+    pub bell: crate::screens::notifications::Bell,
+    /// Answers being composed, per (question approval, question):
     /// chosen option indices, or the user's own text.
     pub question_choices: HashMap<(ApprovalId, usize), Vec<usize>>,
     pub question_own: HashMap<(ApprovalId, usize), String>,
     /// The question that 1–4 answer.
     pub question_focus: usize,
     pub notifications: Option<NotificationsSnapshot>,
-    /// Notifications that were unread when the inbox opened (shown as new).
-    pub inbox_new: Vec<String>,
-    /// Rows of the personal Inbox opened here, with their `created_at_ms` then: read until
-    /// their next event. A row opened here is also read on the server (`notification.mark_read`,
-    /// freeze §2); this map keeps it read at once and while an older server cannot.
-    pub inbox_opened: HashMap<String, i64>,
-    /// The ticket of the selected row whose followers were asked for.
-    pub inbox_followers_asked: Option<aurelius_domain::TicketId>,
     /// Memory of the open project (B17).
     pub memory: Option<(ProjectId, Vec<aurelius_protocol::MemoryView>)>,
     memory_requested: Option<ProjectId>,
@@ -1385,7 +1275,7 @@ pub struct AppView {
     pub dismissed_replies: std::collections::HashSet<MessageId>,
     /// Approvals whose command, content or change the user unfolded in full.
     pub approval_full: std::collections::HashSet<ApprovalId>,
-    /// Approvals whose raw details the user unfolded in the inbox.
+    /// Approvals whose raw details the user unfolded.
     pub approval_raw: std::collections::HashSet<ApprovalId>,
     open_created: bool,
     /// This window shows only this project (opened with 'Open in new window'); `None`: the main window.
@@ -1646,15 +1536,11 @@ impl AppView {
             load_error: None,
             load_form,
             settings_tab: 1,
-            inbox_selected: 0,
-            inbox_tab: InboxTab::NeedsYou,
+            bell: Default::default(),
             question_choices: HashMap::new(),
             question_own: HashMap::new(),
             question_focus: 0,
             notifications: None,
-            inbox_new: Vec::new(),
-            inbox_opened: HashMap::new(),
-            inbox_followers_asked: None,
             memory: None,
             memory_requested: None,
             ideas: None,
@@ -1970,13 +1856,10 @@ impl AppView {
                 }
             }
             Update::Approvals(approvals) => {
-                let before = self.pending_approvals().count();
+                let before = self.pending_approvals().map(|a| a.id).collect();
                 self.approvals = approvals;
-                let after = self.pending_approvals().count();
-                if after > before {
-                    self.notify_user("An approval is waiting for you. Ctrl I opens the inbox.", false, cx);
-                }
-                self.inbox_selected = self.inbox_selected.min(self.inbox_len().saturating_sub(1));
+                self.announce_approvals(&before, cx);
+                self.after_waiting_changed(cx);
             }
             Update::Info(text) => self.notify_user(text, false, cx),
             Update::TaskAssigned(task_id) => {
@@ -2012,13 +1895,10 @@ impl AppView {
                 }
             }
             Update::Proposals(proposals) => {
-                let before = self.pending_proposals().len();
+                let before = self.pending_proposals().into_iter().map(|p| p.id).collect();
                 self.proposals = proposals;
-                let after = self.pending_proposals().len();
-                if after > before {
-                    self.notify_user("An employee proposed a colleague. Ctrl I opens the inbox.", false, cx);
-                }
-                self.inbox_selected = self.inbox_selected.min(self.inbox_len().saturating_sub(1));
+                self.announce_proposals(&before, cx);
+                self.after_waiting_changed(cx);
             }
             Update::Schedules(schedules) => {
                 self.schedules = schedules;
@@ -2026,18 +1906,15 @@ impl AppView {
                 cx.notify();
             }
             Update::Notifications(snapshot) => {
-                let before = self.notifications.as_ref().map(|n| n.unread);
-                if let (Some(before), Some(newest)) = (before, snapshot.notifications.first()) {
-                    if snapshot.unread > before && !newest.read {
-                        let subject = if newest.subject.is_empty() { String::new() } else { format!(": {}", newest.subject) };
-                        self.notify_user(format!("{}{subject} · Ctrl I opens the inbox", newest.title), false, cx);
-                    }
-                }
-                self.inbox_opened.retain(|id, _| snapshot.notifications.iter().any(|n| n.id == *id && !n.read));
+                let before = self.notifications.take();
                 self.notifications = Some(snapshot);
+                let after = self.notifications.as_ref().map(|n| n.notifications.clone()).unwrap_or_default();
+                self.announce_notes(before.as_ref().map(|n| n.notifications.as_slice()), &after, cx);
+                self.bell.opened.retain(|id, _| after.iter().any(|n| n.id == *id && !n.read));
+                self.after_waiting_changed(cx);
             }
             Update::RowReadFailed(id, message) => {
-                self.inbox_opened.remove(&id);
+                self.bell.opened.remove(&id);
                 self.notify_user(format!("Couldn't mark this row read: {message}"), true, cx);
             }
             Update::Ideas(scope, items) => {
@@ -2453,6 +2330,7 @@ impl AppView {
         self.remote = None;
         self.pairing = None;
         self.notifications = None;
+        self.bell = Default::default();
         self.memory = None;
         self.memory_requested = None;
         self.memory_ctx = None;
@@ -3861,21 +3739,6 @@ impl AppView {
         needs_you_of(&self.approvals, &self.tasks, id)
     }
 
-    fn open_inbox(&mut self, _: &OpenInbox, window: &mut Window, cx: &mut Context<Self>) {
-        self.close_overlay();
-        self.navigate(Page::Inbox);
-        // Open on what needs you; with nothing waiting, on the results.
-        let unread_updates = self.inbox_notifications().iter().filter(|n| note_kind(n) == NoteKind::Update && crate::screens::updates::row_unread(n, &self.inbox_opened)).count();
-        self.inbox_tab = first_inbox_tab(self.inbox_counts()[0], unread_updates, self.personal_inbox_supported());
-        self.inbox_selected = 0;
-        self.inbox_new = self.inbox_notifications().iter().filter(|n| !n.read && note_kind(n) != NoteKind::Update).map(|n| n.id.clone()).collect();
-        if opening_marks_all_read(&self.inbox_notifications(), &self.inbox_opened) {
-            let _ = self.requests.send(backend::Request::MarkNotificationsRead);
-        }
-        self.focus.focus(window, cx);
-        cx.notify();
-    }
-
     /// Settings (Ctrl+, , Ctrl+9 and the app menu): one entry, five sections.
     pub fn open_settings(&mut self, _: &OpenSettings, window: &mut Window, cx: &mut Context<Self>) {
         self.open_settings_page(window, cx);
@@ -4323,9 +4186,9 @@ impl AppView {
         cx.notify();
     }
 
-    /// The selected inbox item, when it is one of Claude's questions.
+    /// What the open decision dialog is about, when it is one of Claude's questions.
     pub fn selected_question(&self) -> Option<(ApprovalView, Vec<Question>)> {
-        let a = self.inbox_approval()?.clone();
+        let a = self.decision_approval()?.clone();
         (a.tool == QUESTION_TOOL).then(|| {
             let questions = questions_of(&a);
             (a, questions)
@@ -4352,7 +4215,7 @@ impl AppView {
             .collect()
     }
 
-    /// 1–4 in the inbox: choose (or, for multi-select, toggle) an option of the focused question.
+    /// 1–4 in the dialog: choose (or, for multi-select, toggle) an option of the focused question.
     pub fn choose_option(&mut self, n: usize, cx: &mut Context<Self>) {
         let Some((a, questions)) = self.selected_question() else { return };
         let i = self.question_focus.min(questions.len().saturating_sub(1));
@@ -4367,7 +4230,7 @@ impl AppView {
     }
 
     /// Choose (or, for multi-select, toggle) option `n` of question `index` of a pending
-    /// question: from the inbox or from its card in the conversation.
+    /// question: from its dialog or from its card in the conversation.
     pub fn choose_option_for(&mut self, approval: ApprovalId, index: usize, n: usize, cx: &mut Context<Self>) {
         let Some(a) = self.pending_approvals().find(|a| a.id == approval) else { return };
         let questions = questions_of(a);
@@ -4399,16 +4262,19 @@ impl AppView {
         true
     }
 
-    /// Answer question `index` in your own words, in a dialog over the inbox or the conversation.
-    pub fn open_own_answer(&mut self, approval: ApprovalId, index: usize, in_inbox: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Answer question `index` in your own words, in a dialog over the decision or the conversation.
+    pub fn open_own_answer(&mut self, approval: ApprovalId, index: usize, in_decision: bool, window: &mut Window, cx: &mut Context<Self>) {
         let current = self.question_own.get(&(approval, index)).cloned().unwrap_or_default();
-        self.open_dialog(DialogKind::QuestionAnswer { approval, index, in_inbox }, window, cx);
+        self.open_dialog(DialogKind::QuestionAnswer { approval, index, in_decision }, window, cx);
         self.name_input.update(cx, |input, cx| input.set_value(current, window, cx));
     }
 
-    fn close_own_answer(&mut self, in_inbox: bool, window: &mut Window, cx: &mut Context<Self>) {
-        // The inbox is a page now: closing the answer returns to whatever page is open.
-        let _ = in_inbox;
+    /// Back from your own answer: to the decision dialog it came from, else to the page.
+    fn close_own_answer(&mut self, approval: ApprovalId, in_decision: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if in_decision && self.pending_approvals().any(|a| a.id == approval) {
+            self.open_decision(Decision::Approval(approval), window, cx);
+            return;
+        }
         self.overlay = Overlay::None;
         self.focus.focus(window, cx);
         cx.notify();
@@ -4433,49 +4299,36 @@ impl AppView {
         }
     }
 
+    /// Ctrl+Enter and Reject in the decision dialog.
     fn decide_selected(&mut self, approve: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some((a, _)) = self.selected_question().filter(|_| approve) {
-            if self.send_answers(a.id) {
-                self.question_focus = 0;
-                if self.pending_approvals().count() <= 1 {
-                    self.overlay = Overlay::None;
-                    self.focus.focus(window, cx);
-                }
-            } else {
+        let Overlay::Decision(decision) = self.overlay else { return };
+        match decision {
+            Decision::Proposal(id) => self.decide_proposal(id, approve, cx),
+            // Approve when the card allows it; Reject asks for a note.
+            Decision::Guideline(id) => self.guideline_decide_selected(id, approve, window, cx),
+            Decision::Approval(_) => self.decide_approval_selected(approve, window, cx),
+        }
+    }
+
+    fn decide_approval_selected(&mut self, approve: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(a) = self.decision_approval().cloned() else { return };
+        if a.tool == QUESTION_TOOL {
+            if !approve {
+                let _ = self.requests.send(backend::Request::DecideApproval { approval_id: a.id, action_digest: a.action_digest, approve, always_allow: false });
+            } else if !self.send_answers(a.id) {
                 self.notify_user("Answer every question first (1–4, or T for your own answer), or skip with Ctrl+Backspace.", true, cx);
+                return;
             }
-            cx.notify();
-            return;
-        }
-        // A colleague a manager proposed: Approve / Decline.
-        if let Some(proposal) = self.inbox_proposal().cloned() {
-            self.decide_proposal(proposal.id, approve, cx);
-            return;
-        }
-        // A guideline an employee proposed: Approve when the card allows it; Reject asks for a note.
-        if let Some(id) = self.inbox_guideline_proposal().map(|p| p.id) {
-            self.guideline_decide_selected(id, approve, window, cx);
-            return;
-        }
-        let plan = self.inbox_approval().filter(|a| a.tool == PLAN_TOOL).cloned();
-        if let Some(plan) = plan {
+        } else if a.tool == PLAN_TOOL {
             // A plan is read first; approving, changes and rejecting happen in its drawer.
-            self.open_plan_approval(plan, window, cx);
+            self.open_plan_approval(a, window, cx);
             return;
+        } else {
+            let _ = self.requests.send(backend::Request::DecideApproval { approval_id: a.id, action_digest: a.action_digest, approve, always_allow: false });
         }
-        let Some(a) = self.inbox_approval().cloned() else {
-            if approve {
-                self.open_inbox_notification(window, cx);
-            } else {
-                self.notify_user("No pending approval selected.", false, cx);
-            }
-            return;
-        };
-        let _ = self.requests.send(backend::Request::DecideApproval { approval_id: a.id, action_digest: a.action_digest, approve, always_allow: false });
-        if self.pending_approvals().count() <= 1 {
-            self.overlay = Overlay::None;
-            self.focus.focus(window, cx);
-        }
+        self.question_focus = 0;
+        self.overlay = Overlay::None;
+        self.focus.focus(window, cx);
         cx.notify();
     }
 
@@ -4626,25 +4479,6 @@ impl AppView {
     /// Decide one pending approval straight from the chat that triggered it.
     pub fn decide_approval(&mut self, approval_id: ApprovalId, action_digest: String, approve: bool, cx: &mut Context<Self>) {
         let _ = self.requests.send(backend::Request::DecideApproval { approval_id, action_digest, approve, always_allow: false });
-        cx.notify();
-    }
-
-    /// Open what the selected inbox notification is about (its task).
-    fn open_inbox_notification(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(row) = self.inbox_note().filter(|n| note_kind(n) == NoteKind::Update).cloned() {
-            self.open_update_row(&row, window, cx);
-            return;
-        }
-        let target = self.inbox_note().and_then(|n| n.task_id);
-        let Some(task) = target.and_then(|id| self.tasks.iter().find(|t| t.id == id)).cloned() else {
-            self.notify_user("This notification has no task to open.", false, cx);
-            return;
-        };
-        self.overlay = Overlay::None;
-        self.task_filter = if !crate::ui::is_active(&task) { 2 } else if task.status == aurelius_domain::task::TaskStatus::Waiting { 1 } else { 0 };
-        self.navigate(Page::Project(ProjectRef::Real(task.project_id), Tab::Tasks));
-        self.selected = self.real_tasks(task.project_id).iter().position(|t| t.id == task.id).unwrap_or(0);
-        self.focus.focus(window, cx);
         cx.notify();
     }
 
@@ -5018,7 +4852,7 @@ impl AppView {
             entry("Add employee…", "secondary-shift-m", || Box::new(AddEmployee)),
             entry("Search and commands…", "secondary-k", || Box::new(OpenPalette)),
             None,
-            entry("Inbox", "secondary-i", || Box::new(OpenInbox)),
+            entry("Notifications", "secondary-i", || Box::new(OpenNotifications)),
             entry("Memory…", "", || Box::new(OpenMemory)),
             entry("Usage", "secondary-u", || Box::new(OpenUsage)),
             None,
@@ -5640,47 +5474,19 @@ impl AppView {
         }
     }
 
-    /// Inbox entries: pending approvals first, then notifications.
-    pub fn inbox_notifications(&self) -> Vec<&NotificationView> {
+    /// Every notification as the server sent it.
+    pub fn all_notifications(&self) -> Vec<&NotificationView> {
         self.notifications.as_ref().map(|n| n.notifications.iter().collect()).unwrap_or_default()
     }
 
-    /// Items per inbox tab, in `InboxTab::ALL` order.
-    pub fn inbox_counts(&self) -> [usize; 5] {
-        tab_counts(self.inbox_waiting_head(), &self.inbox_notifications(), |n| self.note_is_mine(n))
-    }
-
     /// The approvals and proposals: they count for everyone.
-    pub fn inbox_waiting_head(&self) -> usize {
+    pub fn waiting_head(&self) -> usize {
         self.pending_approvals().count() + self.pending_proposals().len() + self.pending_guideline_proposals().len()
     }
 
     /// Whether a notification of a task counts for this board member (freeze §5).
     pub fn note_is_mine(&self, n: &NotificationView) -> bool {
         n.task_id.and_then(|id| self.tasks.iter().find(|t| t.id == id)).is_none_or(|t| self.task_counts_for_me(t))
-    }
-
-    /// The notifications the open tab lists, after its approvals and proposals.
-    pub fn inbox_notes(&self) -> Vec<&NotificationView> {
-        tab_notes(self.inbox_tab, &self.inbox_notifications(), |n| self.note_is_mine(n))
-    }
-
-    pub fn inbox_len(&self) -> usize {
-        self.inbox_head() + self.inbox_notes().len()
-    }
-
-    /// The selected inbox item, when it is a pending approval.
-    pub fn inbox_approval(&self) -> Option<&ApprovalView> {
-        self.inbox_tab.shows_head().then(|| self.pending_approvals().nth(self.inbox_selected)).flatten()
-    }
-
-    pub fn inbox_proposal(&self) -> Option<&aurelius_protocol::ProposalView> {
-        let i = self.inbox_selected.checked_sub(self.pending_approvals().count()).filter(|_| self.inbox_tab.shows_head())?;
-        self.pending_proposals().get(i).copied()
-    }
-
-    pub fn inbox_note(&self) -> Option<&NotificationView> {
-        self.inbox_notes().get(self.inbox_selected.checked_sub(self.inbox_head())?).copied()
     }
 
     // ── Navigation ──────────────────────────────────────────────────────
@@ -5846,10 +5652,6 @@ impl AppView {
             let pages = crate::screens::my_tickets::BoardPage::ALL;
             let at = pages.iter().position(|p| *p == self.board_page).unwrap_or(0) as isize;
             self.set_board_page(pages[(at + delta).rem_euclid(pages.len() as isize) as usize], cx);
-        } else if self.screen == Page::Inbox {
-            let tabs = InboxTab::shown(self.personal_inbox_supported());
-            let at = tabs.iter().position(|t| *t == self.inbox_tab).unwrap_or(0) as isize;
-            self.set_inbox_tab(tabs[(at + delta).rem_euclid(tabs.len() as isize) as usize], cx);
         }
     }
 
@@ -5871,13 +5673,6 @@ impl AppView {
         cx.notify();
     }
 
-    pub fn set_inbox_tab(&mut self, tab: InboxTab, cx: &mut Context<Self>) {
-        self.inbox_tab = tab;
-        self.inbox_selected = 0;
-        self.question_focus = 0;
-        cx.notify();
-    }
-
     // ── Action handlers ─────────────────────────────────────────────────
 
     fn on_open_palette(&mut self, _: &OpenPalette, window: &mut Window, cx: &mut Context<Self>) {
@@ -5891,10 +5686,9 @@ impl AppView {
     }
 
     /// A sidebar entry (or its Ctrl+digit): its page, through normal navigation (Back works).
-    /// Inbox and Settings open over the page. Employees and Projects keep the tab they were on.
+    /// Settings opens over the page. Employees and Projects keep the tab they were on.
     pub fn go_nav(&mut self, item: NavItem, window: &mut Window, cx: &mut Context<Self>) {
         let page = match item {
-            NavItem::Inbox => return self.open_inbox(&OpenInbox, window, cx),
             NavItem::Settings => return self.open_settings(&OpenSettings, window, cx),
             NavItem::Dashboard => Page::Dashboard,
             NavItem::Board => {
@@ -6343,15 +6137,15 @@ impl AppView {
     pub fn confirm_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Overlay::Dialog(kind) = self.overlay else { return };
         let name = self.name_input.read(cx).value().trim().to_string();
-        if let DialogKind::QuestionAnswer { approval, index, in_inbox } = kind {
-            // Your own words replace the options; back to the inbox or the conversation to send.
+        if let DialogKind::QuestionAnswer { approval, index, in_decision } = kind {
+            // Your own words replace the options; back to the decision or the conversation to send.
             if name.is_empty() {
                 self.question_own.remove(&(approval, index));
             } else {
                 self.question_choices.remove(&(approval, index));
                 self.question_own.insert((approval, index), name);
             }
-            self.close_own_answer(in_inbox, window, cx);
+            self.close_own_answer(approval, in_decision, window, cx);
             return;
         }
         if let DialogKind::EditProposal { proposal } = kind {
@@ -6552,13 +6346,13 @@ impl AppView {
     }
 
     fn on_confirm_primary(&mut self, _: &ConfirmPrimary, window: &mut Window, cx: &mut Context<Self>) {
-        if self.overlay == Overlay::None && !matches!(self.screen, Page::Inbox | Page::Settings) && self.send_first_quick_reply(window, cx) {
+        if self.overlay == Overlay::None && self.screen != Page::Settings && self.send_first_quick_reply(window, cx) {
             return;
         }
         match self.overlay {
             Overlay::Dialog(_) => self.confirm_dialog(window, cx),
             Overlay::Guidelines => self.guideline_dialog_primary(window, cx),
-            Overlay::None if self.screen == Page::Inbox => self.decide_selected(true, window, cx),
+            Overlay::Decision(_) => self.decide_selected(true, window, cx),
             Overlay::PlanApproval(_) => self.decide_plan(aurelius_domain::approval::PlanDecision::Approve, window, cx),
             Overlay::None if self.screen == Page::Settings && self.adding_server => self.servers_submit(window, cx),
             Overlay::None if self.screen == Page::Settings && self.server_name.editing => self.server_name_save(cx),
@@ -6623,13 +6417,13 @@ impl AppView {
                         // Optimistic: empty the list now; the backend then reloads the real one.
                         // Only results: what needs you, and the hidden alerts of approvals, stay.
                         let result = |n: &NotificationView| matches!(note_kind(n), NoteKind::Result | NoteKind::Failed | NoteKind::Update);
-                        let ids: Vec<String> = self.inbox_notifications().into_iter().filter(|n| result(n)).map(|n| n.id.clone()).collect();
+                        let ids: Vec<String> = self.all_notifications().into_iter().filter(|n| result(n)).map(|n| n.id.clone()).collect();
                         if let Some(n) = self.notifications.as_mut() {
                             n.notifications.retain(|n| !result(n));
                             n.unread = n.notifications.iter().filter(|n| !n.read).count() as _;
                         }
-                        self.inbox_new.clear();
-                        self.inbox_selected = 0;
+                        self.bell.new.clear();
+                        self.bell.selected = 0;
                         let _ = self.requests.send(backend::Request::ClearResults(ids));
                         self.overlay = Overlay::None;
                         self.focus.focus(window, cx);
@@ -6850,8 +6644,8 @@ impl AppView {
             cx.notify();
             return;
         }
-        if let Overlay::Dialog(DialogKind::QuestionAnswer { in_inbox, .. }) = self.overlay {
-            self.close_own_answer(in_inbox, window, cx);
+        if let Overlay::Dialog(DialogKind::QuestionAnswer { approval, in_decision, .. }) = self.overlay {
+            self.close_own_answer(approval, in_decision, window, cx);
         } else if self.overlay != Overlay::None {
             self.overlay = Overlay::None;
         } else if !self.focus.is_focused(window) {
@@ -6929,10 +6723,8 @@ impl AppView {
     }
 
     fn on_open_selected(&mut self, _: &OpenSelected, window: &mut Window, cx: &mut Context<Self>) {
-        if self.overlay == Overlay::None && self.screen == Page::Inbox {
-            if self.inbox_note().is_some() {
-                self.open_inbox_notification(window, cx);
-            }
+        if self.overlay == Overlay::Notifications {
+            self.open_selected_notification(window, cx);
             return;
         }
         match self.screen {
@@ -7513,7 +7305,7 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &FolderTypePath, w, cx| this.folder_type_path(w, cx)))
             .on_action(cx.listener(|this, _: &FolderSystemDialog, w, cx| this.folder_system_dialog(w, cx)))
             .on_action(cx.listener(Self::on_cancel_task))
-            .on_action(cx.listener(Self::open_inbox))
+            .on_action(cx.listener(Self::toggle_notifications))
             .on_action(cx.listener(Self::on_accept_memory))
             .on_action(cx.listener(Self::on_cycle_agent_mode))
             .on_action(cx.listener(Self::on_cycle_heartbeat))
@@ -7603,17 +7395,18 @@ impl Render for AppView {
             .on_action(cx.listener(|this, _: &QuestionOption4, _, cx| this.choose_option(3, cx)))
             .on_action(cx.listener(Self::on_question_next))
             .on_action(cx.listener(Self::on_question_own))
-            .on_action(cx.listener(|this, _: &InboxUp, _, cx| {
-                if this.screen == Page::Settings {
+            .on_action(cx.listener(|this, _: &ListUp, _, cx| {
+                if this.overlay == Overlay::Notifications {
+                    this.notification_move(-1, cx);
+                } else if this.screen == Page::Settings {
                     this.settings_selected = this.settings_selected.saturating_sub(1);
-                } else {
-                    this.inbox_selected = this.inbox_selected.saturating_sub(1);
-                    this.question_focus = 0;
                 }
                 cx.notify();
             }))
-            .on_action(cx.listener(|this, _: &InboxDown, _, cx| {
-                if this.screen == Page::Settings {
+            .on_action(cx.listener(|this, _: &ListDown, _, cx| {
+                if this.overlay == Overlay::Notifications {
+                    this.notification_move(1, cx);
+                } else if this.screen == Page::Settings {
                     let max = if this.settings_tab == crate::screens::remote::REMOTE_TAB {
                         this.remote.as_ref().map_or(0, |r| r.clients.len().saturating_sub(1))
                     } else if this.settings_tab == crate::screens::servers::SERVERS_TAB {
@@ -7624,10 +7417,6 @@ impl Render for AppView {
                         this.connections.as_ref().map_or(0, |c| c.connections.len().saturating_sub(1))
                     };
                     this.settings_selected = (this.settings_selected + 1).min(max);
-                } else {
-                    let max = this.inbox_len().saturating_sub(1);
-                    this.inbox_selected = (this.inbox_selected + 1).min(max);
-                    this.question_focus = 0;
                 }
                 cx.notify();
             }))
@@ -7694,6 +7483,7 @@ impl Render for AppView {
             .child(body)
             .child(self.render_status_bar(cx))
             .when(self.overlay != Overlay::None || self.project_settings.is_some() || self.board.dialog.is_some(), |el| el.child(self.render_overlay(window, cx)))
+            .children(self.render_toasts(cx))
             .when_some(self.hovered_link.clone(), |el, url| {
                 el.child(
                     div().absolute().left_0().bottom_0().max_w(relative(0.6)).h(px(26.)).flex().items_center().px(px(10.))
@@ -7796,6 +7586,7 @@ impl AppView {
                                 .child(label),
                         )
                     })
+                    .child(self.render_bell(cx))
                     .child({
                         let today = self.usage.as_ref().and_then(|u| u.windows.first()).map_or(0, |w| w.input_tokens + w.output_tokens);
                         // Prefer the subscription's session limit; fall back to today's tokens.
@@ -7902,9 +7693,6 @@ impl AppView {
                         0,
                     ),
                 )
-            })
-            .when(self.inbox_count() > 0, |el| {
-                el.child(h().gap(px(6.)).text_color(c(theme::ACCENT_TEXT)).child(ui::diamond(8., theme::ACCENT_TEXT, false)).child(ui::hint("status-inbox", "secondary-i", format!("{} waiting for you", self.inbox_count()), || Box::new(OpenInbox), cx).text_color(c(theme::ACCENT_TEXT))))
             })
             .child(div().flex_none().child(crate::screens::projects::clock(ui::now_ms())))
     }
@@ -8030,7 +7818,7 @@ mod tests {
     fn the_sidebar_lists_six_pages_and_settings_keeps_its_shortcut() {
         use super::{EmployeesTab, NavItem, Page, ProjectRef, ProjectsTab, Tab};
         let labels: Vec<&str> = NavItem::ALL.iter().map(|n| n.label()).collect();
-        assert_eq!(labels, ["Dashboard", "Board", "Team chat", "Inbox", "Tasks", "Employees", "Projects", "Vault", "Settings"]);
+        assert_eq!(labels, ["Dashboard", "Board", "Team chat", "Tasks", "Employees", "Projects", "Vault", "Settings"]);
         // Every entry's shortcut is bound in the shortcut table; Settings keeps Ctrl+9.
         for nav in NavItem::ALL {
             assert!(crate::keymap::SHORTCUTS.iter().any(|s| s.keys.contains(&nav.keys())), "{} has its shortcut", nav.label());
@@ -8046,7 +7834,6 @@ mod tests {
         assert_eq!(crate::keymap::SHORTCUTS.iter().filter(|s| s.keys.contains(&"secondary-5")).count(), 1, "only the board");
         assert_eq!(NavItem::of(Page::Board), NavItem::Board);
         assert_eq!(NavItem::of(Page::Project(ProjectRef::Sample(0), Tab::Tasks)), NavItem::Projects);
-        assert_eq!(NavItem::of(Page::Inbox), NavItem::Inbox, "the inbox is a page, not a dialog");
         assert_eq!(NavItem::of(Page::Settings), NavItem::Settings);
         assert_eq!(EmployeesTab::ALL.map(|t| t.label()), ["List", "Org chart", "Guidelines"]);
         assert_eq!(ProjectsTab::ALL.map(|t| t.label()), ["Projects", "Ideas"]);
@@ -8087,104 +7874,16 @@ mod tests {
     }
 
     #[test]
-    fn inbox_tabs_filter_and_count_what_they_show() {
-        use super::{InboxTab, NoteKind, note_kind, tab_counts, tab_notes};
-        let note = |id: &str, severity: &str, target: &str| NotificationView {
-            ticket_id: None, ticket_number: None, conversation_id: None, message_id: None, reason: None, merged_count: 0, needs_you: false,
-            id: id.into(),
-            severity: severity.into(),
-            title: String::new(),
-            subject: String::new(),
-            created_at_ms: 0,
-            read: false,
-            task_id: None,
-            target_type: target.into(),
-        };
-        let notes = [
-            note("ok", "info", "task.succeeded"),
-            note("approval", "action", "approval.requested"),
-            note("failed", "warning", "task.failed"),
-            note("escalated", "action", "task.waiting"),
-            note("proposal", "action", "employee.proposed"),
-            note("sign-in", "warning", "connection.changed"),
-            note("guideline", "action", "guideline.proposed"),
-        ];
-        let refs: Vec<&NotificationView> = notes.iter().collect();
-        assert_eq!(note_kind(&notes[1]), NoteKind::Hidden, "the approval itself is listed, not its alert");
-        assert_eq!(note_kind(&notes[6]), NoteKind::Hidden, "a guideline's proposal is its own row, not also its alert");
-        let ids = |tab| tab_notes(tab, &refs, |_| true).iter().map(|n| n.id.as_str()).collect::<Vec<_>>();
-        assert_eq!(ids(InboxTab::NeedsYou), ["escalated"]);
-        assert_eq!(ids(InboxTab::Results), ["ok", "failed", "sign-in"]);
-        assert_eq!(ids(InboxTab::Failed), ["failed"]);
-        assert_eq!(ids(InboxTab::All), ["escalated", "ok", "failed", "sign-in"], "what needs you comes first");
-        // Two approvals or proposals waiting; hidden alerts count nowhere.
-        assert_eq!(tab_counts(2, &refs, |_| true), [3, 0, 3, 1, 6]);
-        assert_eq!(tab_counts(0, &[], |_| true), [0, 0, 0, 0, 0]);
-    }
-
-    #[test]
-    fn without_the_personal_inbox_the_tabs_and_the_badge_are_as_before() {
-        use super::{InboxTab, first_inbox_tab, inbox_badge, opening_marks_all_read};
+    fn a_notification_kind_follows_what_it_is_about() {
+        use super::{NoteKind, note_kind};
         use crate::screens::updates::tests::row;
-        assert_eq!(InboxTab::shown(false), [InboxTab::NeedsYou, InboxTab::Results, InboxTab::Failed, InboxTab::All]);
-        assert_eq!(InboxTab::shown(true), InboxTab::ALL);
-        assert_eq!(first_inbox_tab(1, 0, false), InboxTab::NeedsYou);
-        assert_eq!(first_inbox_tab(0, 0, false), InboxTab::Results);
-        let result = NotificationView { reason: None, target_type: "task.succeeded".into(), ..row("ok", None) };
-        let failed = NotificationView { reason: None, severity: "warning".into(), target_type: "task.failed".into(), ..row("failed", None) };
-        let refs = [&result, &failed];
-        let none = std::collections::HashMap::new();
-        assert_eq!(inbox_badge(2, &refs, |_| true, &none), 3, "what waits, and the unread failure; a result does not count");
-        assert!(opening_marks_all_read(&refs, &none), "seeing the list reads it, as ever");
-    }
-
-    #[test]
-    fn a_row_with_a_reason_is_on_updates_and_all_with_a_mark_also_on_needs_you_never_twice() {
-        use super::{InboxTab, NoteKind, first_inbox_tab, inbox_badge, note_kind, opening_marks_all_read, tab_counts, tab_notes};
-        use crate::screens::updates::tests::row;
-        let review = NotificationView { needs_you: true, ..row("review", Some("review")) };
-        let mention = row("mention", Some("mention"));
-        let failed = NotificationView { severity: "warning".into(), ..row("failed", Some("failed")) };
-        let unknown = row("unknown", Some("something_new"));
-        let result = NotificationView { reason: None, target_type: "task.succeeded".into(), ..row("ok", None) };
-        let refs = [&mention, &review, &failed, &unknown, &result];
-        assert_eq!(note_kind(&unknown), NoteKind::Update);
-        let ids = |tab| tab_notes(tab, &refs, |_| true).iter().map(|n| n.id.as_str()).collect::<Vec<_>>();
-        assert_eq!(ids(InboxTab::NeedsYou), ["review"]);
-        assert_eq!(ids(InboxTab::Updates), ["review", "mention", "failed", "unknown"], "◆ first, then as the server sends them");
-        assert_eq!(ids(InboxTab::Results), ["ok"]);
-        assert_eq!(ids(InboxTab::Failed), ["failed"]);
-        assert_eq!(ids(InboxTab::All), ["review", "mention", "failed", "unknown", "ok"]);
-        assert_eq!(tab_counts(1, &refs, |_| true), [2, 4, 1, 1, 6]);
-        // ◆ once, the three other unread rows; a row opened here no longer counts.
-        let mut opened = std::collections::HashMap::new();
-        assert_eq!(inbox_badge(1, &refs, |_| true, &opened), 1 + 1 + 3);
-        opened.insert("mention".to_string(), mention.created_at_ms);
-        assert_eq!(inbox_badge(1, &refs, |_| true, &opened), 1 + 1 + 2);
-        // A login row: from the server, not subject to the rule of the local list.
-        let login = NotificationView { severity: "action".into(), needs_you: true, target_type: "connection.changed".into(), ..row("login", Some("login")) };
-        assert_eq!(tab_notes(InboxTab::NeedsYou, &[&login], |_| false).len(), 1);
-        // Seeing the tab does not read a row (§4.4); with no unread row left the old rule holds.
-        assert!(!opening_marks_all_read(&refs, &opened));
-        let quiet = NotificationView { read: true, ..mention.clone() };
-        assert!(opening_marks_all_read(&[&quiet, &result], &opened));
-        assert_eq!(first_inbox_tab(0, 2, true), InboxTab::Updates);
-        assert_eq!(first_inbox_tab(1, 2, true), InboxTab::NeedsYou);
-        assert_eq!(first_inbox_tab(0, 0, true), InboxTab::Results);
-    }
-
-    #[test]
-    fn a_waiting_note_of_a_main_task_is_on_needs_you_only_when_it_is_mine() {
-        use super::{InboxTab, inbox_badge, tab_notes};
-        use crate::screens::updates::tests::row;
-        let waiting = NotificationView { reason: None, severity: "action".into(), target_type: "task.waiting".into(), ..row("waiting", None) };
-        let failed = NotificationView { reason: None, severity: "warning".into(), target_type: "task.failed".into(), ..row("failed", None) };
-        let none = std::collections::HashMap::new();
-        assert_eq!(tab_notes(InboxTab::NeedsYou, &[&waiting], |_| false).len(), 0);
-        assert_eq!(tab_notes(InboxTab::NeedsYou, &[&waiting], |_| true).len(), 1);
-        assert_eq!(tab_notes(InboxTab::All, &[&waiting], |_| false).len(), 1, "it stays findable");
-        assert_eq!(inbox_badge(1, &[&waiting, &failed], |_| false, &none), 1, "only the approval counts");
-        assert_eq!(inbox_badge(1, &[&waiting, &failed], |_| true, &none), 3);
+        let note = |severity: &str, target: &str| NotificationView { reason: None, severity: severity.into(), target_type: target.into(), ..row("n", None) };
+        assert_eq!(note_kind(&note("action", "approval.requested")), NoteKind::Hidden, "the approval itself is listed, not its alert");
+        assert_eq!(note_kind(&note("action", "guideline.proposed")), NoteKind::Hidden, "a guideline's proposal is its own row, not also its alert");
+        assert_eq!(note_kind(&note("action", "task.waiting")), NoteKind::NeedsYou);
+        assert_eq!(note_kind(&note("warning", "task.failed")), NoteKind::Failed);
+        assert_eq!(note_kind(&note("info", "task.succeeded")), NoteKind::Result);
+        assert_eq!(note_kind(&row("u", Some("something_new"))), NoteKind::Update, "an unknown reason is still a row");
     }
 
     #[test]

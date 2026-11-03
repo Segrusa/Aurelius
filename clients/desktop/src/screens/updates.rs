@@ -1,27 +1,17 @@
-//! The Inbox's rows per ticket or channel (AUR-FA A3, feature `personal_inbox`; freeze §2 and §4,
+//! The rows per ticket or channel (AUR-FA A3, feature `personal_inbox`; freeze §2 and §4,
 //! ui-ontwerp §4): the heading from the row's `reason`, `+n` for what it merged (it opens the
-//! ticket's Activity, there is no list of events per row), ◆ on `needs_you`, Copy link and
-//! Unfollow. A reason this client does not know is a plain row with the server's sentence.
-//! The rules are pure here; the list itself is in `overlays.rs`.
+//! ticket's Activity, there is no list of events per row), ◆ on `needs_you`.
+//! A reason this client does not know is a plain row with the server's sentence.
+//! The rules are pure here; the list itself is in `notifications.rs`.
 
 use crate::app::{AppView, NavItem};
 use crate::backend::{self, BoardCall};
 use crate::screens::board::TicketTab;
-use crate::screens::links::LinkTarget;
-use crate::screens::who::{self, FollowState};
-use crate::theme::{self, c};
-use crate::ui::{self, ButtonKind, h, v};
-use aurelius_domain::ticket::{FollowerView, TicketView};
-use aurelius_domain::{ConversationId, MessageId, TicketId, UserId};
+use aurelius_domain::{ConversationId, MessageId, TicketId};
 use aurelius_protocol::NotificationView;
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use std::collections::HashMap;
 
-/// What a tab without updates says (§4.6).
-pub const NO_UPDATES: &str = "No updates.";
-/// And why there can be none.
-pub const NO_UPDATES_ABOUT: &str = "You get one when you're made responsible or @mentioned, and when a ticket you follow needs review, is sent back or fails.";
 /// `Mark all read` and `Clear all` are per person (§4.4).
 pub const OTHERS_KEEP_THEIRS: &str = "Others keep theirs.";
 
@@ -64,33 +54,6 @@ pub fn more(n: &NotificationView) -> Option<String> {
     (n.merged_count > 0).then(|| format!("+{}", n.merged_count))
 }
 
-/// The eyebrow of the row's detail: `TICKET · 3 UPDATES`.
-pub fn eyebrow(n: &NotificationView) -> String {
-    let kind = if n.ticket_id.is_some() { "TICKET" } else { "CHANNEL" };
-    match n.merged_count {
-        0 => kind.to_string(),
-        more => format!("{kind} · {} UPDATES", more + 1),
-    }
-}
-
-/// What a screen reader hears (§9).
-pub fn spoken(n: &NotificationView, title: Option<&str>, unread: bool, age: &str) -> String {
-    let mut parts = vec![place(n, title).replacen('#', if n.ticket_number.is_some() { "Ticket " } else { "Channel " }, 1), heading(n)];
-    if n.needs_you {
-        parts.push("needs you".into());
-    }
-    match n.merged_count {
-        0 => {}
-        1 => parts.push("1 more update".into()),
-        more => parts.push(format!("{more} more updates")),
-    }
-    if unread {
-        parts.push("unread".into());
-    }
-    parts.push(age.to_string());
-    parts.join(", ")
-}
-
 /// Where opening a row goes (§4.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowTarget {
@@ -113,23 +76,6 @@ pub fn row_target(n: &NotificationView, locate: bool) -> RowTarget {
         (None, None, Some(conversation)) => RowTarget::Conversation(conversation),
         (None, None, None) => RowTarget::Task,
     }
-}
-
-/// The main button of a row's detail.
-pub fn open_label(n: &NotificationView) -> &'static str {
-    match (n.reason.as_deref(), n.ticket_id, n.message_id) {
-        (Some("review"), Some(_), _) => "Review",
-        (Some("plan_review"), Some(_), _) => "Review plan",
-        (Some("mention"), _, Some(_)) => "Open message",
-        (_, Some(_), _) => "Open ticket",
-        (_, None, _) => "Open channel",
-    }
-}
-
-/// What Copy link on a row copies: the ticket, or outside a ticket the message; a channel row
-/// without a message has no place a link can name.
-pub fn row_link(n: &NotificationView) -> Option<LinkTarget> {
-    n.ticket_id.map(LinkTarget::Ticket).or(n.message_id.map(LinkTarget::Message))
 }
 
 /// Whether a row counts as unread: not read on the server, and not opened here since its last
@@ -163,48 +109,18 @@ pub fn row_mark(n: &NotificationView, unread: bool) -> RowMark {
     }
 }
 
-/// The Unfollow of a row (B10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RowUnfollow {
-    /// A channel's row, a server without following, or the reader does not follow.
-    Hidden,
-    /// The Responsible cannot stop following.
-    Locked,
-    Shown,
-}
-
-/// Unfollow on a row. Until the followers are read it shows: `ticket.follow` is idempotent and
-/// the server refuses it for the Responsible, in words.
-pub fn row_unfollow(n: &NotificationView, supported: bool, ticket: Option<&TicketView>, followers: Option<&[FollowerView]>, me: Option<UserId>) -> RowUnfollow {
-    if !supported || n.ticket_id.is_none() {
-        return RowUnfollow::Hidden;
-    }
-    let locked = ticket.is_some_and(|t| me.is_some() && t.responsible_user_id == me);
-    let listed = followers.map(|list| list.iter().any(|f| Some(f.user_id) == me));
-    match (locked, listed) {
-        (true, _) => RowUnfollow::Locked,
-        (false, Some(false)) => RowUnfollow::Hidden,
-        (false, _) => RowUnfollow::Shown,
-    }
-}
-
 impl AppView {
     /// The personal Inbox is on this server (feature `personal_inbox`).
     pub fn personal_inbox_supported(&self) -> bool {
         matches!(&self.connection, backend::Connection::Online { server, .. } if server.personal_inbox)
     }
 
-    /// The ticket's title as this client knows it.
-    fn row_ticket(&self, n: &NotificationView) -> Option<&TicketView> {
-        n.ticket_id.and_then(|id| self.board.ticket(id))
-    }
-
     /// Read a row: at once here, and for this reader on the server.
     fn read_row(&mut self, n: &NotificationView) {
-        if let Some(id) = read_on_open(n, self.personal_inbox_supported(), &self.inbox_opened) {
+        if let Some(id) = read_on_open(n, self.personal_inbox_supported(), &self.bell.opened) {
             let _ = self.requests.send(backend::Request::MarkRowRead(id));
         }
-        self.inbox_opened.insert(n.id.clone(), n.created_at_ms);
+        self.bell.opened.insert(n.id.clone(), n.created_at_ms);
     }
 
     /// Open a row on the right place; that reads it (§4.4).
@@ -236,133 +152,13 @@ impl AppView {
         self.ticket_tab(tab, cx);
     }
 
-    /// Copy link on a row; a server without links has no such button.
-    pub fn copy_row_link(&mut self, n: &NotificationView, cx: &mut Context<Self>) {
-        match row_link(n) {
-            Some(LinkTarget::Ticket(id)) => self.copy_ticket_link_numbered(id, n.ticket_number.unwrap_or(0), cx),
-            Some(LinkTarget::Message(id)) => self.copy_message_link(id, cx),
-            None => {}
-        }
-    }
-
-    /// Read who follows the selected row's ticket once, so its Unfollow knows.
-    pub fn inbox_ask_followers(&mut self, id: TicketId) {
-        if self.inbox_followers_asked != Some(id) && !self.board.followers.contains_key(&id) {
-            self.inbox_followers_asked = Some(id);
-            self.ticket_read_followers(id);
-        }
-    }
-
-    /// One row of the list: where, then the heading with its `+n`.
-    pub fn update_row(&self, n: &NotificationView, j: usize, index: usize, selected: bool, now: i64, cx: &Context<Self>) -> AnyElement {
-        let unread = row_unread(n, &self.inbox_opened);
-        let title = self.row_ticket(n).map(|t| t.title.as_str());
-        let age = ui::relative_age(n.created_at_ms, now);
-        let mark = match row_mark(n, unread) {
-            RowMark::NeedsYou => ui::diamond(8., theme::ACCENT_TEXT, true).into_any_element(),
-            RowMark::Unread => ui::dot(7., theme::ACCENT).into_any_element(),
-            RowMark::Read => ui::ring(7., theme::MUTED).into_any_element(),
-        };
-        let row = n.clone();
-        let more_button = more(n).map(|text| {
-            let opens = n.ticket_id.is_some();
-            div().id(("inbox-more", j)).flex_none().px(px(4.)).rounded(px(4.)).text_size(px(11.5)).text_color(c(theme::ACCENT_TEXT))
-                .when(opens, |el| {
-                    el.cursor_pointer().hover(|s| s.bg(c(theme::BORDER))).tooltip(ui::tip("Open the Activity", None)).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| {
-                        cx.stop_propagation();
-                        this.open_row_activity(&row, w, cx);
-                    }))
-                })
-                .child(text)
-        });
-        h().id(("inbox-update", j)).gap(px(8.)).items_start().px(px(10.)).py(px(8.)).rounded(px(6.)).cursor_pointer()
-            .aria_label(spoken(n, title, unread, &age))
-            .when(selected, |el| el.bg(c(theme::SURFACE_2)))
-            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.inbox_selected = index;
-                this.question_focus = 0;
-                cx.notify();
-            }))
-            .child(h().w(px(10.)).h(px(18.)).flex_none().justify_center().items_center().child(mark))
-            .child(
-                v().flex_1().min_w_0().gap(px(1.))
-                    .child(h().gap(px(6.))
-                        .child(div().flex_1().min_w_0().truncate().text_size(px(13.)).when(unread, |el| el.font_weight(FontWeight::BOLD)).child(place(n, title)))
-                        .child(div().flex_none().text_size(px(11.)).text_color(c(theme::MUTED)).child(age)))
-                    .child(h().gap(px(4.)).min_w_0()
-                        .child(div().flex_shrink(1.).min_w_0().truncate().text_size(px(12.)).text_color(c(theme::TEXT_2)).child(heading(n)))
-                        .children(more_button)),
-            )
-            .into_any_element()
-    }
-
-    /// The detail of a row: what it is about and who has it; no list of events (freeze §4).
-    pub fn update_detail(&self, n: &NotificationView, now: i64, cx: &Context<Self>) -> AnyElement {
-        let ticket = self.row_ticket(n);
-        let me = self.active_member().map(|u| u.id);
-        let row = n.clone();
-        v().p(px(22.)).gap(px(12.))
-            .child(ui::eyebrow(eyebrow(n)))
-            .child(div().font_family(ui::serif(cx)).text_size(px(21.)).child(place(n, ticket.map(|t| t.title.as_str()))))
-            .children(ticket.map(|t| {
-                let work = who::work_line(t, me, self.login_disabled(t));
-                let responsible = who::responsible_line(t, me);
-                v().gap(px(2.)).text_size(px(12.5)).text_color(c(theme::TEXT_2))
-                    .child(format!("{}{}", work.name, work.tail))
-                    .when(self.ticket_responsible_supported(), |el| el.child(format!("{}{}", responsible.name, responsible.tail)))
-            }))
-            .child(h().gap(px(8.)).items_center().text_size(px(14.))
-                .when(n.needs_you, |el| el.child(ui::diamond(9., theme::ACCENT_TEXT, true)))
-                .child(heading(n))
-                .child(div().text_size(px(11.5)).text_color(c(theme::MUTED)).child(ui::relative_age(n.created_at_ms, now))))
-            .children(more(n).filter(|_| n.ticket_id.is_some()).map(|text| {
-                div().id("inbox-detail-more").text_size(px(12.5)).text_color(c(theme::ACCENT_TEXT)).cursor_pointer()
-                    .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_row_activity(&row, w, cx)))
-                    .child(format!("{text} more in the Activity"))
-            }))
-            .into_any_element()
-    }
-
-    /// The bar under a row's detail: Copy link, Unfollow, Read, and the main button.
-    pub fn update_actions(&self, n: &NotificationView, cx: &Context<Self>) -> Vec<AnyElement> {
-        let mut out = Vec::new();
-        if self.message_locate_supported() && row_link(n).is_some() {
-            let row = n.clone();
-            out.push(ui::button("inbox-copy-link", "Copy link", ButtonKind::Outline, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.copy_row_link(&row, cx))).into_any_element());
-        }
-        let ticket = self.row_ticket(n);
-        let followers = n.ticket_id.and_then(|id| self.board.followers.get(&id)).and_then(|r| r.as_ref().ok()).map(Vec::as_slice);
-        match (row_unfollow(n, self.ticket_follow_supported(), ticket, followers, self.active_member().map(|u| u.id)), n.ticket_id) {
-            (RowUnfollow::Shown, Some(id)) => {
-                let number = n.ticket_number.unwrap_or(0);
-                out.push(ui::button("inbox-unfollow", "Unfollow", ButtonKind::Outline, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| this.ticket_follow_numbered(id, number, false, cx))).into_any_element());
-            }
-            (RowUnfollow::Locked, Some(_)) => {
-                let state = FollowState { following: true, locked: true };
-                let tip = who::follow_tip(state, None, n.ticket_number.unwrap_or(0), ticket.map_or(aurelius_domain::ticket::ColumnKind::Doing, |t| t.column));
-                out.push(ui::button("inbox-unfollow", "Unfollow", ButtonKind::Outline, None).opacity(0.5).tooltip(ui::tip(tip, None)).into_any_element());
-            }
-            _ => {}
-        }
-        if row_unread(n, &self.inbox_opened) {
-            let row = n.clone();
-            out.push(ui::button("inbox-read", "Read", ButtonKind::Outline, None).on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                this.read_row(&row);
-                cx.notify();
-            })).into_any_element());
-        }
-        out.push(ui::button("open-update", open_label(n), ButtonKind::Primary, Some(ui::kbd("enter", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(crate::keymap::OpenSelected), cx))).into_any_element());
-        out
-    }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use super::{RowMark, RowTarget, RowUnfollow, eyebrow, heading, is_update, more, open_label, place, read_on_open, row_link, row_mark, row_target, row_unfollow, row_unread, spoken};
+    use super::{RowMark, RowTarget, heading, is_update, more, place, read_on_open, row_mark, row_target, row_unread};
     use crate::screens::board::TicketTab;
-    use crate::screens::links::LinkTarget;
-    use aurelius_domain::ticket::FollowerView;
-    use aurelius_domain::{ConversationId, MessageId, TicketId, UserId};
+    use aurelius_domain::{ConversationId, MessageId, TicketId};
     use aurelius_protocol::NotificationView;
     use std::collections::HashMap;
 
@@ -414,7 +210,6 @@ pub mod tests {
         assert!(is_update(&r));
         assert_eq!(heading(&r), "Marie made you responsible");
         assert_eq!(row_target(&r, true), RowTarget::Ticket(r.ticket_id.unwrap(), TicketTab::Ticket));
-        assert_eq!(open_label(&r), "Open ticket");
         assert!(!is_update(&row("b", None)), "without a reason it is a notification as before");
     }
 
@@ -428,20 +223,11 @@ pub mod tests {
     }
 
     #[test]
-    fn merged_events_show_as_plus_n_and_in_the_eyebrow() {
+    fn merged_events_show_as_plus_n() {
         let mut r = row("a", Some("review"));
-        assert_eq!((more(&r), eyebrow(&r)), (None, "TICKET".to_string()));
+        assert_eq!(more(&r), None);
         r.merged_count = 2;
-        assert_eq!((more(&r).as_deref(), eyebrow(&r).as_str()), (Some("+2"), "TICKET · 3 UPDATES"));
-        assert_eq!(eyebrow(&channel_row("b")), "CHANNEL");
-    }
-
-    #[test]
-    fn a_row_reads_as_one_sentence() {
-        let mut r = row("a", Some("review"));
-        r.needs_you = true;
-        r.merged_count = 2;
-        assert_eq!(spoken(&r, None, true, "2m ago"), "Ticket 42 Login per board member, Ready for your review, needs you, 2 more updates, unread, 2m ago");
+        assert_eq!(more(&r).as_deref(), Some("+2"));
     }
 
     #[test]
@@ -455,15 +241,6 @@ pub mod tests {
         assert_eq!(row_target(&channel, true), RowTarget::Message(channel.message_id.unwrap()));
         assert_eq!(row_target(&channel, false), RowTarget::Conversation(channel.conversation_id.unwrap()));
         assert_eq!(row_target(&NotificationView { ticket_id: None, conversation_id: None, ..row("d", Some("zzz")) }, true), RowTarget::Task);
-    }
-
-    #[test]
-    fn copy_link_names_the_ticket_or_outside_a_ticket_the_message() {
-        let ticket = row("a", Some("mention"));
-        assert_eq!(row_link(&ticket), Some(LinkTarget::Ticket(ticket.ticket_id.unwrap())));
-        let channel = channel_row("b");
-        assert_eq!(row_link(&channel), Some(LinkTarget::Message(channel.message_id.unwrap())));
-        assert_eq!(row_link(&NotificationView { message_id: None, ..channel }), None);
     }
 
     #[test]
@@ -495,37 +272,11 @@ pub mod tests {
     }
 
     #[test]
-    fn a_read_row_stays_listed_and_keeps_its_mark_until_the_work_is_done() {
-        use crate::app::{InboxTab, inbox_badge, tab_notes};
+    fn a_read_row_keeps_its_mark_until_the_work_is_done() {
         let mine = NotificationView { read: true, needs_you: true, ..row("a", Some("review")) };
         assert_eq!(row_mark(&mine, row_unread(&mine, &HashMap::new())), RowMark::NeedsYou);
-        let refs = [&mine];
-        for tab in [InboxTab::NeedsYou, InboxTab::Updates, InboxTab::All] {
-            assert_eq!(tab_notes(tab, &refs, |_| false).len(), 1, "{tab:?}");
-        }
-        assert_eq!(inbox_badge(0, &refs, |_| false, &HashMap::new()), 1, "◆ still counts when read");
-
         let done = NotificationView { needs_you: false, ..mine };
         assert_eq!(row_mark(&done, row_unread(&done, &HashMap::new())), RowMark::Read, "the read after the work is done");
-        let refs = [&done];
-        assert!(tab_notes(InboxTab::NeedsYou, &refs, |_| false).is_empty());
-        assert_eq!(tab_notes(InboxTab::Updates, &refs, |_| false).len(), 1, "it stays on Updates");
-        assert_eq!(inbox_badge(0, &refs, |_| false, &HashMap::new()), 0);
         assert_eq!(row_mark(&row("b", Some("mention")), true), RowMark::Unread);
-    }
-
-    #[test]
-    fn unfollow_shows_on_a_ticket_row_the_reader_follows_and_not_for_the_responsible() {
-        let me = UserId::new();
-        let r = row("a", Some("mention"));
-        let mine = FollowerView { user_id: me, username: "ada".into(), disabled: false, reason: "mentioned".into(), followed_at_ms: 1 };
-        assert_eq!(row_unfollow(&r, true, None, None, Some(me)), RowUnfollow::Shown, "not read yet: the server decides");
-        assert_eq!(row_unfollow(&r, true, None, Some(std::slice::from_ref(&mine)), Some(me)), RowUnfollow::Shown);
-        assert_eq!(row_unfollow(&r, true, None, Some(&[]), Some(me)), RowUnfollow::Hidden, "does not follow");
-        assert_eq!(row_unfollow(&r, false, None, None, Some(me)), RowUnfollow::Hidden, "a server without following");
-        assert_eq!(row_unfollow(&channel_row("b"), true, None, None, Some(me)), RowUnfollow::Hidden, "a channel has nothing to unfollow");
-        let mut ticket = crate::screens::board::tests::card(1, aurelius_domain::ticket::ColumnKind::Review);
-        ticket.responsible_user_id = Some(me);
-        assert_eq!(row_unfollow(&r, true, Some(&ticket), Some(std::slice::from_ref(&mine)), Some(me)), RowUnfollow::Locked, "B10");
     }
 }

@@ -5179,7 +5179,6 @@ mod tests {
             })
             .await;
             assert_eq!(cards.iter().map(|c| c.title.as_str()).collect::<Vec<_>>(), ["ticket.created"]);
-            assert_eq!(crate::app::InboxTab::shown(info.personal_inbox), [crate::app::InboxTab::NeedsYou, crate::app::InboxTab::Results, crate::app::InboxTab::Failed, crate::app::InboxTab::All]);
         }
 
         /// A1 and A2 against the real engine, with what the app does on each step: the picker's

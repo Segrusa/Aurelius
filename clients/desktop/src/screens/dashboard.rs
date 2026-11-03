@@ -1,7 +1,7 @@
 //! The Dashboard, one column: Give work, then what waits for you, then what is running now
 //! (plan v0.9, phase 2).
 
-use crate::app::{AppView, ManagerRef, NavItem, Overlay, Panel};
+use crate::app::{AppView, ManagerRef, Overlay, Panel};
 use crate::keymap::*;
 use crate::theme::{self, c};
 use crate::ui::{self, ButtonKind, h, v};
@@ -49,7 +49,7 @@ pub fn assignee_order(managers: &[EmployeeSummary]) -> Vec<&EmployeeSummary> {
 }
 
 /// What "Needs you" lists: approvals, proposals and tasks waiting for the user. Unread results
-/// count on the inbox badge only, as the list does not show them. `mine`: a ticket's main task
+/// count on the bell only, as the list does not show them. `mine`: a ticket's main task
 /// only when it waits for this board member (freeze §5).
 pub fn needs_you(approvals: usize, proposals: usize, tasks: &[aurelius_protocol::TaskView], mine: impl Fn(&aurelius_protocol::TaskView) -> bool) -> usize {
     approvals + proposals + tasks.iter().filter(|t| ui::is_waiting(t) && mine(t)).count()
@@ -129,25 +129,26 @@ impl AppView {
             )
     }
 
-    /// What waits for a decision, as cards (who · when, then the text); a click opens the inbox or the task.
+    /// What waits for a decision, as cards (who · when, then the text); a click opens where it is asked.
     fn needs_you_section(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        // (who, when, text, task to open)
-        let mut cards: Vec<(String, i64, String, Option<aurelius_domain::TaskId>)> = self.pending_approvals().take(4).map(|a| {
+        use crate::screens::notifications::Item;
+        // (who, when, text, what it opens)
+        let mut cards: Vec<(String, i64, String, Result<aurelius_domain::TaskId, Item>)> = self.pending_approvals().take(4).map(|a| {
             let s = crate::screens::approval::approval_summary(a, &[]);
-            (a.requester.clone(), a.requested_at_ms, format!("{} · {}", s.title, s.gist), None)
+            (a.requester.clone(), a.requested_at_ms, format!("{} · {}", s.title, s.gist), Err(Item::Approval(a.id)))
         }).collect();
         let room = 4usize.saturating_sub(cards.len());
-        cards.extend(self.pending_proposals().into_iter().take(room).map(|p| (p.proposed_by_name.clone(), 0, format!("Proposes {}", p.name), None)));
-        cards.extend(self.tasks.iter().filter(|t| ui::is_waiting(t) && self.task_counts_for_me(t)).take(4).map(|t| (t.employee_name.clone().unwrap_or_else(|| "Task".into()), t.updated_at_ms, t.title.clone(), Some(t.id))));
+        cards.extend(self.pending_proposals().into_iter().take(room).map(|p| (p.proposed_by_name.clone(), 0, format!("Proposes {}", p.name), Err(Item::Proposal(p.id)))));
+        cards.extend(self.tasks.iter().filter(|t| ui::is_waiting(t) && self.task_counts_for_me(t)).take(4).map(|t| (t.employee_name.clone().unwrap_or_else(|| "Task".into()), t.updated_at_ms, t.title.clone(), Ok(t.id))));
         v().gap(px(10.))
-            .child(h().justify_between().child(ui::eyebrow(format!("WAITING FOR YOU · {}", self.needs_you_count()))).child(ui::hint("dash-inbox", "secondary-2", "Inbox →", || Box::new(OpenInbox), cx)))
+            .child(h().justify_between().child(ui::eyebrow(format!("WAITING FOR YOU · {}", self.needs_you_count()))).child(ui::hint("dash-notifications", "secondary-i", "Notifications", || Box::new(OpenNotifications), cx)))
             .when(cards.is_empty(), |el| el.child(div().text_size(px(12.5)).text_color(c(theme::MUTED)).child("Nothing is waiting for you.")))
             .children(cards.into_iter().enumerate().map(|(i, (who, at, text, task))| {
                 v().id(("needs-you", i)).gap(px(4.)).px(px(16.)).py(px(12.)).rounded(px(10.)).border_1().border_color(c(theme::BORDER)).bg(c(theme::SURFACE)).cursor_pointer()
                     .hover(|s| s.border_color(c(theme::BORDER_STRONG)))
-                    .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| match task {
-                        Some(id) => this.open_panel(Panel::Task(id), w, cx),
-                        None => this.go_nav(NavItem::Inbox, w, cx),
+                    .on_click(cx.listener(move |this, _: &ClickEvent, w, cx| match &task {
+                        Ok(id) => this.open_panel(Panel::Task(*id), w, cx),
+                        Err(item) => this.open_notification(item.clone(), w, cx),
                     }))
                     .child(h().gap(px(6.)).text_size(px(13.)).child(div().font_weight(FontWeight::BOLD).child(who)).when(at > 0, |el| el.child(div().text_color(c(theme::MUTED)).child(format!("· {}", crate::screens::projects::clock(at))))))
                     .child(div().text_size(px(13.5)).line_height(px(20.)).line_clamp(3).child(text))

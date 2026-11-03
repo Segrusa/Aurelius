@@ -97,7 +97,7 @@ pub struct AppKeysState {
 /// What a scope allows, for the New key form.
 pub fn scope_help(scope: AppScope) -> &'static str {
     match scope {
-        AppScope::Read => "read: projects, employees, tasks, the inbox, ideas and memory",
+        AppScope::Read => "read: projects, employees, tasks, notifications, ideas and memory",
         AppScope::Draft => "draft: tasks as drafts (no employee), ideas and memories",
         AppScope::Run => "run: tasks that start at once, messages to tasks, stopping tasks, the project assistant (includes draft)",
         AppScope::Approve => "approve: Auto mode and answering approvals. Without it an app's tasks never run in Auto",

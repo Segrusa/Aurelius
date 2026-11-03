@@ -106,7 +106,6 @@ impl AppView {
             Page::Employee(manager) => self.render_manager(manager, window, cx).into_any_element(),
             Page::Employees => self.render_employees_page(window, cx),
             Page::Tasks => self.render_all_tasks(cx),
-            Page::Inbox => self.render_inbox_page(cx),
             Page::Settings => self.render_settings_page(window, cx),
             Page::Vault => self.render_vault_page(window, cx),
         }
@@ -1031,7 +1030,7 @@ impl AppView {
                 _ if t.status.is_terminal() && t.live_run.is_some() => if t.live_run == Some(aurelius_domain::views::LiveRun::Running) { ("Running", theme::ACCENT_TEXT) } else { ("Queued", theme::TEXT_2) },
                 TaskStatus::Draft => ("Draft (no employee)", theme::MUTED),
                 TaskStatus::Queued => ("Queued", theme::TEXT_2),
-                TaskStatus::Running if t.pending_approvals > 0 => ("Waiting for you in the Inbox", theme::ACCENT_TEXT),
+                TaskStatus::Running if t.pending_approvals > 0 => ("Waiting for you", theme::ACCENT_TEXT),
                 TaskStatus::Running => ("Running", theme::ACCENT_TEXT),
                 TaskStatus::Review => ("In employee review", theme::ACCENT_TEXT),
                 TaskStatus::Waiting => match t.waiting_reason.as_deref() {
@@ -1151,11 +1150,12 @@ impl AppView {
                             )
                             .when(t.pending_approvals > 0, |el| {
                                 let n = t.pending_approvals;
+                                let task_id = t.id;
                                 el.child(
                                     h().gap(px(10.)).flex_none().px(px(14.)).py(px(11.)).rounded(px(8.)).border_1().border_color(c(theme::ATTENTION_BORDER)).bg(c(theme::ATTENTION_BG))
                                         .child(ui::diamond(8., theme::ACCENT_TEXT, false))
                                         .child(div().flex_1().min_w_0().text_size(px(12.5)).child(if n == 1 { "This task waits for you: an approval or an answer.".to_string() } else { format!("This task waits for you: {n} approvals or answers.") }))
-                                        .child(ui::button("task-approvals", "Review", ButtonKind::Primary, Some(ui::kbd("secondary-i", cx))).on_click(cx.listener(|_, _: &ClickEvent, w, cx| w.dispatch_action(Box::new(OpenInbox), cx)))),
+                                        .child(ui::button("task-approvals", "Review", ButtonKind::Primary, None).on_click(cx.listener(move |this, _: &ClickEvent, w, cx| this.open_task_approval(task_id, w, cx)))),
                                 )
                             })
                             .child({

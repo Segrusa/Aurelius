@@ -53,6 +53,7 @@ mod screens {
     pub mod threads;
     pub mod who;
     pub mod links;
+    pub mod notifications;
     pub mod updates;
     pub mod thread_panel;
     pub mod ticket_discussion;

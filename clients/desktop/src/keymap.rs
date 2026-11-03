@@ -61,7 +61,7 @@ actions!(
         EditItem,
         TogglePause,
         ArchiveItem,
-        OpenInbox,
+        OpenNotifications,
         AcceptMemory,
         CycleAgentMode,
         CycleHeartbeat,
@@ -106,8 +106,8 @@ actions!(
         RemoveMemory,
         TogglePin,
         ShowContext,
-        InboxUp,
-        InboxDown,
+        ListUp,
+        ListDown,
         RejectApproval,
         OpenSettings,
         SettingsVerify,
@@ -192,7 +192,12 @@ pub const MENTIONS: &str = "Mentions";
 pub const DIALOG: &str = "AureliusDialog";
 /// The Dashboard's Give work box.
 pub const GIVE_WORK: &str = "GiveWork";
-pub const INBOX: &str = "Inbox";
+/// The dialog of something to decide on, opened from the bell.
+pub const DECISION: &str = "Decision";
+/// A card that only shows something (Usage, Context): Esc closes it.
+pub const INFO_CARD: &str = "InfoCard";
+/// The bell's popout.
+pub const NOTIFICATIONS: &str = "Notifications";
 /// A side panel (screenshot, markdown, artifact).
 pub const SIDE_PANEL: &str = "SidePanel";
 pub const SETTINGS: &str = "Settings";
@@ -293,7 +298,7 @@ pub const SHORTCUTS: &[Shortcut] = &[
     sc!(&["alt-enter"], Some(APP), NONE, "Send now: interrupt the running answer with your message (Enter does the same while an answer runs; Shift+Enter queues it)", General, true, SendNow),
     sc!(&["secondary-o"], Some(APP), NONE, "Add files (employee or project conversation)", General, true, AttachFiles),
     sc!(&["secondary-r"], Some(APP), NONE, "Retry last answer (new version)", General, true, RetryAnswer),
-    sc!(&["secondary-i", "secondary-2"], Some(APP), &["i"], "Inbox: approvals and notifications", General, true, OpenInbox),
+    sc!(&["secondary-i", "secondary-2"], Some(APP), &["i"], "Notifications: what waits for you and what happened", General, true, OpenNotifications),
     sc!(&["secondary-m"], Some(APP), NONE, "Model and effort for this chat or task", General, true, CycleModel),
     sc!(&["secondary-u"], Some(APP), &["u"], "Show usage (subscription, tokens and costs)", General, true, OpenUsage),
     sc!(&["shift-tab"], Some(APP), NONE, "Switch this agent's mode (Ask → Accept edits → Auto → Plan → Ask)", General, true, CycleAgentMode),
@@ -383,31 +388,31 @@ fn overlay_bindings() -> Vec<KeyBinding> {
         // Model and effort of delegated tasks and of subagents (Edit manager, Settings → Connections).
         key("alt-u", CycleSubagentModel, Some(DIALOG)),
         key("alt-u", CycleSubagentModel, Some(SETTINGS)),
-        key("up", InboxUp, Some(INBOX)),
-        key("k", InboxUp, Some(INBOX)),
-        key("down", InboxDown, Some(INBOX)),
-        key("j", InboxDown, Some(INBOX)),
-        // The inbox's filter tabs (Ctrl Tab works too).
-        key("h", PrevTab, Some(INBOX)),
-        key("l", NextTab, Some(INBOX)),
-        key("secondary-backspace", RejectApproval, Some(INBOX)),
-        key("x", RejectApproval, Some(INBOX)),
-        key("escape", Back, Some(INBOX)),
+        // The bell's popout.
+        key("up", ListUp, Some(NOTIFICATIONS)),
+        key("k", ListUp, Some(NOTIFICATIONS)),
+        key("down", ListDown, Some(NOTIFICATIONS)),
+        key("j", ListDown, Some(NOTIFICATIONS)),
+        key("enter", OpenSelected, Some(NOTIFICATIONS)),
+        key("o", OpenSelected, Some(NOTIFICATIONS)),
+        key("escape", Back, Some(NOTIFICATIONS)),
+        key("secondary-backspace", RejectApproval, Some(DECISION)),
+        key("x", RejectApproval, Some(DECISION)),
+        key("escape", Back, Some(DECISION)),
+        key("escape", Back, Some(INFO_CARD)),
         key("enter", PanelConfirm, Some(SIDE_PANEL)),
         key("escape", Back, Some(SIDE_PANEL)),
-        // Answering Claude's questions in the inbox.
-        key("1", QuestionOption1, Some(INBOX)),
-        key("2", QuestionOption2, Some(INBOX)),
-        key("3", QuestionOption3, Some(INBOX)),
-        key("4", QuestionOption4, Some(INBOX)),
-        key("tab", QuestionNext, Some(INBOX)),
-        key("t", QuestionOwnAnswer, Some(INBOX)),
-        key("enter", OpenSelected, Some(INBOX)),
-        key("o", OpenSelected, Some(INBOX)),
-        key("up", InboxUp, Some(SETTINGS)),
-        key("k", InboxUp, Some(SETTINGS)),
-        key("down", InboxDown, Some(SETTINGS)),
-        key("j", InboxDown, Some(SETTINGS)),
+        // Answering Claude's questions in the dialog.
+        key("1", QuestionOption1, Some(DECISION)),
+        key("2", QuestionOption2, Some(DECISION)),
+        key("3", QuestionOption3, Some(DECISION)),
+        key("4", QuestionOption4, Some(DECISION)),
+        key("tab", QuestionNext, Some(DECISION)),
+        key("t", QuestionOwnAnswer, Some(DECISION)),
+        key("up", ListUp, Some(SETTINGS)),
+        key("k", ListUp, Some(SETTINGS)),
+        key("down", ListDown, Some(SETTINGS)),
+        key("j", ListDown, Some(SETTINGS)),
         key("v", SettingsVerify, Some(SETTINGS)),
         key("d", SettingsUse, Some(SETTINGS)),
         key("enter", SettingsUse, Some(SETTINGS)),
@@ -598,9 +603,9 @@ mod tests {
             assert!(!fires(&keymap, key, &typing), "{key} fires while typing");
         }
         assert!(!fires(&keymap, "s", &[APP, SETTINGS, "Input"]), "Settings letters fire while typing");
-        for key in ["h", "l"] {
-            assert!(!fires(&keymap, key, &[APP, INBOX, "Input"]), "inbox tab key {key} fires while typing");
-            assert!(fires(&keymap, key, &[APP, INBOX]));
+        for key in ["x", "1"] {
+            assert!(!fires(&keymap, key, &[APP, DECISION, "Input"]), "decision key {key} fires while typing");
+            assert!(fires(&keymap, key, &[APP, DECISION]));
         }
         // Without a text field they still work, and Ctrl shortcuts work while typing.
         assert!(fires(&keymap, "i", &[APP, NAV]));

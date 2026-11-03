@@ -475,13 +475,12 @@ impl AppView {
             }
             ColumnKind::Doing => {
                 let text = match (needs, &t.review_feedback) {
-                    (Some(Needs::Approval), _) if mine => "◆ Waiting for your approval (Inbox).".to_string(),
-                    (Some(Needs::Approval), _) => "Waiting for approval (Inbox).".to_string(),
+                    (Some(Needs::Approval), _) if mine => "◆ Waiting for your approval in the conversation.".to_string(),
+                    (Some(Needs::Approval), _) => "Waiting for approval in the conversation.".to_string(),
                     (_, Some(feedback)) => format!("{}: {}", feedback_label(self.ticket_activity(id)), feedback.lines().next().unwrap_or("")),
                     _ => root.and_then(ui::queued_wait).unwrap_or_else(|| "The owner works on it.".into()),
                 };
                 bar.child(line(text, if mine { theme::ACCENT_TEXT } else { theme::TEXT_2 }))
-                    .when(needs == Some(Needs::Approval), |el| el.child(ui::button("ticket-inbox", "Open in Inbox", ButtonKind::Outline, None).h(px(28.)).on_click(|_: &ClickEvent, w, cx| w.dispatch_action(Box::new(crate::keymap::OpenInbox), cx))))
                     .when(root_id.is_some(), |el| el.child(open_conversation(cx)))
                     .child(back(cx))
             }

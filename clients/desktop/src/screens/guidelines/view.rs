@@ -277,14 +277,10 @@ impl AppView {
         v().child(head).children(rows)
     }
 
-    /// ◆n and "Review ›": the Inbox on this proposal.
+    /// ◆n and "Review ›": the dialog of this proposal, or of the first that waits.
     pub(crate) fn guideline_show_proposal(&mut self, id: Option<GuidelineProposalId>, window: &mut Window, cx: &mut Context<Self>) {
-        self.navigate(crate::app::Page::Inbox);
-        self.inbox_tab = crate::app::InboxTab::NeedsYou;
-        let at = id.and_then(|id| self.pending_guideline_proposals().iter().position(|p| p.id == id)).unwrap_or(0);
-        self.inbox_selected = self.pending_approvals().count() + self.pending_proposals().len() + at;
-        self.focus.focus(window, cx);
-        cx.notify();
+        let Some(id) = id.or_else(|| self.pending_guideline_proposals().first().map(|p| p.id)) else { return };
+        self.open_decision(crate::app::Decision::Guideline(id), window, cx);
     }
 
     fn render_guideline_editor(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {

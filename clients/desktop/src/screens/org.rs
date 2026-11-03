@@ -104,11 +104,6 @@ impl AppView {
         self.proposals.iter().filter(|p| p.status == ProposalStatus::Pending).collect()
     }
 
-    /// Items of the open inbox tab ahead of its results: approvals, then proposals.
-    pub fn inbox_head(&self) -> usize {
-        if self.inbox_tab.shows_head() { self.pending_approvals().count() + self.pending_proposals().len() + self.pending_guideline_proposals().len() } else { 0 }
-    }
-
     pub fn decide_proposal(&mut self, proposal_id: ProposalId, approve: bool, cx: &mut Context<Self>) {
         let _ = self.requests_handle().send(crate::backend::Request::DecideProposal { proposal_id, approve, edits: None, note: None, instructions: None });
         cx.notify();
