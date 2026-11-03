@@ -58,8 +58,8 @@ void main() {
     Future<void> sheet(WidgetTester tester, IdeaView idea, {bool canMakeTicket = true}) async {
       final repo = boardRepository();
       when(() => repo.companyChanges).thenAnswer((_) => const Stream.empty());
+      when(() => repo.ideas('p')).thenAnswer((_) async => [idea]);
       final bloc = IdeasBloc(repo, 'p');
-      addTearDown(bloc.close);
       await tester.pumpWidget(MaterialApp(theme: aureliusTheme(), home: Scaffold(body: BlocProvider.value(value: bloc, child: IdeaSheet(idea: idea, canMakeTicket: canMakeTicket)))));
       // Past the bloc's first refresh.
       await tester.pump(const Duration(milliseconds: 300));
