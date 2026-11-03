@@ -599,6 +599,6 @@ mod tests {
         );
         let mut moved = SystemLine::new(SystemLineKind::Moved);
         (moved.from, moved.to) = (Some("Doing".into()), Some("Review".into()));
-        assert_eq!(line_text(&moved, "", None), "Aurelius moved Doing → Review");
+        assert_eq!(line_text(&moved, "", None), "Aurelius moved the ticket from Doing to Review");
     }
 }
