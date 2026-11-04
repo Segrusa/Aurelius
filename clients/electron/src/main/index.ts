@@ -1,14 +1,28 @@
 // The main process: the window, the pipe to the local daemon, the session in the OS keychain. The
 // page has no Node, reaches only the few calls below, and is checked on every one of them.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHmac, randomBytes } from "node:crypto";
+import {
+  closeSync,
+  existsSync,
+  fchmodSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { hostname } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Link } from "@aurelius/client";
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   net,
@@ -113,6 +127,71 @@ function serveLinks(): void {
   });
 }
 
+/** A secret on the clipboard goes after a minute, and at quit, unless something else was copied since. */
+function serveDesktop(): void {
+  const salt = randomBytes(32);
+  const digest = (text: string) => createHmac("sha256", salt).update(text).digest();
+  let held: Buffer | null = null;
+  let timer: NodeJS.Timeout | null = null;
+  const clearIfOurs = async () => {
+    if (timer !== null) clearTimeout(timer);
+    timer = null;
+    const ours = held;
+    held = null;
+    if (ours !== null && digest(await clipboard.readText()).equals(ours)) await clipboard.writeText("");
+  };
+  handle("clipboard:write", (_sender, text: unknown) => {
+    if (typeof text === "string") return clipboard.writeText(text);
+  });
+  handle("clipboard:write-secret", async (_sender, text: unknown) => {
+    if (typeof text !== "string") throw new Error("Not text.");
+    if (timer !== null) clearTimeout(timer);
+    await clipboard.writeText(text);
+    held = digest(text);
+    timer = setTimeout(() => void clearIfOurs(), 60_000);
+    return { sure: true };
+  });
+  app.on("before-quit", (event) => {
+    if (held === null) return;
+    event.preventDefault();
+    void clearIfOurs().finally(() => app.quit());
+  });
+
+  handle("file:save-secret", async (sender, name: unknown, content: unknown) => {
+    if (typeof name !== "string" || typeof content !== "string") throw new Error("Not a file.");
+    const window = BrowserWindow.fromWebContents(sender);
+    const options = { defaultPath: join(app.getPath("home"), basename(name)) };
+    const chosen = await (window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options));
+    if (chosen.canceled || !chosen.filePath) return null;
+    const file = openSync(chosen.filePath, "w", 0o600);
+    try {
+      // Also over a file that was there, with other rights.
+      fchmodSync(file, 0o600);
+      writeSync(file, `${content}\n`);
+      fsyncSync(file);
+    } finally {
+      closeSync(file);
+    }
+    return { path: chosen.filePath, private: true };
+  });
+
+  handle("folder:pick", async (sender, title: unknown) => {
+    const window = BrowserWindow.fromWebContents(sender);
+    const options = {
+      title: typeof title === "string" ? title : "Choose a folder",
+      properties: ["openDirectory", "createDirectory"] as ("openDirectory" | "createDirectory")[],
+    };
+    const chosen = await (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options));
+    return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
+  });
+  // Only a folder: this must never start a program.
+  handle("folder:open", async (_sender, path: unknown) => {
+    if (typeof path !== "string" || !statSync(path).isDirectory()) throw new Error("Not a folder.");
+    const failure = await shell.openPath(path);
+    if (failure) throw new Error(failure);
+  });
+}
+
 /** Only ever kept encrypted by the OS. Without a keychain it lasts until the app closes. */
 function serveSessions(): void {
   const file = join(app.getPath("userData"), "session.bin");
@@ -197,6 +276,7 @@ void app.whenReady().then(() => {
   serveSite();
   serveLinks();
   serveSessions();
+  serveDesktop();
   openWindow();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow();

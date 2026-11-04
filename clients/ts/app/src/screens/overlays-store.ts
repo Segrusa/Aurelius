@@ -8,7 +8,11 @@ export type OverlayName = "palette" | "ticket" | "give";
 export interface TicketPrefill {
   title: string;
   description: string;
-  fromMessage: string;
+  fromMessage?: string;
+  fromIdea?: string;
+  labels?: string;
+  projectId?: string;
+  employeeId?: string;
 }
 
 let current: OverlayName | null = null;

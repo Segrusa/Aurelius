@@ -384,7 +384,15 @@ function GuidelineDetail({ row, proposal }: { row: InboxRow; proposal: Guideline
   const client = useQueryClient();
   const decide = async (approve: boolean) => {
     try {
-      await connection.write("guideline.decide_proposal", { proposal_id: proposal.id, approve }, { retry: false });
+      // Approving a change holds only if the guideline is still the version it was proposed on.
+      await connection.write(
+        "guideline.decide_proposal",
+        { proposal_id: proposal.id, approve },
+        {
+          retry: false,
+          ...(approve && proposal.base_version != null ? { expectedVersion: proposal.base_version } : {}),
+        },
+      );
       await client.invalidateQueries({ queryKey: ["guideline_proposals"] });
       toast(approve ? "The guideline proposal is approved." : "The guideline proposal is rejected.");
     } catch (e) {
@@ -397,6 +405,14 @@ function GuidelineDetail({ row, proposal }: { row: InboxRow; proposal: Guideline
         <Button kind="primary" onClick={() => void decide(true)}>
           Approve
         </Button>
+        <Link
+          to="/knowledge/guidelines/$id"
+          params={{ id: proposal.guideline_id ?? "new" }}
+          search={{ proposal: proposal.id }}
+          className="inline-flex h-8 items-center rounded-[6px] border border-btn-line bg-btn px-3 text-text no-underline hover:bg-sel"
+        >
+          Edit and approve…
+        </Link>
         <Button kind="danger" onClick={() => void decide(false)}>
           Reject
         </Button>

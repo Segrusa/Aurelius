@@ -34,11 +34,16 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
     expect(reach.process).toBe("undefined");
     expect(reach.bridge).toEqual([
       "closeLink",
+      "copy",
+      "copySecret",
       "desktopPrefs",
       "getSession",
       "info",
       "listenLink",
+      "openFolder",
       "openLink",
+      "pickFolder",
+      "saveSecretFile",
       "sendLink",
       "setSession",
     ]);

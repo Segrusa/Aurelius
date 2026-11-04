@@ -50,7 +50,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           label: p.name,
           detail: "Open project",
           mark: p.id,
-          run: go("/board"),
+          run: () => void navigate({ to: "/projects/$id", params: { id: p.id } }),
         })),
       },
       {
@@ -96,7 +96,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
             label: g.title,
             detail: `v${g.version}`,
             mark: g.id,
-            run: go("/knowledge"),
+            run: () => void navigate({ to: "/knowledge/guidelines/$id", params: { id: g.id } }),
           })),
       },
       {

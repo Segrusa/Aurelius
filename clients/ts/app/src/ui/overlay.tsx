@@ -55,7 +55,7 @@ export function Menu<T extends string>({
   label,
 }: {
   trigger: ReactElement;
-  options: { key: T; label: string }[];
+  options: { key: T; label: string; danger?: boolean }[];
   value?: T;
   onPick: (key: T) => void;
   label: string;
@@ -75,7 +75,7 @@ export function Menu<T extends string>({
             <RadixMenu.Item
               key={o.key}
               onSelect={() => onPick(o.key)}
-              className={`flex h-7 cursor-pointer items-center rounded-[5px] px-2 text-[13px] outline-none data-[highlighted]:bg-sel ${o.key === value ? "font-medium text-acc-text" : ""}`}
+              className={`flex h-7 cursor-pointer items-center rounded-[5px] px-2 text-[13px] outline-none data-[highlighted]:bg-sel ${o.danger ? "text-red " : ""}${o.key === value ? "font-medium text-acc-text" : ""}`}
             >
               {o.label}
             </RadixMenu.Item>

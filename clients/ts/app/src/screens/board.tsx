@@ -268,14 +268,15 @@ function SendBackDialog({ t, onClose }: { t: TicketView; onClose: () => void }) 
 
 type Pending = { kind: "send_back" | "mark_done" | "back_to_backlog" | "reject"; ticket: TicketView } | null;
 
-export function BoardScreen({ ticket }: { ticket: string | undefined }) {
+export function BoardScreen({ ticket, projectId }: { ticket: string | undefined; projectId?: string }) {
   useKeyContext("Board");
   const navigate = useNavigate();
   const client = useQueryClient();
   const { storage } = usePlatform();
   const { features } = useLinkState();
   const write = useTicketWrite();
-  const [project, setProject] = useState<string | null>(() => storage.get("board_project"));
+  const [chosenProject, setProject] = useState<string | null>(() => storage.get("board_project"));
+  const project = projectId ?? chosenProject;
   const [owner, setOwner] = useState<OwnerFilter>({ kind: "anyone" });
   const [query, setQuery] = useState("");
   const [needsOnly, setNeedsOnly] = useState(false);
@@ -436,24 +437,26 @@ export function BoardScreen({ ticket }: { ticket: string | undefined }) {
             Needs you · {needsCount}
           </button>
         ) : null}
-        <Menu
-          label="Project"
-          value={project ?? "all"}
-          options={[
-            { key: "all", label: "All projects" },
-            ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
-          ]}
-          onPick={(id) => {
-            const next = id === "all" ? null : id;
-            setProject(next);
-            storage.set("board_project", next ?? "");
-          }}
-          trigger={
-            <button type="button" className={pill}>
-              {projectName}
-            </button>
-          }
-        />
+        {projectId ? null : (
+          <Menu
+            label="Project"
+            value={project ?? "all"}
+            options={[
+              { key: "all", label: "All projects" },
+              ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
+            ]}
+            onPick={(id) => {
+              const next = id === "all" ? null : id;
+              setProject(next);
+              storage.set("board_project", next ?? "");
+            }}
+            trigger={
+              <button type="button" className={pill}>
+                {projectName}
+              </button>
+            }
+          />
+        )}
         <Menu
           label="Owner"
           options={[

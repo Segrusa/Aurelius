@@ -4,6 +4,7 @@ import { type ReactNode, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useBoard, useEmployees, useMessages, useTicket, useTicketActivity } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
+import { usePlatform } from "../platform";
 import { Button, Chip, initial, Mark, markColor } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { Dialog, Menu } from "../ui/overlay";
@@ -585,6 +586,7 @@ function Activity({ id }: { id: string }) {
 type Tab = "ticket" | "discussion" | "activity";
 
 export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }) {
+  const platform = usePlatform();
   useKeyContext("TicketPanel");
   useAction("Back", onClose);
   const navigate = useNavigate();
@@ -674,7 +676,7 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
       );
     else if (key === "responsible")
       void write("ticket.set_responsible", { ticket_id: t.id, responsible_user_id: need.me });
-    else if (key === "copy") void navigator.clipboard?.writeText(`aurelius://ticket/${t.id}`);
+    else if (key === "copy") void platform.copy(`aurelius://ticket/${t.id}`);
     else move(key);
   };
 

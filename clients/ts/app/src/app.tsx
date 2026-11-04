@@ -7,28 +7,24 @@ import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
 import { BoardScreen } from "./screens/board";
 import { ChatScreen } from "./screens/chat";
+import { EmployeePage } from "./screens/employee-page";
+import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
 import { Frame } from "./screens/frame";
 import { Gate } from "./screens/gate";
+import { GuidelineEditor, GuidelinesScreen } from "./screens/guidelines";
+import { IdeasBody } from "./screens/ideas";
 import { InboxScreen } from "./screens/inbox";
+import { MemoryBody } from "./screens/memory";
 import { MyTicketsScreen } from "./screens/my-tickets";
+import { ProjectPage, ProjectsScreen } from "./screens/projects";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
 import { TasksScreen } from "./screens/tasks";
+import { VaultScreen } from "./screens/vault";
+import { Button } from "./ui/kit";
 import { TooltipProvider } from "./ui/overlay";
 
 /** A screen of the design that is not built yet: says so, and the phase, instead of looking finished. */
-function NotYet({ title }: { title: string }) {
-  return (
-    <>
-      <header className="flex h-11 flex-none items-center border-b border-line pl-[18px]">
-        <h1 className="m-0 text-[13px] font-medium">{title}</h1>
-      </header>
-      <p className="m-0 p-[18px] text-text3">
-        This screen is not in the new client yet. Use the desktop app for it for now.
-      </p>
-    </>
-  );
-}
 
 const root = createRootRoute({
   component: () => (
@@ -63,7 +59,7 @@ const myTickets = createRoute({
     return <MyTicketsScreen ticket={myTickets.useSearch().ticket} />;
   },
 });
-const tasks = createRoute({ getParentRoute: () => root, path: "/tasks", component: TasksScreen });
+const tasks = createRoute({ getParentRoute: () => root, path: "/tasks", component: () => <TasksScreen /> });
 const taskRun = createRoute({
   getParentRoute: () => root,
   path: "/tasks/$taskId",
@@ -84,12 +80,62 @@ const chat = createRoute({
     return <ChatScreen channel={channel ?? null} thread={thread ?? null} />;
   },
 });
-const others = (
-  [
-    ["/employees", "Employees"],
-    ["/knowledge", "Knowledge"],
-  ] as const
-).map(([path, title]) => createRoute({ getParentRoute: () => root, path, component: () => <NotYet title={title} /> }));
+const employees = createRoute({ getParentRoute: () => root, path: "/employees", component: EmployeesScreen });
+const orgChart = createRoute({ getParentRoute: () => root, path: "/employees/org", component: OrgChartScreen });
+const employee = createRoute({
+  getParentRoute: () => root,
+  path: "/employees/$id",
+  component: function EmployeeRoute() {
+    const { id } = employee.useParams();
+    return <EmployeePage key={id} id={id} />;
+  },
+});
+const knowledgeIndex = createRoute({
+  getParentRoute: () => root,
+  path: "/knowledge",
+  beforeLoad: () => {
+    throw redirect({ to: "/knowledge/$tab", params: { tab: "guidelines" } });
+  },
+});
+const knowledge = createRoute({
+  getParentRoute: () => root,
+  path: "/knowledge/$tab",
+  validateSearch: (search: Record<string, unknown>): { project?: string } =>
+    typeof search.project === "string" ? { project: search.project } : {},
+  component: function KnowledgeRoute() {
+    const { tab } = knowledge.useParams();
+    const { project: start } = knowledge.useSearch();
+    if (tab === "memory") return <MemoryBody key={start ?? ""} projectId={null} start={start ?? null} />;
+    if (tab === "ideas") return <IdeasBody projectId={null} />;
+    if (tab === "vault") return <VaultScreen />;
+    return <GuidelinesScreen />;
+  },
+});
+const guideline = createRoute({
+  getParentRoute: () => root,
+  path: "/knowledge/guidelines/$id",
+  validateSearch: (search: Record<string, unknown>): { proposal?: string } =>
+    typeof search.proposal === "string" ? { proposal: search.proposal } : {},
+  component: function GuidelineRoute() {
+    const { id } = guideline.useParams();
+    const { proposal } = guideline.useSearch();
+    return <GuidelineEditor key={`${id}|${proposal ?? ""}`} id={id} proposalId={proposal ?? null} />;
+  },
+});
+const projectsList = createRoute({ getParentRoute: () => root, path: "/projects", component: ProjectsScreen });
+const PROJECT_TABS = ["overview", "board", "tasks", "ideas", "vault"] as const;
+const project = createRoute({
+  getParentRoute: () => root,
+  path: "/projects/$id",
+  validateSearch: (search: Record<string, unknown>): { tab?: (typeof PROJECT_TABS)[number] } =>
+    PROJECT_TABS.includes(search.tab as (typeof PROJECT_TABS)[number])
+      ? { tab: search.tab as (typeof PROJECT_TABS)[number] }
+      : {},
+  component: function ProjectRoute() {
+    const { id } = project.useParams();
+    return <ProjectPage key={id} id={id} tab={project.useSearch().tab ?? "overview"} />;
+  },
+});
 
 const settingsIndex = createRoute({
   getParentRoute: () => root,
@@ -106,6 +152,16 @@ const settings = createRoute({
   },
 });
 
+function ScreenFailed({ reset }: { reset: () => void }) {
+  return (
+    <div className="m-auto flex max-w-[420px] flex-col items-center gap-3 p-10 text-center">
+      <p className="m-0 text-[15px] font-semibold">This screen ran into a problem.</p>
+      <p className="m-0 text-text2">The rest of the app still works. Try it again, or go to another screen.</p>
+      <Button onClick={reset}>Try again</Button>
+    </div>
+  );
+}
+
 const router = createRouter({
   routeTree: root.addChildren([
     index,
@@ -117,9 +173,17 @@ const router = createRouter({
     chat,
     settingsIndex,
     settings,
-    ...others,
+    orgChart,
+    employee,
+    employees,
+    knowledgeIndex,
+    guideline,
+    knowledge,
+    projectsList,
+    project,
   ]),
   defaultPreload: "intent",
+  defaultErrorComponent: ScreenFailed,
 });
 
 export function App({ platform }: { platform: Platform }) {

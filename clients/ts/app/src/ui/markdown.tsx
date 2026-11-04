@@ -1,6 +1,7 @@
 import { Children, isValidElement, memo, type ReactElement, type ReactNode, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { usePlatform } from "../platform";
 import { Mermaid } from "./mermaid";
 
 function textOf(node: ReactNode): string {
@@ -10,6 +11,7 @@ function textOf(node: ReactNode): string {
 }
 
 function Code({ children, diagrams }: { children: ReactNode; diagrams: boolean }) {
+  const platform = usePlatform();
   const [copied, setCopied] = useState(false);
   const code = Children.toArray(children)[0];
   const className = isValidElement(code) ? (code as ReactElement<{ className?: string }>).props.className : undefined;
@@ -20,9 +22,13 @@ function Code({ children, diagrams }: { children: ReactNode; diagrams: boolean }
       <button
         type="button"
         onClick={() => {
-          void navigator.clipboard?.writeText(text);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1200);
+          platform
+            .copy(text)
+            .then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1200);
+            })
+            .catch(() => undefined);
         }}
         className="absolute top-[6px] right-[6px] cursor-pointer rounded-[5px] border border-line bg-panel px-[6px] py-[2px] text-[11px] text-text2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
       >
@@ -40,7 +46,15 @@ function Code({ children, diagrams }: { children: ReactNode; diagrams: boolean }
  * a new window, which the Electron shell hands to the browser; `#@Name` is a mention and goes nowhere.
  * `live`: still being written, so no diagrams yet.
  */
-export const Markdown = memo(function Markdown({ text, live = false }: { text: string; live?: boolean }) {
+export const Markdown = memo(function Markdown({
+  text,
+  live = false,
+  safe = false,
+}: {
+  text: string;
+  live?: boolean;
+  safe?: boolean;
+}) {
   return (
     <div className="prose-aurelius">
       <ReactMarkdown
@@ -54,7 +68,11 @@ export const Markdown = memo(function Markdown({ text, live = false }: { text: s
                 {children}
               </a>
             ),
-          pre: ({ children }) => <Code diagrams={!live}>{children}</Code>,
+          pre: ({ children }) => <Code diagrams={!live && !safe}>{children}</Code>,
+          // Nothing in a guideline loads by itself.
+          ...(safe
+            ? { img: ({ alt }: { alt?: string | undefined }) => <span className="text-text3">[{alt || "image"}]</span> }
+            : {}),
         }}
       >
         {text}

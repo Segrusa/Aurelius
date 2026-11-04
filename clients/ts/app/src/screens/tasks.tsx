@@ -78,7 +78,7 @@ function Preview({ task, onOpen }: { task: TaskView; onOpen: () => void }) {
   );
 }
 
-export function TasksScreen() {
+export function TasksScreen({ projectId }: { projectId?: string } = {}) {
   useKeyContext("Tasks");
   const navigate = useNavigate();
   const tasks = useAllTasks();
@@ -86,7 +86,8 @@ export function TasksScreen() {
   const projects = useProjects();
   const [state, setState] = useState<TaskState>("open");
   const [employee, setEmployee] = useState<string | null>(null);
-  const [project, setProject] = useState<string | null>(null);
+  const [chosenProject, setProject] = useState<string | null>(null);
+  const project = projectId ?? chosenProject;
   const [folds, setFolds] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const list = tasks.data ?? [];
@@ -155,19 +156,21 @@ export function TasksScreen() {
             </button>
           }
         />
-        <Menu
-          label="Project"
-          options={[
-            { key: "any", label: "Any project" },
-            ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
-          ]}
-          onPick={(id) => setProject(id === "any" ? null : id)}
-          trigger={
-            <button type="button" className={pill}>
-              {projectName}
-            </button>
-          }
-        />
+        {projectId ? null : (
+          <Menu
+            label="Project"
+            options={[
+              { key: "any", label: "Any project" },
+              ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
+            ]}
+            onPick={(id) => setProject(id === "any" ? null : id)}
+            trigger={
+              <button type="button" className={pill}>
+                {projectName}
+              </button>
+            }
+          />
+        )}
         <div className="ml-auto">
           <Button kind="primary" onClick={() => overlays.open("give")}>
             Give work <Kbd onAccent>N</Kbd>

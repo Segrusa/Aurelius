@@ -16,6 +16,16 @@ export interface Platform {
   version: string;
   /** How a device that is not paired gets paired; null: it never needs to (the local pipe). */
   pair: ((code: string, deviceName: string) => Promise<void>) | null;
+  /** Writes text. A failure rejects, so a caller can say so. */
+  copy(text: string): Promise<void>;
+  /** Writes a secret and clears it after 60 s if it is still there. `sure`: this device can promise that. */
+  copySecret(text: string): Promise<{ sure: boolean }>;
+  /** Stores a secret so only this user can read it; a browser can only offer a download. Null: cancelled. */
+  saveSecretFile(name: string, content: string): Promise<{ path: string | null; private: boolean } | null>;
+  /** The folder picker of this machine; null where there is none and the path must be typed. */
+  pickFolder: ((title: string) => Promise<string | null>) | null;
+  /** Opens a folder of this machine; null where a folder cannot be opened. */
+  openFolder: ((path: string) => Promise<void>) | null;
 }
 
 const PlatformContext = createContext<Platform | null>(null);

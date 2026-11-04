@@ -20,10 +20,12 @@ import { Tooltip } from "../ui/overlay";
 import { Toasts } from "../ui/toast";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
+import { pinnedFirst } from "./employee-logic";
 import { useInbox } from "./inbox";
 import { needsYouCount, ticketPlace } from "./inbox-logic";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
+import { useProjectPins } from "./projects";
 import { SettingsSidebar } from "./settings";
 
 const NAV_MAIN: { to: string; label: string; icon: NavIcon }[] = [
@@ -135,7 +137,10 @@ const GO_TO: Record<string, string> = {
   GoTasks: "/tasks",
   GoTeamChat: "/chat",
   GoEmployees: "/employees",
-  GoGuidelines: "/knowledge",
+  GoOrgChart: "/employees/org",
+  GoGuidelines: "/knowledge/guidelines",
+  GoIdeas: "/knowledge/ideas",
+  GoVault: "/knowledge/vault",
   OpenSettings: "/settings",
   OpenBackups: "/settings/backups",
   OpenRemote: "/settings/remote",
@@ -183,6 +188,7 @@ function Sidebar() {
   const { open } = overlays;
   const { groups } = useInbox();
   const projects = useProjects();
+  const [projectPins] = useProjectPins();
   const { hostName, status } = useLinkState();
   return (
     <aside className="flex w-[224px] flex-none flex-col gap-[18px] overflow-hidden pt-[6px] pr-[10px] pb-[10px] pl-[14px]">
@@ -230,16 +236,26 @@ function Sidebar() {
         </div>
       </nav>
       <div className="flex min-h-0 flex-col gap-px overflow-hidden">
-        <SectionLabel>Projects</SectionLabel>
-        {(projects.data ?? []).slice(0, 8).map((p) => (
-          <div
-            key={p.id}
-            className="flex h-7 flex-none items-center gap-[9px] rounded-[6px] px-2 font-medium text-text2"
-          >
-            <Mark letter={initial(p.name)} color={markColor(p.id)} size={15} radius={4} />
-            <span className="truncate">{p.name}</span>
-          </div>
-        ))}
+        <Link to="/projects" className="text-text3 no-underline hover:text-text">
+          <SectionLabel>Projects</SectionLabel>
+        </Link>
+        {pinnedFirst(
+          (projects.data ?? []).filter((p) => p.status !== "archived"),
+          projectPins,
+        )
+          .slice(0, 8)
+          .map((p) => (
+            <Link
+              key={p.id}
+              to="/projects/$id"
+              params={{ id: p.id }}
+              className="flex h-7 flex-none items-center gap-[9px] rounded-[6px] px-2 font-medium text-text2 no-underline hover:bg-sel hover:text-text"
+              activeProps={{ className: "bg-sel text-text" }}
+            >
+              <Mark letter={initial(p.name)} color={markColor(p.id)} size={15} radius={4} />
+              <span className="truncate">{p.name}</span>
+            </Link>
+          ))}
       </div>
       <Live />
       <div className="mt-auto flex flex-col gap-2">

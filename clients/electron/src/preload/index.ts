@@ -27,4 +27,9 @@ contextBridge.exposeInMainWorld("aurelius", {
   setSession: (token: string | null) => ipcRenderer.invoke("session:set", token),
   info: () => ipcRenderer.invoke("app:info"),
   desktopPrefs: () => ipcRenderer.invoke("app:desktop-prefs"),
+  copy: (text: string) => ipcRenderer.invoke("clipboard:write", text),
+  copySecret: (text: string) => ipcRenderer.invoke("clipboard:write-secret", text),
+  saveSecretFile: (name: string, content: string) => ipcRenderer.invoke("file:save-secret", name, content),
+  pickFolder: (title: string) => ipcRenderer.invoke("folder:pick", title),
+  openFolder: (path: string) => ipcRenderer.invoke("folder:open", path),
 });

@@ -6,6 +6,7 @@ import { createContext, memo, useContext, useMemo, useState } from "react";
 import { useConnection } from "../connection";
 import { useRunGuidelines } from "../data";
 import { useAction } from "../keys/provider";
+import { usePlatform } from "../platform";
 import { Button, initial, Mark, markColor } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { Dialog, Menu } from "../ui/overlay";
@@ -648,6 +649,7 @@ function RowBar({
   onDelete: () => void;
   name: string;
 }) {
+  const platform = usePlatform();
   const { caps, openThread, features, place } = useChat();
   const actions = rowActions(m, caps);
   const react = useReact(m);
@@ -664,7 +666,7 @@ function RowBar({
       : []),
   ];
   const pick = (key: string) => {
-    if (key === "copy") void navigator.clipboard?.writeText(m.text);
+    if (key === "copy") void platform.copy(m.text).catch(() => toast("This did not copy."));
     if (key === "edit") onEdit();
     if (key === "delete") onDelete();
     if (key === "ticket")

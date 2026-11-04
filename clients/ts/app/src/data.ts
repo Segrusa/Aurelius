@@ -34,7 +34,10 @@ export type Area =
   | "employees"
   | "tickets"
   | "guidelines"
-  | "messages";
+  | "messages"
+  | "ideas"
+  | "memory"
+  | "vault";
 
 /** The areas an event may have changed. An event of a newer server changes nothing here. */
 export function areasOf(kind: EventKind | string): Area[] {
@@ -52,7 +55,7 @@ export function areasOf(kind: EventKind | string): Area[] {
       return ["projects"];
     case "task":
     case "run":
-      return ["tasks", "notifications", "employees", "messages", "tickets"];
+      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas"];
     case "conversation":
     case "message":
     case "chat":
@@ -64,8 +67,17 @@ export function areasOf(kind: EventKind | string): Area[] {
     case "company":
     case "user":
     case "connection":
-    case "employee":
       return ["settings", "employees"];
+    // A proposed colleague or new instructions arrive as `employee.*` events.
+    case "employee":
+      return ["settings", "employees", "proposals"];
+    case "idea":
+      return ["ideas"];
+    case "memory":
+    case "share":
+      return ["memory"];
+    case "vault":
+      return ["vault"];
     case "recurring_task":
     case "schedule":
       return ["settings"];
@@ -203,7 +215,7 @@ export function useGuidelines(wanted = true) {
 }
 
 /** A read with its own key under an area: an event on the area refreshes it. */
-function useKeyed<T>(key: unknown[], read: () => Promise<T>, wanted = true) {
+export function useKeyed<T>(key: unknown[], read: () => Promise<T>, wanted = true) {
   const { status, user } = useLinkState();
   return useQuery({
     queryKey: key,
@@ -315,5 +327,135 @@ export function useThread(messageId: string | null) {
     ["messages", "thread", messageId],
     async () => expectBody(await connection.call("thread.read", { message_id: messageId as string }), "thread").value,
     messageId !== null,
+  );
+}
+
+export function useArchivedGuidelines(wanted: boolean) {
+  const connection = useConnection();
+  return useKeyed(
+    ["guidelines", "archived"],
+    async () => expectBody(await connection.call("guideline.list", { archived: true }), "guidelines").value.guidelines,
+    wanted,
+  );
+}
+
+export function useGuideline(id: string | null, version: number | null = null) {
+  const connection = useConnection();
+  return useKeyed(
+    ["guidelines", "detail", id, version],
+    async () =>
+      expectBody(
+        await connection.call("guideline.get", {
+          guideline_id: id as string,
+          ...(version === null ? {} : { version }),
+        }),
+        "guideline",
+      ).value,
+    id !== null,
+  );
+}
+
+export function useGuidelineVersions(id: string | null, wanted: boolean) {
+  const connection = useConnection();
+  return useKeyed(
+    ["guidelines", "versions", id],
+    async () =>
+      expectBody(await connection.call("guideline.versions", { guideline_id: id as string }), "guideline_versions")
+        .value.versions,
+    wanted && id !== null,
+  );
+}
+
+export function useGuidelineAffected(id: string | null) {
+  const connection = useConnection();
+  return useKeyed(
+    ["guidelines", "affected", id],
+    async () =>
+      expectBody(await connection.call("guideline.affected", { guideline_id: id as string }), "guideline_affected")
+        .value,
+    id !== null,
+  );
+}
+
+/** What a run gets per employee and place, for saying a change would not fit. */
+export function useEffectiveSets(pairs: [string, string | null][]) {
+  const connection = useConnection();
+  return useKeyed(
+    ["guidelines", "effective", pairs],
+    async () => {
+      const answers = await Promise.all(
+        pairs.map(async ([employee_id, project_id]) => {
+          try {
+            const set = expectBody(
+              await connection.call("guideline.effective", { employee_id, ...(project_id ? { project_id } : {}) }),
+              "effective_guidelines",
+            ).value;
+            return [`${employee_id}|${project_id ?? ""}`, set] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      return new Map(answers.flatMap((a) => (a ? [a] : [])));
+    },
+    pairs.length > 0,
+  );
+}
+
+export function useIdeas(projectId: string | null) {
+  const connection = useConnection();
+  return useKeyed(["ideas", projectId], async () =>
+    projectId
+      ? expectBody(await connection.call("idea.list", { project_id: projectId }), "ideas").value.ideas
+      : expectBody(await connection.call("idea.list_all", {}), "all_ideas").value.ideas,
+  );
+}
+
+export function useMemory(projectId: string | null) {
+  const connection = useConnection();
+  return useKeyed(
+    ["memory", "list", projectId],
+    async () =>
+      expectBody(await connection.call("memory.list", { project_id: projectId as string }), "memory").value.items,
+    projectId !== null,
+  );
+}
+
+export function useMemoryContext(projectId: string | null, employeeId: string | null) {
+  const connection = useConnection();
+  return useKeyed(
+    ["memory", "context", projectId, employeeId],
+    async () =>
+      expectBody(
+        await connection.call("memory.get_context", {
+          ...(projectId ? { project_id: projectId } : {}),
+          ...(employeeId ? { employee_id: employeeId } : {}),
+        }),
+        "memory_context",
+      ).value,
+    projectId !== null,
+  );
+}
+
+/** Never a secret's value: the list holds those only for text and URLs. */
+export function useVault(projectId: string | null) {
+  const connection = useConnection();
+  return useKeyed(
+    ["vault", "list", projectId],
+    async () =>
+      expectBody(await connection.call("vault.list", projectId ? { project_id: projectId } : {}), "vault").value,
+  );
+}
+
+export function useVaultAudit(projectId: string | null, all: boolean, wanted: boolean) {
+  const connection = useConnection();
+  return useKeyed(
+    ["vault", "audit", projectId, all],
+    async () =>
+      expectBody(
+        await connection.call("vault.audit", { ...(projectId ? { project_id: projectId } : {}), all, limit: 50 }),
+        "vault_audit",
+      ).value,
+    wanted,
   );
 }

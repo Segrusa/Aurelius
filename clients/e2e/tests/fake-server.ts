@@ -25,6 +25,8 @@ export interface Scripted {
   /** `group_chat.get` answers by channel; "general" for none. */
   feeds?: Record<string, unknown>;
   threads?: Record<string, unknown>;
+  /** Any other answer, by method: the whole response body. */
+  reads?: Record<string, (request: Record<string, unknown>) => unknown>;
   /** A write answered with this instead of a receipt, or nothing. */
   refuse?: (request: Record<string, unknown>) => { code: string; message: string; matched_items?: string[] } | null;
   /** Answers for the writes; recorded in `writes`. */
@@ -45,6 +47,8 @@ export async function scriptServer(
     ws.onMessage((raw) => {
       const request = JSON.parse(String(raw)) as Record<string, unknown>;
       const answer = (ok: unknown) => ws.send(JSON.stringify({ type: "response", request_id: request.request_id, ok }));
+      const read = script.reads?.[request.method as string];
+      if (read) return answer(read(request) as never);
       switch (request.method) {
         case "session.hello":
           return answer({

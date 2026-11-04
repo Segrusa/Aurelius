@@ -14,6 +14,11 @@ interface Bridge {
   setSession(token: string | null): Promise<void>;
   info(): Promise<{ version: string; deviceName: string }>;
   desktopPrefs(): Promise<DesktopPrefs>;
+  copy(text: string): Promise<void>;
+  copySecret(text: string): Promise<{ sure: boolean }>;
+  saveSecretFile(name: string, content: string): Promise<{ path: string | null; private: boolean } | null>;
+  pickFolder(title: string): Promise<string | null>;
+  openFolder(path: string): Promise<void>;
 }
 
 const bridge = (window as unknown as { aurelius: Bridge }).aurelius;
@@ -48,6 +53,11 @@ const platform: Platform = {
   deviceName: info.deviceName,
   version: info.version,
   pair: null,
+  copy: (text) => bridge.copy(text),
+  copySecret: (text) => bridge.copySecret(text),
+  saveSecretFile: (name, content) => bridge.saveSecretFile(name, content),
+  pickFolder: (title) => bridge.pickFolder(title),
+  openFolder: (path) => bridge.openFolder(path),
 };
 
 adoptDesktopPrefs(platform.storage, desktopPrefs);

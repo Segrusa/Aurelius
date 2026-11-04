@@ -136,8 +136,8 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const projects = useProjects();
   const employees = useEmployees();
   const models = useModels();
-  const [projectId, setProjectId] = useState<string | null>(null);
   const [seed] = useState(() => overlays.prefill());
+  const [projectId, setProjectId] = useState<string | null>(seed?.projectId ?? null);
   const [title, setTitle] = useState(seed?.title ?? "");
   const [description, setDescription] = useState(seed?.description ?? "");
   const [priority, setPriority] = useState<TicketPriority>("normal");
@@ -145,7 +145,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const [owner, setOwner] = useState("dispatcher");
   const [mode, setMode] = useState("default");
   const [model, setModel] = useState("default");
-  const [labels, setLabels] = useState("");
+  const [labels, setLabels] = useState(seed?.labels ?? "");
   const [deadline, setDeadline] = useState("");
   const { busy, error, setError, held, send, sendAnyway } = useSend((text) => {
     toast(text);
@@ -179,7 +179,8 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
           // A server without the feature refuses a field it does not know.
           ...(canHaveResponsible && responsible === "me" && user ? { responsible_user_id: user.id } : {}),
           ...(owner === "dispatcher" ? {} : { owner_employee_id: owner }),
-          ...(seed ? { from_message: seed.fromMessage } : {}),
+          ...(seed?.fromMessage ? { from_message: seed.fromMessage } : {}),
+          ...(seed?.fromIdea ? { from_idea: seed.fromIdea } : {}),
         },
         { retry: false },
       );
@@ -337,7 +338,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const employees = useEmployees();
   const models = useModels();
   const [goal, setGoal] = useState("");
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(() => overlays.prefill()?.employeeId ?? null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [mode, setMode] = useState("default");
   const [model, setModel] = useState("default");

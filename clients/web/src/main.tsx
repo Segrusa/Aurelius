@@ -35,6 +35,29 @@ const platform: Platform = {
   deviceName: "Browser",
   version: import.meta.env.VITE_AURELIUS_VERSION ?? "0.0.0",
   pair: (code, name) => pairBrowser(location.origin, code, name),
+  copy: (text) => navigator.clipboard.writeText(text),
+  // A browser only lets a page read the clipboard while focused and allowed, so this is best effort.
+  copySecret: async (text) => {
+    await navigator.clipboard.writeText(text);
+    setTimeout(() => {
+      navigator.clipboard
+        .readText()
+        .then((now) => (now === text ? navigator.clipboard.writeText("") : undefined))
+        .catch(() => undefined);
+    }, 60_000);
+    return { sure: false };
+  },
+  saveSecretFile: async (name, content) => {
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(new Blob([`${content}\n`], { type: "text/plain" }));
+    link.href = url;
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(url);
+    return { path: null, private: false };
+  },
+  pickFolder: null,
+  openFolder: null,
 };
 
 const root = document.getElementById("root");
