@@ -40,6 +40,7 @@ import {
   peopleCount,
   priorityLabel,
   runLocked,
+  suggestedReplies,
   takeOverOffered,
   testingNote,
 } from "./board-logic";
@@ -262,6 +263,14 @@ function ReviewGate({
     setMode(null);
     setFeedback("");
   });
+  const navigate = useNavigate();
+  const discussion = useMessages(t.conversation_id);
+  const lastMessage = (discussion.data?.messages ?? []).filter((m) => !m.deleted_at_ms).at(-1);
+  const reply = (text: string) =>
+    send(async (confirmSecret) => {
+      await connection.write("ticket.post", { ticket_id: t.id, text, confirm_secret: confirmSecret });
+      return "";
+    });
   const too = decideToo(t);
   const done = () => void write("ticket.accept", { ticket_id: t.id }, { done: `${ticketNumber(t)} is Done.` });
   return (
@@ -295,6 +304,14 @@ function ReviewGate({
         </p>
       ) : null}
       {whyNot ? <span className="text-[12px] text-text2">{whyNot}</span> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[12px] text-text3">Tell {t.owner_name ?? "the owner"}:</span>
+        {suggestedReplies(report).map((r) => (
+          <Button key={r.label} disabled={busy} onClick={() => reply(r.text)}>
+            {r.label}
+          </Button>
+        ))}
+      </div>
       <div className="flex flex-wrap gap-2">
         <Button kind="primary" disabled={!ready} onClick={done}>
           Mark done {keyed ? <Kbd onAccent>{showChord("secondary-enter", isMac)}</Kbd> : null}
@@ -335,6 +352,11 @@ function ReviewGate({
         >
           Send back to Doing
         </Button>
+        {lastMessage ? (
+          <Button onClick={() => void navigate({ to: "/board", search: { ticket: t.id, message: lastMessage.id } })}>
+            Open discussion
+          </Button>
+        ) : null}
         {t.root_task_id ? (
           <Link
             to="/tasks/$taskId"
