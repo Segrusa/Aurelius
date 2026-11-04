@@ -74,12 +74,17 @@ function Live() {
       {live.slice(0, 6).map((t) => {
         const who = t.employee_name ?? "Task";
         return (
-          <div key={t.id} className="flex h-7 items-center gap-[9px] rounded-[6px] px-2">
+          <Link
+            key={t.id}
+            to="/tasks/$taskId"
+            params={{ taskId: t.id }}
+            className="flex h-7 items-center gap-[9px] rounded-[6px] px-2 text-text no-underline hover:bg-sel"
+          >
             <Mark letter={initial(who)} color={markColor(t.employee_id ?? t.id)} />
             <span className="font-medium whitespace-nowrap">{who}</span>
             <span className="min-w-0 truncate text-text3">{ticketPlace(t)}</span>
             <span className="ml-auto size-[6px] flex-none rounded-full" style={{ background: liveColor(t) }} />
-          </div>
+          </Link>
         );
       })}
     </div>

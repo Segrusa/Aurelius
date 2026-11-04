@@ -58,7 +58,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           label: `#${t.number} ${t.title}`,
           detail: [COLUMN[t.column] ?? t.column, t.owner_name].filter(Boolean).join(" · "),
           mark: t.id,
-          run: go("/board"),
+          run: () => void navigate({ to: "/board", search: { ticket: t.id } }),
         })),
       },
       {

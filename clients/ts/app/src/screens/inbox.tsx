@@ -1,13 +1,16 @@
 import { ProtocolError } from "@aurelius/client";
-import type { ApprovalView } from "@aurelius/protocol";
+import type { ApprovalView, GuidelineProposalView, NotificationView, ProposalView, TaskView } from "@aurelius/protocol";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useConnection } from "../connection";
-import { useApprovals, useGuidelineProposals, useNotifications, useOpenTasks, useProposals } from "../data";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useConnection, useLinkState } from "../connection";
+import { useApprovals, useGuidelineProposals, useNotifications, useOpenTasks, useProposals, useTickets } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { StatusGlyph } from "../ui/icons";
 import { Button, Kbd, Segments } from "../ui/kit";
+import { toast } from "../ui/toast";
+import { taskCounts } from "./board-logic";
 import {
   age,
   approvalAction,
@@ -19,6 +22,7 @@ import {
   type InboxRow,
   type InboxTone,
 } from "./inbox-logic";
+import { useTicketNeeds } from "./tickets-kit";
 
 const TONES: Record<InboxTone, string> = {
   amber: "var(--amber)",
@@ -42,16 +46,37 @@ export function useInbox() {
   const guidelineProposals = useGuidelineProposals();
   const tasks = useOpenTasks();
   const notifications = useNotifications();
+  const { features } = useLinkState();
+  const responsible = features.includes("ticket_responsible");
+  const tickets = useTickets(responsible);
+  const need = useTicketNeeds(tickets.data ?? []);
   const groups = useMemo(
     () =>
       buildInbox({
         approvals: approvals.data ?? [],
         proposals: proposals.data ?? [],
         guidelineProposals: guidelineProposals.data ?? [],
-        tasks: tasks.data ?? [],
+        // Freeze §5: a ticket's main task only when its ticket needs this board member.
+        tasks: (tasks.data ?? []).filter((t) =>
+          taskCounts(
+            t,
+            responsible,
+            tickets.data?.find((x) => x.id === t.ticket_id),
+            need.mine,
+          ),
+        ),
         notifications: notifications.data ?? [],
       }),
-    [approvals.data, proposals.data, guidelineProposals.data, tasks.data, notifications.data],
+    [
+      approvals.data,
+      proposals.data,
+      guidelineProposals.data,
+      tasks.data,
+      notifications.data,
+      responsible,
+      tickets.data,
+      need,
+    ],
   );
   const loading = approvals.isPending || notifications.isPending || tasks.isPending;
   const error = approvals.error ?? notifications.error ?? tasks.error ?? null;
@@ -202,6 +227,15 @@ function ApprovalDetail({ approval }: { approval: ApprovalView }) {
         <Button kind="primary" disabled={busy} onClick={() => void decide(true)}>
           Allow once <Kbd onAccent>↵</Kbd>
         </Button>
+        {approval.task_id ? (
+          <Link
+            to="/tasks/$taskId"
+            params={{ taskId: approval.task_id }}
+            className="order-last ml-auto self-center text-[12px] text-acc-text no-underline"
+          >
+            Open run →
+          </Link>
+        ) : null}
         {eligible ? (
           <Button disabled={busy} onClick={() => void decide(true, true)}>
             Always allow <Kbd>⇧↵</Kbd>
@@ -233,12 +267,127 @@ function ApprovalDetail({ approval }: { approval: ApprovalView }) {
   );
 }
 
-function PlainDetail({ row }: { row: InboxRow }) {
+function Prose({ title, children }: { title: string; children: string }) {
   return (
-    <div className="enter flex max-w-[760px] flex-col gap-2 px-6 py-8 xl:px-10" key={row.id}>
-      <h2 className="m-0 text-[22px] leading-[1.3] font-semibold tracking-[-0.015em]">{row.title}</h2>
-      <p className="m-0 text-[14px] leading-[1.6] text-text2">{row.meta}</p>
+    <div className="flex flex-col gap-[6px]">
+      <span className="text-[12px] font-medium text-text3">{title}</span>
+      <p className="m-0 text-[14px] leading-[1.6] whitespace-pre-wrap">{children}</p>
     </div>
+  );
+}
+
+function DetailFrame({ row, children }: { row: InboxRow; children: ReactNode }) {
+  return (
+    <div className="enter flex max-w-[760px] flex-col gap-5 px-6 py-8 xl:px-10" key={row.id}>
+      <div className="flex flex-col gap-2">
+        <h2 className="m-0 text-[22px] leading-[1.3] font-semibold tracking-[-0.015em]">{row.title}</h2>
+        <p className="m-0 text-[14px] leading-[1.6] text-text2">{row.meta}</p>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function NotificationDetail({ row, n }: { row: InboxRow; n: NotificationView }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const navigate = useNavigate();
+  const act = async (method: "notification.mark_read" | "notification.dismiss") => {
+    try {
+      await connection.write(method, { id: n.id });
+      await client.invalidateQueries({ queryKey: ["notifications"] });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "This did not work.");
+    }
+  };
+  const open = () => {
+    if (n.ticket_id) void navigate({ to: "/board", search: { ticket: n.ticket_id } });
+    else if (n.task_id) void navigate({ to: "/tasks/$taskId", params: { taskId: n.task_id } });
+  };
+  useAction("OpenSelected", open, Boolean(n.ticket_id || n.task_id));
+  return (
+    <DetailFrame row={row}>
+      {n.reason ? <Prose title="Why you see this">{n.reason}</Prose> : null}
+      <div className="flex flex-wrap gap-2">
+        {n.ticket_id || n.task_id ? (
+          <Button kind="primary" onClick={open}>
+            {n.ticket_id ? "Open ticket" : "Open task"} <Kbd onAccent>↵</Kbd>
+          </Button>
+        ) : null}
+        {n.read ? null : <Button onClick={() => void act("notification.mark_read")}>Mark read</Button>}
+        <Button onClick={() => void act("notification.dismiss")}>Dismiss</Button>
+      </div>
+    </DetailFrame>
+  );
+}
+
+function TaskDetail({ row, task }: { row: InboxRow; task: TaskView }) {
+  const navigate = useNavigate();
+  const open = () => void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } });
+  useAction("OpenSelected", open);
+  return (
+    <DetailFrame row={row}>
+      <Prose title="Goal">{task.goal}</Prose>
+      <div>
+        <Button kind="primary" onClick={open}>
+          Open run <Kbd onAccent>↵</Kbd>
+        </Button>
+      </div>
+    </DetailFrame>
+  );
+}
+
+function ProposalDetail({ row, proposal }: { row: InboxRow; proposal: ProposalView }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const decide = async (approve: boolean) => {
+    try {
+      await connection.write("proposal.decide", { proposal_id: proposal.id, approve }, { retry: false });
+      await client.invalidateQueries({ queryKey: ["proposals"] });
+      toast(approve ? "The proposal is approved." : "The proposal is rejected.");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "This did not work.");
+    }
+  };
+  return (
+    <DetailFrame row={row}>
+      {proposal.reason ? <Prose title="Why">{proposal.reason}</Prose> : null}
+      <Prose title="Instructions">{proposal.instructions}</Prose>
+      <div className="flex flex-wrap gap-2">
+        <Button kind="primary" onClick={() => void decide(true)}>
+          Approve
+        </Button>
+        <Button kind="danger" onClick={() => void decide(false)}>
+          Reject
+        </Button>
+      </div>
+    </DetailFrame>
+  );
+}
+
+function GuidelineDetail({ row, proposal }: { row: InboxRow; proposal: GuidelineProposalView }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const decide = async (approve: boolean) => {
+    try {
+      await connection.write("guideline.decide_proposal", { proposal_id: proposal.id, approve }, { retry: false });
+      await client.invalidateQueries({ queryKey: ["guideline_proposals"] });
+      toast(approve ? "The guideline proposal is approved." : "The guideline proposal is rejected.");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "This did not work.");
+    }
+  };
+  return (
+    <DetailFrame row={row}>
+      <div className="flex flex-wrap gap-2">
+        <Button kind="primary" onClick={() => void decide(true)}>
+          Approve
+        </Button>
+        <Button kind="danger" onClick={() => void decide(false)}>
+          Reject
+        </Button>
+      </div>
+    </DetailFrame>
   );
 }
 
@@ -297,8 +446,14 @@ export function InboxScreen() {
           <div className="min-h-0 flex-1 overflow-y-auto">
             {selected?.source.kind === "approval" ? (
               <ApprovalDetail key={selected.id} approval={selected.source.approval} />
-            ) : selected ? (
-              <PlainDetail row={selected} />
+            ) : selected?.source.kind === "notification" ? (
+              <NotificationDetail key={selected.id} row={selected} n={selected.source.notification} />
+            ) : selected?.source.kind === "task" ? (
+              <TaskDetail key={selected.id} row={selected} task={selected.source.task} />
+            ) : selected?.source.kind === "proposal" ? (
+              <ProposalDetail key={selected.id} row={selected} proposal={selected.source.proposal} />
+            ) : selected?.source.kind === "guideline" ? (
+              <GuidelineDetail key={selected.id} row={selected} proposal={selected.source.proposal} />
             ) : null}
           </div>
         </section>

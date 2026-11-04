@@ -1,3 +1,4 @@
+import { ACTIVITY_LIMIT } from "./screens/board-logic";
 // Server data: a read per query key, refetched when an event says its area changed. Events come in
 // bursts while agents work, so a refetch waits for the burst, as the Rust client did (500 ms).
 
@@ -32,7 +33,8 @@ export type Area =
   | "settings"
   | "employees"
   | "tickets"
-  | "guidelines";
+  | "guidelines"
+  | "messages";
 
 /** The areas an event may have changed. An event of a newer server changes nothing here. */
 export function areasOf(kind: EventKind | string): Area[] {
@@ -50,9 +52,13 @@ export function areasOf(kind: EventKind | string): Area[] {
       return ["projects"];
     case "task":
     case "run":
-      return ["tasks", "notifications", "employees"];
+      return ["tasks", "notifications", "employees", "messages", "tickets"];
+    case "conversation":
+    case "message":
+    case "chat":
+      return ["messages"];
     case "ticket":
-      return ["tasks", "notifications", "tickets"];
+      return ["tasks", "notifications", "tickets", "messages"];
     case "claude_login":
       return ["subscription", "settings"];
     case "company":
@@ -193,5 +199,95 @@ export function useGuidelines(wanted = true) {
     async () => expectBody(await connection.call("guideline.list", {}), "guidelines").value.guidelines,
     30_000,
     wanted,
+  );
+}
+
+/** A read with its own key under an area: an event on the area refreshes it. */
+function useKeyed<T>(key: unknown[], read: () => Promise<T>, wanted = true) {
+  const { status, user } = useLinkState();
+  return useQuery({
+    queryKey: key,
+    queryFn: read,
+    enabled: wanted && status === "online" && user !== null,
+    staleTime: 30_000,
+  });
+}
+
+export function useBoard(projectId: string | null) {
+  const connection = useConnection();
+  return useKeyed(
+    ["tickets", "board", projectId],
+    async () => expectBody(await connection.call("board.get", { project_id: projectId }), "board").value,
+  );
+}
+
+export function useTicket(id: string | null) {
+  const connection = useConnection();
+  return useKeyed(
+    ["tickets", "detail", id],
+    async () => expectBody(await connection.call("ticket.get", { ticket_id: id as string }), "ticket").value,
+    id !== null,
+  );
+}
+
+export function useTicketActivity(id: string | null, limit = ACTIVITY_LIMIT) {
+  const connection = useConnection();
+  return useKeyed(
+    ["tickets", "activity", id, limit],
+    async () =>
+      expectBody(await connection.call("timeline.list", { correlation_id: id, limit, activity: true }), "timeline")
+        .value.cards,
+    id !== null,
+  );
+}
+
+export function useMyTickets(projectId: string | null, includeDone: boolean, wanted = true) {
+  const connection = useConnection();
+  return useKeyed(
+    ["tickets", "mine", projectId, includeDone],
+    async () =>
+      expectBody(
+        await connection.call("ticket.my_tickets", { project_id: projectId, include_done: includeDone }),
+        "my_tickets",
+      ).value,
+    wanted,
+  );
+}
+
+export function useMessages(conversationId: string | null | undefined) {
+  const connection = useConnection();
+  return useKeyed(
+    ["messages", conversationId],
+    async () =>
+      expectBody(await connection.call("conversation.get", { conversation_id: conversationId as string }), "messages")
+        .value,
+    Boolean(conversationId),
+  );
+}
+
+/** Every task, ended too. */
+export function useAllTasks() {
+  const connection = useConnection();
+  return useKeyed(
+    ["tasks", "all"],
+    async () => expectBody(await connection.call("task.list", {}), "tasks").value.tasks,
+  );
+}
+
+export function useCompany() {
+  const connection = useConnection();
+  return useKeyed(
+    ["settings", "company"],
+    async () => expectBody(await connection.call("company.get"), "company").value,
+  );
+}
+
+export function useRunGuidelines(runId: string | null | undefined) {
+  const connection = useConnection();
+  return useKeyed(
+    ["messages", "guidelines", runId],
+    async () =>
+      expectBody(await connection.call("run.guidelines", { run_id: runId as string }), "run_guidelines").value,
+    Boolean(runId),
   );
 }

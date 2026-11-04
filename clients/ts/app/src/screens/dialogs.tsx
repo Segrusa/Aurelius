@@ -46,7 +46,7 @@ function runOf(mode: string, model: string): TaskRun {
   return { ...(mode === "default" ? {} : { mode: mode as AgentMode }), ...(model === "default" ? {} : { model }) };
 }
 
-function useModels() {
+export function useModels() {
   const connection = useConnection();
   const list = useSetting(
     "connections",
@@ -58,8 +58,10 @@ function useModels() {
   }, [list.data]);
 }
 
+export { parseDeadline, parseLabels };
+
 /** Sends one write. A text that holds a vault value comes back held, to send again on purpose. */
-function useSend(onDone: (text: string) => void) {
+export function useSend(onDone: (text: string) => void) {
   const client = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,7 +97,7 @@ function useSend(onDone: (text: string) => void) {
   };
 }
 
-function Held({ names, onSend, busy }: { names: string[]; onSend: () => void; busy: boolean }) {
+export function Held({ names, onSend, busy }: { names: string[]; onSend: () => void; busy: boolean }) {
   return (
     <div
       role="alert"

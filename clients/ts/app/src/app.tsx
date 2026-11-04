@@ -5,10 +5,14 @@ import { type Appearance, AppearanceContext, applyAppearance, readAppearance, sa
 import { ConnectionProvider } from "./connection";
 import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
+import { BoardScreen } from "./screens/board";
 import { Frame } from "./screens/frame";
 import { Gate } from "./screens/gate";
 import { InboxScreen } from "./screens/inbox";
+import { MyTicketsScreen } from "./screens/my-tickets";
 import { SettingsScreen } from "./screens/settings";
+import { TaskRunScreen } from "./screens/task-run";
+import { TasksScreen } from "./screens/tasks";
 import { TooltipProvider } from "./ui/overlay";
 
 /** A screen of the design that is not built yet: says so, and the phase, instead of looking finished. */
@@ -40,11 +44,35 @@ const index = createRoute({
   },
 });
 const inbox = createRoute({ getParentRoute: () => root, path: "/inbox", component: InboxScreen });
+const ticketSearch = (search: Record<string, unknown>): { ticket?: string } =>
+  typeof search.ticket === "string" ? { ticket: search.ticket } : {};
+const board = createRoute({
+  getParentRoute: () => root,
+  path: "/board",
+  validateSearch: ticketSearch,
+  component: function BoardRoute() {
+    return <BoardScreen ticket={board.useSearch().ticket} />;
+  },
+});
+const myTickets = createRoute({
+  getParentRoute: () => root,
+  path: "/my-tickets",
+  validateSearch: ticketSearch,
+  component: function MyTicketsRoute() {
+    return <MyTicketsScreen ticket={myTickets.useSearch().ticket} />;
+  },
+});
+const tasks = createRoute({ getParentRoute: () => root, path: "/tasks", component: TasksScreen });
+const taskRun = createRoute({
+  getParentRoute: () => root,
+  path: "/tasks/$taskId",
+  component: function TaskRunRoute() {
+    const { taskId } = taskRun.useParams();
+    return <TaskRunScreen key={taskId} taskId={taskId} />;
+  },
+});
 const others = (
   [
-    ["/my-tickets", "My tickets"],
-    ["/board", "Board"],
-    ["/tasks", "Tasks"],
     ["/chat", "Team chat"],
     ["/employees", "Employees"],
     ["/knowledge", "Knowledge"],
@@ -67,7 +95,7 @@ const settings = createRoute({
 });
 
 const router = createRouter({
-  routeTree: root.addChildren([index, inbox, settingsIndex, settings, ...others]),
+  routeTree: root.addChildren([index, inbox, board, myTickets, tasks, taskRun, settingsIndex, settings, ...others]),
   defaultPreload: "intent",
 });
 

@@ -11,6 +11,8 @@
   --bg: #08090a;
   --panel: #0f1012;
   --card: #16171a;
+  --board: #0f1012;
+  --card-shadow: none;
   --sunk: #0b0c0d;
   --pop: #141517;
   --line: rgb(255 255 255 / 0.07);
@@ -43,6 +45,8 @@
   --bg: #f3f3f2;
   --panel: #ffffff;
   --card: #ffffff;
+  --board: #f8f8f7;
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
   --sunk: #f8f8f7;
   --pop: #ffffff;
   --line: rgb(0 0 0 / 0.08);
@@ -74,6 +78,8 @@
   --color-bg: var(--bg);
   --color-panel: var(--panel);
   --color-card: var(--card);
+  --color-board: var(--board);
+  --shadow-card: var(--card-shadow);
   --color-sunk: var(--sunk);
   --color-pop: var(--pop);
   --color-line: var(--line);
@@ -194,4 +200,82 @@ a {
     /* biome-ignore lint/complexity/noImportantStyles: this must win over every component. */
     transition-duration: 0.01ms !important;
   }
+}
+
+.prose-aurelius {
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.prose-aurelius > * {
+  margin: 0 0 10px;
+}
+
+.prose-aurelius > :last-child {
+  margin-bottom: 0;
+}
+
+.prose-aurelius h1,
+.prose-aurelius h2,
+.prose-aurelius h3 {
+  margin-top: 14px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.prose-aurelius ul,
+.prose-aurelius ol {
+  padding-left: 20px;
+}
+
+.prose-aurelius ul {
+  list-style: disc;
+}
+
+.prose-aurelius ol {
+  list-style: decimal;
+}
+
+.prose-aurelius a {
+  color: var(--acc-text);
+  text-decoration: none;
+}
+
+.prose-aurelius code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--kbd);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.prose-aurelius pre {
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--sunk);
+}
+
+.prose-aurelius pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.prose-aurelius table {
+  border-collapse: collapse;
+}
+
+.prose-aurelius th,
+.prose-aurelius td {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+
+.prose-aurelius blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+  color: var(--text2);
 }

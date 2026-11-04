@@ -6,7 +6,18 @@ import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Link } from "@aurelius/client";
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, safeStorage, session, type WebContents } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  net,
+  protocol,
+  safeStorage,
+  session,
+  shell,
+  type WebContents,
+} from "electron";
 import { daemonEndpoint, dataDir, openPipe } from "./pipe";
 import { siteFile } from "./site";
 
@@ -167,7 +178,11 @@ function openWindow(): void {
     },
   });
   window.once("ready-to-show", () => window.show());
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  // A link in a report or a message opens in the browser; only a web address leaves the app.
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: "deny" };
+  });
   window.webContents.on("will-navigate", (event, url) => {
     if (!fromOurPage(url)) event.preventDefault();
   });
