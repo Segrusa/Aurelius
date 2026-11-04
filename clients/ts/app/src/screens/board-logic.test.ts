@@ -5,6 +5,7 @@ import {
   activityText,
   beforeFor,
   columnShown,
+  columnsProblem,
   deadlineInput,
   deadlineText,
   decideToo,
@@ -283,5 +284,18 @@ describe("My tickets", () => {
     expect(columnShown("testing", false)).toBe(false);
     expect(columnShown("testing", true)).toBe(true);
     expect(columnShown("doing", false)).toBe(true);
+  });
+});
+
+describe("column names", () => {
+  it("needs a name, and each its own", () => {
+    expect(columnsProblem([{ name: "", title: "Doing" }])).toBe("Give Doing a name.");
+    expect(
+      columnsProblem([
+        { name: "Work", title: "Todo" },
+        { name: "work", title: "Doing" },
+      ]),
+    ).toBe("Each column needs its own name.");
+    expect(columnsProblem([{ name: "Work", title: "Todo" }])).toBeNull();
   });
 });

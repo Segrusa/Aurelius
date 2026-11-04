@@ -53,15 +53,20 @@ export function Menu<T extends string>({
   value,
   onPick,
   label,
+  open,
+  onOpenChange,
 }: {
   trigger: ReactElement;
   options: { key: T; label: string; danger?: boolean }[];
   value?: T;
   onPick: (key: T) => void;
   label: string;
+  /** Only for a menu a key also opens. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <RadixMenu.Root modal={false}>
+    <RadixMenu.Root modal={false} {...(open === undefined ? {} : { open })} {...(onOpenChange ? { onOpenChange } : {})}>
       <RadixMenu.Trigger asChild aria-label={label}>
         {trigger}
       </RadixMenu.Trigger>

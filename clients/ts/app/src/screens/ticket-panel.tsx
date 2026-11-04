@@ -1,8 +1,9 @@
+import { expectBody } from "@aurelius/client";
 import type { AgentMode, TicketPriority, TicketView } from "@aurelius/protocol";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useBoard, useEmployees, useMessages, useTicket, useTicketActivity } from "../data";
+import { useBoard, useEmployees, useKeyed, useMessages, useTicket, useTicketActivity } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { Button, Chip, initial, Mark, markColor } from "../ui/kit";
@@ -28,6 +29,7 @@ import {
   testingNote,
 } from "./board-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
+import { lastSummaryFailed } from "./run-logic";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
 import { ColumnGlyph, ticketNumber, useTicketNeeds, useTicketWrite } from "./tickets-kit";
 
@@ -366,6 +368,30 @@ export function ConfirmDialog({
   );
 }
 
+const FOLLOWERS_SHOWN = 3;
+
+function Followers({ id }: { id: string }) {
+  const connection = useConnection();
+  const followers = useKeyed(
+    ["tickets", "followers", id],
+    async () =>
+      expectBody(await connection.call("ticket.followers", { ticket_id: id }), "ticket_followers").value.followers,
+  );
+  const list = followers.data ?? [];
+  if (list.length === 0) return null;
+  const shown = list.slice(0, FOLLOWERS_SHOWN);
+  return (
+    <Row name="Followers">
+      <span title={list.map((f) => f.username).join(", ")} className="inline-flex items-center gap-1">
+        {shown.map((f) => (
+          <Mark key={f.user_id} letter={initial(f.username)} color={markColor(f.user_id)} size={18} radius={5} />
+        ))}
+        {list.length > shown.length ? <span className="text-text3">+{list.length - shown.length}</span> : null}
+      </span>
+    </Row>
+  );
+}
+
 function StatusBox({
   t,
   choosing,
@@ -378,6 +404,8 @@ function StatusBox({
   const { user } = useLinkState();
   const write = useTicketWrite();
   const employees = useEmployees();
+  const discussion = useMessages(t.column === "done" ? t.conversation_id : null);
+  const summaryFailed = lastSummaryFailed(discussion.data?.messages ?? []);
   const [leaving, setLeaving] = useState<"backlog" | "delete" | null>(null);
   const me = user?.id ?? null;
   const wait = loginWait(t, me, false);
@@ -493,7 +521,15 @@ function StatusBox({
       return <Box>{testingNote(null)}</Box>;
     case "done":
       return (
-        <Box>{`Done${t.done_at_ms ? ` · ${time(t.done_at_ms)}` : ""}. Nothing was merged, pushed or deployed by closing it.`}</Box>
+        <Box>
+          {`Done${t.done_at_ms ? ` · ${time(t.done_at_ms)}` : ""}. Nothing was merged, pushed or deployed by closing it.`}
+          {summaryFailed ? (
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-red">✕ The summary could not be saved to project memory.</span>
+              <Button onClick={() => void write("ticket.retry_summary", { ticket_id: t.id })}>Try again</Button>
+            </div>
+          ) : null}
+        </Box>
       );
     default:
       return null;
@@ -888,6 +924,7 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
                   {t.login_user === need.me ? "Your Claude login" : `${t.login_username}'s Claude login`}
                 </Row>
                 <Row name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</Row>
+                {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}
                 {t.attachments.length > 0 ? (
                   <Row name="Files">{t.attachments.map((f) => f.name).join(", ")}</Row>
                 ) : null}

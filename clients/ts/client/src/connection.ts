@@ -332,6 +332,12 @@ export class Connection {
     if (this.state.signedOut !== null) this.setState({ signedOut: null });
   }
 
+  /** Reads this board member's Claude login again; everything that shows it follows. */
+  async refreshClaudeLogin(): Promise<void> {
+    const body = await this.call("claude_login.status");
+    this.setState({ claudeLogin: expectBody(body, "claude_login").value });
+  }
+
   private setState(change: Partial<LinkState>): void {
     if (this.disposed) return;
     this.state = { ...this.state, ...change };
@@ -552,6 +558,8 @@ export class Connection {
       case "event":
         this.merge.onEvent(message);
         this.events.emit(message);
+        // The hello only told what it was then; this is how a login that just worked gets here.
+        if (message.kind === "claude_login.updated") void this.refreshClaudeLogin().catch(() => undefined);
         if (this.state.status === "online") this.setState({ lastOnlineMs: Date.now() });
         return;
       case "stream":

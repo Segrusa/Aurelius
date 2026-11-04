@@ -8,6 +8,7 @@
 :root,
 :root[data-theme="dark"] {
   --connector: rgba(255, 255, 255, 0.14);
+  --bar: #2e6b4c;
   --dot: rgba(255, 255, 255, 0.05);
   color-scheme: dark;
   --bg: #08090a;
@@ -44,6 +45,7 @@
 
 :root[data-theme="light"] {
   --connector: rgba(0, 0, 0, 0.16);
+  --bar: #8dbfa4;
   --dot: rgba(0, 0, 0, 0.07);
   color-scheme: light;
   --bg: #f3f3f2;

@@ -1,13 +1,17 @@
 import type { TaskView } from "@aurelius/protocol";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useConnection } from "../connection";
 import { useAllTasks, useEmployees, useMessages, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { Button, initial, Kbd, Mark, markColor } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { Menu } from "../ui/overlay";
+import { toast } from "../ui/toast";
 import { overlays } from "./overlays-store";
+import { boardOnlyReason } from "./run-logic";
 import { useTaskCancel } from "./task-run";
 import {
   admits,
@@ -24,9 +28,47 @@ import { ago } from "./ticket-rows";
 
 const ROW_HEIGHT = 52;
 
+/** Who else may do a task that is not running; a ticket's main task goes through the board. */
+function useAssign(task: TaskView | undefined) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const employees = useEmployees();
+  const options = (employees.data ?? [])
+    .filter((e) => e.status === "active" && e.id !== task?.employee_id)
+    .map((e) => ({ key: e.id, label: e.name }));
+  const pick = async (employeeId: string) => {
+    if (!task) return;
+    try {
+      await connection.write("task.assign", { task_id: task.id, employee_id: employeeId }, { retry: false });
+      await client.invalidateQueries({ queryKey: ["tasks"] });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "This did not work.");
+    }
+  };
+  const waiting = task ? ASSIGNABLE.includes(task.status) : false;
+  const allowed = task !== undefined && boardOnlyReason(task) === null && waiting;
+  return { options, pick, allowed };
+}
+
+const ASSIGNABLE: TaskView["status"][] = ["draft", "queued", "waiting"];
+
 function Preview({ task, onOpen }: { task: TaskView; onOpen: () => void }) {
   const messages = useMessages(task.conversation_id);
   const cancel = useTaskCancel();
+  const assign = useAssign(task);
+  const [giving, setGiving] = useState(false);
+  useAction("AssignSelectedTask", () => {
+    const why = boardOnlyReason(task);
+    if (why) toast(why);
+    else if (!assign.allowed) toast("A task can only be given to another employee while it is not running.");
+    else setGiving(true);
+  });
+  useAction("CancelSelectedTask", () => {
+    const why = boardOnlyReason(task);
+    if (why) toast(why);
+    else if (isActive(task)) void cancel(task);
+  });
+  useAction("OpenTaskConversation", onOpen);
   const state = taskStateLine(task);
   const last = [...(messages.data?.messages ?? [])].reverse().find((m) => m.role === "assistant");
   const step = last?.activity.at(-1);
@@ -68,7 +110,17 @@ function Preview({ task, onOpen }: { task: TaskView; onOpen: () => void }) {
         <Button onClick={onOpen}>
           Open conversation <Kbd>↵</Kbd>
         </Button>
-        {isActive(task) ? (
+        {assign.allowed ? (
+          <Menu
+            label="Give to"
+            open={giving}
+            onOpenChange={setGiving}
+            options={assign.options}
+            onPick={(id) => void assign.pick(id)}
+            trigger={<Button>Give to…</Button>}
+          />
+        ) : null}
+        {isActive(task) && boardOnlyReason(task) === null ? (
           <Button kind="danger" onClick={() => void cancel(task)}>
             Cancel task
           </Button>

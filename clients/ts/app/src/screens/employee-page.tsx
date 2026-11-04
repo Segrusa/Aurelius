@@ -14,6 +14,7 @@ import { type AgentMode, canPin, MODE_LABELS, nextMode, position, threadGroup, t
 import { employeeState, pinKey, usePins } from "./employees";
 import { Confirm, EYEBROW, failureOf, PageHead, SMALL, shortDay } from "./org-kit";
 import { overlays } from "./overlays-store";
+import { useFolderChooser } from "./run-tools";
 import { taskStateLine } from "./tasks-logic";
 
 const CHIP =
@@ -45,6 +46,7 @@ export function EmployeePage({ id }: { id: string }) {
   const client = useQueryClient();
   const navigate = useNavigate();
   const platform = usePlatform();
+  const folders = useFolderChooser();
   const { hostName } = useLinkState();
   const employees = useEmployees();
   const tasks = useAllTasks();
@@ -125,7 +127,7 @@ export function EmployeePage({ id }: { id: string }) {
     { key: "mode", label: "Switch mode" },
     { key: "browser", label: e.browser_allowed ? "Browser off" : "Browser on" },
     { key: "screen", label: e.screen_allowed ? "Screen off" : "Screen on" },
-    ...(platform.pickFolder ? [{ key: "folder", label: "Choose workspace folder…" }] : []),
+    { key: "folder", label: "Choose workspace folder…" },
     ...(platform.openFolder && e.folder ? [{ key: "open", label: "Open workspace folder" }] : []),
     { key: "pause", label: e.status === "paused" ? "Resume employee" : "Pause employee" },
     { key: "archive", label: "Archive employee…", danger: true },
@@ -139,9 +141,8 @@ export function EmployeePage({ id }: { id: string }) {
     else if (key === "browser") browser();
     else if (key === "screen") screen();
     else if (key === "folder")
-      void platform.pickFolder?.(`Choose a folder for ${e.name}`).then((path) => {
-        if (path)
-          void act(() => connection.write("employee.set_folder", { employee_id: e.id, path }, { retry: false }));
+      folders.choose(`Choose a folder for ${e.name}`, (path) => {
+        void act(() => connection.write("employee.set_folder", { employee_id: e.id, path }, { retry: false }));
       });
     else if (key === "open" && e.folder) void platform.openFolder?.(e.folder);
     else if (key === "pause") {
@@ -305,6 +306,7 @@ export function EmployeePage({ id }: { id: string }) {
           </div>
         </aside>
       </div>
+      {folders.dialog}
       {editing ? <EmployeeDialog employee={e} onClose={() => setEditing(false)} /> : null}
       {ask === "browser" ? (
         <Confirm

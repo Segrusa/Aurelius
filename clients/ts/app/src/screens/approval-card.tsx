@@ -9,6 +9,7 @@ import { Button } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
 import { approvalAction, approvalSentence } from "./inbox-logic";
+import { composePlanFeedback, type PlanComment } from "./run-logic";
 
 export const QUESTION_TOOL = "claude.AskUserQuestion";
 export const PLAN_TOOL = "claude.ExitPlanMode";
@@ -177,9 +178,21 @@ function PlanCard({ approval }: { approval: ApprovalView }) {
   const { busy, run } = useApprovalWrite();
   const [feedback, setFeedback] = useState("");
   const [missing, setMissing] = useState(false);
+  const [selected, setSelected] = useState("");
+  const [quote, setQuote] = useState<string | null>(null);
+  const [comment, setComment] = useState("");
+  const [comments, setComments] = useState<PlanComment[]>([]);
   const plan = (approval.arguments as { plan?: string } | null)?.plan ?? "";
+  const addComment = () => {
+    if (quote === null || comment.trim() === "") return;
+    setComments([...comments, { quote, text: comment.trim() }]);
+    setQuote(null);
+    setComment("");
+    setSelected("");
+    setMissing(false);
+  };
   const decide = (decision: "approve" | "approve_edits" | "revise" | "reject", done: string) => {
-    const text = feedback.trim();
+    const text = composePlanFeedback(comments, feedback);
     if (decision === "revise" && text === "") return setMissing(true);
     void run(
       (c) =>
@@ -194,7 +207,57 @@ function PlanCard({ approval }: { approval: ApprovalView }) {
   return (
     <Shell title="Plan · waiting for you">
       <div className="flex flex-col gap-3 p-3">
-        {plan ? <Markdown text={plan} /> : <span className="text-text2">The plan is in the conversation.</span>}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: a selection, not a control. */}
+        <div onMouseUp={() => setSelected(window.getSelection()?.toString().trim() ?? "")}>
+          {plan ? <Markdown text={plan} /> : <span className="text-text2">The plan is in the conversation.</span>}
+        </div>
+        {selected && quote === null ? (
+          <div className="flex items-center gap-2 text-[12px] text-text3">
+            <span className="min-w-0 flex-1 truncate">Selected: “{selected}”</span>
+            <Button onClick={() => setQuote(selected)}>Comment</Button>
+          </div>
+        ) : null}
+        {quote !== null ? (
+          <div className="flex flex-col gap-2 rounded-[6px] border border-line p-2">
+            <span className="truncate text-[12px] text-text3">Comment on: “{quote}”</span>
+            <input
+              // biome-ignore lint/a11y/noAutofocus: it opens because of this input.
+              autoFocus
+              aria-label="Your comment"
+              className="h-8 rounded-[6px] border border-btn-line bg-sunk px-2 text-text outline-none"
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addComment();
+                }
+              }}
+            />
+            <span className="flex justify-end gap-2">
+              <Button onClick={() => setQuote(null)}>Cancel</Button>
+              <Button kind="primary" disabled={comment.trim() === ""} onClick={addComment}>
+                Add comment
+              </Button>
+            </span>
+          </div>
+        ) : null}
+        {comments.map((c, i) => (
+          <div key={`${c.quote}|${c.text}`} className="flex items-start gap-2 rounded-[6px] bg-sunk p-2 text-[12px]">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-text3">“{c.quote}”</span>
+              {c.text}
+            </span>
+            <button
+              type="button"
+              aria-label="Remove comment"
+              className="cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text"
+              onClick={() => setComments(comments.filter((_, at) => at !== i))}
+            >
+              ×
+            </button>
+          </div>
+        ))}
         <input
           aria-label="What should change?"
           placeholder="What should change?"

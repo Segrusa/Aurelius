@@ -29,6 +29,8 @@ export interface Scripted {
   reads?: Record<string, (request: Record<string, unknown>) => unknown>;
   /** A write answered with this instead of a receipt, or nothing. */
   refuse?: (request: Record<string, unknown>) => { code: string; message: string; matched_items?: string[] } | null;
+  /** What a write's receipt holds, per method; otherwise an empty command result. */
+  results?: Record<string, (request: Record<string, unknown>) => unknown>;
   /** Answers for the writes; recorded in `writes`. */
   onWrite?: (request: Record<string, unknown>) => void;
 }
@@ -124,8 +126,21 @@ export async function scriptServer(
         case "connection.list":
           return answer({ type: "connections", value: { connections: [] } });
         case "subscription.get":
-          return answer({ type: "subscription", value: { fetched_at_ms: 0, limits: script.limits ?? [], raw: "" } });
+          return answer({
+            type: "subscription",
+            value: { fetched_at_ms: 1, login_user: "u", limits: script.limits ?? [], raw: "" },
+          });
         default:
+          // A read this script has no answer for is not a write.
+          if (!request.idempotency_key) {
+            return ws.send(
+              JSON.stringify({
+                type: "response",
+                request_id: request.request_id,
+                error: { code: "not_found", message: `No answer for ${request.method}.` },
+              }),
+            );
+          }
           writes.push(request);
           script.onWrite?.(request);
           {
@@ -140,7 +155,7 @@ export async function scriptServer(
               idempotency_key: request.idempotency_key,
               committed_seq: 2,
               replayed: false,
-              result: { kind: "command", value: {} },
+              result: script.results?.[request.method as string]?.(request) ?? { kind: "command", value: {} },
             },
           });
       }

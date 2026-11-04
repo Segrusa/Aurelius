@@ -25,6 +25,8 @@ import { IdeasBody } from "./ideas";
 import { splitIdeas } from "./knowledge-logic";
 import { AREA, Confirm, Empty, EYEBROW, FIELD, failureOf, PageHead, PILL, SMALL } from "./org-kit";
 import { overlays } from "./overlays-store";
+import { useFolderChooser } from "./run-tools";
+import { ScheduleDialog } from "./settings-advanced";
 import { TasksScreen } from "./tasks";
 import { taskStateLine } from "./tasks-logic";
 import { VaultBody } from "./vault";
@@ -47,7 +49,7 @@ function NewProject({ onClose }: { onClose: () => void }) {
   const connection = useConnection();
   const client = useQueryClient();
   const navigate = useNavigate();
-  const platform = usePlatform();
+  const folders = useFolderChooser();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [folder, setFolder] = useState("");
@@ -112,17 +114,8 @@ function NewProject({ onClose }: { onClose: () => void }) {
           Project folder (required)
           <span className="flex gap-2">
             <input className={`${FIELD} font-mono`} value={folder} onChange={(e) => setFolder(e.target.value)} />
-            {platform.pickFolder ? (
-              <Button
-                onClick={() =>
-                  void platform.pickFolder?.("Choose a project folder").then((p) => {
-                    if (p) setFolder(p);
-                  })
-                }
-              >
-                Choose…
-              </Button>
-            ) : null}
+            <Button onClick={() => folders.choose("Choose a project folder", setFolder)}>Choose…</Button>
+            {folders.dialog}
           </span>
         </label>
         {error ? (
@@ -145,6 +138,7 @@ function ProjectSettings({ project, onClose }: { project: ProjectSummary; onClos
   const connection = useConnection();
   const client = useQueryClient();
   const platform = usePlatform();
+  const folders = useFolderChooser();
   const { features } = useLinkState();
   const employees = useEmployees();
   const company = useCompany();
@@ -251,20 +245,18 @@ function ProjectSettings({ project, onClose }: { project: ProjectSummary; onClos
             {platform.openFolder && project.folder ? (
               <Button onClick={() => void platform.openFolder?.(project.folder as string)}>Open folder</Button>
             ) : null}
-            {platform.pickFolder ? (
-              <Button
-                onClick={() =>
-                  void platform.pickFolder?.("Choose another folder").then((path) => {
-                    if (path)
-                      void run(() =>
-                        connection.write("project.set_folder", { project_id: project.id, path }, { retry: false }),
-                      );
-                  })
-                }
-              >
-                Choose another folder…
-              </Button>
-            ) : null}
+            <Button
+              onClick={() =>
+                folders.choose("Choose another folder", (path) => {
+                  void run(() =>
+                    connection.write("project.set_folder", { project_id: project.id, path }, { retry: false }),
+                  );
+                })
+              }
+            >
+              Choose another folder…
+            </Button>
+            {folders.dialog}
           </span>
         </div>
         <p className={EYEBROW}>BOARD</p>
@@ -319,6 +311,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
   const client = useQueryClient();
   const platform = usePlatform();
   const navigate = useNavigate();
+  const [scheduling, setScheduling] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const refresh = () =>
     client
@@ -328,6 +321,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
     ? [
         { key: "edit", label: "Edit…" },
         ...(platform.openFolder && project.folder ? [{ key: "folder", label: "Open folder" }] : []),
+        { key: "schedule", label: "New recurring task…" },
         { key: "export", label: "Export (Markdown + JSON)" },
         { key: "memory", label: "Memory" },
         { key: "pause", label: project.status === "paused" ? "Resume project" : "Pause project" },
@@ -354,6 +348,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
         ? setStatus("active", "Project resumed.")
         : setStatus("paused", "Project paused."));
     else if (key === "archive") setArchiving(true);
+    else if (key === "schedule") setScheduling(true);
     else if (key === "export")
       void connection
         .write("project.export", { project_id: project.id }, { retry: false })
@@ -378,7 +373,15 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
         }}
       />
     ) : null;
-  return { options, pick, confirm };
+  const dialogs = (
+    <>
+      {confirm}
+      {scheduling && project ? (
+        <ScheduleDialog schedule={null} projectId={project.id} onClose={() => setScheduling(false)} />
+      ) : null}
+    </>
+  );
+  return { options, pick, confirm: dialogs };
 }
 
 const GRID = "grid grid-cols-[minmax(240px,1.6fr)_180px_120px_110px_110px_36px] items-center gap-3 px-[18px]";

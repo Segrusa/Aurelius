@@ -18,7 +18,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
@@ -32,6 +32,7 @@ import { toast } from "../ui/toast";
 import {
   beforeFor,
   columnShown,
+  columnsProblem,
   dropEffect,
   emptyText,
   movedCard,
@@ -55,6 +56,64 @@ import {
 
 const HIDDEN_KEY = "board_hidden_columns";
 const CARD_HEIGHT = 88;
+
+function ColumnsDialog({ columns, onClose }: { columns: BoardColumnView[]; onClose: () => void }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const [names, setNames] = useState(() => new Map(columns.map((c) => [c.id, c.name])));
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    const edits = columns.map((c) => ({ column_id: c.id, name: (names.get(c.id) ?? "").trim() }));
+    const wrong = columnsProblem(edits.map((e, i) => ({ name: e.name, title: columns[i]?.name ?? "" })));
+    setProblem(wrong);
+    if (wrong) return;
+    setBusy(true);
+    try {
+      await connection.write(
+        "board.columns_update",
+        { columns: edits },
+        { retry: false, expectedVersion: Math.max(...columns.map((c) => c.version)) },
+      );
+      await client.invalidateQueries({ queryKey: ["board"] });
+      toast("Columns saved. Every client shows them now.");
+      onClose();
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : "This did not work.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog open onClose={onClose} title="Columns" width={420}>
+      <div className="flex flex-col gap-2 p-4">
+        <p className="m-0 text-[15px] font-semibold">Columns</p>
+        {columns.map((c) => (
+          <label key={c.id} className="flex items-center gap-2">
+            <ColumnGlyph kind={c.kind} />
+            <input
+              aria-label={`Name of ${c.name}`}
+              className="h-7 min-w-0 flex-1 rounded-[6px] border border-btn-line bg-sunk px-2 text-text"
+              value={names.get(c.id) ?? ""}
+              onChange={(e) => setNames(new Map(names).set(c.id, e.target.value))}
+            />
+          </label>
+        ))}
+        {problem ? (
+          <p role="alert" className="m-0 text-red">
+            {problem}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
+        <Button onClick={onClose}>Cancel</Button>
+        <Button kind="primary" disabled={busy} onClick={() => void save()}>
+          Save columns
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
 
 const CardBody = memo(function CardBody({
   t,
@@ -290,6 +349,8 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
   const projects = useProjects();
   const employees = useEmployees();
   const board = useBoard(project);
+  const [renaming, setRenaming] = useState(false);
+  const { claudeLogin } = useLinkState();
   const all = useMemo(() => (board.data?.columns ?? []).flatMap((c) => c.tickets), [board.data]);
   const need = useTicketNeeds(all);
   const needsCount = useMemo(() => all.filter(need.mine).length, [all, need]);
@@ -479,6 +540,9 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
           className="h-6 w-[130px] min-w-0 rounded-[12px] border border-line bg-transparent px-[10px] text-[12px] text-text outline-none placeholder:text-text3 focus:border-acc-text"
         />
         <div className="ml-auto flex flex-none gap-[6px]">
+          <Button kind="ghost" onClick={() => setRenaming(true)}>
+            Columns
+          </Button>
           <Menu
             label="Display"
             options={columns.map((c) => ({
@@ -493,6 +557,24 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
           </Button>
         </div>
       </header>
+      {claudeLogin && claudeLogin.status !== "linked" ? (
+        <div className="flex flex-none items-center gap-3 border-b border-line bg-amber-soft px-[18px] py-2 text-[12px]">
+          <span className="size-[7px] flex-none rounded-full bg-amber" />
+          {claudeLogin.status === "expired"
+            ? "Your Claude login expired. Reconnect it to run your tickets."
+            : "Connect your Claude login to run your tickets."}
+          <Link
+            to="/settings/$section"
+            params={{ section: "account" }}
+            className="ml-auto font-medium text-acc-text no-underline"
+          >
+            {claudeLogin.status === "expired" ? "Reconnect" : "Connect"}
+          </Link>
+        </div>
+      ) : null}
+      {renaming && board.data ? (
+        <ColumnsDialog columns={board.data.columns.map((c) => c.column)} onClose={() => setRenaming(false)} />
+      ) : null}
       <div className="flex min-h-0 flex-1">
         {board.error ? (
           <p role="alert" className="m-0 flex-1 p-[18px] text-red">

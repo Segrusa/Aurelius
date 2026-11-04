@@ -23,6 +23,7 @@ import {
   type InboxRow,
   type InboxTone,
 } from "./inbox-logic";
+import { Confirm } from "./org-kit";
 import { useTicketNeeds } from "./tickets-kit";
 
 const TONES: Record<InboxTone, string> = {
@@ -442,6 +443,20 @@ export function InboxScreen() {
   useAction("Filter2", () => setFilter("decisions"));
   useAction("Filter3", () => setFilter("reviews"));
   useAction("Filter4", () => setFilter("mentions"));
+  const connection = useConnection();
+  const client = useQueryClient();
+  const notifications = useNotifications().data ?? [];
+  const unread = notifications.some((n) => !n.read);
+  const clearable = notifications.some((n) => !n.needs_you);
+  const [clearing, setClearing] = useState(false);
+  const all = async (method: "notification.mark_all_read" | "notification.dismiss_all") => {
+    try {
+      await connection.write(method, undefined, { retry: false });
+      await client.invalidateQueries({ queryKey: ["notifications"] });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "This did not work.");
+    }
+  };
 
   return (
     <>
@@ -450,6 +465,23 @@ export function InboxScreen() {
         <div className="ml-2">
           <Segments label="Filter" value={filter} options={FILTERS} onChange={setFilter} />
         </div>
+        <span className="ml-auto flex flex-none gap-[6px]">
+          {unread ? <Button onClick={() => void all("notification.mark_all_read")}>Mark all read</Button> : null}
+          {clearable ? <Button onClick={() => setClearing(true)}>Clear all</Button> : null}
+        </span>
+        {clearing ? (
+          <Confirm
+            title="Clear all results?"
+            body="Every result in your notifications is removed. Approvals waiting for you are not touched."
+            action="Clear all"
+            danger
+            onClose={() => setClearing(false)}
+            onConfirm={() => {
+              setClearing(false);
+              void all("notification.dismiss_all");
+            }}
+          />
+        ) : null}
       </header>
       <div className="flex min-h-0 flex-1">
         <section aria-label="Inbox items" className="w-[clamp(280px,36%,400px)] min-w-0 flex-none border-r border-line">

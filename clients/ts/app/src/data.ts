@@ -36,6 +36,7 @@ export type Area =
   | "guidelines"
   | "messages"
   | "ideas"
+  | "usage"
   | "memory"
   | "vault";
 
@@ -55,7 +56,7 @@ export function areasOf(kind: EventKind | string): Area[] {
       return ["projects"];
     case "task":
     case "run":
-      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas"];
+      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas", "usage"];
     case "conversation":
     case "message":
     case "chat":
@@ -458,4 +459,9 @@ export function useVaultAudit(projectId: string | null, all: boolean, wanted: bo
       ).value,
     wanted,
   );
+}
+
+export function useUsage() {
+  const connection = useConnection();
+  return useKeyed(["usage", "snapshot"], async () => expectBody(await connection.call("usage.get"), "usage").value);
 }

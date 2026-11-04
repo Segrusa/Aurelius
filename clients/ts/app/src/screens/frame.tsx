@@ -1,6 +1,6 @@
 import type { TaskView } from "@aurelius/protocol";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useLinkState } from "../connection";
 import { useChannels, useLiveQueries, useOpenTasks, useProjects, useSubscription } from "../data";
 import { useAction } from "../keys/provider";
@@ -27,6 +27,7 @@ import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
 import { useProjectPins } from "./projects";
 import { SettingsSidebar } from "./settings";
+import { subscriptionFor } from "./usage-logic";
 
 const NAV_MAIN: { to: string; label: string; icon: NavIcon }[] = [
   { to: "/inbox", label: "Inbox", icon: "inbox" },
@@ -112,12 +113,17 @@ function Live() {
 
 /** The limit that resets furthest away: the week, when the plan has one. */
 function Usage() {
-  const { data } = useSubscription();
+  const { user } = useLinkState();
+  const data = subscriptionFor(useSubscription().data, user?.id ?? null);
   const limit = data?.limits.find((l) => /week/i.test(l.label)) ?? data?.limits[0];
   if (!limit) return null;
   const percent = Math.max(0, Math.min(100, Math.round(limit.percent)));
   return (
-    <div className="flex flex-col gap-2 px-2">
+    <Link
+      to="/usage"
+      activeProps={{ className: "bg-sel" }}
+      className="flex flex-col gap-2 rounded-[6px] px-2 py-1 no-underline hover:bg-sel"
+    >
       <div className="flex justify-between text-[12px] text-text3">
         <span className="truncate">{limit.label}</span>
         <span className="text-text">{percent}%</span>
@@ -126,9 +132,11 @@ function Usage() {
         <div className="h-[3px] rounded-[2px] bg-acc-text" style={{ width: `${percent}%` }} />
       </div>
       {limit.resets ? <div className="truncate text-[12px] text-text3">{limit.resets}</div> : null}
-    </div>
+    </Link>
   );
 }
+
+const SIDEBAR_KEY = "sidebar";
 
 const GO_TO: Record<string, string> = {
   GoDashboard: "/inbox",
@@ -137,13 +145,16 @@ const GO_TO: Record<string, string> = {
   GoTasks: "/tasks",
   GoTeamChat: "/chat",
   GoEmployees: "/employees",
+  OpenUsage: "/usage",
   GoOrgChart: "/employees/org",
   GoGuidelines: "/knowledge/guidelines",
   GoIdeas: "/knowledge/ideas",
   GoVault: "/knowledge/vault",
   OpenSettings: "/settings",
   OpenBackups: "/settings/backups",
-  OpenRemote: "/settings/remote",
+  OpenRemoteAccess: "/settings/remote",
+  GoProjects: "/projects",
+  OpenNotifications: "/inbox",
   OpenServers: "/settings/servers",
 };
 
@@ -160,6 +171,21 @@ function useGlobalActions(): void {
   useAction("NewItem", () => open("give"));
   useAction("NavBack", () => window.history.back());
   useAction("NavForward", () => window.history.forward());
+  useAction("ScrollPageUp", () => scrollMain((el) => el.scrollBy({ top: -el.clientHeight * 0.9 })));
+  useAction("ScrollPageDown", () => scrollMain((el) => el.scrollBy({ top: el.clientHeight * 0.9 })));
+  useAction("ScrollTop", () => scrollMain((el) => el.scrollTo({ top: 0 })));
+  useAction("ScrollBottom", () => scrollMain((el) => el.scrollTo({ top: el.scrollHeight })));
+}
+
+/** The biggest list or page that scrolls in the screen now shown. */
+function scrollMain(move: (el: Element) => void): void {
+  let best: Element | null = null;
+  for (const el of document.querySelectorAll("main *")) {
+    if (el.scrollHeight <= el.clientHeight + 1 || getComputedStyle(el).overflowY === "visible") continue;
+    if (getComputedStyle(el).overflowY === "hidden") continue;
+    if (!best || el.clientHeight * el.clientWidth > best.clientHeight * best.clientWidth) best = el;
+  }
+  if (best) move(best);
 }
 
 function useScreenCounter(): void {
@@ -276,12 +302,18 @@ export function Frame({ children }: { children: ReactNode }) {
   const inSettings = useRouterState({ select: (s) => s.location.pathname.startsWith("/settings") });
   useGlobalActions();
   useScreenCounter();
+  const { storage } = usePlatform();
+  const [sidebarHidden, setSidebarHidden] = useState(() => storage.get(SIDEBAR_KEY) === "hidden");
+  useAction("ToggleSidebar", () => {
+    storage.set(SIDEBAR_KEY, sidebarHidden ? "shown" : "hidden");
+    setSidebarHidden(!sidebarHidden);
+  });
   return (
     <div className="flex h-full bg-bg py-2 pr-2 text-text">
       {Object.entries(GO_TO).map(([action, to]) => (
         <GoAction key={action} action={action} to={to} />
       ))}
-      {inSettings ? <SettingsSidebar /> : <Sidebar />}
+      {sidebarHidden ? <div className="w-2 flex-none" /> : inSettings ? <SettingsSidebar /> : <Sidebar />}
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[8px] border border-line bg-panel shadow-panel">
         {children}
       </main>

@@ -20,6 +20,7 @@ import { ProjectPage, ProjectsScreen } from "./screens/projects";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
 import { TasksScreen } from "./screens/tasks";
+import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
 import { Button } from "./ui/kit";
 import { TooltipProvider } from "./ui/overlay";
@@ -137,6 +138,7 @@ const project = createRoute({
   },
 });
 
+const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
 const settingsIndex = createRoute({
   getParentRoute: () => root,
   path: "/settings",
@@ -173,6 +175,7 @@ const router = createRouter({
     chat,
     settingsIndex,
     settings,
+    usage,
     orgChart,
     employee,
     employees,

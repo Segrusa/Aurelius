@@ -422,3 +422,11 @@ export function inMyTab(tab: MyTab, t: TicketView, following: string[], me: stri
   if (tab === "created") return t.created_by_user === me;
   return tab === "following" ? following.includes(t.id) : mine;
 }
+
+/** What keeps the column names from being saved, or null. */
+export function columnsProblem(columns: { name: string; title: string }[]): string | null {
+  const blank = columns.find((c) => c.name === "");
+  if (blank) return `Give ${blank.title} a name.`;
+  const names = columns.map((c) => c.name.toLowerCase());
+  return new Set(names).size === names.length ? null : "Each column needs its own name.";
+}

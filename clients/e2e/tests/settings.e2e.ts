@@ -75,6 +75,7 @@ test("every section works against a real daemon, and what is changed stays chang
     await expect(mode).toHaveAttribute("aria-checked", was === "true" ? "false" : "true");
     await main(page).getByLabel("New board member's name").fill("alex");
     await main(page).getByLabel("New board member's password").fill(PASSWORD);
+    await main(page).getByLabel("Repeat the first password").fill(PASSWORD);
     await main(page).getByRole("button", { name: "Add board member" }).click();
     await expect(main(page).getByText("alex", { exact: true })).toBeVisible();
     await main(page).getByRole("button", { name: "Disable", exact: true }).click();
@@ -87,13 +88,14 @@ test("every section works against a real daemon, and what is changed stays chang
     await expect(main(page).getByRole("button", { name: "Save" })).toBeHidden();
 
     await open(page, "Trace");
-    const trace = main(page).getByRole("switch", { name: "Keep a trace of every run" });
+    const trace = main(page).getByRole("switch", { name: "Trace mode" });
     const traced = await trace.getAttribute("aria-checked");
     await trace.click();
+    if (traced === "true") await main(page).getByRole("button", { name: "Turn off and delete" }).click();
     await expect(trace).toHaveAttribute("aria-checked", traced === "true" ? "false" : "true");
 
     await open(page, "Load limits");
-    const runs = main(page).getByLabel("Runs at once");
+    const runs = main(page).getByLabel("Max runs at once");
     await expect(runs).not.toHaveValue("");
     const limit = String(Number(await runs.inputValue()) + 2);
     await runs.fill(limit);
@@ -103,6 +105,16 @@ test("every section works against a real daemon, and what is changed stays chang
     await open(page, "Backups");
     await main(page).getByRole("button", { name: "Back up now" }).click();
     await expect(main(page).getByRole("button", { name: "Restore" }).first()).toBeVisible({ timeout: 30_000 });
+
+    // A connection comes and goes; nothing here needs a real key.
+    await open(page, "Connections");
+    await main(page).getByRole("button", { name: "Add connection…" }).click();
+    await page.getByRole("button", { name: /Anthropic API/ }).click();
+    await page.getByRole("button", { name: "Add connection", exact: true }).click();
+    await expect(main(page).getByRole("button", { name: /Anthropic API/ })).toBeVisible();
+    await main(page).getByRole("button", { name: "Remove" }).last().click();
+    await main(page).getByRole("button", { name: "Yes, remove" }).click();
+    await expect(main(page).getByRole("button", { name: /Anthropic API/ })).toBeHidden();
 
     await open(page, "Remote access");
     await main(page).getByRole("switch", { name: "Remote access" }).click();
@@ -119,9 +131,9 @@ test("every section works against a real daemon, and what is changed stays chang
       was === "true" ? "false" : "true",
     );
     await open(page, "Load limits");
-    await expect(main(page).getByLabel("Runs at once")).toHaveValue(limit);
+    await expect(main(page).getByLabel("Max runs at once")).toHaveValue(limit);
     await open(page, "Trace");
-    await expect(main(page).getByRole("switch", { name: "Keep a trace of every run" })).toHaveAttribute(
+    await expect(main(page).getByRole("switch", { name: "Trace mode" })).toHaveAttribute(
       "aria-checked",
       traced === "true" ? "false" : "true",
     );
@@ -133,6 +145,7 @@ test("every section works against a real daemon, and what is changed stays chang
     await open(page, "Account");
     await main(page).getByLabel("Current password").fill(PASSWORD);
     await main(page).getByLabel("New password").fill(next);
+    await main(page).getByLabel("Repeat password").fill(next);
     await main(page).getByRole("button", { name: "Change password" }).click();
     await expect(main(page).getByText("Your password is changed.")).toBeVisible();
     await main(page).getByRole("button", { name: "Sign out" }).first().click();

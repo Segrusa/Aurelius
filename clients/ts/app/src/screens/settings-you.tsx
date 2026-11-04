@@ -3,7 +3,9 @@ import { type FormEvent, useState } from "react";
 import { type Appearance, useAppearance } from "../appearance";
 import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
+import { parseScreenUse, SCREEN_USE_KEY } from "../screen-use";
 import { Segments } from "../ui/kit";
+import { ClaudeLogin, passwordProblem } from "./settings-accounts";
 import {
   ConfirmButton,
   Group,
@@ -22,13 +24,17 @@ function ChangePassword() {
   const { busy, error, run } = useChange();
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [repeat, setRepeat] = useState("");
   const [done, setDone] = useState(false);
+  const problem = passwordProblem(newPassword, repeat);
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setDone(false);
+    if (problem) return;
     const ok = await run(() => connection.setPassword(oldPassword, newPassword));
     setOldPassword("");
     setNewPassword("");
+    setRepeat("");
     setDone(ok);
   };
   return (
@@ -53,10 +59,20 @@ function ChangePassword() {
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
         />
-        <SmallButton type="submit" disabled={busy}>
+        <TextInput
+          label="Repeat password"
+          placeholder="Repeat password"
+          type="password"
+          autoComplete="new-password"
+          required
+          value={repeat}
+          onChange={(e) => setRepeat(e.target.value)}
+        />
+        <SmallButton type="submit" disabled={busy || problem !== null}>
           Change password
         </SmallButton>
       </form>
+      <Muted>{newPassword && problem ? problem : "At least 12 characters."}</Muted>
       {done ? <Muted>Your password is changed.</Muted> : null}
       <Problem error={error} />
     </div>
@@ -88,20 +104,30 @@ function Sessions() {
         </Row>
       ))}
       {sessions.data?.length === 0 ? <Row title={user?.username ?? ""} hint="No other devices." /> : null}
+      {(sessions.data ?? []).some((s) => !s.current) ? (
+        <Row title="Sign out all other devices" hint="This device stays signed in.">
+          <ConfirmButton
+            label="Sign out all"
+            question="Sign out all other devices?"
+            disabled={busy}
+            onConfirm={() =>
+              void run(async () => {
+                for (const s of sessions.data ?? []) {
+                  if (!s.current) await connection.write("session.revoke", { session_id: s.id }, { retry: false });
+                }
+              })
+            }
+          />
+        </Row>
+      ) : null}
       <Problem error={sessions.error ?? error} />
     </Group>
   );
 }
 
-const CLAUDE_LOGIN = {
-  linked: "Connected",
-  expired: "Expired. Claude asked to sign in again.",
-  missing: "Not connected. Your tickets wait until you connect.",
-} as const;
-
 export function AccountSection() {
   const connection = useConnection();
-  const { user, claudeLogin } = useLinkState();
+  const { user } = useLinkState();
   return (
     <>
       <Group>
@@ -110,15 +136,7 @@ export function AccountSection() {
         </Row>
         <ChangePassword />
       </Group>
-      <Group title="Claude login">
-        <Row
-          title={claudeLogin ? CLAUDE_LOGIN[claudeLogin.status] : "Unknown"}
-          hint={
-            [claudeLogin?.email, claudeLogin?.plan].filter(Boolean).join(" · ") ||
-            "Connecting a login still goes through the desktop app."
-          }
-        />
-      </Group>
+      <ClaudeLogin />
       <Sessions />
     </>
   );
@@ -129,6 +147,34 @@ const APPEARANCES: { key: Appearance; label: string }[] = [
   { key: "light", label: "Light" },
   { key: "dark", label: "Dark" },
 ];
+
+function ScreenUse() {
+  const { storage } = usePlatform();
+  const [use, setUse] = useState(() => parseScreenUse(storage.get(SCREEN_USE_KEY)));
+  const rows = Object.entries(use).sort((a, b) => b[1].opens - a[1].opens);
+  return (
+    <Group title="Screen use (this device only)">
+      {rows.length === 0 ? <Row title="Nothing counted yet." /> : null}
+      {rows.map(([key, u]) => (
+        <Row key={key} title={key} hint={`Last opened ${when(u.last_ms)}`}>
+          <span className="font-mono text-[12px] text-text2">{u.opens}×</span>
+        </Row>
+      ))}
+      {rows.length > 0 ? (
+        <Row title="Reset counts" hint="Counted here only; nothing goes to a server.">
+          <SmallButton
+            onClick={() => {
+              storage.set(SCREEN_USE_KEY, "{}");
+              setUse({});
+            }}
+          >
+            Reset counts
+          </SmallButton>
+        </Row>
+      ) : null}
+    </Group>
+  );
+}
 
 export function AppSection() {
   const { appearance, choose } = useAppearance();
@@ -141,6 +187,7 @@ export function AppSection() {
           <Segments label="Appearance" value={appearance} options={APPEARANCES} onChange={choose} />
         </Row>
       </Group>
+      <ScreenUse />
       <Group title="Version">
         <Row title="This app" hint={platform.kind === "web" ? "In a browser" : "Desktop"}>
           <span className="font-mono text-[12px] text-text2">{platform.version}</span>

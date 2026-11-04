@@ -39,6 +39,7 @@ import {
 } from "./chat-logic";
 import { type ChatContext, ChatProvider, DayLine, FeedIdsProvider, LiveRow, MessageRow, NewLine } from "./chat-message";
 import { Held } from "./dialogs";
+import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ColumnGlyph } from "./tickets-kit";
 
 const FEED_PARTS = {
@@ -210,6 +211,7 @@ function Composer({
   placeholder,
   hint,
   activeRun,
+  waiting,
   people,
   archived,
   quick,
@@ -221,6 +223,7 @@ function Composer({
   placeholder: string;
   hint: string | null;
   activeRun: string | null;
+  waiting: boolean;
   people: Mentionable[];
   archived: string[];
   quick: { question: string | null; options: string[] } | null;
@@ -323,6 +326,7 @@ function Composer({
           </div>
         </section>
       ) : null}
+      <LoadBanner waiting={waiting} />
       {held ? <Held names={held.names} busy={busy} onSend={() => void go(held.text, true)} /> : null}
       {error ? (
         <p role="alert" className="m-0 text-[12px] text-red">
@@ -503,6 +507,7 @@ function ThreadPanel({
             draftKey={`thread:${root}`}
             channel={channel}
             threadParent={root}
+            waiting={false}
             placeholder="Reply… · @ to mention"
             hint={null}
             activeRun={null}
@@ -640,6 +645,7 @@ function Channel({
       openThread: onThread,
       messages: list,
       lastAnswer: lastAnswerId,
+      conversationId: feed.data?.conversation_id ?? null,
     }),
     [
       store,
@@ -654,11 +660,14 @@ function Channel({
       onThread,
       list,
       lastAnswerId,
+      feed.data?.conversation_id,
     ],
   );
 
   const running =
     [...list2].reverse().find((m) => m.status === "partial" && m.run_id)?.run_id ?? live.at(-1)?.run_id ?? null;
+  const retryAnswer = useRetryAnswer(feed.data?.conversation_id, list2);
+  useAction("RetryAnswer", retryAnswer);
   useAction(
     "StopGeneration",
     () => {
@@ -826,6 +835,7 @@ function Channel({
               draftKey={channel ?? "general"}
               channel={channel}
               threadParent={null}
+              waiting={!running && list2.at(-1)?.role === "user"}
               placeholder={placeholder}
               hint={hint}
               activeRun={running}

@@ -189,6 +189,11 @@ export function NameEditor({
   );
 }
 
+/** A page on the web, in the system's browser; only http(s), whatever the server sent. */
+export function openWeb(url: string): void {
+  if (/^https?:\/\//i.test(url)) window.open(url, "_blank", "noreferrer");
+}
+
 export function Muted({ children }: { children: ReactNode }) {
   return <p className="m-0 text-[12px] leading-[1.5] text-text3">{children}</p>;
 }

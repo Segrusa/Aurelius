@@ -6,13 +6,13 @@ import { useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useKeyed } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
-import { usePlatform } from "../platform";
 import { Button, initial, Mark, markColor } from "../ui/kit";
 import { Dialog } from "../ui/overlay";
 import { toast } from "../ui/toast";
 import { useModels } from "./dialogs";
 import { type AgentMode, MODE_LABELS, MODES, reportsCandidates } from "./employee-logic";
 import { AREA, FIELD, failureOf, shortDay } from "./org-kit";
+import { useFolderChooser } from "./run-tools";
 
 const EFFORTS = [
   ["inherit", "Inherit"],
@@ -33,7 +33,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const connection = useConnection();
   const client = useQueryClient();
   const navigate = useNavigate();
-  const platform = usePlatform();
+  const folders = useFolderChooser();
   const { features } = useLinkState();
   const models = useModels();
   const employees = useEmployees();
@@ -248,17 +248,8 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
                 value={folder}
                 onChange={(e) => setFolder(e.target.value)}
               />
-              {platform.pickFolder ? (
-                <Button
-                  onClick={() =>
-                    void platform.pickFolder?.("Choose a folder for this employee").then((path) => {
-                      if (path) setFolder(path);
-                    })
-                  }
-                >
-                  Choose…
-                </Button>
-              ) : null}
+              <Button onClick={() => folders.choose("Choose a folder for this employee", setFolder)}>Choose…</Button>
+              {folders.dialog}
             </span>
             <span>Where its chat works. In a task the project folder applies.</span>
           </label>

@@ -47,6 +47,7 @@ import {
   webSearchSummary,
 } from "./chat-logic";
 import { overlays } from "./overlays-store";
+import { FileChips, MarkdownChips, ScreenshotLink, TraceLink, useRetryAnswer } from "./run-tools";
 import { stepLine } from "./tasks-logic";
 
 const OUTPUT_LINES = 400;
@@ -65,6 +66,7 @@ export interface ChatContext {
   openThread: (id: string) => void;
   messages: MessageView[];
   lastAnswer: string | null;
+  conversationId: string | null;
 }
 
 const Context = createContext<ChatContext | null>(null);
@@ -140,6 +142,7 @@ function ActivityOutput({ step, messageId }: { step: ActivityView; messageId: st
     <div className="flex flex-col gap-1 border-t border-line2 px-[10px] py-2">
       <span className="text-[12px] text-text3">{step.tool}</span>
       {code ? <code className="font-mono text-[12px] break-all text-text2">&gt; {code}</code> : null}
+      <ScreenshotLink tool={step.tool} output={step.output} className={linkish} />
       {step.tool === "WebSearch" && raw !== output ? (
         <Markdown text={output} />
       ) : output ? (
@@ -740,12 +743,13 @@ export const MessageRow = memo(function MessageRow({
   grouped: boolean;
   inThread?: boolean;
 }) {
-  const { roleOf, caps, approvals, me, messages, lastAnswer } = useChat();
+  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId } = useChat();
   const made = useMemo(() => ticketFrom(messages, m.id), [messages, m.id]);
   const connection = useConnection();
   const client = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const retry = useRetryAnswer(conversationId, messages);
   if (m.system || isSystemLine(m, true)) return <SystemRow m={m} />;
   const who = authorOf(m, roleOf);
   const body = m.deleted_at_ms ? (
@@ -759,12 +763,27 @@ export const MessageRow = memo(function MessageRow({
   ) : (
     <>
       <AnswerBody m={m} text={m.text} activity={m.activity} live={false} />
-      {m.id === lastAnswer && m.status === "complete" && m.run_id ? <ContextLink run={m.run_id} /> : null}
+      <MarkdownChips
+        text={m.text}
+        scope={conversationId ? { kind: "conversation", conversation_id: conversationId } : null}
+      />
+      <FileChips files={m.uploads} />
+      {m.id === lastAnswer && m.status === "complete" && m.run_id ? (
+        <span className="flex gap-3">
+          <ContextLink run={m.run_id} />
+          <TraceLink run={m.run_id} className={linkish} />
+        </span>
+      ) : null}
       {m.status === "interrupted" ? (
         <span className="text-[12px] text-text3">Stopped; text up to that point is kept.</span>
       ) : null}
       {m.status === "failed" ? (
         <span className="text-[12px] text-red">Failed; this doesn't count as an answer.</span>
+      ) : null}
+      {m.id === lastAnswer && (m.status === "failed" || m.status === "interrupted") ? (
+        <button type="button" onClick={retry} className={linkish}>
+          ↻ Retry answer
+        </button>
       ) : null}
     </>
   );

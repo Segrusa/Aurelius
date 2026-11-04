@@ -1,5 +1,5 @@
 import type { StreamUpdate } from "@aurelius/client";
-import type { ActivityView, MessageView, TaskView } from "@aurelius/protocol";
+import type { ActivityView, MessageView, TaskRun, TaskView } from "@aurelius/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
@@ -10,9 +10,21 @@ import { Button, initial, Mark, markColor } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
 import { ApprovalCard } from "./approval-card";
-import { Held, useSend } from "./dialogs";
+import { Held, useModels, useSend } from "./dialogs";
+import { boardOnlyReason } from "./run-logic";
+import {
+  FileChips,
+  LoadBanner,
+  MarkdownChips,
+  RunMenu,
+  SubagentsAtWork,
+  TraceLink,
+  UsageChip,
+  useRetryAnswer,
+} from "./run-tools";
 import { modelName } from "./settings-kit";
 import { filesWritten, isActive, stepLine, stepsOf, taskStateLine } from "./tasks-logic";
+import { tokensShort } from "./usage-logic";
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
@@ -65,7 +77,17 @@ function Steps({ activity }: { activity: ActivityView[] }) {
   );
 }
 
-const Message = memo(function Message({ m, name, employeeId }: { m: MessageView; name: string; employeeId: string }) {
+const Message = memo(function Message({
+  m,
+  name,
+  employeeId,
+  conversationId,
+}: {
+  m: MessageView;
+  name: string;
+  employeeId: string;
+  conversationId?: string | null | undefined;
+}) {
   if (m.deleted_at_ms) return null;
   if (m.system) return <div className="text-center text-[12px] text-text3">{m.text}</div>;
   if (m.role === "user") {
@@ -99,6 +121,17 @@ const Message = memo(function Message({ m, name, employeeId }: { m: MessageView;
         </div>
         <Steps activity={m.activity} />
         {m.text ? <Markdown text={m.text} /> : null}
+        <MarkdownChips
+          text={m.text}
+          scope={conversationId ? { kind: "conversation", conversation_id: conversationId } : null}
+        />
+        <FileChips files={m.uploads} />
+        {m.run_id && m.status !== "partial" ? (
+          <TraceLink
+            run={m.run_id}
+            className="cursor-pointer self-start border-0 bg-transparent p-0 text-[12px] text-text3 hover:text-text"
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -138,11 +171,26 @@ function Streaming({
   );
 }
 
-function Composer({ task, name, live }: { task: TaskView; name: string; live: boolean }) {
+function Composer({
+  task,
+  name,
+  live,
+  run,
+  waiting,
+}: {
+  task: TaskView;
+  name: string;
+  live: boolean;
+  run: TaskRun | undefined;
+  waiting: boolean;
+}) {
   const connection = useConnection();
   const client = useQueryClient();
   const [text, setText] = useState("");
   const area = useRef<HTMLTextAreaElement>(null);
+  const models = useModels()
+    .map((m) => m.key)
+    .filter((m) => m !== "default");
   useAction("FocusComposer", () => area.current?.focus());
   const { busy, held, error, send, sendAnyway } = useSend(() => {
     setText("");
@@ -163,6 +211,7 @@ function Composer({ task, name, live }: { task: TaskView; name: string; live: bo
   if (!task.conversation_id) return null;
   return (
     <div className="mx-auto flex w-full max-w-[760px] flex-col gap-2 px-10 pb-[18px] max-[900px]:px-4">
+      <LoadBanner waiting={waiting} />
       {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
       {error ? (
         <p role="alert" className="m-0 text-red">
@@ -186,6 +235,7 @@ function Composer({ task, name, live }: { task: TaskView; name: string; live: bo
           }}
         />
         <div className="flex items-center gap-[6px] px-2 pb-2">
+          {run ? <RunMenu conversationId={task.conversation_id} run={run} models={models} /> : null}
           <span className="ml-auto text-[12px] text-text3">{live ? "Queued until the step finishes" : ""}</span>
           <Button kind="primary" disabled={busy || text.trim() === ""} onClick={go}>
             Send
@@ -203,11 +253,6 @@ function Row({ name, children }: { name: string; children: React.ReactNode }) {
       <span className="min-w-0 truncate">{children}</span>
     </div>
   );
-}
-
-function numberShort(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
 export function TaskRunScreen({ taskId }: { taskId: string }) {
@@ -243,6 +288,8 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
     if (count > 0) end.current?.scrollIntoView({ block: "end" });
   }, [count]);
   useAction("Back", () => void navigate({ to: "/tasks" }));
+  const retry = useRetryAnswer(task?.conversation_id, list);
+  useAction("RetryAnswer", retry);
   const stop = async () => {
     if (!lastRun) return;
     try {
@@ -276,6 +323,7 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
       (a.task_id === task.id || (task.conversation_id && a.conversation_id === task.conversation_id)),
   );
   const project = projects.data?.find((p) => p.id === task.project_id);
+  const lastAnswer = [...list].reverse().find((m) => m.role === "assistant");
 
   return (
     <>
@@ -306,10 +354,14 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
         >
           {state.text}
         </span>
-        <div className="ml-auto flex flex-none gap-[6px]">
+        <div className="ml-auto flex flex-none items-center gap-[6px]">
+          <UsageChip taskId={task.id} />
+          {!live && lastAnswer && (lastAnswer.status === "failed" || lastAnswer.status === "interrupted") ? (
+            <Button onClick={retry}>Retry answer</Button>
+          ) : null}
           {live && lastRun ? (
             <Button onClick={() => void stop()}>Stop run</Button>
-          ) : isActive(task) ? (
+          ) : isActive(task) && boardOnlyReason(task) === null ? (
             <Button kind="danger" onClick={() => void cancel(task)}>
               Cancel task
             </Button>
@@ -330,7 +382,7 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
                 </p>
               ) : null}
               {list.map((m) => (
-                <Message key={m.id} m={m} name={name} employeeId={employeeId} />
+                <Message key={m.id} m={m} name={name} employeeId={employeeId} conversationId={task.conversation_id} />
               ))}
               {task.conversation_id ? (
                 <Streaming conversationId={task.conversation_id} name={name} employeeId={employeeId} known={known} />
@@ -342,7 +394,9 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
               <div ref={end} />
             </div>
           </div>
-          {status === "online" ? <Composer task={task} name={name} live={live} /> : null}
+          {status === "online" ? (
+            <Composer task={task} name={name} live={live} run={messages.data?.run} waiting={!live && isActive(task)} />
+          ) : null}
         </section>
         <aside
           aria-label="Run properties"
@@ -359,10 +413,18 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
                 : "Default"}
             </Row>
             <Row name="Mode">{task.run.mode ?? messages.data?.agent_mode ?? "Default"}</Row>
+            {task.schedule_id ? (
+              <Row name="From schedule">
+                <Link to="/settings/$section" params={{ section: "schedules" }} className="text-acc-text no-underline">
+                  Recurring task
+                </Link>
+              </Row>
+            ) : null}
             <Row name="Created">
               {new Date(task.created_at_ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
             </Row>
           </div>
+          {task.conversation_id ? <SubagentsAtWork conversationId={task.conversation_id} live={live} /> : null}
           {files.length > 0 ? (
             <div className="border-t border-line2 pt-4">
               <p className="mt-0 mb-2 text-[12px] font-medium text-text3">Files written</p>
@@ -386,9 +448,9 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
           ) : null}
           {usage.input + usage.output > 0 ? (
             <div className="border-t border-line2 pt-4 text-[12px] leading-[1.7] text-text3">
-              {numberShort(usage.input)} in · {numberShort(usage.output)} out
+              {tokensShort(usage.input)} in · {tokensShort(usage.output)} out
               <br />
-              {numberShort(usage.cached)} cache read · {numberShort(usage.written)} write
+              {tokensShort(usage.cached)} cache read · {tokensShort(usage.written)} write
               {usage.micro > 0 ? (
                 <>
                   <br />≈ ${(usage.micro / 1_000_000).toFixed(2)} API-equivalent

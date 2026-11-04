@@ -241,6 +241,21 @@ describe("Connection", () => {
     conn.dispose();
   });
 
+  it("follows the Claude login when the server says it changed", async () => {
+    const link = new FakeLink();
+    const login = { status: "linked", user_id: "u", background: false, email: "sam@example.com" };
+    link.answers = (r) =>
+      r.method === "claude_login.status" ? { ok: { type: "claude_login", value: login } } : undefined;
+    const { conn } = connection([link]);
+    conn.start();
+    await settle();
+    expect(conn.getState().claudeLogin?.status).not.toBe("linked");
+    link.frame({ type: "event", seq: 2, kind: "claude_login.updated" });
+    await settle();
+    expect(conn.getState().claudeLogin).toEqual(login);
+    conn.dispose();
+  });
+
   it("passes events and merged streams on, and skips what it cannot read", async () => {
     const link = new FakeLink();
     const { conn } = connection([link]);

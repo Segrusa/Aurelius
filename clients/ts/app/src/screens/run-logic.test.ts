@@ -1,0 +1,80 @@
+import type { LoadSnapshot } from "@aurelius/protocol";
+import { describe, expect, it } from "vitest";
+import {
+  boardOnlyReason,
+  composePlanFeedback,
+  elapsedText,
+  lastSummaryFailed,
+  markdownPaths,
+  screenshotId,
+  usageLine,
+  waitingText,
+} from "./run-logic";
+
+describe("run texts", () => {
+  it("finds markdown files, not web pages", () => {
+    expect(markdownPaths("See docs/plan.md, (README.md) and https://x.org/a.md or plan.md#top.")).toEqual([
+      "docs/plan.md",
+      "README.md",
+      "plan.md",
+    ]);
+    expect(markdownPaths("a.md b.md c.md d.md e.md")).toHaveLength(4);
+  });
+
+  it("takes only a whole id from a screenshot step", () => {
+    const id = "01234567-89ab-cdef-0123-456789abcdef";
+    expect(screenshotId(`Saved as screenshot ${id}.`)).toBe(id);
+    expect(screenshotId("Saved as screenshot ../../etc/passwd")).toBeNull();
+    expect(screenshotId(`Saved as screenshot ${id}0`)).toBeNull();
+  });
+
+  it("writes elapsed time", () => {
+    expect(elapsedText(12_000)).toBe("12s");
+    expect(elapsedText(72_000)).toBe("1m 12s");
+    expect(elapsedText(3_780_000)).toBe("1h 03m");
+  });
+
+  it("does not count what was written to the cache as input", () => {
+    const usage = {
+      input_tokens: 1000,
+      output_tokens: 10,
+      cached_tokens: 0,
+      cache_creation_tokens: 400,
+      estimate: false,
+      runs: 1,
+      cost_micro_usd: 0,
+    };
+    expect(usageLine(usage)).toContain("600 in");
+  });
+
+  it("quotes plan comments before the free text", () => {
+    expect(composePlanFeedback([{ quote: "step one\nstep two", text: "Split " }], " also faster ")).toBe(
+      "> step one\n> step two\n\nSplit\n\nalso faster",
+    );
+    expect(composePlanFeedback([], "  ")).toBe("");
+    expect(composePlanFeedback([], "x")).toBe("x");
+  });
+
+  it("reads the last summary attempt", () => {
+    const failed = { system: { kind: "summary_failed" } };
+    const saved = { system: { kind: "summary" } };
+    expect(lastSummaryFailed([saved, failed, {}])).toBe(true);
+    expect(lastSummaryFailed([failed, saved])).toBe(false);
+    expect(lastSummaryFailed([])).toBe(false);
+  });
+
+  it("sends only a ticket's main task to the board", () => {
+    expect(boardOnlyReason({ ticket_id: "t", ticket_number: 21 })).toContain("ticket #21");
+    expect(boardOnlyReason({ ticket_id: "t", parent_task_id: "p" })).toBeNull();
+    expect(boardOnlyReason({ ticket_id: "t", delegated_by: "e" })).toBeNull();
+    expect(boardOnlyReason({})).toBeNull();
+  });
+
+  it("says why a run waits", () => {
+    const load = { cpu_pct: 91.4, mem_free_mb: 2048, running: 3, hold: { kind: "cpu" } } as LoadSnapshot;
+    expect(waitingText(load)).toBe("Server busy: CPU 91%, waiting");
+    expect(waitingText({ ...load, hold: { kind: "memory" } })).toBe("Server busy: 2.0 GB free, waiting");
+    expect(waitingText({ ...load, hold: { kind: "max_runs" } })).toBe("Server busy: 3 runs active, waiting");
+    expect(waitingText({ ...load, hold: null })).toBeNull();
+  });
+});
