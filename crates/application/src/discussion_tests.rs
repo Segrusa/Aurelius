@@ -389,7 +389,7 @@ fn result_of(s: &Setup, task: TaskId) -> Option<String> {
 #[test]
 fn an_answer_in_review_is_a_message_of_the_owner_and_no_second_report() {
     let s = setup();
-    let (t, root, conversation) = reported_ticket(&s, "The server name is done. Which label do you want?");
+    let (t, root, conversation) = reported_ticket(&s, "The server name is done. Tell me which label you want.");
     let d = ticket_view(&s, t).conversation_id.unwrap();
     let reviews = |s: &Setup| system_lines(s, d).iter().filter(|(k, _)| *k == SystemLineKind::Review).count();
     assert_eq!(reviews(&s), 1);
@@ -404,6 +404,47 @@ fn an_answer_in_review_is_a_message_of_the_owner_and_no_second_report() {
     let last = messages(&s, d).into_iter().last().unwrap();
     assert!(last.text.ends_with("Then I keep that one."), "{}", last.text);
     assert_eq!(last.author.as_deref(), Some("Ann"), "under the owner's name");
+}
+
+#[test]
+fn a_run_that_ends_on_a_question_keeps_the_ticket_in_doing_until_it_is_answered() {
+    use aurelius_domain::task::TaskStatus;
+    let s = setup();
+    let (t, root, conversation, run) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    end_run(&s, run, "I can do either.\n\nWhich label do you want?");
+    assert_eq!(task_status(&s, root), TaskStatus::Waiting);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Doing, "a question is no report");
+    assert_eq!(system_lines(&s, d).iter().filter(|(k, _)| *k == SystemLineKind::Review).count(), 0);
+    assert!(messages(&s, d).into_iter().last().unwrap().text.ends_with("Which label do you want?"), "the question reaches the board member");
+    // The answer wakes the owner, and the task works again.
+    post(&s, t, "The label all clients show.").unwrap();
+    assert_eq!(task_status(&s, root), TaskStatus::Running);
+    let next = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap();
+    assert_eq!(next.len(), 1, "one run answers it");
+    end_run(&s, next[0].0, "Done with the label.");
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
+}
+
+#[test]
+fn a_run_that_asked_in_the_discussion_and_signs_off_keeps_the_ticket_in_doing() {
+    use aurelius_domain::task::TaskStatus;
+    let s = setup();
+    let (t, root, _, run) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    let st = s.service.store().clone();
+    let discussion = s.service.store().read(move |c| crate::conversation::discussion::load(c, d)).unwrap().unwrap();
+    s.service.store().write(move |tx| crate::conversation::discussion::post_from_run(tx, &st, run, &discussion, "Which label do you want?").map(|_| ())).unwrap();
+    end_run(&s, run, "I asked in the discussion.");
+    assert_eq!(task_status(&s, root), TaskStatus::Waiting);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Doing);
+}
+
+#[test]
+fn a_run_that_ends_on_a_statement_still_reports() {
+    let s = setup();
+    let (t, _, _) = reported_ticket(&s, "All done. Anything else?\n\nThe label is changed.");
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
 }
 
 #[test]

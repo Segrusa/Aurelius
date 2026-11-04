@@ -41,6 +41,18 @@ pub fn run_said_last_in(conn: &Connection, discussion: ConversationId, run: RunI
     )?)
 }
 
+/// The blob key of the text of the last message `run` posted in `discussion`, if it posted one.
+pub fn run_last_post_key(conn: &Connection, discussion: ConversationId, run: RunId) -> Result<Option<String>, StorageError> {
+    Ok(conn
+        .query_row(
+            "SELECT b.storage_key FROM messages m JOIN blobs b ON b.id = m.content_blob_id
+             WHERE m.conversation_id = ?1 AND json_extract(m.meta_json, '$.run_id') = ?2 ORDER BY m.ordinal DESC LIMIT 1",
+            [discussion.to_string(), run.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
 // ---- channels ----
 
 /// The channel of a project (`Some`), or the general channel (`None`).
