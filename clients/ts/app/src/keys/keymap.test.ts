@@ -17,8 +17,8 @@ const base: KeyState = {
 };
 
 describe("the table", () => {
-  it("holds all of the desktop's shortcuts, none twice for one chord in one context", () => {
-    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(77);
+  it("holds the desktop's shortcuts that do something here, none twice for one chord in one context", () => {
+    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(74);
     const seen = new Set<string>();
     for (const s of SHORTCUTS) {
       for (const k of s.keys) {

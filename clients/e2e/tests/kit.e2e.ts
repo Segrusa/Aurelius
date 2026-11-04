@@ -42,7 +42,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
-    // No screen makes these yet: a second client does, and the app hears of it through events.
+    // Quicker than through the screens (journey.e2e.ts does that), and the app must hear of it through events.
     let token: string | null = null;
     const endpoint = daemonEndpoint(daemon.data);
     seed = new Connection({

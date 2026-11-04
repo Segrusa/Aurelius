@@ -2,7 +2,8 @@
 
 import { expectBody } from "@aurelius/client";
 import type { ColumnKind, TicketView, TimelineCard } from "@aurelius/protocol";
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAllTasks, useCompany, useEmployees, useProjects } from "../data";
@@ -54,6 +55,7 @@ export function useTicketNeeds(tickets: TicketView[]) {
       stopped.set(t.id, read?.isError ? true : dispatcherGaveUp(read?.data ?? []));
     });
     const approvals = new Map((tasks.data ?? []).map((t) => [t.id, t.pending_approvals]));
+    const waiting = new Map((tasks.data ?? []).map((t) => [t.id, t.waiting_reason ?? null]));
     const dispatcher = (projectId: string) =>
       dispatcherOf(
         projects.data?.find((p) => p.id === projectId)?.dispatcher_employee_id,
@@ -65,7 +67,13 @@ export function useTicketNeeds(tickets: TicketView[]) {
       return isChoosing(t, d.kind === "project" || d.kind === "company", stopped.get(t.id) ?? false);
     };
     const needs = (t: TicketView): Needs | null =>
-      ticketNeeds(t, me, choosing(t), t.root_task_id ? (approvals.get(t.root_task_id) ?? 0) : 0);
+      ticketNeeds(
+        t,
+        me,
+        choosing(t),
+        t.root_task_id ? (approvals.get(t.root_task_id) ?? 0) : 0,
+        t.root_task_id ? (waiting.get(t.root_task_id) ?? null) : null,
+      );
     return { me, dispatcher, choosing, needs, mine: (t: TicketView) => needsMe(needs(t), t, me) };
   }, [unowned, timelines, tasks.data, projects.data, company.data, employees.data, me]);
 }
@@ -172,3 +180,32 @@ export function OwnerMark({ t, size = 18 }: { t: TicketView; size?: number }) {
 }
 
 export const ticketNumber = (t: { number: number }) => `#${t.number}`;
+
+/** No connection at all: nothing can start, and that is better said before starting than after. */
+export function useNoConnection(): boolean {
+  const connection = useConnection();
+  const { status, user } = useLinkState();
+  const list = useQuery({
+    queryKey: ["settings", "connections"],
+    queryFn: async () => expectBody(await connection.call("connection.list"), "connections").value,
+    enabled: status === "online" && user !== null,
+    staleTime: 10_000,
+  });
+  return list.data?.connections.length === 0;
+}
+
+/** Said in a dialog that starts work, and on the board. */
+export function NoConnectionNote() {
+  return (
+    <span role="status" className="text-[12px] text-amber">
+      No connection is set up, so nothing can start yet.{" "}
+      <Link
+        to="/settings/$section"
+        params={{ section: "connections" }}
+        className="font-medium text-acc-text no-underline"
+      >
+        Set one up
+      </Link>
+    </span>
+  );
+}

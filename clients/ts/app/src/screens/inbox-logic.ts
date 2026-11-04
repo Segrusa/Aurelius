@@ -131,10 +131,28 @@ export function notificationHeading(n: NotificationView): string {
   }
 }
 
+/** What a waiting task waits for, in words. */
+export function waitingLabel(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  const known: Record<string, string> = {
+    plan_review: "plan to review",
+    input: "stopped, waits for you",
+    login: "waits for a Claude login",
+    dependencies: "waits for other tasks",
+    quota: "waits for its usage limit",
+  };
+  return known[reason] ?? reason.replaceAll("_", " ");
+}
+
 /** Where the row is: `#42 Title`, or `# general` outside a ticket. */
 export function notificationPlace(n: NotificationView): string {
   const subject = n.subject === "" ? null : n.subject;
-  if (n.ticket_number != null) return subject === null ? `#${n.ticket_number}` : `#${n.ticket_number} ${subject}`;
+  if (n.ticket_number != null) {
+    const number = `#${n.ticket_number}`;
+    if (subject === null) return number;
+    // Some subjects already start with their number.
+    return subject === number || subject.startsWith(`${number} `) ? subject : `${number} ${subject}`;
+  }
   if (subject === null) return "Update";
   if (subject.startsWith("#") || n.ticket_id != null) return subject;
   return `# ${subject}`;
@@ -153,6 +171,9 @@ export function buildInbox(input: {
   tasks: TaskView[];
   notifications: NotificationView[];
 }): InboxGroup[] {
+  const planHasNote = (t: TaskView) =>
+    t.waiting_reason === "plan_review" &&
+    input.notifications.some((n) => n.reason === "plan_review" && (n.task_id === t.id || n.ticket_id === t.ticket_id));
   const decide: InboxRow[] = [
     ...input.approvals
       .filter((a) => a.status === "pending")
@@ -193,19 +214,26 @@ export function buildInbox(input: {
           source: { kind: "guideline", proposal: p },
         }),
       ),
-    ...input.tasks.filter(isWaiting).map(
-      (t): InboxRow => ({
-        id: `task:${t.id}`,
-        title: t.title,
-        meta: [t.employee_name, t.ticket_number == null ? null : `#${t.ticket_number}`, t.waiting_reason]
-          .filter(Boolean)
-          .join(" · "),
-        atMs: t.updated_at_ms,
-        tone: "violet",
-        glyph: "ask",
-        source: { kind: "task", task: t },
-      }),
-    ),
+    // A plan that also has its own row in Ready for review is one decision, not two.
+    ...input.tasks
+      .filter((t) => isWaiting(t) && !planHasNote(t))
+      .map(
+        (t): InboxRow => ({
+          id: `task:${t.id}`,
+          title: t.title,
+          meta: [
+            t.employee_name,
+            t.ticket_number == null ? null : `#${t.ticket_number}`,
+            waitingLabel(t.waiting_reason),
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          atMs: t.updated_at_ms,
+          tone: "violet",
+          glyph: "ask",
+          source: { kind: "task", task: t },
+        }),
+      ),
   ].sort((a, b) => b.atMs - a.atMs);
 
   const toRow = (n: NotificationView): InboxRow => {

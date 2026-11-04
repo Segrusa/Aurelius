@@ -151,7 +151,7 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
 
     // Give work: an effort and a pasted picture, for an employee.
     await server.write("employee.create", { name: "Ava", role: "CEO" }, { retry: false });
-    await page.keyboard.press("n");
+    await page.keyboard.press("Control+n");
     const goal = page.getByLabel("What needs doing");
     await goal.fill("Compare hosting");
     await expect(page.getByRole("button", { name: "Ava" })).toBeVisible();

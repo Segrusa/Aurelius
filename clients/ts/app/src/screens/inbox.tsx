@@ -5,7 +5,15 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useApprovals, useGuidelineProposals, useNotifications, useOpenTasks, useProposals, useTickets } from "../data";
+import {
+  useApprovals,
+  useGuidelineProposals,
+  useMessages,
+  useNotifications,
+  useOpenTasks,
+  useProposals,
+  useTickets,
+} from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { StatusGlyph } from "../ui/icons";
 import { Button, Kbd, Segments } from "../ui/kit";
@@ -26,7 +34,10 @@ import {
 import { useFollowLink } from "./links";
 import { messageLink } from "./links-logic";
 import { Confirm } from "./org-kit";
-import { useTicketNeeds } from "./tickets-kit";
+import { lastFailure } from "./run-logic";
+import { useRetryAnswer } from "./run-tools";
+import { TicketDecision } from "./ticket-panel";
+import { NoConnectionNote, useNoConnection, useTicketNeeds } from "./tickets-kit";
 
 const TONES: Record<InboxTone, string> = {
   amber: "var(--amber)",
@@ -332,7 +343,11 @@ function NotificationDetail({ row, n }: { row: InboxRow; n: NotificationView }) 
   useAction("OpenSelected", open, Boolean(n.ticket_id || n.task_id || n.conversation_id));
   return (
     <DetailFrame row={row}>
-      {n.reason ? <Prose title="Why you see this">{n.reason}</Prose> : null}
+      {n.ticket_id && (n.reason === "plan_review" || n.reason === "review") ? (
+        <TicketDecision id={n.ticket_id} />
+      ) : n.reason ? (
+        <Prose title="Why you see this">{reasonText(n.reason)}</Prose>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         {n.ticket_id || n.task_id || n.conversation_id ? (
           <Button kind="primary" onClick={open}>
@@ -346,17 +361,38 @@ function NotificationDetail({ row, n }: { row: InboxRow; n: NotificationView }) 
   );
 }
 
+function reasonText(reason: string): string {
+  const known: Record<string, string> = {
+    responsible: "You are responsible for this ticket.",
+    mention: "Someone mentioned you.",
+    sent_back: "This was sent back.",
+    failed: "The main task failed.",
+    login: "It waits for your Claude login.",
+  };
+  return known[reason] ?? reason;
+}
+
 function TaskDetail({ row, task }: { row: InboxRow; task: TaskView }) {
   const navigate = useNavigate();
   const open = () => void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } });
   useAction("OpenSelected", open);
+  const stopped = task.waiting_reason === "input";
+  const chat = useMessages(stopped ? task.conversation_id : null);
+  const list = chat.data?.messages ?? [];
+  const failure = lastFailure(list);
+  const retry = useRetryAnswer(task.conversation_id, list, { employeeId: task.employee_id ?? null });
+  const noConnection = useNoConnection();
   return (
     <DetailFrame row={row}>
+      {task.ticket_id && task.waiting_reason === "plan_review" ? <TicketDecision id={task.ticket_id} /> : null}
+      {failure ? <Prose title="Why it stopped">{failure}</Prose> : null}
+      {failure && noConnection ? <NoConnectionNote /> : null}
       <Prose title="Goal">{task.goal}</Prose>
-      <div>
+      <div className="flex flex-wrap gap-2">
         <Button kind="primary" onClick={open}>
           Open run <Kbd onAccent>↵</Kbd>
         </Button>
+        {failure ? <Button onClick={retry}>Try again</Button> : null}
       </div>
     </DetailFrame>
   );

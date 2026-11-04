@@ -251,10 +251,10 @@ test.describe("scripted", () => {
         .poll(() => writesOf(writes, "approval.answer")[0]?.params)
         .toMatchObject({ approval_id: "q1", answers: { "Which colour?": "Green" } });
 
-      await page.getByRole("button", { name: "Pas aan" }).click();
+      await page.getByRole("button", { name: "Request changes" }).click();
       await expect(page.getByText("Say what should change, then ask for changes.")).toBeVisible();
       await page.getByRole("textbox", { name: "What should change?" }).fill("Smaller");
-      await page.getByRole("button", { name: "Pas aan" }).click();
+      await page.getByRole("button", { name: "Request changes" }).click();
       await expect
         .poll(() => writesOf(writes, "approval.decide_plan")[0]?.params)
         .toMatchObject({ approval_id: "p1", decision: "revise", feedback: "Smaller" });

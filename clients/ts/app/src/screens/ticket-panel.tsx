@@ -15,10 +15,11 @@ import {
   useTicket,
   useTicketActivity,
 } from "../data";
-import { useAction, useKeyContext } from "../keys/provider";
+import { showChord } from "../keys/keymap";
+import { isMac, useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { acceptable, filesFrom } from "../ui/attach";
-import { Button, Chip, initial, Mark, markColor } from "../ui/kit";
+import { Button, Chip, initial, Kbd, Mark, markColor } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { Dialog, Menu } from "../ui/overlay";
 import { toast } from "../ui/toast";
@@ -31,10 +32,12 @@ import {
   dropEffect,
   editable,
   feedbackLabel,
+  foldUpdates,
   latestPlan,
   loginWait,
   ownerChoosable,
   PRIORITIES,
+  peopleCount,
   priorityLabel,
   runLocked,
   takeOverOffered,
@@ -43,10 +46,17 @@ import {
 import { canChange, completeMention, mentionSuggestions } from "./chat-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { messageLink, ticketLink } from "./links-logic";
-import { lastSummaryFailed } from "./run-logic";
-import { FileChips } from "./run-tools";
+import { lastFailure, lastSummaryFailed } from "./run-logic";
+import { FileChips, useRetryAnswer } from "./run-tools";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
-import { ColumnGlyph, ticketNumber, useTicketNeeds, useTicketWrite } from "./tickets-kit";
+import {
+  ColumnGlyph,
+  NoConnectionNote,
+  ticketNumber,
+  useNoConnection,
+  useTicketNeeds,
+  useTicketWrite,
+} from "./tickets-kit";
 
 const MODES: { key: string; label: string }[] = [
   { key: "default", label: "Owner's default" },
@@ -186,12 +196,56 @@ function Feedback({
   );
 }
 
+/** Enter stays "open"; deciding takes the stronger chord. */
+function GateKeys({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
+  useKeyContext("Decision");
+  useAction("DecideYes", onYes);
+  useAction("RejectApproval", onNo);
+  return null;
+}
+
+/** A ticket's plan or report, to decide on where it is read: the Inbox. */
+export function TicketDecision({ id }: { id: string }) {
+  const { status } = useLinkState();
+  const detail = useTicket(id);
+  const t = detail.data?.ticket;
+  const conversation = detail.data?.root_task?.conversation_id;
+  const messages = useMessages(t?.column === "plan_review" ? conversation : null);
+  if (!t) return null;
+  if (t.column === "review") {
+    const check = doneCheck(detail.data);
+    return (
+      <ReviewGate
+        key={t.version}
+        keyed
+        t={t}
+        report={detail.data?.root_task?.result ?? null}
+        ready={check.kind === "ready" && status === "online"}
+        whyNot={check.kind === "working" ? "Still at work: Done waits until that has finished." : null}
+      />
+    );
+  }
+  if (t.column === "plan_review") {
+    return (
+      <PlanGate
+        key={t.version}
+        keyed
+        t={t}
+        plan={messages.isPending ? undefined : latestPlan(messages.data?.messages ?? [])}
+      />
+    );
+  }
+  return null;
+}
+
 function ReviewGate({
+  keyed = false,
   t,
   report,
   ready,
   whyNot,
 }: {
+  keyed?: boolean;
   t: TicketView;
   report: string | null;
   ready: boolean;
@@ -208,8 +262,17 @@ function ReviewGate({
     setFeedback("");
   });
   const too = decideToo(t);
+  const done = () => void write("ticket.accept", { ticket_id: t.id }, { done: `${ticketNumber(t)} is Done.` });
   return (
     <Box tone="amber">
+      {keyed ? (
+        <GateKeys
+          onYes={() => {
+            if (ready) done();
+          }}
+          onNo={() => setOpen(true)}
+        />
+      ) : null}
       <div className="flex items-center gap-2 font-medium">
         <span className="size-[7px] rounded-full bg-amber" />
         In review · your decision
@@ -227,12 +290,8 @@ function ReviewGate({
       ) : null}
       {whyNot ? <span className="text-[12px] text-text2">{whyNot}</span> : null}
       <div className="flex flex-wrap gap-2">
-        <Button
-          kind="primary"
-          disabled={!ready}
-          onClick={() => void write("ticket.accept", { ticket_id: t.id }, { done: `${ticketNumber(t)} is Done.` })}
-        >
-          Mark done
+        <Button kind="primary" disabled={!ready} onClick={done}>
+          Mark done {keyed ? <Kbd onAccent>{showChord("secondary-enter", isMac)}</Kbd> : null}
         </Button>
         <Button
           disabled={busy}
@@ -266,7 +325,7 @@ function ReviewGate({
   );
 }
 
-function PlanGate({ t, plan }: { t: TicketView; plan: string | null | undefined }) {
+function PlanGate({ t, plan, keyed = false }: { t: TicketView; plan: string | null | undefined; keyed?: boolean }) {
   const connection = useConnection();
   const write = useTicketWrite();
   const [feedback, setFeedback] = useState("");
@@ -285,6 +344,7 @@ function PlanGate({ t, plan }: { t: TicketView; plan: string | null | undefined 
   const too = decideToo(t);
   return (
     <Box tone="amber">
+      {keyed ? <GateKeys onYes={() => void approve("approve")} onNo={() => setRejecting(true)} /> : null}
       <div className="flex items-center gap-2 font-medium">
         <span className="size-[7px] rounded-full bg-amber" />
         Plan review · your decision
@@ -293,11 +353,23 @@ function PlanGate({ t, plan }: { t: TicketView; plan: string | null | undefined 
       {plan === undefined ? (
         <span className="text-text2">Loading the plan…</span>
       ) : plan === null ? (
-        <span className="text-text2">The plan is in the conversation.</span>
+        <span className="text-text2">
+          This agent did not write a plan of its own.{" "}
+          {t.root_task_id ? (
+            <Link to="/tasks/$taskId" params={{ taskId: t.root_task_id }} className="text-acc-text no-underline">
+              Read what it said →
+            </Link>
+          ) : null}
+        </span>
       ) : (
         <Markdown text={plan} />
       )}
-      <Feedback placeholder="Feedback (needed for Pas aan)" value={feedback} onChange={setFeedback} missing={missing} />
+      <Feedback
+        placeholder="Feedback (needed for Request changes)"
+        value={feedback}
+        onChange={setFeedback}
+        missing={missing}
+      />
       {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
       {error ? (
         <p role="alert" className="m-0 text-red">
@@ -306,7 +378,7 @@ function PlanGate({ t, plan }: { t: TicketView; plan: string | null | undefined 
       ) : null}
       <div className="flex flex-wrap gap-2">
         <Button kind="primary" onClick={() => void approve("approve")}>
-          Approve
+          Approve {keyed ? <Kbd onAccent>{showChord("secondary-enter", isMac)}</Kbd> : null}
         </Button>
         <Button onClick={() => void approve("approve_edits")}>Approve, accept edits</Button>
         <Button
@@ -324,10 +396,10 @@ function PlanGate({ t, plan }: { t: TicketView; plan: string | null | undefined 
             });
           }}
         >
-          Pas aan
+          Request changes
         </Button>
         <Button kind="danger" onClick={() => setRejecting(true)}>
-          Afwijzen
+          Reject
         </Button>
       </div>
       <ConfirmDialog
@@ -335,7 +407,7 @@ function PlanGate({ t, plan }: { t: TicketView; plan: string | null | undefined 
         onClose={() => setRejecting(false)}
         title={`Reject the plan of ${ticketNumber(t)}?`}
         body="The ticket goes back to Backlog."
-        confirm="Afwijzen"
+        confirm="Reject"
         danger
         onConfirm={() => write("ticket.cancel", { ticket_id: t.id })}
       />
@@ -426,6 +498,13 @@ function StatusBox({
   const wait = loginWait(t, me, false);
   const company = useCompany();
   const allTasks = useAllTasks();
+  const root = allTasks.data?.find((x) => x.id === t.root_task_id);
+  const stopped = t.column === "doing" && root?.status === "waiting" && root.waiting_reason === "input";
+  const rootChat = useMessages(stopped ? root?.conversation_id : null);
+  const rootList = rootChat.data?.messages ?? [];
+  const failure = lastFailure(rootList);
+  const retry = useRetryAnswer(root?.conversation_id, rootList, { employeeId: root?.employee_id ?? null });
+  const noConnection = useNoConnection();
   const testerId = company.data?.company.tester_employee_id ?? null;
   const tester = employees.data?.find((e) => e.id === testerId)?.name ?? null;
   const tests = (allTasks.data ?? []).filter((x) => x.ticket_id === t.id && x.employee_id === testerId);
@@ -537,6 +616,27 @@ function StatusBox({
         </Box>
       );
     case "doing":
+      if (stopped) {
+        return (
+          <Box tone="amber">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{t.owner_name ?? "The employee"} stopped and waits for you.</span>
+              {runLink}
+            </div>
+            {failure ? <span className="text-text2">{failure}</span> : null}
+            {failure && noConnection ? <NoConnectionNote /> : null}
+            <div className="flex flex-wrap gap-2">
+              {failure ? (
+                <Button kind="primary" onClick={retry}>
+                  Try again
+                </Button>
+              ) : null}
+              <Button onClick={() => setLeaving("backlog")}>Back to Backlog</Button>
+            </div>
+            {dialogs}
+          </Box>
+        );
+      }
       return (
         <Box>
           <div className="flex flex-wrap items-center gap-2">
@@ -629,7 +729,9 @@ function Discussion({
     run()
       .then(() => client.invalidateQueries({ queryKey: ["messages", conversationId] }))
       .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
-  const list = (messages.data?.messages ?? []).filter((m) => !m.deleted_at_ms && !m.thread_parent);
+  const all = (messages.data?.messages ?? []).filter((m) => !m.deleted_at_ms && !m.thread_parent);
+  const [unfolded, setUnfolded] = useState(Boolean(flash));
+  const { shown: list, earlier } = foldUpdates(all, unfolded);
   return (
     <>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[22px] py-4">
@@ -641,6 +743,15 @@ function Discussion({
             data-message={m.id}
             className={`flex flex-col gap-1 rounded-[6px] transition-colors ${lit === m.id ? "bg-sel" : ""}`}
           >
+            {earlier.get(m.id) ? (
+              <button
+                type="button"
+                onClick={() => setUnfolded(true)}
+                className="cursor-pointer self-start border-0 bg-transparent p-0 text-[12px] text-text3 hover:text-text"
+              >
+                {earlier.get(m.id) === 1 ? "1 earlier update" : `${earlier.get(m.id)} earlier updates`}
+              </button>
+            ) : null}
             <div className="flex items-baseline gap-2">
               <span className="font-medium">
                 {m.author_user?.username ?? m.author ?? (m.role === "user" ? "You" : "Aurelius")}
@@ -867,7 +978,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
       : dispatcher.kind === "inactive"
         ? `${dispatcher.name} is ${dispatcher.state}. Choose an employee.`
         : `${dispatcher.name} could not choose. Choose an employee.`;
-  const count = (discussion.data?.messages ?? []).filter((m) => !m.deleted_at_ms && !m.thread_parent).length;
+  const count = peopleCount((discussion.data?.messages ?? []).filter((m) => !m.deleted_at_ms && !m.thread_parent));
   const update = (params: Record<string, unknown>) =>
     write("ticket.update", { ticket_id: t.id, ...params } as never, { expectedVersion: t.version });
   const columns = (board.data?.columns ?? []).filter((c) => c.column.kind !== t.column);

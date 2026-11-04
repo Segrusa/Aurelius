@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "electron-vite";
@@ -16,6 +17,11 @@ export default defineConfig({
   },
   renderer: {
     root: "src/renderer",
+    resolve: {
+      alias: {
+        "react-style-singleton": fileURLToPath(new URL("../ts/app/src/ui/no-style-singleton.ts", import.meta.url)),
+      },
+    },
     base: "/",
     plugins: [
       react(),

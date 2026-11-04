@@ -68,6 +68,7 @@ export interface ChatContext {
   messages: MessageView[];
   lastAnswer: string | null;
   conversationId: string | null;
+  channel: string | null;
   /** The message a link led to, marked for a moment. */
   flash: string | null;
 }
@@ -815,14 +816,14 @@ export const MessageRow = memo(function MessageRow({
   grouped: boolean;
   inThread?: boolean;
 }) {
-  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId } = useChat();
+  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId, channel } = useChat();
   const made = useMemo(() => ticketFrom(messages, m.id), [messages, m.id]);
   const { flash } = useChat();
   const connection = useConnection();
   const client = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const retry = useRetryAnswer(conversationId, messages);
+  const retry = useRetryAnswer(conversationId, messages, { channel, threadParent: m.thread_parent ?? null });
   if (m.system || isSystemLine(m, true)) return <SystemRow m={m} />;
   const who = authorOf(m, roleOf);
   const body = m.deleted_at_ms ? (

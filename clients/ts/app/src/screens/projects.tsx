@@ -90,7 +90,8 @@ function NewProject({ onClose }: { onClose: () => void }) {
       <div className="flex flex-col gap-3 p-4">
         <p className="m-0 text-[15px] font-semibold">New project</p>
         <p className="m-0 text-[12px] text-text3">
-          A new project starts empty and works without an employee or repository.
+          A project works in a folder on the server. It needs no employee or repository. Choose… can also make a new
+          folder.
         </p>
         <label className="flex flex-col gap-1 text-[12px] text-text3">
           Name

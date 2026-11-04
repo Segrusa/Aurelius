@@ -96,13 +96,15 @@ const Message = memo(function Message({
 }) {
   if (m.deleted_at_ms) return null;
   if (m.system) return <div className="text-center text-[12px] text-text3">{m.text}</div>;
-  if (m.role === "user") {
+  // Not the employee's words: the user's, or the assignment the server wrote for them.
+  if (m.role === "user" || m.update === "brief") {
+    const who = m.author_user?.username ?? (m.role === "user" ? "You" : "Assignment");
     return (
       <div className="flex gap-3">
-        <Mark letter={initial(m.author_user?.username ?? "You")} color="#55595F" size={22} radius={11} />
+        <Mark letter={initial(who)} color="#55595F" size={22} radius={11} />
         <div className="min-w-0 flex-1 rounded-[8px] border border-line bg-sunk px-3 py-[10px]">
           <div className="flex items-baseline gap-2">
-            <span className="font-medium">{m.author_user?.username ?? "You"}</span>
+            <span className="font-medium">{who}</span>
             <span className="text-[12px] text-text3">{m.queued ? "Queued" : clock(m.created_at_ms)}</span>
           </div>
           <div className="mt-[6px]">
@@ -213,12 +215,16 @@ function Composer({
     const conversationId = task.conversation_id;
     if (!conversationId || text.trim() === "" || busy) return;
     send(async (confirmSecret) => {
-      await connection.write("chat.send", {
+      const message = {
         conversation_id: conversationId,
         text: text.trim(),
         confirm_secret: confirmSecret,
         ...(images.paths.length > 0 ? { images: images.paths } : {}),
-      });
+      };
+      // The server keeps an employee's conversations apart from plain chats.
+      await (task.employee_id
+        ? connection.write("employee.send_message", { ...message, employee_id: task.employee_id })
+        : connection.write("chat.send", message));
       images.clear();
       return "";
     });
@@ -320,7 +326,7 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
     if (count > 0) end.current?.scrollIntoView({ block: "end" });
   }, [count]);
   useAction("Back", () => void navigate({ to: "/tasks" }));
-  const retry = useRetryAnswer(task?.conversation_id, list);
+  const retry = useRetryAnswer(task?.conversation_id, list, { employeeId: task?.employee_id ?? null });
   const [contextOf, setContextOf] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   useAction("ShowContext", () => {

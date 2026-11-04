@@ -6,7 +6,7 @@ interface Toast {
 }
 
 const LIFE_MS = 5000;
-const MAX = 5;
+const MAX = 3;
 let toasts: Toast[] = [];
 let nextId = 1;
 const listeners = new Set<() => void>();

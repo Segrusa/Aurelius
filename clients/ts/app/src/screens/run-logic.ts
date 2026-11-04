@@ -105,3 +105,11 @@ export function lastSummaryFailed(messages: { system?: { kind: string } | null |
   }
   return false;
 }
+
+/** Why the last answer did not come: what a stopped task says it waits for. */
+export function lastFailure(
+  messages: { role: string; status: string; text: string; deleted_at_ms?: number | null }[],
+): string | null {
+  const last = [...messages].reverse().find((m) => m.role === "assistant" && !m.deleted_at_ms);
+  return last?.status === "failed" ? last.text.replace(/\s*Send the message again to retry\.\s*$/, "") : null;
+}

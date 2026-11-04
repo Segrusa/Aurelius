@@ -50,13 +50,14 @@ export function dropEffect(from: ColumnKind, to: ColumnKind, choosing: boolean):
   return refused("The engine moves tickets here.");
 }
 
-export type Needs = "review" | "plan_review" | "choose_owner" | "failed" | "approval" | "connect_login";
+export type Needs = "review" | "plan_review" | "choose_owner" | "failed" | "input" | "approval" | "connect_login";
 
 const NEEDS_MINE: Record<Needs, string> = {
   review: "Needs you · review",
   plan_review: "Needs you · plan",
   choose_owner: "Choose an employee",
   failed: "✕ Failed · Needs you",
+  input: "Needs you · stopped",
   approval: "Waiting for your approval",
   connect_login: "Needs you · Claude login",
 };
@@ -66,6 +67,7 @@ const NEEDS_OTHERS: Record<Needs, string> = {
   plan_review: "Waiting for plan review",
   choose_owner: "Choose an employee",
   failed: "✕ Failed",
+  input: "Stopped, waits for an answer",
   approval: "Waiting for approval",
   connect_login: "Waiting for a Claude login",
 };
@@ -75,21 +77,33 @@ export function needsLine(needs: Needs, mine: boolean): string {
 }
 
 /** What a card waits for from a board member, without a login in the way. */
-export function needsYou(t: TicketView, choosing: boolean, rootApprovals: number): Needs | null {
+export function needsYou(
+  t: TicketView,
+  choosing: boolean,
+  rootApprovals: number,
+  rootWaiting: string | null = null,
+): Needs | null {
   if (t.column === "review") return "review";
   if (t.column === "plan_review") return "plan_review";
   if (t.column === "backlog" || t.column === "done") return null;
   if ((t.column === "todo" || t.column === "doing") && t.root_task_status === "failed") return "failed";
   if (rootApprovals > 0) return "approval";
+  if (t.column === "doing" && t.root_task_status === "waiting" && rootWaiting === "input") return "input";
   if (t.column === "todo" && !t.owner_employee_id && !choosing) return "choose_owner";
   return null;
 }
 
 /** A missing Claude login counts only for its own board member. */
-export function ticketNeeds(t: TicketView, me: string | null, choosing: boolean, rootApprovals: number): Needs | null {
+export function ticketNeeds(
+  t: TicketView,
+  me: string | null,
+  choosing: boolean,
+  rootApprovals: number,
+  rootWaiting: string | null = null,
+): Needs | null {
   if (t.needs === "login" && (t.column === "todo" || t.column === "doing"))
     return me === t.login_user ? "connect_login" : null;
-  return needsYou(t, choosing, rootApprovals);
+  return needsYou(t, choosing, rootApprovals, rootWaiting);
 }
 
 /** B6: the ◆, the filter and the badge follow this; anyone can still decide. */
@@ -438,4 +452,37 @@ export function columnsProblem(columns: { name: string; title: string }[]): stri
   if (blank) return `Give ${blank.title} a name.`;
   const names = columns.map((c) => c.name.toLowerCase());
   return new Set(names).size === names.length ? null : "Each column needs its own name.";
+}
+
+export interface DiscussionView<M> {
+  shown: M[];
+  /** The message after which earlier updates are folded away, and how many. */
+  earlier: Map<string, number>;
+}
+
+/** Runs of the system's own lines fold to their latest: people's words stay readable. */
+export function foldUpdates<M extends { id: string; system?: unknown }>(
+  list: M[],
+  unfolded: boolean,
+): DiscussionView<M> {
+  const earlier = new Map<string, number>();
+  if (unfolded) return { shown: list, earlier };
+  const shown: M[] = [];
+  let run = 0;
+  list.forEach((m, i) => {
+    const next = list[i + 1];
+    if (m.system && next?.system) {
+      run += 1;
+      return;
+    }
+    if (m.system && run > 0) earlier.set(m.id, run);
+    run = 0;
+    shown.push(m);
+  });
+  return { shown, earlier };
+}
+
+/** People's words, not the lines about what happened. */
+export function peopleCount(list: { id: string; system?: unknown }[]): number {
+  return list.filter((m) => !m.system).length;
 }

@@ -37,6 +37,14 @@ export class LiveStore {
     if (changed) this.schedule();
   }
 
+  /** The connection went: nothing can grow any more, and what the list says after it comes back holds. */
+  clear() {
+    if (this.entries.size === 0) return;
+    this.entries.clear();
+    this.seenAt.clear();
+    this.schedule();
+  }
+
   /** An empty answer no one writes to any more goes away. */
   sweep(now: number, afterMs: number) {
     let changed = false;
@@ -84,8 +92,12 @@ export function useLiveStore(conversationId: string | null | undefined): LiveSto
       if (u.conversation_id === conversationId) store.put(u);
     });
     const sweep = setInterval(() => store.sweep(Date.now(), 3000), 1000);
+    const offState = connection.subscribe(() => {
+      if (connection.getState().status !== "online") store.clear();
+    });
     return () => {
       off();
+      offState();
       clearInterval(sweep);
       store.dispose();
     };

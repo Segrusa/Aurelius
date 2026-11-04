@@ -262,15 +262,45 @@ export function SubagentsAtWork({ conversationId, live }: { conversationId: stri
   );
 }
 
-/** Asks the employee's last question again. */
-export function useRetryAnswer(conversationId: string | null | undefined, messages: MessageView[]) {
+/** Where a message goes again: an employee's conversation, or the Team chat. */
+export type RetryTarget = { employeeId: string | null } | { channel: string | null; threadParent?: string | null };
+
+/**
+ * Asks the last question again. The server only retries in conversations of neither employee nor
+ * team, so here the question goes again, as a failed answer says to do. A task that never started
+ * has only its assignment, which the server wrote: a message starts it.
+ */
+export function useRetryAnswer(
+  conversationId: string | null | undefined,
+  messages: MessageView[],
+  target: RetryTarget,
+) {
   const connection = useConnection();
   const last = [...messages].reverse().find((m) => m.role === "user");
   return () => {
-    if (!last || !conversationId) return toast("Open a chat with a question first.");
-    connection
-      .write("chat.retry", { conversation_id: conversationId, user_message_id: last.id }, { retry: false })
-      .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
+    if (!conversationId || messages.length === 0) return toast("Open a chat with a question first.");
+    const text = last?.text ?? "Please try again.";
+    const sent =
+      "channel" in target
+        ? connection.write(
+            "group_chat.send",
+            { text, channel: target.channel, thread_parent: target.threadParent ?? null },
+            { retry: false },
+          )
+        : target.employeeId
+          ? connection.write(
+              "employee.send_message",
+              { employee_id: target.employeeId, conversation_id: conversationId, text },
+              { retry: false },
+            )
+          : last
+            ? connection.write(
+                "chat.retry",
+                { conversation_id: conversationId, user_message_id: last.id },
+                { retry: false },
+              )
+            : connection.write("chat.send", { conversation_id: conversationId, text }, { retry: false });
+    sent.catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
   };
 }
 

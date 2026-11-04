@@ -81,7 +81,6 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const save = async () => {
     if (busy) return;
     if (name.trim() === "") return setError("Enter a name.");
-    if (role.trim() === "") return setError("Give the employee a role. It can be anything.");
     setBusy(true);
     setError(null);
     try {
@@ -90,7 +89,8 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
           "employee.create",
           {
             name: name.trim(),
-            role: role.trim(),
+            // A role says how they work; without one they are just an employee.
+            role: role.trim() || "Employee",
             instructions,
             ...(title.trim() ? { title: title.trim() } : {}),
             ...(reportsTo ? { reports_to: reportsTo } : {}),

@@ -284,13 +284,13 @@ test.describe("states a test daemon cannot produce", () => {
     await card("A plan to read").click();
     const plan = page.getByRole("complementary", { name: /A plan to read/ });
     await expect(plan.getByText("First the migration.")).toBeVisible();
-    await plan.getByRole("button", { name: "Pas aan" }).click();
+    await plan.getByRole("button", { name: "Request changes" }).click();
     await expect(plan.getByText("Write what needs to change.")).toBeVisible();
     await plan.getByRole("button", { name: "Approve", exact: true }).click();
     await expect
       .poll(() => writes.find((w) => w.method === "ticket.approve_plan")?.params)
       .toMatchObject({ ticket_id: "t2", decision: "approve" });
-    await plan.getByRole("button", { name: "Afwijzen" }).click();
+    await plan.getByRole("button", { name: "Reject" }).click();
     await expect(page.getByRole("dialog", { name: "Reject the plan of #22?" })).toBeVisible();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Close", exact: true }).click();
@@ -372,7 +372,7 @@ test.describe("states a test daemon cannot produce", () => {
     await page.keyboard.press("Alt+Enter");
     await expect.poll(() => writes.find((w) => w.method === "run.stop")?.params).toBeTruthy();
     await expect
-      .poll(() => writes.find((w) => w.method === "chat.send")?.params)
+      .poll(() => writes.find((w) => w.method === "employee.send_message")?.params)
       .toMatchObject({ text: "Stop and do this instead." });
   });
 
@@ -443,7 +443,7 @@ test.describe("states a test daemon cannot produce", () => {
     await page.getByLabel("Message Flux").fill("Please also check the logs.");
     await page.keyboard.press("Enter");
     await expect
-      .poll(() => writes.find((w) => w.method === "chat.send")?.params)
+      .poll(() => writes.find((w) => w.method === "employee.send_message")?.params)
       .toMatchObject({ conversation_id: "c3", text: "Please also check the logs." });
     await page.getByRole("button", { name: "Stop run" }).click();
     await expect.poll(() => writes.find((w) => w.method === "run.stop")?.params).toMatchObject({ run_id: "r3" });

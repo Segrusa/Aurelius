@@ -51,3 +51,20 @@ export function recurrenceText(r: Recurrence): string {
   if (r.kind === "daily") return `Daily at ${clock(r.at_minute)}`;
   return `${r.weekdays.map((d) => WEEKDAYS[d]).join(", ")} at ${clock(r.at_minute)}`;
 }
+
+const ONE_PAGE = /^(.+)\.[0-9a-f]{8}-[0-9a-f-]{27}$/;
+
+/** A screen's counts, most opened first: every employee's or project's own page counts as one. */
+export function screenUseRows<U extends { opens: number; last_ms: number }>(use: Record<string, U>): [string, U][] {
+  const rows = new Map<string, U>();
+  for (const [key, u] of Object.entries(use)) {
+    const place = ONE_PAGE.exec(key);
+    const name = place ? `${place[1]} (their own pages)` : key;
+    const so_far = rows.get(name);
+    rows.set(
+      name,
+      so_far ? { ...so_far, opens: so_far.opens + u.opens, last_ms: Math.max(so_far.last_ms, u.last_ms) } : u,
+    );
+  }
+  return [...rows.entries()].sort((a, b) => b[1].opens - a[1].opens);
+}

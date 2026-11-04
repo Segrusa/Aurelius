@@ -323,19 +323,19 @@ function PlanCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean 
           disabled={busy}
           onClick={() => decide("approve", "Plan approved. The agent goes on in auto mode.")}
         >
-          Goedkeuren + Auto
+          Approve + Auto
         </Button>
         <Button
           disabled={busy}
           onClick={() => decide("approve_edits", "Plan approved. Edits go through; the agent asks for the rest.")}
         >
-          Goedkeuren, edits
+          Approve, edits
         </Button>
         <Button disabled={busy} onClick={() => decide("revise", "Changes requested. The agent revises the plan.")}>
-          Pas aan
+          Request changes
         </Button>
         <Button kind="danger" disabled={busy} onClick={() => decide("reject", "Plan rejected. The agent stops.")}>
-          Afwijzen
+          Reject
         </Button>
       </div>
     </Shell>

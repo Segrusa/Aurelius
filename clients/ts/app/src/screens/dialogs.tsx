@@ -14,6 +14,7 @@ import { toast } from "../ui/toast";
 import { cycle, defaultAssignee, parseDeadline, parseLabels, rootsOf, titleOfGoal } from "./dialog-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
 import { modelName, useSetting } from "./settings-kit";
+import { NoConnectionNote, useNoConnection } from "./tickets-kit";
 
 const PRIORITIES: { key: TicketPriority; label: string }[] = [
   { key: "low", label: "Low" },
@@ -115,6 +116,19 @@ export function Held({ names, onSend, busy }: { names: string[]; onSend: () => v
   );
 }
 
+/** The two windows are one choice: start now or plan for later. What was typed goes along. */
+function SwitchDialog({ label, onSwitch }: { label: string; onSwitch: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSwitch}
+      className="ml-auto flex-none cursor-pointer border-0 bg-transparent p-0 text-[12px] text-acc-text"
+    >
+      {label}
+    </button>
+  );
+}
+
 function CloseButton() {
   return (
     <DialogClose asChild>
@@ -131,6 +145,7 @@ function CloseButton() {
 
 function NewTicketBody({ onClose }: { onClose: () => void }) {
   useKeyContext("AureliusDialog", true);
+  const noConnection = useNoConnection();
   const connection = useConnection();
   const { user, features } = useLinkState();
   const canHaveResponsible = features.includes("ticket_responsible");
@@ -221,6 +236,12 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
         )}
         <span className="text-faint">›</span>
         <span className="font-medium text-text">New ticket</span>
+        <SwitchDialog
+          label="Give work instead"
+          onSwitch={() =>
+            overlays.open("give", { title: "", description: [title, description].filter(Boolean).join("\n\n") })
+          }
+        />
         <CloseButton />
       </div>
       <div {...attach.target} className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
@@ -332,7 +353,14 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
         ) : null}
       </div>
       <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line2 px-4 py-3">
-        <span className="mr-auto text-[12px] text-text3">Lands in Backlog. Nothing starts until you press Start.</span>
+        {noConnection ? (
+          <span className="mr-auto">
+            <NoConnectionNote />
+          </span>
+        ) : null}
+        <span className={`${noConnection ? "hidden" : "mr-auto"} text-[12px] text-text3`}>
+          Lands in Backlog. Nothing starts until you press Start.
+        </span>
         <Button disabled={!ready || busy} onClick={() => create(false)}>
           Create
         </Button>
@@ -350,13 +378,14 @@ const LAST_GIVEN = "last_given_to";
 
 function GiveWorkBody({ onClose }: { onClose: () => void }) {
   useKeyContext("GiveWork", true);
+  const noConnection = useNoConnection();
   const connection = useConnection();
   const { storage } = usePlatform();
   const { user, features } = useLinkState();
   const projects = useProjects();
   const employees = useEmployees();
   const models = useModels();
-  const [goal, setGoal] = useState("");
+  const [goal, setGoal] = useState(() => overlays.prefill()?.description ?? "");
   const attach = useAttachments();
   const [effort, setEffort] = useState("default");
   const [picked, setPicked] = useState<string | null>(() => overlays.prefill()?.employeeId ?? null);
@@ -444,7 +473,11 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
     <>
       <div className="flex h-11 flex-none items-center gap-2 border-b border-line2 px-4">
         <span className="font-medium">Give work</span>
-        <span className="truncate text-text3">· starts right away</span>
+        <span className="truncate text-text3">· starts right away, or with a plan for you to approve</span>
+        <SwitchDialog
+          label="New ticket instead"
+          onSwitch={() => overlays.open("ticket", { title: titleOfGoal(goal), description: goal.trim() })}
+        />
         <CloseButton />
       </div>
       <div {...attach.target} className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
@@ -550,7 +583,13 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
       </div>
       <div className="flex flex-none items-center gap-2 border-t border-line2 px-4 py-3">
         <span className="mr-auto text-[12px] text-text3">
-          {who ? `${who.name} reports back to you when it is done.` : "Choose who gets this work."}
+          {noConnection ? (
+            <NoConnectionNote />
+          ) : who ? (
+            `${who.name} reports back to you when it is done.`
+          ) : (
+            "Choose who gets this work."
+          )}
         </span>
         <Button kind="primary" disabled={!ready || busy} onClick={submit}>
           Give work <Kbd onAccent>{showChord("secondary-enter", isMac)}</Kbd>

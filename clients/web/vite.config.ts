@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
@@ -8,6 +9,11 @@ const gateway = process.env.AURELIUS_GATEWAY ?? "http://127.0.0.1:47613";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "react-style-singleton": fileURLToPath(new URL("../ts/app/src/ui/no-style-singleton.ts", import.meta.url)),
+    },
+  },
   // No data: URLs: the page's CSP allows only its own origin.
   base: "/",
   build: { outDir: "dist", emptyOutDir: true, assetsInlineLimit: 0 },

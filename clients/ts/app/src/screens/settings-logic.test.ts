@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseClock, recurrenceForm, recurrenceOf, recurrenceText } from "./settings-logic";
+import { parseClock, recurrenceForm, recurrenceOf, recurrenceText, screenUseRows } from "./settings-logic";
 
 describe("recurrence", () => {
   it("reads a clock", () => {
@@ -23,5 +23,19 @@ describe("recurrence", () => {
     expect(recurrenceText(weekly)).toBe("Mon, Fri at 09:05");
     expect(recurrenceText({ kind: "every_hours", hours: 1 })).toBe("Every hour");
     expect(recurrenceText({ kind: "daily", at_minute: 60 })).toBe("Daily at 01:00");
+  });
+});
+
+describe("screenUseRows", () => {
+  it("counts one screen's own pages as one, most opened first", () => {
+    const rows = screenUseRows({
+      board: { opens: 3, last_ms: 5 },
+      "employees.01a1a741-0000-7000-8000-000000000000": { opens: 2, last_ms: 7 },
+      "employees.01a1a741-0000-7000-8000-000000000001": { opens: 2, last_ms: 9 },
+    });
+    expect(rows).toEqual([
+      ["employees (their own pages)", { opens: 4, last_ms: 9 }],
+      ["board", { opens: 3, last_ms: 5 }],
+    ]);
   });
 });

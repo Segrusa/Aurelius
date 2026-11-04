@@ -23,6 +23,7 @@ import {
   useSetting,
   when,
 } from "./settings-kit";
+import { screenUseRows } from "./settings-logic";
 
 function ChangePassword() {
   const connection = useConnection();
@@ -156,7 +157,7 @@ const APPEARANCES: { key: Appearance; label: string }[] = [
 function ScreenUse() {
   const { storage } = usePlatform();
   const [use, setUse] = useState(() => parseScreenUse(storage.get(SCREEN_USE_KEY)));
-  const rows = Object.entries(use).sort((a, b) => b[1].opens - a[1].opens);
+  const rows = screenUseRows(use);
   return (
     <Group title="Screen use (this device only)">
       {rows.length === 0 ? <Row title="Nothing counted yet." /> : null}

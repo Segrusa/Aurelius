@@ -372,15 +372,6 @@ export const SHORTCUTS: Shortcut[] = [
     action: "OpenServers",
   },
   {
-    keys: ["secondary-shift-d"],
-    context: "Aurelius",
-    navKeys: [],
-    label: "Show / hide sample data",
-    section: "General",
-    inPalette: true,
-    action: "TogglePreview",
-  },
-  {
     keys: ["secondary-q"],
     context: "Aurelius",
     navKeys: [],
@@ -624,15 +615,6 @@ export const SHORTCUTS: Shortcut[] = [
     action: "ArchiveItem",
   },
   {
-    keys: ["secondary-shift-r"],
-    context: "Aurelius",
-    navKeys: ["r"],
-    label: "Review approval",
-    section: "Project",
-    inPalette: true,
-    action: "ReviewApproval",
-  },
-  {
     keys: ["secondary-shift-y"],
     context: "Aurelius",
     navKeys: ["y"],
@@ -704,15 +686,6 @@ export const SHORTCUTS: Shortcut[] = [
     inPalette: false,
     action: "ConfirmPrimary",
   },
-  {
-    keys: ["secondary-shift-h"],
-    context: "Aurelius",
-    navKeys: ["g"],
-    label: "Show / hide task history",
-    section: "Manager",
-    inPalette: true,
-    action: "ToggleHistory",
-  },
 ];
 
 /** Bindings of one context, beside the table (`overlay_bindings`). */
@@ -735,6 +708,9 @@ export const CONTEXT_BINDINGS: { key: string; action: string; context: string }[
   { key: "secondary-enter", action: "SettingsUse", context: "Settings" },
   { key: "s", action: "SettingsKey", context: "Settings" },
   { key: "n", action: "SettingsNew", context: "Settings" },
+  { key: "n", action: "MakeTicket", context: "Board" },
+  { key: "n", action: "MakeTicket", context: "MyTickets" },
+  { key: "secondary-enter", action: "DecideYes", context: "Decision" },
   { key: "delete", action: "SettingsRemove", context: "Settings" },
   { key: "c", action: "SettingsCheckUpdate", context: "Settings" },
   { key: "u", action: "SettingsInstallUpdate", context: "Settings" },

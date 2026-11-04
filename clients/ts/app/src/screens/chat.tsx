@@ -682,9 +682,11 @@ function Channel({
       messages: list,
       lastAnswer: lastAnswerId,
       conversationId: feed.data?.conversation_id ?? null,
+      channel,
       flash,
     }),
     [
+      channel,
       flash,
       store,
       caps,
@@ -704,7 +706,7 @@ function Channel({
 
   const running =
     [...list2].reverse().find((m) => m.status === "partial" && m.run_id)?.run_id ?? live.at(-1)?.run_id ?? null;
-  const retryAnswer = useRetryAnswer(feed.data?.conversation_id, list2);
+  const retryAnswer = useRetryAnswer(feed.data?.conversation_id, list2, { channel });
   const [contextOf, setContextOf] = useState<string | null>(null);
   useAction("ShowContext", () => {
     const run = [...list2].reverse().find((m) => m.role === "assistant" && m.run_id)?.run_id;

@@ -4,6 +4,7 @@ import {
   boardOnlyReason,
   composePlanFeedback,
   elapsedText,
+  lastFailure,
   lastSummaryFailed,
   markdownPaths,
   screenshotId,
@@ -76,5 +77,23 @@ describe("run texts", () => {
     expect(waitingText({ ...load, hold: { kind: "memory" } })).toBe("Server busy: 2.0 GB free, waiting");
     expect(waitingText({ ...load, hold: { kind: "max_runs" } })).toBe("Server busy: 3 runs active, waiting");
     expect(waitingText({ ...load, hold: null })).toBeNull();
+  });
+});
+
+describe("lastFailure", () => {
+  const m = (role: string, status: string, text: string) => ({ role, status, text });
+
+  it("says why the last answer did not come, without the advice for a chat", () => {
+    expect(
+      lastFailure([
+        m("user", "complete", "go"),
+        m("assistant", "failed", "No connection. Send the message again to retry."),
+      ]),
+    ).toBe("No connection.");
+  });
+
+  it("is nothing once a later answer came", () => {
+    expect(lastFailure([m("assistant", "failed", "x"), m("assistant", "complete", "ok")])).toBeNull();
+    expect(lastFailure([])).toBeNull();
   });
 });

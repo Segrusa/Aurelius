@@ -11,6 +11,7 @@ import {
   newNotes,
   notificationHeading,
   notificationPlace,
+  waitingLabel,
 } from "./inbox-logic";
 
 const approval = (over: Partial<ApprovalView> = {}) =>
@@ -54,6 +55,26 @@ describe("approvals", () => {
   });
 });
 
+describe("a plan to review", () => {
+  const waiting = task({ id: "t", ticket_id: "k", status: "waiting", waiting_reason: "plan_review" });
+
+  it("is one decision, though the task waits and a notification says so", () => {
+    const groups = buildInbox({
+      ...empty,
+      tasks: [waiting],
+      notifications: [note({ reason: "plan_review", ticket_id: "k" })],
+    });
+    expect(groups.flatMap((g) => g.rows)).toHaveLength(1);
+  });
+
+  it("still shows when only the task says so, in words", () => {
+    const rows = buildInbox({ ...empty, tasks: [waiting] }).flatMap((g) => g.rows);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.meta).toContain("plan to review");
+    expect(waitingLabel("something_new")).toBe("something new");
+  });
+});
+
 describe("tasks", () => {
   it("wait when waiting, or queued with a reason", () => {
     expect(isWaiting(task({ status: "waiting" }))).toBe(true);
@@ -76,6 +97,8 @@ describe("notifications", () => {
     expect(notificationPlace(note({ subject: "general" }))).toBe("# general");
     expect(notificationPlace(note({ subject: "#general" }))).toBe("#general");
     expect(notificationPlace(note({ subject: "" }))).toBe("Update");
+    expect(notificationPlace(note({ ticket_number: 1, subject: "#1 Login page" }))).toBe("#1 Login page");
+    expect(notificationPlace(note({ ticket_number: 1, subject: "#10 Other" }))).toBe("#1 #10 Other");
   });
 
   it("group into reviews and updates; the newest decision comes first", () => {

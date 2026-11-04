@@ -20,9 +20,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useBoard, useEmployees, useMembers, useProjects } from "../data";
+import { useBoard, useCompany, useEmployees, useMembers, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { NewIcon } from "../ui/icons";
@@ -49,9 +49,11 @@ import { TicketRows } from "./ticket-rows";
 import {
   ColumnGlyph,
   NeedsTag,
+  NoConnectionNote,
   OwnerMark,
   TicketTags,
   ticketNumber,
+  useNoConnection,
   useTicketNeeds,
   useTicketWrite,
 } from "./tickets-kit";
@@ -253,6 +255,20 @@ function Column({
   const items = virtual.getVirtualItems();
   const top = items[0]?.start ?? 0;
   const bottom = Math.max(0, virtual.getTotalSize() - (items.at(-1)?.end ?? 0));
+  // Only Plan mode uses this column: while it is empty it gives its room to the others.
+  if (column.kind === "plan_review" && total === 0) {
+    return (
+      <section
+        aria-label={column.name}
+        ref={setNodeRef}
+        title={emptyText(column.kind)}
+        className={`flex max-h-full w-[36px] flex-none flex-col items-center gap-2 rounded-[8px] py-2 ${isOver ? "bg-sel" : ""}`}
+      >
+        <ColumnGlyph kind={column.kind} />
+        <span className="font-medium text-text3 [writing-mode:vertical-rl]">{column.name}</span>
+      </section>
+    );
+  }
   return (
     <section
       aria-label={column.name}
@@ -404,11 +420,26 @@ export function BoardScreen({
   const all = useMemo(() => (board.data?.columns ?? []).flatMap((c) => c.tickets), [board.data]);
   const need = useTicketNeeds(all);
   const needsCount = useMemo(() => all.filter(need.mine).length, [all, need]);
+  const company = useCompany();
+  const noConnection = useNoConnection();
+  // Testing only where someone tests, or a card is still there.
+  const tester = Boolean(company.data?.company.tester_employee_id);
   const testing = features.includes("board_testing");
   const columns = useMemo(
-    () => (board.data?.columns ?? []).filter((c) => columnShown(c.column.kind, testing)),
-    [board.data, testing],
+    () =>
+      (board.data?.columns ?? []).filter((c) =>
+        columnShown(c.column.kind, testing && (tester || c.tickets.length > 0)),
+      ),
+    [board.data, testing, tester],
   );
+  // The panel takes room from the board: the opened card stays in view.
+  useEffect(() => {
+    if (!ticket) return;
+    const frame = requestAnimationFrame(() =>
+      document.querySelector(`[data-card="${ticket}"]`)?.scrollIntoView({ inline: "nearest", block: "nearest" }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [ticket]);
   const filter = useMemo(
     () => ({ owner, responsible, query, needsOnly, needs: need.mine }),
     [owner, responsible, query, needsOnly, need],
@@ -725,6 +756,12 @@ export function BoardScreen({
           </Button>
         </div>
       </header>
+      {noConnection ? (
+        <div className="flex flex-none items-center gap-3 border-b border-line bg-amber-soft px-[18px] py-2 text-[13px]">
+          <span className="size-[7px] flex-none rounded-full bg-amber" />
+          <NoConnectionNote />
+        </div>
+      ) : null}
       {claudeLogin && claudeLogin.status !== "linked" ? (
         <div className="flex flex-none items-center gap-3 border-b border-line bg-amber-soft px-[18px] py-2 text-[12px]">
           <span className="size-[7px] flex-none rounded-full bg-amber" />
@@ -865,7 +902,7 @@ export function BoardScreen({
                 : "This stops the work."
           }
           confirm={
-            pending.kind === "mark_done" ? "Mark done" : pending.kind === "reject" ? "Afwijzen" : "Back to Backlog"
+            pending.kind === "mark_done" ? "Mark done" : pending.kind === "reject" ? "Reject" : "Back to Backlog"
           }
           danger={pending.kind === "reject"}
           onConfirm={() =>

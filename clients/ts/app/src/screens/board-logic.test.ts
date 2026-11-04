@@ -14,6 +14,7 @@ import {
   doneCheck,
   dropEffect,
   feedbackLabel,
+  foldUpdates,
   inMyTab,
   isChoosing,
   latestPlan,
@@ -22,6 +23,7 @@ import {
   needsMe,
   needsYou,
   ownerChoosable,
+  peopleCount,
   shownCards,
   taskCounts,
   ticketNeeds,
@@ -115,6 +117,8 @@ describe("what needs a board member", () => {
   it("per column and state", () => {
     expect(needsYou(ticket({ column: "review" }), false, 0)).toBe("review");
     expect(needsYou(ticket({ column: "plan_review" }), false, 0)).toBe("plan_review");
+    expect(needsYou(ticket({ column: "doing", root_task_status: "waiting" }), false, 0, "input")).toBe("input");
+    expect(needsYou(ticket({ column: "doing", root_task_status: "waiting" }), false, 0, "login")).toBeNull();
     expect(needsYou(ticket({ column: "backlog" }), false, 3)).toBeNull();
     expect(needsYou(ticket({ column: "doing", root_task_status: "failed" }), false, 0)).toBe("failed");
     expect(needsYou(ticket({ column: "doing" }), false, 2)).toBe("approval");
@@ -297,5 +301,23 @@ describe("column names", () => {
       ]),
     ).toBe("Each column needs its own name.");
     expect(columnsProblem([{ name: "Work", title: "Todo" }])).toBeNull();
+  });
+});
+
+describe("a discussion", () => {
+  const line = (id: string) => ({ id, system: { kind: "moved" } });
+  const said = (id: string) => ({ id });
+
+  it("folds runs of the system's lines to the latest, and keeps people's words", () => {
+    const { shown, earlier } = foldUpdates([line("a"), line("b"), line("c"), said("d"), line("e")], false);
+    expect(shown.map((m) => m.id)).toEqual(["c", "d", "e"]);
+    expect(earlier.get("c")).toBe(2);
+    expect(earlier.has("e")).toBe(false);
+  });
+
+  it("shows everything once unfolded, and counts only people", () => {
+    const list = [line("a"), line("b"), said("c")];
+    expect(foldUpdates(list, true).shown).toHaveLength(3);
+    expect(peopleCount(list)).toBe(1);
   });
 });
