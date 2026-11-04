@@ -106,15 +106,29 @@ fi
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 
 echo "Building Aurelius $version ..."
-cargo build --release -p aurelius-desktop -p aurelius-daemon -p aurelius-agent-bridge -p aurelius-client
+cargo build --release -p aurelius-daemon -p aurelius-agent-bridge -p aurelius-client
+
+# The app is a folder, built from clients/electron (Node and pnpm via npx).
+npx -y pnpm@12.16.1 install --frozen-lockfile
+npx -y pnpm@12.16.1 build
+npx -y pnpm@12.16.1 --filter @aurelius/electron package
 
 # Atomic replacement: a running Aurelius keeps its old program until restarted.
 bin="$prefix/bin"
 mkdir -p "$bin"
-for program in aurelius aurelius-daemon aurelius-bridge aurelius-ctl; do
+for program in aurelius-daemon aurelius-bridge aurelius-ctl; do
     install -m 755 "target/release/$program" "$bin/.$program.new"
     mv -f "$bin/.$program.new" "$bin/$program"
 done
+# The app beside the service, which it finds as ../aurelius-daemon from its own folder.
+rm -rf "$bin/.app.new" "$bin/.app.old"
+cp -a "clients/electron/release/linux-$(node -p process.arch)" "$bin/.app.new"
+if [[ -e "$bin/app" ]]; then mv "$bin/app" "$bin/.app.old"; fi
+mv "$bin/.app.new" "$bin/app"
+rm -rf "$bin/.app.old"
+ln -sfn app/aurelius "$bin/.aurelius.new"
+mv -Tf "$bin/.aurelius.new" "$bin/aurelius"
+printf '%s' "$version" > "$bin/aurelius.version"
 
 # The application menu entry and the icon.
 icons="$prefix/share/icons/hicolor/512x512/apps"

@@ -1,0 +1,29 @@
+@import "tailwindcss";
+@import "@aurelius/app/theme.css";
+
+:root[data-os="win32"] main > header {
+  padding-right: 146px;
+}
+/* Windows and macOS draw the window controls over the page: the header bar moves the window, and
+   leaves those controls their room. An open dialog or menu must get its clicks. */
+:root:is([data-os="win32"], [data-os="darwin"]) {
+  & main > header,
+  & body::before {
+    app-region: drag;
+  }
+  & body::before {
+    content: "";
+    position: fixed;
+    inset: 0 0 auto;
+    height: 8px;
+  }
+  &:has([role="dialog"], [role="menu"], [role="listbox"]) main > header {
+    app-region: no-drag;
+  }
+  & header :is(a, button, input, select, textarea, [role="button"], [role="tab"], [tabindex]) {
+    app-region: no-drag;
+  }
+}
+:root[data-os="darwin"] body > #root aside:first-child {
+  padding-top: 36px;
+}

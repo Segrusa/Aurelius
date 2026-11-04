@@ -47,15 +47,17 @@ fn main() -> anyhow::Result<()> {
 
     // The decoy hash of `user.use` (S5-4), beside the start instead of on the first unknown board member.
     std::thread::spawn(aurelius_daemon::api::warm_up);
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-    let stopped = runtime.block_on(aurelius_daemon::run_service(root.clone()))?;
-    drop(runtime);
-    if stopped == aurelius_daemon::Stopped::Restart {
-        // The installed program by name: after an update this process runs
-        // from the renamed `.old` file. The instance lock is free again.
-        let exe = aurelius_host::sibling_executable("aurelius-daemon")?;
-        tracing::info!(exe = %exe.display(), "starting again");
-        aurelius_host::spawn_daemon_detached(&exe, &root)?;
-    }
-    Ok(())
+    aurelius_host::tray::run_service_thread(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+        let stopped = runtime.block_on(aurelius_daemon::run_service(root.clone()))?;
+        drop(runtime);
+        if stopped == aurelius_daemon::Stopped::Restart {
+            // The installed program by name: after an update this process runs
+            // from the renamed `.old` file. The instance lock is free again.
+            let exe = aurelius_host::sibling_executable("aurelius-daemon")?;
+            tracing::info!(exe = %exe.display(), "starting again");
+            aurelius_host::spawn_daemon_detached(&exe, &root)?;
+        }
+        Ok(())
+    })
 }

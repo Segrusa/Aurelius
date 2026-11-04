@@ -18,6 +18,7 @@ $shared = @("aurelius-domain", "aurelius-protocol", "aurelius-host", "aurelius-c
 $server = @(
     "aurelius-storage", "aurelius-application", "aurelius-runtime", "aurelius-tools", "aurelius-daemon", "aurelius-remote-gateway", "aurelius-agent-bridge", "xtask"
 )
+# clients\desktop still builds until it is removed; the app's own tests run at the end of this script.
 $desktop = @("aurelius-desktop")
 
 $packages = switch ($Part) {
@@ -34,3 +35,13 @@ Write-Host "Testing $Part ($($packages.Count) packages)..."
 # production or dev app never locks the files.
 cargo test --target-dir target/work @cargoArgs
 exit $LASTEXITCODE
+
+# The app and its shared TypeScript.
+if ($Part -in @("desktop", "all")) {
+    npx -y pnpm@12.16.1 install --frozen-lockfile
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    npx -y pnpm@12.16.1 lint
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    npx -y pnpm@12.16.1 test
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}

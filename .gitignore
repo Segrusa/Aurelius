@@ -12,3 +12,8 @@
 .env
 scherm*_*.png
 clients/mobile/ios/Flutter/Local.xcconfig
+node_modules/
+dist/
+out/
+test-results/
+clients/electron/release/

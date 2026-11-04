@@ -1,0 +1,55 @@
+{
+  "request_read": {
+    "method": "user.whoami",
+    "protocol": 5,
+    "request_id": 7
+  },
+  "request_write": {
+    "expected_version": 3,
+    "idempotency_key": "01900000-0000-7000-8000-000000000001",
+    "method": "power.cancel",
+    "protocol": 5,
+    "request_id": 8
+  },
+  "response_error": {
+    "error": {
+      "code": "forbidden",
+      "message": "Not here."
+    },
+    "request_id": 7,
+    "type": "response"
+  },
+  "response_receipt": {
+    "ok": {
+      "type": "receipt",
+      "value": {
+        "committed_seq": 91,
+        "idempotency_key": "01900000-0000-7000-8000-000000000001",
+        "replayed": false,
+        "result": {
+          "kind": "command",
+          "value": {
+            "conversation_id": "01900000-0000-7000-8000-000000000001",
+            "message_id": "01900000-0000-7000-8000-000000000001",
+            "run_id": "01900000-0000-7000-8000-000000000001",
+            "type": "chat_message_sent"
+          }
+        }
+      }
+    },
+    "request_id": 8,
+    "type": "response"
+  },
+  "signed_out": {
+    "reason": "revoked",
+    "type": "signed_out"
+  },
+  "stream_append": {
+    "conversation_id": "01900000-0000-7000-8000-000000000001",
+    "message_id": "01900000-0000-7000-8000-000000000001",
+    "offset": 5,
+    "run_id": "01900000-0000-7000-8000-000000000001",
+    "text": " there",
+    "type": "stream_append"
+  }
+}

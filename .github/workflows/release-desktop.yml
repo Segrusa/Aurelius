@@ -56,19 +56,31 @@ jobs:
           if ("desktop-v$version" -ne $env:TAG) { throw "workspace Cargo.toml version $version does not match tag $env:TAG" }
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
       - name: Build
         shell: pwsh
-        run: cargo build --release --locked -p aurelius-desktop -p aurelius-host
+        run: |
+          cargo build --release --locked -p aurelius-host
+          pnpm install --frozen-lockfile
+          pnpm build
+          pnpm --filter @aurelius/electron package
 
       - name: Package and sign
         shell: pwsh
         env:
           AURELIUS_SIGNING_KEY: ${{ secrets.AURELIUS_SIGNING_KEY }}
         run: |
-          $zip = "aurelius-desktop-$env:VERSION-windows-x64.zip"
+          # The whole app folder, with aurelius.exe at the root of the zip.
+          $zip = "aurelius-electron-$env:VERSION-windows-x64.zip"
+          $app = "clients/electron/release/win32-x64"
           New-Item -ItemType Directory -Force dist | Out-Null
-          ./scripts/licenses.ps1 -Out target/release/THIRD-PARTY-LICENSES.md
-          Compress-Archive -Path target/release/aurelius.exe, target/release/THIRD-PARTY-LICENSES.md -DestinationPath "dist/$zip" -Force
+          ./scripts/licenses.ps1 -Out "$app/THIRD-PARTY-LICENSES.md"
+          Compress-Archive -Path "$app/*" -DestinationPath "dist/$zip" -Force
           ./target/release/aurelius-release.exe sign "dist/$zip"
           ./target/release/aurelius-release.exe verify "dist/$zip"
           (Get-FileHash "dist/$zip" -Algorithm SHA256).Hash.ToLower() + "  $zip" | Out-File -Encoding ascii "dist/$zip.sha256"

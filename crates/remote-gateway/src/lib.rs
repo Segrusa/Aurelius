@@ -24,6 +24,7 @@ mod http;
 mod mcp;
 pub mod push;
 pub mod tailscale;
+mod web;
 mod ws;
 
 use aurelius_domain::{ClientId, EventNotice, HostId, PrincipalId};

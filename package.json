@@ -1,0 +1,22 @@
+{
+  "name": "aurelius-clients",
+  "private": true,
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "lint": "biome check clients/ts clients/electron clients/web clients/e2e",
+    "deps": "depcruise clients/ts clients/web clients/electron/src --config .dependency-cruiser.cjs",
+    "test": "vitest run",
+    "test:contract": "vitest run clients/electron/src/main/contract.test.ts",
+    "test:e2e": "pnpm --filter @aurelius/e2e exec playwright test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.4",
+    "dependency-cruiser": "18.7.2",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  }
+}

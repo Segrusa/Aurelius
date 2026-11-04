@@ -21,7 +21,20 @@ pub const PUBLIC_KEY: &str = "SrqZ3sOnSvckbpmNDgzMXAHmz+9p22nvzWxWR+JsBlU=";
 /// Every program of an installation (both products).
 pub const BINARIES: [&str; 4] = ["aurelius.exe", "aurelius-daemon.exe", "aurelius-ctl.exe", "aurelius-bridge.exe"];
 
-/// Written next to `aurelius.exe`: the installed desktop app's version, so the
+/// The desktop app's folder inside the install folder, beside the service's programs.
+pub const APP_DIR: &str = "app";
+/// The app's program, in that folder.
+pub const APP_EXE: &str = "aurelius.exe";
+/// Without these an app package is not whole.
+const APP_REQUIRED: [&str; 2] = [APP_EXE, "resources/app.asar"];
+
+/// The app to start from an install folder: the Electron folder, or an older single program.
+pub fn app_program(dir: &Path) -> std::path::PathBuf {
+    let folder = dir.join(APP_DIR).join(APP_EXE);
+    if folder.exists() { folder } else { dir.join(APP_EXE) }
+}
+
+/// Written in the install folder: the installed desktop app's version, so the
 /// service (which has its own version) knows whether the app is behind.
 pub const DESKTOP_VERSION_FILE: &str = "aurelius.version";
 
@@ -65,15 +78,20 @@ impl Product {
         tags.into_iter().filter_map(|t| self.version_of(t)).max_by_key(|v| parse_version(v))
     }
 
+    /// The app's zip has another name than before it was a folder: a service that can only swap
+    /// one program finds nothing to download, instead of installing the program without its files.
     pub fn zip_name(self, version: &str) -> String {
-        format!("{ZIP_PREFIX}{}-{version}{ZIP_SUFFIX}", self.name())
+        match self {
+            Product::Server => format!("{ZIP_PREFIX}server-{version}{ZIP_SUFFIX}"),
+            Product::Desktop => format!("{ZIP_PREFIX}electron-{version}{ZIP_SUFFIX}"),
+        }
     }
 
-    /// The programs this product's zip contains (and an update replaces).
+    /// The programs this product's zip contains (and an update replaces); the app is a whole folder.
     pub fn binaries(self) -> &'static [&'static str] {
         match self {
             Product::Server => &["aurelius-daemon.exe", "aurelius-ctl.exe", "aurelius-bridge.exe"],
-            Product::Desktop => &["aurelius.exe"],
+            Product::Desktop => &[],
         }
     }
 }
@@ -116,9 +134,40 @@ pub fn is_newer(candidate: &str, current: &str) -> bool {
     matches!((parse_version(candidate), parse_version(current)), (Some(a), Some(b)) if a > b)
 }
 
-/// Extract only the product's binaries from a zip into `dest` (no paths from the archive are trusted).
+/// Extract the product from a zip into `dest` (no paths from the archive are trusted).
 pub fn extract(zip_path: &Path, dest: &Path, product: Product) -> anyhow::Result<()> {
-    extract_names(zip_path, dest, product.binaries())
+    match product {
+        Product::Server => extract_names(zip_path, dest, product.binaries()),
+        Product::Desktop => extract_app(zip_path, dest),
+    }
+}
+
+/// The whole app folder, keeping its tree. An entry that would land outside `dest` refuses the package.
+fn extract_app(zip_path: &Path, dest: &Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    let mut archive = zip::ZipArchive::new(std::fs::File::open(zip_path)?)?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        let Some(relative) = entry.enclosed_name() else {
+            bail!("the update package holds an unsafe path: {}", entry.name());
+        };
+        let target = dest.join(relative);
+        if entry.is_dir() {
+            std::fs::create_dir_all(&target)?;
+            continue;
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut out = std::fs::File::create(&target)?;
+        std::io::copy(&mut entry, &mut out)?;
+    }
+    for name in APP_REQUIRED {
+        if !dest.join(name).is_file() {
+            bail!("the update package is incomplete (no {name})");
+        }
+    }
+    Ok(())
 }
 
 fn extract_names(zip_path: &Path, dest: &Path, binaries: &[&str]) -> anyhow::Result<()> {
@@ -167,7 +216,7 @@ mod tests {
     #[test]
     fn products_have_their_own_tags_and_zips() {
         assert_eq!(Product::Server.tag("0.6.1"), "server-v0.6.1");
-        assert_eq!(Product::Desktop.zip_name("0.7.0"), "aurelius-desktop-0.7.0-windows-x64.zip");
+        assert_eq!(Product::Desktop.zip_name("0.7.0"), "aurelius-electron-0.7.0-windows-x64.zip");
         assert_eq!(Product::Server.version_of("server-v0.6.1"), Some("0.6.1"));
         assert_eq!(Product::Server.version_of("desktop-v0.6.1"), None);
         assert_eq!(Product::Desktop.version_of("v0.6.0"), None);
@@ -203,7 +252,53 @@ mod tests {
     fn a_product_zip_must_be_complete() {
         let dir = tempfile::tempdir().unwrap();
         let zip_path = zip_of(dir.path(), &["aurelius.exe"]);
-        extract(&zip_path, &dir.path().join("app"), Product::Desktop).unwrap();
         assert!(extract(&zip_path, &dir.path().join("server"), Product::Server).is_err());
+    }
+
+    fn app_zip(dir: &Path, names: &[&str]) -> std::path::PathBuf {
+        let zip_path = dir.join("app.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+        let opts: zip::write::SimpleFileOptions = Default::default();
+        for name in names {
+            w.start_file(*name, opts).unwrap();
+            std::io::Write::write_all(&mut w, name.as_bytes()).unwrap();
+        }
+        w.finish().unwrap();
+        zip_path
+    }
+
+    #[test]
+    fn the_app_comes_out_as_the_whole_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = app_zip(dir.path(), &["aurelius.exe", "ffmpeg.dll", "resources/app.asar", "locales/nl.pak"]);
+        let out = dir.path().join("out");
+        extract(&zip_path, &out, Product::Desktop).unwrap();
+        assert!(out.join("aurelius.exe").is_file() && out.join("ffmpeg.dll").is_file());
+        assert!(out.join("resources/app.asar").is_file() && out.join("locales/nl.pak").is_file());
+    }
+
+    #[test]
+    fn an_app_without_its_files_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = app_zip(dir.path(), &["aurelius.exe"]);
+        assert!(extract(&zip_path, &dir.path().join("out"), Product::Desktop).is_err());
+    }
+
+    #[test]
+    fn an_app_package_cannot_write_outside_its_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let zip_path = app_zip(dir.path(), &["aurelius.exe", "resources/app.asar", "../escaped.exe"]);
+        assert!(extract(&zip_path, &dir.path().join("out"), Product::Desktop).is_err());
+        assert!(!dir.path().join("escaped.exe").exists());
+    }
+
+    #[test]
+    fn the_app_folder_goes_before_a_single_program() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(APP_EXE), "old").unwrap();
+        assert_eq!(app_program(dir.path()), dir.path().join(APP_EXE));
+        std::fs::create_dir(dir.path().join(APP_DIR)).unwrap();
+        std::fs::write(dir.path().join(APP_DIR).join(APP_EXE), "new").unwrap();
+        assert_eq!(app_program(dir.path()), dir.path().join(APP_DIR).join(APP_EXE));
     }
 }

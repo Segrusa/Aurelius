@@ -50,6 +50,13 @@ libc = "0.2"
 # The Keychain for secrets (connections' API keys, a client's server pairings).
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
+# The status item of the background service, in the menu bar.
+tao = "0.37"
+tray-icon = "0.26"
+
+# The status bar icon of the background service (StatusNotifierItem).
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", features = ["blocking"] }
 
 [dev-dependencies]
 tempfile.workspace = true
