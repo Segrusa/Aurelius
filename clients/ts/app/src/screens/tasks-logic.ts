@@ -73,6 +73,23 @@ export function treeOrder(rows: TaskView[]): { task: TaskView; depth: number }[]
   return out;
 }
 
+/** Every task below `rootId` (children, their children, …), in tree order, with depth 1 for a direct child. */
+export function subtasksOf(rows: TaskView[], rootId: string): { task: TaskView; depth: number }[] {
+  const below = new Set<string>([rootId]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const t of rows) {
+      if (t.parent_task_id && below.has(t.parent_task_id) && !below.has(t.id)) {
+        below.add(t.id);
+        grew = true;
+      }
+    }
+  }
+  return treeOrder(rows.filter((t) => below.has(t.id)))
+    .filter(({ task }) => task.id !== rootId)
+    .map(({ task, depth }) => ({ task, depth }));
+}
+
 /** Hides what sits below a folded task. Open when `folds` says so, else while it is not finished. */
 export function foldTree(tree: { task: TaskView; depth: number }[], folds: Record<string, boolean>): TreeRow[] {
   const out: TreeRow[] = [];

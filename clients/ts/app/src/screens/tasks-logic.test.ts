@@ -1,6 +1,6 @@
 import type { TaskView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { filesWritten, filterTasks, foldTree, stepLine, stepsOf, taskStateLine, treeOrder } from "./tasks-logic";
+import { filesWritten, filterTasks, foldTree, stepLine, stepsOf, subtasksOf, taskStateLine, treeOrder } from "./tasks-logic";
 
 const task = (id: string, over: Partial<TaskView> = {}): TaskView => ({
   id,
@@ -60,6 +60,21 @@ describe("the task tree", () => {
     ]);
     const cycle = [task("a", { parent_task_id: "b" }), task("b", { parent_task_id: "a" })];
     expect(treeOrder(cycle)).toHaveLength(2);
+  });
+
+  it("lists every task below one task, nested, and nothing else", () => {
+    const rows = [
+      task("top"),
+      task("kid", { parent_task_id: "top", created_at_ms: 1 }),
+      task("grandkid", { parent_task_id: "kid" }),
+      task("other"),
+      task("otherkid", { parent_task_id: "other" }),
+    ];
+    expect(subtasksOf(rows, "top").map((r) => [r.task.id, r.depth])).toEqual([
+      ["kid", 1],
+      ["grandkid", 2],
+    ]);
+    expect(subtasksOf(rows, "grandkid")).toEqual([]);
   });
 
   it("folds what is finished, unless asked otherwise", () => {
