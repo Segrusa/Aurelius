@@ -29,7 +29,7 @@ import {
   useRetryAnswer,
 } from "./run-tools";
 import { modelName } from "./settings-kit";
-import { filesWritten, isActive, stepLine, stepsOf, taskStateLine } from "./tasks-logic";
+import { filesWritten, isActive, stepLine, stepsOf, subtasksOf, taskStateLine } from "./tasks-logic";
 import { tokensShort } from "./usage-logic";
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
@@ -320,6 +320,7 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
     }
     return totals;
   }, [list]);
+  const subtasks = useMemo(() => subtasksOf(tasks.data ?? [], taskId), [tasks.data, taskId]);
   const end = useRef<HTMLDivElement>(null);
   const count = list.length;
   useEffect(() => {
@@ -518,6 +519,28 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
               {new Date(task.created_at_ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
             </Row>
           </div>
+          {subtasks.length > 0 ? (
+            <div className="border-t border-line2 pt-4">
+              <p className="mt-0 mb-2 text-[12px] font-medium text-text3">Subtasks ({subtasks.length})</p>
+              {subtasks.map(({ task: sub, depth }) => {
+                const line = taskStateLine(sub);
+                return (
+                  <Link
+                    key={sub.id}
+                    to="/tasks/$taskId"
+                    params={{ taskId: sub.id }}
+                    style={{ paddingLeft: 4 * (depth - 1) }}
+                    className="flex items-center gap-2 py-1 text-text no-underline hover:text-acc-text"
+                  >
+                    <span className="min-w-0 flex-1 truncate">{sub.title}</span>
+                    <span className="flex-none text-[12px]" style={{ color: line.color }}>
+                      {line.text}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
           {task.conversation_id ? <SubagentsAtWork conversationId={task.conversation_id} live={live} /> : null}
           {files.length > 0 ? (
             <div className="border-t border-line2 pt-4">
