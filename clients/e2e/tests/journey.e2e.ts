@@ -97,11 +97,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
       await act(() => p.keyboard.press("n"));
       const dialog = p.getByRole("dialog");
       await act(() => dialog.getByLabel("Title").fill("Login page"));
-      // The other window, and back: what was typed goes along.
-      await act(() => dialog.getByRole("button", { name: "Give work instead" }).click());
-      await expect(p.getByLabel("What needs doing")).toHaveValue("Login page");
-      await act(() => dialog.getByRole("button", { name: "New ticket instead" }).click());
-      await expect(dialog.getByLabel("Title")).toHaveValue("Login page");
+      await expect(dialog.getByRole("button", { name: /^Project/ })).toBeVisible();
       await act(() => dialog.getByLabel("Description").fill("A login page with a password field."));
       await act(() => dialog.getByRole("button", { name: "Owner" }).press("Enter"));
       await act(() => p.getByRole("menuitem", { name: "Builder" }).click());

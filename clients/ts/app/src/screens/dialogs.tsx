@@ -215,33 +215,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   return (
     <>
       <div className="flex h-11 flex-none items-center gap-2 border-b border-line2 px-4 text-text3">
-        {project ? (
-          <Menu
-            label="Project"
-            value={project.id}
-            options={(projects.data ?? []).map((p) => ({ key: p.id, label: p.name }))}
-            onPick={setProjectId}
-            trigger={
-              <button
-                type="button"
-                className="inline-flex cursor-pointer items-center gap-[6px] border-0 bg-transparent p-0 font-medium text-text2 hover:text-text"
-              >
-                <Mark letter={initial(project.name)} color={markColor(project.id)} size={16} radius={4} />
-                {project.name}
-              </button>
-            }
-          />
-        ) : (
-          <span>No project yet</span>
-        )}
-        <span className="text-faint">›</span>
         <span className="font-medium text-text">New ticket</span>
-        <SwitchDialog
-          label="Give work instead"
-          onSwitch={() =>
-            overlays.open("give", { title: "", description: [title, description].filter(Boolean).join("\n\n") })
-          }
-        />
         <CloseButton />
       </div>
       <div {...attach.target} className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
@@ -263,6 +237,22 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
           />
         </Labeled>
         <div className="flex flex-wrap gap-[6px]">
+          {project ? (
+            <Menu
+              label="Project"
+              value={project.id}
+              options={(projects.data ?? []).map((p) => ({ key: p.id, label: p.name }))}
+              onPick={setProjectId}
+              trigger={
+                <Chip name="Project">
+                  <Mark letter={initial(project.name)} color={markColor(project.id)} size={14} radius={3} />
+                  {project.name}
+                </Chip>
+              }
+            />
+          ) : (
+            <span className="text-[12px] text-text3">No project yet</span>
+          )}
           <Menu
             label="Priority"
             value={priority}
