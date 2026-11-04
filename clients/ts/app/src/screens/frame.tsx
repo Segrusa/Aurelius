@@ -327,9 +327,8 @@ function Sidebar() {
   return (
     <aside className="flex w-[224px] flex-none flex-col gap-[18px] overflow-hidden pt-[6px] pr-[10px] pb-[10px] pl-[14px]">
       <div className="flex h-8 items-center gap-2 [-webkit-app-region:drag]">
-        <Logo />
-        <span className="truncate font-semibold" title={hostName ?? "Aurelius"}>
-          {hostName ?? "Aurelius"}
+        <span className="flex" title={hostName ?? "Aurelius"}>
+          <Logo />
         </span>
         <div className="ml-auto flex gap-[2px] [-webkit-app-region:no-drag]">
           <Tooltip text="Search and commands">
