@@ -843,7 +843,6 @@ export const MessageRow = memo(function MessageRow({
       />
       <FileChips files={m.uploads} />
       <KeptFiles files={m.files ?? []} />
-      <KeptFiles files={m.files ?? []} />
       {m.id === lastAnswer && m.status === "complete" && m.run_id ? (
         <span className="flex gap-3">
           <ContextLink run={m.run_id} />
