@@ -1,0 +1,29 @@
+{
+  "name": "@aurelius/electron",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "build": "tsc && electron-vite build",
+    "dev": "electron-vite dev",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@aurelius/app": "workspace:*",
+    "@aurelius/client": "workspace:*",
+    "@aurelius/protocol": "workspace:*",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.4",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.2.1",
+    "electron": "44.9.2",
+    "electron-vite": "6.0.0",
+    "tailwindcss": "4.3.4",
+    "vite": "8.3.5"
+  }
+}

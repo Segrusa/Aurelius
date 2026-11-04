@@ -1,0 +1,167 @@
+/* Precision, dark green: the tokens of the design, dark and light. A shell imports this after
+   Tailwind; switching theme only changes `data-theme` on <html>, so nothing has to re-render. */
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+
+@source ".";
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #08090a;
+  --panel: #0f1012;
+  --card: #16171a;
+  --sunk: #0b0c0d;
+  --pop: #141517;
+  --line: rgb(255 255 255 / 0.07);
+  --line2: rgb(255 255 255 / 0.05);
+  --sel: rgb(255 255 255 / 0.06);
+  --track: rgb(255 255 255 / 0.08);
+  --text: #edeef0;
+  --text2: #a0a4ab;
+  --text3: #7d828a;
+  --faint: #4a4e55;
+  --acc: #1f7a4c;
+  --acc-line: #2a8a5a;
+  --acc-text: #5fcb95;
+  --acc-soft: rgb(95 203 149 / 0.12);
+  --amber: #e8a84a;
+  --amber-soft: rgb(229 162 58 / 0.1);
+  --amber-line: rgb(229 162 58 / 0.35);
+  --blue: #7ea6f8;
+  --violet: #b39dfa;
+  --red: #f08a8a;
+  --btn: rgb(255 255 255 / 0.04);
+  --btn-line: rgb(255 255 255 / 0.09);
+  --kbd: rgb(255 255 255 / 0.08);
+  --panel-shadow: none;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f3f2;
+  --panel: #ffffff;
+  --card: #ffffff;
+  --sunk: #f8f8f7;
+  --pop: #ffffff;
+  --line: rgb(0 0 0 / 0.08);
+  --line2: rgb(0 0 0 / 0.06);
+  --sel: rgb(0 0 0 / 0.05);
+  --track: rgb(0 0 0 / 0.08);
+  --text: #1b1c1e;
+  --text2: #55595f;
+  --text3: #696d74;
+  --faint: #a6a9ae;
+  --acc: #17603f;
+  --acc-line: #145536;
+  --acc-text: #17603f;
+  --acc-soft: rgb(23 96 63 / 0.08);
+  --amber: #9a5800;
+  --amber-soft: rgb(196 122 0 / 0.08);
+  --amber-line: rgb(196 122 0 / 0.35);
+  --blue: #2d5bd0;
+  --violet: #6d4ac9;
+  --red: #c2281c;
+  --btn: #ffffff;
+  --btn-line: rgb(0 0 0 / 0.12);
+  --kbd: rgb(0 0 0 / 0.06);
+  --panel-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-card: var(--card);
+  --color-sunk: var(--sunk);
+  --color-pop: var(--pop);
+  --color-line: var(--line);
+  --color-line2: var(--line2);
+  --color-sel: var(--sel);
+  --color-track: var(--track);
+  --color-text: var(--text);
+  --color-text2: var(--text2);
+  --color-text3: var(--text3);
+  --color-faint: var(--faint);
+  --color-acc: var(--acc);
+  --color-acc-line: var(--acc-line);
+  --color-acc-text: var(--acc-text);
+  --color-acc-soft: var(--acc-soft);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-amber-line: var(--amber-line);
+  --color-blue: var(--blue);
+  --color-violet: var(--violet);
+  --color-red: var(--red);
+  --color-btn: var(--btn);
+  --color-btn-line: var(--btn-line);
+  --color-kbd: var(--kbd);
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+  --ease-out-quick: cubic-bezier(0.2, 0, 0, 1);
+  --shadow-panel: var(--panel-shadow);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* A thin bar in the design's own colors, not the system's. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--track) transparent;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* Hover and focus: quick. Only what the compositor can do without layout. */
+button,
+a {
+  transition:
+    background-color 100ms var(--ease-out-quick),
+    color 100ms var(--ease-out-quick),
+    border-color 100ms var(--ease-out-quick);
+}
+
+:focus-visible {
+  outline: 2px solid var(--acc-text);
+  outline-offset: 1px;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.enter {
+  animation: enter 160ms var(--ease-out-quick);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: this must win over every component. */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: this must win over every component. */
+    transition-duration: 0.01ms !important;
+  }
+}

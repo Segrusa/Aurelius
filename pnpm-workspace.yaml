@@ -1,2 +1,8 @@
 packages:
   - clients/ts/*
+  - clients/electron
+  - clients/web
+  - clients/e2e
+allowBuilds:
+  electron: true
+minimumReleaseAgeStrict: true

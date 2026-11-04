@@ -96,7 +96,8 @@ export type PairPoll =
   | {
       status: "approved";
       client_id: string;
-      device_secret: string;
+      /** Native clients only: a browser gets it as an `HttpOnly` cookie. */
+      device_secret?: string;
       host_id: string;
       host_name: string;
       environment: string;
@@ -104,7 +105,8 @@ export type PairPoll =
 
 /** The 200 of `POST /v1/session`. */
 export interface GatewaySession {
-  token: string;
+  /** Native clients only: a browser gets it as an `HttpOnly` cookie. */
+  token?: string;
   expires_at_ms: number;
   capabilities: Capability[];
   name: string;

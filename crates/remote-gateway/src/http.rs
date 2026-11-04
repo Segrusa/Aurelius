@@ -1,14 +1,14 @@
 //! HTTP surface of the gateway. Tokens travel only in `Authorization`
-//! headers, never in URLs, and are never logged.
+//! headers or a browser's `HttpOnly` cookies (`web`), never in URLs, and are never logged.
 
 use crate::auth::{self, ClaimError, PairState};
-use crate::{Hub, MAX_UPLOAD_BYTES, SESSION_MS};
+use crate::{Hub, MAX_UPLOAD_BYTES, SESSION_MS, web};
 use aurelius_domain::agent_function::{CallError, CallState, Remaining};
 use aurelius_storage::remote::RemoteClient;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, State, WebSocketUpgrade};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{any, get, post, put};
 use axum::{Json, Router};
 use base64::Engine;
 use serde::Deserialize;
@@ -16,11 +16,11 @@ use serde_json::json;
 use std::time::Duration;
 
 pub fn router(hub: Hub) -> Router {
-    Router::new()
+    let api = Router::new()
         .route("/v1/health", get(health))
         .route("/v1/pair", post(pair))
         .route("/v1/pair/{id}", get(pair_poll))
-        .route("/v1/session", post(session))
+        .route("/v1/session", post(session).delete(end_browser_session))
         .route("/v1/ws", get(websocket))
         .route("/v1/upload", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES + 64 * 1024)))
         .route("/v1/push", put(push_register).delete(push_unregister))
@@ -29,8 +29,21 @@ pub fn router(hub: Hub) -> Router {
         // Apps with an API key reach only these two routes (never ws, upload or push).
         .route("/v1/functions/{slug}/calls", post(function_call))
         .route("/v1/calls/{call_id}", get(function_call_state))
+        // Not the web client's page below.
+        .route("/v1/{*rest}", any(|| async { error(StatusCode::NOT_FOUND, "Not found.") }))
         .layer(DefaultBodyLimit::max(64 * 1024))
-        .with_state(hub)
+        .with_state(hub);
+    let Some(dir) = web::site_dir() else { return api };
+    // A path that is no file is a page of the app: it gets index.html and routes itself.
+    let site = tower_http::services::ServeDir::new(&dir).fallback(tower_http::services::ServeFile::new(dir.join("index.html")));
+    api.fallback_service(site).layer(axum::middleware::map_response(security_headers))
+}
+
+async fn security_headers(mut response: Response) -> Response {
+    for (name, value) in web::SECURITY_HEADERS {
+        response.headers_mut().insert(HeaderName::from_static(name), HeaderValue::from_static(value));
+    }
+    response
 }
 
 pub(crate) fn error(status: StatusCode, message: &str) -> Response {
@@ -57,15 +70,21 @@ struct PairBody {
     role: Option<String>,
 }
 
-/// Phones pair as devices; computers may ask to be an owner.
+/// Phones and browsers pair as devices; computers may ask to be an owner.
 const PHONES: [&str; 2] = ["ios", "android"];
 const COMPUTERS: [&str; 3] = ["windows", "macos", "linux"];
+/// Its secret goes into an `HttpOnly` cookie, out of reach of the page's scripts.
+const BROWSER: &str = "web";
 
-async fn pair(State(hub): State<Hub>, Json(body): Json<PairBody>) -> Response {
+async fn pair(State(hub): State<Hub>, headers: HeaderMap, Json(body): Json<PairBody>) -> Response {
     let platform = body.platform.as_str();
     let computer = COMPUTERS.contains(&platform);
-    if !computer && !PHONES.contains(&platform) {
+    let browser = platform == BROWSER;
+    if !computer && !browser && !PHONES.contains(&platform) {
         return error(StatusCode::BAD_REQUEST, "Unknown platform.");
+    }
+    if browser && !hub.allows_origin(&headers).await {
+        return error(StatusCode::FORBIDDEN, "This page may not pair with this server.");
     }
     let owner = match body.role.as_deref() {
         None | Some("device") => false,
@@ -73,7 +92,12 @@ async fn pair(State(hub): State<Hub>, Json(body): Json<PairBody>) -> Response {
         Some(_) => return error(StatusCode::BAD_REQUEST, "Only a computer can ask for full access."),
     };
     let name = body.device_name.trim();
-    let name = if name.is_empty() { if computer { "Computer" } else { "Phone" } } else { name };
+    let name = match (name.is_empty(), computer, browser) {
+        (false, ..) => name,
+        (true, true, _) => "Computer",
+        (true, _, true) => "Browser",
+        (true, ..) => "Phone",
+    };
     let claimed = hub.inner.pairings.lock().unwrap().claim(&body.code, name, platform, owner);
     match claimed {
         Ok(request) => {
@@ -96,15 +120,25 @@ async fn pair_poll(State(hub): State<Hub>, Path(id): Path<String>) -> Response {
         match state {
             PairState::Approved { client_id, secret } => {
                 let host_name = hub.server_name().await;
-                return Json(json!({
+                let store = hub.inner.store.clone();
+                let client = tokio::task::spawn_blocking(move || store.read(|c| aurelius_storage::remote::find_client(c, client_id))).await;
+                let Ok(Ok(Some(client))) = client else {
+                    return error(StatusCode::SERVICE_UNAVAILABLE, "The database is busy. Try again.");
+                };
+                let mut body = json!({
                     "status": "approved",
                     "client_id": client_id,
-                    "device_secret": secret,
                     "host_id": hub.inner.host_id,
                     "host_name": host_name,
                     "environment": hub.inner.environment,
-                }))
-                .into_response();
+                });
+                if client.platform != BROWSER {
+                    body["device_secret"] = json!(secret);
+                    return Json(body).into_response();
+                }
+                let mut response = Json(body).into_response();
+                web::set_device_cookie(&mut response, &client_id.to_string(), &secret);
+                return response;
             }
             PairState::Rejected => return (StatusCode::FORBIDDEN, Json(json!({ "status": "rejected" }))).into_response(),
             PairState::Pending => {
@@ -117,11 +151,17 @@ async fn pair_poll(State(hub): State<Hub>, Path(id): Path<String>) -> Response {
     }
 }
 
-/// `Authorization: Basic base64(client_id:device_secret)` → a session token.
+/// `Authorization: Basic base64(client_id:device_secret)` → a session token. A browser's
+/// device cookie, from its own origin, → the same session as a cookie; scripts never see it.
 async fn session(State(hub): State<Hub>, headers: HeaderMap) -> Response {
-    let Some((client_id, secret)) = basic(&headers) else {
+    let browser = !headers.contains_key(header::AUTHORIZATION);
+    let credentials = if browser { web::device_cookie(&headers) } else { basic(&headers) };
+    let Some((client_id, secret)) = credentials else {
         return error(StatusCode::UNAUTHORIZED, "Missing credentials.");
     };
+    if browser && !hub.allows_origin(&headers).await {
+        return error(StatusCode::FORBIDDEN, "This page may not use this server.");
+    }
     let store = hub.inner.store.clone();
     let found = tokio::task::spawn_blocking(move || store.read(|c| aurelius_storage::remote::find_client(c, client_id))).await;
     let Ok(Ok(Some(client))) = found else {
@@ -145,13 +185,28 @@ async fn session(State(hub): State<Hub>, headers: HeaderMap) -> Response {
     if !matches!(created, Ok(Ok(()))) {
         return error(StatusCode::SERVICE_UNAVAILABLE, "The database is busy. Try again.");
     }
-    Json(json!({
-        "token": token,
+    let mut body = json!({
         "expires_at_ms": expires_at_ms,
         "capabilities": client.capabilities,
         "name": client.name,
-    }))
-    .into_response()
+    });
+    if !browser {
+        body["token"] = json!(token);
+        return Json(body).into_response();
+    }
+    let mut response = Json(body).into_response();
+    web::set_session_cookie(&mut response, &token, SESSION_MS / 1000);
+    response
+}
+
+/// A browser forgets its pairing and session. The server keeps the device until it is revoked.
+async fn end_browser_session(State(hub): State<Hub>, headers: HeaderMap) -> Response {
+    if !hub.allows_origin(&headers).await {
+        return error(StatusCode::FORBIDDEN, "This page may not use this server.");
+    }
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    web::clear_cookies(&mut response);
+    response
 }
 
 fn basic(headers: &HeaderMap) -> Option<(aurelius_domain::ClientId, String)> {
@@ -167,9 +222,19 @@ pub(crate) fn bearer(headers: &HeaderMap) -> Option<String> {
     headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).map(|t| t.trim().to_owned())
 }
 
-/// The device behind `Authorization: Bearer <session token>`.
+/// The device behind `Authorization: Bearer <session token>`, or a browser's session cookie
+/// sent from its own origin.
 async fn authed(hub: &Hub, headers: &HeaderMap) -> Result<RemoteClient, Response> {
-    let token = bearer(headers).ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Missing session."))?;
+    let token = match bearer(headers) {
+        Some(token) => token,
+        None => {
+            let token = web::session_cookie(headers).ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Missing session."))?;
+            if !hub.allows_origin(headers).await {
+                return Err(error(StatusCode::FORBIDDEN, "This page may not use this server."));
+            }
+            token
+        }
+    };
     // An API key is for functions only, an app key for the WebSocket and MCP; neither is a session.
     if token.starts_with(aurelius_domain::agent_function::KEY_PREFIX) || token.starts_with(aurelius_domain::app_key::KEY_PREFIX) {
         return Err(error(StatusCode::UNAUTHORIZED, "This credential cannot be used here."));

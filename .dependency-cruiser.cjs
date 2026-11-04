@@ -6,13 +6,13 @@ module.exports = {
       name: "shared-code-runs-in-a-browser",
       comment: "clients/ts may not use Node or Electron; put it behind the Platform contract.",
       severity: "error",
-      from: { path: "^clients/ts/" },
+      from: { path: "^clients/(ts|web|electron/src/renderer)/" },
       to: { dependencyTypes: ["core"] },
     },
     {
       name: "shared-code-without-electron",
       severity: "error",
-      from: { path: "^clients/ts/" },
+      from: { path: "^clients/(ts|web|electron/src/renderer)/" },
       to: { path: "node_modules/electron" },
     },
     {
@@ -30,7 +30,7 @@ module.exports = {
   ],
   options: {
     doNotFollow: { path: "node_modules" },
-    exclude: { path: "\\.test\\.ts$" },
+    exclude: { path: ["\\.test\\.ts$", "vite\\.config\\.ts$", "/dist/"] },
     tsPreCompilationDeps: true,
     tsConfig: { fileName: "tsconfig.base.json" },
   },
