@@ -39,7 +39,7 @@ import { linkInArguments, linkOf } from "./links";
 import { daemonEndpoint, dataDir, openPipe } from "./pipe";
 import { type Box, MIN_HEIGHT, MIN_WIDTH, placement } from "./placement";
 import { openRemote, openSession, requestPairing, uploadFile } from "./remote";
-import { DeviceSecrets, validHostId } from "./secrets";
+import { DeviceSecrets, sessionRef, validHostId } from "./secrets";
 import {
   loadServers,
   type PairedServer,
@@ -72,12 +72,14 @@ const INSTALL = installDir(process.execPath, app.isPackaged);
 const PROGRAM = daemonProgram(process.env, INSTALL);
 const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 
+const osCrypt = {
+  available: encryptedStorage,
+  encrypt: (text: string) => safeStorage.encryptString(text),
+  decrypt: (data: Buffer) => safeStorage.decryptString(data),
+};
+
 const deviceSecrets = () =>
-  new DeviceSecrets(join(app.getPath("userData"), "servers"), ROOT ?? app.getPath("userData"), ENVIRONMENT, {
-    available: encryptedStorage,
-    encrypt: (text) => safeStorage.encryptString(text),
-    decrypt: (data) => safeStorage.decryptString(data),
-  });
+  new DeviceSecrets(join(app.getPath("userData"), "servers"), ROOT ?? app.getPath("userData"), ENVIRONMENT, osCrypt);
 
 function encryptedStorage(): boolean {
   return safeStorage.isEncryptionAvailable() && safeStorage.getSelectedStorageBackend?.() !== "basic_text";
@@ -310,40 +312,22 @@ function serveDesktop(): void {
   });
 }
 
-/** Only ever kept encrypted by the OS, per server. Without a keychain it lasts until the app closes. */
+/** Per server, like a device secret. The Rust client's key for this computer's own service is `local`. */
 function serveSessions(): void {
-  const fileOf = (target: string | null) =>
-    target === null
-      ? join(app.getPath("userData"), "session.bin")
-      : join(app.getPath("userData"), "sessions", `${target}.bin`);
-  const inMemory = new Map<string | null, string>();
+  const sessions = new DeviceSecrets(
+    join(app.getPath("userData"), "sessions"),
+    ROOT ?? app.getPath("userData"),
+    ENVIRONMENT,
+    osCrypt,
+    process.platform,
+    sessionRef,
+  );
+  const target = () => activeServer()?.host_id ?? "local";
 
-  handle("session:get", () => {
-    const target = activeServer()?.host_id ?? null;
-    const kept = inMemory.get(target);
-    if (kept !== undefined) return kept;
-    const file = fileOf(target);
-    if (!encryptedStorage() || !existsSync(file)) return null;
-    try {
-      const token = safeStorage.decryptString(readFileSync(file));
-      inMemory.set(target, token);
-      return token;
-    } catch {
-      rmSync(file, { force: true });
-      return null;
-    }
-  });
+  handle("session:get", () => sessions.get(target()));
   handle("session:set", (_sender, token: unknown) => {
-    const target = activeServer()?.host_id ?? null;
-    const file = fileOf(target);
-    if (typeof token === "string") inMemory.set(target, token);
-    else inMemory.delete(target);
-    if (typeof token === "string" && encryptedStorage()) {
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, safeStorage.encryptString(token), { mode: 0o600 });
-    } else {
-      rmSync(file, { force: true });
-    }
+    if (typeof token === "string") sessions.set(target(), token);
+    else sessions.delete(target());
   });
   handle("app:info", (sender) => {
     const server = activeServer();

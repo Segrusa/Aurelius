@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { connectOrStart, daemonProgram } from "./daemon";
 import { linkInArguments } from "./links";
 import { placement } from "./placement";
-import { type Crypt, DeviceSecrets, rustSecretFile, validHostId } from "./secrets";
+import { type Crypt, DeviceSecrets, rustSecretFile, sessionRef, validHostId } from "./secrets";
 import {
   loadServers,
   pairingPlatform,
@@ -189,5 +189,37 @@ describe("device secrets", () => {
     other.set("h1", "s");
     expect(other.get("h1")).toBe("s");
     expect(new DeviceSecrets(room(), room(), "dev", crypt(false), "win32").get("h1")).toBeNull();
+  });
+
+  it("keeps a sign-in where the Rust client did, so moving to this app does not sign you out", () => {
+    const root = room();
+    const sessions = () => new DeviceSecrets(room(), root, "production", crypt(false), "linux", sessionRef);
+    mkdirSync(join(root, "secrets"));
+    const file = join(root, "secrets", "Aurelius_desktop-session-local");
+    writeFileSync(file, "from-rust");
+    expect(sessions().get("local")).toBe("from-rust");
+
+    sessions().set("local", "fresh");
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(sessions().get("local")).toBe("fresh");
+
+    sessions().delete("local");
+    expect(existsSync(file)).toBe(false);
+    expect(sessions().get("local")).toBeNull();
+  });
+
+  it("signing out also forgets the Rust client's copy when the OS encrypts", () => {
+    const root = room();
+    const folder = room();
+    mkdirSync(join(root, "secrets"));
+    const file = join(root, "secrets", "Aurelius_desktop-session-local");
+    writeFileSync(file, "from-rust");
+    const sessions = new DeviceSecrets(folder, root, "production", crypt(true), "linux", sessionRef);
+    expect(sessions.get("local")).toBe("from-rust");
+    sessions.set("local", "fresh");
+    expect(sessions.get("local")).toBe("fresh");
+    sessions.delete("local");
+    expect(existsSync(file)).toBe(false);
+    expect(sessions.get("local")).toBeNull();
   });
 });
