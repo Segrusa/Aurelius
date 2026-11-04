@@ -53,6 +53,7 @@ function NewProject({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [folder, setFolder] = useState("");
+  useAction("ChooseDialogFolder", () => folders.choose("Choose a project folder", setFolder));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const save = async () => {

@@ -85,6 +85,13 @@ export function Menu<T extends string>({
         <RadixMenu.Content
           align="start"
           sideOffset={4}
+          onKeyDown={(event) => {
+            if (event.key !== "j" && event.key !== "k") return;
+            event.preventDefault();
+            const items = [...event.currentTarget.querySelectorAll<HTMLElement>("[role=menuitem]")];
+            const at = items.indexOf(document.activeElement as HTMLElement);
+            items[at + (event.key === "j" ? 1 : -1)]?.focus();
+          }}
           className="menu-rise z-50 max-h-[300px] min-w-[160px] overflow-y-auto rounded-[8px] border border-line bg-pop p-1 text-text shadow-pop"
         >
           {options.map((o) => (

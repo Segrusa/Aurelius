@@ -45,6 +45,9 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
+    // The app's own mark, not a letter.
+    await expect(page.getByRole("complementary").locator("svg rect.fill-acc").first()).toBeVisible();
+
     // A key that belongs to another screen goes there and does it.
     await page.keyboard.press("Control+k");
     await page.locator("[cmdk-input]").fill("New project");
@@ -198,6 +201,18 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.getByRole("menuitem", { name: "Delete conversation…" }).click();
     await page.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(page).toHaveURL(/\/tasks$/);
+
+    // Settings: the keys of the page, and they show when asked.
+    await page.getByRole("link", { name: "Settings" }).click();
+    await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "App", exact: true }).click();
+    await expect(page.getByRole("switch", { name: "Always show shortcut hints" })).toBeVisible();
+    await page.keyboard.press("h");
+    await expect(page.getByRole("switch", { name: "Always show shortcut hints" })).toBeChecked();
+    await expect(page.locator("html")).toHaveAttribute("data-hints", "");
+    await page.keyboard.press("h");
+    await expect(page.getByRole("switch", { name: "Always show shortcut hints" })).not.toBeChecked();
+    await page.keyboard.press("j");
+    await expect(page.locator("[data-setting-row]:focus")).toHaveCount(1);
   } finally {
     seed?.dispose();
     await app.close();

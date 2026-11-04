@@ -539,6 +539,9 @@ function makeWindow(extra: Electron.BrowserWindowConstructorOptions, path: strin
     backgroundColor: "#08090A",
     autoHideMenuBar: true,
     title: "Aurelius",
+    icon: app.isPackaged
+      ? join(process.resourcesPath, "aurelius-512.png")
+      : join(here, "../../../desktop/assets/aurelius-512.png"),
     ...titleBar,
     ...extra,
     webPreferences: {

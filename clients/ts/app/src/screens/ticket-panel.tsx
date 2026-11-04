@@ -2,9 +2,19 @@ import { expectBody } from "@aurelius/client";
 import type { AgentMode, TicketPriority, TicketView } from "@aurelius/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useBoard, useEmployees, useKeyed, useMembers, useMessages, useTicket, useTicketActivity } from "../data";
+import {
+  useAllTasks,
+  useBoard,
+  useCompany,
+  useEmployees,
+  useKeyed,
+  useMembers,
+  useMessages,
+  useTicket,
+  useTicketActivity,
+} from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { acceptable, filesFrom } from "../ui/attach";
@@ -406,7 +416,7 @@ function StatusBox({
   choosing: boolean;
   dispatcherLine: string | null;
 }) {
-  const { user } = useLinkState();
+  const { user, claudeLogin } = useLinkState();
   const write = useTicketWrite();
   const employees = useEmployees();
   const discussion = useMessages(t.column === "done" ? t.conversation_id : null);
@@ -414,6 +424,12 @@ function StatusBox({
   const [leaving, setLeaving] = useState<"backlog" | "delete" | null>(null);
   const me = user?.id ?? null;
   const wait = loginWait(t, me, false);
+  const company = useCompany();
+  const allTasks = useAllTasks();
+  const testerId = company.data?.company.tester_employee_id ?? null;
+  const tester = employees.data?.find((e) => e.id === testerId)?.name ?? null;
+  const tests = (allTasks.data ?? []).filter((x) => x.ticket_id === t.id && x.employee_id === testerId);
+  const testTask = testerId ? [...tests].sort((a, b) => b.updated_at_ms - a.updated_at_ms)[0] : undefined;
   const active = (employees.data ?? []).filter((e) => e.status === "active").map((e) => ({ key: e.id, label: e.name }));
   const start = (employee: string | null = null) =>
     write("ticket.start", { ticket_id: t.id, employee_id: employee }, { done: `${ticketNumber(t)} started.` });
@@ -452,6 +468,17 @@ function StatusBox({
     return (
       <Box tone="amber">
         <span className="font-medium">{wait}</span>
+        {t.login_user === me && !wait.startsWith("⏸") ? (
+          <div>
+            <Link
+              to="/settings/$section"
+              params={{ section: "account" }}
+              className="inline-flex h-7 items-center rounded-[6px] border border-btn-line px-3 text-text no-underline"
+            >
+              {claudeLogin?.status === "expired" ? "Reconnect Claude login" : "Connect Claude login"}
+            </Link>
+          </div>
+        ) : null}
         {takeOverOffered(t, me) ? (
           <div>
             <Button onClick={() => void write("ticket.use_my_login", { ticket_id: t.id })}>Run on my login</Button>
@@ -523,7 +550,22 @@ function StatusBox({
         </Box>
       );
     case "testing":
-      return <Box>{testingNote(null)}</Box>;
+      return (
+        <Box>
+          {testingNote(testTask?.employee_name ?? tester)}
+          {testTask ? (
+            <div className="mt-2">
+              <Link
+                to="/tasks/$taskId"
+                params={{ taskId: testTask.id }}
+                className="inline-flex h-7 items-center rounded-[6px] border border-btn-line px-3 text-text no-underline"
+              >
+                Open test task
+              </Link>
+            </div>
+          ) : null}
+        </Box>
+      );
     case "done":
       return (
         <Box>
@@ -541,7 +583,15 @@ function StatusBox({
   }
 }
 
-function Discussion({ t, conversationId }: { t: TicketView; conversationId: string | null | undefined }) {
+function Discussion({
+  t,
+  conversationId,
+  flash,
+}: {
+  t: TicketView;
+  flash: string | undefined;
+  conversationId: string | null | undefined;
+}) {
   const connection = useConnection();
   const messages = useMessages(conversationId);
   const [text, setText] = useState("");
@@ -561,6 +611,16 @@ function Discussion({ t, conversationId }: { t: TicketView; conversationId: stri
   const [deleting, setDeleting] = useState<string | null>(null);
   const [closedOn, setClosedOn] = useState<string | null>(null);
   const area = useRef<HTMLInputElement>(null);
+  const [lit, setLit] = useState<string | null>(null);
+  const loaded = messages.data !== undefined;
+  // Followed a link to one message: to it, and it lights up for a moment.
+  useEffect(() => {
+    if (!flash || !loaded) return;
+    document.querySelector(`[data-message="${flash}"]`)?.scrollIntoView({ block: "center" });
+    setLit(flash);
+    const timer = setTimeout(() => setLit(null), 2000);
+    return () => clearTimeout(timer);
+  }, [flash, loaded]);
   const people = (employees.data ?? [])
     .filter((e) => e.status === "active")
     .map((e) => ({ name: e.name, kind: "employee", employee: true }));
@@ -576,7 +636,11 @@ function Discussion({ t, conversationId }: { t: TicketView; conversationId: stri
         {messages.isPending && conversationId ? <span className="text-text3">Loading the discussion…</span> : null}
         {list.length === 0 && !messages.isPending ? <span className="text-text3">Nothing said yet.</span> : null}
         {list.map((m) => (
-          <div key={m.id} className="flex flex-col gap-1">
+          <div
+            key={m.id}
+            data-message={m.id}
+            className={`flex flex-col gap-1 rounded-[6px] transition-colors ${lit === m.id ? "bg-sel" : ""}`}
+          >
             <div className="flex items-baseline gap-2">
               <span className="font-medium">
                 {m.author_user?.username ?? m.author ?? (m.role === "user" ? "You" : "Aurelius")}
@@ -748,7 +812,7 @@ function Activity({ id }: { id: string }) {
 
 type Tab = "ticket" | "discussion" | "activity";
 
-export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }) {
+export function TicketPanel({ id, onClose, message }: { id: string; onClose: () => void; message?: string }) {
   const platform = usePlatform();
   const { hostId } = useLinkState();
   useKeyContext("TicketPanel");
@@ -761,7 +825,7 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
   const models = useModels();
   const write = useTicketWrite();
   const members = useMembers();
-  const [tab, setTab] = useState<Tab>("ticket");
+  const [tab, setTab] = useState<Tab>(message ? "discussion" : "ticket");
   const t = detail.data?.ticket;
   const list = useMemo(() => (t ? [t] : []), [t]);
   const need = useTicketNeeds(list);
@@ -1032,7 +1096,7 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
         </div>
       </div>
       {tab === "discussion" ? (
-        <Discussion t={t} conversationId={t.conversation_id} />
+        <Discussion t={t} conversationId={t.conversation_id} flash={message} />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-[22px] py-4">
           {tab === "activity" ? (

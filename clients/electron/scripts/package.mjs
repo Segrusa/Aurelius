@@ -51,6 +51,7 @@ try {
     protocols: [{ name: "Aurelius link", schemes: ["aurelius"] }],
     ...(platform === "win32" ? { icon: join(assets, "aurelius.ico") } : {}),
     ...(platform === "darwin" ? { icon: join(assets, "aurelius.icns") } : {}),
+    extraResource: [join(assets, "aurelius-512.png")],
     win32metadata: { CompanyName: "Segrusa", ProductName: "Aurelius", FileDescription: "Aurelius" },
   });
   if (!made) throw new Error("The packager made nothing.");

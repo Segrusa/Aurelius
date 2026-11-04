@@ -85,3 +85,17 @@ export function NewIcon() {
     </svg>
   );
 }
+
+/** The stone-cut "A" of the app icon (`scripts/make-icon.py`), on its green tile. */
+export function Logo({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 120 120" aria-hidden="true" className="flex-none">
+      <rect width="120" height="120" rx="28" className="fill-acc" />
+      <path
+        transform="translate(60 60) scale(.72) translate(-60 -60)"
+        fill="#fff"
+        d="M60 14 104 106H82L60 56 38 106H16Z"
+      />
+    </svg>
+  );
+}

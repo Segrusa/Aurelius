@@ -3,8 +3,9 @@
 
 import type { ApprovalView } from "@aurelius/protocol";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useConnection } from "../connection";
+import { useAction, useKeyContext } from "../keys/provider";
 import { Button } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
@@ -83,12 +84,50 @@ function Shell({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function QuestionCard({ approval }: { approval: ApprovalView }) {
+/** The keys of a decision in the Inbox. */
+function DecisionKeys({
+  onOption,
+  onNext,
+  onOwn,
+  onSkip,
+  onSend,
+  several,
+}: {
+  onOption: (n: number) => void;
+  onNext: () => void;
+  onOwn: () => void;
+  onSkip: () => void;
+  onSend: () => void;
+  several: boolean;
+}) {
+  useKeyContext("Decision");
+  useAction("QuestionOption1", () => onOption(0));
+  useAction("QuestionOption2", () => onOption(1));
+  useAction("QuestionOption3", () => onOption(2));
+  useAction("QuestionOption4", () => onOption(3));
+  useAction("QuestionNext", onNext, several);
+  useAction("QuestionOwnAnswer", onOwn);
+  useAction("RejectApproval", onSkip);
+  useAction("AllowOnce", onSend);
+  return null;
+}
+
+function QuestionCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean }) {
   const { busy, run } = useApprovalWrite();
   const questions = questionsOf(approval);
   const [chosen, setChosen] = useState<Record<number, number[]>>({});
   const [own, setOwn] = useState<Record<number, string>>({});
   const [missing, setMissing] = useState(false);
+  const [at, setAt] = useState(0);
+  const card = useRef<HTMLDivElement>(null);
+  const skip = () =>
+    void run((c) =>
+      c.write(
+        "approval.decide",
+        { approval_id: approval.id, action_digest: approval.action_digest, approve: false, always_allow: false },
+        { retry: false },
+      ),
+    );
   const pick = (i: number, n: number, multi: boolean) => {
     const now = chosen[i] ?? [];
     setChosen({ ...chosen, [i]: multi ? (now.includes(n) ? now.filter((x) => x !== n) : [...now, n]) : [n] });
@@ -103,9 +142,25 @@ function QuestionCard({ approval }: { approval: ApprovalView }) {
   };
   return (
     <Shell title={`Question · ${approval.requester} waits for your answer`}>
-      <div className="flex flex-col gap-3 p-3">
+      {keyed ? (
+        <DecisionKeys
+          several={questions.length > 1}
+          onOption={(n) => {
+            const q = questions[at];
+            if (q?.options[n]) pick(at, n, q.multi);
+          }}
+          onNext={() => setAt((at + 1) % questions.length)}
+          onOwn={() => card.current?.querySelectorAll<HTMLInputElement>("[data-own]")[at]?.focus()}
+          onSkip={skip}
+          onSend={submit}
+        />
+      ) : null}
+      <div ref={card} className="flex flex-col gap-3 p-3">
         {questions.map((q, i) => (
-          <fieldset key={q.text} className="m-0 flex flex-col gap-1 border-0 p-0">
+          <fieldset
+            key={q.text}
+            className={`m-0 flex flex-col gap-1 border-0 p-0 ${keyed && questions.length > 1 && i === at ? "rounded-[6px] bg-sel/40" : ""}`}
+          >
             <legend className="mb-1 p-0 text-[14px] leading-[1.45] font-medium">
               {q.header ? (
                 <span className="mr-2 rounded-[4px] bg-sel px-[6px] py-[1px] text-[12px] text-text2">{q.header}</span>
@@ -132,6 +187,7 @@ function QuestionCard({ approval }: { approval: ApprovalView }) {
               </label>
             ))}
             <input
+              data-own
               aria-label={`Your own answer: ${q.text}`}
               placeholder="Or in your own words…"
               className="mt-1 h-8 rounded-[6px] border border-btn-line bg-sunk px-2 text-text outline-none placeholder:text-text3 focus:border-acc-text"
@@ -150,23 +206,7 @@ function QuestionCard({ approval }: { approval: ApprovalView }) {
         <Button kind="primary" disabled={busy} onClick={submit}>
           Send answer
         </Button>
-        <Button
-          disabled={busy}
-          onClick={() =>
-            void run((c) =>
-              c.write(
-                "approval.decide",
-                {
-                  approval_id: approval.id,
-                  action_digest: approval.action_digest,
-                  approve: false,
-                  always_allow: false,
-                },
-                { retry: false },
-              ),
-            )
-          }
-        >
+        <Button disabled={busy} onClick={skip}>
           Skip
         </Button>
       </div>
@@ -174,7 +214,13 @@ function QuestionCard({ approval }: { approval: ApprovalView }) {
   );
 }
 
-function PlanCard({ approval }: { approval: ApprovalView }) {
+function RejectKey({ onReject }: { onReject: () => void }) {
+  useKeyContext("Decision");
+  useAction("RejectApproval", onReject);
+  return null;
+}
+
+function PlanCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean }) {
   const { busy, run } = useApprovalWrite();
   const [feedback, setFeedback] = useState("");
   const [missing, setMissing] = useState(false);
@@ -206,6 +252,7 @@ function PlanCard({ approval }: { approval: ApprovalView }) {
   };
   return (
     <Shell title="Plan · waiting for you">
+      {keyed ? <RejectKey onReject={() => decide("reject", "Plan rejected. The agent stops.")} /> : null}
       <div className="flex flex-col gap-3 p-3">
         {/* biome-ignore lint/a11y/noStaticElementInteractions: a selection, not a control. */}
         <div onMouseUp={() => setSelected(window.getSelection()?.toString().trim() ?? "")}>
@@ -329,8 +376,8 @@ function ActionCard({ approval }: { approval: ApprovalView }) {
   );
 }
 
-export function ApprovalCard({ approval }: { approval: ApprovalView }) {
-  if (approval.tool === QUESTION_TOOL) return <QuestionCard approval={approval} />;
-  if (approval.tool === PLAN_TOOL) return <PlanCard approval={approval} />;
+export function ApprovalCard({ approval, keyed = false }: { approval: ApprovalView; keyed?: boolean }) {
+  if (approval.tool === QUESTION_TOOL) return <QuestionCard approval={approval} keyed={keyed} />;
+  if (approval.tool === PLAN_TOOL) return <PlanCard approval={approval} keyed={keyed} />;
   return <ActionCard approval={approval} />;
 }

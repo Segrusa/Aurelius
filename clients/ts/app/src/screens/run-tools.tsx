@@ -15,7 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useKeyed } from "../data";
-import { useAction } from "../keys/provider";
+import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { Button } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
@@ -621,6 +621,28 @@ export function FolderBrowser({
   );
   const dir = listing.data;
   const entries: DirEntryView[] = dir ? (dir.path ? dir.entries : dir.roots) : [];
+  const [cursor, setCursor] = useState(0);
+  const at = Math.min(cursor, Math.max(entries.length - 1, 0));
+  const go = (next: string | null) => {
+    setPath(next);
+    setCursor(0);
+  };
+  useKeyContext("ServerFolder", true);
+  useAction("FolderNext", () => setCursor(Math.min(at + 1, entries.length - 1)));
+  useAction("FolderPrev", () => setCursor(Math.max(at - 1, 0)));
+  useAction("FolderOpen", () => {
+    const entry = entries[at];
+    if (entry) go(entry.path);
+  });
+  useAction("FolderParent", () => {
+    if (dir?.path) go(dir.parent ?? null);
+  });
+  useAction("FolderUse", () => {
+    if (dir?.path) onPick(dir.path);
+  });
+  useAction("FolderNewFolder", () => {
+    if (dir?.path) setMaking("");
+  });
   const make = async () => {
     if (!dir?.path || !making?.trim()) return;
     try {
@@ -641,18 +663,22 @@ export function FolderBrowser({
           {dir?.path ? (
             <button
               type="button"
-              onClick={() => setPath(dir.parent ?? null)}
+              onClick={() => go(dir.parent ?? null)}
               className="block w-full cursor-pointer border-0 bg-transparent px-3 py-[6px] text-left text-text2 hover:bg-sel"
             >
               ↑ Up
             </button>
           ) : null}
-          {entries.map((e) => (
+          {entries.map((e, i) => (
             <button
               key={e.path}
               type="button"
-              onClick={() => setPath(e.path)}
-              className="block w-full cursor-pointer truncate border-0 bg-transparent px-3 py-[6px] text-left text-text hover:bg-sel"
+              aria-current={i === at ? "true" : undefined}
+              ref={(el) => {
+                if (i === at) el?.scrollIntoView({ block: "nearest" });
+              }}
+              onClick={() => go(e.path)}
+              className="block w-full cursor-pointer truncate border-0 bg-transparent aria-[current]:bg-sel px-3 py-[6px] text-left text-text hover:bg-sel"
             >
               {e.name}
             </button>

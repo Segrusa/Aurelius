@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useAllTasks, useApprovals, useMessages, useProjects, useRunGuidelines } from "../data";
+import { useAllTasks, useApprovals, useEmployees, useMessages, useProjects, useRunGuidelines } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { AttachedImages, useImagePaste } from "../ui/attach";
 import { Button, initial, Mark, markColor } from "../ui/kit";
@@ -202,11 +202,14 @@ function Composer({
     .filter((m) => m !== "default");
   useAction("FocusComposer", () => area.current?.focus());
   const images = useImagePaste();
+  const employees = useEmployees();
+  const paused = employees.data?.find((e) => e.id === task.employee_id)?.status === "paused";
   const { busy, held, error, send, sendAnyway } = useSend(() => {
     setText("");
     void client.invalidateQueries({ queryKey: ["messages", task.conversation_id] });
   });
   const go = () => {
+    if (paused) return;
     const conversationId = task.conversation_id;
     if (!conversationId || text.trim() === "" || busy) return;
     send(async (confirmSecret) => {
@@ -241,6 +244,11 @@ function Composer({
           {error}
         </p>
       ) : null}
+      {paused ? (
+        <p role="status" className="m-0 mb-2 text-[12px] text-amber">
+          {name} is paused: nothing starts until you resume them on their page.
+        </p>
+      ) : null}
       <div {...images.target} className="rounded-[10px] border border-btn-line bg-sunk">
         <AttachedImages images={images} />
         <textarea
@@ -261,7 +269,7 @@ function Composer({
         <div className="flex items-center gap-[6px] px-2 pb-2">
           {run ? <RunMenu conversationId={task.conversation_id} run={run} models={models} /> : null}
           <span className="ml-auto text-[12px] text-text3">{live ? "Queued until the step finishes" : ""}</span>
-          <Button kind="primary" disabled={busy || text.trim() === ""} onClick={go}>
+          <Button kind="primary" disabled={busy || paused || text.trim() === ""} onClick={go}>
             Send
           </Button>
         </div>

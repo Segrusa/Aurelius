@@ -401,6 +401,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
     });
   };
   useAction("SubmitGiveWork", submit);
+  useAction("CycleTaskEffort", () => setEffort(cycle(["default", "low", "medium", "high", "xhigh", "max"], effort)));
   useAction(
     "CycleTaskManager",
     () =>

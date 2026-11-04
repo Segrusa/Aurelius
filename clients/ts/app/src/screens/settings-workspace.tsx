@@ -11,6 +11,7 @@ import { MemberAccess, passwordProblem } from "./settings-accounts";
 import {
   ConfirmButton,
   Group,
+  Keyed,
   Muted,
   modelName,
   NameEditor,
@@ -399,9 +400,11 @@ function ServerUpdate() {
       </Row>
       <Row title="Latest" hint={data.checked_at_ms ? `Checked ${when(data.checked_at_ms)}` : undefined}>
         <span className="font-mono text-[12px] text-text2">{data.latest ?? "Unknown"}</span>
-        <SmallButton disabled={busy} onClick={() => void check()}>
-          Check now
-        </SmallButton>
+        <Keyed action="SettingsCheckUpdate" chord="C">
+          <SmallButton disabled={busy} onClick={() => void check()}>
+            Check now
+          </SmallButton>
+        </Keyed>
       </Row>
       <Row title="Status" hint={data.error ?? data.reason ?? undefined}>
         <span className="text-[12px] text-text2">
@@ -414,22 +417,26 @@ function ServerUpdate() {
                 : "Up to date"}
         </span>
         {data.enabled && data.available && !data.staged ? (
-          <SmallButton
-            disabled={busy}
-            onClick={() =>
-              void run(() => connection.write("update.prepare", undefined, { retry: false, timeoutMs: 600_000 }))
-            }
-          >
-            Download update
-          </SmallButton>
+          <Keyed action="SettingsInstallUpdate" chord="U">
+            <SmallButton
+              disabled={busy}
+              onClick={() =>
+                void run(() => connection.write("update.prepare", undefined, { retry: false, timeoutMs: 600_000 }))
+              }
+            >
+              Download update
+            </SmallButton>
+          </Keyed>
         ) : null}
         {data.staged ? (
-          <ConfirmButton
-            label="Update server"
-            question="Answers that are running now are interrupted. Update now?"
-            disabled={busy}
-            onConfirm={() => void run(() => connection.write("update.apply", undefined, { retry: false }))}
-          />
+          <Keyed action="SettingsInstallUpdate" chord="U">
+            <ConfirmButton
+              label="Update server"
+              question="Answers that are running now are interrupted. Update now?"
+              disabled={busy}
+              onConfirm={() => void run(() => connection.write("update.apply", undefined, { retry: false }))}
+            />
+          </Keyed>
         ) : null}
       </Row>
       {data.notes ? <Row title="What's new" hint={<span className="whitespace-pre-wrap">{data.notes}</span>} /> : null}
@@ -466,15 +473,19 @@ function Power() {
         </SmallButton>
       ) : (
         <>
-          <ConfirmButton
-            label="Shut down now"
-            question="Powers off after a 60 second countdown; running answers are lost."
-            disabled={busy}
-            onConfirm={() => void asked("now")}
-          />
-          <SmallButton disabled={busy} onClick={() => void asked("when_idle")}>
-            When all work is done
-          </SmallButton>
+          <Keyed action="SettingsShutdownNow" chord="Q">
+            <ConfirmButton
+              label="Shut down now"
+              question="Powers off after a 60 second countdown; running answers are lost."
+              disabled={busy}
+              onConfirm={() => void asked("now")}
+            />
+          </Keyed>
+          <Keyed action="SettingsShutdownIdle" chord="G">
+            <SmallButton disabled={busy} onClick={() => void asked("when_idle")}>
+              When all work is done
+            </SmallButton>
+          </Keyed>
         </>
       )}
       <Problem error={power.error ?? error} />
@@ -541,12 +552,14 @@ export function ServerSection() {
           title="Restart server"
           hint="Answers that are running now are interrupted; agents pick up again afterwards."
         >
-          <ConfirmButton
-            label="Restart"
-            question="Restart the server now?"
-            disabled={busy}
-            onConfirm={() => void run(() => connection.write("server.restart", undefined, { retry: false }))}
-          />
+          <Keyed action="SettingsRestartServer" chord="E">
+            <ConfirmButton
+              label="Restart"
+              question="Restart the server now?"
+              disabled={busy}
+              onConfirm={() => void run(() => connection.write("server.restart", undefined, { retry: false }))}
+            />
+          </Keyed>
         </Row>
         <Power />
       </Group>
@@ -640,14 +653,16 @@ function PushKey({ clients, status }: { clients: { id: string; name: string }[];
               </option>
             ))}
           </select>
-          <SmallButton
-            disabled={busy || !phone}
-            onClick={() =>
-              void run(() => connection.write("push.test", { client_id: phone }, { retry: false })).then(setSent)
-            }
-          >
-            Send test
-          </SmallButton>
+          <Keyed action="SettingsPushTest" chord="T">
+            <SmallButton
+              disabled={busy || !phone}
+              onClick={() =>
+                void run(() => connection.write("push.test", { client_id: phone }, { retry: false })).then(setSent)
+              }
+            >
+              Send test
+            </SmallButton>
+          </Keyed>
         </Row>
       ) : null}
       <Problem error={error} />
@@ -700,14 +715,16 @@ export function RemoteSection() {
               : "Through Tailscale, on your own devices only.")
           }
         >
-          <Switch
-            label="Remote access"
-            on={data?.enabled ?? false}
-            disabled={busy || !data}
-            onChange={(on) =>
-              void run(() => connection.write(on ? "remote.enable" : "remote.disable", undefined, { retry: false }))
-            }
-          />
+          <Keyed action="SettingsRemoteToggle" chord="O">
+            <Switch
+              label="Remote access"
+              on={data?.enabled ?? false}
+              disabled={busy || !data}
+              onChange={(on) =>
+                void run(() => connection.write(on ? "remote.enable" : "remote.disable", undefined, { retry: false }))
+              }
+            />
+          </Keyed>
         </Row>
         {data?.enabled ? (
           <Row
@@ -715,9 +732,11 @@ export function RemoteSection() {
             hint={code ? `Valid until ${when(code.expires)}.` : "Shows a one-time code to enter on the other device."}
           >
             {code ? <span className="font-mono text-[15px] font-medium tracking-[0.08em]">{code.code}</span> : null}
-            <SmallButton disabled={busy} onClick={() => void startPairing()}>
-              {code ? "New code" : "Show code"}
-            </SmallButton>
+            <Keyed action="SettingsNew" chord="N">
+              <SmallButton disabled={busy} onClick={() => void startPairing()}>
+                {code ? "New code" : "Show code"}
+              </SmallButton>
+            </Keyed>
           </Row>
         ) : null}
         {data?.enabled && code ? (
@@ -726,7 +745,9 @@ export function RemoteSection() {
             hint={code.text ? "Another computer: copy the pairing text and paste it there." : undefined}
           >
             {code.text ? (
-              <SmallButton onClick={() => void platform.copy(code.text)}>Copy pairing text</SmallButton>
+              <Keyed action="SettingsCopyPairing" chord="Y">
+                <SmallButton onClick={() => void platform.copy(code.text)}>Copy pairing text</SmallButton>
+              </Keyed>
             ) : null}
             {code.qr ? <QrCode payload={code.qr} label="Pairing code for a phone" /> : null}
           </Row>
@@ -740,21 +761,23 @@ export function RemoteSection() {
               title={p.device_name}
               hint={`${p.platform} · asked ${when(p.requested_at_ms)}${p.owner ? ". It asks for full access: it can do everything this app does here, including API keys, folders on this PC, backups and updates." : ""}`}
             >
-              <SmallButton
-                kind="primary"
-                disabled={busy}
-                onClick={() =>
-                  void run(() =>
-                    connection.write(
-                      "remote.decide_pairing",
-                      { pairing_id: p.pairing_id, approve: true, owner: false },
-                      { retry: false },
-                    ),
-                  )
-                }
-              >
-                Allow
-              </SmallButton>
+              <Keyed action="SettingsUse" chord="Enter">
+                <SmallButton
+                  kind="primary"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() =>
+                      connection.write(
+                        "remote.decide_pairing",
+                        { pairing_id: p.pairing_id, approve: true, owner: false },
+                        { retry: false },
+                      ),
+                    )
+                  }
+                >
+                  Allow
+                </SmallButton>
+              </Keyed>
               {p.owner ? (
                 <SmallButton
                   disabled={busy}
@@ -771,21 +794,23 @@ export function RemoteSection() {
                   Allow as owner
                 </SmallButton>
               ) : null}
-              <SmallButton
-                kind="danger"
-                disabled={busy}
-                onClick={() =>
-                  void run(() =>
-                    connection.write(
-                      "remote.decide_pairing",
-                      { pairing_id: p.pairing_id, approve: false, owner: false },
-                      { retry: false },
-                    ),
-                  )
-                }
-              >
-                Refuse
-              </SmallButton>
+              <Keyed action="SettingsRefusePairing" chord="X">
+                <SmallButton
+                  kind="danger"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() =>
+                      connection.write(
+                        "remote.decide_pairing",
+                        { pairing_id: p.pairing_id, approve: false, owner: false },
+                        { retry: false },
+                      ),
+                    )
+                  }
+                >
+                  Refuse
+                </SmallButton>
+              </Keyed>
             </Row>
           ))}
         </Group>
@@ -798,14 +823,16 @@ export function RemoteSection() {
               title={c.name}
               hint={`${c.platform} · ${c.connected ? "Connected now" : `Last seen ${when(c.last_seen_ms)}`}`}
             >
-              <ConfirmButton
-                label="Revoke"
-                question={`Revoke ${c.name}?`}
-                disabled={busy}
-                onConfirm={() =>
-                  void run(() => connection.write("remote.revoke", { client_id: c.id }, { retry: false }))
-                }
-              />
+              <Keyed action="SettingsRemove" chord="Del">
+                <ConfirmButton
+                  label="Revoke"
+                  question={`Revoke ${c.name}?`}
+                  disabled={busy}
+                  onConfirm={() =>
+                    void run(() => connection.write("remote.revoke", { client_id: c.id }, { retry: false }))
+                  }
+                />
+              </Keyed>
             </Row>
           ))}
         </Group>

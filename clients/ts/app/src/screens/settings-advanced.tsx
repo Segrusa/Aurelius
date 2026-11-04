@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
 import { useConnection } from "../connection";
 import { useEmployees, useProjects } from "../data";
+import { useAction, useKeyContext } from "../keys/provider";
 import { AttachRow, useAttachments } from "../ui/attach";
 import { Button, Segments } from "../ui/kit";
 import { Dialog } from "../ui/overlay";
@@ -12,6 +13,7 @@ import {
   bytes,
   ConfirmButton,
   Group,
+  Keyed,
   Muted,
   modelName,
   openWeb,
@@ -42,6 +44,11 @@ function AddConnectionDialog({ onClose }: { onClose: () => void }) {
   const [provider, setProvider] = useState<ProviderKind | null>(null);
   const [path, setPath] = useState("");
   const chosen = PROVIDERS.find((p) => p.key === provider);
+  useKeyContext("AddConnection", true);
+  PROVIDERS.slice(0, 3).forEach((p, i) => {
+    // biome-ignore lint/correctness/useHookAtTopLevel: a fixed list: the same hooks in the same order.
+    useAction(`Provider${i + 1}`, () => setProvider(p.key));
+  });
   useEffect(() => {
     if (provider !== "claude_code") return;
     connection
@@ -113,7 +120,12 @@ function ApiKey({ id, has }: { id: string; has: boolean }) {
   const { busy, error, run } = useChange();
   const [open, setOpen] = useState(false);
   const [secret, setSecret] = useState("");
-  if (!open) return <SmallButton onClick={() => setOpen(true)}>{has ? "Replace API key" : "API key"}</SmallButton>;
+  if (!open)
+    return (
+      <Keyed action="SettingsKey" chord="S">
+        <SmallButton onClick={() => setOpen(true)}>{has ? "Replace API key" : "API key"}</SmallButton>
+      </Keyed>
+    );
   const close = () => {
     setSecret("");
     setOpen(false);
@@ -191,22 +203,26 @@ export function ConnectionsSection() {
                   .join(" · ")}
               >
                 {needsKey ? <ApiKey id={c.id} has={c.has_secret} /> : null}
-                <SmallButton
-                  disabled={busy}
-                  onClick={() =>
-                    void run(() => connection.write("connection.verify", { connection_id: c.id }, { retry: false }))
-                  }
-                >
-                  Check
-                </SmallButton>
-                <ConfirmButton
-                  label="Remove"
-                  question={`Remove ${c.display_name}?`}
-                  disabled={busy}
-                  onConfirm={() =>
-                    void run(() => connection.write("connection.remove", { connection_id: c.id }, { retry: false }))
-                  }
-                />
+                <Keyed action="SettingsVerify" chord="V">
+                  <SmallButton
+                    disabled={busy}
+                    onClick={() =>
+                      void run(() => connection.write("connection.verify", { connection_id: c.id }, { retry: false }))
+                    }
+                  >
+                    Check
+                  </SmallButton>
+                </Keyed>
+                <Keyed action="SettingsRemove" chord="Del">
+                  <ConfirmButton
+                    label="Remove"
+                    question={`Remove ${c.display_name}?`}
+                    disabled={busy}
+                    onConfirm={() =>
+                      void run(() => connection.write("connection.remove", { connection_id: c.id }, { retry: false }))
+                    }
+                  />
+                </Keyed>
               </Row>
               {open === c.id ? (
                 <dl className="m-0 grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 px-4 pb-[14px] text-[12px]">
@@ -244,9 +260,11 @@ export function ConnectionsSection() {
         })}
       </Group>
       <div>
-        <SmallButton kind="primary" onClick={() => setAdding(true)}>
-          Add connection…
-        </SmallButton>
+        <Keyed action="SettingsNew" chord="N">
+          <SmallButton kind="primary" onClick={() => setAdding(true)}>
+            Add connection…
+          </SmallButton>
+        </Keyed>
       </div>
       {adding ? <AddConnectionDialog onClose={() => setAdding(false)} /> : null}
       <Problem error={list.error ?? error} />
@@ -553,19 +571,23 @@ export function McpSection() {
               disabled={busy}
               onChange={(on) => void setEnabled(s.name, on)}
             />
-            <ConfirmButton
-              label="Remove"
-              question={`Remove ${s.name}?`}
-              disabled={busy}
-              onConfirm={() => void run(() => connection.write("mcp.remove", { name: s.name }, { retry: false }))}
-            />
+            <Keyed action="SettingsRemove" chord="Del">
+              <ConfirmButton
+                label="Remove"
+                question={`Remove ${s.name}?`}
+                disabled={busy}
+                onConfirm={() => void run(() => connection.write("mcp.remove", { name: s.name }, { retry: false }))}
+              />
+            </Keyed>
           </Row>
         ))}
       </Group>
       <div>
-        <SmallButton kind="primary" onClick={() => setAdding(true)}>
-          Add MCP server…
-        </SmallButton>
+        <Keyed action="SettingsNew" chord="N">
+          <SmallButton kind="primary" onClick={() => setAdding(true)}>
+            Add MCP server…
+          </SmallButton>
+        </Keyed>
       </div>
       <AlwaysAllowed />
       {adding ? <AddMcp onClose={() => setAdding(false)} /> : null}
@@ -817,14 +839,16 @@ export function SchedulesSection() {
                 Run now
               </SmallButton>
               <SmallButton onClick={() => setEditing(s)}>Edit</SmallButton>
-              <ConfirmButton
-                label="Delete"
-                question="Delete this recurring task? Tasks it already made stay."
-                disabled={busy}
-                onConfirm={() =>
-                  void run(() => connection.write("recurring_task.delete", { schedule_id: s.id }, { retry: false }))
-                }
-              />
+              <Keyed action="SettingsRemove" chord="Del">
+                <ConfirmButton
+                  label="Delete"
+                  question="Delete this recurring task? Tasks it already made stay."
+                  disabled={busy}
+                  onConfirm={() =>
+                    void run(() => connection.write("recurring_task.delete", { schedule_id: s.id }, { retry: false }))
+                  }
+                />
+              </Keyed>
               <Switch
                 label={`${s.title} is active`}
                 on={!s.paused}
@@ -871,9 +895,11 @@ export function SchedulesSection() {
         ))}
       </Group>
       <div>
-        <SmallButton kind="primary" onClick={() => setEditing("new")}>
-          New recurring task
-        </SmallButton>
+        <Keyed action="SettingsNew" chord="N">
+          <SmallButton kind="primary" onClick={() => setEditing("new")}>
+            New recurring task
+          </SmallButton>
+        </Keyed>
       </div>
       {editing ? (
         <ScheduleDialog schedule={editing === "new" ? null : editing} onClose={() => setEditing(null)} />
@@ -892,26 +918,30 @@ export function BackupsSection() {
     <>
       <Group>
         <Row title="Back up now" hint={data?.folder}>
-          <SmallButton
-            disabled={busy}
-            onClick={() =>
-              void run(() => connection.write("backup.create", undefined, { retry: false, timeoutMs: 600_000 }))
-            }
-          >
-            {busy ? "Working…" : "Back up now"}
-          </SmallButton>
+          <Keyed action="SettingsBackupNow" chord="B">
+            <SmallButton
+              disabled={busy}
+              onClick={() =>
+                void run(() => connection.write("backup.create", undefined, { retry: false, timeoutMs: 600_000 }))
+              }
+            >
+              {busy ? "Working…" : "Back up now"}
+            </SmallButton>
+          </Keyed>
         </Row>
         {data?.paused ? (
           <Row
             title="Restored from a backup. Nothing runs (tasks, chats, schedules) until you resume."
             hint={data.paused}
           >
-            <SmallButton
-              disabled={busy}
-              onClick={() => void run(() => connection.write("backup.resume", undefined, { retry: false }))}
-            >
-              Resume
-            </SmallButton>
+            <Keyed action="SettingsResume" chord="P">
+              <SmallButton
+                disabled={busy}
+                onClick={() => void run(() => connection.write("backup.resume", undefined, { retry: false }))}
+              >
+                Resume
+              </SmallButton>
+            </Keyed>
           </Row>
         ) : null}
         {data?.restore_pending ? <Row title="A restore waits for the next start" hint={data.restore_pending} /> : null}
@@ -924,12 +954,14 @@ export function BackupsSection() {
             title={when(b.created_at_ms)}
             hint={`${b.kind === "daily" ? "daily" : "manual"} · ${bytes(b.bytes)} · ${b.files} files · version ${b.app_version}`}
           >
-            <ConfirmButton
-              label="Restore"
-              question={`Restore the backup of ${when(b.created_at_ms)}? Aurelius restarts and today's data is replaced.`}
-              disabled={busy}
-              onConfirm={() => void run(() => connection.write("backup.restore", { id: b.id }, { retry: false }))}
-            />
+            <Keyed action="SettingsRestore" chord="R">
+              <ConfirmButton
+                label="Restore"
+                question={`Restore the backup of ${when(b.created_at_ms)}? Aurelius restarts and today's data is replaced.`}
+                disabled={busy}
+                onConfirm={() => void run(() => connection.write("backup.restore", { id: b.id }, { retry: false }))}
+              />
+            </Keyed>
           </Row>
         ))}
       </Group>
@@ -1016,12 +1048,16 @@ export function LoadSection() {
       <form onSubmit={(e) => void save(e)} className="contents">
         <Group title="CPU and memory">
           <Row title="Hold runs when the computer is busy">
-            <Switch
-              label="Hold runs when the computer is busy"
-              on={data?.limits.enabled ?? false}
-              disabled={busy || !data}
-              onChange={(enabled) => void run(() => connection.write("load.set_limits", { enabled }, { retry: false }))}
-            />
+            <Keyed action="LoadToggleEnabled" chord="Alt E">
+              <Switch
+                label="Hold runs when the computer is busy"
+                on={data?.limits.enabled ?? false}
+                disabled={busy || !data}
+                onChange={(enabled) =>
+                  void run(() => connection.write("load.set_limits", { enabled }, { retry: false }))
+                }
+              />
+            </Keyed>
           </Row>
           {LIMITS.map(({ key, label, hint }) => (
             <Row key={key} title={label} hint={hint}>
@@ -1039,9 +1075,11 @@ export function LoadSection() {
         </Group>
         {Object.keys(changes).length > 0 ? (
           <div>
-            <SmallButton kind="primary" type="submit" disabled={busy || invalid !== null}>
-              Save limits
-            </SmallButton>
+            <Keyed action="LoadSave" chord="Ctrl S">
+              <SmallButton kind="primary" type="submit" disabled={busy || invalid !== null}>
+                Save limits
+              </SmallButton>
+            </Keyed>
           </div>
         ) : null}
       </form>

@@ -376,6 +376,41 @@ test.describe("states a test daemon cannot produce", () => {
       .toMatchObject({ text: "Stop and do this instead." });
   });
 
+  test("a question in the Inbox: the number keys, then Enter", async ({ page }) => {
+    const question = approval("q1", {
+      tool: "claude.AskUserQuestion",
+      task_id: "k3",
+      conversation_id: "c3",
+      arguments: {
+        questions: [
+          {
+            question: "Which database?",
+            header: "Storage",
+            multiSelect: false,
+            options: [
+              { label: "Postgres", description: "" },
+              { label: "SQLite", description: "" },
+            ],
+          },
+        ],
+      },
+    });
+    const { writes } = await scriptServer(page, { ...script, approvals: [question] });
+    await page.goto(`${site.origin}/inbox`);
+    await page
+      .getByRole("button", { name: /Which database|Flux/ })
+      .first()
+      .click();
+    await expect(page.getByRole("radio", { name: "SQLite" })).toBeVisible();
+    await page.locator("body").click({ position: { x: 1, y: 1 } });
+    await page.keyboard.press("2");
+    await expect(page.getByRole("radio", { name: "SQLite" })).toBeChecked();
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(() => writes.find((w) => w.method === "approval.answer")?.params)
+      .toMatchObject({ approval_id: "q1" });
+  });
+
   test("Tasks and a run: approve inline, stop, and the properties", async ({ page }) => {
     const { writes } = await scriptServer(page, script);
     await page.goto(site.origin);

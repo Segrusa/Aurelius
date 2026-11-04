@@ -4,6 +4,7 @@ import { boardMemberStep } from "@aurelius/client";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
+import { Logo } from "../ui/icons";
 import { Button } from "../ui/kit";
 import { ServerChoicesPanel } from "./servers";
 
@@ -13,6 +14,7 @@ function Centered({ title, children, wide = false }: { title: string; children?:
       <div
         className={`enter flex w-full ${wide ? "max-w-[520px]" : "max-w-[360px]"} flex-col gap-4 rounded-[12px] border border-line bg-panel p-6 shadow-panel`}
       >
+        <Logo size={28} />
         <h1 className="m-0 text-[16px] font-semibold">{title}</h1>
         {children}
       </div>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { type ServerChoices, usePlatform } from "../platform";
 import { Button } from "../ui/kit";
 import { Confirm } from "./org-kit";
+import { Keyed } from "./settings-kit";
 
 const ROW = "flex items-center gap-2 border-b border-line2 px-4 py-[10px] text-[13px] last:border-b-0";
 const SMALL = "h-7 px-[10px] text-[12px]";
@@ -45,9 +46,15 @@ export function ServerChoicesPanel() {
     choices.active === hostId ? (
       <span className="ml-auto text-[12px] text-acc-text">In use</span>
     ) : (
-      <Button className={`ml-auto ${SMALL}`} aria-label={`Use ${name}`} onClick={() => act(() => servers.use(hostId))}>
-        Use
-      </Button>
+      <Keyed action="SettingsUse" chord="Enter">
+        <Button
+          className={`ml-auto ${SMALL}`}
+          aria-label={`Use ${name}`}
+          onClick={() => act(() => servers.use(hostId))}
+        >
+          Use
+        </Button>
+      </Keyed>
     );
 
   return (
@@ -66,9 +73,11 @@ export function ServerChoicesPanel() {
               <span className="truncate text-[12px] text-text3">{s.url}</span>
             </span>
             {use(s.hostId, s.hostName)}
-            <Button className={SMALL} aria-label={`Forget ${s.hostName}`} onClick={() => setForgetting(s)}>
-              Forget
-            </Button>
+            <Keyed action="SettingsRemove" chord="Del">
+              <Button className={SMALL} aria-label={`Forget ${s.hostName}`} onClick={() => setForgetting(s)}>
+                Forget
+              </Button>
+            </Keyed>
           </div>
         ))}
         {!choices.localAvailable && choices.servers.length === 0 ? (

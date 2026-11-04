@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
 import { type Appearance, useAppearance } from "../appearance";
 import { useConnection, useLinkState } from "../connection";
+import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { parseScreenUse, SCREEN_USE_KEY } from "../screen-use";
 import { Segments } from "../ui/kit";
@@ -10,6 +11,8 @@ import { ClaudeLogin, passwordProblem } from "./settings-accounts";
 import {
   ConfirmButton,
   Group,
+  HINTS_KEY,
+  Keyed,
   Muted,
   Problem,
   Row,
@@ -191,17 +194,19 @@ function Background() {
     <Group title="Background">
       {startup ? (
         <Row title="Start at sign-in" hint="The background service starts when you sign in to this computer.">
-          <Switch
-            label="Start at sign-in"
-            on={on === true}
-            disabled={on === null}
-            onChange={(next) => {
-              setProblem(null);
-              startup
-                .set(next)
-                .then(setOn, (e: unknown) => setProblem(e instanceof Error ? e.message : "This did not work."));
-            }}
-          />
+          <Keyed action="SettingsLoginStart" chord="L">
+            <Switch
+              label="Start at sign-in"
+              on={on === true}
+              disabled={on === null}
+              onChange={(next) => {
+                setProblem(null);
+                startup
+                  .set(next)
+                  .then(setOn, (e: unknown) => setProblem(e instanceof Error ? e.message : "This did not work."));
+              }}
+            />
+          </Keyed>
         </Row>
       ) : null}
       <Row title="Closing" hint="Closing the window: background work continues.">
@@ -245,21 +250,25 @@ function AppUpdate() {
     <Group title="App update">
       <Row title="Latest" hint={app.checked_at_ms ? `Checked ${when(app.checked_at_ms)}` : undefined}>
         <span className="font-mono text-[12px] text-text2">{app.latest ?? "Unknown"}</span>
-        <SmallButton disabled={busy} onClick={() => void check()}>
-          Check now
-        </SmallButton>
+        <Keyed action="SettingsCheckUpdate" chord="C">
+          <SmallButton disabled={busy} onClick={() => void check()}>
+            Check now
+          </SmallButton>
+        </Keyed>
       </Row>
       <Row title="Status" hint={app.error ?? app.reason ?? undefined}>
         <span className="text-[12px] text-text2">
           {!app.enabled ? "Updates are off" : app.available ? "An update is available" : "Up to date"}
         </span>
         {app.enabled && app.available ? (
-          <ConfirmButton
-            label="Update app"
-            question="The app closes and comes back as the new version. Update now?"
-            disabled={busy}
-            onConfirm={() => void install()}
-          />
+          <Keyed action="SettingsInstallAppUpdate" chord="I">
+            <ConfirmButton
+              label="Update app"
+              question="The app closes and comes back as the new version. Update now?"
+              disabled={busy}
+              onConfirm={() => void install()}
+            />
+          </Keyed>
         ) : null}
       </Row>
       {app.notes ? <Row title="What's new" hint={<span className="whitespace-pre-wrap">{app.notes}</span>} /> : null}
@@ -272,11 +281,33 @@ export function AppSection() {
   const { appearance, choose } = useAppearance();
   const platform = usePlatform();
   const { daemonVersion } = useLinkState();
+  const { storage } = platform;
+  const [hints, setHints] = useState(() => storage.get(HINTS_KEY) === "true");
+  useAction("SettingsAppearance", () => {
+    const at = APPEARANCES.findIndex((a) => a.key === appearance);
+    const next = APPEARANCES[(at + 1) % APPEARANCES.length];
+    if (next) choose(next.key);
+  });
   return (
     <>
       <Group>
         <Row title="Appearance" hint="Kept on this device.">
           <Segments label="Appearance" value={appearance} options={APPEARANCES} onChange={choose} />
+        </Row>
+      </Group>
+      <Group>
+        <Row title="Always show shortcut hints" hint="The keys of this page, beside its buttons.">
+          <Keyed action="SettingsShowHints" chord="H">
+            <Switch
+              label="Always show shortcut hints"
+              on={hints}
+              onChange={(on) => {
+                setHints(on);
+                storage.set(HINTS_KEY, String(on));
+                document.documentElement.toggleAttribute("data-hints", on);
+              }}
+            />
+          </Keyed>
         </Row>
       </Group>
       <ScreenUse />

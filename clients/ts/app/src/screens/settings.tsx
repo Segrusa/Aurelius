@@ -1,7 +1,9 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { useEffect } from "react";
 import { useLinkState } from "../connection";
-import { useAction } from "../keys/provider";
+import { useAction, useKeyContext } from "../keys/provider";
+import { usePlatform } from "../platform";
 import { Icon } from "../ui/icons";
 import {
   BackupsSection,
@@ -11,8 +13,35 @@ import {
   SchedulesSection,
   TraceSection,
 } from "./settings-advanced";
+import { focusField, HINTS_KEY, pressKeyed, stepRow } from "./settings-kit";
 import { CompanySection, RemoteSection, ServerSection } from "./settings-workspace";
 import { AccountSection, AppSection } from "./settings-you";
+
+/** Keys that press a control on the page shown; the control says so with `Keyed`. */
+const KEYED_ACTIONS = [
+  "SettingsVerify",
+  "SettingsUse",
+  "SettingsKey",
+  "SettingsNew",
+  "SettingsRemove",
+  "SettingsCheckUpdate",
+  "SettingsInstallUpdate",
+  "SettingsInstallAppUpdate",
+  "SettingsRestartServer",
+  "SettingsShutdownNow",
+  "SettingsShutdownIdle",
+  "SettingsBackupNow",
+  "SettingsLoginStart",
+  "SettingsShowHints",
+  "SettingsRestore",
+  "SettingsResume",
+  "SettingsRemoteToggle",
+  "SettingsRefusePairing",
+  "SettingsPushTest",
+  "SettingsCopyPairing",
+  "LoadSave",
+  "LoadToggleEnabled",
+];
 
 interface Section {
   key: string;
@@ -96,6 +125,19 @@ export function SettingsSidebar() {
 
 export function SettingsScreen({ section }: { section: string }) {
   const navigate = useNavigate();
+  useKeyContext("Settings");
+  const { storage } = usePlatform();
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-hints", storage.get(HINTS_KEY) === "true");
+  }, [storage]);
+  useAction("SettingsRenameServer", () => focusField("Server name"));
+  useAction("SettingsPushKey", () => focusField("Team id"));
+  useAction("SelectNext", () => stepRow(1));
+  useAction("SelectPrev", () => stepRow(-1));
+  for (const action of KEYED_ACTIONS) {
+    // biome-ignore lint/correctness/useHookAtTopLevel: a fixed list: the same hooks in the same order.
+    useAction(action, () => pressKeyed(action));
+  }
   useAction("Back", () => void navigate({ to: "/inbox" }));
   const stepSection = (by: number) => {
     const all = GROUPS.flatMap((g) => g.sections);

@@ -9,6 +9,7 @@ import { useAction, useKeyContext } from "../keys/provider";
 import { Button, initial, Mark, markColor } from "../ui/kit";
 import { Dialog } from "../ui/overlay";
 import { toast } from "../ui/toast";
+import { cycle } from "./dialog-logic";
 import { useModels } from "./dialogs";
 import { type AgentMode, MODE_LABELS, MODES, reportsCandidates } from "./employee-logic";
 import { AREA, FIELD, failureOf, shortDay } from "./org-kit";
@@ -164,6 +165,27 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
     }
   };
   useAction("ConfirmPrimary", () => void save());
+  useAction("ToggleManagerSequential", () => setSequential(!sequential));
+  useAction("CycleReportsTo", () => setReportsTo(cycle(["", ...candidates.map((c) => c.id)], reportsTo)));
+  useAction("CycleTaskEffort", () =>
+    setPicks({
+      ...picks,
+      effort: cycle(
+        EFFORTS.map(([k]) => k as string),
+        effort,
+      ),
+    }),
+  );
+  useAction("CycleSubagentModel", () =>
+    setPicks({
+      ...picks,
+      subModel: cycle(
+        models.map((m) => (m.key === "default" ? "inherit" : m.key)),
+        subModel,
+      ),
+    }),
+  );
+  useAction("ChooseDialogFolder", () => folders.choose("Choose a folder for this employee", setFolder));
 
   const restore = async (version: number) => {
     if (!employee) return;

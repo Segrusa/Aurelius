@@ -57,9 +57,54 @@ export function Group({ title, children }: { title?: string; children: ReactNode
   );
 }
 
+/** A key on a Settings control: the `chord` is shown when shortcut hints are on. */
+export function Keyed({ action, chord, children }: { action: string; chord: string; children: ReactNode }) {
+  return (
+    <span data-key={action} className="contents">
+      <kbd className="hidden rounded-[3px] border border-line px-1 font-mono text-[10px] text-text3 [[data-hints]_&]:inline">
+        {chord}
+      </kbd>
+      {children}
+    </span>
+  );
+}
+
+/** Press what this key stands for: in the row that has the focus, otherwise the first on the page. */
+export function pressKeyed(action: string): void {
+  // A dialog on top has the keys; nothing behind it goes off.
+  if (document.querySelector('[role="dialog"]')) return;
+  const chosen = `[data-key="${action}"] button:not(:disabled)`;
+  const row = document.activeElement?.closest("[data-setting-row]");
+  const button = row?.querySelector<HTMLButtonElement>(chosen) ?? document.querySelector<HTMLButtonElement>(chosen);
+  button?.focus();
+  button?.click();
+}
+
+/** Put the cursor in the field with this label. */
+export function focusField(label: string): void {
+  const field = [...document.querySelectorAll("label")]
+    .find((l) => l.textContent?.includes(label))
+    ?.querySelector("input");
+  (field ?? document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`))?.focus();
+}
+
+export const HINTS_KEY = "always_show_shortcuts";
+
+/** Walk the rows of a Settings page. */
+export function stepRow(by: 1 | -1): void {
+  if (document.querySelector('[role="dialog"]')) return;
+  const rows = [...document.querySelectorAll<HTMLElement>("[data-setting-row]")];
+  const at = rows.indexOf(document.activeElement?.closest("[data-setting-row]") as HTMLElement);
+  (rows[at + by] ?? (at < 0 ? rows[0] : undefined))?.focus();
+}
+
 export function Row({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="flex items-center gap-4 px-4 py-[14px]">
+    <div
+      data-setting-row
+      tabIndex={-1}
+      className="flex items-center gap-4 px-4 py-[14px] outline-none focus-within:bg-sel/40 focus:bg-sel"
+    >
       <div className="min-w-0 flex-1">
         <div className="font-medium [overflow-wrap:anywhere]">{title}</div>
         {hint ? (

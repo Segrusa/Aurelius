@@ -4,6 +4,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
+  useAllTasks,
   useChannels,
   useEmployees,
   useLiveQueries,
@@ -11,6 +12,7 @@ import {
   useOpenTasks,
   useProjects,
   useSubscription,
+  useTickets,
 } from "../data";
 import { useAction, useFallbackAction, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
@@ -23,7 +25,7 @@ import {
   screenKey,
   screenUseJson,
 } from "../screen-use";
-import { Icon, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
+import { Icon, Logo, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/kit";
 import { Tooltip } from "../ui/overlay";
 import { Toasts, toast } from "../ui/toast";
@@ -37,6 +39,7 @@ import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
 import { useProjectPins } from "./projects";
 import { SettingsSidebar } from "./settings";
+import { useTicketNeeds } from "./tickets-kit";
 import { subscriptionFor } from "./usage-logic";
 
 const NAV_MAIN: { to: string; label: string; icon: NavIcon }[] = [
@@ -218,11 +221,24 @@ function useScreenAction(action: string): void {
 function useNoteToasts(): void {
   const notes = useNotifications();
   const before = useRef<NotificationView[] | null>(null);
+  const tasks = useAllTasks();
+  const tickets = useTickets();
+  const need = useTicketNeeds(tickets.data ?? []);
+  // A step of someone else's ticket is theirs to hear about; what names you always is yours.
+  const noteIsMine = (note: NotificationView) => {
+    if (note.reason) return true;
+    const task = tasks.data?.find((t) => t.id === note.task_id);
+    if (!task?.ticket_id || task.parent_task_id) return true;
+    const ticket = tickets.data?.find((t) => t.id === task.ticket_id);
+    return !ticket || need.mine(ticket);
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new list says something new.
   useEffect(() => {
     if (!notes.data) return;
     for (const note of newNotes(before.current, notes.data).slice(0, 3)) {
       // Its conversation is in view: you see it happen.
       if (note.conversation_id && window.location.href.includes(note.conversation_id)) continue;
+      if (!noteIsMine(note)) continue;
       toast(notificationHeading(note));
     }
     before.current = notes.data;
@@ -311,9 +327,7 @@ function Sidebar() {
   return (
     <aside className="flex w-[224px] flex-none flex-col gap-[18px] overflow-hidden pt-[6px] pr-[10px] pb-[10px] pl-[14px]">
       <div className="flex h-8 items-center gap-2 [-webkit-app-region:drag]">
-        <div className="grid size-5 place-items-center rounded-[5px] bg-acc text-[11px] font-semibold text-white">
-          A
-        </div>
+        <Logo />
         <span className="truncate font-semibold" title={hostName ?? "Aurelius"}>
           {hostName ?? "Aurelius"}
         </span>

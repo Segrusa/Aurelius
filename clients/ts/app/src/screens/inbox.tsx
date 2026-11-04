@@ -173,7 +173,7 @@ function ApprovalDetail({ approval }: { approval: ApprovalView }) {
   if (approval.tool === QUESTION_TOOL || approval.tool === PLAN_TOOL) {
     return (
       <div className="enter flex max-w-[760px] flex-col gap-5 px-6 py-8 xl:px-10" key={approval.id}>
-        <ApprovalCard approval={approval} />
+        <ApprovalCard approval={approval} keyed />
       </div>
     );
   }
@@ -209,6 +209,8 @@ function ActionDetail({ approval }: { approval: ApprovalView }) {
   useAction("AllowOnce", () => void decide(true));
   useAction("AlwaysAllow", () => void decide(true, true), eligible);
   useAction("DenyApproval", () => void decide(false));
+  useKeyContext("Decision");
+  useAction("RejectApproval", () => void decide(false));
 
   return (
     <div className="enter flex max-w-[760px] flex-col gap-6 px-6 py-8 xl:px-10" key={approval.id}>
@@ -372,6 +374,9 @@ function ProposalDetail({ row, proposal }: { row: InboxRow; proposal: ProposalVi
       toast(e instanceof Error ? e.message : "This did not work.");
     }
   };
+  useKeyContext("Decision");
+  useAction("AllowOnce", () => void decide(true));
+  useAction("RejectApproval", () => void decide(false));
   return (
     <DetailFrame row={row}>
       {proposal.reason ? <Prose title="Why">{proposal.reason}</Prose> : null}
@@ -408,6 +413,9 @@ function GuidelineDetail({ row, proposal }: { row: InboxRow; proposal: Guideline
       toast(e instanceof Error ? e.message : "This did not work.");
     }
   };
+  useKeyContext("Decision");
+  useAction("AllowOnce", () => void decide(true));
+  useAction("RejectApproval", () => void decide(false));
   return (
     <DetailFrame row={row}>
       <div className="flex flex-wrap gap-2">
