@@ -22,6 +22,11 @@ export interface Platform {
   copySecret(text: string): Promise<{ sure: boolean }>;
   /** Stores a secret so only this user can read it; a browser can only offer a download. Null: cancelled. */
   saveSecretFile(name: string, content: string): Promise<{ path: string | null; private: boolean } | null>;
+  /**
+   * Chooses files for a ticket and gives the paths the server can read: where the server is on
+   * this machine the chosen paths, otherwise they are uploaded first. Empty: cancelled.
+   */
+  pickFiles(): Promise<{ path: string; name: string }[]>;
   /** The folder picker of this machine; null where there is none and the path must be typed. */
   pickFolder: ((title: string) => Promise<string | null>) | null;
   /** Opens a folder of this machine; null where a folder cannot be opened. */

@@ -6,6 +6,7 @@ import { useConnection } from "../connection";
 import { useEmployees, useProjects } from "../data";
 import { Button, Segments } from "../ui/kit";
 import { Dialog } from "../ui/overlay";
+import { FileChips } from "./run-tools";
 import {
   bytes,
   ConfirmButton,
@@ -756,6 +757,7 @@ export function SchedulesSection() {
   const connection = useConnection();
   const { busy, error, run } = useChange();
   const [editing, setEditing] = useState<TaskScheduleView | "new" | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
   const list = useSetting(
     "schedules",
     async () => expectBody(await connection.call("recurring_task.list", {}), "task_schedules").value.schedules,
@@ -765,39 +767,80 @@ export function SchedulesSection() {
       <Group title="Recurring schedules">
         {list.data?.length === 0 ? <Row title="No recurring tasks yet." /> : null}
         {(list.data ?? []).map((s) => (
-          <Row
-            key={s.id}
-            title={s.title}
-            hint={`${s.employee_name} · ${recurrenceText(s.recurrence)} · ${s.paused ? "Paused" : `Next ${when(s.next_run_ms)}`} · Last ${when(s.last_run_ms)}`}
-          >
-            <SmallButton
-              disabled={busy}
-              onClick={() =>
-                void run(() => connection.write("recurring_task.run_now", { schedule_id: s.id }, { retry: false }))
+          <div key={s.id}>
+            <Row
+              title={
+                <button
+                  type="button"
+                  aria-expanded={open === s.id}
+                  onClick={() => setOpen(open === s.id ? null : s.id)}
+                  className="cursor-pointer border-0 bg-transparent p-0 text-left font-medium text-text"
+                >
+                  {open === s.id ? "▾" : "▸"} {s.title}
+                </button>
               }
+              hint={`${s.employee_name} · ${recurrenceText(s.recurrence)} · ${s.paused ? "Paused" : `Next ${when(s.next_run_ms)}`} · Last ${when(s.last_run_ms)}`}
             >
-              Run now
-            </SmallButton>
-            <SmallButton onClick={() => setEditing(s)}>Edit</SmallButton>
-            <ConfirmButton
-              label="Delete"
-              question="Delete this recurring task? Tasks it already made stay."
-              disabled={busy}
-              onConfirm={() =>
-                void run(() => connection.write("recurring_task.delete", { schedule_id: s.id }, { retry: false }))
-              }
-            />
-            <Switch
-              label={`${s.title} is active`}
-              on={!s.paused}
-              disabled={busy}
-              onChange={(on) =>
-                void run(() =>
-                  connection.write("recurring_task.set_paused", { schedule_id: s.id, paused: !on }, { retry: false }),
-                )
-              }
-            />
-          </Row>
+              <SmallButton
+                disabled={busy}
+                onClick={() =>
+                  void run(() => connection.write("recurring_task.run_now", { schedule_id: s.id }, { retry: false }))
+                }
+              >
+                Run now
+              </SmallButton>
+              <SmallButton onClick={() => setEditing(s)}>Edit</SmallButton>
+              <ConfirmButton
+                label="Delete"
+                question="Delete this recurring task? Tasks it already made stay."
+                disabled={busy}
+                onConfirm={() =>
+                  void run(() => connection.write("recurring_task.delete", { schedule_id: s.id }, { retry: false }))
+                }
+              />
+              <Switch
+                label={`${s.title} is active`}
+                on={!s.paused}
+                disabled={busy}
+                onChange={(on) =>
+                  void run(() =>
+                    connection.write("recurring_task.set_paused", { schedule_id: s.id, paused: !on }, { retry: false }),
+                  )
+                }
+              />
+            </Row>
+            {open === s.id ? (
+              <div className="flex flex-col gap-3 px-4 pb-[14px] text-[12px]">
+                <div>
+                  <p className="m-0 mb-1 font-medium text-text3">Goal</p>
+                  <p className="m-0 leading-[1.5] whitespace-pre-wrap">{s.goal}</p>
+                </div>
+                {s.criteria.length > 0 ? (
+                  <div>
+                    <p className="m-0 mb-1 font-medium text-text3">Acceptance criteria</p>
+                    <ul className="m-0 pl-4">
+                      {s.criteria.map((c) => (
+                        <li key={c}>{c}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                <div>
+                  <p className="m-0 mb-1 font-medium text-text3">Each task runs with</p>
+                  <p className="m-0">
+                    Mode {s.run.mode ?? "default"} · Model {s.run.model ? modelName(s.run.model) : "default"} · Effort{" "}
+                    {s.run.effort ?? "default"}
+                  </p>
+                </div>
+                {s.attachments.length > 0 ? (
+                  <div>
+                    <p className="m-0 mb-1 font-medium text-text3">Attachments</p>
+                    <FileChips files={s.attachments} />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         ))}
       </Group>
       <div>

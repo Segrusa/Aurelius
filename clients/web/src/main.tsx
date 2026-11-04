@@ -14,6 +14,19 @@ function safe<T>(action: () => T, fallback: T): T {
   }
 }
 
+/** To the server's inbox for this device; a ticket then names them by that path. */
+async function uploadFiles(files: File[]): Promise<{ path: string; name: string }[]> {
+  const uploaded: { path: string; name: string }[] = [];
+  for (const file of files) {
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetch("/v1/upload", { method: "POST", body });
+    if (!response.ok) throw new Error(`${file.name} did not upload.`);
+    uploaded.push((await response.json()) as { path: string; name: string });
+  }
+  return uploaded;
+}
+
 const platform: Platform = {
   kind: "web",
   openLink: webLink(location.origin),
@@ -56,6 +69,17 @@ const platform: Platform = {
     URL.revokeObjectURL(url);
     return { path: null, private: false };
   },
+  pickFiles: () =>
+    new Promise((resolve, reject) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.addEventListener("cancel", () => resolve([]));
+      input.addEventListener("change", () => {
+        uploadFiles([...(input.files ?? [])]).then(resolve, reject);
+      });
+      input.click();
+    }),
   pickFolder: null,
   openFolder: null,
 };

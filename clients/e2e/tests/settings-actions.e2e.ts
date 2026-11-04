@@ -245,6 +245,87 @@ test.describe("settings actions", () => {
 });
 
 test.describe("around the work", () => {
+  test("a recurring task opens to what it does", async ({ page }) => {
+    const schedule = {
+      id: "s1",
+      title: "Weekly report",
+      goal: "Write the report.",
+      criteria: ["It is sent"],
+      employee_id: "e1",
+      employee_name: "Orion",
+      project_id: "p1",
+      paused: false,
+      recurrence: { kind: "daily", at_minute: 60 },
+      run: { mode: "ask" },
+      attachments: [],
+    };
+    const { stop } = await scripted(
+      page,
+      { reads: { "recurring_task.list": () => ({ type: "task_schedules", value: { schedules: [schedule] } }) } },
+      "/settings/schedules",
+    );
+    await expect(page.getByText("Write the report.")).toBeHidden();
+    await page.getByRole("button", { name: /Weekly report/ }).click();
+    await expect(page.getByText("Write the report.")).toBeVisible();
+    await expect(page.getByText("It is sent")).toBeVisible();
+    await expect(page.getByText(/Mode ask/)).toBeVisible();
+    await stop();
+  });
+
+  test("memory answers to the keys of the selected entry", async ({ page }) => {
+    const memory = (id: string, status: string, content: string) => ({
+      id,
+      status,
+      content,
+      kind: "project_knowledge",
+      pinned: false,
+      sources: [],
+      scope: { kind: "project", id: "p1" },
+      created_at_ms: 0,
+      version: 1,
+    });
+    const { writes, stop } = await scripted(
+      page,
+      {
+        reads: {
+          "memory.list": () => ({
+            type: "memory",
+            value: { items: [memory("m1", "proposed", "First"), memory("m2", "proposed", "Second")] },
+          }),
+        },
+      },
+      "/knowledge/memory?project=p1",
+    );
+    await expect(page.getByText("Second")).toBeVisible();
+    await page.getByText("Second").click();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press("y");
+    await expect
+      .poll(() => sent(writes, "memory.decide").map((w) => w.params))
+      .toEqual([{ memory_id: "m2", accept: true }]);
+    await stop();
+  });
+
+  test("files on a new ticket are uploaded by a browser, and sent by the path it got", async ({ page }) => {
+    const { writes, stop } = await scripted(page, {}, "/inbox");
+    await page.route("**/v1/upload", (route) =>
+      route.fulfill({ json: { path: "/srv/inbox/1/notes.txt", name: "notes.txt", byte_length: 5 } }),
+    );
+    await page.getByRole("button", { name: "New ticket" }).first().click();
+    await page.getByPlaceholder("What should happen?").fill("With a file");
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByRole("button", { name: "Add files…" }).click(),
+    ]);
+    await chooser.setFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("hello") });
+    await expect(page.getByRole("button", { name: "Remove notes.txt" })).toBeVisible();
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    await expect
+      .poll(() => sent(writes, "ticket.create").map((w) => (w.params as { files?: string[] }).files))
+      .toEqual([["/srv/inbox/1/notes.txt"]]);
+    await stop();
+  });
+
   test("the inbox clears only after asking", async ({ page }) => {
     const { writes, stop } = await scripted(
       page,

@@ -17,6 +17,7 @@ interface Bridge {
   copy(text: string): Promise<void>;
   copySecret(text: string): Promise<{ sure: boolean }>;
   saveSecretFile(name: string, content: string): Promise<{ path: string | null; private: boolean } | null>;
+  pickFiles(): Promise<string[]>;
   pickFolder(title: string): Promise<string | null>;
   openFolder(path: string): Promise<void>;
 }
@@ -56,6 +57,7 @@ const platform: Platform = {
   copy: (text) => bridge.copy(text),
   copySecret: (text) => bridge.copySecret(text),
   saveSecretFile: (name, content) => bridge.saveSecretFile(name, content),
+  pickFiles: async () => (await bridge.pickFiles()).map((path) => ({ path, name: path.split(/[\\/]/).pop() ?? path })),
   pickFolder: (title) => bridge.pickFolder(title),
   openFolder: (path) => bridge.openFolder(path),
 };

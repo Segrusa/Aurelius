@@ -184,6 +184,15 @@ function serveDesktop(): void {
     const chosen = await (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options));
     return chosen.canceled ? null : (chosen.filePaths[0] ?? null);
   });
+  handle("files:pick", async (sender) => {
+    const window = BrowserWindow.fromWebContents(sender);
+    const options = {
+      title: "Add files",
+      properties: ["openFile", "multiSelections"] as ("openFile" | "multiSelections")[],
+    };
+    const chosen = await (window ? dialog.showOpenDialog(window, options) : dialog.showOpenDialog(options));
+    return chosen.canceled ? [] : chosen.filePaths;
+  });
   // Only a folder: this must never start a program.
   handle("folder:open", async (_sender, path: unknown) => {
     if (typeof path !== "string" || !statSync(path).isDirectory()) throw new Error("Not a folder.");

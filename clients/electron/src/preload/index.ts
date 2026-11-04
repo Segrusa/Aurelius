@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("aurelius", {
   copy: (text: string) => ipcRenderer.invoke("clipboard:write", text),
   copySecret: (text: string) => ipcRenderer.invoke("clipboard:write-secret", text),
   saveSecretFile: (name: string, content: string) => ipcRenderer.invoke("file:save-secret", name, content),
+  pickFiles: () => ipcRenderer.invoke("files:pick"),
   pickFolder: (title: string) => ipcRenderer.invoke("folder:pick", title),
   openFolder: (path: string) => ipcRenderer.invoke("folder:open", path),
 });

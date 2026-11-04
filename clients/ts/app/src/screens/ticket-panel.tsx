@@ -30,6 +30,7 @@ import {
 } from "./board-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { lastSummaryFailed } from "./run-logic";
+import { FileChips } from "./run-tools";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
 import { ColumnGlyph, ticketNumber, useTicketNeeds, useTicketWrite } from "./tickets-kit";
 
@@ -925,9 +926,30 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
                 </Row>
                 <Row name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</Row>
                 {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}
-                {t.attachments.length > 0 ? (
-                  <Row name="Files">{t.attachments.map((f) => f.name).join(", ")}</Row>
-                ) : null}
+                <Row name="Files">
+                  <span className="flex flex-col items-start gap-[6px]">
+                    <FileChips files={t.attachments} />
+                    {t.column === "done" ? null : (
+                      <Button
+                        onClick={() => {
+                          platform
+                            .pickFiles()
+                            .then((files) => {
+                              if (files.length === 0) return;
+                              return write(
+                                "ticket.update",
+                                { ticket_id: t.id, add_files: files.map((f) => f.path) },
+                                { expectedVersion: t.version, done: "Files added." },
+                              );
+                            })
+                            .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
+                        }}
+                      >
+                        Add files…
+                      </Button>
+                    )}
+                  </span>
+                </Row>
               </div>
               {tasks.length > 0 ? (
                 <div className="flex flex-col gap-1">

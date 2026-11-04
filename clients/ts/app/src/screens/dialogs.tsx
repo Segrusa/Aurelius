@@ -58,6 +58,9 @@ export function useModels() {
   }, [list.data]);
 }
 
+/** As many as the server takes. */
+const FILES_MAX = 8;
+
 export { parseDeadline, parseLabels };
 
 /** Sends one write. A text that holds a vault value comes back held, to send again on purpose. */
@@ -147,6 +150,18 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const [model, setModel] = useState("default");
   const [labels, setLabels] = useState(seed?.labels ?? "");
   const [deadline, setDeadline] = useState("");
+  const platform = usePlatform();
+  const [files, setFiles] = useState<{ path: string; name: string }[]>([]);
+  const addFiles = () => {
+    platform
+      .pickFiles()
+      .then((picked) => {
+        const next = [...files, ...picked.filter((f) => !files.some((x) => x.path === f.path))];
+        if (next.length > FILES_MAX) toast(`At most ${FILES_MAX} files.`);
+        setFiles(next.slice(0, FILES_MAX));
+      })
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
+  };
   const { busy, error, setError, held, send, sendAnyway } = useSend((text) => {
     toast(text);
     onClose();
@@ -173,6 +188,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
           priority,
           labels: parseLabels(labels),
           deadline_ms: deadlineMs,
+          ...(files.length > 0 ? { files: files.map((f) => f.path) } : {}),
           start,
           run: runOf(mode, model),
           confirm_secret: confirmSecret,
@@ -304,6 +320,20 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
               onChange={(e) => setDeadline(e.target.value)}
             />
           </Labeled>
+        </div>
+        <div className="flex flex-wrap items-center gap-[6px]">
+          <Button onClick={addFiles}>Add files…</Button>
+          {files.map((f) => (
+            <button
+              key={f.path}
+              type="button"
+              aria-label={`Remove ${f.name}`}
+              onClick={() => setFiles(files.filter((x) => x.path !== f.path))}
+              className="cursor-pointer rounded-[6px] border border-line bg-transparent px-2 py-1 text-[12px] text-text hover:border-btn-line"
+            >
+              {f.name} ×
+            </button>
+          ))}
         </div>
         {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
         {error ? (

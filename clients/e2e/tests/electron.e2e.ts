@@ -42,6 +42,7 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
       "listenLink",
       "openFolder",
       "openLink",
+      "pickFiles",
       "pickFolder",
       "saveSecretFile",
       "sendLink",

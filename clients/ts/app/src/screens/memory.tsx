@@ -15,7 +15,17 @@ type Tab = "context" | "proposals" | "history";
 const NOTE =
   "Employees propose memories during runs. Proposals wait here until you accept or reject them; accepted ones go into every run in this project.";
 
-function Entry({ m, children }: { m: MemoryView; children?: React.ReactNode }) {
+function Entry({
+  m,
+  selected,
+  onSelect,
+  children,
+}: {
+  m: MemoryView;
+  selected: boolean;
+  onSelect: () => void;
+  children?: React.ReactNode;
+}) {
   const badge =
     m.status === "proposed"
       ? "PROPOSAL"
@@ -28,7 +38,12 @@ function Entry({ m, children }: { m: MemoryView; children?: React.ReactNode }) {
             : null;
   const source = m.sources[0];
   return (
-    <article className="flex flex-col gap-2 border-b border-line2 px-[18px] py-4">
+    // biome-ignore lint/a11y/useKeyWithClickEvents: J and K do the same.
+    <article
+      aria-current={selected ? "true" : undefined}
+      onClick={onSelect}
+      className={`flex flex-col gap-2 border-b border-line2 px-[18px] py-4 ${selected ? "bg-sel" : ""}`}
+    >
       <div className="flex flex-wrap items-center gap-2 text-[12px] text-text3">
         <span className="inline-flex h-5 items-center gap-[6px] rounded-[10px] border border-line px-[7px] text-[11px] text-text2">
           <span className="size-[6px] rounded-full bg-violet" />
@@ -202,6 +217,33 @@ export function MemoryBody({
       toast(failureOf(e));
     }
   };
+  const shownItems =
+    tab === "proposals" ? proposals : tab === "history" ? history : items.filter((m) => m.status === "active");
+  const [chosen, setChosen] = useState<string | null>(null);
+  const current = shownItems.find((m) => m.id === chosen) ?? shownItems[0] ?? null;
+  const step = (by: number) => {
+    const next = shownItems[(current ? shownItems.indexOf(current) : -1) + by];
+    if (next) setChosen(next.id);
+  };
+  useAction("SelectNext", () => step(1));
+  useAction("SelectPrev", () => step(-1));
+  useAction("AcceptMemory", () => {
+    if (current?.status === "proposed") void decide(current, true);
+    else toast("Select a proposal to accept (filter 2 shows only proposals).");
+  });
+  useAction("RemoveMemory", () => {
+    if (current?.status === "proposed") void decide(current, false);
+    else if (current?.status === "active") setForgetting(current);
+    else if (current) toast("This item is no longer active.");
+  });
+  const pin = (m: MemoryView) =>
+    act(
+      () => connection.write("memory.pin", { memory_id: m.id, pinned: !m.pinned }, { retry: false }),
+      m.pinned ? "Unpinned." : "Pinned: always included as context.",
+    );
+  useAction("TogglePin", () => {
+    if (current) void pin(current);
+  });
   useAction("Filter1", () => setTab("context"));
   useAction("Filter2", () => setTab("proposals"));
   useAction("Filter3", () => setTab("history"));
@@ -266,7 +308,7 @@ export function MemoryBody({
                   <p className="m-0 p-6 text-text3">No proposals.</p>
                 ) : (
                   proposals.map((m) => (
-                    <Entry key={m.id} m={m}>
+                    <Entry key={m.id} m={m} selected={m.id === current?.id} onSelect={() => setChosen(m.id)}>
                       <Button kind="primary" className={SMALL} onClick={() => void decide(m, true)}>
                         Accept
                       </Button>
@@ -281,7 +323,9 @@ export function MemoryBody({
                 history.length === 0 ? (
                   <p className="m-0 p-6 text-text3">Nothing superseded, rejected or forgotten yet.</p>
                 ) : (
-                  history.map((m) => <Entry key={m.id} m={m} />)
+                  history.map((m) => (
+                    <Entry key={m.id} m={m} selected={m.id === current?.id} onSelect={() => setChosen(m.id)} />
+                  ))
                 )
               ) : null}
               {tab === "context" ? (
@@ -362,24 +406,11 @@ export function MemoryBody({
                   {items
                     .filter((m) => m.status === "active")
                     .map((m) => (
-                      <Entry key={m.id} m={m}>
+                      <Entry key={m.id} m={m} selected={m.id === current?.id} onSelect={() => setChosen(m.id)}>
                         <Button className={SMALL} onClick={() => setRevising(m)}>
                           Revise
                         </Button>
-                        <Button
-                          className={SMALL}
-                          onClick={() =>
-                            void act(
-                              () =>
-                                connection.write(
-                                  "memory.pin",
-                                  { memory_id: m.id, pinned: !m.pinned },
-                                  { retry: false },
-                                ),
-                              m.pinned ? "Unpinned." : "Pinned: always included as context.",
-                            )
-                          }
-                        >
+                        <Button className={SMALL} onClick={() => void pin(m)}>
                           {m.pinned ? "Unpin" : "Pin"}
                         </Button>
                         <Button kind="danger" className={SMALL} onClick={() => setForgetting(m)}>
