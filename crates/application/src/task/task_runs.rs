@@ -33,6 +33,9 @@ const ANSWER_STOPPED: &str = "My answer was stopped before it was finished. Send
 /// What the discussion says when the run of an answer about a report could not start.
 const ANSWER_NOT_STARTED: &str = "I could not start on your message. Send it again.";
 
+/// Why a main task waits after a run that ended on a question for the board member.
+const WAITING_QUESTION: &str = "question";
+
 /// A run of the task's conversation still going (other than `except`).
 pub(crate) fn live_run(conn: &rusqlite::Connection, task: TaskId, except: Option<RunId>) -> Result<bool, StorageError> {
     Ok(conn.query_row(
@@ -62,7 +65,7 @@ pub(crate) fn link_run(tx: &Tx<'_>, run: RunId, conversation: ConversationId) ->
     }
     tx.execute("UPDATE runs SET task_id = ?2 WHERE id = ?1", [run.to_string(), task.to_string()])?;
     let mut notices = Vec::new();
-    if row.status == TaskStatus::Waiting && matches!(store::waiting_cause(tx, task)?.as_deref(), Some("stopped" | "not_started" | "escalated_to_boss")) {
+    if row.status == TaskStatus::Waiting && matches!(store::waiting_cause(tx, task)?.as_deref(), Some("stopped" | "not_started" | "escalated_to_boss" | WAITING_QUESTION)) {
         notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
         notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
         notices.push(task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": "conversation" }))?);
@@ -190,10 +193,46 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
             notices.extend(answered);
             return Ok(notices);
         }
+        // A run that ends on a question has not finished: the ticket stays in Doing until the board member answers.
+        if row.status != TaskStatus::Review && ends_on_question(tx, st, task, run, closing)? {
+            notices.extend(wait_for_answer(tx, st, task, &row, run, closing)?);
+            return Ok(notices);
+        }
         notices.extend(complete(tx, st, task, closing)?);
         return Ok(notices);
     }
     notices.extend(complete(tx, st, task, answer)?);
+    Ok(notices)
+}
+
+/// The text ends on a question: its last non-empty line, without markdown marks, ends with "?".
+fn asks_question(text: &str) -> bool {
+    let last = text.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("");
+    last.trim_end_matches(|c: char| matches!(c, '*' | '_' | '`' | '"' | '\'' | ')' | '”' | '»' | ' ')).ends_with('?')
+}
+
+/// The run of a ticket's main task ended on a question: its closing text, or the last
+/// message it posted in the ticket's discussion, ends with "?".
+fn ends_on_question(tx: &Tx<'_>, st: &Store, task: TaskId, run: RunId, closing: &str) -> Result<bool, StorageError> {
+    if asks_question(closing) {
+        return Ok(true);
+    }
+    let Some(ticket) = crate::task::ticket_line::ticket_of(tx, task)? else { return Ok(false) };
+    let Some(discussion) = aurelius_storage::discussions::ticket_conversation(tx, ticket)? else { return Ok(false) };
+    let key = aurelius_storage::discussions::run_last_post_key(tx, discussion, run)?;
+    let posted = key.and_then(|k| st.blobs().read(&k).ok()).and_then(|b| String::from_utf8(b).ok());
+    Ok(posted.is_some_and(|text| asks_question(&text)))
+}
+
+/// The question goes to the discussion (unless the run posted it there itself) and the
+/// main task waits for the answer; the card stays in Doing. The answer resumes it.
+fn wait_for_answer(tx: &Tx<'_>, st: &Store, task: TaskId, row: &store::TaskRow, run: RunId, closing: &str) -> Result<Vec<EventNotice>, StorageError> {
+    let mut notices = Vec::new();
+    if let Some(ticket) = crate::task::ticket_line::ticket_of(tx, task)? {
+        notices.extend(crate::conversation::discussion::owner_answer(tx, st, ticket, run, closing)?);
+    }
+    notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?);
+    notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": WAITING_QUESTION }))?);
     Ok(notices)
 }
 

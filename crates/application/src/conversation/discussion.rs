@@ -617,7 +617,9 @@ fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &
     let extra = serde_json::json!({ "discussion": d.id, "thread_parent": thread, "from_message": source });
     let (message, posted) = crate::task::task_threads::post_returning_with(tx, store, conversation, root, crate::task::task_threads::Speaker::Update { kind: "message", from }, &body, extra)?;
     let mut notices = vec![posted];
-    if !matches!(row.status, TaskStatus::Running | TaskStatus::Review) {
+    // A main task that waits for this answer to its question goes on with a run of its own.
+    let answers_question = row.status == TaskStatus::Waiting && aurelius_storage::tasks::waiting_cause(tx, root)?.as_deref() == Some("question");
+    if !matches!(row.status, TaskStatus::Running | TaskStatus::Review) && !answers_question {
         return Ok(Some(notices));
     }
     // The owner is mid-run: the caller says so now, the answer comes when that run ends.
