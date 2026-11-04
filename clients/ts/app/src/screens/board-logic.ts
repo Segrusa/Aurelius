@@ -486,3 +486,23 @@ export function foldUpdates<M extends { id: string; system?: unknown }>(
 export function peopleCount(list: { id: string; system?: unknown }[]): number {
   return list.filter((m) => !m.system).length;
 }
+
+/** A ready-made reply to a report: what the button says and what the owner is told. */
+export interface SuggestedReply {
+  label: string;
+  text: string;
+}
+
+/** One-click answers to a report in review: the usual next steps, plus the ones the report itself points at. */
+export function suggestedReplies(report: string | null): SuggestedReply[] {
+  const text = report ?? "";
+  const replies: SuggestedReply[] = [{ label: "Merge into main", text: "Merge this into main." }];
+  if (/\bpush/i.test(text) || /\bmerge[dn]?\b/i.test(text)) {
+    replies.push({ label: "Push", text: "Push main to the remote." });
+  }
+  if (/not (tested|built)|niet (getest|gebouwd)|untested|could not (test|build)/i.test(text)) {
+    replies.push({ label: "Build and test it", text: "Build it and run the tests, then report the result." });
+  }
+  replies.push({ label: "Explain what you did", text: "Explain in a few lines what you changed and why." });
+  return replies;
+}

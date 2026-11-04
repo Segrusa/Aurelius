@@ -1,6 +1,7 @@
 import type { TicketView, TimelineCard } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  suggestedReplies,
   activityDetail,
   activityText,
   beforeFor,
@@ -319,5 +320,20 @@ describe("a discussion", () => {
     const list = [line("a"), line("b"), said("c")];
     expect(foldUpdates(list, true).shown).toHaveLength(3);
     expect(peopleCount(list)).toBe(1);
+  });
+});
+
+describe("suggestedReplies", () => {
+  it("always offers merge and an explanation", () => {
+    const labels = suggestedReplies(null).map((r) => r.label);
+    expect(labels).toEqual(["Merge into main", "Explain what you did"]);
+  });
+
+  it("offers a test run when the report says it was not tested", () => {
+    expect(suggestedReplies("Fixed it, but niet getest.").map((r) => r.label)).toContain("Build and test it");
+  });
+
+  it("offers a push when the report talks about pushing", () => {
+    expect(suggestedReplies("Nothing was pushed.").map((r) => r.label)).toContain("Push");
   });
 });

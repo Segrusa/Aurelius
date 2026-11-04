@@ -40,6 +40,7 @@ import {
   peopleCount,
   priorityLabel,
   runLocked,
+  suggestedReplies,
   takeOverOffered,
   testingNote,
 } from "./board-logic";
@@ -254,13 +255,22 @@ function ReviewGate({
   const connection = useConnection();
   const write = useTicketWrite();
   const [feedback, setFeedback] = useState("");
-  const [open, setOpen] = useState(false);
+  // "back" asks for changes; "reply" tells the owner what to do next and leaves the ticket in review.
+  const [mode, setMode] = useState<"back" | "reply" | null>(null);
   const [missing, setMissing] = useState(false);
   const { busy, held, error, send, sendAnyway } = useSend((text) => {
-    toast(text);
-    setOpen(false);
+    if (text !== "") toast(text);
+    setMode(null);
     setFeedback("");
   });
+  const navigate = useNavigate();
+  const discussion = useMessages(t.conversation_id);
+  const lastMessage = (discussion.data?.messages ?? []).filter((m) => !m.deleted_at_ms).at(-1);
+  const reply = (text: string) =>
+    send(async (confirmSecret) => {
+      await connection.write("ticket.post", { ticket_id: t.id, text, confirm_secret: confirmSecret });
+      return "";
+    });
   const too = decideToo(t);
   const done = () => void write("ticket.accept", { ticket_id: t.id }, { done: `${ticketNumber(t)} is Done.` });
   return (
@@ -270,7 +280,7 @@ function ReviewGate({
           onYes={() => {
             if (ready) done();
           }}
-          onNo={() => setOpen(true)}
+          onNo={() => setMode("back")}
         />
       ) : null}
       <div className="flex items-center gap-2 font-medium">
@@ -279,8 +289,13 @@ function ReviewGate({
       </div>
       {too ? <span className="text-[12px] text-text2">{too}</span> : null}
       {report ? <Markdown text={report} /> : <span className="text-text2">No report text. See the conversation.</span>}
-      {open ? (
-        <Feedback placeholder="What needs to change?" value={feedback} onChange={setFeedback} missing={missing} />
+      {mode ? (
+        <Feedback
+          placeholder={mode === "reply" ? "What should happen next?" : "What needs to change?"}
+          value={feedback}
+          onChange={setFeedback}
+          missing={missing}
+        />
       ) : null}
       {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
       {error ? (
@@ -289,6 +304,14 @@ function ReviewGate({
         </p>
       ) : null}
       {whyNot ? <span className="text-[12px] text-text2">{whyNot}</span> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[12px] text-text3">Tell {t.owner_name ?? "the owner"}:</span>
+        {suggestedReplies(report).map((r) => (
+          <Button key={r.label} disabled={busy} onClick={() => reply(r.text)}>
+            {r.label}
+          </Button>
+        ))}
+      </div>
       <div className="flex flex-wrap gap-2">
         <Button kind="primary" disabled={!ready} onClick={done}>
           Mark done {keyed ? <Kbd onAccent>{showChord("secondary-enter", isMac)}</Kbd> : null}
@@ -296,7 +319,25 @@ function ReviewGate({
         <Button
           disabled={busy}
           onClick={() => {
-            if (!open) return setOpen(true);
+            if (mode !== "reply") return setMode("reply");
+            if (feedback.trim() === "") return setMissing(true);
+            setMissing(false);
+            send(async (confirmSecret) => {
+              await connection.write("ticket.post", {
+                ticket_id: t.id,
+                text: feedback.trim(),
+                confirm_secret: confirmSecret,
+              });
+              return "";
+            });
+          }}
+        >
+          Reply to {t.owner_name ?? "the owner"}
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            if (mode !== "back") return setMode("back");
             if (feedback.trim() === "") return setMissing(true);
             setMissing(false);
             send(async (confirmSecret) => {
@@ -311,6 +352,11 @@ function ReviewGate({
         >
           Send back to Doing
         </Button>
+        {lastMessage ? (
+          <Button onClick={() => void navigate({ to: "/board", search: { ticket: t.id, message: lastMessage.id } })}>
+            Open discussion
+          </Button>
+        ) : null}
         {t.root_task_id ? (
           <Link
             to="/tasks/$taskId"
