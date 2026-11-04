@@ -1,11 +1,12 @@
-//! `cargo xtask gen-dart`: Dart types for the mobile app, generated from the JSON
-//! Schemas of the protocol crates (`schemars`). Pure: `generate` returns the files,
-//! `main` writes or checks them, and `tests/drift.rs` fails when the checked-in
-//! output differs.
+//! `cargo xtask gen-dart` and `gen-ts`: Dart types for the mobile app and TypeScript types for
+//! the React client, generated from the JSON Schemas of the protocol crates (`schemars`). Pure:
+//! `generate` and `generate_ts` return the files, `main` writes or checks them, and
+//! `tests/drift.rs` fails when the checked-in output differs.
 
 pub mod catalog;
 pub mod dart;
 pub mod schema;
+pub mod ts;
 
 use schemars::JsonSchema;
 use serde_json::{Map, Value};
@@ -15,6 +16,11 @@ use std::path::PathBuf;
 /// Where the generated Dart files are checked in.
 pub fn output_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("clients").join("mobile").join("lib").join("data").join("protocol")
+}
+
+/// Where the generated TypeScript files are checked in.
+pub fn ts_output_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("clients").join("ts").join("protocol").join("src").join("generated")
 }
 
 /// Adds the schema of `T` and every definition it refers to. The root itself is
@@ -66,6 +72,18 @@ pub fn generate() -> BTreeMap<String, String> {
     ])
 }
 
+/// File name to content of every generated TypeScript file.
+pub fn generate_ts() -> BTreeMap<String, String> {
+    let model = schema::parse(&schemas());
+    let entries = catalog::build(&model);
+    BTreeMap::from([
+        ("models.ts".to_owned(), ts::models(&model)),
+        ("methods.ts".to_owned(), ts::methods(&entries, aurelius_protocol::PROTOCOL_MAJOR)),
+        ("index.ts".to_owned(), ts::barrel()),
+        ("wire-samples.json".to_owned(), ts::wire_samples()),
+    ])
+}
+
 /// The file on disk with Windows line endings (a git checkout) normalised.
 pub fn read_checked_in(name: &str) -> Option<String> {
     std::fs::read_to_string(output_dir().join(name)).ok().map(|s| s.replace("\r\n", "\n"))
@@ -74,4 +92,14 @@ pub fn read_checked_in(name: &str) -> Option<String> {
 /// The files whose checked-in content differs from `generate()` (or is missing).
 pub fn drifted() -> Vec<String> {
     generate().into_iter().filter(|(name, content)| read_checked_in(name).as_deref() != Some(content.as_str())).map(|(name, _)| name).collect()
+}
+
+/// `read_checked_in` for the TypeScript files.
+pub fn read_checked_in_ts(name: &str) -> Option<String> {
+    std::fs::read_to_string(ts_output_dir().join(name)).ok().map(|s| s.replace("\r\n", "\n"))
+}
+
+/// `drifted` for the TypeScript files.
+pub fn drifted_ts() -> Vec<String> {
+    generate_ts().into_iter().filter(|(name, content)| read_checked_in_ts(name).as_deref() != Some(content.as_str())).map(|(name, _)| name).collect()
 }

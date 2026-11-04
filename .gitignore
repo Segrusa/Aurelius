@@ -12,3 +12,4 @@
 .env
 scherm*_*.png
 clients/mobile/ios/Flutter/Local.xcconfig
+node_modules/

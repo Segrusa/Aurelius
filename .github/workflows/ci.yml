@@ -1,6 +1,6 @@
 # Tests on every pull request and every push to main: the server crates
-# (Rust) and the mobile app (Flutter). The desktop app is built by the release
-# workflow; its GPU dependencies are not worth the CI minutes here.
+# (Rust), the mobile app (Flutter) and the TypeScript clients. The desktop app is
+# built by the release workflow; its GPU dependencies are not worth the CI minutes here.
 name: ci
 
 on:
@@ -40,3 +40,19 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter test
+
+  clients-ts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm deps
+      - run: pnpm build
+      - run: pnpm test

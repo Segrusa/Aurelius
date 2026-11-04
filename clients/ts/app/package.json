@@ -1,0 +1,15 @@
+{
+  "name": "@aurelius/app",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@aurelius/client": "workspace:*",
+    "@aurelius/protocol": "workspace:*"
+  }
+}

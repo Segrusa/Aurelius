@@ -1,0 +1,1142 @@
+// GENERATED CODE - DO NOT EDIT.
+// Run: cargo xtask gen-ts
+
+import type * as M from "./models";
+
+/** The protocol major this app speaks. The server refuses another one. */
+export const PROTOCOL_MAJOR = 5;
+
+/** `read`: reads and session methods. `host`: writes only the host can do. `command`: domain commands. */
+export type MethodGroup = "read" | "host" | "command";
+
+/** The wire name of every method, with its group. */
+export const METHODS = {
+  "activity.get": "read",
+  "agent_function.create": "host",
+  "agent_function.delete": "host",
+  "agent_function.list": "read",
+  "agent_function.set_all_enabled": "host",
+  "agent_function.set_enabled": "host",
+  "agent_function.update": "host",
+  "api_key.create": "host",
+  "api_key.list": "read",
+  "api_key.revoke": "host",
+  "api_key.set_functions": "host",
+  "app_key.create": "host",
+  "app_key.list": "read",
+  "app_key.revoke": "host",
+  "approval.answer": "command",
+  "approval.decide": "command",
+  "approval.decide_plan": "command",
+  "approval.list": "read",
+  "artifact.get_content": "read",
+  "artifact.get_setting": "read",
+  "artifact.list": "read",
+  "artifact.set_enabled": "host",
+  "attachment.add": "command",
+  "attachment.remove": "command",
+  "auto_allow.get_setting": "read",
+  "auto_allow.set_enabled": "host",
+  "backup.create": "host",
+  "backup.list": "read",
+  "backup.restore": "host",
+  "backup.resume": "host",
+  "board.columns_update": "command",
+  "board.get": "read",
+  "browser.get": "read",
+  "browser.set": "host",
+  "browser.set_backend": "host",
+  "channel.list": "read",
+  "channel.search": "read",
+  "chat.retry": "command",
+  "chat.send": "command",
+  "claude_login.cancel": "host",
+  "claude_login.input": "read",
+  "claude_login.link": "host",
+  "claude_login.status": "read",
+  "claude_login.unlink": "host",
+  "company.get": "read",
+  "company.set_background_login": "command",
+  "company.set_follow_org_chart": "command",
+  "company.update": "command",
+  "connection.add": "command",
+  "connection.detect_runtime": "read",
+  "connection.list": "read",
+  "connection.remove": "command",
+  "connection.set_defaults": "command",
+  "connection.verify": "command",
+  "conversation.delete": "command",
+  "conversation.delete_queued": "command",
+  "conversation.get": "read",
+  "conversation.send_queued_now": "command",
+  "conversation.set_agent_mode": "command",
+  "conversation.set_browser_allowed": "command",
+  "conversation.set_run": "command",
+  "conversation.set_screen_allowed": "command",
+  "employee.chat": "read",
+  "employee.create": "command",
+  "employee.instruction_versions": "read",
+  "employee.list": "read",
+  "employee.restore_instructions": "command",
+  "employee.send_message": "command",
+  "employee.set_folder": "command",
+  "employee.set_reports_to": "command",
+  "employee.set_status": "command",
+  "employee.update": "command",
+  "event.subscribe": "read",
+  "file.get": "read",
+  "fs.create_dir": "host",
+  "fs.list_dir": "read",
+  "function_call.list": "read",
+  "git.get_diff": "read",
+  "git.get_status": "read",
+  "group_chat.get": "read",
+  "group_chat.send": "command",
+  "guideline.add_starter_set": "command",
+  "guideline.affected": "read",
+  "guideline.archive": "command",
+  "guideline.create": "command",
+  "guideline.decide_proposal": "command",
+  "guideline.effective": "read",
+  "guideline.get": "read",
+  "guideline.link": "command",
+  "guideline.list": "read",
+  "guideline.proposals": "read",
+  "guideline.restore": "command",
+  "guideline.restore_version": "command",
+  "guideline.starter_set": "read",
+  "guideline.unlink": "command",
+  "guideline.update": "command",
+  "guideline.versions": "read",
+  "heartbeat.set": "command",
+  "idea.add": "command",
+  "idea.delete": "command",
+  "idea.list": "read",
+  "idea.list_all": "read",
+  "idea.set_status": "command",
+  "idea.start": "command",
+  "idea.update": "command",
+  "job.list": "read",
+  "load.get": "read",
+  "load.set_limits": "host",
+  "management_mode.get_setting": "read",
+  "management_mode.set_enabled": "host",
+  "markdown.get": "read",
+  "markdown.list": "read",
+  "mcp.add": "host",
+  "mcp.list": "read",
+  "mcp.login_complete": "host",
+  "mcp.login_get": "read",
+  "mcp.login_start": "host",
+  "mcp.logout": "host",
+  "mcp.remove": "host",
+  "mcp.set": "host",
+  "mcp_always_allow.list": "read",
+  "mcp_always_allow.remove": "host",
+  "memory.consolidate": "command",
+  "memory.decide": "command",
+  "memory.forget": "command",
+  "memory.get_context": "read",
+  "memory.list": "read",
+  "memory.pin": "command",
+  "memory.remember": "command",
+  "memory.revise": "command",
+  "message.delete": "command",
+  "message.edit": "command",
+  "message.history": "read",
+  "message.locate": "read",
+  "message.react": "command",
+  "note.create": "host",
+  "note.delete": "host",
+  "note.get": "read",
+  "note.list": "read",
+  "note.set_pinned": "host",
+  "note.update": "host",
+  "notification.dismiss": "host",
+  "notification.dismiss_all": "host",
+  "notification.list": "read",
+  "notification.mark_all_read": "host",
+  "notification.mark_read": "host",
+  "plugin.get_for_employee": "read",
+  "plugin.get_for_project": "read",
+  "plugin.install": "host",
+  "plugin.list": "read",
+  "plugin.list_available": "read",
+  "plugin.preview": "host",
+  "plugin.remove": "host",
+  "plugin.set_for_employee": "host",
+  "plugin.set_for_project": "host",
+  "plugin.update": "host",
+  "power.cancel": "host",
+  "power.get": "read",
+  "power.shutdown": "host",
+  "project.create": "command",
+  "project.export": "host",
+  "project.list": "read",
+  "project.rename": "command",
+  "project.set_description": "command",
+  "project.set_folder": "command",
+  "project.set_status": "command",
+  "project.update": "command",
+  "project_conversation.list": "read",
+  "project_conversation.send": "command",
+  "project_conversation.start": "command",
+  "proposal.decide": "command",
+  "proposal.list": "read",
+  "push.configure": "host",
+  "push.test": "host",
+  "recurring_task.create": "command",
+  "recurring_task.delete": "command",
+  "recurring_task.list": "read",
+  "recurring_task.run_now": "command",
+  "recurring_task.set_paused": "command",
+  "recurring_task.update": "command",
+  "remote.decide_pairing": "host",
+  "remote.disable": "host",
+  "remote.enable": "host",
+  "remote.get_status": "read",
+  "remote.revoke": "host",
+  "remote.start_pairing": "host",
+  "run.get_context": "read",
+  "run.get_trace": "read",
+  "run.guidelines": "read",
+  "run.stop": "command",
+  "screenshot.get": "read",
+  "secret.set": "host",
+  "server.get_health": "read",
+  "server.get_name": "read",
+  "server.restart": "host",
+  "server.set_name": "command",
+  "session.hello": "read",
+  "session.list": "read",
+  "session.revoke": "host",
+  "share.create": "command",
+  "share.list": "read",
+  "share.revoke": "command",
+  "subagent.list": "read",
+  "subscription.get": "read",
+  "task.assign": "command",
+  "task.cancel": "command",
+  "task.choose_variant": "command",
+  "task.create": "command",
+  "task.discuss": "command",
+  "task.list": "read",
+  "task.variants": "read",
+  "terminal.close": "read",
+  "terminal.detach": "read",
+  "terminal.input": "read",
+  "terminal.list": "read",
+  "terminal.open": "read",
+  "terminal.resize": "read",
+  "thread.read": "read",
+  "ticket.accept": "command",
+  "ticket.approve_plan": "command",
+  "ticket.archive": "command",
+  "ticket.assign": "command",
+  "ticket.cancel": "command",
+  "ticket.create": "command",
+  "ticket.follow": "command",
+  "ticket.followers": "read",
+  "ticket.get": "read",
+  "ticket.list": "read",
+  "ticket.move": "command",
+  "ticket.my_tickets": "read",
+  "ticket.post": "command",
+  "ticket.retry_summary": "command",
+  "ticket.revise_plan": "command",
+  "ticket.send_back": "command",
+  "ticket.set_responsible": "command",
+  "ticket.start": "command",
+  "ticket.update": "command",
+  "ticket.use_my_login": "command",
+  "timeline.list": "read",
+  "trace.get_setting": "read",
+  "trace.set_enabled": "host",
+  "update.apply": "host",
+  "update.apply_app": "host",
+  "update.get": "read",
+  "update.prepare": "host",
+  "update.prepare_app": "host",
+  "upload.get": "read",
+  "usage.get": "read",
+  "usage.get_hours": "read",
+  "usage.get_totals": "read",
+  "user.create": "host",
+  "user.disable": "host",
+  "user.list": "read",
+  "user.login": "read",
+  "user.logout": "read",
+  "user.set_password": "host",
+  "user.whoami": "read",
+  "variants.get_setting": "read",
+  "variants.set_enabled": "host",
+  "vault.archive": "host",
+  "vault.audit": "read",
+  "vault.create": "host",
+  "vault.key_export": "read",
+  "vault.list": "read",
+  "vault.reveal": "read",
+  "vault.update": "host",
+} as const satisfies Record<string, MethodGroup>;
+
+export type MethodName = keyof typeof METHODS;
+
+/** The `params` of every method; `undefined`: it takes none. */
+export interface MethodParams {
+  /**
+   * One tool call of an answer whole: the input and output that
+   * `conversation.get` and live updates shorten (feature `activity_preview`).
+   */
+  "activity.get": { call_id: string; message_id: string };
+  "agent_function.create": M.CreateAgentFunction;
+  "agent_function.delete": { function_id: string };
+  "agent_function.list": { project_id?: string | null };
+  /**
+   * The kill switch: `enabled: false` makes every function refuse calls.
+   */
+  "agent_function.set_all_enabled": { enabled: boolean };
+  "agent_function.set_enabled": { enabled: boolean; function_id: string };
+  "agent_function.update": M.UpdateAgentFunction;
+  /**
+   * The secret is in the answer once; the receipt keeps none.
+   */
+  "api_key.create": { function_ids: string[]; name: string };
+  "api_key.list": undefined;
+  "api_key.revoke": { key_id: string };
+  "api_key.set_functions": { function_ids: string[]; key_id: string };
+  /**
+   * A key for an outside app (feature `app_keys`); answers `AppKeyCreated`
+   * with the secret, once: the receipt keeps none.
+   */
+  "app_key.create": M.CreateAppKey;
+  /**
+   * The keys of outside apps that use `aurelius-mcp`, newest first (feature `app_keys`).
+   */
+  "app_key.list": undefined;
+  /**
+   * Revoked at once, also for the app's open sessions; answers `AppKey`.
+   */
+  "app_key.revoke": { key_id: string };
+  "approval.answer": M.AnswerQuestion;
+  "approval.decide": M.DecideApproval;
+  "approval.decide_plan": M.DecidePlan;
+  "approval.list": undefined;
+  /**
+   * The file the server kept of one publish (`version`, else the newest kept),
+   * so a client can show the page without a claude.ai login. Not found for an
+   * unknown URL; `snapshot` is none for pages published before servers kept them.
+   */
+  "artifact.get_content": { url: string; version?: number | null };
+  /**
+   * Whether runs may publish Claude Code artifacts (pages on claude.ai).
+   */
+  "artifact.get_setting": undefined;
+  /**
+   * Artifacts runs published, newest first: every given filter applies, none lists all.
+   */
+  "artifact.list": { conversation_id?: string | null; project_id?: string | null; task_id?: string | null };
+  /**
+   * Turn Claude Code artifacts on or off for every run that starts afterwards.
+   */
+  "artifact.set_enabled": { enabled: boolean };
+  "attachment.add": M.AttachFile;
+  "attachment.remove": M.RemoveAttachment;
+  /**
+   * Whether the safe read-only tools pass without a question (the auto-allow list).
+   */
+  "auto_allow.get_setting": undefined;
+  /**
+   * Auto-allow of the safe read-only tools on or off, from the next tool call. On by default.
+   */
+  "auto_allow.set_enabled": { enabled: boolean };
+  "backup.create": undefined;
+  "backup.list": undefined;
+  /**
+   * Restore at the next start (the service stops now); work stays paused until resumed.
+   */
+  "backup.restore": { id: string };
+  "backup.resume": undefined;
+  /**
+   * Rename the columns and set their order (B3): all of them, left to right.
+   * `expected_version` is the board's (`board_version`: the columns change
+   * together); the answer gives the new one.
+   */
+  "board.columns_update": { columns: M.BoardColumnEdit[] };
+  /**
+   * The board: its six columns left to right, each with its cards (not
+   * archived), for one project or every project.
+   */
+  "board.get": { project_id?: string | null };
+  "browser.get": undefined;
+  "browser.set": { choice: M.BrowserChoice };
+  /**
+   * Claude in Chrome or Playwright, for every run that starts afterwards.
+   */
+  "browser.set_backend": { backend: M.BrowserBackend };
+  /**
+   * The channels of the Team chat (feature `team_channels`): the general
+   * one first, then one per project (archived projects too: read-only).
+   */
+  "channel.list": undefined;
+  /**
+   * The channels whose name or ticket number matches `query` (feature
+   * `ticket_channels`), in the order of `channel.list`, archived ones too: a
+   * closed ticket's channel stays findable. `#12` and `12` match ticket 12;
+   * other text matches the name, case not counting. A connection that does not
+   * accept `ticket_channels` gets no ticket channels here either.
+   */
+  "channel.search": { query: string };
+  "chat.retry": M.RetryReply;
+  "chat.send": M.SendChatMessage;
+  /**
+   * Stop a running link of the session's own login. Answers `ClaudeLogin`.
+   */
+  "claude_login.cancel": { link_id: string };
+  /**
+   * What a running `claude_login.link` asks for: the code Claude showed after
+   * the sign-in at Anthropic, written to `claude auth login` as typed. Only
+   * the connection that started the link. A session method: no receipt, no
+   * request hash, no event, never printed or logged. Answers `ClaudeLogin`.
+   */
+  "claude_login.input": M.ClaudeLoginInputParams;
+  /**
+   * Connect the session's own Claude login: the server starts `claude auth
+   * login` for `<data>/logins/<user_id>/` and answers `ClaudeLoginLink`. What
+   * Claude asks (the sign-in link, the code) comes to this connection only as
+   * `ServerMessage::ClaudeLoginPrompt`; the code goes back with
+   * `claude_login.input`. One link per board member at a time, 10 minutes.
+   */
+  "claude_login.link": undefined;
+  /**
+   * The session's own Claude login (`ClaudeLoginView`). Feature of protocol 5.
+   */
+  "claude_login.status": undefined;
+  /**
+   * Disconnect the session's own Claude login (`claude auth logout`, its folder
+   * removed). Answers `ClaudeLogin`.
+   */
+  "claude_login.unlink": undefined;
+  /**
+   * The company in one read: employees, the org chart setting and the
+   * management team (roots).
+   */
+  "company.get": undefined;
+  /**
+   * The company's background jobs (memory consolidation, B6) run on the Claude
+   * login of the board member who asks (`enabled`), or on none (`false`, only
+   * when it is theirs): without one they do not run. Only the own login can be
+   * chosen. Answers `CompanyUpdated`.
+   */
+  "company.set_background_login": { enabled: boolean };
+  "company.set_follow_org_chart": M.SetFollowOrgChart;
+  "company.update": M.UpdateCompany;
+  "connection.add": M.AddConnection;
+  /**
+   * Where Claude Code is installed on the server.
+   */
+  "connection.detect_runtime": undefined;
+  "connection.list": undefined;
+  "connection.remove": M.RemoveConnection;
+  "connection.set_defaults": M.SetRunDefaults;
+  "connection.verify": M.VerifyConnection;
+  "conversation.delete": M.DeleteConversation;
+  "conversation.delete_queued": M.DeleteQueuedMessage;
+  /**
+   * A conversation's messages and settings.
+   */
+  "conversation.get": { conversation_id: string };
+  "conversation.send_queued_now": M.SendQueuedNow;
+  "conversation.set_agent_mode": M.SetAgentMode;
+  "conversation.set_browser_allowed": M.SetBrowserAllowed;
+  "conversation.set_run": M.SetConversationRun;
+  "conversation.set_screen_allowed": M.SetScreenAllowed;
+  /**
+   * An employee's persistent chat with the user (company scope, no project):
+   * its messages and settings, as `conversation.get` answers them.
+   */
+  "employee.chat": { employee_id: string };
+  "employee.create": M.CreateEmployee;
+  /**
+   * The versions of an employee's instructions, newest first (feature `instruction_proposals`).
+   */
+  "employee.instruction_versions": { employee_id: string };
+  /**
+   * The company's employees (not archived), oldest first.
+   */
+  "employee.list": undefined;
+  "employee.restore_instructions": M.RestoreEmployeeInstructions;
+  "employee.send_message": M.SendEmployeeMessage;
+  "employee.set_folder": M.SetEmployeeFolder;
+  "employee.set_reports_to": M.SetEmployeeReportsTo;
+  "employee.set_status": M.SetEmployeeStatus;
+  "employee.update": M.UpdateEmployee;
+  /**
+   * Replay events after `after_seq`, then stream live events (and load/power pushes).
+   */
+  "event.subscribe": { after_seq: number };
+  /**
+   * A file kept with a message (see `MessageView::files`).
+   */
+  "file.get": { id: string };
+  /**
+   * A new folder `name` in the folder `parent`.
+   */
+  "fs.create_dir": { name: string; parent: string };
+  /**
+   * Folders on the server: none lists the starting points.
+   */
+  "fs.list_dir": { path?: string | null };
+  "function_call.list": { function_id?: string | null; limit?: number | null };
+  "git.get_diff": { conversation_id: string };
+  /**
+   * Branch and uncommitted change of the folder a conversation works in; none outside a Git repository.
+   */
+  "git.get_status": { conversation_id: string };
+  /**
+   * The company's group chat (Team chat): the user and every employee. Its
+   * messages and settings, as `conversation.get` answers them; an employee's
+   * messages carry its name as `author`. Write with `group_chat.send`.
+   * `channel` (feature `team_channels`): a project's channel from
+   * `channel.list`; none: the general channel, the one older servers have.
+   */
+  "group_chat.get": { channel?: string | null };
+  "group_chat.send": M.SendGroupMessage;
+  /**
+   * `guideline.add_starter_set`: the chosen templates as guidelines without links (B7).
+   * A key whose title is in the library already is skipped.
+   */
+  "guideline.add_starter_set": { keys: string[] };
+  /**
+   * Who a change of this guideline reaches from their next run (B6): employees,
+   * projects and conversations that start a new session.
+   */
+  "guideline.affected": { guideline_id: string };
+  /**
+   * `guideline.archive`: no run gets it any more; links and versions stay.
+   */
+  "guideline.archive": { guideline_id: string };
+  /**
+   * `guideline.create`: a new guideline (version 1, source `created`), linked at once to `links`.
+   */
+  "guideline.create": { links?: M.GuidelineTarget[]; text: string; title: string };
+  /**
+   * `guideline.decide_proposal` (B5): approve (with `title`/`text` edited by the
+   * board member, and for a new guideline the `links`; none: the suggested
+   * ones) or reject. `note` goes back to the proposer. `version_conflict` when
+   * the guideline moved on since the proposal's base version.
+   */
+  "guideline.decide_proposal": { approve: boolean; links?: M.GuidelineTarget[] | null; note?: string | null; proposal_id: string; text?: string | null; title?: string | null };
+  /**
+   * The set a run of this employee in this project would get now, in block
+   * order, with `total_chars` against `limit_chars` (B4). Only an employee:
+   * its own chat (employee guidelines); only a project: its guidelines alone.
+   */
+  "guideline.effective": { employee_id?: string | null; project_id?: string | null };
+  /**
+   * One guideline with the text of its current version, or of `version`.
+   */
+  "guideline.get": { guideline_id: string; version?: number | null };
+  /**
+   * `guideline.link`: an employee or a project gets it from its next run.
+   */
+  "guideline.link": { guideline_id: string; target: M.GuidelineTarget };
+  /**
+   * The guideline library (feature `guidelines`): every guideline without its
+   * text, alphabetical; archived ones only with `archived` (then only those).
+   */
+  "guideline.list": { archived?: boolean };
+  /**
+   * Proposals of `propose_guideline` (B5), pending first, then the latest
+   * decisions; `status` filters. Apart from `proposal.list`.
+   */
+  "guideline.proposals": { status?: M.ProposalStatus | null };
+  /**
+   * `guideline.restore`: back from the archive, with its links (B4 and the title are checked again).
+   */
+  "guideline.restore": { guideline_id: string };
+  /**
+   * `guideline.restore_version`: a copy of `version` as the newest (source `restored`).
+   */
+  "guideline.restore_version": { guideline_id: string; version: number };
+  /**
+   * The templates of the starter set (B7), for "Add starter set…".
+   */
+  "guideline.starter_set": undefined;
+  /**
+   * `guideline.unlink`.
+   */
+  "guideline.unlink": { guideline_id: string; target: M.GuidelineTarget };
+  /**
+   * `guideline.update`: a new version with what changed (source `edited`); what
+   * is left out stays. `expected_version` in the envelope is the version the
+   * editor started from (`version_conflict` otherwise).
+   */
+  "guideline.update": { guideline_id: string; text?: string | null; title?: string | null };
+  /**
+   * Every version of a guideline, newest first, with its text and source.
+   */
+  "guideline.versions": { guideline_id: string };
+  "heartbeat.set": M.SetHeartbeat;
+  "idea.add": M.AddIdea;
+  "idea.delete": M.DeleteIdea;
+  "idea.list": { project_id: string };
+  /**
+   * The ideas of every project (each keeps its own project).
+   */
+  "idea.list_all": {  };
+  "idea.set_status": M.SetIdeaStatus;
+  "idea.start": M.StartIdea;
+  "idea.update": M.UpdateIdea;
+  "job.list": undefined;
+  "load.get": undefined;
+  "load.set_limits": M.LoadLimitsUpdate;
+  /**
+   * Whether management chooses its own task mode (feature `management_chooses_mode`).
+   */
+  "management_mode.get_setting": undefined;
+  /**
+   * Management chooses its own task mode (feature `management_chooses_mode`), for every run
+   * that starts afterwards. On by default.
+   */
+  "management_mode.set_enabled": { enabled: boolean };
+  /**
+   * One Markdown file as UTF-8 text. `path` is relative to the work folder.
+   */
+  "markdown.get": { path: string; scope: M.FileScope };
+  /**
+   * The Markdown files in a work folder, for the in-app viewer.
+   */
+  "markdown.list": { scope: M.FileScope };
+  "mcp.add": M.McpAddParams;
+  /**
+   * The user-scope MCP servers of Claude Code and which of them every run uses.
+   */
+  "mcp.list": undefined;
+  /**
+   * Finishes a login with the address the browser ended on (`…/callback?code=…&state=…`),
+   * for a browser that is not on the server's computer.
+   */
+  "mcp.login_complete": { login_id: string; redirect_url: string };
+  /**
+   * A login started with `mcp.login_start`; kept for a while after it ends.
+   */
+  "mcp.login_get": { login_id: string };
+  /**
+   * Starts an OAuth login for an http/sse server; answers `McpLogin` with the URL to open.
+   */
+  "mcp.login_start": { name: string };
+  /**
+   * Forgets the server's tokens (keeps its client registration).
+   */
+  "mcp.logout": { name: string };
+  "mcp.remove": { name: string };
+  "mcp.set": { enabled: string[] };
+  /**
+   * The MCP tools the user always allows (answered an approval with 'Always allow').
+   */
+  "mcp_always_allow.list": undefined;
+  /**
+   * Take a tool off the always-allow list: its next call asks again.
+   */
+  "mcp_always_allow.remove": { tool: string };
+  "memory.consolidate": M.ConsolidateMemory;
+  "memory.decide": M.DecideMemory;
+  "memory.forget": M.ForgetMemory;
+  /**
+   * What goes into a context: an employee's (own, the project if given,
+   * global) or a project conversation's (project, global; no employee). At
+   * least one of the two.
+   */
+  "memory.get_context": { employee_id?: string | null; project_id?: string | null };
+  /**
+   * Memories, newest first: global always, plus the scopes asked for (a
+   * project, an employee). Nothing asked: global and every employee.
+   */
+  "memory.list": { employee_id?: string | null; project_id?: string | null };
+  "memory.pin": M.PinMemory;
+  "memory.remember": M.Remember;
+  "memory.revise": M.ReviseMemory;
+  "message.delete": M.DeleteMessage;
+  "message.edit": M.EditMessage;
+  /**
+   * The earlier texts of a message, newest first (feature `message_edits`);
+   * none for a deleted one. Not for apps.
+   */
+  "message.history": { message_id: string };
+  /**
+   * Where a message is (feature `message_locate`), for a link to it: its
+   * conversation, ticket and thread. Only a message of a channel or a ticket's
+   * discussion; any other is `not_found`, as an unknown one. Not for apps.
+   */
+  "message.locate": { message_id: string };
+  "message.react": M.ReactToMessage;
+  /**
+   * A new note in a project; answers `Note`.
+   */
+  "note.create": { body?: string; project_id: string };
+  "note.delete": { note_id: string };
+  /**
+   * One note with its Markdown body.
+   */
+  "note.get": { note_id: string };
+  /**
+   * A project's notes (summaries), pinned first, then the last edited; `query` searches the text.
+   */
+  "note.list": { project_id: string; query?: string | null };
+  "note.set_pinned": { note_id: string; pinned: boolean };
+  /**
+   * Replace a note's body. Refused with `version_conflict` when the note is no
+   * longer at `base_revision` (saved elsewhere): load it again with `note.get`.
+   */
+  "note.update": { base_revision: number; body: string; note_id: string };
+  "notification.dismiss": { id: string };
+  "notification.dismiss_all": undefined;
+  "notification.list": undefined;
+  "notification.mark_all_read": undefined;
+  /**
+   * One row read, for this board member only (feature `personal_inbox`); answers
+   * `Count`, 0 when there was nothing to read, so it can be repeated.
+   */
+  "notification.mark_read": { id: string };
+  /**
+   * The plugins one employee has enabled.
+   */
+  "plugin.get_for_employee": { employee_id: string };
+  /**
+   * The plugins a project has enabled (its project assistant loads them).
+   */
+  "plugin.get_for_project": { project_id: string };
+  /**
+   * Install plugins (`name@marketplace`) and enable them for the given employees and projects.
+   */
+  "plugin.install": { employees: string[]; ids: string[]; projects?: string[] };
+  /**
+   * Claude Code plugins installed on the server's computer, with the employees that use each.
+   */
+  "plugin.list": undefined;
+  /**
+   * Plugins offered by the marketplaces already added.
+   */
+  "plugin.list_available": undefined;
+  /**
+   * Adds the marketplace behind a link (GitHub URL, `owner/repo` or git URL).
+   */
+  "plugin.preview": { source: string };
+  "plugin.remove": { id: string };
+  /**
+   * Replace the plugins an employee has enabled; applies from its next run.
+   */
+  "plugin.set_for_employee": { employee_id: string; enabled: string[] };
+  /**
+   * Replace the plugins a project has enabled (for its project assistant); applies from its next run.
+   */
+  "plugin.set_for_project": { enabled: string[]; project_id: string };
+  "plugin.update": { id: string };
+  "power.cancel": undefined;
+  "power.get": undefined;
+  "power.shutdown": { when: M.ShutdownWhen };
+  "project.create": M.CreateProject;
+  /**
+   * Write a readable Markdown + JSON export of a project into its folder.
+   */
+  "project.export": { project_id: string };
+  "project.list": undefined;
+  "project.rename": M.RenameProject;
+  "project.set_description": M.SetProjectDescription;
+  "project.set_folder": M.SetProjectFolder;
+  "project.set_status": M.SetProjectStatus;
+  "project.update": M.UpdateProject;
+  /**
+   * The conversations of a project, most recently active first.
+   */
+  "project_conversation.list": { project_id: string };
+  "project_conversation.send": M.SendProjectMessage;
+  "project_conversation.start": M.StartProjectConversation;
+  "proposal.decide": M.DecideProposal;
+  /**
+   * Proposals of the whole company (colleagues and instructions): pending
+   * first, then the latest decisions.
+   */
+  "proposal.list": undefined;
+  "push.configure": M.PushConfig;
+  "push.test": { client_id: string };
+  "recurring_task.create": M.CreateTaskSchedule;
+  "recurring_task.delete": M.DeleteTaskSchedule;
+  "recurring_task.list": { project_id?: string | null };
+  "recurring_task.run_now": M.RunTaskScheduleNow;
+  "recurring_task.set_paused": M.SetTaskSchedulePaused;
+  "recurring_task.update": M.UpdateTaskSchedule;
+  /**
+   * Allow or refuse a device that entered the code. A computer that asks for
+   * full access is only allowed with `owner` (the user confirmed it).
+   */
+  "remote.decide_pairing": { approve: boolean; owner: boolean; pairing_id: string };
+  "remote.disable": undefined;
+  "remote.enable": undefined;
+  "remote.get_status": undefined;
+  "remote.revoke": { client_id: string };
+  /**
+   * A new one-time code (5 minutes) plus the QR payload; the receipt keeps neither.
+   */
+  "remote.start_pairing": undefined;
+  /**
+   * The context manifest of one run (context inspector).
+   */
+  "run.get_context": { run_id: string };
+  /**
+   * What one run sent to the runtime and what each model call cost; not found
+   * unless trace mode was on for it and it is among the latest (feature `run_trace`).
+   */
+  "run.get_trace": { run_id: string };
+  /**
+   * The guideline versions a run had in its system text (B6), kept for every
+   * run (the trace's "Guidelines: Rust v3, …"); also without trace mode.
+   */
+  "run.guidelines": { run_id: string };
+  "run.stop": M.StopRun;
+  /**
+   * A screenshot the agent took (the id is in its screenshot tool's output).
+   */
+  "screenshot.get": { id: string };
+  "secret.set": { connection_id: string; secret: string };
+  "server.get_health": undefined;
+  /**
+   * The server's name, its source and the computer's name (feature `server_name`).
+   */
+  "server.get_name": undefined;
+  "server.restart": undefined;
+  /**
+   * Choose the server's name (`server.set_name`). Empty or only spaces puts the
+   * computer's name back. The same name as now changes nothing (no event).
+   * Answers `ServerNameSet`.
+   */
+  "server.set_name": { name: string };
+  /**
+   * The first request of a session: who is calling. The protocol major in
+   * every request must equal the server's, else the answer is a hard error.
+   */
+  "session.hello": M.HelloParams;
+  /**
+   * The signed-in devices of a board member (none: the session's own),
+   * newest activity first (`SessionView::current` marks this one). Any board
+   * member may list another's (one role). Never a token or its hash.
+   */
+  "session.list": { user_id?: string | null };
+  /**
+   * End one session (any board member's: one role). Its device's open
+   * connection closes at once (`ServerMessage::SignedOut`); the timeline says
+   * who revoked it. Answers `Done`. Not for apps.
+   */
+  "session.revoke": { session_id: string };
+  "share.create": M.ShareMessage;
+  "share.list": { project_id: string };
+  "share.revoke": M.RevokeShare;
+  /**
+   * The subagents running in the answers of one conversation.
+   */
+  "subagent.list": { conversation_id: string };
+  "subscription.get": { refresh: boolean };
+  "task.assign": M.AssignTask;
+  "task.cancel": M.CancelTask;
+  "task.choose_variant": M.ChooseTaskVariant;
+  "task.create": M.CreateTask;
+  "task.discuss": M.DiscussTask;
+  /**
+   * Tasks, newest first, company-wide; every given filter applies.
+   */
+  "task.list": { employee_id?: string | null; project_id?: string | null; state?: M.TaskListState | null };
+  /**
+   * A task's variants and the judge's comparison (feature `task_variants`).
+   */
+  "task.variants": { task_id: string };
+  "terminal.close": { terminal_id: string };
+  /**
+   * This session stops getting a terminal's output; the shell keeps running and
+   * keeps its scrollback (feature `terminal.multi`).
+   */
+  "terminal.detach": { terminal_id: string };
+  "terminal.input": { data_base64: string; terminal_id: string };
+  /**
+   * The terminals of a conversation, oldest first (feature `terminal.multi`).
+   */
+  "terminal.list": { conversation_id: string };
+  /**
+   * A shell in the folder a conversation works in. Attaches to the running terminal
+   * unless `fresh`; this session then gets its output as `ServerMessage::TerminalOutput`.
+   * With `terminal_id` it attaches to exactly that terminal (its scrollback follows);
+   * with `additional` it starts another terminal beside the running ones
+   * (feature `terminal.multi`; at most 4 per conversation, 8 per server).
+   */
+  "terminal.open": { additional?: boolean; cols: number; conversation_id: string; fresh: boolean; rows: number; terminal_id?: string | null };
+  "terminal.resize": { cols: number; rows: number; terminal_id: string };
+  /**
+   * One thread of a channel (feature `chat_threads`): `message_id` is the
+   * message that starts it (a message of a channel or a ticket's discussion
+   * that is not itself a reply), answered with the message and its replies,
+   * oldest first (`ThreadSnapshot`). The board member who reads it has read
+   * the thread (its `thread_unread` goes to none); reading the channel never
+   * does. A message without replies is a thread of none.
+   */
+  "thread.read": { message_id: string };
+  /**
+   * Review → Done. Only a board member; only when no linked task still works (B6).
+   */
+  "ticket.accept": { confirm_secret?: boolean; note?: string | null; ticket_id: string };
+  /**
+   * Plan review → Doing: the owner carries the plan out.
+   */
+  "ticket.approve_plan": { decision: M.PlanApproval; feedback?: string | null; ticket_id: string };
+  /**
+   * Take a ticket off the board (from Done or Backlog); it stays readable.
+   */
+  "ticket.archive": { ticket_id: string };
+  /**
+   * Choose the owner of a ticket before its main task exists: a board member
+   * (instead of the dispatcher) or the dispatcher itself. Gives `ticket.dispatched`.
+   *
+   * `employee_id` none: no owner again, so the dispatcher chooses when it
+   * starts. Only in Backlog (before the start); gives `ticket.updated` with
+   * `changed: ["owner"]`, not `ticket.dispatched` (nobody was chosen).
+   */
+  "ticket.assign": { employee_id?: string | null; reason?: string | null; ticket_id: string };
+  /**
+   * Stop the work on a ticket: its main task is cancelled and it goes back to Backlog.
+   */
+  "ticket.cancel": { ticket_id: string };
+  /**
+   * A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
+   */
+  "ticket.create": { confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; files?: string[]; from_idea?: string | null; from_message?: string | null; labels?: string[]; owner_employee_id?: string | null; priority?: M.TicketPriority; project_id: string; responsible_user_id?: string | null; run?: M.TaskRun; start?: boolean; title: string };
+  "ticket.follow": M.FollowTicket;
+  /**
+   * Who follows a ticket (feature `ticket_follow`). Not for apps.
+   */
+  "ticket.followers": { ticket_id: string };
+  /**
+   * One ticket with its main task and every task linked to it.
+   */
+  "ticket.get": { ticket_id: string };
+  /**
+   * Tickets in board order (not archived); every given filter applies. `query`
+   * searches title, description and `#number`.
+   */
+  "ticket.list": { column?: M.ColumnKind | null; project_id?: string | null; query?: string | null };
+  /**
+   * Drag a card. Within its column: only the order. To Todo: start it. To
+   * Backlog: cancel it. Done only through `ticket.accept`, and Review back to
+   * Doing only through `ticket.send_back`; out of Testing only to Backlog (cancel);
+   * other moves follow the work and are refused.
+   * The place is relative to a neighbour, so it means the same on a board
+   * filtered by project as on the whole board. A move within the same column
+   * also gives `ticket.moved` (with `from` = `to`). A card put above itself in
+   * its own column stays where it is: no event, the version is unchanged.
+   * Unknown fields (such as the old `position`) are refused.
+   */
+  "ticket.move": { before_ticket_id?: string | null; column_id: string; ticket_id: string };
+  /**
+   * The tickets of the board member of the session (feature `my_tickets`),
+   * never of one named in a param: responsible, created or followed by them,
+   * and open ones on their login or without an active responsible. Done and
+   * archived ones only with `include_done`. By priority, then the latest
+   * update; at most `MY_TICKETS_MAX`. Not for apps.
+   */
+  "ticket.my_tickets": { include_done?: boolean; project_id?: string | null };
+  /**
+   * A board member writes in a ticket's discussion (feature `ticket_discussion`).
+   * Without `@Name` it goes to the owner while the ticket is in Todo (with an
+   * owner), Doing, Plan review, Testing or Review; else it wakes nobody. `@Name` wakes those
+   * employees. Refused on Done (the discussion is read-only there). Not for apps.
+   */
+  "ticket.post": { confirm_secret?: boolean; files?: string[]; images?: string[]; text: string; thread_parent?: string | null; ticket_id: string };
+  /**
+   * Try the summary of a ticket on Done again after it failed (`SystemLineKind::SummaryFailed`).
+   * Only a board member; refused when the summary is already there or still being made.
+   */
+  "ticket.retry_summary": { ticket_id: string };
+  /**
+   * Plan review → Doing in Plan mode: the owner makes a new plan with the feedback.
+   */
+  "ticket.revise_plan": { confirm_secret?: boolean; feedback: string; ticket_id: string };
+  /**
+   * Review → Doing with feedback (required) for the owner.
+   */
+  "ticket.send_back": { confirm_secret?: boolean; feedback: string; ticket_id: string };
+  /**
+   * Choose the board member responsible for a ticket (`ticket.set_responsible`,
+   * feature `ticket_responsible`). Its own command rather than a field of
+   * `UpdateTicket`, where "nobody" and "unchanged" would need two kinds of none.
+   */
+  "ticket.set_responsible": { responsible_user_id?: string | null; ticket_id: string };
+  /**
+   * The Start button: Backlog to Todo. With an employee the dispatcher is skipped.
+   * Also starts again a ticket whose main task failed.
+   */
+  "ticket.start": { employee_id?: string | null; ticket_id: string };
+  /**
+   * Change the fields of a ticket. Left out: unchanged. The creator never
+   * changes; the owner only through `ticket.assign`; mode and model only while
+   * the main task does not run.
+   */
+  "ticket.update": { add_files?: string[] | null; clear_deadline?: boolean; confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; labels?: string[] | null; priority?: M.TicketPriority | null; run?: M.TaskRun | null; ticket_id: string; title?: string | null };
+  /**
+   * Run a ticket on the Claude login of the board member who asks (B4, D3-3):
+   * `TicketView::login_user` becomes that board member, never anyone else. The
+   * creator stays. Only a board member; answers `TicketChanged`.
+   */
+  "ticket.use_my_login": { ticket_id: string };
+  /**
+   * Human-readable timeline cards, newest first (keyset on `seq`).
+   */
+  "timeline.list": M.TimelineQuery;
+  /**
+   * Whether runs keep a trace (feature `run_trace`).
+   */
+  "trace.get_setting": undefined;
+  /**
+   * Trace mode on or off for every run that starts afterwards (feature `run_trace`).
+   * Off also forgets the traces kept so far.
+   */
+  "trace.set_enabled": { enabled: boolean };
+  "update.apply": undefined;
+  "update.apply_app": undefined;
+  /**
+   * Update status; `check` asks GitHub for the latest release first.
+   */
+  "update.get": { check: boolean };
+  "update.prepare": undefined;
+  "update.prepare_app": undefined;
+  /**
+   * A file the user uploaded with a message, task, recurring task or idea (see
+   * `MessageFileView::id`), in parts of at most `UPLOAD_CHUNK_BYTES` from
+   * `offset` (none: 0). With `max_side` an image comes back whole as a JPEG
+   * that fits that many pixels (clamped to `UPLOAD_THUMB_MAX_SIDE`); other files are refused.
+   */
+  "upload.get": { id: string; max_side?: number | null; offset?: number | null };
+  "usage.get": undefined;
+  /**
+   * Usage per hour of one server-local day (any moment in it).
+   */
+  "usage.get_hours": { day_start_ms: number };
+  /**
+   * What a conversation or a task used, with the tasks given away from it apart
+   * (feature `run_usage`). Give one of the two; a task wins.
+   */
+  "usage.get_totals": { conversation_id?: string | null; task_id?: string | null };
+  /**
+   * A new board member (OV-12: `invalid_username`, `weak_password` (also a
+   * password of only spaces), `username_taken`; `too_many_attempts` after five
+   * a minute on one connection or twenty an hour on the server); answers
+   * `CommandResult::UserCreated` as a command receipt. Without a session only
+   * the first board member (the onboarding): that connection then gets a
+   * session, whose token `user.login` would give (see `HelloResult::user`;
+   * the client signs in once more to get the token). After that it needs a
+   * session (any board member, one role). The server hashes the password
+   * before anything is recorded: the receipt, its request hash and the event
+   * `user.created` hold the name only. Not for apps.
+   */
+  "user.create": M.UserCreateParams;
+  /**
+   * Disable a board member: their sessions end at once and they cannot sign
+   * in; their Claude login is disconnected; tickets keep their creator. The
+   * last active board member cannot be disabled (`last_board_member`).
+   * Answers `User`. Not for apps.
+   */
+  "user.disable": { user_id: string };
+  /**
+   * The board members, oldest first (never a password's hash), disabled ones
+   * too (`UserView::disabled_at_ms`). Works without a session (the sign-in
+   * screen may offer the names). Apps may read it too.
+   */
+  "user.list": undefined;
+  /**
+   * Sign in (protocol 5): a right username and password give this connection a
+   * session and answer `Login` with its token, shown once (keep it for the
+   * server and give it in every hello). A wrong password, an unknown username
+   * and a disabled board member all answer `wrong_password`; after 5 failed tries
+   * for one username the server waits longer each time, up to 15 minutes
+   * (`too_many_attempts` with `retry_after_ms`). A session method: it changes
+   * only the connection and the sessions, so it has no receipt and no event.
+   * Not for apps.
+   */
+  "user.login": M.LoginParams;
+  /**
+   * End this connection's session (the device must sign in again); answers
+   * `WhoAmI` without a board member. A session method.
+   */
+  "user.logout": undefined;
+  /**
+   * Change a password. Own (no `user_id`, or the session's): with the old
+   * password; the other sessions end, this one stays. Another board member's
+   * (B10): a temporary password, changed at their next sign-in
+   * (`must_change_password`); all their sessions end. Like `user.create`, the
+   * passwords are in no receipt, request hash, event or log. Answers `Done`.
+   */
+  "user.set_password": M.SetPasswordParams;
+  /**
+   * Whether the server has board members, and this connection's session's one.
+   * Works without a session.
+   */
+  "user.whoami": undefined;
+  /**
+   * Whether tasks may be tried in several ways first (feature `task_variants`).
+   */
+  "variants.get_setting": undefined;
+  /**
+   * Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
+   */
+  "variants.set_enabled": { enabled: boolean };
+  /**
+   * Archive ("Delete") an item: runs and employees no longer get it; its audit
+   * history stays. Answers `VaultItem`. Not for apps.
+   */
+  "vault.archive": { item_id: string };
+  /**
+   * The audit log, newest first (`VaultAuditPage`): the company's (nothing
+   * given), a project's, or every scope's (`all`); one item's with `item_id`.
+   * `before`: rows older than that row id; `limit` at most 200 (default 50).
+   * Never a value. Not for apps.
+   */
+  "vault.audit": { all?: boolean; before?: number | null; item_id?: string | null; limit?: number | null; project_id?: string | null };
+  /**
+   * A new vault item (feature `vault`), in the company (no `project_id`) or a
+   * project. Answers `VaultItem` (`value` only for text/url). The server
+   * encrypts the value before anything is recorded: the receipt, its request
+   * hash and the event `vault.item_created` hold no value (MU4-05 AC2).
+   * `validation` for a name or env name used in the scope, an env name that
+   * is not UPPER_SNAKE or that the runtime reserves (`PATH`, `ANTHROPIC_*`,
+   * …), a url without `https://`/`http://`, a secret under 8 characters.
+   * Board members with a session only (employees and agent tools never); not for apps.
+   */
+  "vault.create": M.VaultCreateParams;
+  /**
+   * The server's vault key (`VaultKeyExport`, never printed), for a restore on
+   * another machine (B8): a board member with a session that needs no new
+   * password, who gives their password again (`wrong_password`; it counts
+   * for the sign-in limits, `too_many_attempts`). Writes an audit row
+   * `key_export` and tells every board member. Not found before the first
+   * item. Not for apps.
+   */
+  "vault.key_export": M.KeyExportParams;
+  /**
+   * The vault of a scope (feature `vault`): none, the company's items; a
+   * project, its items plus the company's apart (`VaultList::company_items`),
+   * with `overrides_company` on a project item whose env name the company
+   * has too, and the item count of every scope. Never a secret's value.
+   * Archived items are left out. Board members only; not for apps (B5).
+   */
+  "vault.list": { project_id?: string | null };
+  /**
+   * One item's value (`VaultValue`, never printed), for a board member with a
+   * session. Writes an audit row `reveal` (show) or `copy` with the session's
+   * device. `vault_undecryptable` when the key does not fit. Not for apps.
+   */
+  "vault.reveal": { item_id: string; purpose: M.RevealPurpose };
+  /**
+   * Change an item; what is left out stays. `value`: a new value (a secret's
+   * is never sent back to the editor, so "leave empty to keep"). `kind` only
+   * between text and url: to or from secret is `vault_kind_locked` (B7).
+   * With `expected_version` in the envelope a stale edit is `version_conflict`.
+   * Answers `VaultItem`. As `vault.create`: no value in receipt, hash or event.
+   */
+  "vault.update": M.VaultUpdateParams;
+}
