@@ -55,53 +55,21 @@ if [[ -z "$dest" ]]; then
     if [[ -w /Applications ]]; then dest=/Applications; else dest="$HOME/Applications"; fi
 fi
 mkdir -p "$dest"
-version="$(sed -n 's/^version = "\(.*\)"/\1/p' clients/desktop/Cargo.toml | head -1)"
+version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 # The commit is kept in Info.plist, so scripts/update-mac.sh knows what's installed.
 commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 
 echo "Building Aurelius $version ..."
-cargo build -p aurelius-desktop --release
+npx -y pnpm@12.16.1 install --frozen-lockfile
+npx -y pnpm@12.16.1 build
+npx -y pnpm@12.16.1 --filter @aurelius/electron package
 
-# The bundle: the program, the icon, the licences and Info.plist.
-app=target/release/Aurelius.app
-rm -rf "$app"
-mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp target/release/aurelius "$app/Contents/MacOS/aurelius"
-cp clients/desktop/assets/aurelius.icns "$app/Contents/Resources/aurelius.icns"
+# The packager made the bundle, with the aurelius:// scheme and the icon. The commit goes in its
+# Info.plist, then an ad-hoc signature over the whole of it: Apple Silicon only runs signed code.
+app="clients/electron/release/darwin-$(node -p process.arch)/Aurelius.app"
 cp THIRD-PARTY-LICENSES.md "$app/Contents/Resources/"
-cat > "$app/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key><string>Aurelius</string>
-    <key>CFBundleDisplayName</key><string>Aurelius</string>
-    <key>CFBundleIdentifier</key><string>com.segrusa.aurelius.desktop</string>
-    <key>CFBundleExecutable</key><string>aurelius</string>
-    <key>CFBundleIconFile</key><string>aurelius</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>$version</string>
-    <key>CFBundleVersion</key><string>$version</string>
-    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-    <key>LSMinimumSystemVersion</key><string>11.0</string>
-    <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key><string>com.segrusa.aurelius.link</string>
-            <key>CFBundleTypeRole</key><string>Viewer</string>
-            <key>CFBundleURLSchemes</key>
-            <array><string>aurelius</string></array>
-        </dict>
-    </array>
-    <key>AureliusCommit</key><string>$commit</string>
-</dict>
-</plist>
-PLIST
-# Apple Silicon only runs signed code; an ad-hoc signature over the whole
-# bundle also ties Info.plist and the icon to it.
-codesign --force --sign - "$app"
+/usr/libexec/PlistBuddy -c "Add :AureliusCommit string $commit" "$app/Contents/Info.plist"
+codesign --force --deep --sign - "$app"
 
 # Quit a running Aurelius, then swap the app in one move.
 if pgrep -x aurelius >/dev/null 2>&1; then

@@ -164,6 +164,8 @@ export interface ConnectionOptions {
   deviceName: string;
   /** Refuses a server of another environment, once it is known. */
   environment?: string;
+  /** Refuses any other server, or this one without owner rights: a paired computer has full access. */
+  expectedHostId?: string;
 }
 
 type Listener<T> = (value: T) => void;
@@ -413,7 +415,17 @@ export class Connection {
       throw error;
     }
     if (hello.protocol !== PROTOCOL_MAJOR) throw new Incompatible(DIFFERENT_VERSIONS);
-    const { environment } = this.options;
+    const { environment, expectedHostId } = this.options;
+    if (expectedHostId !== undefined) {
+      if (hello.host_id !== expectedHostId) {
+        throw new Incompatible(`${hello.host_name} now answers as another Aurelius server. Pair this computer again.`);
+      }
+      if (!hello.capabilities.includes("owner")) {
+        throw new Incompatible(
+          `This computer is paired with ${hello.host_name} without full access. Pair it again and choose "Allow as owner".`,
+        );
+      }
+    }
     if (environment !== undefined && hello.environment !== environment) {
       throw new Incompatible(
         `This device is paired with the ${environment} Aurelius, but the server is ${hello.environment}. Pair again.`,

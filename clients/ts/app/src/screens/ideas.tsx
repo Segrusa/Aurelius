@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useIdeas, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
+import { AttachRow, useAttachments } from "../ui/attach";
 import { Button, initial, Mark, markColor, Segments } from "../ui/kit";
 import { Dialog } from "../ui/overlay";
 import { toast } from "../ui/toast";
@@ -13,6 +14,7 @@ import { Held } from "./dialogs";
 import { type Author, admits, canBecomeTicket, ideaPrefill, ideasEmpty, splitIdeas } from "./knowledge-logic";
 import { AREA, Confirm, FIELD, failureOf, hhmm, KnowledgeTabs, PageHead, SMALL } from "./org-kit";
 import { overlays } from "./overlays-store";
+import { FileChips } from "./run-tools";
 
 const PAGE = 100;
 
@@ -30,6 +32,8 @@ function IdeaDialog({
   const client = useQueryClient();
   const projects = useProjects();
   const list = (projects.data ?? []).filter((p) => p.status !== "archived");
+  const attach = useAttachments(idea?.attachments?.length ?? 0);
+  const [dropped, setDropped] = useState<string[]>([]);
   const [title, setTitle] = useState(idea?.title ?? "");
   const [note, setNote] = useState(idea?.note ?? "");
   const [kind, setKind] = useState<IdeaKind>(idea?.kind ?? "feature");
@@ -49,8 +53,14 @@ function IdeaDialog({
         kind,
         confirm_secret: confirmSecret,
       };
-      if (idea) await connection.write("idea.update", { idea_id: idea.id, ...fields }, { retry: false });
-      else await connection.write("idea.add", { project_id: project, ...fields }, { retry: false });
+      if (idea)
+        await connection.write(
+          "idea.update",
+          { idea_id: idea.id, ...fields, add_files: attach.paths, remove_files: dropped },
+          { retry: false },
+        );
+      else
+        await connection.write("idea.add", { project_id: project, ...fields, files: attach.paths }, { retry: false });
       await client.invalidateQueries({ queryKey: ["ideas"] });
       onClose();
     } catch (e) {
@@ -63,7 +73,7 @@ function IdeaDialog({
   const name = idea ? "Edit idea" : "New idea";
   return (
     <Dialog open onClose={onClose} title={name} width={520}>
-      <div className="flex flex-col gap-3 p-4">
+      <div {...attach.target} className="flex flex-col gap-3 p-4">
         <p className="m-0 text-[15px] font-semibold">{name}</p>
         <p className="m-0 text-[12px] leading-[1.5] text-text3">
           For later. When its time comes, make a ticket from it (Ctrl+T in Ideas). Enter adds a line; Ctrl+Enter saves.
@@ -104,6 +114,20 @@ function IdeaDialog({
             </select>
           </label>
         )}
+        {(idea?.attachments ?? [])
+          .filter((f) => !dropped.includes(f.path))
+          .map((f) => (
+            <button
+              key={f.path}
+              type="button"
+              aria-label={`Remove ${f.name}`}
+              onClick={() => setDropped([...dropped, f.path])}
+              className="cursor-pointer self-start rounded-[6px] border border-line bg-transparent px-2 py-1 text-[12px] text-text"
+            >
+              {f.name} ×
+            </button>
+          ))}
+        <AttachRow attach={attach} />
         {held ? <Held names={held} busy={busy} onSend={() => void save(true)} /> : null}
         {error ? (
           <p role="alert" className="m-0 text-red">
@@ -176,6 +200,13 @@ export function IdeasBody({ projectId, chrome = true }: { projectId: string | nu
   const canTicket = (i: IdeaView) => features.includes("ticket_from_idea") && canBecomeTicket(i);
   useAction("NewItem", () => setDialog("new"));
   useAction("EditItem", () => selected && setDialog(selected), selected !== null);
+  useAction(
+    "RemoveMemory",
+    () =>
+      selected?.status === "open" &&
+      void setIdeaStatus(selected, "dropped", `Dropped “${selected.title}” (filter 3 shows dropped ideas).`),
+    selected !== null,
+  );
   useAction("MakeTicket", () => selected && canTicket(selected) && makeTicket(selected), selected !== null);
   useAction("Filter1", () => setStatus("open"));
   useAction("Filter2", () => setStatus("done"));
@@ -287,6 +318,7 @@ export function IdeasBody({ projectId, chrome = true }: { projectId: string | nu
             {selected.note ? (
               <p className="m-0 text-[14px] leading-[1.65] whitespace-pre-wrap text-text2">{selected.note}</p>
             ) : null}
+            <FileChips files={selected.attachments ?? []} />
             {selected.ticket_id ? (
               <Link to="/board" search={{ ticket: selected.ticket_id }} className="text-acc-text no-underline">
                 Open ticket{selected.ticket_number ? ` #${selected.ticket_number}` : ""}

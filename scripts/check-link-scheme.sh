@@ -25,10 +25,8 @@ if command -v xdg-mime >/dev/null 2>&1; then
     [[ "$got" == "aurelius.desktop" ]] || bad "xdg-mime did not take aurelius.desktop (got '$got')"
 fi
 
-# Mac: the Info.plist heredoc must be well-formed and declare the scheme.
-sed -n '/<<PLIST$/,/^PLIST$/p' scripts/install-mac.sh | sed '1d;$d' > "$tmp/mac.plist"
-xmllint --noout "$tmp/mac.plist" || bad "Mac Info.plist is not well-formed"
-grep -q '<string>aurelius</string>' "$tmp/mac.plist" && grep -q CFBundleURLSchemes "$tmp/mac.plist" || bad "Mac plist has no aurelius URL scheme"
+# Mac: the packager writes the Info.plist from this declaration.
+grep -q 'schemes: \["aurelius"\]' clients/electron/scripts/package.mjs || bad "the Mac bundle does not declare the scheme"
 
 # iOS and Android.
 ios=clients/mobile/ios/Runner/Info.plist

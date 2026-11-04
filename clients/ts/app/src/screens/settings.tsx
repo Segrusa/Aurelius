@@ -97,6 +97,14 @@ export function SettingsSidebar() {
 export function SettingsScreen({ section }: { section: string }) {
   const navigate = useNavigate();
   useAction("Back", () => void navigate({ to: "/inbox" }));
+  const stepSection = (by: number) => {
+    const all = GROUPS.flatMap((g) => g.sections);
+    const at = all.findIndex((s) => s.key === section);
+    const next = all[(at + by + all.length) % all.length];
+    if (next) void navigate({ to: "/settings/$section", params: { section: next.key } });
+  };
+  useAction("NextTab", () => stepSection(1));
+  useAction("PrevTab", () => stepSection(-1));
   const found = GROUPS.flatMap((g) => g.sections).find((s) => s.key === section);
   return (
     <>

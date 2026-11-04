@@ -20,9 +20,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useBoard, useEmployees, useProjects } from "../data";
+import { useBoard, useEmployees, useMembers, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { NewIcon } from "../ui/icons";
@@ -38,9 +38,11 @@ import {
   movedCard,
   type Needs,
   type OwnerFilter,
+  type ResponsibleFilter,
   shownCards,
 } from "./board-logic";
 import { Held, useSend } from "./dialogs";
+import { ticketLink } from "./links-logic";
 import { overlays } from "./overlays-store";
 import { ConfirmDialog, TicketPanel } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
@@ -61,10 +63,18 @@ function ColumnsDialog({ columns, onClose }: { columns: BoardColumnView[]; onClo
   const connection = useConnection();
   const client = useQueryClient();
   const [names, setNames] = useState(() => new Map(columns.map((c) => [c.id, c.name])));
+  const [ordered, setOrdered] = useState(columns);
+  const shift = (index: number, by: number) => {
+    const next = [...ordered];
+    const [moved] = next.splice(index, 1);
+    if (!moved) return;
+    next.splice(index + by, 0, moved);
+    setOrdered(next);
+  };
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const save = async () => {
-    const edits = columns.map((c) => ({ column_id: c.id, name: (names.get(c.id) ?? "").trim() }));
+    const edits = ordered.map((c) => ({ column_id: c.id, name: (names.get(c.id) ?? "").trim() }));
     const wrong = columnsProblem(edits.map((e, i) => ({ name: e.name, title: columns[i]?.name ?? "" })));
     setProblem(wrong);
     if (wrong) return;
@@ -88,8 +98,26 @@ function ColumnsDialog({ columns, onClose }: { columns: BoardColumnView[]; onClo
     <Dialog open onClose={onClose} title="Columns" width={420}>
       <div className="flex flex-col gap-2 p-4">
         <p className="m-0 text-[15px] font-semibold">Columns</p>
-        {columns.map((c) => (
+        {ordered.map((c, i) => (
           <label key={c.id} className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-label={`Move ${c.name} left`}
+              disabled={i === 0}
+              onClick={() => shift(i, -1)}
+              className="cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text disabled:opacity-30"
+            >
+              ←
+            </button>
+            <button
+              type="button"
+              aria-label={`Move ${c.name} right`}
+              disabled={i === ordered.length - 1}
+              onClick={() => shift(i, 1)}
+              className="cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text disabled:opacity-30"
+            >
+              →
+            </button>
             <ColumnGlyph kind={c.kind} />
             <input
               aria-label={`Name of ${c.name}`}
@@ -152,6 +180,7 @@ function Card({
   mine,
   selected,
   onOpen,
+  onMenu,
 }: {
   t: TicketView;
   kind: ColumnKind;
@@ -159,6 +188,7 @@ function Card({
   mine: boolean;
   selected: boolean;
   onOpen: (id: string) => void;
+  onMenu: (t: TicketView, x: number, y: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: t.id,
@@ -172,6 +202,10 @@ function Card({
       data-column={kind}
       aria-label={`${ticketNumber(t)} ${t.title}`}
       onClick={() => onOpen(t.id)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        onMenu(t, e.clientX, e.clientY);
+      }}
       {...attributes}
       {...listeners}
       style={{ transform: CSS.Translate.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
@@ -191,6 +225,7 @@ function Column({
   mine,
   selected,
   onOpen,
+  onMenu,
   onShowOlder,
 }: {
   column: BoardColumnView;
@@ -201,6 +236,7 @@ function Column({
   mine: (t: TicketView) => boolean;
   selected: string | undefined;
   onOpen: (id: string) => void;
+  onMenu: (t: TicketView, x: number, y: number) => void;
   onShowOlder: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `column:${column.kind}`, data: { kind: column.kind } });
@@ -253,6 +289,7 @@ function Column({
                     mine={mine(t)}
                     selected={t.id === selected}
                     onOpen={onOpen}
+                    onMenu={onMenu}
                   />
                 </div>
               );
@@ -332,11 +369,14 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
   const navigate = useNavigate();
   const client = useQueryClient();
   const { storage } = usePlatform();
-  const { features } = useLinkState();
+  const { features, user, hostId } = useLinkState();
+  const me = user?.id ?? null;
   const write = useTicketWrite();
   const [chosenProject, setProject] = useState<string | null>(() => storage.get("board_project"));
   const project = projectId ?? chosenProject;
   const [owner, setOwner] = useState<OwnerFilter>({ kind: "anyone" });
+  const [responsible, setResponsible] = useState<ResponsibleFilter>({ kind: "anyone" });
+  const members = useMembers();
   const [query, setQuery] = useState("");
   const [needsOnly, setNeedsOnly] = useState(false);
   const [doneAll, setDoneAll] = useState(false);
@@ -345,6 +385,8 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
     () => (storage.get(HIDDEN_KEY)?.split(",").filter(Boolean) ?? []) as ColumnKind[],
   );
   const [dragging, setDragging] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<TicketView | null>(null);
+  const platform = usePlatform();
   const [pending, setPending] = useState<Pending>(null);
   const projects = useProjects();
   const employees = useEmployees();
@@ -359,7 +401,10 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
     () => (board.data?.columns ?? []).filter((c) => columnShown(c.column.kind, testing)),
     [board.data, testing],
   );
-  const filter = useMemo(() => ({ owner, query, needsOnly, needs: need.mine }), [owner, query, needsOnly, need]);
+  const filter = useMemo(
+    () => ({ owner, responsible, query, needsOnly, needs: need.mine }),
+    [owner, responsible, query, needsOnly, need],
+  );
   const shown = useMemo(
     () => columns.map((c) => ({ ...c, ...shownCards(c.column.kind, c.tickets, filter, doneAll) })),
     [columns, filter, doneAll],
@@ -400,7 +445,11 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
     if (!t || !event.over) return;
     const overId = String(event.over.id);
     const to = (event.over.data.current?.kind ?? t.column) as ColumnKind;
-    const onto = overId.startsWith("column:") ? null : overId;
+    moveCard(t, to, overId.startsWith("column:") ? null : overId);
+  };
+
+  /** A drag or the Move menu: the same rules. */
+  const moveCard = (t: TicketView, to: ColumnKind, onto: string | null) => {
     const effect = dropEffect(t.column, to, need.choosing(t));
     switch (effect.kind) {
       case "refused":
@@ -456,6 +505,92 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
   useAction("OpenSelected", () => {
     const id = document.activeElement instanceof HTMLElement ? document.activeElement.dataset.card : undefined;
     if (id) open(id);
+  });
+
+  const [cardMenu, setCardMenu] = useState<{ t: TicketView; x: number; y: number } | null>(null);
+  const openMenu = useCallback((t: TicketView, x: number, y: number) => setCardMenu({ t, x, y }), []);
+  const copyLink = (t: TicketView) =>
+    void platform.copy(ticketLink(hostId ?? "", t.id)).then(() => toast("Link copied."));
+  const pickFromMenu = (t: TicketView, key: string) => {
+    if (key === "open") open(t.id);
+    else if (key === "start") void write("ticket.start", { ticket_id: t.id }, { done: `${ticketNumber(t)} started.` });
+    else if (key.startsWith("start:"))
+      void write(
+        "ticket.start",
+        { ticket_id: t.id, employee_id: key.slice("start:".length) },
+        { done: `${ticketNumber(t)} started.` },
+      );
+    else if (key === "copy") copyLink(t);
+    else if (key === "follow" || key === "unfollow")
+      void write(
+        "ticket.follow",
+        { ticket_id: t.id, on: key === "follow" },
+        { done: key === "follow" ? "You follow this ticket." : "You don't follow this ticket any more." },
+      );
+    else if (key.startsWith("responsible:")) {
+      const who = key.slice("responsible:".length);
+      void write("ticket.set_responsible", { ticket_id: t.id, responsible_user_id: who === "none" ? null : who });
+    } else if (key.startsWith("move:")) moveCard(t, key.slice("move:".length) as ColumnKind, null);
+    else if (key === "delete") setDeleting(t);
+  };
+  const cardOptions = (t: TicketView) => [
+    { key: "open", label: "Open" },
+    ...(t.column === "backlog"
+      ? [
+          { key: "start", label: "Start" },
+          ...(employees.data ?? [])
+            .filter((e) => e.status === "active")
+            .map((e) => ({ key: `start:${e.id}`, label: `Start with ${e.name}` })),
+        ]
+      : []),
+    { key: "copy", label: "Copy link" },
+    ...(features.includes("ticket_follow")
+      ? [
+          { key: "follow", label: "Follow" },
+          { key: "unfollow", label: "Unfollow" },
+        ]
+      : []),
+    ...(features.includes("ticket_responsible") && t.column !== "done"
+      ? [
+          ...(me && t.responsible_user_id !== me ? [{ key: `responsible:${me}`, label: "Make me responsible" }] : []),
+          ...(me && t.responsible_user_id === me
+            ? [{ key: "responsible:none", label: "Remove me as responsible" }]
+            : []),
+          ...(members.data ?? [])
+            .filter((u) => !u.disabled_at_ms && u.id !== me && u.id !== t.responsible_user_id)
+            .map((u) => ({ key: `responsible:${u.id}`, label: `Responsible: ${u.username}` })),
+        ]
+      : []),
+    ...columns
+      .filter((c) => c.column.kind !== t.column)
+      .map((c) => ({ key: `move:${c.column.kind}`, label: `Move to ${c.column.name}` })),
+    ...(t.column === "backlog" ? [{ key: "delete", label: "Delete…", danger: true }] : []),
+  ];
+  /** The card with the keyboard's focus. */
+  const focusedCard = () => {
+    const el = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const t = all.find((x) => x.id === el?.dataset.card);
+    return t && el ? { t, el } : null;
+  };
+  const menuOnCard = () => {
+    const card = focusedCard();
+    if (!card) return;
+    const box = card.el.getBoundingClientRect();
+    openMenu(card.t, box.left, box.bottom);
+  };
+  useAction("BoardMoveTo", menuOnCard);
+  useAction("BoardResponsible", menuOnCard);
+  useAction("BoardStart", () => {
+    const card = focusedCard();
+    if (card?.t.column === "backlog") moveCard(card.t, "doing", null);
+  });
+  useAction("BoardFollow", () => {
+    const card = focusedCard();
+    if (card) pickFromMenu(card.t, "follow");
+  });
+  useAction("BoardCopyLink", () => {
+    const card = focusedCard();
+    if (card) copyLink(card.t);
   });
 
   const toggleColumn = (kind: ColumnKind) => {
@@ -532,6 +667,31 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
             </button>
           }
         />
+        {features.includes("ticket_responsible") ? (
+          <Menu
+            label="Responsible"
+            options={[
+              { key: "anyone", label: "Anyone" },
+              ...(me ? [{ key: me, label: "Me" }] : []),
+              { key: "none", label: "No one" },
+              ...(members.data ?? [])
+                .filter((u) => u.id !== me && (!u.disabled_at_ms || all.some((t) => t.responsible_user_id === u.id)))
+                .map((u) => ({ key: u.id, label: u.username })),
+            ]}
+            onPick={(id) => setResponsible(id === "anyone" || id === "none" ? { kind: id } : { kind: "user", id })}
+            trigger={
+              <button type="button" className={pill}>
+                {responsible.kind === "anyone"
+                  ? "Responsible: anyone"
+                  : responsible.kind === "none"
+                    ? "Responsible: no one"
+                    : responsible.id === me
+                      ? "Responsible: me"
+                      : `Responsible: ${members.data?.find((u) => u.id === responsible.id)?.username ?? "…"}`}
+              </button>
+            }
+          />
+        ) : null}
         <input
           aria-label="Find a ticket"
           placeholder="Find"
@@ -613,6 +773,7 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
                     mine={need.mine}
                     selected={ticket}
                     onOpen={open}
+                    onMenu={openMenu}
                     onShowOlder={() => setDoneAll(true)}
                   />
                 ))}
@@ -651,6 +812,32 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
       >
         {pending?.kind === "send_back" ? <SendBackDialog t={pending.ticket} onClose={() => setPending(null)} /> : null}
       </Dialog>
+      {cardMenu ? (
+        <Menu
+          open
+          label={`${ticketNumber(cardMenu.t)} actions`}
+          onOpenChange={(next) => {
+            if (!next) setCardMenu(null);
+          }}
+          options={cardOptions(cardMenu.t)}
+          onPick={(key) => pickFromMenu(cardMenu.t, key)}
+          trigger={<span aria-hidden="true" style={{ position: "fixed", left: cardMenu.x, top: cardMenu.y }} />}
+        />
+      ) : null}
+      {deleting ? (
+        <ConfirmDialog
+          open
+          danger
+          title={`Delete ${ticketNumber(deleting)}?`}
+          body="It leaves the board and stays readable for the record."
+          confirm="Delete"
+          onClose={() => setDeleting(null)}
+          onConfirm={() => {
+            void write("ticket.archive", { ticket_id: deleting.id }, { done: `${ticketNumber(deleting)} is deleted.` });
+            setDeleting(null);
+          }}
+        />
+      ) : null}
       {pending && pending.kind !== "send_back" ? (
         <ConfirmDialog
           open

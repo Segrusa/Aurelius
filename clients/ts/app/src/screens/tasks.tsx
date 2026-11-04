@@ -35,9 +35,11 @@ function useAssign(task: TaskView | undefined) {
   const employees = useEmployees();
   const options = (employees.data ?? [])
     .filter((e) => e.status === "active" && e.id !== task?.employee_id)
-    .map((e) => ({ key: e.id, label: e.name }));
-  const pick = async (employeeId: string) => {
+    .map((e) => ({ key: e.id, label: e.name }))
+    .concat(task?.employee_id ? [{ key: "draft", label: "Nobody: a draft again" }] : []);
+  const pick = async (choice: string) => {
     if (!task) return;
+    const employeeId = choice === "draft" ? null : choice;
     try {
       await connection.write("task.assign", { task_id: task.id, employee_id: employeeId }, { retry: false });
       await client.invalidateQueries({ queryKey: ["tasks"] });

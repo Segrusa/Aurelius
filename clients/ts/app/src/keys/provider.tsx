@@ -10,12 +10,16 @@ type Handler = () => void;
 interface Keys {
   stack: KeyState["stack"];
   pushContext(name: string, modal: boolean): () => void;
-  addHandler(action: string, handler: { current: Handler }): () => void;
+  addHandler(action: string, handler: { current: Handler }, fallback?: boolean): () => void;
+  /** How many screens answer this action now. */
+  count(action: string): number;
   has(action: string): boolean;
   run(action: string): void;
+  /** Handle a key press, as if it had reached the window. */
+  press(event: KeyboardEvent): void;
 }
 
-const KeysContext = createContext<Keys | null>(null);
+export const KeysContext = createContext<Keys | null>(null);
 
 export const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
@@ -28,6 +32,7 @@ export function KeysProvider({ children }: { children: ReactNode }) {
     ];
     const handlers = new Map<string, { current: Handler }[]>();
     const list = (action: string) => handlers.get(action) ?? [];
+    const run = (action: string) => list(action).at(-1)?.current();
     return {
       stack,
       pushContext(name, modal) {
@@ -37,8 +42,8 @@ export function KeysProvider({ children }: { children: ReactNode }) {
           stack.splice(stack.indexOf(entry), 1);
         };
       },
-      addHandler(action, handler) {
-        handlers.set(action, [...list(action), handler]);
+      addHandler(action, handler, fallback = false) {
+        handlers.set(action, fallback ? [handler, ...list(action)] : [...list(action), handler]);
         return () => {
           handlers.set(
             action,
@@ -46,27 +51,31 @@ export function KeysProvider({ children }: { children: ReactNode }) {
           );
         };
       },
+      count: (action) => list(action).length,
       has: (action) => list(action).length > 0,
-      run: (action) => list(action).at(-1)?.current(),
+      run,
+      press(event) {
+        const chord = chordOf(event, isMac);
+        if (chord === null) return;
+        const target = event.target instanceof Element ? event.target : null;
+        const typing = Boolean(target?.closest("input, textarea, select, [contenteditable=true]"));
+        const onControl = Boolean(target?.closest("button, a, [role=menuitem]"));
+        const action = actionsFor(chord, { stack, typing, onControl, kind }).find((a) => list(a).length > 0);
+        if (action === undefined) return;
+        event.preventDefault();
+        run(action);
+      },
     };
-  }, []);
+  }, [kind]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing) return;
-      const chord = chordOf(event, isMac);
-      if (chord === null) return;
-      const target = event.target instanceof Element ? event.target : null;
-      const typing = Boolean(target?.closest("input, textarea, select, [contenteditable=true]"));
-      const onControl = Boolean(target?.closest("button, a, [role=menuitem]"));
-      const action = actionsFor(chord, { stack: keys.stack, typing, onControl, kind }).find((a) => keys.has(a));
-      if (action === undefined) return;
-      event.preventDefault();
-      keys.run(action);
+      keys.press(event);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [keys, kind]);
+  }, [keys]);
 
   return <KeysContext.Provider value={keys}>{children}</KeysContext.Provider>;
 }
@@ -83,6 +92,14 @@ export function useAction(action: string, handler: Handler, enabled = true): voi
   const latest = useRef(handler);
   latest.current = handler;
   useEffect(() => (enabled ? keys.addHandler(action, latest) : undefined), [keys, action, enabled]);
+}
+
+/** Only when no screen answers `action`: the app-wide way to it. */
+export function useFallbackAction(action: string, handler: Handler): void {
+  const keys = useKeys();
+  const latest = useRef(handler);
+  latest.current = handler;
+  useEffect(() => keys.addHandler(action, latest, true), [keys, action]);
 }
 
 /** While mounted, this context is open. A modal one shuts out everything behind it. */

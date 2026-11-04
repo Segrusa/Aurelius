@@ -5,10 +5,11 @@
 //! only when its Ed25519 signature verifies against the compiled-in release
 //! key. The server (service + aurelius-ctl) and the desktop app are released
 //! separately (`server-v*`, `desktop-v*`), each with its own version; this
-//! service installs both. Applying: running programs are renamed to `.old`
-//! (allowed on Windows) and the new ones placed beside them. A server update
-//! stops the service, which starts the new version; an app update only asks
-//! the app to restart. Any failure restores the old files.
+//! service installs both. Applying the server: running programs are renamed to
+//! `.old` (allowed on Windows) and the new ones placed beside them; the service
+//! stops and starts the new version. Applying the app: the app is a folder that
+//! can't move while it runs, so the app closes and this service then swaps the
+//! folder and opens the new one. Any failure restores the old files.
 
 use crate::Shared;
 use aurelius_protocol::UpdateStatus;
@@ -58,10 +59,10 @@ async fn gh_output(args: &[&str]) -> Result<String, String> {
 }
 
 /// Whether this computer has the desktop app: a server-only install
-/// (`install-production.ps1 -Role server`) has no `aurelius.exe`.
+/// (`install-production.ps1 -Role server`) has none.
 fn has_app(dir: &Path) -> bool {
     let server_only = std::fs::read_to_string(dir.join("role.txt")).is_ok_and(|r| r.trim() == "server");
-    !server_only && dir.join("aurelius.exe").exists()
+    !server_only && aurelius_host::updater::app_program(dir).exists()
 }
 
 /// The installed app's version (written beside it at install and update);
@@ -250,21 +251,125 @@ pub async fn apply(shared: &Arc<Shared>) -> Result<UpdateStatus, String> {
     Ok(status)
 }
 
-/// Swap `aurelius.exe` for the staged app version. The service keeps running;
-/// the app restarts itself into the new version.
+/// Accepts the staged app version. The app closes on this answer; this service then swaps the
+/// folder and opens the new app (`install_app_when_closed`).
 pub async fn apply_app(shared: &Arc<Shared>) -> Result<UpdateStatus, String> {
     let (version, dir, bin) = staged_bin(shared, Product::Desktop)?;
     if !has_app(&dir) {
         return Err("This computer has no desktop app installed.".into());
     }
-    swap(&dir, &bin, Product::Desktop).map_err(|e| format!("Update not applied (old version restored): {e}"))?;
-    std::fs::write(dir.join(aurelius_host::updater::DESKTOP_VERSION_FILE), &version).map_err(|e| e.to_string())?;
-    tracing::info!(%version, "app update applied");
+    // An app of one program restarts itself by name on this answer: it must not find itself.
+    retire_single_program(&dir);
+    tracing::info!(%version, "app update accepted; waiting for the app to close");
+    tokio::spawn(install_app_when_closed(shared.clone(), version, dir, bin));
     let mut status = base_status(shared, Product::Desktop);
     status.staged = None;
     status.available = false;
     store(shared, Product::Desktop, &status);
     Ok(status)
+}
+
+/// How long the app gets to close; after that the old one stays and the status says why.
+const APP_CLOSE_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+const APP_CLOSE_STEP: std::time::Duration = std::time::Duration::from_millis(500);
+
+async fn install_app_when_closed(shared: Arc<Shared>, version: String, dir: PathBuf, bin: PathBuf) {
+    let started = std::time::Instant::now();
+    let result = loop {
+        tokio::time::sleep(APP_CLOSE_STEP).await;
+        match swap_app(&dir, &bin) {
+            Ok(()) => break Ok(()),
+            Err(e) if started.elapsed() >= APP_CLOSE_WAIT => break Err(e),
+            Err(_) => {}
+        }
+    };
+    match result {
+        Ok(()) => {
+            if let Err(e) = std::fs::write(dir.join(aurelius_host::updater::DESKTOP_VERSION_FILE), &version) {
+                tracing::warn!(error = %e, "could not write the app's version");
+            }
+            tracing::info!(%version, "app update applied");
+        }
+        Err(e) => {
+            restore_single_program(&dir);
+            tracing::warn!(error = %e, "app update not applied");
+            let mut status = base_status(&shared, Product::Desktop);
+            status.error = Some(format!("Update not applied (old version kept): {e}. Close the app and try again."));
+            store(&shared, Product::Desktop, &status);
+        }
+    }
+    open_app(&dir);
+}
+
+fn open_app(dir: &Path) {
+    let program = aurelius_host::updater::app_program(dir);
+    let folder = program.parent().map_or_else(|| dir.to_path_buf(), Path::to_path_buf);
+    if let Err(e) = std::process::Command::new(&program).current_dir(folder).spawn() {
+        tracing::warn!(error = %e, "could not open the app");
+    }
+}
+
+fn old_app_dir(dir: &Path) -> PathBuf {
+    dir.join(format!("{}.old", aurelius_host::updater::APP_DIR))
+}
+
+fn single_program_old(dir: &Path) -> (PathBuf, PathBuf) {
+    let name = aurelius_host::updater::APP_EXE;
+    (dir.join(name), dir.join(format!("{name}.old")))
+}
+
+/// A running program may be renamed on Windows; `start` removes it at the next start.
+fn retire_single_program(dir: &Path) {
+    let (program, old) = single_program_old(dir);
+    if program.exists() {
+        let _ = std::fs::remove_file(&old);
+        let _ = std::fs::rename(&program, &old);
+    }
+}
+
+fn restore_single_program(dir: &Path) {
+    let (program, old) = single_program_old(dir);
+    if old.exists() && !program.exists() {
+        let _ = std::fs::rename(&old, &program);
+    }
+}
+
+/// Puts the staged folder in place of the app's. Moving a folder fails while the app still runs
+/// from it, which is the caller's sign to wait. Any failure leaves the old folder in place.
+fn swap_app(dir: &Path, bin: &Path) -> std::io::Result<()> {
+    let app = dir.join(aurelius_host::updater::APP_DIR);
+    let old = old_app_dir(dir);
+    if old.exists() {
+        std::fs::remove_dir_all(&old)?;
+    }
+    let had = app.exists();
+    if had {
+        std::fs::rename(&app, &old)?;
+    }
+    let placed = std::fs::rename(bin, &app).or_else(|_| copy_tree(bin, &app));
+    if let Err(e) = placed {
+        let _ = std::fs::remove_dir_all(&app);
+        if had {
+            std::fs::rename(&old, &app)?;
+        }
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// For staging on another drive than the install folder, where a rename can't.
+fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
 }
 
 /// Replace the product's programs in `dir` with those in `bin`; any failure
@@ -299,6 +404,15 @@ pub fn start(shared: Arc<Shared>) {
         for name in aurelius_host::updater::BINARIES {
             // An app still running from its `.old` file keeps it; that's fine.
             let _ = std::fs::remove_file(dir.join(format!("{name}.old")));
+        }
+        // A swap that stopped halfway leaves only the old folder: it is still the app.
+        let (app, old) = (dir.join(aurelius_host::updater::APP_DIR), old_app_dir(&dir));
+        if old.exists() {
+            if app.exists() {
+                let _ = std::fs::remove_dir_all(&old);
+            } else {
+                let _ = std::fs::rename(&old, &app);
+            }
         }
         let _ = std::fs::remove_dir_all(shared.root.join("updates"));
     } else {
@@ -354,13 +468,56 @@ mod tests {
         assert_eq!(read(dir.path(), "aurelius.exe"), "old");
     }
 
+    fn app_folder(root: &Path, text: &str) -> PathBuf {
+        let app = root.join("resources");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(root.join("aurelius.exe"), text).unwrap();
+        std::fs::write(app.join("app.asar"), text).unwrap();
+        root.to_path_buf()
+    }
+
     #[test]
-    fn an_app_update_leaves_the_server_alone() {
-        let (dir, bin) = (installed(), bin_with_everything());
-        swap(dir.path(), bin.path(), Product::Desktop).unwrap();
-        assert_eq!(read(dir.path(), "aurelius.exe"), "new");
+    fn an_app_update_swaps_the_folder_and_leaves_the_server_alone() {
+        let dir = installed();
+        app_folder(&dir.path().join("app"), "old");
+        std::fs::write(dir.path().join("app/left-behind"), "old").unwrap();
+        let staged = tempfile::tempdir().unwrap();
+        let bin = app_folder(&staged.path().join("bin"), "new");
+        swap_app(dir.path(), &bin).unwrap();
+        assert_eq!(read(&dir.path().join("app"), "aurelius.exe"), "new");
+        assert_eq!(read(&dir.path().join("app/resources"), "app.asar"), "new");
+        assert!(!dir.path().join("app/left-behind").exists());
         assert_eq!(read(dir.path(), "aurelius-daemon.exe"), "old");
         assert_eq!(read(dir.path(), "aurelius-ctl.exe"), "old");
+    }
+
+    #[test]
+    fn a_failed_app_swap_keeps_the_old_folder() {
+        let dir = installed();
+        app_folder(&dir.path().join("app"), "old");
+        let missing = dir.path().join("nothing-staged");
+        assert!(swap_app(dir.path(), &missing).is_err());
+        assert_eq!(read(&dir.path().join("app"), "aurelius.exe"), "old");
+        assert!(!dir.path().join("app.old").exists());
+    }
+
+    #[test]
+    fn a_folder_can_be_placed_across_drives_too() {
+        let from = tempfile::tempdir().unwrap();
+        let bin = app_folder(&from.path().join("bin"), "new");
+        let to = tempfile::tempdir().unwrap();
+        copy_tree(&bin, &to.path().join("app")).unwrap();
+        assert_eq!(read(&to.path().join("app/resources"), "app.asar"), "new");
+    }
+
+    #[test]
+    fn the_single_program_goes_out_of_the_way_and_can_come_back() {
+        let dir = installed();
+        retire_single_program(dir.path());
+        assert!(!dir.path().join("aurelius.exe").exists());
+        assert_eq!(read(dir.path(), "aurelius.exe.old"), "old");
+        restore_single_program(dir.path());
+        assert_eq!(read(dir.path(), "aurelius.exe"), "old");
     }
 
     #[test]
@@ -377,7 +534,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("aurelius-daemon.exe"), "old").unwrap();
         assert!(!has_app(dir.path()));
-        std::fs::write(dir.path().join("aurelius.exe"), "old").unwrap();
+        app_folder(&dir.path().join("app"), "old");
         assert!(has_app(dir.path()));
         std::fs::write(dir.path().join("role.txt"), "server").unwrap();
         assert!(!has_app(dir.path()));

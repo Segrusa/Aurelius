@@ -6,6 +6,7 @@ import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/kit";
 import { QrCode } from "./qr-code";
+import { ServerChoicesPanel } from "./servers";
 import { MemberAccess, passwordProblem } from "./settings-accounts";
 import {
   ConfirmButton,
@@ -481,6 +482,18 @@ function Power() {
   );
 }
 
+function OtherServers() {
+  const { servers } = usePlatform();
+  if (servers === null) return null;
+  return (
+    <Group title="Servers">
+      <div className="p-3">
+        <ServerChoicesPanel />
+      </div>
+    </Group>
+  );
+}
+
 export function ServerSection() {
   const connection = useConnection();
   const { busy, error, run } = useChange();
@@ -495,6 +508,7 @@ export function ServerSection() {
   );
   return (
     <>
+      <OtherServers />
       <Group title="This server">
         <Row
           title="Name"

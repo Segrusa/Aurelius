@@ -6,14 +6,20 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAllTasks, useApprovals, useMessages, useProjects, useRunGuidelines } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
+import { AttachedImages, useImagePaste } from "../ui/attach";
 import { Button, initial, Mark, markColor } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
+import { Menu } from "../ui/overlay";
 import { toast } from "../ui/toast";
 import { ApprovalCard } from "./approval-card";
+import { ContextDialog } from "./chat-message";
 import { Held, useModels, useSend } from "./dialogs";
+import { nextMode } from "./employee-logic";
+import { Confirm } from "./org-kit";
 import { boardOnlyReason } from "./run-logic";
 import {
   FileChips,
+  KeptFiles,
   LoadBanner,
   MarkdownChips,
   RunMenu,
@@ -126,6 +132,7 @@ const Message = memo(function Message({
           scope={conversationId ? { kind: "conversation", conversation_id: conversationId } : null}
         />
         <FileChips files={m.uploads} />
+        <KeptFiles files={m.files ?? []} />
         {m.run_id && m.status !== "partial" ? (
           <TraceLink
             run={m.run_id}
@@ -175,10 +182,12 @@ function Composer({
   task,
   name,
   live,
+  activeRun,
   run,
   waiting,
 }: {
   task: TaskView;
+  activeRun: string | null;
   name: string;
   live: boolean;
   run: TaskRun | undefined;
@@ -192,6 +201,7 @@ function Composer({
     .map((m) => m.key)
     .filter((m) => m !== "default");
   useAction("FocusComposer", () => area.current?.focus());
+  const images = useImagePaste();
   const { busy, held, error, send, sendAnyway } = useSend(() => {
     setText("");
     void client.invalidateQueries({ queryKey: ["messages", task.conversation_id] });
@@ -204,10 +214,23 @@ function Composer({
         conversation_id: conversationId,
         text: text.trim(),
         confirm_secret: confirmSecret,
+        ...(images.paths.length > 0 ? { images: images.paths } : {}),
       });
+      images.clear();
       return "";
     });
   };
+  // Stops what runs now, then this message goes: the same as in a channel.
+  const sendNow = async () => {
+    if (!activeRun || text.trim() === "") return;
+    try {
+      await connection.write("run.stop", { run_id: activeRun }, { retry: false });
+    } catch {
+      // It may have just ended: the message goes either way.
+    }
+    go();
+  };
+  useAction("SendNow", () => void sendNow(), Boolean(activeRun));
   if (!task.conversation_id) return null;
   return (
     <div className="mx-auto flex w-full max-w-[760px] flex-col gap-2 px-10 pb-[18px] max-[900px]:px-4">
@@ -218,7 +241,8 @@ function Composer({
           {error}
         </p>
       ) : null}
-      <div className="rounded-[10px] border border-btn-line bg-sunk">
+      <div {...images.target} className="rounded-[10px] border border-btn-line bg-sunk">
+        <AttachedImages images={images} />
         <textarea
           ref={area}
           aria-label={`Message ${name}`}
@@ -228,7 +252,7 @@ function Composer({
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
               e.preventDefault();
               go();
             }
@@ -289,6 +313,22 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
   }, [count]);
   useAction("Back", () => void navigate({ to: "/tasks" }));
   const retry = useRetryAnswer(task?.conversation_id, list);
+  const [contextOf, setContextOf] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  useAction("ShowContext", () => {
+    if (lastRun) setContextOf(lastRun);
+    else toast("Open a conversation with an answer to see the context it used.");
+  });
+  const client = useQueryClient();
+  useAction("CycleAgentMode", () => {
+    const id = task?.conversation_id;
+    const mode = messages.data?.agent_mode;
+    if (!id || !mode) return;
+    connection
+      .write("conversation.set_agent_mode", { conversation_id: id, mode: nextMode(mode) }, { retry: false })
+      .then(() => client.invalidateQueries({ queryKey: ["messages", id] }))
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
+  });
   useAction("RetryAnswer", retry);
   const stop = async () => {
     if (!lastRun) return;
@@ -356,6 +396,19 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
         </span>
         <div className="ml-auto flex flex-none items-center gap-[6px]">
           <UsageChip taskId={task.id} />
+          <Menu
+            label="Conversation"
+            options={[
+              { key: "context", label: "Show context of last answer" },
+              ...(task.conversation_id ? [{ key: "delete", label: "Delete conversation…", danger: true }] : []),
+            ]}
+            onPick={(key) => {
+              if (key === "delete") setDeleting(true);
+              else if (lastRun) setContextOf(lastRun);
+              else toast("Open a conversation with an answer to see the context it used.");
+            }}
+            trigger={<Button>⋯</Button>}
+          />
           {!live && lastAnswer && (lastAnswer.status === "failed" || lastAnswer.status === "interrupted") ? (
             <Button onClick={retry}>Retry answer</Button>
           ) : null}
@@ -368,6 +421,26 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
           ) : null}
         </div>
       </header>
+      {contextOf ? <ContextDialog run={contextOf} onClose={() => setContextOf(null)} /> : null}
+      {deleting && task.conversation_id ? (
+        <Confirm
+          danger
+          title="Delete this conversation?"
+          body="Its messages are gone for good. The task itself stays."
+          action="Delete"
+          onClose={() => setDeleting(false)}
+          onConfirm={() => {
+            setDeleting(false);
+            connection
+              .write("conversation.delete", { conversation_id: task.conversation_id as string }, { retry: false })
+              .then(() => {
+                void client.invalidateQueries({ queryKey: ["tasks"] });
+                void navigate({ to: "/tasks" });
+              })
+              .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
+          }}
+        />
+      ) : null}
       <div className="flex min-h-0 flex-1">
         <section aria-label="Run" className="flex min-w-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -395,7 +468,14 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
             </div>
           </div>
           {status === "online" ? (
-            <Composer task={task} name={name} live={live} run={messages.data?.run} waiting={!live && isActive(task)} />
+            <Composer
+              task={task}
+              name={name}
+              live={live}
+              activeRun={live ? (lastRun ?? null) : null}
+              run={messages.data?.run}
+              waiting={!live && isActive(task)}
+            />
           ) : null}
         </section>
         <aside

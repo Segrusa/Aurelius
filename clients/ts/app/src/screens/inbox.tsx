@@ -23,6 +23,8 @@ import {
   type InboxRow,
   type InboxTone,
 } from "./inbox-logic";
+import { useFollowLink } from "./links";
+import { messageLink } from "./links-logic";
 import { Confirm } from "./org-kit";
 import { useTicketNeeds } from "./tickets-kit";
 
@@ -303,6 +305,8 @@ function DetailFrame({ row, children }: { row: InboxRow; children: ReactNode }) 
 }
 
 function NotificationDetail({ row, n }: { row: InboxRow; n: NotificationView }) {
+  const { hostId, features } = useLinkState();
+  const follow = useFollowLink();
   const connection = useConnection();
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -315,7 +319,11 @@ function NotificationDetail({ row, n }: { row: InboxRow; n: NotificationView }) 
     }
   };
   const open = () => {
-    if (n.ticket_id) void navigate({ to: "/board", search: { ticket: n.ticket_id } });
+    // A mention or a message outside a ticket: right to that message.
+    const inDiscussion = n.reason === "mention" || n.reason === "sent_back";
+    if (n.message_id && hostId && follow && (!n.ticket_id || inDiscussion) && features.includes("message_locate")) {
+      follow(messageLink(hostId, n.message_id));
+    } else if (n.ticket_id) void navigate({ to: "/board", search: { ticket: n.ticket_id } });
     else if (n.task_id) void navigate({ to: "/tasks/$taskId", params: { taskId: n.task_id } });
     else if (n.conversation_id) void navigate({ to: "/chat", search: { channel: n.conversation_id } });
   };

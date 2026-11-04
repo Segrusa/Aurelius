@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc && electron-vite build",
     "dev": "electron-vite dev",
+    "package": "node scripts/package.mjs",
     "start": "electron ."
   },
   "dependencies": {
@@ -13,13 +14,17 @@
     "@aurelius/client": "workspace:*",
     "@aurelius/protocol": "workspace:*",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "ws": "8.18.3"
   },
   "devDependencies": {
+    "@electron/fuses": "1.8.0",
+    "@electron/packager": "20.3.0",
     "@tailwindcss/vite": "4.3.4",
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "6.2.1",
     "electron": "44.9.2",
     "electron-vite": "6.0.0",

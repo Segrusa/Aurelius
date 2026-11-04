@@ -14,22 +14,21 @@ function Restart-App([bool]$WithService) {
         & (Join-Path $PSScriptRoot "dev.ps1")
         return
     }
-    Get-Process aurelius -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$debug*" } | Stop-Process -Force
-    cargo build -p aurelius-desktop
-    if ($LASTEXITCODE -eq 0) { Start-Process -FilePath (Join-Path $debug "aurelius.exe") }
+    # electron-vite reloads the page by itself; this only opens a closed app again.
+    & (Join-Path $PSScriptRoot "dev.ps1") -Part desktop
 }
 
 $watcher = New-Object IO.FileSystemWatcher "$root", "*.*"
 $watcher.IncludeSubdirectories = $true
 $watcher.NotifyFilter = [IO.NotifyFilters]::LastWrite -bor [IO.NotifyFilters]::FileName
-# Server and shared crates live in crates\, the desktop client in clients\desktop\.
+# Server and shared crates live in crates\, the app in clients\ts\ and clients\electron\.
 $relevant = {
     param($p)
-    $p -match '\.(rs|toml|ico|png)$' -and $p -notmatch '\\target\\' -and
-        ($p -match '^(crates|clients\\desktop)\\' -or $p -eq 'Cargo.toml')
+    $p -match '\.(rs|toml|ico|png|ts|tsx|css)$' -and $p -notmatch '\\target\\' -and
+        ($p -match '^(crates|clients\\ts|clients\\electron)\\' -or $p -eq 'Cargo.toml')
 }
 
-Write-Host "Starting the dev app; watching crates\ and clients\desktop\ for changes (Ctrl+C stops)."
+Write-Host "Starting the dev app; watching crates\ and clients\ for changes (Ctrl+C stops)."
 Restart-App $true
 while ($true) {
     $first = $watcher.WaitForChanged([IO.WatcherChangeTypes]::All, 60000)
@@ -41,7 +40,7 @@ while ($true) {
         if ($next.TimedOut) { break }
         if (& $relevant $next.Name) { $changed += $next.Name }
     }
-    $desktopOnly = -not ($changed | Where-Object { $_ -notlike "clients\desktop\*" })
+    $desktopOnly = -not ($changed | Where-Object { $_ -notlike "clients\*" })
     $what = if ($desktopOnly) { "app" } else { "service and app" }
     Write-Host ("{0:HH:mm:ss} {1} changed - restarting the {2}" -f (Get-Date), ($changed | Select-Object -Unique | Select-Object -First 3) -join ", ", $what)
     Restart-App (-not $desktopOnly)

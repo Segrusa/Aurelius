@@ -80,8 +80,16 @@ const platform: Platform = {
       });
       input.click();
     }),
+  keepFiles: uploadFiles,
   pickFolder: null,
   openFolder: null,
+  target: null,
+  servers: null,
+  osLinks: null,
+  startup: null,
+  windowProject: null,
+  openProjectWindow: null,
+  quit: null,
 };
 
 const root = document.getElementById("root");

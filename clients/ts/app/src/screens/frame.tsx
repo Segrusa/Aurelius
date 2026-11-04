@@ -1,9 +1,18 @@
-import type { TaskView } from "@aurelius/protocol";
+import { expectBody } from "@aurelius/client";
+import type { NotificationView, TaskView } from "@aurelius/protocol";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { useLinkState } from "../connection";
-import { useChannels, useLiveQueries, useOpenTasks, useProjects, useSubscription } from "../data";
-import { useAction } from "../keys/provider";
+import { useConnection, useLinkState } from "../connection";
+import {
+  useChannels,
+  useEmployees,
+  useLiveQueries,
+  useNotifications,
+  useOpenTasks,
+  useProjects,
+  useSubscription,
+} from "../data";
+import { useAction, useFallbackAction, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
 import {
   noteScreen,
@@ -17,12 +26,13 @@ import {
 import { Icon, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/kit";
 import { Tooltip } from "../ui/overlay";
-import { Toasts } from "../ui/toast";
+import { Toasts, toast } from "../ui/toast";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { pinnedFirst } from "./employee-logic";
+import { pinKey, usePins } from "./employees";
 import { useInbox } from "./inbox";
-import { needsYouCount, ticketPlace } from "./inbox-logic";
+import { needsYouCount, newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
 import { useProjectPins } from "./projects";
@@ -164,8 +174,85 @@ function GoAction({ action, to }: { action: string; to: string }) {
   return null;
 }
 
+/** Says once per start that the app is behind; the service looks every six hours. */
+function useUpdateNotice(): void {
+  const connection = useConnection();
+  const { quit } = usePlatform();
+  const { remote } = useLinkState();
+  useEffect(() => {
+    if (quit === null || remote) return;
+    connection
+      .call("update.get", { check: false })
+      .then((body) => {
+        const app = expectBody(body, "update").value.app;
+        if (app?.available && app.latest) toast(`App ${app.latest} is available · Ctrl Shift U`);
+      })
+      .catch(() => undefined);
+  }, [connection, quit, remote]);
+}
+
+/** Actions that belong to one screen: from elsewhere they go there first, then do it. */
+const LIVES_ON: Record<string, string> = {
+  NewProject: "/projects",
+  AddEmployee: "/employees",
+  NewGuideline: "/knowledge/guidelines",
+  FindGuideline: "/knowledge/guidelines",
+};
+const SCREEN_ACTIONS = Object.keys(LIVES_ON);
+
+function useScreenAction(action: string): void {
+  const keys = useKeys();
+  const navigate = useNavigate();
+  useFallbackAction(action, () => {
+    void navigate({ to: LIVES_ON[action] as string });
+    const started = performance.now();
+    const when = () => {
+      if (keys.count(action) > 1) keys.run(action);
+      else if (performance.now() - started < 2000) requestAnimationFrame(when);
+    };
+    requestAnimationFrame(when);
+  });
+}
+
+/** Something new shows for a moment, wherever you are. */
+function useNoteToasts(): void {
+  const notes = useNotifications();
+  const before = useRef<NotificationView[] | null>(null);
+  useEffect(() => {
+    if (!notes.data) return;
+    for (const note of newNotes(before.current, notes.data).slice(0, 3)) {
+      // Its conversation is in view: you see it happen.
+      if (note.conversation_id && window.location.href.includes(note.conversation_id)) continue;
+      toast(notificationHeading(note));
+    }
+    before.current = notes.data;
+  }, [notes.data]);
+}
+
 function useGlobalActions(): void {
+  for (const action of SCREEN_ACTIONS) {
+    // biome-ignore lint/correctness/useHookAtTopLevel: a fixed list: the same hooks in the same order.
+    useScreenAction(action);
+  }
   const { open } = overlays;
+  const platform = usePlatform();
+  const connection = useConnection();
+  const navigate = useNavigate();
+  useAction("Quit", () => platform.quit?.(), platform.quit !== null);
+  useAction("OpenUpdates", () => {
+    connection
+      .call("update.get", { check: true })
+      .then((body) => {
+        const status = expectBody(body, "update").value;
+        // Only the server is behind: its page. Otherwise the app's, where its own update is.
+        void navigate({
+          to: "/settings/$section",
+          params: { section: status.available && !status.app?.available ? "servers" : "app" },
+        });
+      })
+      .catch(() => void navigate({ to: "/settings/$section", params: { section: "app" } }));
+  });
+  useFallbackAction("OpenMemory", () => void navigate({ to: "/knowledge/$tab", params: { tab: "memory" } }));
   useAction("OpenPalette", () => open("palette"));
   useAction("MakeTicket", () => open("ticket"));
   useAction("NewItem", () => open("give"));
@@ -216,6 +303,11 @@ function Sidebar() {
   const projects = useProjects();
   const [projectPins] = useProjectPins();
   const { hostName, status } = useLinkState();
+  const employees = useEmployees();
+  const [employeePins] = usePins(pinKey(hostName, "pinned_employees"));
+  const pinnedEmployees = employeePins.flatMap(
+    (id) => employees.data?.filter((e) => e.id === id && e.status !== "archived") ?? [],
+  );
   return (
     <aside className="flex w-[224px] flex-none flex-col gap-[18px] overflow-hidden pt-[6px] pr-[10px] pb-[10px] pl-[14px]">
       <div className="flex h-8 items-center gap-2 [-webkit-app-region:drag]">
@@ -283,6 +375,25 @@ function Sidebar() {
             </Link>
           ))}
       </div>
+      {pinnedEmployees.length > 0 ? (
+        <div className="flex min-h-0 flex-col gap-px overflow-hidden">
+          <Link to="/employees" className="text-text3 no-underline hover:text-text">
+            <SectionLabel>Employees</SectionLabel>
+          </Link>
+          {pinnedEmployees.map((e) => (
+            <Link
+              key={e.id}
+              to="/employees/$id"
+              params={{ id: e.id }}
+              className="flex h-7 flex-none items-center gap-[9px] rounded-[6px] px-2 font-medium text-text2 no-underline hover:text-text"
+              activeProps={{ className: "bg-sel text-text" }}
+            >
+              <Mark letter={initial(e.name)} color={markColor(e.id)} size={15} radius={4} />
+              <span className="truncate">{e.name}</span>
+            </Link>
+          ))}
+        </div>
+      ) : null}
       <Live />
       <div className="mt-auto flex flex-col gap-2">
         {status !== "online" ? (
@@ -302,7 +413,9 @@ export function Frame({ children }: { children: ReactNode }) {
   const inSettings = useRouterState({ select: (s) => s.location.pathname.startsWith("/settings") });
   useGlobalActions();
   useScreenCounter();
-  const { storage } = usePlatform();
+  useUpdateNotice();
+  useNoteToasts();
+  const { storage, windowProject } = usePlatform();
   const [sidebarHidden, setSidebarHidden] = useState(() => storage.get(SIDEBAR_KEY) === "hidden");
   useAction("ToggleSidebar", () => {
     storage.set(SIDEBAR_KEY, sidebarHidden ? "shown" : "hidden");
@@ -313,7 +426,13 @@ export function Frame({ children }: { children: ReactNode }) {
       {Object.entries(GO_TO).map(([action, to]) => (
         <GoAction key={action} action={action} to={to} />
       ))}
-      {sidebarHidden ? <div className="w-2 flex-none" /> : inSettings ? <SettingsSidebar /> : <Sidebar />}
+      {sidebarHidden || windowProject !== null ? (
+        <div className="w-2 flex-none" />
+      ) : inSettings ? (
+        <SettingsSidebar />
+      ) : (
+        <Sidebar />
+      )}
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[8px] border border-line bg-panel shadow-panel">
         {children}
       </main>

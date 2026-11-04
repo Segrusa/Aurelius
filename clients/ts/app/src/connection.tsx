@@ -22,6 +22,7 @@ export function ConnectionProvider({
       clientName: `aurelius-${platform.kind}`,
       clientVersion: platform.version,
       deviceName: platform.deviceName,
+      ...(platform.target ? { expectedHostId: platform.target.hostId, environment: platform.target.environment } : {}),
     });
     next.start();
     setConnection(next);

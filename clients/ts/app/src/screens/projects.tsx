@@ -319,6 +319,9 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
       .then(() => client.invalidateQueries({ queryKey: ["projects"] }));
   const options = project
     ? [
+        ...(platform.openProjectWindow && !platform.windowProject
+          ? [{ key: "window", label: "Open in new window" }]
+          : []),
         { key: "edit", label: "Edit…" },
         ...(platform.openFolder && project.folder ? [{ key: "folder", label: "Open folder" }] : []),
         { key: "schedule", label: "New recurring task…" },
@@ -348,6 +351,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
         ? setStatus("active", "Project resumed.")
         : setStatus("paused", "Project paused."));
     else if (key === "archive") setArchiving(true);
+    else if (key === "window" && project) void platform.openProjectWindow?.(project.id, project.name);
     else if (key === "schedule") setScheduling(true);
     else if (key === "export")
       void connection
@@ -771,6 +775,8 @@ export function ProjectPage({ id, tab }: { id: string; tab: ProjectTab }) {
   useAction("PrevTab", () => go(-1));
   useAction("Back", () => void navigate({ to: "/projects" }));
   useAction("OpenProjectSettings", () => setEditing(true), project !== null);
+  useAction("EditItem", () => setEditing(true), project !== null);
+  useAction("ChangeProjectFolder", () => setEditing(true), project !== null);
   useAction("ExportProject", () => pick("export"), project !== null);
   useAction("TogglePause", () => pick("pause"), project !== null);
   useAction("ArchiveItem", () => pick("archive"), project !== null);

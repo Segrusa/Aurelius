@@ -1,8 +1,26 @@
 import { Children, isValidElement, memo, type ReactElement, type ReactNode, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { usePlatform } from "../platform";
+import { useFollowLink } from "../screens/links";
 import { Mermaid } from "./mermaid";
+
+/** The sanitizer knows web addresses; ours go to the app, not to the browser. */
+const keepAppLinks = (url: string) => (url.startsWith("aurelius://") ? url : defaultUrlTransform(url));
+
+function AppLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const follow = useFollowLink();
+  if (follow === null) return <>{children}</>;
+  return (
+    <button
+      type="button"
+      onClick={() => follow(href)}
+      className="cursor-pointer border-0 bg-transparent p-0 text-acc-text underline"
+    >
+      {children}
+    </button>
+  );
+}
 
 function textOf(node: ReactNode): string {
   if (typeof node === "string") return node;
@@ -59,10 +77,13 @@ export const Markdown = memo(function Markdown({
     <div className="prose-aurelius">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={keepAppLinks}
         components={{
           a: ({ href, children }) =>
             href?.startsWith("#") ? (
               <span className="mention">{children}</span>
+            ) : href?.startsWith("aurelius://") ? (
+              <AppLink href={href}>{children}</AppLink>
             ) : (
               <a href={href} target="_blank" rel="noreferrer">
                 {children}

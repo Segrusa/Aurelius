@@ -33,20 +33,36 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
     expect(reach.require).toBe("undefined");
     expect(reach.process).toBe("undefined");
     expect(reach.bridge).toEqual([
+      "cancelPairing",
       "closeLink",
       "copy",
       "copySecret",
       "desktopPrefs",
+      "forgetServer",
       "getSession",
+      "getStartup",
+      "holdLink",
       "info",
+      "listServers",
       "listenLink",
+      "listenLinks",
       "openFolder",
       "openLink",
+      "openProjectWindow",
+      "pairServer",
+      "pathOf",
       "pickFiles",
       "pickFolder",
+      "quit",
       "saveSecretFile",
       "sendLink",
       "setSession",
+      "setStartup",
+      "setTitleBar",
+      "startupAvailable",
+      "storeFile",
+      "takeLink",
+      "useServer",
     ]);
 
     await page.getByLabel("Name").fill("sam");

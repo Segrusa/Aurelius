@@ -27,11 +27,20 @@ $env:AURELIUS_ENV = "production"
 # @(...) keeps a one-item list a list; splatting a bare string passes its characters.
 $packages = @(switch ($Role) {
     "server" { @("-p", "aurelius-daemon", "-p", "aurelius-client", "-p", "aurelius-agent-bridge") }
-    "client" { @("-p", "aurelius-desktop", "-p", "aurelius-client") }
-    default { @("--workspace") }
+    "client" { @("-p", "aurelius-client") }
+    default { @("-p", "aurelius-daemon", "-p", "aurelius-client", "-p", "aurelius-agent-bridge") }
 })
 cargo build --release @packages
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# The app is a folder, built from clients\electron (Node and pnpm via npx).
+if ($Role -ne "server") {
+    npx -y pnpm@12.16.1 install --frozen-lockfile
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    npx -y pnpm@12.16.1 build
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    npx -y pnpm@12.16.1 --filter "@aurelius/electron" package
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 $dest = Join-Path $env:LOCALAPPDATA "Programs\Aurelius"
 New-Item -ItemType Directory -Force $dest | Out-Null
@@ -46,8 +55,8 @@ if (Test-Path "$dest\aurelius-daemon.exe") {
 $programs = switch ($Role) {
     # The daemon starts aurelius-bridge (Claude Code's approval MCP server) from its own folder.
     "server" { @("aurelius-daemon.exe", "aurelius-ctl.exe", "aurelius-bridge.exe") }
-    "client" { @("aurelius.exe", "aurelius-ctl.exe") }
-    default { @("aurelius.exe", "aurelius-daemon.exe", "aurelius-ctl.exe", "aurelius-bridge.exe") }
+    "client" { @("aurelius-ctl.exe") }
+    default { @("aurelius-daemon.exe", "aurelius-ctl.exe", "aurelius-bridge.exe") }
 }
 foreach ($exe in $programs) {
     Copy-Item ".\target\release\$exe" (Join-Path $dest $exe) -Force
@@ -55,14 +64,18 @@ foreach ($exe in $programs) {
 # A different role than before: the programs it no longer has go.
 $unused = @("aurelius.exe", "aurelius-daemon.exe", "aurelius-bridge.exe") | Where-Object { $programs -notcontains $_ }
 foreach ($exe in $unused) { Remove-Item (Join-Path $dest $exe) -Force -ErrorAction SilentlyContinue }
+$appDir = Join-Path $dest "app"
+Remove-Item $appDir -Recurse -Force -ErrorAction SilentlyContinue
+if ($Role -ne "server") { Copy-Item ".\clients\electron\release\win32-x64" $appDir -Recurse -Force }
+$appExe = Join-Path $appDir "aurelius.exe"
 Copy-Item ".\THIRD-PARTY-LICENSES.md" (Join-Path $dest "THIRD-PARTY-LICENSES.md") -Force
 # The app reads this: a client install never starts a background service of its own.
 Set-Content -Path (Join-Path $dest "role.txt") -Value $Role -NoNewline
 # The app's own version, for the service that installs app updates (the app
 # also writes it when it starts).
 $appVersion = Join-Path $dest "aurelius.version"
-if ($programs -contains "aurelius.exe") {
-    $version = [regex]::Match((Get-Content clients/desktop/Cargo.toml -Raw), '(?m)^version = "([^"]+)"').Groups[1].Value
+if ($Role -ne "server") {
+    $version = [regex]::Match((Get-Content Cargo.toml -Raw), '(?m)^version = "([^"]+)"').Groups[1].Value
     Set-Content -Path $appVersion -Value $version -NoNewline
 } else {
     Remove-Item $appVersion -Force -ErrorAction SilentlyContinue
@@ -75,8 +88,8 @@ if ($Role -eq "server") {
 } else {
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut($menu)
-    $link.TargetPath = Join-Path $dest "aurelius.exe"
-    $link.WorkingDirectory = $dest
+    $link.TargetPath = $appExe
+    $link.WorkingDirectory = $appDir
     $link.Description = "Aurelius"
     $link.Save()
 
@@ -86,7 +99,7 @@ if ($Role -eq "server") {
     New-Item -Path "$scheme\shell\open\command" -Force | Out-Null
     Set-ItemProperty -Path $scheme -Name "(default)" -Value "URL:Aurelius link"
     Set-ItemProperty -Path $scheme -Name "URL Protocol" -Value ""
-    Set-ItemProperty -Path "$scheme\shell\open\command" -Name "(default)" -Value ('"{0}" "%1"' -f (Join-Path $dest "aurelius.exe"))
+    Set-ItemProperty -Path "$scheme\shell\open\command" -Name "(default)" -Value ('"{0}" "%1"' -f $appExe)
 }
 
 $ctl = Join-Path $dest "aurelius-ctl.exe"
@@ -103,10 +116,10 @@ switch ($Role) {
     "client" {
         Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "Aurelius" -ErrorAction SilentlyContinue
         Write-Host "App installed in $dest (Start menu: Aurelius). Connect it to your server in Settings → Servers."
-        if (-not $NoLaunch) { Start-Process -FilePath (Join-Path $dest "aurelius.exe") -WorkingDirectory $dest }
+        if (-not $NoLaunch) { Start-Process -FilePath $appExe -WorkingDirectory $appDir }
     }
     default {
         Write-Host "Production installed in $dest (Start menu: Aurelius). Remove it with scripts\uninstall-production.ps1."
-        if (-not $NoLaunch) { Start-Process -FilePath (Join-Path $dest "aurelius.exe") -WorkingDirectory $dest }
+        if (-not $NoLaunch) { Start-Process -FilePath $appExe -WorkingDirectory $appDir }
     }
 }

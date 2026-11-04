@@ -33,6 +33,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const projects = useProjects();
+  const { openProjectWindow } = usePlatform();
   const employees = useEmployees();
   const tickets = useTickets();
   const guidelines = useGuidelines();
@@ -53,6 +54,20 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           run: () => void navigate({ to: "/projects/$id", params: { id: p.id } }),
         })),
       },
+      ...(openProjectWindow
+        ? [
+            {
+              label: "Project windows",
+              items: (projects.data ?? []).map((p) => ({
+                id: `project-window:${p.id}`,
+                label: `Open ${p.name} in a new window`,
+                detail: "Project window",
+                mark: p.id,
+                run: () => void openProjectWindow(p.id, p.name),
+              })),
+            },
+          ]
+        : []),
       {
         label: "Tickets",
         items: (tickets.data ?? []).map((t) => ({
@@ -120,7 +135,17 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           }),
       },
     ];
-  }, [projects.data, tickets.data, employees.data, guidelines.data, channels.data, keys, kind, navigate]);
+  }, [
+    openProjectWindow,
+    projects.data,
+    tickets.data,
+    employees.data,
+    guidelines.data,
+    channels.data,
+    keys,
+    kind,
+    navigate,
+  ]);
 
   const shown = useMemo(() => filterGroups(query, groups), [query, groups]);
 

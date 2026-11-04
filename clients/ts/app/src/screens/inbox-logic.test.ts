@@ -8,6 +8,7 @@ import {
   filterInbox,
   isWaiting,
   needsYouCount,
+  newNotes,
   notificationHeading,
   notificationPlace,
 } from "./inbox-logic";
@@ -126,5 +127,17 @@ describe("age", () => {
     expect(age(0, 8 * 3_600_000)).toBe("8h");
     expect(age(0, 49 * 3_600_000)).toBe("2d");
     expect(age(100_000, 0)).toBe("now");
+  });
+});
+
+describe("newNotes", () => {
+  const note = (id: string, at: number, read = false) =>
+    ({ id, created_at_ms: at, read, severity: "info", subject: "", target_type: "x", title: id }) as NotificationView;
+  it("says nothing on the first list", () => {
+    expect(newNotes(null, [note("a", 1)])).toEqual([]);
+  });
+  it("names new rows and rows with a new event, never read ones", () => {
+    const after = [note("a", 1), note("b", 2), note("c", 5), note("d", 3, true)];
+    expect(newNotes([note("a", 1), note("c", 4)], after).map((n) => n.id)).toEqual(["b", "c"]);
   });
 });

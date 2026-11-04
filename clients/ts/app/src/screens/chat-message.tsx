@@ -1,9 +1,9 @@
 import { expectBody } from "@aurelius/client";
-import type { ActivityView, ApprovalView, MessageVersionView, MessageView } from "@aurelius/protocol";
+import type { ActivityView, ApprovalView, ContextView, MessageVersionView, MessageView } from "@aurelius/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { createContext, memo, useContext, useMemo, useState } from "react";
-import { useConnection } from "../connection";
+import { createContext, memo, useContext, useEffect, useMemo, useState } from "react";
+import { useConnection, useLinkState } from "../connection";
 import { useRunGuidelines } from "../data";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
@@ -46,8 +46,9 @@ import {
   todos,
   webSearchSummary,
 } from "./chat-logic";
+import { messageLink } from "./links-logic";
 import { overlays } from "./overlays-store";
-import { FileChips, MarkdownChips, ScreenshotLink, TraceLink, useRetryAnswer } from "./run-tools";
+import { FileChips, KeptFiles, MarkdownChips, ScreenshotLink, TraceLink, useRetryAnswer } from "./run-tools";
 import { stepLine } from "./tasks-logic";
 
 const OUTPUT_LINES = 400;
@@ -67,6 +68,8 @@ export interface ChatContext {
   messages: MessageView[];
   lastAnswer: string | null;
   conversationId: string | null;
+  /** The message a link led to, marked for a moment. */
+  flash: string | null;
 }
 
 const Context = createContext<ChatContext | null>(null);
@@ -325,23 +328,73 @@ function ContextLink({ run }: { run: string }) {
   );
 }
 
-function ContextDialog({ run, onClose }: { run: string; onClose: () => void }) {
+/** What an answer was given: its full list, with why each part did or didn't go in. */
+export function ContextDialog({ run, onClose }: { run: string; onClose: () => void }) {
+  const connection = useConnection();
   const guidelines = useRunGuidelines(run);
   const list = guidelines.data?.guidelines ?? [];
+  const [view, setView] = useState<ContextView | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    connection
+      .call("run.get_context", { run_id: run })
+      .then((body) => setView(expectBody(body, "context").value))
+      .catch((e: unknown) => setProblem(e instanceof Error ? e.message : "This did not load."));
+  }, [connection, run]);
+  const sections = view ? [...new Set(view.items.map((i) => i.section))] : [];
   return (
-    <Dialog open onClose={onClose} title="Context of this answer" width={480}>
-      <div className="flex flex-col gap-2 p-4">
+    <Dialog open onClose={onClose} title="Context of this answer" width={720}>
+      <div className="flex max-h-[75vh] flex-col gap-3 overflow-y-auto p-4">
         <p className="m-0 text-[15px] font-semibold">Context of this answer</p>
-        {guidelines.isPending ? <p className="m-0 text-text3">Loading…</p> : null}
-        {!guidelines.isPending && list.length === 0 ? <p className="m-0 text-text2">No guidelines were used.</p> : null}
-        {list.map((g) => (
-          <div key={g.guideline_id} className="flex justify-between gap-3">
-            <span className="min-w-0 truncate">{g.title}</span>
-            <span className="flex-none text-[12px] text-text3">
-              v{g.version} · {g.chars} chars
-            </span>
-          </div>
+        {view ? (
+          <p className="m-0 text-[12px] text-text3">
+            {view.runtime_managed
+              ? "The runtime manages its own context."
+              : `${view.used_tokens} of ${view.budget_tokens} tokens`}
+            {view.scopes.length > 0 ? ` · ${view.scopes.join(", ")}` : ""}
+          </p>
+        ) : null}
+        {problem ? (
+          <p role="alert" className="m-0 text-red">
+            {problem}
+          </p>
+        ) : null}
+        {!view && !problem ? <p className="m-0 text-text3">Loading…</p> : null}
+        {sections.map((section) => (
+          <section key={section} className="flex flex-col gap-1">
+            <p className="m-0 text-[12px] font-medium text-text3">{section}</p>
+            {view?.items
+              .filter((i) => i.section === section)
+              .map((i) => (
+                <div key={i.id} className={`flex justify-between gap-3 ${i.included ? "" : "text-text3"}`}>
+                  <span className="min-w-0">
+                    {i.included ? "" : "Left out: "}
+                    {i.label}
+                    {i.reason ? <span className="text-text3"> · {i.reason}</span> : null}
+                  </span>
+                  <span className="flex-none font-mono text-[12px] text-text3">
+                    {i.tokens} tok{typeof i.score === "number" ? ` · ${i.score.toFixed(2)}` : ""}
+                  </span>
+                </div>
+              ))}
+          </section>
         ))}
+        {list.length > 0 ? (
+          <section className="flex flex-col gap-1">
+            <p className="m-0 text-[12px] font-medium text-text3">Guidelines</p>
+            {list.map((g) => (
+              <div key={g.guideline_id} className="flex justify-between gap-3">
+                <span className="min-w-0 truncate">{g.title}</span>
+                <span className="flex-none text-[12px] text-text3">
+                  v{g.version} · {g.chars} chars
+                </span>
+              </div>
+            ))}
+          </section>
+        ) : null}
+        <p className="m-0 text-[12px] text-text3">
+          Only permitted scopes are searched, before any text is loaded. Memory is data, not instructions.
+        </p>
       </div>
     </Dialog>
   );
@@ -597,6 +650,8 @@ function EditBox({ m, onDone }: { m: MessageView; onDone: () => void }) {
   const connection = useConnection();
   const client = useQueryClient();
   const [text, setText] = useState(m.text);
+  const [gone, setGone] = useState<string | null>(null);
+  const platform = usePlatform();
   const save = saveOf(m.text, text);
   const go = async () => {
     if (save.kind === "close") return onDone();
@@ -606,11 +661,24 @@ function EditBox({ m, onDone }: { m: MessageView; onDone: () => void }) {
       await client.invalidateQueries({ queryKey: ["messages"] });
       onDone();
     } catch (e) {
-      toast(e instanceof Error ? e.message : "This did not work.");
+      setGone(e instanceof Error ? e.message : "This did not work.");
     }
   };
   return (
     <div className="flex flex-col gap-2">
+      {gone ? (
+        <div role="alert" className="flex items-center gap-2 text-[12px] text-red">
+          <span className="min-w-0 flex-1">{gone}</span>
+          <Button
+            onClick={() => {
+              void platform.copy(text).then(() => toast("Copied your text."));
+              onDone();
+            }}
+          >
+            Copy my text
+          </Button>
+        </div>
+      ) : null}
       <textarea
         aria-label="Edit message"
         ref={(el) => el?.focus({ preventScroll: true })}
@@ -658,8 +726,11 @@ function RowBar({
   const react = useReact(m);
   const editable = canChange(m, features.includes("message_edits"));
   const makeTicket = features.includes("ticket_discussion") && canMakeTicket(m);
+  const { hostId } = useLinkState();
+  const linkable = hostId !== null && features.includes("message_locate") && actions.react && !m.deleted_at_ms;
   const more = [
     { key: "copy", label: "Copy" },
+    ...(linkable ? [{ key: "link", label: "Copy link" }] : []),
     ...(makeTicket ? [{ key: "ticket", label: "Create ticket…" }] : []),
     ...(editable
       ? [
@@ -670,6 +741,7 @@ function RowBar({
   ];
   const pick = (key: string) => {
     if (key === "copy") void platform.copy(m.text).catch(() => toast("This did not copy."));
+    if (key === "link") void platform.copy(messageLink(hostId ?? "", m.id)).then(() => toast("Link copied."));
     if (key === "edit") onEdit();
     if (key === "delete") onDelete();
     if (key === "ticket")
@@ -745,6 +817,7 @@ export const MessageRow = memo(function MessageRow({
 }) {
   const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId } = useChat();
   const made = useMemo(() => ticketFrom(messages, m.id), [messages, m.id]);
+  const { flash } = useChat();
   const connection = useConnection();
   const client = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -768,6 +841,8 @@ export const MessageRow = memo(function MessageRow({
         scope={conversationId ? { kind: "conversation", conversation_id: conversationId } : null}
       />
       <FileChips files={m.uploads} />
+      <KeptFiles files={m.files ?? []} />
+      <KeptFiles files={m.files ?? []} />
       {m.id === lastAnswer && m.status === "complete" && m.run_id ? (
         <span className="flex gap-3">
           <ContextLink run={m.run_id} />
@@ -797,7 +872,7 @@ export const MessageRow = memo(function MessageRow({
   };
   return (
     <div
-      className={`group/row relative flex gap-3 rounded-[6px] hover:bg-[color-mix(in_srgb,var(--sel)_45%,transparent)] ${grouped ? "pt-[2px]" : "pt-2"}`}
+      className={`group/row relative flex gap-3 rounded-[6px] hover:bg-[color-mix(in_srgb,var(--sel)_45%,transparent)] ${grouped ? "pt-[2px]" : "pt-2"} ${flash === m.id ? "bg-sel" : ""}`}
     >
       <div className="w-7 flex-none">
         {grouped ? null : (

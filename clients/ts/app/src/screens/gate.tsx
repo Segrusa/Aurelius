@@ -1,15 +1,18 @@
 // What comes before the app: the connection's state, pairing a browser and the sign-in.
 
 import { boardMemberStep } from "@aurelius/client";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
 import { Button } from "../ui/kit";
+import { ServerChoicesPanel } from "./servers";
 
-function Centered({ title, children }: { title: string; children?: ReactNode }) {
+function Centered({ title, children, wide = false }: { title: string; children?: ReactNode; wide?: boolean }) {
   return (
-    <main className="grid h-full place-items-center bg-bg p-4">
-      <div className="enter flex w-full max-w-[360px] flex-col gap-4 rounded-[12px] border border-line bg-panel p-6 shadow-panel">
+    <main className="grid h-full place-items-center overflow-y-auto bg-bg p-4">
+      <div
+        className={`enter flex w-full ${wide ? "max-w-[520px]" : "max-w-[360px]"} flex-col gap-4 rounded-[12px] border border-line bg-panel p-6 shadow-panel`}
+      >
         <h1 className="m-0 text-[16px] font-semibold">{title}</h1>
         {children}
       </div>
@@ -191,30 +194,69 @@ function Pair({ onPaired }: { onPaired: () => void }) {
   );
 }
 
+/** Signing in on a paired server isn't the only way on: this computer may have its own. */
+function LeaveServer() {
+  const { servers } = usePlatform();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="fixed right-4 bottom-4 flex max-h-[80%] w-[420px] max-w-[calc(100%-32px)] flex-col items-end gap-2 overflow-y-auto">
+      {open ? (
+        <div className="w-full rounded-[10px] border border-line bg-panel p-3">
+          <ServerChoicesPanel />
+        </div>
+      ) : null}
+      {servers ? <Button onClick={() => setOpen(!open)}>Servers</Button> : null}
+    </div>
+  );
+}
+
 export function Gate({ children, onPaired }: { children: ReactNode; onPaired: () => void }) {
   const platform = usePlatform();
   const connection = useConnection();
   const state = useLinkState();
   const step = boardMemberStep(state);
+  const failedOnce = useRef(false);
 
+  const servers = platform.servers ? <ServerChoicesPanel /> : null;
   if (state.status === "revoked") {
     if (platform.pair) return <Pair onPaired={onPaired} />;
-    return <Centered title="No access">{state.message}</Centered>;
-  }
-  if (state.status === "incompatible") return <Centered title="Different versions">{state.message}</Centered>;
-  if (step === "unknown") {
-    if (state.status === "connecting") return <div className="h-full bg-bg" />;
     return (
-      <Centered title="Not connected">
+      <Centered title="No access" wide={servers !== null}>
+        <p className="m-0 text-text2">{state.message}</p>
+        {servers}
+      </Centered>
+    );
+  }
+  if (state.status === "incompatible") {
+    return (
+      <Centered title={platform.target ? "This server can't be used" : "Different versions"} wide={servers !== null}>
+        <p className="m-0 text-text2">{state.message}</p>
+        {servers}
+      </Centered>
+    );
+  }
+  if (step === "unknown") {
+    // Only before the first answer: the retries after it must not wipe what is being typed here.
+    if (state.status !== "connecting") failedOnce.current = true;
+    if (!failedOnce.current) return <div className="h-full bg-bg" />;
+    return (
+      <Centered title="Not connected" wide={servers !== null}>
         <p className="m-0 text-text2">{state.message}</p>
         <Button onClick={() => connection.wake()} className="justify-center">
           Try again
         </Button>
+        {servers}
       </Centered>
     );
   }
-  if (step === "create_first") return <SignIn first />;
-  if (step === "sign_in") return <SignIn first={false} />;
+  if (step === "create_first" || step === "sign_in") {
+    return (
+      <>
+        <SignIn first={step === "create_first"} />
+        {platform.target ? <LeaveServer /> : null}
+      </>
+    );
+  }
   if (step === "change_password") return <ForcedPassword />;
   return <>{children}</>;
 }

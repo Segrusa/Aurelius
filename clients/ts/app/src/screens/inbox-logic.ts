@@ -273,3 +273,13 @@ export function age(atMs: number, nowMs: number): string {
   if (hours < 24) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
 }
+
+/** What is new since the last list: nothing the first time, read rows and old rows never. */
+export function newNotes(before: NotificationView[] | null, after: NotificationView[]): NotificationView[] {
+  if (before === null) return [];
+  return after.filter((n) => {
+    if (n.read) return false;
+    const old = before.find((b) => b.id === n.id);
+    return !old || n.created_at_ms > old.created_at_ms;
+  });
+}

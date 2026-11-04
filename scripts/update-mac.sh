@@ -47,7 +47,7 @@ fi
 
 echo "Fetching the latest main ..."
 git pull --ff-only
-new_version="$(sed -n 's/^version = "\(.*\)"/\1/p' clients/desktop/Cargo.toml | head -1)"
+new_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 new_commit="$(git rev-parse HEAD)"
 
 if [[ "$old_commit" == "$new_commit" && $force -eq 0 ]]; then

@@ -14,6 +14,7 @@ import { Gate } from "./screens/gate";
 import { GuidelineEditor, GuidelinesScreen } from "./screens/guidelines";
 import { IdeasBody } from "./screens/ideas";
 import { InboxScreen } from "./screens/inbox";
+import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { MyTicketsScreen } from "./screens/my-tickets";
 import { ProjectPage, ProjectsScreen } from "./screens/projects";
@@ -29,9 +30,11 @@ import { TooltipProvider } from "./ui/overlay";
 
 const root = createRootRoute({
   component: () => (
-    <Frame>
-      <Outlet />
-    </Frame>
+    <LinkFollower>
+      <Frame>
+        <Outlet />
+      </Frame>
+    </LinkFollower>
   ),
 });
 const index = createRoute({
@@ -72,13 +75,14 @@ const taskRun = createRoute({
 const chat = createRoute({
   getParentRoute: () => root,
   path: "/chat",
-  validateSearch: (search: Record<string, unknown>): { channel?: string; thread?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { channel?: string; thread?: string; message?: string } => ({
     ...(typeof search.channel === "string" ? { channel: search.channel } : {}),
     ...(typeof search.thread === "string" ? { thread: search.thread } : {}),
+    ...(typeof search.message === "string" ? { message: search.message } : {}),
   }),
   component: function ChatRoute() {
-    const { channel, thread } = chat.useSearch();
-    return <ChatScreen channel={channel ?? null} thread={thread ?? null} />;
+    const { channel, thread, message } = chat.useSearch();
+    return <ChatScreen channel={channel ?? null} thread={thread ?? null} message={message ?? null} />;
   },
 });
 const employees = createRoute({ getParentRoute: () => root, path: "/employees", component: EmployeesScreen });

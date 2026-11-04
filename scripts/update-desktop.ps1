@@ -11,7 +11,9 @@ $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
 $dest = Join-Path $env:LOCALAPPDATA "Programs\Aurelius"
-if (-not (Test-Path (Join-Path $dest "aurelius.exe"))) {
+$appDir = Join-Path $dest "app"
+$appExe = Join-Path $appDir "aurelius.exe"
+if (-not (Test-Path $appExe) -and -not (Test-Path (Join-Path $dest "aurelius.exe"))) {
     Write-Error "Aurelius isn't installed yet: run scripts\install-production.ps1 -Role client"
     exit 1
 }
@@ -29,7 +31,7 @@ Write-Host "Fetching the latest main ..."
 git pull --ff-only
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $newCommit = (git rev-parse HEAD).Trim()
-$newVersion = [regex]::Match((Get-Content clients/desktop/Cargo.toml -Raw), '(?m)^version = "([^"]+)"').Groups[1].Value
+$newVersion = [regex]::Match((Get-Content Cargo.toml -Raw), '(?m)^version = "([^"]+)"').Groups[1].Value
 
 if ($oldCommit -eq $newCommit -and -not $Force) {
     Write-Host "Already up to date: Aurelius $oldVersion ($($newCommit.Substring(0,7)))."
@@ -39,7 +41,11 @@ $was = if ($oldCommit) { $oldCommit.Substring(0, [Math]::Min(7, $oldCommit.Lengt
 Write-Host "Updating Aurelius $oldVersion ($was) -> $newVersion ($($newCommit.Substring(0,7))) ..."
 
 $env:AURELIUS_ENV = "production"
-cargo build --release -p aurelius-desktop -p aurelius-client
+cargo build --release -p aurelius-client
+if ($LASTEXITCODE -ne 0) { Write-Error "Build failed; the installed app is unchanged."; exit 1 }
+npx -y pnpm@12.16.1 install --frozen-lockfile
+if ($LASTEXITCODE -eq 0) { npx -y pnpm@12.16.1 build }
+if ($LASTEXITCODE -eq 0) { npx -y pnpm@12.16.1 --filter "@aurelius/electron" package }
 if ($LASTEXITCODE -ne 0) { Write-Error "Build failed; the installed app is unchanged."; exit 1 }
 
 $running = @(Get-Process aurelius -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dest*" })
@@ -47,10 +53,12 @@ if ($running.Count -gt 0) {
     $running | Stop-Process
     $running | ForEach-Object { $_.WaitForExit(5000) | Out-Null }
 }
-Copy-Item ".\target\release\aurelius.exe" (Join-Path $dest "aurelius.exe") -Force
+Remove-Item $appDir -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item (Join-Path $dest "aurelius.exe") -Force -ErrorAction SilentlyContinue
+Copy-Item ".\clients\electron\release\win32-x64" $appDir -Recurse -Force
 Copy-Item ".\THIRD-PARTY-LICENSES.md" (Join-Path $dest "THIRD-PARTY-LICENSES.md") -Force
 Set-Content -Path "$dest\aurelius.version" -Value $newVersion -NoNewline
 Set-Content -Path $commitFile -Value $newCommit -NoNewline
 
-if ($running.Count -gt 0) { Start-Process -FilePath (Join-Path $dest "aurelius.exe") -WorkingDirectory $dest }
+if ($running.Count -gt 0) { Start-Process -FilePath $appExe -WorkingDirectory $appDir }
 Write-Host "Aurelius app updated to $newVersion ($($newCommit.Substring(0,7)))."

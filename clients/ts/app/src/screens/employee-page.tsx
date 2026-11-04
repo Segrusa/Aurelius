@@ -41,6 +41,29 @@ function TaskCard({ task }: { task: TaskView }) {
   );
 }
 
+function EmployeeKeys({
+  onBrowser,
+  onScreen,
+  onMode,
+  onFolder,
+  onPick,
+}: {
+  onBrowser: () => void;
+  onScreen: () => void;
+  onMode: () => void;
+  onFolder: () => void;
+  onPick: (key: string) => void;
+}) {
+  useAction("TogglePause", () => onPick("pause"));
+  useAction("ArchiveItem", () => onPick("archive"));
+  useAction("OpenProjectFolder", () => onPick("open"));
+  useAction("ToggleBrowser", onBrowser);
+  useAction("ToggleScreen", onScreen);
+  useAction("CycleAgentMode", onMode);
+  useAction("ChangeProjectFolder", onFolder);
+  return null;
+}
+
 export function EmployeePage({ id }: { id: string }) {
   const connection = useConnection();
   const client = useQueryClient();
@@ -307,6 +330,13 @@ export function EmployeePage({ id }: { id: string }) {
         </aside>
       </div>
       {folders.dialog}
+      <EmployeeKeys
+        onPick={pick}
+        onBrowser={browser}
+        onScreen={screen}
+        onMode={setMode}
+        onFolder={() => pick("folder")}
+      />
       {editing ? <EmployeeDialog employee={e} onClose={() => setEditing(false)} /> : null}
       {ask === "browser" ? (
         <Confirm

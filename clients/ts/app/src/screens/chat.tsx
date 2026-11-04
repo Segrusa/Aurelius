@@ -7,6 +7,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
 import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
+import { AttachedImages, useImagePaste } from "../ui/attach";
 import { SearchIcon } from "../ui/icons";
 import { Button, initial, Kbd, Mark, markColor } from "../ui/kit";
 import { toast } from "../ui/toast";
@@ -37,7 +38,16 @@ import {
   unknownWarning,
   visibleChannels,
 } from "./chat-logic";
-import { type ChatContext, ChatProvider, DayLine, FeedIdsProvider, LiveRow, MessageRow, NewLine } from "./chat-message";
+import {
+  type ChatContext,
+  ChatProvider,
+  ContextDialog,
+  DayLine,
+  FeedIdsProvider,
+  LiveRow,
+  MessageRow,
+  NewLine,
+} from "./chat-message";
 import { Held } from "./dialogs";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ColumnGlyph } from "./tickets-kit";
@@ -253,6 +263,7 @@ function Composer({
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   });
+  const images = useImagePaste();
   const go = async (body: string, confirmSecret = false) => {
     const clean = body.trim();
     if (clean === "" || busy) return;
@@ -263,9 +274,17 @@ function Composer({
     try {
       await connection.write(
         "group_chat.send",
-        { text: clean, images: [], files: [], channel, thread_parent: threadParent, confirm_secret: confirmSecret },
+        {
+          text: clean,
+          images: images.paths,
+          files: [],
+          channel,
+          thread_parent: threadParent,
+          confirm_secret: confirmSecret,
+        },
         { retry: false },
       );
+      images.clear();
       void client.invalidateQueries({ queryKey: ["messages"] });
       onSent();
     } catch (e) {
@@ -363,7 +382,11 @@ function Composer({
             ))}
           </div>
         ) : null}
-        <div className="flex items-end gap-2 rounded-[10px] border border-btn-line bg-sunk py-2 pr-2 pl-[14px] focus-within:border-acc-text">
+        <AttachedImages images={images} />
+        <div
+          {...images.target}
+          className="flex items-end gap-2 rounded-[10px] border border-btn-line bg-sunk py-2 pr-2 pl-[14px] focus-within:border-acc-text"
+        >
           <textarea
             ref={area}
             rows={1}
@@ -533,12 +556,14 @@ function Channel({
   thread,
   onThread,
   general,
+  message = null,
 }: {
   channel: string | null;
   c: ChannelView | null;
   thread: string | null;
   onThread: (id: string | null) => void;
   general: boolean;
+  message?: string | null;
 }) {
   useKeyContext("TeamChat");
   const { user, features, status } = useLinkState();
@@ -564,6 +589,17 @@ function Channel({
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
   const list2 = useMemo(() => list.filter((m) => !m.thread_parent), [list]);
   const handle = useRef<VirtuosoHandle>(null);
+  // The message a link led to: into view, and marked for a moment.
+  const [flash, setFlash] = useState<string | null>(null);
+  useEffect(() => {
+    if (message === null) return;
+    const at = list2.findIndex((m) => m.id === message);
+    if (at < 0) return;
+    setFlash(message);
+    handle.current?.scrollToIndex({ index: at, align: "center" });
+    const timer = setTimeout(() => setFlash(null), 2000);
+    return () => clearTimeout(timer);
+  }, [message, list2]);
   const atBottom = useRef(true);
 
   // The line "New messages" is decided once, from what was unread before this read.
@@ -646,8 +682,10 @@ function Channel({
       messages: list,
       lastAnswer: lastAnswerId,
       conversationId: feed.data?.conversation_id ?? null,
+      flash,
     }),
     [
+      flash,
       store,
       caps,
       features,
@@ -667,6 +705,12 @@ function Channel({
   const running =
     [...list2].reverse().find((m) => m.status === "partial" && m.run_id)?.run_id ?? live.at(-1)?.run_id ?? null;
   const retryAnswer = useRetryAnswer(feed.data?.conversation_id, list2);
+  const [contextOf, setContextOf] = useState<string | null>(null);
+  useAction("ShowContext", () => {
+    const run = [...list2].reverse().find((m) => m.role === "assistant" && m.run_id)?.run_id;
+    if (run) setContextOf(run);
+    else toast("Open a conversation with an answer to see the context it used.");
+  });
   useAction("RetryAnswer", retryAnswer);
   useAction(
     "StopGeneration",
@@ -748,6 +792,7 @@ function Channel({
             </Link>
           ) : null}
         </header>
+        {contextOf ? <ContextDialog run={contextOf} onClose={() => setContextOf(null)} /> : null}
         <ChatProvider value={ctx}>
           <FeedIdsProvider value={{ conversationId: openId ?? null }}>
             <div className="min-h-0 flex-1">
@@ -870,7 +915,15 @@ function Channel({
   );
 }
 
-export function ChatScreen({ channel, thread }: { channel: string | null; thread: string | null }) {
+export function ChatScreen({
+  channel,
+  thread,
+  message = null,
+}: {
+  channel: string | null;
+  thread: string | null;
+  message?: string | null;
+}) {
   const navigate = useNavigate();
   const channels = useChannels();
   const list = useMemo(() => channels.data ?? [], [channels.data]);
@@ -921,6 +974,7 @@ export function ChatScreen({ channel, thread }: { channel: string | null; thread
         channel={channel}
         c={openC}
         thread={thread}
+        message={message}
         onThread={onThread}
         general={channel === null}
       />

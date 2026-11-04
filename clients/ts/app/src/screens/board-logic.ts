@@ -206,8 +206,12 @@ export function beforeFor(cards: { id: string }[], dragged: string, onto: string
 
 export type OwnerFilter = { kind: "anyone" } | { kind: "none" } | { kind: "employee"; id: string };
 
+/** Who is responsible: anyone, nobody, or this user's id. */
+export type ResponsibleFilter = { kind: "anyone" } | { kind: "none" } | { kind: "user"; id: string };
+
 export interface CardFilter {
   owner: OwnerFilter;
+  responsible?: ResponsibleFilter;
   query: string;
   needsOnly: boolean;
   needs: (t: TicketView) => boolean;
@@ -226,6 +230,11 @@ export function shownCards(
     (t) =>
       (filter.owner.kind === "anyone" ||
         (filter.owner.kind === "none" ? !t.owner_employee_id : t.owner_employee_id === filter.owner.id)) &&
+      (!filter.responsible ||
+        filter.responsible.kind === "anyone" ||
+        (filter.responsible.kind === "none"
+          ? !t.responsible_user_id
+          : t.responsible_user_id === filter.responsible.id)) &&
       (query === "" ||
         t.title.toLowerCase().includes(query) ||
         (number !== "" && String(t.number) === number) ||

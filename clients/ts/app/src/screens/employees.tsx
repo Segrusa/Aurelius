@@ -2,7 +2,7 @@ import { ProtocolError } from "@aurelius/client";
 import type { EmployeeSummary, ProposalView, TaskView } from "@aurelius/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useEffectiveSets, useEmployees, useOpenTasks, useProposals } from "../data";
 import { useAction } from "../keys/provider";
@@ -24,18 +24,31 @@ import {
 import { lineDiff } from "./guideline-logic";
 import { AREA, EmployeesTabs, EYEBROW, FIELD, failureOf, PageHead, SMALL } from "./org-kit";
 
+/** Every list of pins on screen follows a change, the sidebar too. */
+const pinListeners = new Set<(key: string) => void>();
+
 export function usePins(key: string) {
   const platform = usePlatform();
-  const [pins, setPins] = useState<string[]>(() => {
+  const read = useCallback(() => {
     try {
       return JSON.parse(platform.storage.get(key) ?? "[]") as string[];
     } catch {
       return [];
     }
-  });
+  }, [key, platform]);
+  const [pins, setPins] = useState<string[]>(read);
+  useEffect(() => {
+    const changed = (other: string) => {
+      if (other === key) setPins(read());
+    };
+    pinListeners.add(changed);
+    return () => {
+      pinListeners.delete(changed);
+    };
+  }, [key, read]);
   const set = (next: string[]) => {
-    setPins(next);
     platform.storage.set(key, JSON.stringify(next));
+    for (const listener of pinListeners) listener(key);
   };
   return [pins, set] as const;
 }

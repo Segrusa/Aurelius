@@ -55,6 +55,17 @@ $lines += "## Mobile app"
 $lines += ""
 $lines += "Bundled in ``clients/mobile/assets/mermaid``: [mermaid](https://github.com/mermaid-js/mermaid) 12.2.0 (MIT), which carries its own bundled dependencies under permissive licenses."
 $lines += ""
+$lines += "Bundled in the desktop app and the web client (``clients/electron``, ``clients/web``), with Electron and Chromium, whose own notices are ``LICENSES.chromium.html`` in the app folder:"
+$lines += ""
+$lines += "| Package | Version | License |"
+$lines += "|---|---|---|"
+$node = (npx -y pnpm@12.16.1 licenses list --prod --recursive --json | Out-String) | ConvertFrom-Json
+foreach ($license in $node.PSObject.Properties) {
+    foreach ($package in $license.Value) {
+        foreach ($version in $package.versions) { $lines += "| $($package.name) | $version | $($license.Name) |" }
+    }
+}
+$lines += ""
 $lines += "Flutter/Dart dependencies of ``clients/mobile`` (direct):"
 $lines += ""
 $lines += "| Package | Version | License |"

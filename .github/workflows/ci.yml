@@ -56,3 +56,4 @@ jobs:
       - run: pnpm deps
       - run: pnpm build
       - run: pnpm test
+      - run: pnpm --filter @aurelius/electron package

@@ -31,16 +31,17 @@ if ($Part -eq "server") {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Stop-Daemon
     # An open window reconnects and starts the new service; otherwise start the app.
-    $open = Get-Process aurelius -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$debug*" }
-    if (-not $open) { Start-Process -FilePath "$debug\aurelius.exe" }
+    $open = Get-Process electron -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$PWD*" }
+    if (-not $open) { Start-Process -FilePath "npx" -ArgumentList "-y", "pnpm@12.16.1", "--filter", "@aurelius/electron", "dev" -NoNewWindow }
     return
 }
 
 # Stop what gets rebuilt first: Windows locks running programs, so the build
 # could not replace them. Work resumes after the restart.
-Get-Process aurelius -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$debug*" } | Stop-Process -Force
+Get-Process electron -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$PWD*" } | Stop-Process -Force
 if ($Part -eq "all") { Stop-Daemon }
-$packages = if ($Part -eq "desktop") { @("-p", "aurelius-desktop") } else { @("--workspace") }
-cargo build @packages
+$packages = if ($Part -eq "desktop") { @() } else { @("--workspace", "--exclude", "aurelius-desktop") }
+if ($packages.Count -gt 0) { cargo build @packages }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-Start-Process -FilePath "$debug\aurelius.exe"
+$env:AURELIUS_DAEMON_PATH = "$debug\aurelius-daemon.exe"
+Start-Process -FilePath "npx" -ArgumentList "-y", "pnpm@12.16.1", "--filter", "@aurelius/electron", "dev" -NoNewWindow

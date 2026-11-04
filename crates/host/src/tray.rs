@@ -59,7 +59,9 @@ mod imp {
 
     fn open_app() {
         if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
-            let _ = std::process::Command::new(dir.join("aurelius.exe")).current_dir(&dir).spawn();
+            let program = crate::updater::app_program(&dir);
+            let folder = program.parent().map_or_else(|| dir.clone(), std::path::Path::to_path_buf);
+            let _ = std::process::Command::new(program).current_dir(folder).spawn();
         }
     }
 

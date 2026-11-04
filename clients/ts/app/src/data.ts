@@ -254,6 +254,12 @@ export function useTicketActivity(id: string | null, limit = ACTIVITY_LIMIT) {
   );
 }
 
+/** The board members, for choosing who is responsible. */
+export function useMembers() {
+  const connection = useConnection();
+  return useKeyed(["users"], async () => expectBody(await connection.call("user.list"), "users").value.users);
+}
+
 export function useMyTickets(projectId: string | null, includeDone: boolean, wanted = true) {
   const connection = useConnection();
   return useKeyed(

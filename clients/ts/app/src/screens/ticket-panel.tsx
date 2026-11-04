@@ -1,11 +1,13 @@
 import { expectBody } from "@aurelius/client";
 import type { AgentMode, TicketPriority, TicketView } from "@aurelius/protocol";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useBoard, useEmployees, useKeyed, useMessages, useTicket, useTicketActivity } from "../data";
+import { useBoard, useEmployees, useKeyed, useMembers, useMessages, useTicket, useTicketActivity } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
+import { acceptable, filesFrom } from "../ui/attach";
 import { Button, Chip, initial, Mark, markColor } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { Dialog, Menu } from "../ui/overlay";
@@ -28,7 +30,9 @@ import {
   takeOverOffered,
   testingNote,
 } from "./board-logic";
+import { canChange, completeMention, mentionSuggestions } from "./chat-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
+import { messageLink, ticketLink } from "./links-logic";
 import { lastSummaryFailed } from "./run-logic";
 import { FileChips } from "./run-tools";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
@@ -549,6 +553,22 @@ function Discussion({ t, conversationId }: { t: TicketView; conversationId: stri
       return "";
     });
   };
+  const { features, hostId } = useLinkState();
+  const platform = usePlatform();
+  const client = useQueryClient();
+  const employees = useEmployees();
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [closedOn, setClosedOn] = useState<string | null>(null);
+  const area = useRef<HTMLInputElement>(null);
+  const people = (employees.data ?? [])
+    .filter((e) => e.status === "active")
+    .map((e) => ({ name: e.name, kind: "employee", employee: true }));
+  const suggestions = closedOn === text ? null : mentionSuggestions(text, people);
+  const change = (run: () => Promise<unknown>) =>
+    run()
+      .then(() => client.invalidateQueries({ queryKey: ["messages", conversationId] }))
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
   const list = (messages.data?.messages ?? []).filter((m) => !m.deleted_at_ms && !m.thread_parent);
   return (
     <>
@@ -562,8 +582,69 @@ function Discussion({ t, conversationId }: { t: TicketView; conversationId: stri
                 {m.author_user?.username ?? m.author ?? (m.role === "user" ? "You" : "Aurelius")}
               </span>
               <span className="text-[12px] text-text3">{time(m.created_at_ms)}</span>
+              {m.system ? null : (
+                <Menu
+                  label="Message actions"
+                  options={[
+                    { key: "copy", label: "Copy" },
+                    ...(hostId && features.includes("message_locate") ? [{ key: "link", label: "Copy link" }] : []),
+                    ...(canChange(m, features.includes("message_edits"))
+                      ? [
+                          { key: "edit", label: "Edit" },
+                          { key: "delete", label: "Delete", danger: true },
+                        ]
+                      : []),
+                  ]}
+                  onPick={(key) => {
+                    if (key === "copy") void platform.copy(m.text);
+                    if (key === "link")
+                      void platform.copy(messageLink(hostId ?? "", m.id)).then(() => toast("Link copied."));
+                    if (key === "edit") setEditing({ id: m.id, text: m.text });
+                    if (key === "delete") setDeleting(m.id);
+                  }}
+                  trigger={
+                    <button
+                      type="button"
+                      aria-label="Message actions"
+                      className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text"
+                    >
+                      ⋯
+                    </button>
+                  }
+                />
+              )}
             </div>
-            {m.system ? <span className="text-text2">{m.text}</span> : <Markdown text={m.text} />}
+            {editing?.id === m.id ? (
+              <div className="flex flex-col gap-2">
+                <textarea
+                  aria-label="Edit message"
+                  rows={3}
+                  value={editing.text}
+                  onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                  className="resize-y rounded-[6px] border border-btn-line bg-sunk p-2 text-[13px] text-text"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    kind="primary"
+                    disabled={editing.text.trim() === ""}
+                    onClick={() => {
+                      const { text: next } = editing;
+                      setEditing(null);
+                      void change(() =>
+                        connection.write("message.edit", { message_id: m.id, text: next }, { retry: false }),
+                      );
+                    }}
+                  >
+                    Save
+                  </Button>
+                  <Button onClick={() => setEditing(null)}>Cancel</Button>
+                </div>
+              </div>
+            ) : m.system ? (
+              <span className="text-text2">{m.text}</span>
+            ) : (
+              <Markdown text={m.text} />
+            )}
           </div>
         ))}
       </div>
@@ -575,17 +656,47 @@ function Discussion({ t, conversationId }: { t: TicketView; conversationId: stri
               {error}
             </p>
           ) : null}
+          {suggestions && suggestions.found.length > 0 ? (
+            <div
+              role="listbox"
+              aria-label="Mention"
+              className="flex flex-col rounded-[8px] border border-line bg-panel py-1"
+            >
+              {suggestions.found.map((p) => (
+                <button
+                  key={p.name}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => {
+                    setText(completeMention(text, suggestions.at, p.name));
+                    setClosedOn(null);
+                    area.current?.focus();
+                  }}
+                  className="cursor-pointer border-0 bg-transparent px-3 py-1 text-left text-text hover:bg-sel"
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="flex items-center gap-2 rounded-[8px] border border-btn-line bg-sunk py-[6px] pr-[6px] pl-3">
             <input
+              ref={area}
               aria-label="Reply in discussion"
               placeholder="Reply in discussion · @ to mention"
               className="min-w-0 flex-1 border-0 bg-transparent text-text outline-none placeholder:text-text3"
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
+                if (e.key === "Escape" && suggestions) {
+                  e.stopPropagation();
+                  setClosedOn(text);
+                } else if (e.key === "Enter") {
                   e.preventDefault();
-                  post();
+                  const first = suggestions?.found[0];
+                  if (suggestions && first) setText(completeMention(text, suggestions.at, first.name));
+                  else post();
                 }
               }}
             />
@@ -595,6 +706,21 @@ function Discussion({ t, conversationId }: { t: TicketView; conversationId: stri
           </div>
         </div>
       )}
+      {deleting ? (
+        <ConfirmDialog
+          open
+          danger
+          title="Delete this message?"
+          body="It reads as deleted for everyone; earlier versions stay with the board."
+          confirm="Delete"
+          onClose={() => setDeleting(null)}
+          onConfirm={() => {
+            const id = deleting;
+            setDeleting(null);
+            void change(() => connection.write("message.delete", { message_id: id }, { retry: false }));
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -624,6 +750,7 @@ type Tab = "ticket" | "discussion" | "activity";
 
 export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }) {
   const platform = usePlatform();
+  const { hostId } = useLinkState();
   useKeyContext("TicketPanel");
   useAction("Back", onClose);
   const navigate = useNavigate();
@@ -633,6 +760,7 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
   const employees = useEmployees();
   const models = useModels();
   const write = useTicketWrite();
+  const members = useMembers();
   const [tab, setTab] = useState<Tab>("ticket");
   const t = detail.data?.ticket;
   const list = useMemo(() => (t ? [t] : []), [t]);
@@ -700,7 +828,17 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
         ]
       : []),
     ...(features.includes("ticket_responsible") && t.column !== "done"
-      ? [{ key: "responsible", label: "Make me responsible" }]
+      ? [
+          t.responsible_user_id === need.me
+            ? { key: "responsible:none", label: "Remove me as responsible" }
+            : { key: "responsible", label: "Make me responsible" },
+          ...(members.data ?? [])
+            .filter((u) => !u.disabled_at_ms && u.id !== need.me && u.id !== t.responsible_user_id)
+            .map((u) => ({ key: `responsible:${u.id}`, label: `Responsible: ${u.username}` })),
+          ...(t.responsible_user_id && t.responsible_user_id !== need.me
+            ? [{ key: "responsible:none", label: "Responsible: no one" }]
+            : []),
+        ]
       : []),
     { key: "copy", label: "Copy link" },
   ];
@@ -711,14 +849,47 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
         { ticket_id: t.id, on: key === "follow" },
         { done: key === "follow" ? "You follow this ticket." : "You don't follow this ticket any more." },
       );
-    else if (key === "responsible")
+    else if (key.startsWith("responsible:")) {
+      const who = key.slice("responsible:".length);
+      void write("ticket.set_responsible", { ticket_id: t.id, responsible_user_id: who === "none" ? null : who });
+    } else if (key === "responsible")
       void write("ticket.set_responsible", { ticket_id: t.id, responsible_user_id: need.me });
-    else if (key === "copy") void platform.copy(`aurelius://ticket/${t.id}`);
+    else if (key === "copy") void platform.copy(ticketLink(hostId ?? "", t.id)).then(() => toast("Link copied."));
     else move(key);
   };
 
+  const addFiles = async (files: { path: string }[]) => {
+    if (files.length === 0) return;
+    await write(
+      "ticket.update",
+      { ticket_id: t.id, add_files: files.map((f) => f.path) },
+      { expectedVersion: t.version, done: "Files added." },
+    );
+  };
+  const addFailed = (e: unknown) => toast(e instanceof Error ? e.message : "This did not work.");
+  // A file copied or dropped on the panel of an open ticket goes on the ticket.
+  const takeFiles = (given: File[]) => {
+    const { fit, problems } = acceptable(given);
+    for (const problem of problems) toast(problem);
+    if (fit.length > 0 && t.column !== "done") platform.keepFiles(fit).then(addFiles).catch(addFailed);
+  };
   return (
     <aside
+      onPaste={(e) => {
+        const given = filesFrom(e.clipboardData);
+        if (given.length === 0) return;
+        e.preventDefault();
+        takeFiles(given);
+      }}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        const given = filesFrom(e.dataTransfer);
+        if (given.length === 0) return;
+        e.preventDefault();
+        takeFiles(given);
+      }}
       aria-label={`${ticketNumber(t)} ${t.title}`}
       className="enter flex w-[clamp(360px,38%,560px)] min-w-0 flex-none flex-col border-l border-line bg-panel"
     >
@@ -930,23 +1101,7 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
                   <span className="flex flex-col items-start gap-[6px]">
                     <FileChips files={t.attachments} />
                     {t.column === "done" ? null : (
-                      <Button
-                        onClick={() => {
-                          platform
-                            .pickFiles()
-                            .then((files) => {
-                              if (files.length === 0) return;
-                              return write(
-                                "ticket.update",
-                                { ticket_id: t.id, add_files: files.map((f) => f.path) },
-                                { expectedVersion: t.version, done: "Files added." },
-                              );
-                            })
-                            .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
-                        }}
-                      >
-                        Add files…
-                      </Button>
+                      <Button onClick={() => platform.pickFiles().then(addFiles, addFailed)}>Add files…</Button>
                     )}
                   </span>
                 </Row>

@@ -4,6 +4,15 @@
 import type { OpenLink, SessionStore } from "@aurelius/client";
 import { createContext, useContext } from "react";
 
+/** The servers this device can work with. Changing them makes the app start over. */
+export interface ServerChoices {
+  /** Null: this computer's own service. */
+  active: string | null;
+  localName: string | null;
+  localAvailable: boolean;
+  servers: { hostId: string; hostName: string; url: string; lastUsedMs: number }[];
+}
+
 export interface Platform {
   kind: "electron" | "web";
   openLink: OpenLink;
@@ -27,10 +36,37 @@ export interface Platform {
    * this machine the chosen paths, otherwise they are uploaded first. Empty: cancelled.
    */
   pickFiles(): Promise<{ path: string; name: string }[]>;
+  /** The same for files that were pasted or dropped. */
+  keepFiles(files: File[]): Promise<{ path: string; name: string }[]>;
   /** The folder picker of this machine; null where there is none and the path must be typed. */
   pickFolder: ((title: string) => Promise<string | null>) | null;
   /** Opens a folder of this machine; null where a folder cannot be opened. */
   openFolder: ((path: string) => Promise<void>) | null;
+  /** The paired server this page must find on the other side; null: its own service or origin. */
+  target: { hostId: string; environment: string } | null;
+  /** Null: this page belongs to one server. */
+  servers: {
+    list(): Promise<ServerChoices>;
+    use(hostId: string | null): Promise<void>;
+    /** Waits for the person at the server; `cancelled`: `cancelPairing` ended it. */
+    pair(text: string): Promise<{ cancelled: boolean }>;
+    cancelPairing(): Promise<void>;
+    forget(hostId: string): Promise<void>;
+  } | null;
+  /** `aurelius://` from the operating system; null: a browser. */
+  osLinks: {
+    take(): Promise<string | null>;
+    /** Keeps a link for after the app started over on another server. */
+    hold(url: string): Promise<void>;
+    listen(arrived: () => void): void;
+  } | null;
+  /** The service starting when this user signs in; null where this install can't. */
+  startup: { get(): Promise<boolean>; set(on: boolean): Promise<boolean> } | null;
+  /** The project this window was opened for, if it isn't the main window. */
+  windowProject: string | null;
+  openProjectWindow: ((id: string, name: string) => Promise<void>) | null;
+  /** Ends the app; the service keeps running. Null: a browser tab can't close itself. */
+  quit: (() => void) | null;
 }
 
 const PlatformContext = createContext<Platform | null>(null);

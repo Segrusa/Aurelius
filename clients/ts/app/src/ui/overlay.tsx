@@ -4,7 +4,8 @@
 import * as RadixDialog from "@radix-ui/react-dialog";
 import * as RadixMenu from "@radix-ui/react-dropdown-menu";
 import * as RadixTooltip from "@radix-ui/react-tooltip";
-import type { ReactElement, ReactNode } from "react";
+import { type ReactElement, type ReactNode, useContext } from "react";
+import { KeysContext } from "../keys/provider";
 
 export function Dialog({
   open,
@@ -65,9 +66,19 @@ export function Menu<T extends string>({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const keys = useContext(KeysContext);
   return (
     <RadixMenu.Root modal={false} {...(open === undefined ? {} : { open })} {...(onOpenChange ? { onOpenChange } : {})}>
-      <RadixMenu.Trigger asChild aria-label={label}>
+      <RadixMenu.Trigger
+        asChild
+        aria-label={label}
+        onKeyDown={(event) => {
+          // After a pick the focus is back here, and Ctrl Enter means the form, not this menu.
+          if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+          event.preventDefault();
+          keys?.press(event.nativeEvent);
+        }}
+      >
         {trigger}
       </RadixMenu.Trigger>
       <RadixMenu.Portal>

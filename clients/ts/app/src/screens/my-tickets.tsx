@@ -2,9 +2,11 @@ import type { ColumnKind } from "@aurelius/protocol";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useLinkState } from "../connection";
-import { useBoard, useMyTickets } from "../data";
+import { useBoard, useMyTickets, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
+import { usePlatform } from "../platform";
 import { Button, Kbd } from "../ui/kit";
+import { Menu } from "../ui/overlay";
 import { inMyTab, MY_TABS, type MyTab } from "./board-logic";
 import { overlays } from "./overlays-store";
 import { TicketPanel } from "./ticket-panel";
@@ -18,7 +20,11 @@ export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
   const supported = features.includes("my_tickets");
   const [includeDone, setIncludeDone] = useState(false);
   const [chosen, setChosen] = useState<MyTab | null>(null);
-  const mine = useMyTickets(null, includeDone, supported);
+  const { storage } = usePlatform();
+  const projects = useProjects();
+  // The same project filter as the Board's.
+  const [project, setProject] = useState<string | null>(() => storage.get("board_project") || null);
+  const mine = useMyTickets(project, includeDone, supported);
   const board = useBoard(null);
   const tickets = useMemo(() => mine.data?.tickets ?? [], [mine.data]);
   const need = useTicketNeeds(tickets);
@@ -59,6 +65,27 @@ export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
   return (
     <>
       <header className="flex h-11 flex-none items-center gap-[10px] border-b border-line pr-3 pl-[18px]">
+        <Menu
+          label="Project"
+          value={project ?? "all"}
+          options={[
+            { key: "all", label: "All projects" },
+            ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
+          ]}
+          onPick={(id) => {
+            const next = id === "all" ? null : id;
+            setProject(next);
+            storage.set("board_project", next ?? "");
+          }}
+          trigger={
+            <button
+              type="button"
+              className="h-6 cursor-pointer rounded-[12px] border border-line bg-transparent px-[9px] text-[12px] text-text2 hover:text-text"
+            >
+              {projects.data?.find((p) => p.id === project)?.name ?? "All projects"}
+            </button>
+          }
+        />
         <h1 className="m-0 text-[13px] font-medium">My tickets</h1>
         <fieldset aria-label="Tabs" className="m-0 ml-2 flex gap-1 border-0 p-0">
           {MY_TABS.map(({ key, label }) => (

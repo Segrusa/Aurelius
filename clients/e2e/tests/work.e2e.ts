@@ -309,6 +309,73 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(card("Nothing to do")).toHaveCount(0);
   });
 
+  test("a run: what its answer was given, its kept files, send now", async ({ page }) => {
+    const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const answered = message("kept", "assistant", "Here is the chart.", {
+      run_id: "r3",
+      files: [{ id: "f1", media_type: "image/png", name: "chart.png", size: 68 }],
+    });
+    const { writes } = await scriptServer(page, {
+      ...script,
+      conversations: { ...script.conversations, c3: messages("c3", [answered]) },
+      reads: {
+        "run.get_context": () => ({
+          type: "context",
+          value: {
+            run_id: "r3",
+            budget_tokens: 1000,
+            used_tokens: 120,
+            runtime_managed: false,
+            scopes: ["project"],
+            items: [
+              {
+                id: "i1",
+                hash: "h",
+                included: true,
+                label: "Project memory",
+                reason: null,
+                score: 0.9,
+                section: "Memory",
+                tokens: 100,
+              },
+              {
+                id: "i2",
+                hash: "h",
+                included: false,
+                label: "Old note",
+                reason: "over budget",
+                score: 0.2,
+                section: "Memory",
+                tokens: 20,
+              },
+            ],
+          },
+        }),
+        "file.get": () => ({
+          type: "file",
+          value: { id: "f1", media_type: "image/png", name: "chart.png", data_base64: PIXEL },
+        }),
+      },
+    });
+    await page.goto(`${site.origin}/tasks/k3`);
+    await page.getByRole("button", { name: "Conversation", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Show context of last answer" }).click();
+    const context = page.getByRole("dialog");
+    await expect(context.getByText("120 of 1000 tokens · project")).toBeVisible();
+    await expect(context.getByText("Project memory")).toBeVisible();
+    await expect(context.getByText(/Left out: Old note/)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /chart\.png/ }).click();
+    await expect(page.getByRole("dialog", { name: "chart.png" }).getByRole("img")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.getByLabel("Message Flux").fill("Stop and do this instead.");
+    await page.keyboard.press("Alt+Enter");
+    await expect.poll(() => writes.find((w) => w.method === "run.stop")?.params).toBeTruthy();
+    await expect
+      .poll(() => writes.find((w) => w.method === "chat.send")?.params)
+      .toMatchObject({ text: "Stop and do this instead." });
+  });
+
   test("Tasks and a run: approve inline, stop, and the properties", async ({ page }) => {
     const { writes } = await scriptServer(page, script);
     await page.goto(site.origin);

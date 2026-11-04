@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
 import { useConnection } from "../connection";
 import { useEmployees, useProjects } from "../data";
+import { AttachRow, useAttachments } from "../ui/attach";
 import { Button, Segments } from "../ui/kit";
 import { Dialog } from "../ui/overlay";
 import { FileChips } from "./run-tools";
@@ -587,6 +588,8 @@ export function ScheduleDialog({
   const employees = useEmployees();
   const projects = useProjects();
   const start = recurrenceForm(schedule?.recurrence ?? null);
+  const attach = useAttachments(schedule?.attachments.length ?? 0);
+  const [dropped, setDropped] = useState<string[]>([]);
   const [title, setTitle] = useState(schedule?.title ?? "");
   const [goal, setGoal] = useState(schedule?.goal ?? "");
   const [criteria, setCriteria] = useState((schedule?.criteria ?? []).join("\n"));
@@ -617,8 +620,16 @@ export function ScheduleDialog({
     };
     const ok = await run(() =>
       schedule
-        ? connection.write("recurring_task.update", { schedule_id: schedule.id, ...fields }, { retry: false })
-        : connection.write("recurring_task.create", { project_id: where as string, ...fields }, { retry: false }),
+        ? connection.write(
+            "recurring_task.update",
+            { schedule_id: schedule.id, ...fields, add_files: attach.paths, remove_files: dropped },
+            { retry: false },
+          )
+        : connection.write(
+            "recurring_task.create",
+            { project_id: where as string, ...fields, files: attach.paths },
+            { retry: false },
+          ),
     );
     if (ok) onClose();
   };
@@ -655,6 +666,22 @@ export function ScheduleDialog({
             onChange={(e) => setCriteria(e.target.value)}
           />
         </label>
+        <div {...attach.target} className="flex flex-wrap items-center gap-[6px]">
+          {(schedule?.attachments ?? [])
+            .filter((f) => !dropped.includes(f.path))
+            .map((f) => (
+              <button
+                key={f.path}
+                type="button"
+                aria-label={`Remove ${f.name}`}
+                onClick={() => setDropped([...dropped, f.path])}
+                className="cursor-pointer rounded-[6px] border border-line bg-transparent px-2 py-1 text-[12px] text-text"
+              >
+                {f.name} ×
+              </button>
+            ))}
+          <AttachRow attach={attach} />
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <label className={label}>
             Employee
@@ -923,6 +950,23 @@ const shownLimit = (key: string, v: number | undefined) =>
   v === undefined ? "" : key === "mem_min_mb" ? String(v / 1024) : String(v);
 const sentLimit = (key: string, v: number) => (key === "mem_min_mb" ? Math.round(v * 1024) : v);
 
+/** What the server is doing or about to do; the sidebar's Live only knows tasks. */
+function RunningNow() {
+  const connection = useConnection();
+  const jobs = useSetting("jobs", async () => expectBody(await connection.call("job.list"), "jobs").value.jobs);
+  const open = (jobs.data ?? []).filter((j) => j.state === "leased" || j.state === "ready");
+  if (open.length === 0) return null;
+  return (
+    <Group title="Running now">
+      {open.map((j) => (
+        <Row key={j.id} title={j.label} hint={j.reason ?? j.kind}>
+          <span className="text-[12px] text-text2">{j.state === "leased" ? "Running" : "Waiting"}</span>
+        </Row>
+      ))}
+    </Group>
+  );
+}
+
 export function LoadSection() {
   const connection = useConnection();
   const client = useQueryClient();
@@ -955,6 +999,7 @@ export function LoadSection() {
   };
   return (
     <>
+      <RunningNow />
       <Group title="Now">
         <Row
           title={data?.gate === "held" ? "New runs are waiting" : "New runs start right away"}

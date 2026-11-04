@@ -83,7 +83,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await page.keyboard.press("Control+k");
     await expect(palette(page)).toBeFocused();
     await palette(page).fill("north");
-    await expect(page.getByRole("option", { name: /Northwind API/ })).toBeVisible();
+    await expect(page.getByRole("option", { name: /Northwind API/ }).first()).toBeVisible();
     await palette(page).fill("j");
     await expect(page).toHaveURL(/inbox/);
     await palette(page).fill("heartbeat");

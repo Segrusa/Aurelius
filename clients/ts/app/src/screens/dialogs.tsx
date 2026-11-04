@@ -3,10 +3,11 @@ import type { AgentMode, TaskRun, TicketPriority } from "@aurelius/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useEmployees, useProjects } from "../data";
+import { useEmployees, useMembers, useProjects } from "../data";
 import { showChord } from "../keys/keymap";
 import { isMac, useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
+import { AttachRow, useAttachments } from "../ui/attach";
 import { Button, Chip, initial, Kbd, Mark, markColor } from "../ui/kit";
 import { Dialog, DialogClose, Menu } from "../ui/overlay";
 import { toast } from "../ui/toast";
@@ -57,9 +58,6 @@ export function useModels() {
     return [{ key: "default", label: "Default" }, ...models.map((m) => ({ key: m, label: modelName(m) }))];
   }, [list.data]);
 }
-
-/** As many as the server takes. */
-const FILES_MAX = 8;
 
 export { parseDeadline, parseLabels };
 
@@ -144,24 +142,14 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const [title, setTitle] = useState(seed?.title ?? "");
   const [description, setDescription] = useState(seed?.description ?? "");
   const [priority, setPriority] = useState<TicketPriority>("normal");
-  const [responsible, setResponsible] = useState<"me" | "none">("me");
+  const [responsible, setResponsible] = useState("me");
+  const members = useMembers();
   const [owner, setOwner] = useState("dispatcher");
   const [mode, setMode] = useState("default");
   const [model, setModel] = useState("default");
   const [labels, setLabels] = useState(seed?.labels ?? "");
   const [deadline, setDeadline] = useState("");
-  const platform = usePlatform();
-  const [files, setFiles] = useState<{ path: string; name: string }[]>([]);
-  const addFiles = () => {
-    platform
-      .pickFiles()
-      .then((picked) => {
-        const next = [...files, ...picked.filter((f) => !files.some((x) => x.path === f.path))];
-        if (next.length > FILES_MAX) toast(`At most ${FILES_MAX} files.`);
-        setFiles(next.slice(0, FILES_MAX));
-      })
-      .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
-  };
+  const attach = useAttachments();
   const { busy, error, setError, held, send, sendAnyway } = useSend((text) => {
     toast(text);
     onClose();
@@ -188,11 +176,14 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
           priority,
           labels: parseLabels(labels),
           deadline_ms: deadlineMs,
-          ...(files.length > 0 ? { files: files.map((f) => f.path) } : {}),
+          ...(attach.paths.length > 0 ? { files: attach.paths } : {}),
           start,
           run: runOf(mode, model),
           confirm_secret: confirmSecret,
           // A server without the feature refuses a field it does not know.
+          ...(canHaveResponsible && responsible !== "me" && responsible !== "none"
+            ? { responsible_user_id: responsible }
+            : {}),
           ...(canHaveResponsible && responsible === "me" && user ? { responsible_user_id: user.id } : {}),
           ...(owner === "dispatcher" ? {} : { owner_employee_id: owner }),
           ...(seed?.fromMessage ? { from_message: seed.fromMessage } : {}),
@@ -232,7 +223,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
         <span className="font-medium text-text">New ticket</span>
         <CloseButton />
       </div>
-      <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
+      <div {...attach.target} className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
         <Labeled label="Title">
           <input
             data-autofocus
@@ -264,10 +255,21 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
               value={responsible}
               options={[
                 { key: "me", label: "You" },
+                ...(members.data ?? [])
+                  .filter((u) => !u.disabled_at_ms && u.id !== user?.id)
+                  .map((u) => ({ key: u.id, label: u.username })),
                 { key: "none", label: "No one" },
               ]}
               onPick={setResponsible}
-              trigger={<Chip name="Responsible">{responsible === "me" ? "You" : "No one"}</Chip>}
+              trigger={
+                <Chip name="Responsible">
+                  {responsible === "me"
+                    ? "You"
+                    : responsible === "none"
+                      ? "No one"
+                      : (members.data?.find((u) => u.id === responsible)?.username ?? "No one")}
+                </Chip>
+              }
             />
           ) : null}
           <Menu
@@ -321,20 +323,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
             />
           </Labeled>
         </div>
-        <div className="flex flex-wrap items-center gap-[6px]">
-          <Button onClick={addFiles}>Add files…</Button>
-          {files.map((f) => (
-            <button
-              key={f.path}
-              type="button"
-              aria-label={`Remove ${f.name}`}
-              onClick={() => setFiles(files.filter((x) => x.path !== f.path))}
-              className="cursor-pointer rounded-[6px] border border-line bg-transparent px-2 py-1 text-[12px] text-text hover:border-btn-line"
-            >
-              {f.name} ×
-            </button>
-          ))}
-        </div>
+        <AttachRow attach={attach} />
         {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
         {error ? (
           <p role="alert" className="m-0 text-red">
@@ -368,6 +357,8 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const employees = useEmployees();
   const models = useModels();
   const [goal, setGoal] = useState("");
+  const attach = useAttachments();
+  const [effort, setEffort] = useState("default");
   const [picked, setPicked] = useState<string | null>(() => overlays.prefill()?.employeeId ?? null);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [mode, setMode] = useState("default");
@@ -398,7 +389,8 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
           description: goal.trim(),
           owner_employee_id: who.id,
           start: true,
-          run: runOf(mode, model),
+          run: { ...runOf(mode, model), ...(effort === "default" ? {} : { effort }) },
+          ...(attach.paths.length > 0 ? { files: attach.paths } : {}),
           confirm_secret: confirmSecret,
           ...(features.includes("ticket_responsible") && user ? { responsible_user_id: user.id } : {}),
         },
@@ -454,7 +446,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
         <span className="truncate text-text3">· starts right away</span>
         <CloseButton />
       </div>
-      <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
+      <div {...attach.target} className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
         <Labeled label="What needs doing">
           <textarea
             data-autofocus
@@ -524,6 +516,15 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
             trigger={<Chip name="Model">{models.find((m) => m.key === model)?.label ?? "Default"}</Chip>}
           />
           <Menu
+            label="Effort"
+            options={[
+              { key: "default", label: "Default" },
+              ...["low", "medium", "high", "xhigh", "max"].map((e) => ({ key: e, label: e })),
+            ]}
+            onPick={setEffort}
+            trigger={<Chip name="Effort">{effort === "default" ? "Default" : effort}</Chip>}
+          />
+          <Menu
             label="Mode"
             value={mode}
             options={MODES.map((m) => ({
@@ -538,6 +539,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
             }
           />
         </div>
+        <AttachRow attach={attach} />
         {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
         {error ? (
           <p role="alert" className="m-0 text-red">

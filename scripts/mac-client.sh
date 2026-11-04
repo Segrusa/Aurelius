@@ -38,9 +38,10 @@ fi
 
 if [[ "${1:-}" == "--release" ]]; then
     export AURELIUS_ENV=production
-    exec cargo run -p aurelius-desktop --release
+else
+    export AURELIUS_ENV=dev
 fi
-export AURELIUS_ENV=dev
 # Unsigned dev builds change with every build; the Keychain would ask each time.
 export AURELIUS_SECRETS="${AURELIUS_SECRETS:-file}"
-exec cargo run -p aurelius-desktop
+npx -y pnpm@12.16.1 install --frozen-lockfile
+exec npx -y pnpm@12.16.1 --filter @aurelius/electron dev

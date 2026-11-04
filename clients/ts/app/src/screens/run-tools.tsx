@@ -2,7 +2,15 @@
 // files it refers to.
 
 import { expectBody } from "@aurelius/client";
-import type { DirEntryView, FileScope, MessageFileView, MessageView, TaskRun, TokenUsage } from "@aurelius/protocol";
+import type {
+  DirEntryView,
+  FileRef,
+  FileScope,
+  MessageFileView,
+  MessageView,
+  TaskRun,
+  TokenUsage,
+} from "@aurelius/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
@@ -340,6 +348,7 @@ export function ScreenshotLink({
 
 function MarkdownDialog({ path, scope, onClose }: { path: string; scope: FileScope; onClose: () => void }) {
   const connection = useConnection();
+  const platform = usePlatform();
   const file = useKeyed(
     ["markdown", path, scope],
     async () => expectBody(await connection.call("markdown.get", { path, scope }), "markdown_file").value,
@@ -351,6 +360,18 @@ function MarkdownDialog({ path, scope, onClose }: { path: string; scope: FileSco
         {file.data ? <Markdown text={file.data.text} /> : null}
         {file.isPending ? <p className="m-0 text-text3">Loading…</p> : null}
         {file.error ? <p className="m-0 text-text3">{file.error.message}</p> : null}
+      </div>
+      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
+        {file.data ? (
+          <Button
+            onClick={() => {
+              void platform.copy(file.data.text).then(() => toast("Copied the Markdown"));
+            }}
+          >
+            Copy raw
+          </Button>
+        ) : null}
+        <Button onClick={() => void file.refetch()}>Reload</Button>
       </div>
     </Dialog>
   );
@@ -381,45 +402,172 @@ export function MarkdownChips({ text, scope }: { text: string; scope: FileScope 
 }
 
 /** Saved from the server, then offered as a download; opening is up to this computer. */
-export function FileChips({ files }: { files: MessageFileView[] }) {
+const sizeText = (size: number) =>
+  size >= 1_048_576 ? `${(size / 1_048_576).toFixed(1)} MB` : `${Math.ceil(size / 1024)} KB`;
+
+function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/** Files an answer kept with its message: an image shows here, anything else is saved. */
+export function KeptFiles({ files }: { files: FileRef[] }) {
   const connection = useConnection();
-  const open = async (f: MessageFileView) => {
-    if (!f.id) return toast("This file is not on the server any more.");
+  const [shown, setShown] = useState<{ name: string; url: string } | null>(null);
+  const open = async (file: FileRef) => {
     try {
-      const parts: string[] = [];
-      let type = "application/octet-stream";
-      let offset = 0;
-      for (;;) {
-        const chunk = expectBody(await connection.call("upload.get", { id: f.id, offset }), "upload").value;
-        parts.push(chunk.data_base64);
-        type = chunk.media_type;
-        if (chunk.done) break;
-        offset += atob(chunk.data_base64).length;
+      const got = expectBody(await connection.call("file.get", { id: file.id }), "file").value;
+      const bytes = Uint8Array.from(atob(got.data_base64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: got.media_type });
+      if (got.media_type.startsWith("image/") && got.media_type !== "image/svg+xml") {
+        setShown({ name: got.name, url: URL.createObjectURL(blob) });
+      } else {
+        saveBlob(blob, got.name);
       }
-      const bytes = parts.map((p) => Uint8Array.from(atob(p), (c) => c.charCodeAt(0)));
-      const url = URL.createObjectURL(new Blob(bytes, { type }));
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = f.name;
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e) {
       toast(e instanceof Error ? e.message : "This file did not load.");
     }
   };
   if (files.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-[6px]">
+    <div className="flex flex-wrap gap-2 pt-[2px]">
       {files.map((f) => (
         <button
-          key={f.path}
+          key={f.id}
           type="button"
           onClick={() => void open(f)}
-          className="cursor-pointer rounded-[6px] border border-line bg-transparent px-[9px] py-1 text-[12px] text-text hover:border-btn-line"
+          className="flex cursor-pointer items-center gap-2 rounded-[7px] border border-line bg-transparent px-[10px] py-[6px] text-[12.5px] text-text hover:border-btn-line"
         >
+          <span className="text-acc-text">{f.media_type.startsWith("image/") ? "▣" : "▤"}</span>
           {f.name}
+          <span className="text-[11px] text-text3">{sizeText(f.size)}</span>
         </button>
       ))}
+      {shown ? (
+        <Dialog
+          open
+          onClose={() => {
+            URL.revokeObjectURL(shown.url);
+            setShown(null);
+          }}
+          title={shown.name}
+          width={900}
+        >
+          <img src={shown.url} alt={shown.name} className="block max-h-[80vh] w-full object-contain" />
+        </Dialog>
+      ) : null}
+    </div>
+  );
+}
+
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp)$/i;
+
+/** The small version the server makes; the file itself only when someone opens it. */
+async function fetchThumb(connection: ReturnType<typeof useConnection>, id: string): Promise<Blob> {
+  const chunk = expectBody(await connection.call("upload.get", { id, max_side: 160 }), "upload").value;
+  return new Blob([Uint8Array.from(atob(chunk.data_base64), (c) => c.charCodeAt(0))], { type: chunk.media_type });
+}
+
+async function fetchUpload(connection: ReturnType<typeof useConnection>, id: string): Promise<Blob> {
+  const parts: Uint8Array<ArrayBuffer>[] = [];
+  let type = "application/octet-stream";
+  let offset = 0;
+  for (;;) {
+    const chunk = expectBody(await connection.call("upload.get", { id, offset }), "upload").value;
+    const bytes = Uint8Array.from(atob(chunk.data_base64), (c) => c.charCodeAt(0));
+    parts.push(bytes);
+    type = chunk.media_type;
+    if (chunk.done) break;
+    offset += bytes.length;
+  }
+  return new Blob(parts, { type });
+}
+
+/** A small picture of an image that was sent with a message. */
+function UploadThumb({ id, name, onShow }: { id: string; name: string; onShow: () => void }) {
+  const connection = useConnection();
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let made: string | null = null;
+    let gone = false;
+    fetchThumb(connection, id)
+      .then((blob) => {
+        if (gone) return;
+        made = URL.createObjectURL(blob);
+        setUrl(made);
+      })
+      .catch(() => undefined);
+    return () => {
+      gone = true;
+      if (made) URL.revokeObjectURL(made);
+    };
+  }, [connection, id]);
+  if (url === null) return null;
+  return (
+    <button
+      type="button"
+      aria-label={`View ${name}`}
+      onClick={onShow}
+      className="cursor-pointer border-0 bg-transparent p-0"
+    >
+      <img src={url} alt="" className="block h-[56px] max-w-[96px] rounded-[6px] object-cover" />
+    </button>
+  );
+}
+
+export function FileChips({ files }: { files: MessageFileView[] }) {
+  const connection = useConnection();
+  const [shown, setShown] = useState<{ name: string; url: string } | null>(null);
+  const open = async (f: MessageFileView) => {
+    if (!f.id) return toast("This file is not on the server any more.");
+    try {
+      saveBlob(await fetchUpload(connection, f.id), f.name);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "This file did not load.");
+    }
+  };
+  const show = async (f: MessageFileView) => {
+    if (!f.id) return;
+    try {
+      setShown({ name: f.name, url: URL.createObjectURL(await fetchUpload(connection, f.id)) });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "This file did not load.");
+    }
+  };
+  if (files.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-[6px]">
+      {files.map((f) =>
+        f.id && IMAGE_FILE.test(f.name) ? (
+          <UploadThumb key={f.path} id={f.id} name={f.name} onShow={() => void show(f)} />
+        ) : (
+          <button
+            key={f.path}
+            type="button"
+            onClick={() => void open(f)}
+            className="cursor-pointer rounded-[6px] border border-line bg-transparent px-[9px] py-1 text-[12px] text-text hover:border-btn-line"
+          >
+            {f.name}
+          </button>
+        ),
+      )}
+      {shown ? (
+        <Dialog
+          open
+          onClose={() => {
+            URL.revokeObjectURL(shown.url);
+            setShown(null);
+          }}
+          title={shown.name}
+          width={900}
+        >
+          <img src={shown.url} alt={shown.name} className="block max-h-[80vh] w-full object-contain" />
+        </Dialog>
+      ) : null}
     </div>
   );
 }
