@@ -1,16 +1,16 @@
 import type { StreamUpdate } from "@aurelius/client";
-import type { ActivityView, ApprovalView, MessageView, TaskView } from "@aurelius/protocol";
+import type { ActivityView, MessageView, TaskView } from "@aurelius/protocol";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAllTasks, useApprovals, useMessages, useProjects, useRunGuidelines } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
-import { Button, initial, Kbd, Mark, markColor } from "../ui/kit";
+import { Button, initial, Mark, markColor } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
+import { ApprovalCard } from "./approval-card";
 import { Held, useSend } from "./dialogs";
-import { approvalAction, approvalSentence } from "./inbox-logic";
 import { modelName } from "./settings-kit";
 import { filesWritten, isActive, stepLine, stepsOf, taskStateLine } from "./tasks-logic";
 
@@ -133,56 +133,6 @@ function Streaming({
         </div>
         <Steps activity={update.activity} />
         {update.text ? <p className="m-0 text-[14px] leading-[1.65] whitespace-pre-wrap">{update.text}</p> : null}
-      </div>
-    </div>
-  );
-}
-
-function ApprovalCard({ approval }: { approval: ApprovalView }) {
-  const connection = useConnection();
-  const client = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  const action = approvalAction(approval);
-  const eligible = approval.always_allow_eligible ?? false;
-  const decide = async (approve: boolean, alwaysAllow = false) => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await connection.write(
-        "approval.decide",
-        { approval_id: approval.id, action_digest: approval.action_digest, approve, always_allow: alwaysAllow },
-        { retry: false },
-      );
-      await client.invalidateQueries({ queryKey: ["approvals"] });
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "This did not work.");
-      setBusy(false);
-    }
-  };
-  useAction("AllowOnce", () => void decide(true));
-  useAction("AlwaysAllow", () => void decide(true, true), eligible);
-  useAction("DenyApproval", () => void decide(false));
-  return (
-    <div className="overflow-hidden rounded-[8px] border border-amber-line">
-      <div className="flex items-center gap-2 bg-amber-soft px-3 py-[10px] font-medium">
-        <span className="size-[7px] flex-none rounded-full bg-amber" />
-        Approval needed · {approvalSentence(approval)}
-      </div>
-      <pre className="m-0 max-h-[240px] overflow-auto border-t border-line2 bg-sunk p-3 font-mono text-[13px] whitespace-pre-wrap">
-        {action.body}
-      </pre>
-      <div className="flex flex-wrap gap-2 border-t border-line2 px-3 py-[10px]">
-        <Button kind="primary" disabled={busy} onClick={() => void decide(true)}>
-          Allow once <Kbd onAccent>↵</Kbd>
-        </Button>
-        {eligible ? (
-          <Button disabled={busy} onClick={() => void decide(true, true)}>
-            Always allow <Kbd>⇧↵</Kbd>
-          </Button>
-        ) : null}
-        <Button kind="danger" disabled={busy} onClick={() => void decide(false)}>
-          Deny <Kbd>D</Kbd>
-        </Button>
       </div>
     </div>
   );

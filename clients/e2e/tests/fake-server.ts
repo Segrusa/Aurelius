@@ -21,16 +21,27 @@ export interface Scripted {
   company?: unknown;
   proposals?: unknown[];
   features?: string[];
+  channels?: unknown[];
+  /** `group_chat.get` answers by channel; "general" for none. */
+  feeds?: Record<string, unknown>;
+  threads?: Record<string, unknown>;
+  /** A write answered with this instead of a receipt, or nothing. */
+  refuse?: (request: Record<string, unknown>) => { code: string; message: string; matched_items?: string[] } | null;
   /** Answers for the writes; recorded in `writes`. */
   onWrite?: (request: Record<string, unknown>) => void;
 }
 
-export async function scriptServer(page: Page, script: Scripted): Promise<{ writes: Record<string, unknown>[] }> {
+export async function scriptServer(
+  page: Page,
+  script: Scripted,
+): Promise<{ writes: Record<string, unknown>[]; push: (frame: unknown) => void }> {
   const writes: Record<string, unknown>[] = [];
   await page.route("**/v1/session", (route) =>
     route.fulfill({ json: { expires_at_ms: Date.now() + 3_600_000, protocol: 5, environment: "dev", host_id: "h" } }),
   );
+  let socket: { send: (text: string) => void } | null = null;
   await page.routeWebSocket("**/v1/ws", (ws) => {
+    socket = ws;
     ws.onMessage((raw) => {
       const request = JSON.parse(String(raw)) as Record<string, unknown>;
       const answer = (ok: unknown) => ws.send(JSON.stringify({ type: "response", request_id: request.request_id, ok }));
@@ -94,6 +105,18 @@ export async function scriptServer(page: Page, script: Scripted): Promise<{ writ
           return answer({ type: "company", value: script.company ?? { company: {}, members: [] } });
         case "run.guidelines":
           return answer({ type: "run_guidelines", value: { guidelines: [], run_id: "r" } });
+        case "channel.list":
+          return answer({ type: "channels", value: { channels: script.channels ?? [] } });
+        case "group_chat.get":
+          return answer({
+            type: "messages",
+            value: script.feeds?.[(request.params as { channel: string | null }).channel ?? "general"],
+          });
+        case "thread.read":
+          return answer({
+            type: "thread",
+            value: script.threads?.[(request.params as { message_id: string }).message_id],
+          });
         case "connection.list":
           return answer({ type: "connections", value: { connections: [] } });
         case "subscription.get":
@@ -101,6 +124,12 @@ export async function scriptServer(page: Page, script: Scripted): Promise<{ writ
         default:
           writes.push(request);
           script.onWrite?.(request);
+          {
+            const refused = script.refuse?.(request);
+            if (refused) {
+              return ws.send(JSON.stringify({ type: "response", request_id: request.request_id, error: refused }));
+            }
+          }
           return answer({
             type: "receipt",
             value: {
@@ -113,7 +142,10 @@ export async function scriptServer(page: Page, script: Scripted): Promise<{ writ
       }
     });
   });
-  return { writes };
+  return {
+    writes,
+    push: (frame) => socket?.send(JSON.stringify(frame)),
+  };
 }
 
 export const approval = (id: string, over: Record<string, unknown> = {}) => ({
@@ -228,5 +260,19 @@ export const message = (id: string, role: string, text: string, over: Record<str
   created_at_ms: Date.now() - 300_000,
   status: "complete",
   uploads: [],
+  ...over,
+});
+
+export const channel = (id: string, name: string, over: Record<string, unknown> = {}) => ({
+  archived: false,
+  conversation_id: id,
+  kind: "project",
+  last_activity_ms: 0,
+  member: true,
+  member_count: 3,
+  mentions: 0,
+  name,
+  read_through: null,
+  unread: 0,
   ...over,
 });

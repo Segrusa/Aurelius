@@ -1,6 +1,6 @@
 import type { ColumnKind } from "@aurelius/protocol";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useLinkState } from "../connection";
 import { useBoard, useMyTickets } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
@@ -41,9 +41,6 @@ export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
   );
   const open = (id: string) => void navigate({ to: "/my-tickets", search: { ticket: id } });
   const close = () => void navigate({ to: "/my-tickets", search: {} });
-  useEffect(() => {
-    document.querySelector<HTMLElement>(`[data-ticket="${ticket}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [ticket]);
 
   const at = shown.findIndex((t) => t.id === ticket);
   const step = (by: number) => {
@@ -83,7 +80,7 @@ export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
         </div>
       </header>
       <div className="flex min-h-0 flex-1">
-        <div className="min-w-0 flex-1 overflow-auto">
+        <div className="flex min-w-0 flex-1 flex-col">
           {!supported ? (
             <p className="m-0 p-[18px] text-text3">This server does not have My tickets yet.</p>
           ) : mine.error ? (

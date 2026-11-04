@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Command } from "cmdk";
 import { useMemo, useState } from "react";
-import { useEmployees, useGuidelines, useProjects, useTickets } from "../data";
+import { useChannels, useEmployees, useGuidelines, useProjects, useTickets } from "../data";
 import { hidden } from "../hidden";
 import { keysFor, SHORTCUTS, showChord } from "../keys/keymap";
 import { isMac, useKeyContext, useKeys } from "../keys/provider";
@@ -9,6 +9,7 @@ import { usePlatform } from "../platform";
 import { SearchIcon } from "../ui/icons";
 import { initial, Kbd, Mark, markColor } from "../ui/kit";
 import { Dialog } from "../ui/overlay";
+import { bareName } from "./chat-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
 import { filterGroups, type PaletteGroup } from "./palette-logic";
 
@@ -35,6 +36,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const employees = useEmployees();
   const tickets = useTickets();
   const guidelines = useGuidelines();
+  const channels = useChannels();
 
   const groups = useMemo<PaletteGroup[]>(() => {
     const go = (to: string) => () => void navigate({ to });
@@ -59,6 +61,20 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           detail: [COLUMN[t.column] ?? t.column, t.owner_name].filter(Boolean).join(" · "),
           mark: t.id,
           run: () => void navigate({ to: "/board", search: { ticket: t.id } }),
+        })),
+      },
+      {
+        label: "Channels",
+        items: (channels.data ?? []).map((c) => ({
+          id: `channel:${c.conversation_id}`,
+          label: `Go to #${bareName(c)}`,
+          detail: "Team chat",
+          mark: c.conversation_id,
+          run: () =>
+            void navigate({
+              to: "/chat",
+              search: c.kind && c.kind !== "general" ? { channel: c.conversation_id } : {},
+            }),
         })),
       },
       {
@@ -104,7 +120,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           }),
       },
     ];
-  }, [projects.data, tickets.data, employees.data, guidelines.data, keys, kind, navigate]);
+  }, [projects.data, tickets.data, employees.data, guidelines.data, channels.data, keys, kind, navigate]);
 
   const shown = useMemo(() => filterGroups(query, groups), [query, groups]);
 

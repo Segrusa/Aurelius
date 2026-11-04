@@ -279,3 +279,11 @@ a {
   border-left: 2px solid var(--line);
   color: var(--text2);
 }
+
+.prose-aurelius .mention {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--sel);
+  color: var(--acc-text);
+  font-weight: 500;
+}

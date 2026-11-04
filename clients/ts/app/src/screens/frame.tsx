@@ -1,8 +1,8 @@
 import type { TaskView } from "@aurelius/protocol";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { useLinkState } from "../connection";
-import { useLiveQueries, useOpenTasks, useProjects, useSubscription } from "../data";
+import { useChannels, useLiveQueries, useOpenTasks, useProjects, useSubscription } from "../data";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import {
@@ -18,6 +18,7 @@ import { Icon, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/kit";
 import { Tooltip } from "../ui/overlay";
 import { Toasts } from "../ui/toast";
+import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { useInbox } from "./inbox";
 import { needsYouCount, ticketPlace } from "./inbox-logic";
@@ -37,7 +38,19 @@ const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon }[] = [
   { to: "/knowledge", label: "Knowledge", icon: "know" },
 ];
 
-function NavRow({ to, label, icon, count }: { to: string; label: string; icon: NavIcon; count?: number }) {
+function NavRow({
+  to,
+  label,
+  icon,
+  count,
+  dot,
+}: {
+  to: string;
+  label: string;
+  icon: NavIcon;
+  count?: number;
+  dot?: boolean;
+}) {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const on = path === to || path.startsWith(`${to}/`);
   return (
@@ -48,7 +61,11 @@ function NavRow({ to, label, icon, count }: { to: string; label: string; icon: N
     >
       <Icon name={icon} />
       {label}
-      {count ? <span className="ml-auto text-[12px] text-text">{count}</span> : null}
+      {count ? (
+        <span className="ml-auto text-[12px] text-text">{count}</span>
+      ) : dot ? (
+        <span role="img" aria-label="Unread" className="ml-auto size-[6px] rounded-full bg-text2" />
+      ) : null}
     </Link>
   );
 }
@@ -161,6 +178,8 @@ function useScreenCounter(): void {
 }
 
 function Sidebar() {
+  const channels = useChannels();
+  const chat = useMemo(() => chatBadge(channels.data ?? []), [channels.data]);
   const { open } = overlays;
   const { groups } = useInbox();
   const projects = useProjects();
@@ -206,7 +225,7 @@ function Sidebar() {
         <div className="flex flex-col gap-px">
           <SectionLabel>Workspace</SectionLabel>
           {NAV_WORKSPACE.map((n) => (
-            <NavRow key={n.to} {...n} />
+            <NavRow key={n.to} {...n} {...(n.to === "/chat" ? { count: chat.mentions, dot: chat.unread } : {})} />
           ))}
         </div>
       </nav>

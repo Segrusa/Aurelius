@@ -19,7 +19,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { memo, useMemo, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { memo, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useBoard, useEmployees, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
@@ -53,6 +54,7 @@ import {
 } from "./tickets-kit";
 
 const HIDDEN_KEY = "board_hidden_columns";
+const CARD_HEIGHT = 88;
 
 const CardBody = memo(function CardBody({
   t,
@@ -144,6 +146,18 @@ function Column({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `column:${column.kind}`, data: { kind: column.kind } });
   const ids = useMemo(() => cards.map((c) => c.id), [cards]);
+  const scroller = useRef<HTMLDivElement>(null);
+  const virtual = useVirtualizer({
+    count: cards.length,
+    getScrollElement: () => scroller.current,
+    estimateSize: () => CARD_HEIGHT,
+    gap: 6,
+    overscan: 6,
+    getItemKey: (i) => (cards[i] as TicketView).id,
+  });
+  const items = virtual.getVirtualItems();
+  const top = items[0]?.start ?? 0;
+  const bottom = Math.max(0, virtual.getTotalSize() - (items.at(-1)?.end ?? 0));
   return (
     <section
       aria-label={column.name}
@@ -165,19 +179,26 @@ function Column({
           </button>
         ) : null}
       </div>
-      <div className="flex min-h-[40px] flex-col gap-[6px] overflow-y-auto pb-1">
+      <div ref={scroller} className="min-h-[40px] overflow-y-auto pb-1">
         <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-          {cards.map((t) => (
-            <Card
-              key={t.id}
-              t={t}
-              kind={column.kind}
-              need={need(t)}
-              mine={mine(t)}
-              selected={t.id === selected}
-              onOpen={onOpen}
-            />
-          ))}
+          {/* In flow between two paddings: the sortable transforms need the cards where they stand. */}
+          <div style={{ paddingTop: top, paddingBottom: bottom }} className="flex flex-col gap-[6px]">
+            {items.map((item) => {
+              const t = cards[item.index] as TicketView;
+              return (
+                <div key={t.id} data-index={item.index} ref={virtual.measureElement}>
+                  <Card
+                    t={t}
+                    kind={column.kind}
+                    need={need(t)}
+                    mine={mine(t)}
+                    selected={t.id === selected}
+                    onOpen={onOpen}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </SortableContext>
         {cards.length === 0 ? (
           <p className="m-0 px-[6px] py-1 text-[12px] text-text3">{emptyText(column.kind)}</p>
@@ -475,7 +496,7 @@ export function BoardScreen({ ticket }: { ticket: string | undefined }) {
             {board.error.message}
           </p>
         ) : view === "list" ? (
-          <div className="min-w-0 flex-1 overflow-auto">
+          <div className="flex min-w-0 flex-1 flex-col">
             <TicketRows
               tickets={shown.flatMap((c) => c.cards)}
               columnName={columnName}

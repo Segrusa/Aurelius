@@ -10,6 +10,7 @@ import { useAction, useKeyContext } from "../keys/provider";
 import { StatusGlyph } from "../ui/icons";
 import { Button, Kbd, Segments } from "../ui/kit";
 import { toast } from "../ui/toast";
+import { ApprovalCard, PLAN_TOOL, QUESTION_TOOL } from "./approval-card";
 import { taskCounts } from "./board-logic";
 import {
   age,
@@ -165,6 +166,18 @@ function InboxList({
 }
 
 function ApprovalDetail({ approval }: { approval: ApprovalView }) {
+  // A question and a plan need their answer, not Allow or Deny.
+  if (approval.tool === QUESTION_TOOL || approval.tool === PLAN_TOOL) {
+    return (
+      <div className="enter flex max-w-[760px] flex-col gap-5 px-6 py-8 xl:px-10" key={approval.id}>
+        <ApprovalCard approval={approval} />
+      </div>
+    );
+  }
+  return <ActionDetail approval={approval} />;
+}
+
+function ActionDetail({ approval }: { approval: ApprovalView }) {
   const connection = useConnection();
   const client = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -303,15 +316,16 @@ function NotificationDetail({ row, n }: { row: InboxRow; n: NotificationView }) 
   const open = () => {
     if (n.ticket_id) void navigate({ to: "/board", search: { ticket: n.ticket_id } });
     else if (n.task_id) void navigate({ to: "/tasks/$taskId", params: { taskId: n.task_id } });
+    else if (n.conversation_id) void navigate({ to: "/chat", search: { channel: n.conversation_id } });
   };
-  useAction("OpenSelected", open, Boolean(n.ticket_id || n.task_id));
+  useAction("OpenSelected", open, Boolean(n.ticket_id || n.task_id || n.conversation_id));
   return (
     <DetailFrame row={row}>
       {n.reason ? <Prose title="Why you see this">{n.reason}</Prose> : null}
       <div className="flex flex-wrap gap-2">
-        {n.ticket_id || n.task_id ? (
+        {n.ticket_id || n.task_id || n.conversation_id ? (
           <Button kind="primary" onClick={open}>
-            {n.ticket_id ? "Open ticket" : "Open task"} <Kbd onAccent>↵</Kbd>
+            {n.ticket_id ? "Open ticket" : n.task_id ? "Open task" : "Open chat"} <Kbd onAccent>↵</Kbd>
           </Button>
         ) : null}
         {n.read ? null : <Button onClick={() => void act("notification.mark_read")}>Mark read</Button>}

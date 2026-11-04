@@ -137,8 +137,9 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const employees = useEmployees();
   const models = useModels();
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [seed] = useState(() => overlays.prefill());
+  const [title, setTitle] = useState(seed?.title ?? "");
+  const [description, setDescription] = useState(seed?.description ?? "");
   const [priority, setPriority] = useState<TicketPriority>("normal");
   const [responsible, setResponsible] = useState<"me" | "none">("me");
   const [owner, setOwner] = useState("dispatcher");
@@ -178,6 +179,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
           // A server without the feature refuses a field it does not know.
           ...(canHaveResponsible && responsible === "me" && user ? { responsible_user_id: user.id } : {}),
           ...(owner === "dispatcher" ? {} : { owner_employee_id: owner }),
+          ...(seed ? { from_message: seed.fromMessage } : {}),
         },
         { retry: false },
       );

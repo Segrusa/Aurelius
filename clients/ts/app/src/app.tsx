@@ -6,6 +6,7 @@ import { ConnectionProvider } from "./connection";
 import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
 import { BoardScreen } from "./screens/board";
+import { ChatScreen } from "./screens/chat";
 import { Frame } from "./screens/frame";
 import { Gate } from "./screens/gate";
 import { InboxScreen } from "./screens/inbox";
@@ -71,9 +72,20 @@ const taskRun = createRoute({
     return <TaskRunScreen key={taskId} taskId={taskId} />;
   },
 });
+const chat = createRoute({
+  getParentRoute: () => root,
+  path: "/chat",
+  validateSearch: (search: Record<string, unknown>): { channel?: string; thread?: string } => ({
+    ...(typeof search.channel === "string" ? { channel: search.channel } : {}),
+    ...(typeof search.thread === "string" ? { thread: search.thread } : {}),
+  }),
+  component: function ChatRoute() {
+    const { channel, thread } = chat.useSearch();
+    return <ChatScreen channel={channel ?? null} thread={thread ?? null} />;
+  },
+});
 const others = (
   [
-    ["/chat", "Team chat"],
     ["/employees", "Employees"],
     ["/knowledge", "Knowledge"],
   ] as const
@@ -95,7 +107,18 @@ const settings = createRoute({
 });
 
 const router = createRouter({
-  routeTree: root.addChildren([index, inbox, board, myTickets, tasks, taskRun, settingsIndex, settings, ...others]),
+  routeTree: root.addChildren([
+    index,
+    inbox,
+    board,
+    myTickets,
+    tasks,
+    taskRun,
+    chat,
+    settingsIndex,
+    settings,
+    ...others,
+  ]),
   defaultPreload: "intent",
 });
 

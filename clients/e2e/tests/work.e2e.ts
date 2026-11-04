@@ -378,8 +378,13 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     const started = Date.now();
     await nav(page, "Board");
-    await expect(page.getByRole("button", { name: /Busy ticket 998/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Busy ticket 0$/ })).toBeVisible();
     const opened = Date.now() - started;
+    expect(await page.locator("[data-card]").count()).toBeLessThan(120);
+    // A card far down the column comes up when it is scrolled to.
+    const todo = page.getByRole("region", { name: "Todo" }).locator(".overflow-y-auto");
+    await todo.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    await expect(page.getByRole("button", { name: /Busy ticket 998/ })).toBeVisible();
     const filtering = Date.now();
     await page.getByLabel("Find a ticket").fill("Busy ticket 999");
     await expect(page.getByRole("button", { name: /Busy ticket 998/ })).toHaveCount(0);

@@ -291,3 +291,29 @@ export function useRunGuidelines(runId: string | null | undefined) {
     Boolean(runId),
   );
 }
+
+export function useChannels() {
+  const connection = useConnection();
+  return useKeyed(
+    ["messages", "channels"],
+    async () => expectBody(await connection.call("channel.list"), "channels").value.channels,
+  );
+}
+
+/** A channel's messages; reading marks it read on the server. `channel` null: general. */
+export function useChannelFeed(channel: string | null) {
+  const connection = useConnection();
+  return useKeyed(
+    ["messages", "feed", channel],
+    async () => expectBody(await connection.call("group_chat.get", { channel }), "messages").value,
+  );
+}
+
+export function useThread(messageId: string | null) {
+  const connection = useConnection();
+  return useKeyed(
+    ["messages", "thread", messageId],
+    async () => expectBody(await connection.call("thread.read", { message_id: messageId as string }), "thread").value,
+    messageId !== null,
+  );
+}
