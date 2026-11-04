@@ -34,6 +34,7 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
     expect(reach.process).toBe("undefined");
     expect(reach.bridge).toEqual([
       "closeLink",
+      "desktopPrefs",
       "getSession",
       "info",
       "listenLink",
@@ -50,6 +51,7 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
 
     // Fonts and styles came through the CSP: the design's type and panel.
     await page.emulateMedia({ colorScheme: "dark" });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     const look = await page.evaluate(async () => {
       await document.fonts.ready;
       return {

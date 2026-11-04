@@ -1,6 +1,7 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useLinkState } from "../connection";
+import { useAction } from "../keys/provider";
 import { Icon } from "../ui/icons";
 import {
   BackupsSection,
@@ -19,7 +20,7 @@ interface Section {
   body: () => ReactNode;
 }
 
-// Plugins and App keys are in the design's list, but HIDDEN_FEATURES leads: they stay out.
+// Plugins and App keys are in the design's list, but hidden.ts leads: they stay out.
 const GROUPS: { label: string; sections: Section[] }[] = [
   {
     label: "You",
@@ -94,6 +95,8 @@ export function SettingsSidebar() {
 }
 
 export function SettingsScreen({ section }: { section: string }) {
+  const navigate = useNavigate();
+  useAction("Back", () => void navigate({ to: "/inbox" }));
   const found = GROUPS.flatMap((g) => g.sections).find((s) => s.key === section);
   return (
     <>

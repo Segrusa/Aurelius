@@ -1,12 +1,28 @@
 import type { TaskView } from "@aurelius/protocol";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { useLinkState } from "../connection";
 import { useLiveQueries, useOpenTasks, useProjects, useSubscription } from "../data";
+import { useAction } from "../keys/provider";
+import { usePlatform } from "../platform";
+import {
+  noteScreen,
+  parseScreenUse,
+  SAVE_DELAY_MS,
+  SCREEN_USE_KEY,
+  type ScreenUse,
+  screenKey,
+  screenUseJson,
+} from "../screen-use";
 import { Icon, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/kit";
+import { Tooltip } from "../ui/overlay";
+import { Toasts } from "../ui/toast";
+import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { useInbox } from "./inbox";
 import { needsYouCount, ticketPlace } from "./inbox-logic";
+import { overlays } from "./overlays-store";
+import { Palette } from "./palette";
 import { SettingsSidebar } from "./settings";
 
 const NAV_MAIN: { to: string; label: string; icon: NavIcon }[] = [
@@ -90,7 +106,57 @@ function Usage() {
   );
 }
 
+const GO_TO: Record<string, string> = {
+  GoDashboard: "/inbox",
+  GoMyTickets: "/my-tickets",
+  GoBoard: "/board",
+  GoTasks: "/tasks",
+  GoTeamChat: "/chat",
+  GoEmployees: "/employees",
+  GoGuidelines: "/knowledge",
+  OpenSettings: "/settings",
+  OpenBackups: "/settings/backups",
+  OpenRemote: "/settings/remote",
+  OpenServers: "/settings/servers",
+};
+
+function GoAction({ action, to }: { action: string; to: string }) {
+  const navigate = useNavigate();
+  useAction(action, () => void navigate({ to }));
+  return null;
+}
+
+function useGlobalActions(): void {
+  const { open } = overlays;
+  useAction("OpenPalette", () => open("palette"));
+  useAction("MakeTicket", () => open("ticket"));
+  useAction("NewItem", () => open("give"));
+  useAction("NavBack", () => window.history.back());
+  useAction("NavForward", () => window.history.forward());
+}
+
+function useScreenCounter(): void {
+  const { storage } = usePlatform();
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const state = useRef<{ use: ScreenUse; previous: string | null; timer: ReturnType<typeof setTimeout> | null } | null>(
+    null,
+  );
+  useEffect(() => {
+    state.current ??= { use: parseScreenUse(storage.get(SCREEN_USE_KEY)), previous: null, timer: null };
+    const counter = state.current;
+    const key = screenKey(path);
+    if (noteScreen(counter.use, counter.previous, key, Date.now())) {
+      counter.timer ??= setTimeout(() => {
+        counter.timer = null;
+        storage.set(SCREEN_USE_KEY, screenUseJson(counter.use));
+      }, SAVE_DELAY_MS);
+    }
+    counter.previous = key;
+  }, [path, storage]);
+}
+
 function Sidebar() {
+  const { open } = overlays;
   const { groups } = useInbox();
   const projects = useProjects();
   const { hostName, status } = useLinkState();
@@ -104,24 +170,26 @@ function Sidebar() {
           {hostName ?? "Aurelius"}
         </span>
         <div className="ml-auto flex gap-[2px] [-webkit-app-region:no-drag]">
-          <button
-            type="button"
-            disabled
-            aria-label="Search"
-            title="Comes with the command palette"
-            className="grid size-7 place-items-center rounded-[6px] border-0 bg-transparent text-text2 opacity-50"
-          >
-            <SearchIcon />
-          </button>
-          <button
-            type="button"
-            disabled
-            aria-label="New ticket"
-            title="Comes with the dialogs"
-            className="grid size-[26px] place-items-center rounded-[6px] border border-btn-line bg-btn text-text opacity-50"
-          >
-            <NewIcon />
-          </button>
+          <Tooltip text="Search and commands">
+            <button
+              type="button"
+              aria-label="Search"
+              onClick={() => open("palette")}
+              className="grid size-7 cursor-pointer place-items-center rounded-[6px] border-0 bg-transparent text-text2 hover:bg-sel hover:text-text"
+            >
+              <SearchIcon />
+            </button>
+          </Tooltip>
+          <Tooltip text="New ticket">
+            <button
+              type="button"
+              aria-label="New ticket"
+              onClick={() => open("ticket")}
+              className="grid size-[26px] cursor-pointer place-items-center rounded-[6px] border border-btn-line bg-btn text-text hover:bg-sel"
+            >
+              <NewIcon />
+            </button>
+          </Tooltip>
         </div>
       </div>
       <nav aria-label="Main" className="flex flex-col gap-[14px]">
@@ -165,24 +233,22 @@ function Sidebar() {
 
 export function Frame({ children }: { children: ReactNode }) {
   useLiveQueries();
-  const navigate = useNavigate();
   const inSettings = useRouterState({ select: (s) => s.location.pathname.startsWith("/settings") });
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key === ",") {
-        event.preventDefault();
-        void navigate({ to: "/settings" });
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [navigate]);
+  useGlobalActions();
+  useScreenCounter();
   return (
     <div className="flex h-full bg-bg py-2 pr-2 text-text">
+      {Object.entries(GO_TO).map(([action, to]) => (
+        <GoAction key={action} action={action} to={to} />
+      ))}
       {inSettings ? <SettingsSidebar /> : <Sidebar />}
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[8px] border border-line bg-panel shadow-panel">
         {children}
       </main>
+      <Palette />
+      <NewTicketDialog />
+      <GiveWorkDialog />
+      <Toasts />
     </div>
   );
 }

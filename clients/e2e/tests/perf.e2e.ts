@@ -108,6 +108,68 @@ test("the Inbox with 5,000 rows, in a browser", async ({ page }) => {
   }
 });
 
+test("the palette with 3,000 tickets, in a browser", async ({ page }) => {
+  const site = await serveStatic(WEB_DIST);
+  try {
+    await scriptServer(page, {
+      projects: [
+        { id: "p", name: "Northwind API", status: "active", created_at_ms: 0, employees_active: 0, version: 1 },
+      ],
+      tickets: Array.from({ length: 3000 }, (_, i) => ({
+        id: `t${i}`,
+        number: i + 1,
+        title: `Ticket about subject ${i}`,
+        column: "doing",
+        project_id: "p",
+        project_name: "Northwind API",
+      })),
+    });
+    await page.goto(`${site.origin}/inbox`);
+    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    const pressK = () =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true }));
+    // The first open fetches the tickets; only after that counts as a real measurement of the data.
+    await page.evaluate(pressK);
+    await expect(page.getByRole("option", { name: /#1 Ticket about subject 0/ })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[cmdk-input]")).toHaveCount(0);
+
+    const opens: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      // From the key press to the frame that shows the palette, measured in the page.
+      opens.push(
+        await page.evaluate(async () => {
+          const start = performance.now();
+          window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true }));
+          while (!document.querySelector("[cmdk-input]")) await new Promise((r) => requestAnimationFrame(r));
+          return performance.now() - start;
+        }),
+      );
+      await page.keyboard.press("Escape");
+      await expect(page.locator("[cmdk-input]")).toHaveCount(0);
+    }
+    results.paletteOpen3000TicketsMs = { worst: Math.max(...opens), all: opens.map(Math.round) };
+    expect(Math.max(...opens)).toBeLessThan(50);
+
+    await page.evaluate(pressK);
+    const typed = await page.evaluate(async () => {
+      const input = document.querySelector("[cmdk-input]") as HTMLInputElement;
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      const start = performance.now();
+      set?.call(input, "subject 2999");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      while (!document.querySelector('[cmdk-item][data-value="ticket:t2999"]')) {
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      return performance.now() - start;
+    });
+    results.paletteFilter3000TicketsMs = typed;
+    expect(typed).toBeLessThan(50);
+  } finally {
+    site.close();
+  }
+});
+
 test("a chat of 2,000 markdown messages while one streams", async ({ page }) => {
   const site = await serveStatic(join(REPO, "clients/e2e/bench/dist"));
   try {

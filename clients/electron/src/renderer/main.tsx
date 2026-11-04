@@ -1,4 +1,4 @@
-import { App, type Platform } from "@aurelius/app";
+import { App, adoptDesktopPrefs, type DesktopPrefs, type Platform } from "@aurelius/app";
 import { LinkError } from "@aurelius/client";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -13,6 +13,7 @@ interface Bridge {
   getSession(): Promise<string | null>;
   setSession(token: string | null): Promise<void>;
   info(): Promise<{ version: string; deviceName: string }>;
+  desktopPrefs(): Promise<DesktopPrefs>;
 }
 
 const bridge = (window as unknown as { aurelius: Bridge }).aurelius;
@@ -25,7 +26,7 @@ function safe<T>(action: () => T, fallback: T): T {
   }
 }
 
-const info = await bridge.info();
+const [info, desktopPrefs] = await Promise.all([bridge.info(), bridge.desktopPrefs()]);
 
 const platform: Platform = {
   kind: "electron",
@@ -48,6 +49,8 @@ const platform: Platform = {
   version: info.version,
   pair: null,
 };
+
+adoptDesktopPrefs(platform.storage, desktopPrefs);
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("No root element.");

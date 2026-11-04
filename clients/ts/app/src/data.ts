@@ -4,13 +4,16 @@
 import { expectBody } from "@aurelius/client";
 import type {
   ApprovalView,
+  EmployeeSummary,
   EventKind,
   GuidelineProposalView,
+  GuidelineView,
   NotificationView,
   ProjectSummary,
   ProposalView,
   SubscriptionUsage,
   TaskView,
+  TicketView,
 } from "@aurelius/protocol";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
@@ -26,7 +29,10 @@ export type Area =
   | "projects"
   | "tasks"
   | "subscription"
-  | "settings";
+  | "settings"
+  | "employees"
+  | "tickets"
+  | "guidelines";
 
 /** The areas an event may have changed. An event of a newer server changes nothing here. */
 export function areasOf(kind: EventKind | string): Area[] {
@@ -39,19 +45,21 @@ export function areasOf(kind: EventKind | string): Area[] {
     case "proposal":
       return ["proposals", "notifications"];
     case "guideline":
-      return ["guideline_proposals"];
+      return ["guideline_proposals", "guidelines"];
     case "project":
       return ["projects"];
     case "task":
     case "run":
+      return ["tasks", "notifications", "employees"];
     case "ticket":
-      return ["tasks", "notifications"];
+      return ["tasks", "notifications", "tickets"];
     case "claude_login":
       return ["subscription", "settings"];
     case "company":
     case "user":
     case "connection":
     case "employee":
+      return ["settings", "employees"];
     case "recurring_task":
     case "schedule":
       return ["settings"];
@@ -88,9 +96,14 @@ export function useLiveQueries(client: QueryClient = useQueryClient()): void {
   }, [signedIn, client]);
 }
 
-function useRead<T>(area: Area, read: () => Promise<T>, staleTime = 30_000) {
+function useRead<T>(area: Area, read: () => Promise<T>, staleTime = 30_000, wanted = true) {
   const { status, user } = useLinkState();
-  return useQuery({ queryKey: [area], queryFn: read, enabled: status === "online" && user !== null, staleTime });
+  return useQuery({
+    queryKey: [area],
+    queryFn: read,
+    enabled: wanted && status === "online" && user !== null,
+    staleTime,
+  });
 }
 
 export function useApprovals() {
@@ -149,5 +162,36 @@ export function useSubscription() {
     "subscription",
     async () => expectBody(await connection.call("subscription.get", { refresh: false }), "subscription").value,
     5 * 60_000,
+  );
+}
+
+export function useEmployees(wanted = true) {
+  const connection = useConnection();
+  return useRead<EmployeeSummary[]>(
+    "employees",
+    async () => expectBody(await connection.call("employee.list"), "employees").value.employees,
+    30_000,
+    wanted,
+  );
+}
+
+/** All tickets of all projects: only fetched while something needs them. */
+export function useTickets(wanted = true) {
+  const connection = useConnection();
+  return useRead<TicketView[]>(
+    "tickets",
+    async () => expectBody(await connection.call("ticket.list", {}), "tickets").value.tickets,
+    30_000,
+    wanted,
+  );
+}
+
+export function useGuidelines(wanted = true) {
+  const connection = useConnection();
+  return useRead<GuidelineView[]>(
+    "guidelines",
+    async () => expectBody(await connection.call("guideline.list", {}), "guidelines").value.guidelines,
+    30_000,
+    wanted,
   );
 }

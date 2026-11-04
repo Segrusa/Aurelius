@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import { type Appearance, useAppearance } from "../appearance";
 import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
+import { Segments } from "../ui/kit";
 import {
   ConfirmButton,
   Group,
@@ -137,19 +138,7 @@ export function AppSection() {
     <>
       <Group>
         <Row title="Appearance" hint="Kept on this device.">
-          <fieldset className="m-0 flex gap-1 border-0 p-0" aria-label="Appearance">
-            {APPEARANCES.map((a) => (
-              <button
-                key={a.key}
-                type="button"
-                aria-pressed={a.key === appearance}
-                onClick={() => choose(a.key)}
-                className={`h-7 cursor-pointer rounded-[6px] border px-[10px] text-[12px] font-medium ${a.key === appearance ? "border-btn-line bg-sel text-text" : "border-transparent bg-transparent text-text2 hover:text-text"}`}
-              >
-                {a.label}
-              </button>
-            ))}
-          </fieldset>
+          <Segments label="Appearance" value={appearance} options={APPEARANCES} onChange={choose} />
         </Row>
       </Group>
       <Group title="Version">

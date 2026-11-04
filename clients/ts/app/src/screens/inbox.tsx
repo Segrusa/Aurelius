@@ -5,8 +5,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "../connection";
 import { useApprovals, useGuidelineProposals, useNotifications, useOpenTasks, useProposals } from "../data";
+import { useAction, useKeyContext } from "../keys/provider";
 import { StatusGlyph } from "../ui/icons";
-import { Button, Kbd } from "../ui/kit";
+import { Button, Kbd, Segments } from "../ui/kit";
 import {
   age,
   approvalAction,
@@ -164,24 +165,9 @@ function ApprovalDetail({ approval }: { approval: ApprovalView }) {
     }
   };
 
-  const decideRef = useRef(decide);
-  decideRef.current = decide;
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, [contenteditable=true]") || event.ctrlKey || event.metaKey || event.altKey)
-        return;
-      if (event.key === "Enter" && !(target instanceof HTMLButtonElement)) {
-        event.preventDefault();
-        void decideRef.current(true, event.shiftKey && eligible);
-      } else if (event.key === "d" || event.key === "D") {
-        event.preventDefault();
-        void decideRef.current(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [eligible]);
+  useAction("AllowOnce", () => void decide(true));
+  useAction("AlwaysAllow", () => void decide(true, true), eligible);
+  useAction("DenyApproval", () => void decide(false));
 
   return (
     <div className="enter flex max-w-[760px] flex-col gap-6 px-6 py-8 xl:px-10" key={approval.id}>
@@ -266,49 +252,25 @@ export function InboxScreen() {
   const selected = rows.find((r) => r.id === selectedId) ?? rows[0] ?? null;
   const at = selected ? rows.indexOf(selected) : -1;
 
-  const move = useRef<(by: number) => void>(() => {});
-  move.current = (by) => {
+  useKeyContext("Inbox");
+  const move = (by: number) => {
     const next = rows[at + by];
     if (next) setSelectedId(next.id);
   };
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (
-        (event.target as HTMLElement | null)?.closest("input, textarea, [contenteditable=true]") ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.altKey
-      )
-        return;
-      if (event.key === "j" || event.key === "ArrowDown") {
-        event.preventDefault();
-        move.current(1);
-      } else if (event.key === "k" || event.key === "ArrowUp") {
-        event.preventDefault();
-        move.current(-1);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  useAction("SelectNext", () => move(1));
+  useAction("SelectPrev", () => move(-1));
+  useAction("Filter1", () => setFilter("all"));
+  useAction("Filter2", () => setFilter("decisions"));
+  useAction("Filter3", () => setFilter("reviews"));
+  useAction("Filter4", () => setFilter("mentions"));
 
   return (
     <>
       <header className="flex h-11 flex-none items-center gap-[10px] border-b border-line pr-3 pl-[18px]">
         <h1 className="m-0 text-[13px] font-medium">Inbox</h1>
-        <fieldset className="m-0 ml-2 flex gap-1 border-0 p-0" aria-label="Filter">
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              aria-pressed={f.key === filter}
-              onClick={() => setFilter(f.key)}
-              className={`h-6 cursor-pointer rounded-[5px] border px-[9px] text-[12px] font-medium ${f.key === filter ? "border-btn-line bg-sel text-text" : "border-transparent bg-transparent text-text2 hover:text-text"}`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </fieldset>
+        <div className="ml-2">
+          <Segments label="Filter" value={filter} options={FILTERS} onChange={setFilter} />
+        </div>
       </header>
       <div className="flex min-h-0 flex-1">
         <section aria-label="Inbox items" className="w-[clamp(280px,36%,400px)] min-w-0 flex-none border-r border-line">

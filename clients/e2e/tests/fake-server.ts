@@ -9,6 +9,9 @@ export interface Scripted {
   tasks?: unknown[];
   projects?: unknown[];
   limits?: unknown[];
+  employees?: unknown[];
+  tickets?: unknown[];
+  guidelines?: unknown[];
   /** Answers for the writes; recorded in `writes`. */
   onWrite?: (request: Record<string, unknown>) => void;
 }
@@ -55,6 +58,14 @@ export async function scriptServer(page: Page, script: Scripted): Promise<{ writ
           return answer({ type: "guideline_proposals", value: { proposals: [] } });
         case "project.list":
           return answer({ type: "projects", value: { projects: script.projects ?? [], as_of_seq: 1 } });
+        case "employee.list":
+          return answer({ type: "employees", value: { employees: script.employees ?? [], as_of_seq: 1 } });
+        case "ticket.list":
+          return answer({ type: "tickets", value: { tickets: script.tickets ?? [], as_of_seq: 1 } });
+        case "guideline.list":
+          return answer({ type: "guidelines", value: { guidelines: script.guidelines ?? [] } });
+        case "connection.list":
+          return answer({ type: "connections", value: { connections: [] } });
         case "subscription.get":
           return answer({ type: "subscription", value: { fetched_at_ms: 0, limits: script.limits ?? [], raw: "" } });
         default:

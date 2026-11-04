@@ -26,4 +26,5 @@ contextBridge.exposeInMainWorld("aurelius", {
   getSession: () => ipcRenderer.invoke("session:get"),
   setSession: (token: string | null) => ipcRenderer.invoke("session:set", token),
   info: () => ipcRenderer.invoke("app:info"),
+  desktopPrefs: () => ipcRenderer.invoke("app:desktop-prefs"),
 });

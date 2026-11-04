@@ -72,3 +72,50 @@ export function markColor(id: string): string {
 export function initial(name: string): string {
   return name.trim().charAt(0).toUpperCase() || "?";
 }
+
+/** The design's little choices with a name in front: "Priority Normal". Opens a menu or cycles. */
+export function Chip({
+  name,
+  children,
+  ...props
+}: { name?: string; children: ReactNode } & ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      type="button"
+      className="inline-flex h-[26px] cursor-pointer items-center gap-[6px] rounded-[6px] border border-line bg-transparent px-[9px] text-[12px] text-text2 hover:bg-sel hover:text-text"
+      {...props}
+    >
+      {name ? <span className="text-text3">{name}</span> : null}
+      {children}
+    </button>
+  );
+}
+
+/** A row of mutually exclusive choices. */
+export function Segments<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: { key: T; label: string }[];
+  onChange: (key: T) => void;
+}) {
+  return (
+    <fieldset className="m-0 flex gap-1 border-0 p-0" aria-label={label}>
+      {options.map((o) => (
+        <button
+          key={o.key}
+          type="button"
+          aria-pressed={o.key === value}
+          onClick={() => onChange(o.key)}
+          className={`h-6 cursor-pointer rounded-[5px] border px-[9px] text-[12px] font-medium ${o.key === value ? "border-btn-line bg-sel text-text" : "border-transparent bg-transparent text-text2 hover:text-text"}`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </fieldset>
+  );
+}

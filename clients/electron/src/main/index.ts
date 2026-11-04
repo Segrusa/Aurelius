@@ -1,7 +1,7 @@
 // The main process: the window, the pipe to the local daemon, the session in the OS keychain. The
 // page has no Node, reaches only the few calls below, and is checked on every one of them.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -129,6 +129,22 @@ function serveSessions(): void {
     }
   });
   handle("app:info", () => ({ version: app.getVersion(), deviceName: hostname() }));
+  handle("app:desktop-prefs", () => {
+    const root = dataDir(process.env, ENVIRONMENT);
+    return {
+      uiJson: root === null ? null : readSmallFile(join(root, "ui.json")),
+      screenUseJson: root === null ? null : readSmallFile(join(root, "screen_use.json")),
+    };
+  });
+}
+
+/** The contents of a small text file, or null: these are preferences, never worth failing over. */
+function readSmallFile(path: string): string | null {
+  try {
+    return statSync(path).size <= 1024 * 1024 ? readFileSync(path, "utf8") : null;
+  } catch {
+    return null;
+  }
 }
 
 function openWindow(): void {

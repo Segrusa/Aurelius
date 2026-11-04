@@ -3,11 +3,13 @@ import { createRootRoute, createRoute, createRouter, Outlet, RouterProvider, red
 import { useEffect, useMemo, useState } from "react";
 import { type Appearance, AppearanceContext, applyAppearance, readAppearance, saveAppearance } from "./appearance";
 import { ConnectionProvider } from "./connection";
+import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
 import { Frame } from "./screens/frame";
 import { Gate } from "./screens/gate";
 import { InboxScreen } from "./screens/inbox";
 import { SettingsScreen } from "./screens/settings";
+import { TooltipProvider } from "./ui/overlay";
 
 /** A screen of the design that is not built yet: says so, and the phase, instead of looking finished. */
 function NotYet({ title }: { title: string }) {
@@ -93,7 +95,11 @@ export function App({ platform }: { platform: Platform }) {
         <QueryClientProvider client={client}>
           <ConnectionProvider platform={platform} generation={generation}>
             <Gate onPaired={() => setGeneration((g) => g + 1)}>
-              <RouterProvider router={router} />
+              <KeysProvider>
+                <TooltipProvider>
+                  <RouterProvider router={router} />
+                </TooltipProvider>
+              </KeysProvider>
             </Gate>
           </ConnectionProvider>
         </QueryClientProvider>
