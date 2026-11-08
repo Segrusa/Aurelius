@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "@playwright/test";
 import { REPO, serveStatic, WEB_DIST } from "./daemon";
-import { approval, notification, scriptServer } from "./fake-server";
+import { approval, channel, message, messages, notification, scriptServer } from "./fake-server";
 
 for (const theme of ["dark", "light"] as const) {
   test(`the Inbox, ${theme}`, async ({ page }) => {
@@ -88,9 +88,19 @@ for (const theme of ["dark", "light"] as const) {
       await page.addInitScript((t) => localStorage.setItem("aurelius.appearance", t), theme);
       await scriptServer(page, {
         employees: [
-          { id: "e1", name: "Flux", role: "engineer", title: "Engineer", status: "active" },
-          { id: "e2", name: "Atlas", role: "ceo", title: "CEO", status: "active" },
+          {
+            id: "e1",
+            name: "Flux",
+            role: "engineer",
+            title: "Engineer",
+            status: "active",
+            agents: [],
+            conversations: [],
+          },
+          { id: "e2", name: "Atlas", role: "ceo", title: "CEO", status: "active", agents: [], conversations: [] },
         ],
+        channels: [channel("g", "general", { kind: "general" })],
+        feeds: { general: messages("g", [message("m1", "assistant", "All **green** on the rollout.")]) },
         limits: [{ label: "Weekly limit", percent: 58, resets: "Resets Mon 09:00" }],
       });
       const dir = join(REPO, "clients/e2e/test-results/shots");
