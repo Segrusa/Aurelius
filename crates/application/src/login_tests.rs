@@ -274,8 +274,7 @@ fn runs_the_team_chat_wakes_use_the_login_of_hop_0_at_every_hop() {
         s.service
             .store()
             .read(move |c| {
-                let chat = aurelius_storage::employees::main_chat(c, employee)?.unwrap();
-                let id: String = c.query_row("SELECT id FROM runs WHERE conversation_id = ?1 ORDER BY rowid DESC LIMIT 1", [chat.to_string()], |r| r.get(0))?;
+                let id: String = c.query_row("SELECT r.id FROM runs r JOIN conversations c ON c.id = r.conversation_id WHERE c.employee_id = ?1 AND c.thread_key IS NOT NULL ORDER BY r.rowid DESC LIMIT 1", [employee.to_string()], |r| r.get(0))?;
                 Ok(RunId::parse(&id).unwrap())
             })
             .unwrap()

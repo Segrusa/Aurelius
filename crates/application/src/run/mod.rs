@@ -7,6 +7,7 @@ pub mod connections;
 pub mod events;
 pub mod guidelines;
 pub mod heartbeat;
+pub mod inbox;
 pub mod lifecycle;
 pub mod login;
 pub mod login_wait;

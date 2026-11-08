@@ -196,6 +196,8 @@ pub(crate) fn take_over(tx: &Tx<'_>, ticket: TicketId, user: UserId) -> Result<V
          WHERE kind = 'ticket.triage' AND state = 'ready' AND json_extract(payload_json, '$.ticket_id') = ?1",
         rusqlite::params![ticket.to_string(), me],
     )?;
+    // What still waits in a mailbox moves too, and is not held by the old login's limit.
+    aurelius_storage::inbox::move_ticket_login(tx, ticket, &me, aurelius_storage::now_ms())?;
     // What waited for the old login's limit is due now: the new login has its own (R2 m7).
     tx.execute(
         "UPDATE jobs SET not_before_ms = ?3 WHERE state = 'ready' AND last_error_code = 'quota'

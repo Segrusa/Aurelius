@@ -81,12 +81,17 @@ pub async fn run(shared: Arc<Shared>) {
                 0
             }
         };
-        let store = shared.store().clone();
+        let s = shared.clone();
         let owner2 = owner.clone();
-        let claimed = tokio::task::spawn_blocking(move || {
-            store.write(move |tx| queries::claim_due_job(tx, &owner2, aurelius_storage::now_ms(), LEASE_MS, limit))
-        })
-        .await;
+        // A worker's item first (it becomes a run with a leased job), else a due job.
+        let claimed = tokio::task::spawn_blocking(move || s.service.claim_next_work(&owner2, LEASE_MS, limit)).await.map(|r| {
+            r.map(|work| {
+                work.map(|(job, notices)| {
+                    shared.publish(notices);
+                    job
+                })
+            })
+        });
         match claimed {
             Ok(Ok(Some(job))) if job.kind == CHAT_RUN_KIND => {
                 tokio::spawn(chat::run_chat(shared.clone(), job));
@@ -115,7 +120,7 @@ pub async fn run(shared: Arc<Shared>) {
                 }
             }
             Ok(Err(err)) => {
-                tracing::error!(error = %err, "claim failed; pausing dispatch");
+                tracing::error!(error = %err.message, "claim failed; pausing dispatch");
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
             Err(_) => return,

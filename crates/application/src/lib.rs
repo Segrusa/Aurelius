@@ -695,6 +695,9 @@ mod tests;
 mod approvals_tests;
 
 #[cfg(test)]
+mod inbox_tests;
+
+#[cfg(test)]
 mod org_tests;
 
 #[cfg(test)]

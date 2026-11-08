@@ -188,7 +188,7 @@ async fn the_dispatcher_chooses_an_owner_and_the_work_starts() {
     assert_eq!(runs, [("succeeded".to_string(), Some(orion.to_string()))]);
     // MU2-03: the dispatcher's choice with its reason, linked to the main task; once.
     let lines = discussion_lines(&b.client, id).await;
-    let chose: Vec<_> = lines.iter().filter(|(_, _, t)| t.starts_with("Orion chose")).collect();
+    let chose: Vec<_> = lines.iter().filter(|(_, _, t)| t.starts_with("Orion made")).collect();
     assert_eq!(chose.len(), 1, "{lines:#?}");
     assert_eq!((chose[0].0, chose[0].1, chose[0].2.as_str()), (aurelius_domain::views::SystemLineKind::Delegated, Some(root), "Orion made Builder the owner of this ticket. Reason: Builder knows this part"));
 

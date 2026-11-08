@@ -237,6 +237,7 @@ impl CommandService {
         self.store
             .write(move |tx| {
                 let mut notices = Vec::new();
+                notices.extend(CommandService::note_held_items(tx, &reason, aurelius_storage::now_ms())?);
                 for job in queries::mark_held_runs(tx, &reason, aurelius_storage::now_ms())? {
                     let conversation: Option<String> = tx
                         .query_row("SELECT json_extract(payload_json, '$.conversation_id') FROM jobs WHERE id = ?1", [&job], |r| r.get(0))?;

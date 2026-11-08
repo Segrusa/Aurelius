@@ -18,8 +18,8 @@
 //!   copied answers never wake anyone.
 //! * How: the message, with the latest messages of the discussion (a JSON list,
 //!   so no message can pass for another or for a board member's), goes to each
-//!   of them as an update (`[Group chat · from …]`) in their own main chat, where
-//!   a normal run answers it. A woken employee that is not the ticket's owner
+//!   of them as an update (`[Group chat · from …]`) in their own conversation for
+//!   that ticket or channel (R6, `employee_threads`), where a normal run answers it. A woken employee that is not the ticket's owner
 //!   only answers there: the ticket's column and main task stay as they are.
 //! * What a woken employee reads (P2, P3): the lead of the discussion, and unless it
 //!   is the lead or the only employee there, only the messages addressed to it and
@@ -646,7 +646,12 @@ struct Wake<'a> {
 /// the discussion go to its main chat as an update, and a run there answers it.
 /// Its answer comes back to the discussion (`mirror_answer`).
 fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, (employee, name): (EmployeeId, &str), w: &Wake<'_>) -> Result<Option<(RunId, Vec<EventNotice>)>, StorageError> {
-    let Some(chat) = employees::main_chat(tx, employee)? else { return Ok(None) };
+    // Its own conversation for this thread (R6), with its own session; the main chat stays its own.
+    let thread = match w.discussion.ticket() {
+        Some(t) => crate::run::inbox::ticket_thread(t.id),
+        None => crate::run::inbox::channel_thread(w.discussion.id),
+    };
+    let Some(chat) = aurelius_storage::inbox::thread_conversation(tx, employee, &thread, &w.discussion.label())? else { return Ok(None) };
     let (d, from, shared, hop) = (w.discussion, w.from, &w.shared, w.hop);
     let mut body = wake_body(w, employee, w.view.for_employee(employee));
     let place = if w.thread.is_some() { format!("that thread of {}", d.label()) } else { d.label() };
@@ -659,7 +664,7 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     // The employees of the Team chat always work in Auto.
     conv::set_agent_mode(tx, chat, AgentMode::Auto)?;
     // Only a board member waits for the answer; a colleague's mention would just add lines.
-    let busy = if w.board.is_some() { busy_notices(tx, store, meta, correlation, (employee, name), w, chat)? } else { Vec::new() };
+    let busy = if w.board.is_some() { busy_notices(tx, store, meta, correlation, (employee, name), w)? } else { Vec::new() };
     let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login, thread_parent: w.thread };
     let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
     Ok(Some((run, std::iter::once(posted).chain(busy).chain(queued).collect())))
@@ -758,12 +763,8 @@ fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &
     }
     // The owner is mid-run: the caller says so now, the answer comes when that run ends.
     *busy_in = Some(conversation);
-    let runs = conv::unfinished_runs_in(tx, conversation)?;
-    if runs.iter().any(|(_, status)| status == "created") {
-        return Ok(Some(notices));
-    }
     let (run, queued) = crate::run::queue::queue_run(tx, &serde_json::json!({ "task_id": root, "discussion": t.id }), &root.to_string(), conversation, message)?;
-    tx.execute("UPDATE runs SET task_id = ?2 WHERE id = ?1", [run.to_string(), root.to_string()])?;
+    crate::run::inbox::link_task(tx, run, root)?;
     notices.extend(queued);
     notices.extend(crate::task::task_runs::live_run_notice(tx, conversation)?);
     Ok(Some(notices))
@@ -842,8 +843,8 @@ fn run_duration(ms: i64) -> String {
 /// quick answer when one can start, and the busy line. Nothing when no run is
 /// going there. Call it before the run for the message is queued. The line is a
 /// `Limit` system line with its own words, so old clients show it as it is.
-fn busy_notices(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, (employee, name): (EmployeeId, &str), w: &Wake<'_>, conversation: ConversationId) -> Result<Vec<EventNotice>, StorageError> {
-    let Some(since) = conv::going_run_since(tx, conversation)? else { return Ok(Vec::new()) };
+fn busy_notices(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, (employee, name): (EmployeeId, &str), w: &Wake<'_>) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(since) = conv::employee_going_since(tx, employee)? else { return Ok(Vec::new()) };
     let for_how_long = since.map_or_else(|| "just started".to_owned(), |at| run_duration(aurelius_storage::now_ms() - at));
     let quick = quick_answer(tx, store, meta, correlation, (employee, name), w, &for_how_long)?;
     let text = match quick {
@@ -1263,8 +1264,8 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
     let read = reader(store);
     let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, view: ThreadView::read(tx, &read, d, thread, Some(message))?, hop: 0, login, thread };
     // The owner is mid-run: the board member hears it at once, and gets a quick answer.
-    if let (Some(conversation), Some((owner, owner_name))) = (owner_busy, &named.owner) {
-        notices.extend(busy_notices(tx, store, meta, correlation, (*owner, owner_name), &w, conversation)?);
+    if let (Some(_), Some((owner, owner_name))) = (owner_busy, &named.owner) {
+        notices.extend(busy_notices(tx, store, meta, correlation, (*owner, owner_name), &w)?);
     }
     for (employee, name) in &named.awake {
         if let Some((run, n)) = wake(tx, store, meta, correlation, (*employee, name), &w)? {

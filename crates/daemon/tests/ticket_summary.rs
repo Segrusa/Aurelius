@@ -139,7 +139,7 @@ async fn live_run(root: &std::path::Path, conversation: ConversationId) -> RunId
 async fn quiet(root: &std::path::Path, conversation: ConversationId) {
     for _ in 0..800 {
         let running: bool = common::db(root)
-            .query_row("SELECT EXISTS(SELECT 1 FROM runs WHERE conversation_id = ?1 AND status IN ('created','starting','running','waiting','cancelling'))", [conversation.to_string()], |r| r.get(0))
+            .query_row("SELECT EXISTS(SELECT 1 FROM runs WHERE conversation_id = ?1 AND status IN ('created','starting','running','waiting','cancelling')) OR EXISTS(SELECT 1 FROM employee_inbox WHERE conversation_id = ?1 AND state = 'queued')", [conversation.to_string()], |r| r.get(0))
             .unwrap();
         if !running {
             return;
@@ -236,11 +236,13 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
 
     // A board member's word in Review goes to the owner (AUR-BUG-Q): a run of the
     // main task answers it and reports again, the ticket stays in Review; then Done.
-    let runs = |root: &std::path::Path| -> i64 { common::db(root).query_row("SELECT COUNT(*) FROM runs WHERE conversation_id = ?1", [main.conversation_id.unwrap().to_string()], |r| r.get(0)).unwrap() };
+    let runs = |root: &std::path::Path| -> i64 {
+        common::db(root).query_row("SELECT (SELECT COUNT(*) FROM runs WHERE conversation_id = ?1) + (SELECT COUNT(*) FROM employee_inbox WHERE conversation_id = ?1 AND state = 'queued')", [main.conversation_id.unwrap().to_string()], |r| r.get(0)).unwrap()
+    };
     let before = runs(dir.path());
     let posted = client.ticket_command(Command::PostTicketMessage(PostTicketMessage { confirm_secret: false, ticket_id: id, text: "Keep the old file name.".into(), images: vec![], files: vec![], thread_parent: None }), None).await;
     assert!(posted.is_ok(), "{posted:?}");
-    // The post queued the owner's run in the same commit.
+    // The post put the owner's run in its mailbox in the same commit.
     assert_eq!(runs(dir.path()), before + 1, "a run of the main task answers it");
     quiet(dir.path(), main.conversation_id.unwrap()).await;
     until(&client, id, ColumnKind::Review, TaskStatus::Review).await;

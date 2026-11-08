@@ -1179,9 +1179,9 @@ fn migration_17_adds_one_group_chat_and_keeps_every_conversation_and_message() {
     assert_eq!(count(&store, "SELECT COUNT(*) FROM conversations WHERE kind = 'group' AND project_id IS NULL AND employee_id IS NULL"), 1);
     let group = store.read(conversations::group_conversation).unwrap().expect("the group chat exists");
     assert!(group.to_string().len() == 36);
-    // The employee still loads through its main chat, with its settings.
-    let loaded = store.write(move |tx| employees::load_employee(tx, employee)).unwrap().unwrap();
-    assert_eq!(loaded.conversation_id, chat);
+    // The employee keeps its main chat, with its settings (a full load needs schema 36).
+    let main: String = store.read(move |c| Ok(c.query_row("SELECT id FROM conversations WHERE employee_id = ?1 AND kind = 'employee' ORDER BY created_at_ms, id LIMIT 1", [employee.to_string()], |r| r.get(0))?)).unwrap();
+    assert_eq!(main, chat.to_string());
     assert_eq!(store.read(|c| conversations::agent_mode(c, chat)).unwrap(), aurelius_domain::autonomy::AgentMode::Auto);
     assert_eq!(count(&store, "SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
 

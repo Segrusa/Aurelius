@@ -306,6 +306,8 @@ async fn a_red_verdict_sends_the_failures_to_the_owner_and_the_next_report_is_te
     let (first, run) = test_run(&client, dir.path(), id).await;
     let (ok, text) = bridge.employee_act(run, verdict(false, "2 new failures: login::empty_password, login::lockout")).await.unwrap();
     assert!(ok, "{text}");
+    // Its verdict is in: the tester's run ends, or the next test waits for it (one run at a time).
+    client.execute(aurelius_client::envelope(Command::StopRun(aurelius_domain::conversation::StopRun { run_id: run }), None)).await.unwrap();
 
     // The owner works on with the tester's message, reports again, and that goes to Testing again.
     let (second, run) = test_run(&client, dir.path(), id).await;

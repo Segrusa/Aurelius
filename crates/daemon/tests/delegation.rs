@@ -895,12 +895,20 @@ async fn turning_one_at_a_time_off_starts_the_queued_tasks() {
 
     assert_eq!(client.tasks(None).await.unwrap().tasks.iter().find(|t| t.id == second).unwrap().status, TaskStatus::Queued);
 
-    // Off again: the queued task starts beside the running one, as before.
+    // Off again: the queued task is free to start, and goes when Alex is free (R2).
     one_at_a_time(&client, alex, "Alex", "Backend developer", false).await;
     assert!(!client.employees().await.unwrap().employees.iter().find(|m| m.id == alex).unwrap().sequential_tasks);
-    running_run(dir.path(), second).await;
-    assert_eq!(running_tasks(dir.path(), alex), 2);
+    let queued = |root: &Path| -> i64 { db(root).query_row("SELECT COUNT(*) FROM employee_inbox WHERE task_id = ?1 AND state = 'queued'", [second.to_string()], |r| r.get(0)).unwrap() };
+    for _ in 0..400 {
+        if queued(dir.path()) == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(queued(dir.path()), 1, "in Alex's mailbox");
+    assert_eq!(db(dir.path()).query_row("SELECT COUNT(*) FROM runs WHERE task_id = ?1", [second.to_string()], |r| r.get::<_, i64>(0)).unwrap(), 0);
     release.notify_one();
+    running_run(dir.path(), second).await;
     release.notify_one();
     for id in [first, second] {
         assert_eq!(wait_task(&client, id, |t| t.status.is_terminal()).await.status, TaskStatus::Succeeded);

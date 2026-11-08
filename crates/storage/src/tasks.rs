@@ -227,8 +227,9 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
                 CASE WHEN t.status IN ('succeeded','failed','cancelled','review') AND t.conversation_id IS NOT NULL THEN
                     (SELECT CASE
                         WHEN SUM(r.status IN ('starting','running','waiting','cancelling') OR (r.status = 'created' AND rj.state = 'leased')) > 0 THEN 'running'
-                        WHEN SUM(r.status = 'created') > 0 THEN 'queued' END
-                     FROM runs r LEFT JOIN jobs rj ON rj.id = r.id
+                        WHEN SUM(r.status = 'created') > 0 THEN 'queued'
+                        WHEN (SELECT COUNT(*) FROM employee_inbox i WHERE i.conversation_id = t.conversation_id AND i.state = 'queued') > 0 THEN 'queued' END
+                     FROM runs r LEFT JOIN jobs rj ON rj.id = r.id AND rj.kind = 'run.chat'
                      WHERE r.conversation_id = t.conversation_id AND r.status IN ('created','starting','running','waiting','cancelling')) END,
                 t.ticket_id, (SELECT k.number FROM tickets k WHERE k.id = t.ticket_id)
          FROM tasks t JOIN blobs gb ON gb.id = t.brief_blob_id LEFT JOIN blobs cb ON cb.id = t.acceptance_blob_id

@@ -133,7 +133,7 @@ fn woken(s: &Setup, employee: EmployeeId) -> Vec<(RunId, ConversationId, u32)> {
     s.service
         .store()
         .read(move |c| {
-            let chat = aurelius_storage::employees::main_chat(c, employee)?.unwrap();
+            let chat = last_chat(c, employee);
             let mut stmt = c.prepare("SELECT r.id FROM runs r WHERE r.conversation_id = ?1 ORDER BY r.rowid")?;
             let ids: Vec<String> = stmt.query_map([chat.to_string()], |r| r.get(0))?.collect::<Result<_, _>>()?;
             let mut out = Vec::new();
@@ -299,8 +299,20 @@ fn the_general_channel_wakes_the_ceo_and_a_project_channel_its_dispatcher() {
     assert!(messages(&s, discussion).iter().any(|m| m.text == "x"));
 }
 
+/// The conversation `employee` was last woken in: its own for that thread (R6), else its main chat.
 fn aurelius_storage_main_chat(s: &Setup, employee: EmployeeId) -> ConversationId {
-    s.service.store().read(move |c| aurelius_storage::employees::main_chat(c, employee)).unwrap().unwrap()
+    s.service.store().read(move |c| Ok(last_chat(c, employee))).unwrap()
+}
+
+fn last_chat(c: &rusqlite::Connection, employee: EmployeeId) -> ConversationId {
+    let id: String = c
+        .query_row(
+            "SELECT id FROM conversations WHERE employee_id = ?1 AND kind = 'employee' AND quick_answer = 0 ORDER BY thread_key IS NOT NULL DESC, created_at_ms DESC, rowid DESC LIMIT 1",
+            [employee.to_string()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    ConversationId::parse(&id).unwrap()
 }
 
 #[test]
@@ -382,7 +394,7 @@ fn without_a_mention_a_ticket_goes_to_its_owner_in_the_main_task() {
     // The owner has no entry in `run_ids` (that run is the task's): `to` is longer.
     let (to, runs) = post(&s, t, "Please also check the logout.").unwrap();
     assert_eq!((to, runs), (vec![s.ann], vec![]));
-    assert_eq!(runs_in(&s).len(), 1, "no extra run while one is queued");
+    assert_eq!(runs_in(&s).len(), 2, "queued behind it: the worker takes them together");
     let note = messages(&s, root_conversation).into_iter().last().unwrap();
     assert_eq!((note.update.as_deref(), note.author.as_deref()), (Some("message"), Some("grace")));
     assert!(note.text.starts_with("Please also check the logout.") && note.text.contains("post_to_discussion"), "{}", note.text);
@@ -436,9 +448,9 @@ fn an_answer_in_the_discussion_reaches_an_owner_whose_report_asks_a_question() {
     // The task stays in Review until that run reports again.
     assert_eq!(task_status(&s, root), TaskStatus::Review);
     assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
-    // A second answer while that run is queued: no extra run.
+    // A second answer while that run is queued waits too; the worker takes them together.
     post(&s, t, "And show it on mobile too.").unwrap();
-    assert_eq!(runs_in(&s).len(), 1);
+    assert_eq!(runs_in(&s).len(), 2);
 }
 
 /// A started ticket whose owner works in Auto: its main task, that task's conversation and its run.
@@ -839,12 +851,13 @@ fn a_ticket_made_from_a_message_links_both_ways_and_wakes_nobody() {
     let hello = sent_message(&s, None, "And a PDF export?");
     let (_, n) = ticket_from(&s, Some(hello), Some(s.user)).unwrap();
     assert!(system_lines(&s, general).contains(&(SystemLineKind::TicketCreated, format!("grace created #{n} from a message"))));
-    let chat = aurelius_storage_main_chat(&s, s.ann);
-    let (ann_ticket, _) = {
+    let (ann_ticket, chat, _) = {
         let (_, runs) = send(&s, None, "@Ann what about XML?").unwrap();
         assert!(!runs.is_empty());
+        let chat = aurelius_storage_main_chat(&s, s.ann);
         let update = messages(&s, chat).into_iter().rev().find(|m| m.update.is_some()).expect("an update in Ann's chat").id;
-        ticket_from(&s, Some(update), Some(s.user)).unwrap()
+        let (ticket, number) = ticket_from(&s, Some(update), Some(s.user)).unwrap();
+        (ticket, chat, number)
     };
     let first = messages(&s, ticket_view(&s, ann_ticket).conversation_id.unwrap()).into_iter().next().unwrap();
     assert!(first.text.contains("in Ann's chat"), "{}", first.text);

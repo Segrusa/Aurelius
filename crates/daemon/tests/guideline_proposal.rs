@@ -25,7 +25,8 @@ async fn a_text_only_run_of_an_employee_cannot_propose_a_guideline() {
     let send = SendEmployeeMessage { confirm_secret: false, employee_id, text: "houd me wakker".into(), conversation_id, images: vec![], files: vec![], interrupt: false };
     let CommandResult::EmployeeMessageSent { run_id, .. } = client.execute(envelope(Command::SendEmployeeMessage(send), None)).await.unwrap().result else { panic!() };
     for _ in 0..200 {
-        let status: String = db(dir.path()).query_row("SELECT status FROM runs WHERE id = ?1", [run_id.to_string()], |r| r.get(0)).unwrap();
+        // The run row is made when its turn comes.
+        let status: String = db(dir.path()).query_row("SELECT status FROM runs WHERE id = ?1", [run_id.to_string()], |r| r.get(0)).unwrap_or_default();
         if matches!(status.as_str(), "starting" | "running" | "waiting") {
             break;
         }

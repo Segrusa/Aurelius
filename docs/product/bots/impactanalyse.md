@@ -41,3 +41,14 @@
 | R2 | Een niet-lead mist iets en wordt verrast | De notitie noemt het aantal en de tool. Tot 60 berichten terug |
 | R3 | Een bevroren sessie houdt oude rollen of beschrijvingen tot 24 uur | Geldt ook vandaag voor de lijst van collega's. De platformregels zelf zijn versiegebonden |
 | R4 | Parallelle runs en "ordinary, individual usage" | Eén run per employee (R2); limieten op wekkende posts blijven |
+
+## Stap 5 (gebouwd): mailbox en threads
+
+- **Tabellen:** migratie `0036_employee_inbox.sql` met `employee_inbox`, `employee_threads`, `run_triggers` en `conversations.thread_key`. Opslag in `crates/storage/src/inbox.rs`, de worker in `crates/application/src/run/inbox.rs`.
+- **Worker:** logisch per employee, in de ene dispatcher-lus (`claim_next_work`). De SQL garandeert één run per employee; een run die op een approval wacht telt niet mee voor de employee, wel voor `max_runs`, en zijn thread blijft bezet.
+- **Run-rij:** ontstaat pas als de worker het item pakt. Statusvragen vallen terug op het item, zodat "Queued" en stoppen blijven werken.
+- **Taken:** de `task.run`-job blijft de poort voor afhankelijkheden, pauze en varianten; de modelrun van de taak start via een inbox-item.
+- **Varianten en "één tegelijk":** varianten van één employee draaien nu na elkaar. De instelling "één taak tegelijk" bepaalt alleen nog wanneer een taak vrijkomt; de modelruns gaan altijd één voor één.
+- **Threads (R6):** een ticket of channel krijgt per employee een eigen, verborgen conversation met een eigen `--resume`-sessie. Modus, browser, scherm en runinstellingen komen bij elke wek uit de hoofdchat. Berichten in de hoofdchat zelf blijven `chat:<conversation>`.
+- **Quota en login:** per board member. Een run die op de limiet van de een wacht houdt de thread niet vast voor het werk op de login van de ander.
+

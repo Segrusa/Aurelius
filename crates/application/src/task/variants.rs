@@ -300,7 +300,7 @@ impl CommandService {
                 // The trial's conversation is known before its run is queued: the run plans in its worktree.
                 store::start_variant(tx, task, n, conversation, &worktree)?;
                 let (message, posted) = thread::post_returning(tx, &st, conversation, task, Speaker::Update { kind: "brief", from: "Task" }, &brief)?;
-                let (run, queued) = crate::run::queue::queue_run(tx, &serde_json::json!({ "task_id": task, "variant": n }), &task.to_string(), conversation, message)?;
+                let (run, queued) = crate::run::queue::queue_run_with_row(tx, &serde_json::json!({ "task_id": task, "variant": n }), &task.to_string(), conversation, message)?;
                 store::set_variant_run(tx, task, n, run)?;
                 let project = ctx_project(tx, task)?;
                 let probed = task_event(tx, task, project, "task.variant_probed", serde_json::json!({ "n": n, "status": "running", "conversation_id": conversation, "run_id": run }))?;

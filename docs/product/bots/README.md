@@ -45,7 +45,7 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | 2 | C1 UI op de overrides, C3 toegangsniveau | gebouwd |
 | 3 | C5 scope-regel | gebouwd |
 | 4 | U1, U2, U4 | gebouwd |
-| 5 | Mailbox, worker, samenvoegen, parkeren, hybride sessies (R1-R3, R6) | open |
+| 5 | Mailbox, worker, samenvoegen, parkeren, hybride sessies (R1-R3, R6) | gebouwd |
 | 6 | R4 hop op elk bericht, R5 vastgehouden handoff | open |
 | 7 | R7, C7, U3, U7 | open |
 | 8 | C2 tools en MCP per employee | open |

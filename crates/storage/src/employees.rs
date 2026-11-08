@@ -19,7 +19,7 @@ pub struct EmployeeRow {
 }
 
 /// The persistent chat of employee `?` (the column or parameter it is compared with).
-pub(crate) const MAIN_CHAT: &str = "(SELECT id FROM conversations WHERE employee_id = {} AND kind = 'employee' ORDER BY created_at_ms, id LIMIT 1)";
+pub(crate) const MAIN_CHAT: &str = "(SELECT id FROM conversations WHERE employee_id = {} AND kind = 'employee' AND thread_key IS NULL ORDER BY created_at_ms, id LIMIT 1)";
 
 pub(crate) fn main_chat_of(employee: &str) -> String {
     MAIN_CHAT.replace("{}", employee)
@@ -217,7 +217,8 @@ pub fn projects_active(conn: &Connection, employee: EmployeeId) -> Result<Vec<Pr
 pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<EmployeeSummary>, StorageError> {
     let sql = format!(
         "SELECT m.id, m.name, m.role, m.title, m.reports_to, b.storage_key, m.status, m.version, c.id,
-                EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id IN (SELECT id FROM conversations WHERE employee_id = m.id) AND r.status IN ('created','starting','running','cancelling')),
+                EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id IN (SELECT id FROM conversations WHERE employee_id = m.id) AND r.status IN ('created','starting','running','cancelling'))
+                  OR EXISTS(SELECT 1 FROM employee_inbox i WHERE i.employee_id = m.id AND i.state = 'queued'),
                 c.agent_mode, m.folder, c.browser_allowed, c.screen_allowed,
                 COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0), m.description, m.access_level
          FROM employees m

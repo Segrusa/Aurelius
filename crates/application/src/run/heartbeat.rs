@@ -4,7 +4,7 @@
 //! user hears about it only when the employee has something to say.
 
 use crate::run::events::{Ev, emit};
-use crate::run::queue::queue_run;
+use crate::run::queue::queue_run_with_row;
 use crate::{CommandService, Committed, domain_error, storage_error};
 use aurelius_domain::{
     ActorKind, DomainError, MessageId, RunId,
@@ -136,7 +136,7 @@ impl CommandService {
                 let mut meta = serde_json::json!({ "origin": "heartbeat", "schedule_id": schedule_id, "reasons": reasons, "missed": missed });
                 // On the login of the board member who turned it on (B5); none: it waits for one.
                 meta["login_user"] = serde_json::json!(hb::login_user(tx, employee)?);
-                let (event_id, mut n) = emit(tx, Ev {
+                let (event_id, n) = emit(tx, Ev {
                     aggregate_type: "heartbeat",
                     aggregate_id: schedule_id.clone(),
                     event_type: "wake.requested",
@@ -158,7 +158,7 @@ impl CommandService {
                     run_id: None,
                     reply_to: None,
                 })?;
-                let (run_id, run_notice) = queue_run(tx, &meta, &key, row.conversation_id, message_id)?;
+                let (run_id, run_notice) = queue_run_with_row(tx, &meta, &key, row.conversation_id, message_id)?;
                 hb::record_wake(tx, &schedule_id, run_id, &key, &reasons, missed)?;
                 hb::advance(tx, &schedule_id, next_due, Some(newest), None)?;
                 Ok(std::iter::once(n).chain(run_notice).collect())

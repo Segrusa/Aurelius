@@ -150,7 +150,10 @@ pub struct GroupRun {
 /// The conversation a run answers in.
 pub fn run_conversation(conn: &Connection, run: RunId) -> Result<Option<ConversationId>, StorageError> {
     let id: Option<Option<String>> = conn.query_row("SELECT conversation_id FROM runs WHERE id = ?1", [run.to_string()], |r| r.get(0)).optional()?;
-    Ok(id.flatten().and_then(|c| ConversationId::parse(&c).ok()))
+    match id.flatten().and_then(|c| ConversationId::parse(&c).ok()) {
+        Some(id) => Ok(Some(id)),
+        None => crate::inbox::queued_conversation(conn, run),
+    }
 }
 
 /// The group chat marking of a run, if the group chat woke it.
@@ -158,7 +161,12 @@ pub fn group_run(conn: &Connection, run: RunId) -> Result<Option<GroupRun>, Stor
     let marking: Option<Option<String>> = conn
         .query_row("SELECT json_extract(payload_json, '$.group') FROM jobs WHERE id = ?1", [run.to_string()], |r| r.get(0))
         .optional()?;
-    Ok(marking.flatten().and_then(|m| serde_json::from_str(&m).ok()))
+    // A queued item stopped before it became a run has no job, only its inbox item.
+    let marking = match marking.flatten() {
+        Some(m) => Some(m),
+        None => crate::inbox::group_marking(conn, run)?,
+    };
+    Ok(marking.and_then(|m| serde_json::from_str(&m).ok()))
 }
 
 pub struct NewMessage {
@@ -334,7 +342,11 @@ pub fn run_login_user(conn: &rusqlite::Connection, run_id: RunId) -> Result<Opti
 }
 
 pub fn run_status(tx: &rusqlite::Connection, run_id: RunId) -> Result<Option<String>, StorageError> {
-    Ok(tx.query_row("SELECT status FROM runs WHERE id = ?1", [run_id.to_string()], |r| r.get(0)).optional()?)
+    if let Some(status) = tx.query_row("SELECT status FROM runs WHERE id = ?1", [run_id.to_string()], |r| r.get(0)).optional()? {
+        return Ok(Some(status));
+    }
+    // Still an item in its employee's inbox: the run has not been made yet.
+    Ok(crate::inbox::is_queued(tx, run_id)?.then(|| "created".to_string()))
 }
 
 /// The error code a run carries (`quota` while it waits for the usage limit).
@@ -351,6 +363,9 @@ pub fn set_run_status(tx: &Transaction<'_>, run_id: RunId, status: &str, error_c
          WHERE id = ?1",
         params![run_id.to_string(), status, error_code, now],
     )?;
+    if matches!(status, "succeeded" | "failed" | "cancelled" | "unknown") {
+        crate::inbox::finish_run(tx, run_id)?;
+    }
     Ok(())
 }
 
@@ -408,7 +423,7 @@ pub fn employee_conversations(conn: &Connection, employee: aurelius_domain::Empl
         "SELECT c.id, c.title, c.created_at_ms,
                 COALESCE((SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = c.id), c.created_at_ms),
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id)
-         FROM conversations c WHERE c.kind = 'employee' AND c.employee_id = ?1 AND c.archived_at_ms IS NULL AND c.quick_answer = 0
+         FROM conversations c WHERE c.kind = 'employee' AND c.employee_id = ?1 AND c.archived_at_ms IS NULL AND c.quick_answer = 0 AND c.thread_key IS NULL
          ORDER BY 4 DESC, c.created_at_ms DESC",
     )?;
     let rows = stmt.query_map([employee.to_string()], |r| {
@@ -960,6 +975,17 @@ pub fn delete_conversation(tx: &Transaction<'_>, conversation: ConversationId) -
 
 /// Runs of the conversation that are queued or still going, with their status.
 pub fn unfinished_runs_in(conn: &rusqlite::Connection, conversation: ConversationId) -> Result<Vec<(RunId, String)>, StorageError> {
+    let mut out = started_or_made_runs_in(conn, conversation)?;
+    // What waits in its employee's inbox has no run yet; it is the run that will answer.
+    for (run, _) in crate::inbox::queued_in(conn, conversation)? {
+        if !out.iter().any(|(known, _)| *known == run) {
+            out.push((run, "created".to_string()));
+        }
+    }
+    Ok(out)
+}
+
+fn started_or_made_runs_in(conn: &rusqlite::Connection, conversation: ConversationId) -> Result<Vec<(RunId, String)>, StorageError> {
     let mut stmt =
         conn.prepare("SELECT id, status FROM runs WHERE conversation_id = ?1 AND status IN ('created','starting','running','waiting','cancelling')")?;
     let rows = stmt.query_map([conversation.to_string()], |r| Ok((RunId::parse(&r.get::<_, String>(0)?).map_err(conv_err)?, r.get::<_, String>(1)?)))?;
@@ -972,6 +998,16 @@ pub fn unfinished_runs_in(conn: &rusqlite::Connection, conversation: Conversatio
 pub fn going_run_since(conn: &rusqlite::Connection, conversation: ConversationId) -> Result<Option<Option<i64>>, StorageError> {
     let mut stmt = conn.prepare("SELECT started_at_ms FROM runs WHERE conversation_id = ?1 AND status IN ('starting','running','waiting','cancelling') ORDER BY started_at_ms LIMIT 1")?;
     Ok(stmt.query_row([conversation.to_string()], |r| r.get::<_, Option<i64>>(0)).optional()?)
+}
+
+/// Since when `employee` is busy in a run in any of its conversations (a quick
+/// answer does not count): `Some(None)` when one is going but not timed yet.
+pub fn employee_going_since(conn: &rusqlite::Connection, employee: aurelius_domain::EmployeeId) -> Result<Option<Option<i64>>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT r.started_at_ms FROM runs r JOIN conversations c ON c.id = r.conversation_id
+         WHERE c.employee_id = ?1 AND c.quick_answer = 0 AND r.status IN ('starting','running','waiting','cancelling') ORDER BY r.started_at_ms LIMIT 1",
+    )?;
+    Ok(stmt.query_row([employee.to_string()], |r| r.get::<_, Option<i64>>(0)).optional()?)
 }
 
 /// The title of the hidden conversation of an employee's quick answers.
@@ -1054,6 +1090,18 @@ fn queued_runs(conn: &Connection, conversation: ConversationId) -> Result<Vec<(R
             out.push((run, message));
         }
     }
+    // Waiting in the employee's inbox: the worker has not made its run yet.
+    for (run, message) in crate::inbox::queued_in(conn, conversation)? {
+        let Some(Ok(message)) = message.as_deref().map(MessageId::parse) else { continue };
+        let answered: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM messages a WHERE a.conversation_id = ?1 AND a.reply_to_id = ?2)",
+            params![conversation.to_string(), message.to_string()],
+            |r| r.get(0),
+        )?;
+        if !answered {
+            out.push((run, message));
+        }
+    }
     Ok(out)
 }
 
@@ -1079,7 +1127,8 @@ pub fn reply_state(conn: &Connection, conversation: ConversationId, message: Mes
         "SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = ?1 AND reply_to_id = ?2)
              OR EXISTS(SELECT 1 FROM runs r JOIN jobs j ON j.id = r.id
                        WHERE r.conversation_id = ?1 AND j.kind = 'run.chat' AND json_extract(j.payload_json, '$.reply_to') = ?2
-                         AND (r.status IN ('starting','running','waiting','cancelling','succeeded','failed','unknown') OR j.state = 'leased'))",
+                         AND (r.status IN ('starting','running','waiting','cancelling','succeeded','failed','unknown') OR j.state = 'leased'))
+             OR EXISTS(SELECT 1 FROM employee_inbox i WHERE i.conversation_id = ?1 AND json_extract(i.payload_json, '$.reply_to') = ?2 AND i.state IN ('claimed', 'done'))",
         params![conversation.to_string(), message.to_string()],
         |r| r.get(0),
     )?;
@@ -1099,7 +1148,20 @@ pub fn runs_ahead_of(conn: &Connection, conversation: ConversationId, run: RunId
     let rows = stmt.query_map(params![conversation.to_string(), run.to_string(), ordinal], |r| {
         Ok((RunId::parse(&r.get::<_, String>(0)?).map_err(conv_err)?, r.get::<_, String>(1)?))
     })?;
-    Ok(rows.collect::<Result<_, _>>()?)
+    let mut ahead: Vec<(RunId, String)> = rows.collect::<Result<_, _>>()?;
+    // What waits in the employee's inbox for a message up to this one is ahead too.
+    let mut stmt = conn.prepare(
+        "SELECT i.run_id FROM employee_inbox i LEFT JOIN messages m ON m.id = json_extract(i.payload_json, '$.reply_to')
+         WHERE i.conversation_id = ?1 AND i.run_id <> ?2 AND i.state = 'queued' AND COALESCE(m.ordinal, 0) <= ?3",
+    )?;
+    let queued = stmt.query_map(params![conversation.to_string(), run.to_string(), ordinal], |r| r.get::<_, String>(0))?;
+    for item in queued {
+        let item = RunId::parse(&item?).map_err(|e| StorageError::Rejected(e.to_string()))?;
+        if !ahead.iter().any(|(known, _)| *known == item) {
+            ahead.push((item, "created".to_string()));
+        }
+    }
+    Ok(ahead)
 }
 
 /// A message's place in its conversation.
@@ -1216,7 +1278,7 @@ pub fn hurry_job(tx: &Transaction<'_>, run: RunId) -> Result<(), StorageError> {
          WHERE id = ?1 AND state = 'ready'",
         params![run.to_string(), now_ms()],
     )?;
-    Ok(())
+    crate::inbox::hurry(tx, run)
 }
 
 /// Runs of the conversation waiting for their process to be interrupted.

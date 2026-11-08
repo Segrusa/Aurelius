@@ -40,7 +40,8 @@ const WAITING_QUESTION: &str = "question";
 pub(crate) fn live_run(conn: &rusqlite::Connection, task: TaskId, except: Option<RunId>) -> Result<bool, StorageError> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM runs WHERE task_id = ?1 AND conversation_id IS NOT NULL AND id <> COALESCE(?2, '')
-           AND status IN ('created','starting','running','waiting','cancelling'))",
+           AND status IN ('created','starting','running','waiting','cancelling'))
+         OR EXISTS(SELECT 1 FROM employee_inbox WHERE task_id = ?1 AND state = 'queued' AND run_id <> COALESCE(?2, ''))",
         rusqlite::params![task.to_string(), except.map(|r| r.to_string())],
         |r| r.get(0),
     )?)
@@ -49,7 +50,7 @@ pub(crate) fn live_run(conn: &rusqlite::Connection, task: TaskId, except: Option
 /// Queue a run of the task's conversation that answers `reply_to`, counted for the task.
 pub(crate) fn run_for(tx: &Tx<'_>, task: TaskId, conversation: ConversationId, reply_to: MessageId) -> Result<Vec<EventNotice>, StorageError> {
     let (run, notices) = queue_run(tx, &serde_json::json!({ "task_id": task }), &task.to_string(), conversation, reply_to)?;
-    tx.execute("UPDATE runs SET task_id = ?2 WHERE id = ?1", [run.to_string(), task.to_string()])?;
+    crate::run::inbox::link_task(tx, run, task)?;
     Ok(notices)
 }
 
@@ -63,7 +64,7 @@ pub(crate) fn link_run(tx: &Tx<'_>, run: RunId, conversation: ConversationId) ->
     if row.status.is_terminal() || owner.is_none() || owner != row.employee_id {
         return Ok(vec![]);
     }
-    tx.execute("UPDATE runs SET task_id = ?2 WHERE id = ?1", [run.to_string(), task.to_string()])?;
+    crate::run::inbox::link_task(tx, run, task)?;
     let mut notices = Vec::new();
     if row.status == TaskStatus::Waiting && matches!(store::waiting_cause(tx, task)?.as_deref(), Some("stopped" | "not_started" | "escalated_to_boss" | WAITING_QUESTION)) {
         notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
@@ -227,6 +228,8 @@ fn wait_for_answer(tx: &Tx<'_>, st: &Store, task: TaskId, row: &store::TaskRow, 
     }
     notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?);
     notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": WAITING_QUESTION }))?);
+    // What comes in for this thread now waits until the answer has been dealt with (R3).
+    crate::run::inbox::park_on_question(tx, run, task)?;
     Ok(notices)
 }
 
@@ -500,7 +503,8 @@ fn open_from(conn: &rusqlite::Connection, conversation: ConversationId, except: 
 pub(crate) fn live_in(conn: &rusqlite::Connection, conversation: ConversationId, except: Option<RunId>) -> Result<bool, StorageError> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM runs WHERE conversation_id = ?1 AND id <> COALESCE(?2, '')
-           AND status IN ('created','starting','running','waiting','cancelling'))",
+           AND status IN ('created','starting','running','waiting','cancelling'))
+         OR EXISTS(SELECT 1 FROM employee_inbox WHERE conversation_id = ?1 AND state = 'queued' AND run_id <> COALESCE(?2, ''))",
         rusqlite::params![conversation.to_string(), except.map(|r| r.to_string())],
         |r| r.get(0),
     )?)

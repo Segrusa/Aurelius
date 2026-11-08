@@ -18,6 +18,7 @@ pub mod threads;
 pub mod message_edits;
 pub mod conversation_sessions;
 pub mod employees;
+pub mod inbox;
 pub mod company_convert;
 pub mod approvals;
 pub mod proposals;
@@ -252,6 +253,8 @@ mod schema33_tests;
 mod schema34_tests;
 #[cfg(test)]
 mod schema35_tests;
+#[cfg(test)]
+mod schema36_tests;
 #[cfg(test)]
 mod schema29_tests;
 #[cfg(test)]
