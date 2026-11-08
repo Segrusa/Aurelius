@@ -10,6 +10,9 @@ import { scriptServer } from "./fake-server";
 const SECRET = "ghp_a-very-secret-value-for-the-test";
 const PASSWORD = "a-long-enough-password";
 
+const toast = (page: Page, text: string | RegExp) =>
+  page.getByRole("region", { name: "Notifications" }).getByText(text);
+
 const go = (page: Page, name: string) => page.getByRole("navigation").getByRole("link", { name }).first().click();
 
 test("employees, projects, guidelines, ideas, memory and the vault over a real daemon", async () => {
@@ -60,7 +63,8 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByRole("button", { name: "Add employee" }).click();
     await page.getByPlaceholder("Name, for example Alex").fill("Pixel");
     await page.getByPlaceholder(/Free-form role/).fill("Designer");
-    await page.getByLabel("Reports to").selectOption({ label: "Orion" });
+    await page.getByRole("combobox", { name: "Reports to" }).click();
+    await page.getByRole("option", { name: "Orion" }).click();
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await expect(page.getByText("Designer · reports to Orion")).toBeVisible();
     await page.getByRole("link", { name: "Employees", exact: true }).first().click();
@@ -99,7 +103,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByRole("link", { name: "Memory" }).click();
     await page.getByLabel("Remember for this project").fill("Publishing needs a review first");
     await page.getByRole("button", { name: "Remember", exact: true }).click();
-    await expect(page.getByText(/Saved to project memory/)).toBeVisible();
+    await expect(toast(page, /Saved to project memory/)).toBeVisible();
     await page.getByRole("tab", { name: "In context" }).click();
     await expect(page.getByText("Publishing needs a review first").first()).toBeVisible();
 
@@ -119,7 +123,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     expect(await page.content()).not.toContain(SECRET);
 
     await page.getByRole("button", { name: "Copy GitHub token" }).click();
-    await expect(page.getByText("Copied. Clears in 60 s.")).toBeVisible();
+    await expect(toast(page, "Copied. Clears in 60 s.")).toBeVisible();
     expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(SECRET);
     expect(await page.content()).not.toContain(SECRET);
 
@@ -131,10 +135,10 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     // The key: a wrong password stays out, the right one shows it once.
     await page.getByRole("button", { name: "Export key…" }).click();
     await page.getByPlaceholder("Your password").fill("not-the-password");
-    await page.getByRole("button", { name: "Export key" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Export key", exact: true }).click();
     await expect(page.getByRole("alert")).toBeVisible();
     await page.getByPlaceholder("Your password").fill(PASSWORD);
-    await page.getByRole("button", { name: "Export key" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Export key", exact: true }).click();
     await expect(page.getByLabel("The vault key, shown once")).toBeVisible();
     await page.getByRole("button", { name: "Done" }).click();
     await expect(page.getByLabel("The vault key, shown once")).toBeHidden();
@@ -419,8 +423,8 @@ test.describe("scripted organisation", () => {
       "/knowledge/vault",
     );
     await page.getByRole("button", { name: "Copy GitHub token" }).click();
-    await expect(page.getByText(/A browser may keep it on the clipboard/)).toBeVisible();
-    await expect(page.getByText("Copied. Clears in 60 s.")).toBeHidden();
+    await expect(toast(page, /A browser may keep it on the clipboard/)).toBeVisible();
+    await expect(toast(page, "Copied. Clears in 60 s.")).toBeHidden();
 
     await page.getByRole("button", { name: "New item" }).first().click();
     await page.getByRole("button", { name: "Secret" }).click();

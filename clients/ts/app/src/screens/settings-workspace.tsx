@@ -1,20 +1,27 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { FileInput } from "@astryxdesign/core/FileInput";
+import { Selector } from "@astryxdesign/core/Selector";
+import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { expectBody } from "@aurelius/client";
 import type { PushStatus, Setting2 } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
-import { initial, Mark, markColor } from "../ui/kit";
+import { initial, Mark, markColor } from "../ui/marks";
 import { QrCode } from "./qr-code";
 import { ServerChoicesPanel } from "./servers";
 import { MemberAccess, passwordProblem } from "./settings-accounts";
 import {
   ConfirmButton,
   Group,
+  GroupTitle,
   Keyed,
   Muted,
   modelName,
   NameEditor,
+  Part,
   Problem,
   Row,
   SmallButton,
@@ -24,6 +31,38 @@ import {
   useSetting,
   when,
 } from "./settings-kit";
+
+const styles = stylex.create({
+  form: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  stack: { display: "flex", flexDirection: "column", gap: 10 },
+  models: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 },
+  model: {
+    height: "auto",
+    whiteSpace: "normal",
+    justifyContent: "flex-start",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 8,
+    padding: 12,
+    textAlign: "left",
+    fontWeight: 600,
+    color: "var(--color-text-primary)",
+  },
+  modelOn: {
+    borderColor: "var(--color-text-accent)",
+    backgroundColor: "var(--color-overlay-hover)",
+    boxShadow: "0 0 0 1px var(--color-text-accent)",
+  },
+  connection: { display: "block", fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
+  quiet: { color: "var(--precision-text3)" },
+  member: { display: "inline-flex", alignItems: "center", gap: 6 },
+  tight: { padding: 12 },
+  value: { fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--color-text-secondary)" },
+  status: { fontSize: 12, color: "var(--color-text-secondary)" },
+  notes: { whiteSpace: "pre-wrap" },
+  code: { fontFamily: "var(--font-family-code)", fontSize: 15, fontWeight: 500, letterSpacing: "0.08em" },
+});
 
 function BoardMembers() {
   const connection = useConnection();
@@ -66,8 +105,8 @@ function BoardMembers() {
           )}
         </Row>
       ))}
-      <div className="flex flex-col gap-2 px-4 py-[14px]">
-        <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => void add(e)}>
+      <Part>
+        <form {...stylex.props(styles.form)} onSubmit={(e) => void add(e)}>
           <TextInput
             label="New board member's name"
             placeholder="Name"
@@ -101,7 +140,7 @@ function BoardMembers() {
         <Muted>{password && problem ? problem : "At least 12 characters."}</Muted>
         <Problem error={users.error ?? error} />
         {access ? <MemberAccess user={access.id} name={access.username} onClose={() => setAccess(null)} /> : null}
-      </div>
+      </Part>
     </Group>
   );
 }
@@ -147,26 +186,24 @@ function DefaultModel() {
     );
   };
   return (
-    <section className="flex flex-col gap-[10px]">
-      <h2 className="m-0 text-[12px] font-medium text-text3">
-        Employee default model{current ? ` · Now: ${modelName(current)}` : ""}
-      </h2>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2">
+    <section {...stylex.props(styles.stack)}>
+      <GroupTitle>Employee default model{current ? ` · Now: ${modelName(current)}` : ""}</GroupTitle>
+      <div {...stylex.props(styles.models)}>
         {connections.flatMap((c) =>
           c.models.map((m) => {
             const on = c.id === active?.id && m === current;
             return (
-              <button
+              <ToggleButton
                 key={`${c.id}|${m}`}
-                type="button"
-                aria-pressed={on}
-                disabled={busy}
-                onClick={() => void choose(c.id, m)}
-                className={`cursor-pointer rounded-[8px] border p-3 text-left font-semibold text-text ${on ? "border-acc-text bg-sel shadow-[0_0_0_1px_var(--acc-text)]" : "border-line bg-transparent hover:bg-sel"}`}
+                label={`${modelName(m)}, ${c.display_name}`}
+                isPressed={on}
+                isDisabled={busy}
+                onPressedChange={() => void choose(c.id, m)}
+                xstyle={[styles.model, on && styles.modelOn]}
               >
                 {modelName(m)}
-                <span className="block text-[12px] font-normal text-text3">{c.display_name}</span>
-              </button>
+                <span {...stylex.props(styles.connection)}>{c.display_name}</span>
+              </ToggleButton>
             );
           }),
         )}
@@ -209,42 +246,39 @@ function SubagentDefault() {
       ),
     );
   };
-  const select = "h-7 max-w-[200px] rounded-[6px] border border-btn-line bg-btn px-2 text-[12px] font-medium text-text";
   return (
     <Group title="Subagents">
       <Row title="Subagents" hint="What the helpers of an employee run on, unless the employee says otherwise.">
-        <select
-          aria-label="Subagent model"
-          className={select}
-          disabled={busy}
+        <Selector
+          label="Subagent model"
+          isLabelHidden
+          size="sm"
+          variant="secondary"
+          width={200}
+          isDisabled={busy}
           value={pick(settings.model)}
-          onChange={(e) => void save({ model: e.target.value })}
-        >
-          <option value="inherit">Inherit</option>
-          {models.map((m) => (
-            <option key={m} value={m}>
-              {modelName(m)}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Subagent effort"
-          className={select}
-          disabled={busy}
+          options={[{ value: "inherit", label: "Inherit" }, ...models.map((m) => ({ value: m, label: modelName(m) }))]}
+          onChange={(model) => void save({ model })}
+        />
+        <Selector
+          label="Subagent effort"
+          isLabelHidden
+          size="sm"
+          variant="secondary"
+          width={200}
+          isDisabled={busy}
           value={pick(settings.effort)}
-          onChange={(e) => void save({ effort: e.target.value })}
-        >
-          {SUB_EFFORTS.map(([k, l]) => (
-            <option key={k} value={k}>
-              {l}
-            </option>
-          ))}
-        </select>
+          options={SUB_EFFORTS.map(([value, label]) => ({ value, label }))}
+          onChange={(effort) => void save({ effort })}
+        />
       </Row>
       <Problem error={error} />
     </Group>
   );
 }
+
+/** Selector has no empty option: this stands for "no tester", never an employee's id. */
+const NO_TESTER = "none";
 
 export function CompanySection() {
   const connection = useConnection();
@@ -294,9 +328,9 @@ export function CompanySection() {
           />
         </Row>
         <Row title="Management team" hint="Employees that report to no one.">
-          {roots.length === 0 ? <span className="text-text3">Nobody yet</span> : null}
+          {roots.length === 0 ? <span {...stylex.props(styles.quiet)}>Nobody yet</span> : null}
           {roots.map((e) => (
-            <span key={e.id} className="inline-flex items-center gap-[6px]">
+            <span key={e.id} {...stylex.props(styles.member)}>
               <Mark letter={initial(e.name)} color={markColor(e.id)} />
               {e.name}
             </span>
@@ -310,28 +344,28 @@ export function CompanySection() {
           title="Tester"
           hint="Runs the full test suite once when the owner reports, in the Testing column. Green goes on to Review; red goes back to Doing with the failures."
         >
-          <select
-            aria-label="Tester"
-            value={testerId}
-            disabled={busy || !data}
-            onChange={(e) =>
+          <Selector
+            label="Tester"
+            isLabelHidden
+            size="sm"
+            variant="secondary"
+            width={220}
+            value={testerId || NO_TESTER}
+            isDisabled={busy || !data}
+            options={[
+              { value: NO_TESTER, label: "None: no Testing step" },
+              ...(data?.employees ?? []).map((e) => ({ value: e.id, label: e.name })),
+            ]}
+            onChange={(picked) =>
               void run(() =>
                 connection.write(
                   "company.update",
-                  { tester: { employee_id: e.target.value || null } },
+                  { tester: { employee_id: picked === NO_TESTER ? null : picked } },
                   { retry: false },
                 ),
               )
             }
-            className="h-7 max-w-[220px] rounded-[6px] border border-btn-line bg-btn px-2 text-[12px] font-medium text-text"
-          >
-            <option value="">None: no Testing step</option>
-            {(data?.employees ?? []).map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
+          />
         </Row>
       </Group>
       <Group title="Background jobs">
@@ -351,24 +385,30 @@ export function CompanySection() {
             ) : null}
           </Row>
         ) : (
-          <div className="flex items-center gap-4 rounded-[10px] bg-amber-soft px-4 py-[14px] shadow-[inset_0_0_0_1px_var(--amber-line)]">
-            <span className="size-[7px] flex-none rounded-full bg-amber" />
-            <div className="min-w-0 flex-1">
-              No Claude login is chosen: background jobs (memory consolidation) do not run.
-            </div>
-            <SmallButton
-              kind="primary"
-              disabled={busy || claudeLogin?.status !== "linked"}
-              title={
-                claudeLogin?.status === "linked" ? undefined : "Connect your Claude login first (Settings → Account)."
+          <Part>
+            <Banner
+              status="warning"
+              title="No Claude login is chosen: background jobs (memory consolidation) do not run."
+              endContent={
+                <SmallButton
+                  kind="primary"
+                  disabled={busy || claudeLogin?.status !== "linked"}
+                  title={
+                    claudeLogin?.status === "linked"
+                      ? undefined
+                      : "Connect your Claude login first (Settings → Account)."
+                  }
+                  onClick={() =>
+                    void run(() =>
+                      connection.write("company.set_background_login", { enabled: true }, { retry: false }),
+                    )
+                  }
+                >
+                  Use my Claude login
+                </SmallButton>
               }
-              onClick={() =>
-                void run(() => connection.write("company.set_background_login", { enabled: true }, { retry: false }))
-              }
-            >
-              Use my Claude login
-            </SmallButton>
-          </div>
+            />
+          </Part>
         )}
       </Group>
       <DefaultModel />
@@ -396,10 +436,10 @@ function ServerUpdate() {
   return (
     <Group title="Server update">
       <Row title="Installed">
-        <span className="font-mono text-[12px] text-text2">{data.current}</span>
+        <span {...stylex.props(styles.value)}>{data.current}</span>
       </Row>
       <Row title="Latest" hint={data.checked_at_ms ? `Checked ${when(data.checked_at_ms)}` : undefined}>
-        <span className="font-mono text-[12px] text-text2">{data.latest ?? "Unknown"}</span>
+        <span {...stylex.props(styles.value)}>{data.latest ?? "Unknown"}</span>
         <Keyed action="SettingsCheckUpdate" chord="C">
           <SmallButton disabled={busy} onClick={() => void check()}>
             Check now
@@ -407,7 +447,7 @@ function ServerUpdate() {
         </Keyed>
       </Row>
       <Row title="Status" hint={data.error ?? data.reason ?? undefined}>
-        <span className="text-[12px] text-text2">
+        <span {...stylex.props(styles.status)}>
           {!data.enabled
             ? "Updates are off"
             : data.staged
@@ -439,7 +479,7 @@ function ServerUpdate() {
           </Keyed>
         ) : null}
       </Row>
-      {data.notes ? <Row title="What's new" hint={<span className="whitespace-pre-wrap">{data.notes}</span>} /> : null}
+      {data.notes ? <Row title="What's new" hint={<span {...stylex.props(styles.notes)}>{data.notes}</span>} /> : null}
       <Problem error={error} />
     </Group>
   );
@@ -498,9 +538,9 @@ function OtherServers() {
   if (servers === null) return null;
   return (
     <Group title="Servers">
-      <div className="p-3">
+      <Part xstyle={styles.tight}>
         <ServerChoicesPanel />
-      </div>
+      </Part>
     </Group>
   );
 }
@@ -535,13 +575,13 @@ export function ServerSection() {
           ) : null}
         </Row>
         <Row title="Connected through" hint={remote ? "Remote access" : "This computer"}>
-          <span className="font-mono text-[12px] text-text2">{environment}</span>
+          <span {...stylex.props(styles.value)}>{environment}</span>
         </Row>
         <Row title="Running since" hint={hostId ?? undefined}>
-          <span className="text-[12px] text-text2">{when(health.data?.started_at_ms)}</span>
+          <span {...stylex.props(styles.status)}>{when(health.data?.started_at_ms)}</span>
         </Row>
         <Row title="Busy now">
-          <span className="text-[12px] text-text2">
+          <span {...stylex.props(styles.status)}>
             {health.data?.active_jobs ?? 0} job{health.data?.active_jobs === 1 ? "" : "s"}
           </span>
         </Row>
@@ -577,6 +617,7 @@ function PushKey({ clients, status }: { clients: { id: string; name: string }[];
     bundle_id: status.bundle_id ?? "",
   });
   const [keyFile, setKeyFile] = useState<string | null>(null);
+  const [chosenFile, setChosenFile] = useState<File | null>(null);
   const [phone, setPhone] = useState("");
   const [sent, setSent] = useState(false);
   const save = () =>
@@ -584,7 +625,10 @@ function PushKey({ clients, status }: { clients: { id: string; name: string }[];
       connection.write("push.configure", { ...form, ...(keyFile ? { key_p8: keyFile } : {}) }, { retry: false }),
     ).then((ok) => {
       // The private key stays only as long as it takes to send it.
-      if (ok) setKeyFile(null);
+      if (ok) {
+        setKeyFile(null);
+        setChosenFile(null);
+      }
     });
   return (
     <Group title="Phone notifications">
@@ -595,21 +639,21 @@ function PushKey({ clients, status }: { clients: { id: string; name: string }[];
         <TextInput
           label="Team id"
           placeholder="Team id"
-          className="w-[110px]"
+          width={110}
           value={form.team_id}
           onChange={(e) => setForm({ ...form, team_id: e.target.value })}
         />
         <TextInput
           label="Key id"
           placeholder="Key id"
-          className="w-[110px]"
+          width={110}
           value={form.key_id}
           onChange={(e) => setForm({ ...form, key_id: e.target.value })}
         />
         <TextInput
           label="Bundle id"
           placeholder="Bundle id"
-          className="w-[150px]"
+          width={150}
           value={form.bundle_id}
           onChange={(e) => setForm({ ...form, bundle_id: e.target.value })}
         />
@@ -620,14 +664,17 @@ function PushKey({ clients, status }: { clients: { id: string; name: string }[];
           keyFile ? "Chosen. It is sent when you save." : status.apns ? "Leave it to keep the current key." : undefined
         }
       >
-        <input
-          aria-label="APNs key file"
-          type="file"
+        <FileInput
+          label="APNs key file"
+          isLabelHidden
           accept=".p8"
-          className="max-w-[220px] text-[12px] text-text2"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
+          width={220}
+          value={chosenFile}
+          onChange={(picked) => {
+            const file = Array.isArray(picked) ? (picked[0] ?? null) : picked;
+            setChosenFile(file);
             if (file) void file.text().then(setKeyFile);
+            else setKeyFile(null);
           }}
         />
         <SmallButton
@@ -640,19 +687,17 @@ function PushKey({ clients, status }: { clients: { id: string; name: string }[];
       </Row>
       {status.apns && clients.length > 0 ? (
         <Row title="Test notification" hint={sent ? "Sent. It should show on that phone." : undefined}>
-          <select
-            aria-label="Phone"
-            className="h-7 max-w-[200px] rounded-[6px] border border-btn-line bg-btn px-2 text-[12px] text-text"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          >
-            <option value="">Choose a device</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <Selector
+            label="Phone"
+            isLabelHidden
+            size="sm"
+            variant="secondary"
+            width={200}
+            placeholder="Choose a device"
+            {...(phone ? { value: phone } : {})}
+            options={clients.map((c) => ({ value: c.id, label: c.name }))}
+            onChange={setPhone}
+          />
           <Keyed action="SettingsPushTest" chord="T">
             <SmallButton
               disabled={busy || !phone}
@@ -731,7 +776,7 @@ export function RemoteSection() {
             title="Pair a device"
             hint={code ? `Valid until ${when(code.expires)}.` : "Shows a one-time code to enter on the other device."}
           >
-            {code ? <span className="font-mono text-[15px] font-medium tracking-[0.08em]">{code.code}</span> : null}
+            {code ? <span {...stylex.props(styles.code)}>{code.code}</span> : null}
             <Keyed action="SettingsNew" chord="N">
               <SmallButton disabled={busy} onClick={() => void startPairing()}>
                 {code ? "New code" : "Show code"}

@@ -1,3 +1,13 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
+import { Link } from "@astryxdesign/core/Link";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import type { BoardColumnView, BoardView, ColumnKind, TicketView } from "@aurelius/protocol";
 import {
   closestCorners,
@@ -17,8 +27,9 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
@@ -26,8 +37,8 @@ import { useBoard, useCompany, useEmployees, useMembers, useProjects } from "../
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { NewIcon } from "../ui/icons";
-import { Button, Kbd, Segments } from "../ui/kit";
-import { Dialog, Menu } from "../ui/overlay";
+import { KeyHint } from "../ui/key-hint";
+import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import {
   beforeFor,
@@ -43,6 +54,7 @@ import {
 } from "./board-logic";
 import { Held, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
+import { FormDialog, Page, PageHead, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { ConfirmDialog, TicketPanel } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
@@ -57,6 +69,174 @@ import {
   useTicketNeeds,
   useTicketWrite,
 } from "./tickets-kit";
+
+const styles = stylex.create({
+  columnsRow: { display: "flex", alignItems: "center", gap: 8 },
+  card: {
+    display: "flex",
+    width: "100%",
+    boxSizing: "border-box",
+    flexDirection: "column",
+    gap: 8,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: { default: "var(--color-border)", ":hover": "var(--color-border-emphasized)" },
+    backgroundColor: "var(--color-background-card)",
+    paddingInline: 12,
+    paddingBlock: 10,
+    textAlign: "left",
+    color: "var(--color-text-primary)",
+    boxShadow: "var(--precision-card-shadow)",
+  },
+  cardSelected: {
+    display: "flex",
+    width: "100%",
+    boxSizing: "border-box",
+    flexDirection: "column",
+    gap: 8,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-text-accent)",
+    backgroundColor: "var(--color-background-card)",
+    paddingInline: 12,
+    paddingBlock: 10,
+    textAlign: "left",
+    color: "var(--color-text-primary)",
+    boxShadow: "0 0 0 1px var(--color-text-accent)",
+  },
+  cardHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  cardOwner: { marginInlineStart: "auto" },
+  cardTitle: { lineHeight: 1.4, fontWeight: 500 },
+  cardTags: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, ":empty": { display: "none" } },
+  cardButton: {
+    display: "block",
+    width: "100%",
+    cursor: "pointer",
+    borderRadius: 7,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    textAlign: "left",
+  },
+  column: {
+    display: "flex",
+    maxHeight: "100%",
+    width: 248,
+    flexShrink: 0,
+    flexDirection: "column",
+    gap: 6,
+    borderRadius: 8,
+  },
+  columnFolded: {
+    display: "flex",
+    maxHeight: "100%",
+    width: 36,
+    flexShrink: 0,
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 8,
+    paddingBlock: 8,
+  },
+  over: { backgroundColor: "var(--color-overlay-hover)" },
+  foldedName: { fontWeight: 500, color: "var(--precision-text3)", writingMode: "vertical-rl" },
+  columnHead: { display: "flex", height: 32, flexShrink: 0, alignItems: "center", gap: 8, paddingInline: 6 },
+  columnName: { fontWeight: 500 },
+  columnCount: { color: "var(--precision-text3)" },
+  columnAdd: { marginInlineStart: "auto" },
+  columnScroll: { minHeight: 40, overflowY: "auto", paddingBottom: 4 },
+  columnCards: { display: "flex", flexDirection: "column", gap: 6 },
+  columnEmpty: { margin: 0, paddingInline: 6, paddingBlock: 4, fontSize: 12, color: "var(--precision-text3)" },
+  showOlder: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 6,
+    textAlign: "left",
+    fontSize: 12,
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+  },
+  needs: {
+    height: 24,
+    flexShrink: 0,
+    cursor: "pointer",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border-warning)",
+    backgroundColor: "var(--color-warning-muted)",
+    paddingInline: 9,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--color-text-warning)",
+  },
+  needsOn: { boxShadow: "inset 0 0 0 1px var(--color-border-warning)" },
+  pill: {
+    height: 24,
+    flexShrink: 0,
+    cursor: "pointer",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "var(--color-border-emphasized)",
+    backgroundColor: "transparent",
+    paddingInline: 9,
+    fontSize: 12,
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+  },
+  body: { position: "relative", minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%" },
+  fill: { position: "absolute", inset: 0 },
+  message: { padding: 18 },
+  main: { display: "flex", height: "100%", minWidth: 0, flexDirection: "column" },
+  columns: {
+    display: "flex",
+    height: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    alignItems: "flex-start",
+    gap: 12,
+    overflowX: "auto",
+    backgroundColor: "var(--color-background-muted)",
+    paddingBlock: 12,
+    paddingInlineStart: 14,
+    paddingInlineEnd: 12,
+  },
+  hidden: { display: "flex", width: 170, flexShrink: 0, flexDirection: "column", gap: 4, paddingInline: 6 },
+  hiddenHead: {
+    display: "flex",
+    height: 32,
+    alignItems: "center",
+    fontWeight: 500,
+    color: "var(--color-text-secondary)",
+  },
+  hiddenColumn: {
+    display: "flex",
+    height: 30,
+    cursor: "pointer",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--precision-line2)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingInline: 8,
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+  },
+  hiddenCount: { marginInlineStart: "auto", color: "var(--precision-text3)" },
+  menuAnchor: { position: "fixed" },
+});
 
 const HIDDEN_KEY = "board_hidden_columns";
 const CARD_HEIGHT = 88;
@@ -97,51 +277,47 @@ function ColumnsDialog({ columns, onClose }: { columns: BoardColumnView[]; onClo
     }
   };
   return (
-    <Dialog open onClose={onClose} title="Columns" width={420}>
-      <div className="flex flex-col gap-2 p-4">
-        <p className="m-0 text-[15px] font-semibold">Columns</p>
-        {ordered.map((c, i) => (
-          <label key={c.id} className="flex items-center gap-2">
-            <button
-              type="button"
-              aria-label={`Move ${c.name} left`}
-              disabled={i === 0}
-              onClick={() => shift(i, -1)}
-              className="cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text disabled:opacity-30"
-            >
-              ←
-            </button>
-            <button
-              type="button"
-              aria-label={`Move ${c.name} right`}
-              disabled={i === ordered.length - 1}
-              onClick={() => shift(i, 1)}
-              className="cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text disabled:opacity-30"
-            >
-              →
-            </button>
-            <ColumnGlyph kind={c.kind} />
-            <input
-              aria-label={`Name of ${c.name}`}
-              className="h-7 min-w-0 flex-1 rounded-[6px] border border-btn-line bg-sunk px-2 text-text"
-              value={names.get(c.id) ?? ""}
-              onChange={(e) => setNames(new Map(names).set(c.id, e.target.value))}
-            />
-          </label>
-        ))}
-        {problem ? (
-          <p role="alert" className="m-0 text-red">
-            {problem}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="primary" disabled={busy} onClick={() => void save()}>
-          Save columns
-        </Button>
-      </div>
-    </Dialog>
+    <FormDialog
+      title="Columns"
+      width={420}
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button variant="primary" label="Save columns" isDisabled={busy} onClick={() => void save()} />
+        </>
+      }
+    >
+      {ordered.map((c, i) => (
+        <div key={c.id} {...stylex.props(styles.columnsRow)}>
+          <IconButton
+            variant="ghost"
+            size="sm"
+            label={`Move ${c.name} left`}
+            icon={<Icon icon="chevronLeft" />}
+            isDisabled={i === 0}
+            onClick={() => shift(i, -1)}
+          />
+          <IconButton
+            variant="ghost"
+            size="sm"
+            label={`Move ${c.name} right`}
+            icon={<Icon icon="chevronRight" />}
+            isDisabled={i === ordered.length - 1}
+            onClick={() => shift(i, 1)}
+          />
+          <ColumnGlyph kind={c.kind} />
+          <TextInput
+            label={`Name of ${c.name}`}
+            isLabelHidden
+            size="sm"
+            value={names.get(c.id) ?? ""}
+            onChange={(value) => setNames(new Map(names).set(c.id, value))}
+          />
+        </div>
+      ))}
+      {problem ? <Problem>{problem}</Problem> : null}
+    </FormDialog>
   );
 }
 
@@ -157,25 +333,23 @@ const CardBody = memo(function CardBody({
   selected: boolean;
 }) {
   return (
-    <span
-      className={`flex w-full flex-col gap-2 rounded-[7px] border bg-card px-3 py-[10px] text-left text-text shadow-card ${selected ? "border-acc-text shadow-[0_0_0_1px_var(--acc-text)]" : "border-line hover:border-btn-line"}`}
-    >
-      <span className="flex items-center gap-[6px] font-mono text-[12px] text-text3">
+    <Card xstyle={selected ? styles.cardSelected : styles.card}>
+      <span {...stylex.props(styles.cardHead)}>
         {ticketNumber(t)}
-        <span className="ml-auto">
+        <span {...stylex.props(styles.cardOwner)}>
           <OwnerMark t={t} />
         </span>
       </span>
-      <span className="leading-[1.4] font-medium">{t.title}</span>
-      <span className="flex flex-wrap items-center gap-[6px] empty:hidden">
+      <span {...stylex.props(styles.cardTitle)}>{t.title}</span>
+      <span {...stylex.props(styles.cardTags)}>
         {need ? <NeedsTag needs={need} mine={mine} /> : null}
         <TicketTags t={t} />
       </span>
-    </span>
+    </Card>
   );
 });
 
-function Card({
+function TicketCard({
   t,
   kind,
   need,
@@ -211,7 +385,7 @@ function Card({
       {...attributes}
       {...listeners}
       style={{ transform: CSS.Translate.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
-      className="block w-full cursor-pointer rounded-[7px] border-0 bg-transparent p-0 text-left"
+      {...stylex.props(styles.cardButton)}
     >
       <CardBody t={t} need={need} mine={mine} selected={selected} />
     </button>
@@ -262,43 +436,40 @@ function Column({
         aria-label={column.name}
         ref={setNodeRef}
         title={emptyText(column.kind)}
-        className={`flex max-h-full w-[36px] flex-none flex-col items-center gap-2 rounded-[8px] py-2 ${isOver ? "bg-sel" : ""}`}
+        {...stylex.props(styles.columnFolded, isOver && styles.over)}
       >
         <ColumnGlyph kind={column.kind} />
-        <span className="font-medium text-text3 [writing-mode:vertical-rl]">{column.name}</span>
+        <span {...stylex.props(styles.foldedName)}>{column.name}</span>
       </section>
     );
   }
   return (
-    <section
-      aria-label={column.name}
-      ref={setNodeRef}
-      className={`flex max-h-full w-[248px] flex-none flex-col gap-[6px] rounded-[8px] ${isOver ? "bg-sel" : ""}`}
-    >
-      <div className="flex h-8 flex-none items-center gap-2 px-[6px]">
+    <section aria-label={column.name} ref={setNodeRef} {...stylex.props(styles.column, isOver && styles.over)}>
+      <div {...stylex.props(styles.columnHead)}>
         <ColumnGlyph kind={column.kind} />
-        <span className="font-medium">{column.name}</span>
-        <span className="text-text3">{total}</span>
+        <span {...stylex.props(styles.columnName)}>{column.name}</span>
+        <span {...stylex.props(styles.columnCount)}>{total}</span>
         {column.kind === "backlog" ? (
-          <button
-            type="button"
-            aria-label={`Add ticket to ${column.name}`}
-            onClick={() => overlays.open("ticket")}
-            className="ml-auto grid size-[22px] cursor-pointer place-items-center rounded-[5px] border-0 bg-transparent text-text3 hover:bg-sel hover:text-text"
-          >
-            <NewIcon />
-          </button>
+          <span {...stylex.props(styles.columnAdd)}>
+            <IconButton
+              variant="ghost"
+              size="sm"
+              label={`Add ticket to ${column.name}`}
+              icon={<NewIcon />}
+              onClick={() => overlays.open("ticket")}
+            />
+          </span>
         ) : null}
       </div>
-      <div ref={scroller} className="min-h-[40px] overflow-y-auto pb-1">
+      <div ref={scroller} data-column-scroll {...stylex.props(styles.columnScroll)}>
         <SortableContext items={ids} strategy={verticalListSortingStrategy}>
           {/* In flow between two paddings: the sortable transforms need the cards where they stand. */}
-          <div style={{ paddingTop: top, paddingBottom: bottom }} className="flex flex-col gap-[6px]">
+          <div style={{ paddingTop: top, paddingBottom: bottom }} {...stylex.props(styles.columnCards)}>
             {items.map((item) => {
               const t = cards[item.index] as TicketView;
               return (
                 <div key={t.id} data-index={item.index} ref={virtual.measureElement}>
-                  <Card
+                  <TicketCard
                     t={t}
                     kind={column.kind}
                     need={need(t)}
@@ -312,15 +483,9 @@ function Column({
             })}
           </div>
         </SortableContext>
-        {cards.length === 0 ? (
-          <p className="m-0 px-[6px] py-1 text-[12px] text-text3">{emptyText(column.kind)}</p>
-        ) : null}
+        {cards.length === 0 ? <p {...stylex.props(styles.columnEmpty)}>{emptyText(column.kind)}</p> : null}
         {older > 0 ? (
-          <button
-            type="button"
-            onClick={onShowOlder}
-            className="cursor-pointer border-0 bg-transparent p-[6px] text-left text-[12px] text-text3 hover:text-text"
-          >
+          <button type="button" onClick={onShowOlder} {...stylex.props(styles.showOlder)}>
             Show older ({older})
           </button>
         ) : null}
@@ -350,31 +515,29 @@ function SendBackDialog({ t, onClose }: { t: TicketView; onClose: () => void }) 
   useAction("ConfirmPrimary", go);
   useKeyContext("AureliusDialog", true);
   return (
-    <>
-      <div className="flex flex-col gap-3 p-4">
-        <p className="m-0 text-[15px] font-semibold">Send {ticketNumber(t)} back to Doing</p>
-        <textarea
-          data-autofocus
-          aria-label="What needs to change?"
-          placeholder="What needs to change?"
-          className="min-h-[100px] w-full resize-y rounded-[6px] border border-btn-line bg-sunk p-2 text-text outline-none focus:border-acc-text"
-          value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
-        />
-        {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="primary" disabled={busy || feedback.trim() === ""} onClick={go}>
-          Send back
-        </Button>
-      </div>
-    </>
+    <FormDialog
+      title={`Send ${ticketNumber(t)} back to Doing`}
+      width={480}
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button variant="primary" label="Send back" isDisabled={busy || feedback.trim() === ""} onClick={go} />
+        </>
+      }
+    >
+      <TextArea
+        hasAutoFocus
+        label="What needs to change?"
+        isLabelHidden
+        placeholder="What needs to change?"
+        rows={4}
+        value={feedback}
+        onChange={setFeedback}
+      />
+      {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
+      {error ? <Problem>{error}</Problem> : null}
+    </FormDialog>
   );
 }
 
@@ -546,8 +709,14 @@ export function BoardScreen({
     if (id) open(id);
   });
 
+  // One menu for right click and keyboard: it stays mounted, because a DropdownMenu mounted already open
+  // takes no focus, and what it last showed stays while it animates away.
   const [cardMenu, setCardMenu] = useState<{ t: TicketView; x: number; y: number } | null>(null);
-  const openMenu = useCallback((t: TicketView, x: number, y: number) => setCardMenu({ t, x, y }), []);
+  const [cardMenuOpen, setCardMenuOpen] = useState(false);
+  const openMenu = useCallback((t: TicketView, x: number, y: number) => {
+    setCardMenu({ t, x, y });
+    setCardMenuOpen(true);
+  }, []);
   const copyLink = (t: TicketView) =>
     void platform.copy(ticketLink(hostId ?? "", t.id)).then(() => toast("Link copied."));
   const pickFromMenu = (t: TicketView, key: string) => {
@@ -646,229 +815,238 @@ export function BoardScreen({
         : (employees.data?.find((e) => e.id === owner.id)?.name ?? "Someone");
   const projectName = projects.data?.find((p) => p.id === project)?.name ?? "All projects";
   const active = dragging ? all.find((t) => t.id === dragging) : undefined;
-  const pill =
-    "h-6 flex-none cursor-pointer rounded-[12px] border border-dashed whitespace-nowrap border-btn-line bg-transparent px-[9px] text-[12px] font-medium text-text2 hover:text-text";
 
   return (
-    <>
-      <header className="flex h-11 flex-none items-center gap-[10px] border-b border-line pr-3 pl-[18px]">
-        <h1 className="m-0 text-[13px] font-medium">Board</h1>
-        <Segments
-          label="View"
-          value={view}
-          options={[
-            { key: "board", label: "Board" },
-            { key: "list", label: "List" },
-          ]}
-          onChange={setView}
-        />
-        {needsCount > 0 || needsOnly ? (
-          <button
-            type="button"
-            aria-pressed={needsOnly}
-            onClick={() => setNeedsOnly(!needsOnly)}
-            className={`h-6 cursor-pointer rounded-[12px] border border-amber-line px-[9px] text-[12px] font-medium text-amber ${needsOnly ? "bg-amber-soft shadow-[inset_0_0_0_1px_var(--amber-line)]" : "bg-amber-soft"}`}
-          >
-            Needs you · {needsCount}
-          </button>
-        ) : null}
-        {projectId ? null : (
-          <Menu
-            label="Project"
-            value={project ?? "all"}
-            options={[
-              { key: "all", label: "All projects" },
-              ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
-            ]}
-            onPick={(id) => {
-              const next = id === "all" ? null : id;
-              setProject(next);
-              storage.set("board_project", next ?? "");
-            }}
-            trigger={
-              <button type="button" className={pill}>
-                {projectName}
+    <Page>
+      <PageHead
+        title="Board"
+        tabs={
+          <>
+            <SegmentedControl
+              label="View"
+              size="sm"
+              value={view}
+              onChange={(next) => setView(next as "board" | "list")}
+            >
+              <SegmentedControlItem value="board" label="Board" />
+              <SegmentedControlItem value="list" label="List" />
+            </SegmentedControl>
+            {needsCount > 0 || needsOnly ? (
+              <button
+                type="button"
+                aria-pressed={needsOnly}
+                onClick={() => setNeedsOnly(!needsOnly)}
+                {...stylex.props(styles.needs, needsOnly && styles.needsOn)}
+              >
+                Needs you · {needsCount}
               </button>
-            }
-          />
-        )}
+            ) : null}
+            {projectId ? null : (
+              <Menu
+                label="Project"
+                value={project ?? "all"}
+                options={[
+                  { key: "all", label: "All projects" },
+                  ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
+                ]}
+                onPick={(id) => {
+                  const next = id === "all" ? null : id;
+                  setProject(next);
+                  storage.set("board_project", next ?? "");
+                }}
+                trigger={
+                  <button type="button" {...stylex.props(styles.pill)}>
+                    {projectName}
+                  </button>
+                }
+              />
+            )}
+            <Menu
+              label="Owner"
+              options={[
+                { key: "anyone", label: "Anyone" },
+                { key: "none", label: "No owner yet" },
+                ...(employees.data ?? [])
+                  .filter((e) => e.status !== "archived")
+                  .map((e) => ({ key: e.id, label: e.name })),
+              ]}
+              onPick={(id) => setOwner(id === "anyone" || id === "none" ? { kind: id } : { kind: "employee", id })}
+              trigger={
+                <button type="button" {...stylex.props(styles.pill)}>
+                  {ownerName}
+                </button>
+              }
+            />
+            {features.includes("ticket_responsible") ? (
+              <Menu
+                label="Responsible"
+                options={[
+                  { key: "anyone", label: "Anyone" },
+                  ...(me ? [{ key: me, label: "Me" }] : []),
+                  { key: "none", label: "No one" },
+                  ...(members.data ?? [])
+                    .filter(
+                      (u) => u.id !== me && (!u.disabled_at_ms || all.some((t) => t.responsible_user_id === u.id)),
+                    )
+                    .map((u) => ({ key: u.id, label: u.username })),
+                ]}
+                onPick={(id) => setResponsible(id === "anyone" || id === "none" ? { kind: id } : { kind: "user", id })}
+                trigger={
+                  <button type="button" {...stylex.props(styles.pill)}>
+                    {responsible.kind === "anyone"
+                      ? "Responsible: anyone"
+                      : responsible.kind === "none"
+                        ? "Responsible: no one"
+                        : responsible.id === me
+                          ? "Responsible: me"
+                          : `Responsible: ${members.data?.find((u) => u.id === responsible.id)?.username ?? "…"}`}
+                  </button>
+                }
+              />
+            ) : null}
+            <TextInput
+              label="Find a ticket"
+              isLabelHidden
+              placeholder="Find"
+              size="sm"
+              width={130}
+              value={query}
+              onChange={setQuery}
+            />
+          </>
+        }
+      >
+        <Button variant="ghost" label="Columns" onClick={() => setRenaming(true)} />
         <Menu
-          label="Owner"
-          options={[
-            { key: "anyone", label: "Anyone" },
-            { key: "none", label: "No owner yet" },
-            ...(employees.data ?? []).filter((e) => e.status !== "archived").map((e) => ({ key: e.id, label: e.name })),
-          ]}
-          onPick={(id) => setOwner(id === "anyone" || id === "none" ? { kind: id } : { kind: "employee", id })}
-          trigger={
-            <button type="button" className={pill}>
-              {ownerName}
-            </button>
+          label="Display"
+          options={columns.map((c) => ({
+            key: c.column.kind,
+            label: `${hidden.includes(c.column.kind) ? "Show" : "Hide"} ${c.column.name}`,
+          }))}
+          onPick={toggleColumn}
+          trigger={<Button variant="ghost" label="Display" />}
+        />
+        <Button variant="primary" label="New ticket" onClick={() => overlays.open("ticket")}>
+          New ticket <KeyHint onAccent>N</KeyHint>
+        </Button>
+      </PageHead>
+      {noConnection ? <Banner status="warning" container="section" title={<NoConnectionNote />} /> : null}
+      {claudeLogin && claudeLogin.status !== "linked" ? (
+        <Banner
+          status="warning"
+          container="section"
+          title={
+            claudeLogin.status === "expired"
+              ? "Your Claude login expired. Reconnect it to run your tickets."
+              : "Connect your Claude login to run your tickets."
+          }
+          endContent={
+            <Link href="/settings/account">{claudeLogin.status === "expired" ? "Reconnect" : "Connect"}</Link>
           }
         />
-        {features.includes("ticket_responsible") ? (
-          <Menu
-            label="Responsible"
-            options={[
-              { key: "anyone", label: "Anyone" },
-              ...(me ? [{ key: me, label: "Me" }] : []),
-              { key: "none", label: "No one" },
-              ...(members.data ?? [])
-                .filter((u) => u.id !== me && (!u.disabled_at_ms || all.some((t) => t.responsible_user_id === u.id)))
-                .map((u) => ({ key: u.id, label: u.username })),
-            ]}
-            onPick={(id) => setResponsible(id === "anyone" || id === "none" ? { kind: id } : { kind: "user", id })}
-            trigger={
-              <button type="button" className={pill}>
-                {responsible.kind === "anyone"
-                  ? "Responsible: anyone"
-                  : responsible.kind === "none"
-                    ? "Responsible: no one"
-                    : responsible.id === me
-                      ? "Responsible: me"
-                      : `Responsible: ${members.data?.find((u) => u.id === responsible.id)?.username ?? "…"}`}
-              </button>
-            }
-          />
-        ) : null}
-        <input
-          aria-label="Find a ticket"
-          placeholder="Find"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="h-6 w-[130px] min-w-0 rounded-[12px] border border-line bg-transparent px-[10px] text-[12px] text-text outline-none placeholder:text-text3 focus:border-acc-text"
-        />
-        <div className="ml-auto flex flex-none gap-[6px]">
-          <Button kind="ghost" onClick={() => setRenaming(true)}>
-            Columns
-          </Button>
-          <Menu
-            label="Display"
-            options={columns.map((c) => ({
-              key: c.column.kind,
-              label: `${hidden.includes(c.column.kind) ? "Show" : "Hide"} ${c.column.name}`,
-            }))}
-            onPick={toggleColumn}
-            trigger={<Button kind="ghost">Display</Button>}
-          />
-          <Button kind="primary" onClick={() => overlays.open("ticket")}>
-            New ticket <Kbd onAccent>N</Kbd>
-          </Button>
-        </div>
-      </header>
-      {noConnection ? (
-        <div className="flex flex-none items-center gap-3 border-b border-line bg-amber-soft px-[18px] py-2 text-[13px]">
-          <span className="size-[7px] flex-none rounded-full bg-amber" />
-          <NoConnectionNote />
-        </div>
-      ) : null}
-      {claudeLogin && claudeLogin.status !== "linked" ? (
-        <div className="flex flex-none items-center gap-3 border-b border-line bg-amber-soft px-[18px] py-2 text-[12px]">
-          <span className="size-[7px] flex-none rounded-full bg-amber" />
-          {claudeLogin.status === "expired"
-            ? "Your Claude login expired. Reconnect it to run your tickets."
-            : "Connect your Claude login to run your tickets."}
-          <Link
-            to="/settings/$section"
-            params={{ section: "account" }}
-            className="ml-auto font-medium text-acc-text no-underline"
-          >
-            {claudeLogin.status === "expired" ? "Reconnect" : "Connect"}
-          </Link>
-        </div>
       ) : null}
       {renaming && board.data ? (
         <ColumnsDialog columns={board.data.columns.map((c) => c.column)} onClose={() => setRenaming(false)} />
       ) : null}
-      <div className="flex min-h-0 flex-1">
-        {board.error ? (
-          <p role="alert" className="m-0 flex-1 p-[18px] text-red">
-            {board.error.message}
-          </p>
-        ) : view === "list" ? (
-          <div className="flex min-w-0 flex-1 flex-col">
-            <TicketRows
-              tickets={shown.flatMap((c) => c.cards)}
-              columnName={columnName}
-              selected={ticket}
-              needs={need.needs}
-              mine={need.mine}
-              onOpen={open}
-            />
-          </div>
-        ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
-            onDragStart={(e) => setDragging(String(e.active.id))}
-            onDragEnd={drop}
-            onDragCancel={() => setDragging(null)}
-          >
-            <div className="flex min-w-0 flex-1 items-start gap-3 overflow-x-auto bg-board py-3 pr-3 pl-[14px]">
-              {shown
-                .filter((c) => !hidden.includes(c.column.kind))
-                .map((c) => (
-                  <Column
-                    key={c.column.id}
-                    column={c.column}
-                    cards={c.cards}
-                    older={c.older}
-                    total={c.cards.length + c.older}
-                    need={need.needs}
-                    mine={need.mine}
-                    selected={ticket}
-                    onOpen={open}
-                    onMenu={openMenu}
-                    onShowOlder={() => setDoneAll(true)}
-                  />
-                ))}
-              {hidden.length > 0 ? (
-                <div className="flex w-[170px] flex-none flex-col gap-1 px-[6px]">
-                  <div className="flex h-8 items-center font-medium text-text2">Hidden columns</div>
-                  {shown
-                    .filter((c) => hidden.includes(c.column.kind))
-                    .map((c) => (
-                      <button
-                        key={c.column.id}
-                        type="button"
-                        onClick={() => toggleColumn(c.column.kind)}
-                        className="flex h-[30px] cursor-pointer items-center gap-2 rounded-[6px] border border-line2 bg-sunk px-2 text-text2 hover:text-text"
-                      >
-                        <ColumnGlyph kind={c.column.kind} />
-                        {c.column.name}
-                        <span className="ml-auto text-text3">{c.cards.length + c.older}</span>
-                      </button>
-                    ))}
-                </div>
-              ) : null}
-            </div>
-            <DragOverlay dropAnimation={null}>
-              {active ? <CardBody t={active} need={need.needs(active)} mine={need.mine(active)} selected /> : null}
-            </DragOverlay>
-          </DndContext>
-        )}
-        {ticket ? <TicketPanel key={ticket} id={ticket} onClose={close} {...(message ? { message } : {})} /> : null}
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.fill)}>
+          <Layout
+            height="fill"
+            end={
+              ticket ? <TicketPanel key={ticket} id={ticket} onClose={close} {...(message ? { message } : {})} /> : null
+            }
+            content={
+              <LayoutContent isScrollable={false} padding={0}>
+                {board.error ? (
+                  <div {...stylex.props(styles.message)}>
+                    <Problem>{board.error.message}</Problem>
+                  </div>
+                ) : view === "list" ? (
+                  <div {...stylex.props(styles.main)}>
+                    <TicketRows
+                      tickets={shown.flatMap((c) => c.cards)}
+                      columnName={columnName}
+                      selected={ticket}
+                      needs={need.needs}
+                      mine={need.mine}
+                      onOpen={open}
+                    />
+                  </div>
+                ) : (
+                  <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCorners}
+                    onDragStart={(e) => setDragging(String(e.active.id))}
+                    onDragEnd={drop}
+                    onDragCancel={() => setDragging(null)}
+                  >
+                    <div {...stylex.props(styles.columns)}>
+                      {shown
+                        .filter((c) => !hidden.includes(c.column.kind))
+                        .map((c) => (
+                          <Column
+                            key={c.column.id}
+                            column={c.column}
+                            cards={c.cards}
+                            older={c.older}
+                            total={c.cards.length + c.older}
+                            need={need.needs}
+                            mine={need.mine}
+                            selected={ticket}
+                            onOpen={open}
+                            onMenu={openMenu}
+                            onShowOlder={() => setDoneAll(true)}
+                          />
+                        ))}
+                      {hidden.length > 0 ? (
+                        <div {...stylex.props(styles.hidden)}>
+                          <div {...stylex.props(styles.hiddenHead)}>Hidden columns</div>
+                          {shown
+                            .filter((c) => hidden.includes(c.column.kind))
+                            .map((c) => (
+                              <button
+                                key={c.column.id}
+                                type="button"
+                                onClick={() => toggleColumn(c.column.kind)}
+                                {...stylex.props(styles.hiddenColumn)}
+                              >
+                                <ColumnGlyph kind={c.column.kind} />
+                                {c.column.name}
+                                <span {...stylex.props(styles.hiddenCount)}>{c.cards.length + c.older}</span>
+                              </button>
+                            ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <DragOverlay dropAnimation={null}>
+                      {active ? (
+                        <CardBody t={active} need={need.needs(active)} mine={need.mine(active)} selected />
+                      ) : null}
+                    </DragOverlay>
+                  </DndContext>
+                )}
+              </LayoutContent>
+            }
+          />
+        </div>
       </div>
-      <Dialog
-        open={pending?.kind === "send_back"}
-        onClose={() => setPending(null)}
-        title="Send back to Doing"
-        width={480}
-      >
-        {pending?.kind === "send_back" ? <SendBackDialog t={pending.ticket} onClose={() => setPending(null)} /> : null}
-      </Dialog>
-      {cardMenu ? (
-        <Menu
-          open
-          label={`${ticketNumber(cardMenu.t)} actions`}
-          onOpenChange={(next) => {
-            if (!next) setCardMenu(null);
-          }}
-          options={cardOptions(cardMenu.t)}
-          onPick={(key) => pickFromMenu(cardMenu.t, key)}
-          trigger={<span aria-hidden="true" style={{ position: "fixed", left: cardMenu.x, top: cardMenu.y }} />}
-        />
-      ) : null}
+      {pending?.kind === "send_back" ? <SendBackDialog t={pending.ticket} onClose={() => setPending(null)} /> : null}
+      <Menu
+        open={cardMenuOpen}
+        label={cardMenu ? `${ticketNumber(cardMenu.t)} actions` : "Ticket actions"}
+        onOpenChange={setCardMenuOpen}
+        options={cardMenu ? cardOptions(cardMenu.t) : []}
+        onPick={(key) => {
+          if (cardMenu) pickFromMenu(cardMenu.t, key);
+        }}
+        trigger={
+          <span
+            aria-hidden="true"
+            {...stylex.props(styles.menuAnchor)}
+            style={{ left: cardMenu?.x ?? 0, top: cardMenu?.y ?? 0 }}
+          />
+        }
+      />
       {deleting ? (
         <ConfirmDialog
           open
@@ -910,6 +1088,6 @@ export function BoardScreen({
           }
         />
       ) : null}
-    </>
+    </Page>
   );
 }

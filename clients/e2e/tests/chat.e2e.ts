@@ -128,7 +128,7 @@ test.describe("scripted", () => {
       frame("");
       await expect(page.getByText("Thinking…")).toBeVisible();
       await page.evaluate(() => {
-        (window as unknown as { kept: Element | null }).kept = document.querySelector(".prose-aurelius");
+        (window as unknown as { kept: Element | null }).kept = document.querySelector("[data-message-body]");
       });
       frame("First block.\n\nSecond");
       await expect(page.getByText("Second")).toBeVisible();

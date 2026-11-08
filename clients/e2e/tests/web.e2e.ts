@@ -206,7 +206,7 @@ test.describe("the Inbox", () => {
     });
     await page.goto(`${site.origin}/inbox`);
     await expect(page.locator("pre")).toHaveText("<script>alert(1)</script>");
-    expect(await page.locator("main img").count()).toBe(0);
+    expect(await page.locator('[role="main"] img').count()).toBe(0);
   });
 
   test("walks with J and K, and filters", async ({ page }) => {

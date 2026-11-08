@@ -1,5 +1,15 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { ChatComposer } from "@astryxdesign/core/Chat";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { ProtocolError } from "@aurelius/client";
 import type { ChannelView, EmployeeSummary, MessageView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -8,9 +18,10 @@ import { useConnection, useLinkState } from "../connection";
 import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { AttachedImages, useImagePaste } from "../ui/attach";
-import { SearchIcon } from "../ui/icons";
-import { Button, initial, Kbd, Mark, markColor } from "../ui/kit";
+import { KeyHint } from "../ui/key-hint";
+import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
+import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import {
@@ -52,12 +63,327 @@ import { Held } from "./dialogs";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ColumnGlyph } from "./tickets-kit";
 
+const enter = stylex.keyframes({
+  from: { opacity: 0, transform: "translateY(4px)" },
+});
+
+const styles = stylex.create({
+  feedTop: { height: 14 },
+  feedEnd: { height: 16 },
+  channelRow: {
+    display: "flex",
+    height: 28,
+    width: "100%",
+    cursor: "pointer",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 6,
+    borderWidth: 0,
+    paddingInline: 8,
+    textAlign: "left",
+    backgroundColor: "transparent",
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+  },
+  channelOn: { backgroundColor: "var(--color-overlay-hover)", color: "var(--color-text-primary)" },
+  channelUnread: { color: "var(--color-text-primary)", fontWeight: 600 },
+  hash: { color: "var(--precision-text3)" },
+  channelName: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexBasis: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  readOnlyTag: { fontSize: 11, color: "var(--precision-text3)" },
+  badgeMention: { fontSize: 12, fontWeight: 600, color: "var(--color-text-warning)" },
+  badgeUnread: { fontSize: 12, color: "var(--color-text-secondary)" },
+  list: {
+    display: "flex",
+    width: 220,
+    flexShrink: 0,
+    flexDirection: "column",
+    gap: 14,
+    overflowY: "auto",
+    borderRightWidth: 1,
+    borderRightStyle: "solid",
+    borderRightColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingInline: 8,
+    paddingBlock: 10,
+  },
+  listGroup: { display: "flex", flexDirection: "column", gap: 1 },
+  eyebrow: {
+    margin: 0,
+    marginBottom: 4,
+    paddingInline: 8,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--precision-text3)",
+  },
+  none: { margin: 0, paddingInline: 8, color: "var(--precision-text3)" },
+  more: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    paddingInline: 8,
+    paddingBlock: 4,
+    textAlign: "left",
+    fontSize: 12,
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+  },
+  composer: {
+    marginInline: "auto",
+    display: "flex",
+    width: "100%",
+    maxWidth: 820,
+    flexDirection: "column",
+    gap: 6,
+    paddingInline: 24,
+    paddingBottom: 16,
+  },
+  quick: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingInline: 14,
+    paddingBlock: 10,
+  },
+  quickTop: { display: "flex", alignItems: "flex-start", gap: 8 },
+  quickText: { minWidth: 0, flexGrow: 1, flexBasis: 0 },
+  quickOptions: { display: "flex", flexWrap: "wrap", gap: 8 },
+  composerBody: { borderRadius: 10, backgroundColor: "var(--precision-sunk)" },
+  composerInput: { position: "relative" },
+  people: {
+    position: "absolute",
+    insetInline: 0,
+    bottom: "100%",
+    zIndex: 10,
+    marginBottom: 12,
+    display: "flex",
+    maxHeight: 220,
+    flexDirection: "column",
+    overflowY: "auto",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--color-background-surface)",
+    padding: 4,
+    boxShadow: "var(--shadow-high)",
+  },
+  person: {
+    display: "flex",
+    height: 32,
+    flexShrink: 0,
+    cursor: "pointer",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 6,
+    borderWidth: 0,
+    paddingInline: 8,
+    textAlign: "left",
+    backgroundColor: "transparent",
+    color: "var(--color-text-primary)",
+  },
+  personOn: { backgroundColor: "var(--color-overlay-hover)" },
+  personKind: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  textarea: {
+    display: "block",
+    width: "100%",
+    resize: "none",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    paddingBlock: 4,
+    paddingInline: 6,
+    fontSize: 14,
+    lineHeight: 1.45,
+    color: "var(--color-text-primary)",
+    outlineStyle: { default: "none", ":focus-visible": "none" },
+    "::placeholder": { color: "var(--precision-text3)" },
+  },
+  warning: { fontSize: 12, color: "var(--color-text-warning)" },
+  hint: { fontSize: 12, color: "var(--precision-text3)" },
+  thread: {
+    display: "flex",
+    width: 360,
+    flexShrink: 0,
+    flexDirection: "column",
+    borderLeftWidth: 1,
+    borderLeftStyle: "solid",
+    borderLeftColor: "var(--color-border)",
+    backgroundColor: "var(--color-background-surface)",
+    animationName: enter,
+    animationDuration: "160ms",
+    animationTimingFunction: "var(--ease-standard)",
+  },
+  threadTop: {
+    display: "flex",
+    height: 44,
+    flexShrink: 0,
+    alignItems: "center",
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--precision-line2)",
+    paddingInlineStart: 14,
+    paddingInlineEnd: 10,
+  },
+  threadTitle: {
+    margin: 0,
+    minWidth: 0,
+    flexGrow: 1,
+    flexBasis: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  threadFeed: {
+    display: "flex",
+    minHeight: 0,
+    flexGrow: 1,
+    flexBasis: 0,
+    flexDirection: "column",
+    gap: 8,
+    overflowY: "auto",
+    padding: 12,
+  },
+  error: { color: "var(--color-text-error)" },
+  replies: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    paddingBlock: 4,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  rule: { height: 1, flexGrow: 1, backgroundColor: "var(--precision-line2)" },
+  threadClosed: {
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--precision-line2)",
+    padding: 12,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  threadComposer: { paddingTop: 8 },
+  channel: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0 },
+  channelMain: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column" },
+  top: {
+    display: "flex",
+    minHeight: 44,
+    flexShrink: 0,
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--color-border)",
+    paddingBlock: 6,
+    paddingInlineStart: 18,
+    paddingInlineEnd: 12,
+  },
+  title: { margin: 0, fontSize: 13, fontWeight: 600 },
+  column: {
+    display: "inline-flex",
+    height: 22,
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    paddingInline: 8,
+    fontSize: 12,
+    color: "var(--color-text-secondary)",
+  },
+  subtitle: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexBasis: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  openTicket: {
+    display: "inline-flex",
+    height: 28,
+    flexShrink: 0,
+    alignItems: "center",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border-emphasized)",
+    backgroundColor: "var(--color-neutral)",
+    paddingInline: 10,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--color-text-primary)",
+    textDecoration: "none",
+  },
+  feedBox: { minHeight: 0, flexGrow: 1, flexBasis: 0 },
+  loading: { display: "flex", flexDirection: "column", gap: 8, padding: 24 },
+  waiting: { margin: 0, padding: 24, color: "var(--precision-text3)" },
+  problem: { padding: 24 },
+  feed: { height: "100%", scrollbarGutter: "stable both-edges" },
+  feedColumn: { marginInline: "auto", width: "100%", maxWidth: 820, paddingInline: 24 },
+  topGap: { paddingTop: 8 },
+  approvalGap: { paddingTop: 12 },
+  readOnlyRow: {
+    marginInline: "auto",
+    display: "flex",
+    width: "100%",
+    maxWidth: 820,
+    alignItems: "center",
+    gap: 12,
+    paddingInline: 24,
+    paddingBottom: 16,
+  },
+  readOnlyBar: {
+    display: "flex",
+    flexGrow: 1,
+    flexBasis: 0,
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingInline: 14,
+    paddingBlock: 10,
+    color: "var(--color-text-secondary)",
+  },
+  readOnlyText: { flexGrow: 1, flexBasis: 0 },
+  readOnlyLink: { fontSize: 12, color: "var(--color-text-accent)", textDecoration: "none" },
+  screen: { display: "flex", minHeight: 0, flexGrow: 1, flexBasis: 0 },
+});
+
+/** Worked out once: every visible row uses these. */
+const FEED_COLUMN = stylex.props(styles.feedColumn);
+const TOP_GAP = stylex.props(styles.topGap);
+
 const FEED_PARTS = {
   Header: function FeedTop() {
-    return <div className="h-[14px]" />;
+    return <div {...stylex.props(styles.feedTop)} />;
   },
   Footer: function FeedEnd() {
-    return <div className="h-4" />;
+    return <div {...stylex.props(styles.feedEnd)} />;
   },
 };
 
@@ -88,15 +414,15 @@ function ChannelRow({ c, on, onOpen }: { c: ChannelView; on: boolean; onOpen: (c
       aria-current={on ? "true" : undefined}
       aria-label={channelLabel(c)}
       onClick={() => onOpen(c)}
-      className={`flex h-7 w-full cursor-pointer items-center gap-2 rounded-[6px] border-0 px-2 text-left ${on ? "bg-sel text-text" : unread ? "bg-transparent text-text" : "bg-transparent text-text2 hover:text-text"} ${unread ? "font-semibold" : ""}`}
+      {...stylex.props(styles.channelRow, on && styles.channelOn, unread && styles.channelUnread)}
     >
-      <span className="text-text3">#</span>
-      <span className="min-w-0 flex-1 truncate">{bareName(c)}</span>
-      {c.archived ? <span className="text-[11px] text-text3">read-only</span> : null}
+      <span {...stylex.props(styles.hash)}>#</span>
+      <span {...stylex.props(styles.channelName)}>{bareName(c)}</span>
+      {c.archived ? <span {...stylex.props(styles.readOnlyTag)}>read-only</span> : null}
       {on || c.archived ? null : c.mentions > 0 ? (
-        <span className="text-[12px] font-semibold text-amber">@{c.mentions}</span>
+        <span {...stylex.props(styles.badgeMention)}>@{c.mentions}</span>
       ) : c.unread > 0 ? (
-        <span className="text-[12px] text-text2">{c.unread}</span>
+        <span {...stylex.props(styles.badgeUnread)}>{c.unread}</span>
       ) : null}
     </button>
   );
@@ -145,64 +471,65 @@ function ChannelList({
     };
   }, [query, channels, connection, features]);
 
-  const eyebrow = "m-0 mb-1 px-2 text-[12px] font-medium text-text3";
-  const more = "cursor-pointer border-0 bg-transparent px-2 py-1 text-left text-[12px] text-text3 hover:text-text";
+  const eyebrow = stylex.props(styles.eyebrow);
+  const more = stylex.props(styles.more);
+  const group = stylex.props(styles.listGroup);
   const row = (c: ChannelView) => (
     <ChannelRow key={c.conversation_id} c={c} on={c.conversation_id === openId} onOpen={onOpen} />
   );
   return (
     <section
       aria-label="Channels"
-      className="flex w-[220px] flex-none flex-col gap-[14px] overflow-y-auto border-r border-line bg-sunk px-2 py-[10px]"
+      {...stylex.props(styles.list)}
       onPointerEnter={() => setFrozen(s.tickets.map((c) => c.conversation_id))}
       onPointerLeave={() => setFrozen(null)}
     >
-      <label className="flex h-[30px] flex-none items-center gap-[6px] rounded-[6px] border border-line px-2 text-text3">
-        <SearchIcon />
-        <input
-          aria-label="Search channels"
-          placeholder="Search channels"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="min-w-0 flex-1 border-0 bg-transparent text-text outline-none placeholder:text-text3"
-        />
-      </label>
+      <TextInput
+        label="Search channels"
+        isLabelHidden
+        placeholder="Search channels"
+        size="sm"
+        startIcon="search"
+        width="100%"
+        value={query}
+        onChange={setQuery}
+      />
       {found ? (
-        <div className="flex flex-col gap-[1px]">
-          <p className={eyebrow}>Results</p>
-          {found.length === 0 ? <p className="m-0 px-2 text-text3">No channel matches.</p> : found.map(row)}
+        <div {...group}>
+          <p {...eyebrow}>Results</p>
+          {found.length === 0 ? <p {...stylex.props(styles.none)}>No channel matches.</p> : found.map(row)}
         </div>
       ) : (
         <>
-          <div className="flex flex-col gap-[1px]">
-            <p className={eyebrow}>Channels</p>
+          <div {...group}>
+            <p {...eyebrow}>Channels</p>
             {s.general ? row(s.general) : null}
             {s.projects.map(row)}
           </div>
           {tickets.length > 0 ? (
-            <div className="flex flex-col gap-[1px]">
-              <p className={eyebrow}>Tickets</p>
+            <div {...group}>
+              <p {...eyebrow}>Tickets</p>
               {tickets.slice(0, shownCount(tickets.length, ticketsAll)).map(row)}
               {!ticketsAll && tickets.length > 15 ? (
-                <button type="button" className={more} onClick={() => setTicketsAll(true)}>
+                <button type="button" {...more} onClick={() => setTicketsAll(true)}>
                   Show more ({tickets.length - 15})
                 </button>
               ) : null}
             </div>
           ) : null}
           {s.archived.length > 0 ? (
-            <div className="flex flex-col gap-[1px]">
+            <div {...group}>
               <button
                 type="button"
                 aria-expanded={archivedOpen}
-                className={more}
+                {...more}
                 onClick={() => setArchivedOpen(!archivedOpen)}
               >
                 {archivedOpen ? "▾" : "▸"} Archived ({s.archived.length})
               </button>
               {archivedOpen ? s.archived.slice(0, shownCount(s.archived.length, archivedAll)).map(row) : null}
               {archivedOpen && !archivedAll && s.archived.length > 15 ? (
-                <button type="button" className={more} onClick={() => setArchivedAll(true)}>
+                <button type="button" {...more} onClick={() => setArchivedAll(true)}>
                   Show more ({s.archived.length - 15})
                 </button>
               ) : null}
@@ -319,128 +646,132 @@ function Composer({
   useAction("SendNow", () => void sendNow(), Boolean(activeRun));
   useAction("ConfirmPrimary", () => offerQuick && void go(offerQuick.options[0] as string), Boolean(offerQuick));
   return (
-    <div className="mx-auto flex w-full max-w-[820px] flex-col gap-[6px] px-6 pb-4">
+    <div {...stylex.props(styles.composer)}>
       {offerQuick ? (
-        <section
-          aria-label="Suggested replies"
-          className="flex flex-col gap-2 rounded-[8px] border border-line bg-sunk px-[14px] py-[10px]"
-        >
-          <div className="flex items-start gap-2">
-            <span className="min-w-0 flex-1">{offerQuick.question}</span>
-            <button
-              type="button"
-              aria-label="Dismiss"
+        <section aria-label="Suggested replies" {...stylex.props(styles.quick)}>
+          <div {...stylex.props(styles.quickTop)}>
+            <span {...stylex.props(styles.quickText)}>{offerQuick.question}</span>
+            <IconButton
+              size="sm"
+              variant="ghost"
+              label="Dismiss"
+              icon={<Icon icon="close" />}
               onClick={() => setDismissed(true)}
-              className="cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text"
-            >
-              ✕
-            </button>
+            />
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div {...stylex.props(styles.quickOptions)}>
             {offerQuick.options.map((option, i) => (
-              <Button key={option} kind={i === 0 ? "primary" : "secondary"} onClick={() => void go(option)}>
-                {replyLabel(option)}
-              </Button>
+              <Button
+                key={option}
+                variant={i === 0 ? "primary" : "secondary"}
+                label={replyLabel(option)}
+                onClick={() => void go(option)}
+              />
             ))}
           </div>
         </section>
       ) : null}
       <LoadBanner waiting={waiting} />
       {held ? <Held names={held.names} busy={busy} onSend={() => void go(held.text, true)} /> : null}
-      {error ? (
-        <p role="alert" className="m-0 text-[12px] text-red">
-          {error}
-        </p>
-      ) : null}
-      <div className="relative">
-        {suggestions ? (
-          <div
-            role="listbox"
-            aria-label="People"
-            className="absolute inset-x-0 bottom-full z-10 mb-1 flex max-h-[220px] flex-col overflow-y-auto rounded-[8px] border border-line bg-panel p-1 shadow-(--pop-shadow)"
-          >
-            {suggestions.found.map((p, i) => (
-              <button
-                key={p.name}
-                type="button"
-                role="option"
-                aria-selected={i === active}
-                aria-label={`${p.name}, ${p.kind}, ${i + 1} of ${suggestions.found.length}`}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => pick(p.name)}
-                className={`flex h-8 cursor-pointer items-center gap-2 rounded-[6px] border-0 px-2 text-left text-text ${i === active ? "bg-sel" : "bg-transparent"}`}
-              >
-                <Mark
-                  letter={initial(p.name)}
-                  color={p.employee ? markColor(p.name) : "#55595F"}
-                  size={18}
-                  radius={p.employee ? 5 : 9}
-                />
-                {p.name}
-                <span className="truncate text-[12px] text-text3">{p.kind}</span>
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <AttachedImages images={images} />
-        <div
-          {...images.target}
-          className="flex items-end gap-2 rounded-[10px] border border-btn-line bg-sunk py-2 pr-2 pl-[14px] focus-within:border-acc-text"
-        >
-          <textarea
-            ref={area}
-            rows={1}
-            aria-label={placeholder}
-            placeholder={placeholder}
-            className="min-w-0 flex-1 resize-none border-0 bg-transparent py-1 text-[14px] leading-[1.45] text-text outline-none placeholder:text-text3 focus-visible:outline-none"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (suggestions) {
-                const of = suggestions.found.length;
-                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setPicked((active + (e.key === "ArrowDown" ? 1 : of - 1)) % of);
-                  return;
-                }
-                if (e.key === "Enter" || e.key === "Tab") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  pick(suggestions.found[active]?.name as string);
-                  return;
+      {error ? <Banner status="error" role="alert" title={error} /> : null}
+      {/* The text stays this component's own: Enter and Send call `go`, which empties the field at once and puts
+          refused words back. The composer's own submit, which would clear it, is never reached. */}
+      <ChatComposer
+        {...images.target}
+        density="compact"
+        elevation="none"
+        xstyle={styles.composerBody}
+        onSubmit={(value) => void go(value)}
+        drawer={<AttachedImages images={images} />}
+        sendActions={
+          activeRun && text.trim() !== "" ? (
+            <Button label="Send now" onClick={() => void sendNow()}>
+              Send now <KeyHint>⌥↵</KeyHint>
+            </Button>
+          ) : null
+        }
+        sendButton={
+          <Button
+            variant="primary"
+            label="Send"
+            isDisabled={busy || text.trim() === ""}
+            onClick={() => void go(text)}
+          />
+        }
+        input={
+          <div {...stylex.props(styles.composerInput)}>
+            {suggestions ? (
+              <div role="listbox" aria-label="People" {...stylex.props(styles.people)}>
+                {suggestions.found.map((p, i) => (
+                  <button
+                    key={p.name}
+                    type="button"
+                    role="option"
+                    aria-selected={i === active}
+                    aria-label={`${p.name}, ${p.kind}, ${i + 1} of ${suggestions.found.length}`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => pick(p.name)}
+                    {...stylex.props(styles.person, i === active && styles.personOn)}
+                  >
+                    <Mark
+                      letter={initial(p.name)}
+                      color={p.employee ? markColor(p.name) : "#55595F"}
+                      size={18}
+                      radius={p.employee ? 5 : 9}
+                    />
+                    {p.name}
+                    <span {...stylex.props(styles.personKind)}>{p.kind}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <textarea
+              ref={area}
+              rows={1}
+              aria-label={placeholder}
+              placeholder={placeholder}
+              {...stylex.props(styles.textarea)}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (suggestions) {
+                  const of = suggestions.found.length;
+                  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setPicked((active + (e.key === "ArrowDown" ? 1 : of - 1)) % of);
+                    return;
+                  }
+                  if (e.key === "Enter" || e.key === "Tab") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    pick(suggestions.found[active]?.name as string);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setClosedOn(text);
+                    return;
+                  }
                 }
                 if (e.key === "Escape") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setClosedOn(text);
+                  e.currentTarget.blur();
                   return;
                 }
-              }
-              if (e.key === "Escape") {
-                e.currentTarget.blur();
-                return;
-              }
-              if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-                e.preventDefault();
-                void go(text);
-              }
-            }}
-          />
-          {activeRun && text.trim() !== "" ? (
-            <Button onClick={() => void sendNow()}>
-              Send now <Kbd>⌥↵</Kbd>
-            </Button>
-          ) : null}
-          <Button kind="primary" disabled={busy || text.trim() === ""} onClick={() => void go(text)}>
-            Send
-          </Button>
-        </div>
-      </div>
+                if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+                  e.preventDefault();
+                  void go(text);
+                }
+              }}
+            />
+          </div>
+        }
+      />
       {warning ? (
-        <div className="text-[12px] text-amber">{warning}</div>
+        <div {...stylex.props(styles.warning)}>{warning}</div>
       ) : hint ? (
-        <div className="text-[12px] text-text3">{hint}</div>
+        <div {...stylex.props(styles.hint)}>{hint}</div>
       ) : null}
     </div>
   );
@@ -481,28 +812,24 @@ function ThreadPanel({
     if (size >= 0) end.current?.scrollIntoView({ block: "end" });
   }, [size]);
   const closed = readOnly || thread.data?.read_only === true;
+  const loading = useDelayed(thread.isPending);
   return (
-    <aside aria-label="Thread" className="enter flex w-[360px] flex-none flex-col border-l border-line bg-panel">
-      <div className="flex h-11 flex-none items-center gap-2 border-b border-line2 pr-[10px] pl-[14px]">
-        <h2 className="m-0 min-w-0 flex-1 truncate text-[13px] font-semibold">Thread · #{channelName}</h2>
-        <button
-          type="button"
-          aria-label="Close thread"
-          onClick={onClose}
-          className="grid size-7 cursor-pointer place-items-center rounded-[6px] border-0 bg-transparent text-text2 hover:bg-sel hover:text-text"
-        >
-          ✕
-        </button>
+    <aside aria-label="Thread" {...stylex.props(styles.thread)}>
+      <div {...stylex.props(styles.threadTop)}>
+        <Heading level={2} xstyle={styles.threadTitle}>
+          Thread · #{channelName}
+        </Heading>
+        <IconButton size="sm" variant="ghost" label="Close thread" icon={<Icon icon="close" />} onClick={onClose} />
       </div>
       <FeedIdsProvider value={{ conversationId }}>
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-3">
-          {thread.error ? <span className="text-red">The thread did not load.</span> : null}
-          {thread.isPending ? <span className="text-text3">Loading the thread…</span> : null}
+        <div {...stylex.props(styles.threadFeed)}>
+          {thread.error ? <span {...stylex.props(styles.error)}>The thread did not load.</span> : null}
+          {loading ? <Skeleton height={48} /> : null}
           {thread.data ? <MessageRow m={thread.data.root} grouped={false} inThread /> : null}
           {list.length > 0 ? (
-            <div className="flex items-center gap-3 py-1 text-[12px] text-text3">
+            <div {...stylex.props(styles.replies)}>
               {replies(list.length)}
-              <span className="h-px flex-1 bg-line2" />
+              <span {...stylex.props(styles.rule)} />
             </div>
           ) : null}
           {list.map((m) => (
@@ -520,11 +847,9 @@ function ThreadPanel({
         </div>
       </FeedIdsProvider>
       {closed ? (
-        <div className="border-t border-line2 p-3 text-[12px] text-text3">
-          This channel is closed · the thread is read-only.
-        </div>
+        <div {...stylex.props(styles.threadClosed)}>This channel is closed · the thread is read-only.</div>
       ) : (
-        <div className="pt-2">
+        <div {...stylex.props(styles.threadComposer)}>
           <Composer
             key={root}
             draftKey={`thread:${root}`}
@@ -749,21 +1074,22 @@ function Channel({
       : "@Name asks that employee about this ticket."
     : `@Name asks that employee; without a name, ${first ?? "the top of the org chart"} answers.`;
   const answering = [...new Set(live.flatMap((u) => runAuthor(employeesData ?? [], u.run_id) ?? []))];
+  const loading = useDelayed(feed.isPending);
 
   return (
-    <section aria-label={`#${name}`} className="flex min-w-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-h-11 flex-none flex-wrap items-center gap-[10px] border-b border-line py-[6px] pr-3 pl-[18px]">
-          <h1 className="m-0 text-[13px] font-semibold">
-            <span className="text-text3">#</span> {name}
-          </h1>
+    <section aria-label={`#${name}`} {...stylex.props(styles.channel)}>
+      <div {...stylex.props(styles.channelMain)}>
+        <header {...stylex.props(styles.top)}>
+          <Heading level={1} xstyle={styles.title}>
+            <span {...stylex.props(styles.hash)}>#</span> {name}
+          </Heading>
           {t ? (
-            <span className="inline-flex h-[22px] items-center gap-[6px] rounded-[11px] border border-line px-2 text-[12px] text-text2">
+            <span {...stylex.props(styles.column)}>
               <ColumnGlyph kind={t.column} />
               {t.column.replace("_", " ")}
             </span>
           ) : null}
-          <span className="min-w-0 flex-1 truncate text-[12px] text-text3">
+          <span {...stylex.props(styles.subtitle)}>
             {answering.length > 0
               ? `${answering.join(", ")} answering`
               : t
@@ -785,11 +1111,7 @@ function Channel({
                   : `You and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`}
           </span>
           {c?.ticket_id ? (
-            <Link
-              to="/board"
-              search={{ ticket: c.ticket_id }}
-              className="inline-flex h-7 flex-none items-center rounded-[6px] border border-btn-line bg-btn px-[10px] text-[12px] font-medium text-text no-underline"
-            >
+            <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.openTicket)}>
               Open ticket ↗
             </Link>
           ) : null}
@@ -797,32 +1119,44 @@ function Channel({
         {contextOf ? <ContextDialog run={contextOf} onClose={() => setContextOf(null)} /> : null}
         <ChatProvider value={ctx}>
           <FeedIdsProvider value={{ conversationId: openId ?? null }}>
-            <div className="min-h-0 flex-1">
+            <div {...stylex.props(styles.feedBox)}>
               {feed.error ? (
-                <div role="alert" className="flex flex-col items-start gap-2 p-6">
-                  <p className="m-0 font-medium">The Team chat did not load.</p>
-                  <p className="m-0 text-text2">{feed.error.message}</p>
-                  <Button onClick={() => void feed.refetch()}>Try again</Button>
+                <div {...stylex.props(styles.problem)}>
+                  <Banner
+                    status="error"
+                    role="alert"
+                    title="The Team chat did not load."
+                    description={feed.error.message}
+                    endContent={<Button label="Try again" onClick={() => void feed.refetch()} />}
+                  />
                 </div>
               ) : feed.isPending ? (
-                <p className="m-0 p-6 text-text3">{status === "online" ? "Loading…" : "Waiting for the server…"}</p>
+                status === "online" ? (
+                  loading ? (
+                    <div {...stylex.props(styles.loading)}>
+                      <Skeleton height={48} />
+                      <Skeleton height={48} />
+                      <Skeleton height={48} />
+                    </div>
+                  ) : null
+                ) : (
+                  <p {...stylex.props(styles.waiting)}>Waiting for the server…</p>
+                )
               ) : rows.length === 0 ? (
-                <div className="mx-auto flex max-w-[520px] flex-col gap-2 p-10 text-center">
-                  <p className="m-0 text-[15px] font-semibold">
-                    {isTicket ? "Discuss the ticket here." : "Talk with your whole team here."}
-                  </p>
-                  <p className="m-0 text-text2">
-                    {isTicket
+                <EmptyState
+                  title={isTicket ? "Discuss the ticket here." : "Talk with your whole team here."}
+                  description={
+                    isTicket
                       ? `Write @Name to ask an employee${t ? ownerAnswers(owner) : " about this ticket"}.`
-                      : `Write @Name to ask an employee; without a name, ${first ?? "the top of the org chart"} answers and brings in whoever is needed.`}
-                  </p>
-                </div>
+                      : `Write @Name to ask an employee; without a name, ${first ?? "the top of the org chart"} answers and brings in whoever is needed.`
+                  }
+                />
               ) : (
                 <Virtuoso
                   ref={handle}
                   key={openId}
                   data={rows}
-                  className="h-full [scrollbar-gutter:stable_both-edges]"
+                  {...stylex.props(styles.feed)}
                   increaseViewportBy={600}
                   initialTopMostItemIndex={{ index: "LAST", align: "end" }}
                   atBottomThreshold={120}
@@ -833,12 +1167,12 @@ function Channel({
                   computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
                   components={FEED_PARTS}
                   itemContent={(_, row) => (
-                    <div className="mx-auto w-full max-w-[820px] px-6">
+                    <div {...FEED_COLUMN}>
                       {row.kind === "message" ? (
                         <>
                           {row.day ? <DayLine ms={row.m.created_at_ms} /> : null}
                           {row.isNew ? <NewLine /> : null}
-                          <div className={row.grouped ? "" : "pt-2"}>
+                          <div {...(row.grouped ? null : TOP_GAP)}>
                             <MessageRow m={row.m} grouped={row.grouped} />
                           </div>
                         </>
@@ -849,7 +1183,7 @@ function Channel({
                           kind="employee"
                         />
                       ) : (
-                        <div className="pt-3">
+                        <div {...stylex.props(styles.approvalGap)}>
                           {approvalMap.get(row.id) ? (
                             <ApprovalCard
                               approval={approvalMap.get(row.id) as NonNullable<ReturnType<typeof approvalMap.get>>}
@@ -864,13 +1198,13 @@ function Channel({
             </div>
           </FeedIdsProvider>
           {readOnly ? (
-            <div className="mx-auto flex w-full max-w-[820px] items-center gap-3 px-6 pb-4">
-              <div className="flex flex-1 items-center gap-3 rounded-[10px] border border-line bg-sunk px-[14px] py-[10px] text-text2">
-                <span className="flex-1">
+            <div {...stylex.props(styles.readOnlyRow)}>
+              <div {...stylex.props(styles.readOnlyBar)}>
+                <span {...stylex.props(styles.readOnlyText)}>
                   {c ? readOnlyBar(c, c.ticket_column === "done") : "This channel is read-only."}
                 </span>
                 {c?.ticket_id ? (
-                  <Link to="/board" search={{ ticket: c.ticket_id }} className="text-[12px] text-acc-text no-underline">
+                  <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.readOnlyLink)}>
                     Open ticket
                   </Link>
                 ) : null}
@@ -969,7 +1303,7 @@ export function ChatScreen({
   useAction("PrevChannel", () => step(false));
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div {...stylex.props(styles.screen)}>
       {list.length > 0 ? <ChannelList channels={list} open={channel} onOpen={open} /> : null}
       <Channel
         key={channel ?? "general"}

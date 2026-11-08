@@ -1,5 +1,11 @@
+import { AppShell } from "@astryxdesign/core/AppShell";
+import type { IconType } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { expectBody } from "@aurelius/client";
 import type { NotificationView, TaskView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
@@ -25,9 +31,8 @@ import {
   screenKey,
   screenUseJson,
 } from "../screen-use";
-import { Icon, Logo, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
-import { initial, Mark, markColor } from "../ui/kit";
-import { Tooltip } from "../ui/overlay";
+import { Logo, NAV_ICONS, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
+import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
@@ -42,6 +47,72 @@ import { SettingsSidebar } from "./settings";
 import { useTicketNeeds } from "./tickets-kit";
 import { subscriptionFor } from "./usage-logic";
 
+const styles = stylex.create({
+  // What the screens were written against: a column that fills the shell and scrolls inside.
+  screen: {
+    display: "flex",
+    flexDirection: "column",
+    height: "100%",
+    minWidth: 0,
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  settingsSidebar: { display: "flex", height: "100%" },
+  head: { display: "flex", height: 32, alignItems: "center", gap: 8, paddingInline: 8 },
+  logo: { display: "flex" },
+  headActions: { marginInlineStart: "auto", display: "flex", gap: 2 },
+  section: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    margin: 0,
+    marginBlockEnd: 4,
+    paddingInline: 8,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--precision-text3)",
+  },
+  sectionLink: { textDecoration: "none", color: "var(--precision-text3)" },
+  group: { display: "flex", flexDirection: "column", gap: 1, marginBlockStart: 14 },
+  count: { fontSize: 12, color: "var(--color-text-primary)" },
+  dot: { display: "block", width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
+  dotUnread: { backgroundColor: "var(--color-text-secondary)" },
+  dotLive: { backgroundColor: "var(--color-text-accent)" },
+  place: {
+    maxWidth: 90,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "var(--precision-text3)",
+  },
+  liveEnd: { display: "flex", alignItems: "center", gap: 8 },
+  foot: { display: "flex", flexDirection: "column", gap: 8, paddingInline: 8 },
+  reconnect: { margin: 0, paddingInline: 8, fontSize: 12, color: "var(--color-text-warning)" },
+  usage: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    borderRadius: 6,
+    paddingInline: 8,
+    paddingBlock: 4,
+    textDecoration: "none",
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+  },
+  usageOn: { backgroundColor: "var(--color-overlay-hover)" },
+  usageTop: { display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--precision-text3)" },
+  usagePercent: { color: "var(--color-text-primary)" },
+  truncate: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  usageResets: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  bar: { height: 3, borderRadius: 2, backgroundColor: "var(--color-track)" },
+  barFill: { height: 3, borderRadius: 2, backgroundColor: "var(--color-text-accent)" },
+});
+
 const NAV_MAIN: { to: string; label: string; icon: NavIcon }[] = [
   { to: "/inbox", label: "Inbox", icon: "inbox" },
   { to: "/my-tickets", label: "My tickets", icon: "mine" },
@@ -54,45 +125,37 @@ const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon }[] = [
   { to: "/knowledge", label: "Knowledge", icon: "know" },
 ];
 
-function NavRow({
-  to,
-  label,
-  icon,
-  count,
-  dot,
-}: {
-  to: string;
-  label: string;
-  icon: NavIcon;
-  count?: number;
-  dot?: boolean;
-}) {
+// SideNavItem takes a component: one per mark, kept, or every render would remount the rows' icons.
+const MARK_ICONS = new Map<string, IconType>();
+
+function markIcon(letter: string, color: string, size: number, radius: number): IconType {
+  const key = `${letter}|${color}|${size}|${radius}`;
+  let icon = MARK_ICONS.get(key);
+  if (!icon) {
+    icon = () => <Mark letter={letter} color={color} size={size} radius={radius} />;
+    MARK_ICONS.set(key, icon);
+  }
+  return icon;
+}
+
+function NavRow({ to, label, icon, end }: { to: string; label: string; icon: IconType; end?: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const on = path === to || path.startsWith(`${to}/`);
-  return (
-    <Link
-      to={to}
-      aria-current={on ? "page" : undefined}
-      className={`flex h-7 items-center gap-[9px] rounded-[6px] px-2 font-medium no-underline ${on ? "bg-sel text-text" : "text-text2 hover:bg-sel hover:text-text"}`}
-    >
-      <Icon name={icon} />
-      {label}
-      {count ? (
-        <span className="ml-auto text-[12px] text-text">{count}</span>
-      ) : dot ? (
-        <span role="img" aria-label="Unread" className="ml-auto size-[6px] rounded-full bg-text2" />
-      ) : null}
-    </Link>
-  );
+  return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
+}
+
+function Counted({ count, dot }: { count?: number; dot?: boolean }) {
+  if (count) return <span {...stylex.props(styles.count)}>{count}</span>;
+  return dot ? <span role="img" aria-label="Unread" {...stylex.props(styles.dot, styles.dotUnread)} /> : null;
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
-  return <p className="m-0 mb-1 flex items-center gap-[6px] px-2 text-[12px] font-medium text-text3">{children}</p>;
+  return <p {...stylex.props(styles.section)}>{children}</p>;
 }
 
 function liveColor(t: TaskView): string {
-  if (t.pending_approvals > 0 || t.status === "waiting") return "var(--amber)";
-  return t.status === "running" ? "var(--acc-text)" : "var(--text3)";
+  if (t.pending_approvals > 0 || t.status === "waiting") return "var(--color-text-warning)";
+  return t.status === "running" ? "var(--color-text-accent)" : "var(--precision-text3)";
 }
 
 function Live() {
@@ -100,24 +163,25 @@ function Live() {
   const live = (tasks.data ?? []).filter((t) => t.live_run != null);
   if (live.length === 0) return null;
   return (
-    <div className="flex min-h-0 flex-col gap-px">
+    <div {...stylex.props(styles.group)}>
       <SectionLabel>
-        Live <span className="size-[6px] rounded-full bg-acc-text" /> {live.length}
+        Live <span {...stylex.props(styles.dot, styles.dotLive)} /> {live.length}
       </SectionLabel>
       {live.slice(0, 6).map((t) => {
         const who = t.employee_name ?? "Task";
         return (
-          <Link
+          <NavRow
             key={t.id}
-            to="/tasks/$taskId"
-            params={{ taskId: t.id }}
-            className="flex h-7 items-center gap-[9px] rounded-[6px] px-2 text-text no-underline hover:bg-sel"
-          >
-            <Mark letter={initial(who)} color={markColor(t.employee_id ?? t.id)} />
-            <span className="font-medium whitespace-nowrap">{who}</span>
-            <span className="min-w-0 truncate text-text3">{ticketPlace(t)}</span>
-            <span className="ml-auto size-[6px] flex-none rounded-full" style={{ background: liveColor(t) }} />
-          </Link>
+            to={`/tasks/${t.id}`}
+            label={who}
+            icon={markIcon(initial(who), markColor(t.employee_id ?? t.id), 18, 5)}
+            end={
+              <span {...stylex.props(styles.liveEnd)}>
+                <span {...stylex.props(styles.place)}>{ticketPlace(t)}</span>
+                <span {...stylex.props(styles.dot)} style={{ background: liveColor(t) }} />
+              </span>
+            }
+          />
         );
       })}
     </div>
@@ -127,24 +191,21 @@ function Live() {
 /** The limit that resets furthest away: the week, when the plan has one. */
 function Usage() {
   const { user } = useLinkState();
+  const on = useRouterState({ select: (s) => s.location.pathname === "/usage" });
   const data = subscriptionFor(useSubscription().data, user?.id ?? null);
   const limit = data?.limits.find((l) => /week/i.test(l.label)) ?? data?.limits[0];
   if (!limit) return null;
   const percent = Math.max(0, Math.min(100, Math.round(limit.percent)));
   return (
-    <Link
-      to="/usage"
-      activeProps={{ className: "bg-sel" }}
-      className="flex flex-col gap-2 rounded-[6px] px-2 py-1 no-underline hover:bg-sel"
-    >
-      <div className="flex justify-between text-[12px] text-text3">
-        <span className="truncate">{limit.label}</span>
-        <span className="text-text">{percent}%</span>
+    <Link to="/usage" {...stylex.props(styles.usage, on && styles.usageOn)}>
+      <div {...stylex.props(styles.usageTop)}>
+        <span {...stylex.props(styles.truncate)}>{limit.label}</span>
+        <span {...stylex.props(styles.usagePercent)}>{percent}%</span>
       </div>
-      <div className="h-[3px] rounded-[2px] bg-track">
-        <div className="h-[3px] rounded-[2px] bg-acc-text" style={{ width: `${percent}%` }} />
+      <div {...stylex.props(styles.bar)}>
+        <div {...stylex.props(styles.barFill)} style={{ width: `${percent}%` }} />
       </div>
-      {limit.resets ? <div className="truncate text-[12px] text-text3">{limit.resets}</div> : null}
+      {limit.resets ? <div {...stylex.props(styles.usageResets)}>{limit.resets}</div> : null}
     </Link>
   );
 }
@@ -283,9 +344,10 @@ function useGlobalActions(): void {
 /** The biggest list or page that scrolls in the screen now shown. */
 function scrollMain(move: (el: Element) => void): void {
   let best: Element | null = null;
-  for (const el of document.querySelectorAll("main *")) {
-    if (el.scrollHeight <= el.clientHeight + 1 || getComputedStyle(el).overflowY === "visible") continue;
-    if (getComputedStyle(el).overflowY === "hidden") continue;
+  for (const el of document.querySelectorAll('[role="main"], [role="main"] *')) {
+    if (el.scrollHeight <= el.clientHeight + 1) continue;
+    const { overflowY } = getComputedStyle(el);
+    if (overflowY === "visible" || overflowY === "hidden" || overflowY === "clip") continue;
     if (!best || el.clientHeight * el.clientWidth > best.clientHeight * best.clientWidth) best = el;
   }
   if (best) move(best);
@@ -311,7 +373,7 @@ function useScreenCounter(): void {
   }, [path, storage]);
 }
 
-function Sidebar() {
+function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (collapsed: boolean) => void }) {
   const channels = useChannels();
   const chat = useMemo(() => chatBadge(channels.data ?? []), [channels.data]);
   const { open } = overlays;
@@ -324,100 +386,108 @@ function Sidebar() {
   const pinnedEmployees = employeePins.flatMap(
     (id) => employees.data?.filter((e) => e.id === id && e.status !== "archived") ?? [],
   );
+  const inbox = needsYouCount(groups);
   return (
-    <aside className="flex w-[224px] flex-none flex-col gap-[18px] overflow-hidden pt-[6px] pr-[10px] pb-[10px] pl-[14px]">
-      <div className="flex h-8 items-center gap-2 [-webkit-app-region:drag]">
-        <span className="flex" title={hostName ?? "Aurelius"}>
-          <Logo />
-        </span>
-        <div className="ml-auto flex gap-[2px] [-webkit-app-region:no-drag]">
-          <Tooltip text="Search and commands">
-            <button
-              type="button"
-              aria-label="Search"
-              onClick={() => open("palette")}
-              className="grid size-7 cursor-pointer place-items-center rounded-[6px] border-0 bg-transparent text-text2 hover:bg-sel hover:text-text"
-            >
-              <SearchIcon />
-            </button>
-          </Tooltip>
-          <Tooltip text="New ticket">
-            <button
-              type="button"
-              aria-label="New ticket"
-              onClick={() => open("ticket")}
-              className="grid size-[26px] cursor-pointer place-items-center rounded-[6px] border border-btn-line bg-btn text-text hover:bg-sel"
-            >
-              <NewIcon />
-            </button>
-          </Tooltip>
+    <SideNav
+      aria-label="Main"
+      data-sidebar
+      collapsible
+      resizable={{ defaultWidth: 224, autoSaveId: "sidebar", isCollapsed: collapsed, onCollapseChange: onCollapse }}
+      header={
+        <div data-sidebar-drag {...stylex.props(styles.head)}>
+          <span title={hostName ?? "Aurelius"} {...stylex.props(styles.logo)}>
+            <Logo />
+          </span>
+          {collapsed ? null : (
+            <div {...stylex.props(styles.headActions)}>
+              <Tooltip content="Search and commands" delay={400} hasHoverIndication={false}>
+                <IconButton
+                  label="Search"
+                  icon={<SearchIcon />}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => open("palette")}
+                />
+              </Tooltip>
+              <Tooltip content="New ticket" delay={400} hasHoverIndication={false}>
+                <IconButton label="New ticket" icon={<NewIcon />} size="sm" onClick={() => open("ticket")} />
+              </Tooltip>
+            </div>
+          )}
         </div>
-      </div>
-      <nav aria-label="Main" className="flex flex-col gap-[14px]">
-        <div className="flex flex-col gap-px">
-          {NAV_MAIN.map((n) => (
-            <NavRow key={n.to} {...n} {...(n.to === "/inbox" ? { count: needsYouCount(groups) } : {})} />
-          ))}
+      }
+      footer={
+        <div {...stylex.props(styles.foot)}>
+          {status !== "online" && !collapsed ? (
+            <p role="status" {...stylex.props(styles.reconnect)}>
+              Reconnecting…
+            </p>
+          ) : null}
+          {collapsed ? null : <Usage />}
+          <NavRow to="/settings" label="Settings" icon={NAV_ICONS.settings} />
         </div>
-        <div className="flex flex-col gap-px">
-          <SectionLabel>Workspace</SectionLabel>
-          {NAV_WORKSPACE.map((n) => (
-            <NavRow key={n.to} {...n} {...(n.to === "/chat" ? { count: chat.mentions, dot: chat.unread } : {})} />
-          ))}
-        </div>
-      </nav>
-      <div className="flex min-h-0 flex-col gap-px overflow-hidden">
-        <Link to="/projects" className="text-text3 no-underline hover:text-text">
-          <SectionLabel>Projects</SectionLabel>
-        </Link>
-        {pinnedFirst(
-          (projects.data ?? []).filter((p) => p.status !== "archived"),
-          projectPins,
-        )
-          .slice(0, 8)
-          .map((p) => (
-            <Link
-              key={p.id}
-              to="/projects/$id"
-              params={{ id: p.id }}
-              className="flex h-7 flex-none items-center gap-[9px] rounded-[6px] px-2 font-medium text-text2 no-underline hover:bg-sel hover:text-text"
-              activeProps={{ className: "bg-sel text-text" }}
-            >
-              <Mark letter={initial(p.name)} color={markColor(p.id)} size={15} radius={4} />
-              <span className="truncate">{p.name}</span>
+      }
+    >
+      {NAV_MAIN.map((n) => (
+        <NavRow
+          key={n.to}
+          to={n.to}
+          label={n.label}
+          icon={NAV_ICONS[n.icon]}
+          end={n.to === "/inbox" && inbox ? <Counted count={inbox} /> : undefined}
+        />
+      ))}
+      <SideNavSection title="Workspace">
+        {NAV_WORKSPACE.map((n) => (
+          <NavRow
+            key={n.to}
+            to={n.to}
+            label={n.label}
+            icon={NAV_ICONS[n.icon]}
+            end={n.to === "/chat" ? <Counted count={chat.mentions} dot={chat.unread} /> : undefined}
+          />
+        ))}
+      </SideNavSection>
+      {/* What only fits written out: the rail keeps the rows above. */}
+      {collapsed ? null : (
+        <>
+          <div {...stylex.props(styles.group)}>
+            <Link to="/projects" {...stylex.props(styles.sectionLink)}>
+              <SectionLabel>Projects</SectionLabel>
             </Link>
-          ))}
-      </div>
-      {pinnedEmployees.length > 0 ? (
-        <div className="flex min-h-0 flex-col gap-px overflow-hidden">
-          <Link to="/employees" className="text-text3 no-underline hover:text-text">
-            <SectionLabel>Employees</SectionLabel>
-          </Link>
-          {pinnedEmployees.map((e) => (
-            <Link
-              key={e.id}
-              to="/employees/$id"
-              params={{ id: e.id }}
-              className="flex h-7 flex-none items-center gap-[9px] rounded-[6px] px-2 font-medium text-text2 no-underline hover:text-text"
-              activeProps={{ className: "bg-sel text-text" }}
-            >
-              <Mark letter={initial(e.name)} color={markColor(e.id)} size={15} radius={4} />
-              <span className="truncate">{e.name}</span>
-            </Link>
-          ))}
-        </div>
-      ) : null}
-      <Live />
-      <div className="mt-auto flex flex-col gap-2">
-        {status !== "online" ? (
-          <p role="status" className="m-0 px-2 text-[12px] text-amber">
-            Reconnecting…
-          </p>
-        ) : null}
-        <Usage />
-        <NavRow to="/settings" label="Settings" icon="settings" />
-      </div>
-    </aside>
+            {pinnedFirst(
+              (projects.data ?? []).filter((p) => p.status !== "archived"),
+              projectPins,
+            )
+              .slice(0, 8)
+              .map((p) => (
+                <NavRow
+                  key={p.id}
+                  to={`/projects/${p.id}`}
+                  label={p.name}
+                  icon={markIcon(initial(p.name), markColor(p.id), 15, 4)}
+                />
+              ))}
+          </div>
+          {pinnedEmployees.length > 0 ? (
+            <div {...stylex.props(styles.group)}>
+              <Link to="/employees" {...stylex.props(styles.sectionLink)}>
+                <SectionLabel>Employees</SectionLabel>
+              </Link>
+              {pinnedEmployees.map((e) => (
+                <NavRow
+                  key={e.id}
+                  to={`/employees/${e.id}`}
+                  label={e.name}
+                  icon={markIcon(initial(e.name), markColor(e.id), 15, 4)}
+                />
+              ))}
+            </div>
+          ) : null}
+          <Live />
+        </>
+      )}
+    </SideNav>
   );
 }
 
@@ -430,29 +500,37 @@ export function Frame({ children }: { children: ReactNode }) {
   useNoteToasts();
   const { storage, windowProject } = usePlatform();
   const [sidebarHidden, setSidebarHidden] = useState(() => storage.get(SIDEBAR_KEY) === "hidden");
-  useAction("ToggleSidebar", () => {
-    storage.set(SIDEBAR_KEY, sidebarHidden ? "shown" : "hidden");
-    setSidebarHidden(!sidebarHidden);
-  });
+  const setHidden = (hidden: boolean) => {
+    storage.set(SIDEBAR_KEY, hidden ? "hidden" : "shown");
+    setSidebarHidden(hidden);
+  };
+  useAction("ToggleSidebar", () => setHidden(!sidebarHidden));
+
+  // A project window has no sidebar. The app's sidebar folds to a rail; Settings' has no rail to fold to.
+  let side: ReactNode = null;
+  if (windowProject === null) {
+    if (!inSettings) side = <Sidebar collapsed={sidebarHidden} onCollapse={setHidden} />;
+    else if (!sidebarHidden) {
+      side = (
+        <div data-sidebar {...stylex.props(styles.settingsSidebar)}>
+          <SettingsSidebar />
+        </div>
+      );
+    }
+  }
+
   return (
-    <div className="flex h-full bg-bg py-2 pr-2 text-text">
+    <>
       {Object.entries(GO_TO).map(([action, to]) => (
         <GoAction key={action} action={action} to={to} />
       ))}
-      {sidebarHidden || windowProject !== null ? (
-        <div className="w-2 flex-none" />
-      ) : inSettings ? (
-        <SettingsSidebar />
-      ) : (
-        <Sidebar />
-      )}
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[8px] border border-line bg-panel shadow-panel">
-        {children}
-      </main>
+      <AppShell variant="section" height="fill" mobileNav={false} {...(side ? { sideNav: side } : {})}>
+        <div {...stylex.props(styles.screen)}>{children}</div>
+      </AppShell>
       <Palette />
       <NewTicketDialog />
       <GiveWorkDialog />
       <ToastBridge />
-    </div>
+    </>
   );
 }

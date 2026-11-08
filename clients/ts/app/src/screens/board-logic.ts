@@ -150,7 +150,12 @@ export function priorityLabel(p: TicketPriority): string {
 }
 
 export function priorityColor(p: TicketPriority): string {
-  return { urgent: "var(--red)", high: "var(--amber)", normal: "var(--text2)", low: "var(--text2)" }[p];
+  return {
+    urgent: "var(--color-text-error)",
+    high: "var(--color-text-warning)",
+    normal: "var(--color-text-secondary)",
+    low: "var(--color-text-secondary)",
+  }[p];
 }
 
 export function emptyText(kind: ColumnKind): string {

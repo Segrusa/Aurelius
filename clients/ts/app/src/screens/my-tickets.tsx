@@ -1,17 +1,64 @@
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Layout, LayoutContent, LayoutHeader } from "@astryxdesign/core/Layout";
+import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import type { ColumnKind } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useLinkState } from "../connection";
 import { useBoard, useMyTickets, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { Button, Kbd } from "../ui/kit";
-import { Menu } from "../ui/overlay";
+import { KeyHint } from "../ui/key-hint";
+import { Menu } from "../ui/menu";
 import { inMyTab, MY_TABS, type MyTab } from "./board-logic";
+import { Loading, Page, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { TicketPanel } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
 import { useTicketNeeds } from "./tickets-kit";
+
+const styles = stylex.create({
+  head: { display: "flex", minHeight: 44, alignItems: "center", gap: 10, paddingInlineStart: 18, paddingInlineEnd: 12 },
+  title: { margin: 0, fontSize: 13, fontWeight: 500 },
+  pill: {
+    height: 24,
+    cursor: "pointer",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "transparent",
+    paddingInline: 9,
+    fontSize: 12,
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+  },
+  tabCount: { color: "var(--precision-text3)" },
+  actions: { marginInlineStart: "auto", display: "flex", gap: 6 },
+  body: { position: "relative", minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%" },
+  fill: { position: "absolute", inset: 0 },
+  main: { display: "flex", height: "100%", minWidth: 0, flexDirection: "column" },
+  message: { padding: 18 },
+  showDone: {
+    display: "flex",
+    flexShrink: 0,
+    height: 34,
+    width: "100%",
+    cursor: "pointer",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderStyle: "solid",
+    borderBottomColor: "var(--precision-line2)",
+    backgroundColor: "transparent",
+    paddingInline: 18,
+    fontWeight: 500,
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+  },
+});
 
 export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
   useKeyContext("MyTickets");
@@ -63,82 +110,100 @@ export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
   const empty = MY_TABS.find((t) => t.key === tab)?.empty;
 
   return (
-    <>
-      <header className="flex h-11 flex-none items-center gap-[10px] border-b border-line pr-3 pl-[18px]">
-        <Menu
-          label="Project"
-          value={project ?? "all"}
-          options={[
-            { key: "all", label: "All projects" },
-            ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
-          ]}
-          onPick={(id) => {
-            const next = id === "all" ? null : id;
-            setProject(next);
-            storage.set("board_project", next ?? "");
-          }}
-          trigger={
-            <button
-              type="button"
-              className="h-6 cursor-pointer rounded-[12px] border border-line bg-transparent px-[9px] text-[12px] text-text2 hover:text-text"
-            >
-              {projects.data?.find((p) => p.id === project)?.name ?? "All projects"}
-            </button>
-          }
-        />
-        <h1 className="m-0 text-[13px] font-medium">My tickets</h1>
-        <fieldset aria-label="Tabs" className="m-0 ml-2 flex gap-1 border-0 p-0">
-          {MY_TABS.map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={key === tab}
-              onClick={() => setChosen(key)}
-              className={`h-6 cursor-pointer rounded-[5px] border px-[9px] text-[12px] font-medium ${key === tab ? "border-btn-line bg-sel text-text" : "border-transparent bg-transparent text-text2 hover:text-text"}`}
-            >
-              {label} <span className="text-text3">{counts[key]}</span>
-            </button>
-          ))}
-        </fieldset>
-        <div className="ml-auto flex gap-[6px]">
-          <Button kind="primary" onClick={() => overlays.open("ticket")}>
-            New ticket <Kbd onAccent>N</Kbd>
-          </Button>
+    <Page>
+      <LayoutHeader hasDivider padding={0} data-titlebar>
+        <div {...stylex.props(styles.head)}>
+          <Menu
+            label="Project"
+            value={project ?? "all"}
+            options={[
+              { key: "all", label: "All projects" },
+              ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
+            ]}
+            onPick={(id) => {
+              const next = id === "all" ? null : id;
+              setProject(next);
+              storage.set("board_project", next ?? "");
+            }}
+            trigger={
+              <button type="button" {...stylex.props(styles.pill)}>
+                {projects.data?.find((p) => p.id === project)?.name ?? "All projects"}
+              </button>
+            }
+          />
+          <Heading level={1} xstyle={styles.title}>
+            My tickets
+          </Heading>
+          <ToggleButtonGroup
+            label="Tabs"
+            type="single"
+            size="sm"
+            value={tab}
+            onChange={(next) => {
+              if (next) setChosen(next as MyTab);
+            }}
+          >
+            {MY_TABS.map(({ key, label }) => (
+              <ToggleButton key={key} value={key} label={label}>
+                {label} <span {...stylex.props(styles.tabCount)}>{counts[key]}</span>
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+          <div {...stylex.props(styles.actions)}>
+            <Button variant="primary" label="New ticket" onClick={() => overlays.open("ticket")}>
+              New ticket <KeyHint onAccent>N</KeyHint>
+            </Button>
+          </div>
         </div>
-      </header>
-      <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          {!supported ? (
-            <p className="m-0 p-[18px] text-text3">This server does not have My tickets yet.</p>
-          ) : mine.error ? (
-            <p role="alert" className="m-0 p-[18px] text-red">
-              {mine.error.message}
-            </p>
-          ) : shown.length === 0 && !mine.isPending ? (
-            <p className="m-0 p-[18px] text-text3">{empty}</p>
-          ) : (
-            <TicketRows
-              tickets={shown}
-              columnName={columnName}
-              selected={ticket}
-              needs={need.needs}
-              mine={need.mine}
-              onOpen={open}
-            />
-          )}
-          {supported ? (
-            <button
-              type="button"
-              aria-pressed={includeDone}
-              onClick={() => setIncludeDone(!includeDone)}
-              className="flex h-[34px] w-full cursor-pointer items-center gap-2 border-0 border-b border-solid border-line2 bg-transparent px-[18px] font-medium text-text2 hover:text-text"
-            >
-              {includeDone ? "Hide Done" : "Show Done"}
-            </button>
-          ) : null}
+      </LayoutHeader>
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.fill)}>
+          <Layout
+            height="fill"
+            end={ticket ? <TicketPanel key={ticket} id={ticket} onClose={close} /> : null}
+            content={
+              <LayoutContent isScrollable={false} padding={0}>
+                <div {...stylex.props(styles.main)}>
+                  {!supported ? (
+                    <div {...stylex.props(styles.message)}>
+                      <EmptyState isCompact title="This server does not have My tickets yet." />
+                    </div>
+                  ) : mine.error ? (
+                    <div {...stylex.props(styles.message)}>
+                      <Problem>{mine.error.message}</Problem>
+                    </div>
+                  ) : mine.isPending && shown.length === 0 ? (
+                    <Loading rows={6} />
+                  ) : shown.length === 0 ? (
+                    <div {...stylex.props(styles.message)}>
+                      <EmptyState isCompact title={empty ?? ""} />
+                    </div>
+                  ) : (
+                    <TicketRows
+                      tickets={shown}
+                      columnName={columnName}
+                      selected={ticket}
+                      needs={need.needs}
+                      mine={need.mine}
+                      onOpen={open}
+                    />
+                  )}
+                  {supported ? (
+                    <button
+                      type="button"
+                      aria-pressed={includeDone}
+                      onClick={() => setIncludeDone(!includeDone)}
+                      {...stylex.props(styles.showDone)}
+                    >
+                      {includeDone ? "Hide Done" : "Show Done"}
+                    </button>
+                  ) : null}
+                </div>
+              </LayoutContent>
+            }
+          />
         </div>
-        {ticket ? <TicketPanel key={ticket} id={ticket} onClose={close} /> : null}
       </div>
-    </>
+    </Page>
   );
 }

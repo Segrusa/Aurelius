@@ -46,11 +46,11 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
     // The app's own mark, not a letter.
-    await expect(page.getByRole("complementary").locator("svg rect.fill-acc").first()).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("img", { name: "Aurelius" })).toBeVisible();
 
     // A key that belongs to another screen goes there and does it.
     await page.keyboard.press("Control+k");
-    await page.locator("[cmdk-input]").fill("New project");
+    await page.getByRole("combobox", { name: "Command palette" }).fill("New project");
     await expect(page.getByRole("option", { name: /New project/ }).first()).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/projects/);
@@ -172,7 +172,7 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.getByRole("link", { name: /Ava/ }).first().click();
     await page.getByRole("button", { name: "More for Ava" }).click();
     await page.getByRole("menuitem", { name: "Pin to the list" }).click();
-    await expect(page.getByRole("complementary").getByRole("link", { name: "Ava" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Ava" })).toBeVisible();
 
     // An idea takes files too.
     await page.getByRole("navigation").getByRole("link", { name: "Knowledge" }).first().click();

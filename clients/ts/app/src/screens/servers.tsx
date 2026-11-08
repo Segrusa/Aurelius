@@ -1,13 +1,31 @@
 // The servers this device can work with: this computer's service and paired ones.
 
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { Text } from "@astryxdesign/core/Text";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import * as stylex from "@stylexjs/stylex";
 import { useCallback, useEffect, useState } from "react";
 import { type ServerChoices, usePlatform } from "../platform";
-import { Button } from "../ui/kit";
 import { Confirm } from "./org-kit";
 import { Keyed } from "./settings-kit";
 
-const ROW = "flex items-center gap-2 border-b border-line2 px-4 py-[10px] text-[13px] last:border-b-0";
-const SMALL = "h-7 px-[10px] text-[12px]";
+const styles = stylex.create({
+  panel: { display: "flex", flexDirection: "column", gap: 12 },
+  list: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+  },
+  actions: { display: "flex", alignItems: "center", gap: 8 },
+  form: { display: "flex", flexDirection: "column", gap: 8 },
+  pairing: { fontFamily: "var(--font-family-code)", fontSize: 12, resize: "none" },
+  inUse: { fontSize: 12, color: "var(--color-text-accent)" },
+  buttons: { display: "flex", gap: 8 },
+});
 
 /** The list and the pairing form. A server that is chosen or paired makes the app start over. */
 export function ServerChoicesPanel() {
@@ -44,83 +62,73 @@ export function ServerChoicesPanel() {
   };
   const use = (hostId: string | null, name: string) =>
     choices.active === hostId ? (
-      <span className="ml-auto text-[12px] text-acc-text">In use</span>
+      <span {...stylex.props(styles.inUse)}>In use</span>
     ) : (
       <Keyed action="SettingsUse" chord="Enter">
-        <Button
-          className={`ml-auto ${SMALL}`}
-          aria-label={`Use ${name}`}
-          onClick={() => act(() => servers.use(hostId))}
-        >
-          Use
-        </Button>
+        <Button label="Use" size="sm" aria-label={`Use ${name}`} onClick={() => act(() => servers.use(hostId))} />
       </Keyed>
     );
 
   return (
-    <section aria-label="Servers" className="flex flex-col gap-3">
-      <div className="rounded-[8px] border border-line">
-        {choices.localAvailable ? (
-          <div className={ROW}>
-            <span className="min-w-0 truncate">{choices.localName ?? "This computer"}</span>
-            {use(null, "this computer")}
-          </div>
-        ) : null}
-        {choices.servers.map((s) => (
-          <div key={s.hostId} className={ROW}>
-            <span className="flex min-w-0 flex-col">
-              <span className="truncate">{s.hostName}</span>
-              <span className="truncate text-[12px] text-text3">{s.url}</span>
-            </span>
-            {use(s.hostId, s.hostName)}
-            <Keyed action="SettingsRemove" chord="Del">
-              <Button className={SMALL} aria-label={`Forget ${s.hostName}`} onClick={() => setForgetting(s)}>
-                Forget
-              </Button>
-            </Keyed>
-          </div>
-        ))}
-        {!choices.localAvailable && choices.servers.length === 0 ? (
-          <p className="m-0 px-4 py-3 text-[13px] text-text3">No server yet. Paste a pairing text from the server.</p>
-        ) : null}
-      </div>
+    <section aria-label="Servers" {...stylex.props(styles.panel)}>
+      {!choices.localAvailable && choices.servers.length === 0 ? (
+        <EmptyState title="No server yet." description="Paste a pairing text from the server." isCompact />
+      ) : (
+        <List hasDividers density="compact" xstyle={styles.list}>
+          {choices.localAvailable ? (
+            <ListItem label={choices.localName ?? "This computer"} endContent={use(null, "this computer")} />
+          ) : null}
+          {choices.servers.map((s) => (
+            <ListItem
+              key={s.hostId}
+              label={s.hostName}
+              description={s.url}
+              endContent={
+                <span {...stylex.props(styles.actions)}>
+                  {use(s.hostId, s.hostName)}
+                  <Keyed action="SettingsRemove" chord="Del">
+                    <Button
+                      label="Forget"
+                      size="sm"
+                      aria-label={`Forget ${s.hostName}`}
+                      onClick={() => setForgetting(s)}
+                    />
+                  </Keyed>
+                </span>
+              }
+            />
+          ))}
+        </List>
+      )}
       <form
-        className="flex flex-col gap-2"
+        {...stylex.props(styles.form)}
         onSubmit={(event) => {
           event.preventDefault();
           void pair();
         }}
       >
-        <label className="flex flex-col gap-1 text-[12px] font-medium text-text2">
-          Pair a server
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={2}
-            disabled={waiting}
-            placeholder="aurelius-pair:…"
-            autoComplete="off"
-            spellCheck={false}
-            className="resize-none rounded-[6px] border border-btn-line bg-sunk p-2 font-mono text-[12px] text-text"
-          />
-        </label>
-        <p className="m-0 text-[12px] leading-[1.5] text-text3">
+        <TextArea
+          label="Pair a server"
+          value={text}
+          onChange={setText}
+          rows={2}
+          isDisabled={waiting}
+          placeholder="aurelius-pair:…"
+          autoComplete="off"
+          hasSpellCheck={false}
+          controlXstyle={styles.pairing}
+        />
+        <Text as="p" type="supporting">
           {waiting
             ? 'Waiting until you choose "Allow as owner" on the server (Settings, Remote access there).'
             : "On the server: Settings, Remote access, show a code, Copy. A paired computer gets full access to that server."}
-        </p>
-        <div className="flex gap-2">
-          <Button kind="primary" type="submit" disabled={waiting || text.trim() === ""}>
-            Pair
-          </Button>
-          {waiting ? <Button onClick={() => void servers.cancelPairing()}>Cancel</Button> : null}
+        </Text>
+        <div {...stylex.props(styles.buttons)}>
+          <Button label="Pair" variant="primary" type="submit" isDisabled={waiting || text.trim() === ""} />
+          {waiting ? <Button label="Cancel" onClick={() => void servers.cancelPairing()} /> : null}
         </div>
       </form>
-      {error ? (
-        <p role="alert" className="m-0 text-[12px] text-red">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Banner status="error" role="alert" title={error} /> : null}
       {forgetting ? (
         <Confirm
           title={`Forget ${forgetting.hostName}?`}

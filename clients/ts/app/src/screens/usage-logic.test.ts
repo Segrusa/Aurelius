@@ -18,9 +18,9 @@ describe("usage numbers", () => {
   });
 
   it("colours a limit by how close it is", () => {
-    expect(limitTone(69)).toBe("bg-acc-text");
-    expect(limitTone(70)).toBe("bg-amber");
-    expect(limitTone(90)).toBe("bg-red");
+    expect(limitTone(69)).toBe("var(--color-text-accent)");
+    expect(limitTone(70)).toBe("var(--color-warning)");
+    expect(limitTone(90)).toBe("var(--color-error)");
     expect(clampPercent(120)).toBe(100);
   });
 

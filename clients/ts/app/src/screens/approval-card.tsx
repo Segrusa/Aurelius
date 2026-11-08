@@ -1,16 +1,116 @@
 // An approval where it is asked: in a run, in a channel, in the Inbox. A question gets its form, a plan
 // its decision, the rest Allow or Deny.
 
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { ButtonGroup } from "@astryxdesign/core/ButtonGroup";
+import { Card } from "@astryxdesign/core/Card";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import type { ApprovalView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useConnection } from "../connection";
 import { useAction, useKeyContext } from "../keys/provider";
-import { Button } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
 import { approvalAction, approvalSentence } from "./inbox-logic";
 import { composePlanFeedback, type PlanComment } from "./run-logic";
+
+const styles = stylex.create({
+  shell: { overflow: "hidden", borderColor: "var(--color-border-warning)" },
+  body: { display: "flex", flexDirection: "column", gap: 12, padding: 12 },
+  question: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    margin: 0,
+    borderWidth: 0,
+    padding: 0,
+  },
+  current: { borderRadius: 6, backgroundColor: "var(--color-overlay-hover)" },
+  legend: { marginBottom: 4, padding: 0, fontSize: 14, lineHeight: 1.45, fontWeight: 500 },
+  header: {
+    marginInlineEnd: 8,
+    borderRadius: 4,
+    backgroundColor: "var(--color-overlay-hover)",
+    paddingInline: 6,
+    paddingBlock: 1,
+    fontSize: 12,
+    color: "var(--color-text-secondary)",
+  },
+  several: { marginInlineStart: 8, fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
+  problem: { fontSize: 12, color: "var(--color-text-error)" },
+  footer: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--precision-line2)",
+    paddingInline: 12,
+    paddingBlock: 10,
+  },
+  muted: { color: "var(--color-text-secondary)" },
+  selected: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--precision-text3)" },
+  selectedText: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "0%",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  commentBox: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    padding: 8,
+  },
+  quote: {
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  quoteBlock: { display: "block" },
+  commentActions: { display: "flex", justifyContent: "flex-end", gap: 8 },
+  comment: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 8,
+    borderRadius: 6,
+    backgroundColor: "var(--precision-sunk)",
+    padding: 8,
+    fontSize: 12,
+  },
+  commentText: { minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%" },
+  // The command must stay selectable, also where a parent turned selection off, and stays one block.
+  command: {
+    margin: 0,
+    maxHeight: 240,
+    overflow: "auto",
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--precision-line2)",
+    backgroundColor: "var(--precision-sunk)",
+    padding: 12,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 13,
+    whiteSpace: "pre-wrap",
+    userSelect: "text",
+  },
+});
 
 export const QUESTION_TOOL = "claude.AskUserQuestion";
 export const PLAN_TOOL = "claude.ExitPlanMode";
@@ -74,13 +174,10 @@ function useApprovalWrite() {
 
 function Shell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-[8px] border border-amber-line">
-      <div className="flex items-center gap-2 bg-amber-soft px-3 py-[10px] font-medium">
-        <span className="size-[7px] flex-none rounded-full bg-amber" />
-        {title}
-      </div>
+    <Card padding={0} xstyle={styles.shell}>
+      <Banner status="warning" container="section" title={title} />
       {children}
-    </div>
+    </Card>
   );
 }
 
@@ -155,60 +252,65 @@ function QuestionCard({ approval, keyed }: { approval: ApprovalView; keyed: bool
           onSend={submit}
         />
       ) : null}
-      <div ref={card} className="flex flex-col gap-3 p-3">
+      <div ref={card} {...stylex.props(styles.body)}>
         {questions.map((q, i) => (
           <fieldset
             key={q.text}
-            className={`m-0 flex flex-col gap-1 border-0 p-0 ${keyed && questions.length > 1 && i === at ? "rounded-[6px] bg-sel/40" : ""}`}
+            {...stylex.props(styles.question, keyed && questions.length > 1 && i === at && styles.current)}
           >
-            <legend className="mb-1 p-0 text-[14px] leading-[1.45] font-medium">
-              {q.header ? (
-                <span className="mr-2 rounded-[4px] bg-sel px-[6px] py-[1px] text-[12px] text-text2">{q.header}</span>
-              ) : null}
+            <legend {...stylex.props(styles.legend)}>
+              {q.header ? <span {...stylex.props(styles.header)}>{q.header}</span> : null}
               {q.text}
-              {q.multi ? <span className="ml-2 text-[12px] font-normal text-text3">choose one or more</span> : null}
+              {q.multi ? <span {...stylex.props(styles.several)}>choose one or more</span> : null}
             </legend>
-            {q.options.map((o, n) => (
-              <label
-                key={o.label}
-                className="flex cursor-pointer items-start gap-[10px] rounded-[6px] px-2 py-[6px] hover:bg-sel"
-              >
-                <input
-                  type={q.multi ? "checkbox" : "radio"}
-                  name={`${approval.id}-${i}`}
-                  className="mt-[3px] accent-(--acc-text)"
-                  checked={own[i] === undefined && (chosen[i] ?? []).includes(n)}
-                  onChange={() => pick(i, n, q.multi)}
+            {q.multi ? (
+              q.options.map((o, n) => (
+                <CheckboxInput
+                  key={o.label}
+                  label={o.label}
+                  {...(o.description ? { description: o.description } : {})}
+                  value={own[i] === undefined && (chosen[i] ?? []).includes(n)}
+                  onChange={() => pick(i, n, true)}
                 />
-                <span className="min-w-0">
-                  {o.label}
-                  {o.description ? <span className="block text-[12px] text-text2">{o.description}</span> : null}
-                </span>
-              </label>
-            ))}
-            <input
+              ))
+            ) : (
+              <RadioList
+                label={q.text}
+                isLabelHidden
+                value={own[i] === undefined && chosen[i]?.[0] !== undefined ? String(chosen[i]?.[0]) : ""}
+                onChange={(next) => pick(i, Number(next), false)}
+              >
+                {q.options.map((o, n) => (
+                  <RadioListItem
+                    key={o.label}
+                    value={String(n)}
+                    label={o.label}
+                    {...(o.description ? { description: o.description } : {})}
+                  />
+                ))}
+              </RadioList>
+            )}
+            <TextInput
               data-own
-              aria-label={`Your own answer: ${q.text}`}
+              label={`Your own answer: ${q.text}`}
+              isLabelHidden
               placeholder="Or in your own words…"
-              className="mt-1 h-8 rounded-[6px] border border-btn-line bg-sunk px-2 text-text outline-none placeholder:text-text3 focus:border-acc-text"
               value={own[i] ?? ""}
-              onChange={(e) => {
+              onChange={(value) => {
                 const { [i]: _, ...rest } = own;
-                setOwn(e.target.value === "" ? rest : { ...own, [i]: e.target.value });
+                setOwn(value === "" ? rest : { ...own, [i]: value });
                 setMissing(false);
               }}
             />
           </fieldset>
         ))}
-        {missing ? <span className="text-[12px] text-red">Answer every question first, or skip.</span> : null}
+        {missing ? <span {...stylex.props(styles.problem)}>Answer every question first, or skip.</span> : null}
       </div>
-      <div className="flex gap-2 border-t border-line2 px-3 py-[10px]">
-        <Button kind="primary" disabled={busy} onClick={submit}>
-          Send answer
-        </Button>
-        <Button disabled={busy} onClick={skip}>
-          Skip
-        </Button>
+      <div {...stylex.props(styles.footer)}>
+        <ButtonGroup label="Answer">
+          <Button variant="primary" label="Send answer" isDisabled={busy} onClick={submit} />
+          <Button label="Skip" isDisabled={busy} onClick={skip} />
+        </ButtonGroup>
       </div>
     </Shell>
   );
@@ -253,90 +355,90 @@ function PlanCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean 
   return (
     <Shell title="Plan · waiting for you">
       {keyed ? <RejectKey onReject={() => decide("reject", "Plan rejected. The agent stops.")} /> : null}
-      <div className="flex flex-col gap-3 p-3">
+      <div {...stylex.props(styles.body)}>
         {/* biome-ignore lint/a11y/noStaticElementInteractions: a selection, not a control. */}
         <div onMouseUp={() => setSelected(window.getSelection()?.toString().trim() ?? "")}>
-          {plan ? <Markdown text={plan} /> : <span className="text-text2">The plan is in the conversation.</span>}
+          {plan ? (
+            <Markdown text={plan} />
+          ) : (
+            <span {...stylex.props(styles.muted)}>The plan is in the conversation.</span>
+          )}
         </div>
         {selected && quote === null ? (
-          <div className="flex items-center gap-2 text-[12px] text-text3">
-            <span className="min-w-0 flex-1 truncate">Selected: “{selected}”</span>
-            <Button onClick={() => setQuote(selected)}>Comment</Button>
+          <div {...stylex.props(styles.selected)}>
+            <span {...stylex.props(styles.selectedText)}>Selected: “{selected}”</span>
+            <Button label="Comment" onClick={() => setQuote(selected)} />
           </div>
         ) : null}
         {quote !== null ? (
-          <div className="flex flex-col gap-2 rounded-[6px] border border-line p-2">
-            <span className="truncate text-[12px] text-text3">Comment on: “{quote}”</span>
-            <input
-              // biome-ignore lint/a11y/noAutofocus: it opens because of this input.
-              autoFocus
-              aria-label="Your comment"
-              className="h-8 rounded-[6px] border border-btn-line bg-sunk px-2 text-text outline-none"
+          <div {...stylex.props(styles.commentBox)}>
+            <span {...stylex.props(styles.quote)}>Comment on: “{quote}”</span>
+            <TextInput
+              hasAutoFocus
+              label="Your comment"
+              isLabelHidden
               value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addComment();
-                }
-              }}
+              onChange={setComment}
+              onEnter={addComment}
             />
-            <span className="flex justify-end gap-2">
-              <Button onClick={() => setQuote(null)}>Cancel</Button>
-              <Button kind="primary" disabled={comment.trim() === ""} onClick={addComment}>
-                Add comment
-              </Button>
+            <span {...stylex.props(styles.commentActions)}>
+              <Button label="Cancel" onClick={() => setQuote(null)} />
+              <Button variant="primary" label="Add comment" isDisabled={comment.trim() === ""} onClick={addComment} />
             </span>
           </div>
         ) : null}
         {comments.map((c, i) => (
-          <div key={`${c.quote}|${c.text}`} className="flex items-start gap-2 rounded-[6px] bg-sunk p-2 text-[12px]">
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-text3">“{c.quote}”</span>
+          <div key={`${c.quote}|${c.text}`} {...stylex.props(styles.comment)}>
+            <span {...stylex.props(styles.commentText)}>
+              <span {...stylex.props(styles.quote, styles.quoteBlock)}>“{c.quote}”</span>
               {c.text}
             </span>
-            <button
-              type="button"
-              aria-label="Remove comment"
-              className="cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text"
+            <IconButton
+              variant="ghost"
+              size="sm"
+              label="Remove comment"
+              icon={<Icon icon="close" />}
               onClick={() => setComments(comments.filter((_, at) => at !== i))}
-            >
-              ×
-            </button>
+            />
           </div>
         ))}
-        <input
-          aria-label="What should change?"
+        <TextInput
+          label="What should change?"
+          isLabelHidden
           placeholder="What should change?"
-          className="h-8 rounded-[6px] border border-btn-line bg-sunk px-2 text-text outline-none placeholder:text-text3 focus:border-acc-text"
           value={feedback}
-          onChange={(e) => {
-            setFeedback(e.target.value);
+          onChange={(value) => {
+            setFeedback(value);
             setMissing(false);
           }}
         />
-        {missing ? <span className="text-[12px] text-red">Say what should change, then ask for changes.</span> : null}
+        {missing ? <span {...stylex.props(styles.problem)}>Say what should change, then ask for changes.</span> : null}
       </div>
-      <div className="flex flex-wrap gap-2 border-t border-line2 px-3 py-[10px]">
-        <Button
-          kind="primary"
-          disabled={busy}
-          onClick={() => decide("approve", "Plan approved. The agent goes on in auto mode.")}
-        >
-          Approve + Auto
-        </Button>
-        <Button
-          disabled={busy}
-          onClick={() => decide("approve_edits", "Plan approved. Edits go through; the agent asks for the rest.")}
-        >
-          Approve, edits
-        </Button>
-        <Button disabled={busy} onClick={() => decide("revise", "Changes requested. The agent revises the plan.")}>
-          Request changes
-        </Button>
-        <Button kind="danger" disabled={busy} onClick={() => decide("reject", "Plan rejected. The agent stops.")}>
-          Reject
-        </Button>
+      <div {...stylex.props(styles.footer)}>
+        <ButtonGroup label="Decide on the plan">
+          <Button
+            variant="primary"
+            label="Approve + Auto"
+            isDisabled={busy}
+            onClick={() => decide("approve", "Plan approved. The agent goes on in auto mode.")}
+          />
+          <Button
+            label="Approve, edits"
+            isDisabled={busy}
+            onClick={() => decide("approve_edits", "Plan approved. Edits go through; the agent asks for the rest.")}
+          />
+          <Button
+            label="Request changes"
+            isDisabled={busy}
+            onClick={() => decide("revise", "Changes requested. The agent revises the plan.")}
+          />
+          <Button
+            variant="destructive"
+            label="Reject"
+            isDisabled={busy}
+            onClick={() => decide("reject", "Plan rejected. The agent stops.")}
+          />
+        </ButtonGroup>
       </div>
     </Shell>
   );
@@ -356,21 +458,13 @@ function ActionCard({ approval }: { approval: ApprovalView }) {
     );
   return (
     <Shell title={`Approval needed · ${approvalSentence(approval)}`}>
-      <pre className="m-0 max-h-[240px] overflow-auto border-t border-line2 bg-sunk p-3 font-mono text-[13px] whitespace-pre-wrap">
-        {action.body}
-      </pre>
-      <div className="flex flex-wrap gap-2 border-t border-line2 px-3 py-[10px]">
-        <Button kind="primary" disabled={busy} onClick={() => void decide(true)}>
-          Allow once
-        </Button>
-        {eligible ? (
-          <Button disabled={busy} onClick={() => void decide(true, true)}>
-            Always allow
-          </Button>
-        ) : null}
-        <Button kind="danger" disabled={busy} onClick={() => void decide(false)}>
-          Deny
-        </Button>
+      <pre {...stylex.props(styles.command)}>{action.body}</pre>
+      <div {...stylex.props(styles.footer)}>
+        <ButtonGroup label="Decide">
+          <Button variant="primary" label="Allow once" isDisabled={busy} onClick={() => void decide(true)} />
+          {eligible ? <Button label="Always allow" isDisabled={busy} onClick={() => void decide(true, true)} /> : null}
+          <Button variant="destructive" label="Deny" isDisabled={busy} onClick={() => void decide(false)} />
+        </ButtonGroup>
       </div>
     </Shell>
   );

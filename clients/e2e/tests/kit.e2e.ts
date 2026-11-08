@@ -10,7 +10,7 @@ import { scriptServer } from "./fake-server";
 
 const PASSWORD = "a-long-enough-password";
 
-const palette = (page: Page) => page.locator("[cmdk-input]");
+const palette = (page: Page) => page.getByRole("combobox", { name: "Command palette" });
 
 test("keyboard, palette, New ticket and Give work against a real daemon", async () => {
   const daemon = new TestDaemon();

@@ -1,16 +1,61 @@
 // What the Employees, Knowledge and Projects screens share: the page's head, its tabs, and the confirm.
 
-import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
-import { Button } from "../ui/kit";
-import { Dialog } from "../ui/overlay";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Layout, LayoutContent, LayoutFooter, LayoutHeader } from "@astryxdesign/core/Layout";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Text } from "@astryxdesign/core/Text";
+import * as stylex from "@stylexjs/stylex";
+import { useRouterState } from "@tanstack/react-router";
+import { type ComponentProps, type KeyboardEvent, type ReactNode, useContext } from "react";
+import { KeysContext } from "../keys/provider";
+import { useDelayed } from "../ui/use-delayed";
 
+// Tailwind strings for the screens still to migrate (usage, run-tools, settings-accounts); they go with their last importer.
 export const SMALL = "h-7 px-[10px] text-[12px]";
 export const EYEBROW = "m-0 text-[11.5px] font-semibold tracking-[0.04em] text-text3";
 export const FIELD =
   "h-8 w-full rounded-[6px] border border-btn-line bg-sunk px-2 text-text outline-none placeholder:text-text3 focus:border-acc-text focus-visible:outline-none";
-export const AREA =
-  "w-full resize-y rounded-[6px] border border-btn-line bg-sunk p-2 leading-[1.5] text-text outline-none placeholder:text-text3 focus:border-acc-text focus-visible:outline-none";
+
+const styles = stylex.create({
+  page: { display: "flex", minHeight: 0, flex: 1, flexDirection: "column" },
+  head: {
+    display: "flex",
+    minHeight: 44,
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 10,
+    paddingBlock: 6,
+    paddingInlineStart: 18,
+    paddingInlineEnd: 12,
+  },
+  title: { display: "flex", minWidth: 0, alignItems: "center", gap: 8, margin: 0, fontSize: 13, fontWeight: 500 },
+  sub: { fontSize: 12, color: "var(--precision-text3)" },
+  actions: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginInlineStart: "auto" },
+  eyebrow: {
+    margin: 0,
+    fontSize: 11.5,
+    fontWeight: 600,
+    letterSpacing: "0.04em",
+    color: "var(--precision-text3)",
+  },
+  hint: { margin: 0, fontSize: 12, color: "var(--precision-text3)" },
+  body: { display: "flex", flexDirection: "column", gap: 12 },
+  footer: { display: "flex", justifyContent: "flex-end", gap: 8 },
+  confirmBody: { lineHeight: 1.5, color: "var(--color-text-secondary)" },
+  loading: { display: "flex", flexDirection: "column", gap: 8, padding: 24 },
+  contents: { display: "contents" },
+});
+
+/** A screen: a column that fills what the frame leaves and scrolls inside, never itself. */
+export function Page({ children }: { children: ReactNode }) {
+  return <div {...stylex.props(styles.page)}>{children}</div>;
+}
 
 export function PageHead({
   title,
@@ -24,30 +69,55 @@ export function PageHead({
   children?: ReactNode;
 }) {
   return (
-    <header className="flex min-h-11 flex-none flex-wrap items-center gap-[10px] border-b border-line py-[6px] pr-3 pl-[18px]">
-      <h1 className="m-0 flex min-w-0 items-center gap-2 text-[13px] font-medium">{title}</h1>
-      {sub ? <span className="text-[12px] text-text3">{sub}</span> : null}
-      {tabs}
-      <div className="ml-auto flex flex-wrap items-center gap-2">{children}</div>
-    </header>
+    <LayoutHeader hasDivider padding={0} data-titlebar>
+      <div {...stylex.props(styles.head)}>
+        <Heading level={1} xstyle={styles.title}>
+          {title}
+        </Heading>
+        {sub ? <span {...stylex.props(styles.sub)}>{sub}</span> : null}
+        {tabs}
+        <div {...stylex.props(styles.actions)}>{children}</div>
+      </div>
+    </LayoutHeader>
   );
 }
 
-export function TabPills({ label, tabs }: { label: string; tabs: { key: string; label: string; link: ReactNode }[] }) {
+export function Eyebrow({ children, title }: { children: ReactNode; title?: string }) {
   return (
-    <nav aria-label={label} className="flex gap-px rounded-[6px] border border-line2 bg-sunk p-[2px]">
-      {tabs.map((t) => (
-        <span key={t.key} className="contents">
-          {t.link}
-        </span>
-      ))}
-    </nav>
+    <Text as="p" display="block" xstyle={styles.eyebrow} {...(title ? { title } : {})}>
+      {children}
+    </Text>
   );
 }
 
-export const PILL =
-  "flex h-[22px] items-center rounded-[4px] px-2 text-[12px] font-medium whitespace-nowrap text-text2 no-underline hover:text-text";
-export const PILL_ON = { className: "bg-sel !text-text" };
+/** The small grey line under a field or a section. */
+export function Hint({ children }: { children: ReactNode }) {
+  return (
+    <Text as="p" display="block" xstyle={styles.hint}>
+      {children}
+    </Text>
+  );
+}
+
+export const Problem = ({ children }: { children: ReactNode }) => (
+  <Banner status="error" role="alert" title={children} />
+);
+
+/** Shown only when the wait lasts: a fast answer never flashes it. */
+export function Loading({ rows = 3 }: { rows?: number }) {
+  const shown = useDelayed(true);
+  if (!shown) return null;
+  return (
+    <div {...stylex.props(styles.loading)}>
+      {Array.from({ length: rows }, (_, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: placeholders have nothing else to tell them apart.
+        <Skeleton key={i} index={i} height={16} />
+      ))}
+    </div>
+  );
+}
+
+const noNavigation = () => {};
 
 const KNOWLEDGE = [
   { key: "guidelines", label: "Guidelines" },
@@ -57,55 +127,90 @@ const KNOWLEDGE = [
 ] as const;
 
 export function KnowledgeTabs() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const current = KNOWLEDGE.find((t) => pathname.startsWith(`/knowledge/${t.key}`))?.key ?? "";
   return (
-    <TabPills
-      label="Knowledge"
-      tabs={KNOWLEDGE.map((t) => ({
-        ...t,
-        link: (
-          <Link to="/knowledge/$tab" params={{ tab: t.key }} className={PILL} activeProps={PILL_ON}>
-            {t.label}
-          </Link>
-        ),
-      }))}
-    />
+    <TabList aria-label="Knowledge" size="sm" value={current} onChange={noNavigation}>
+      {KNOWLEDGE.map((t) => (
+        <Tab key={t.key} value={t.key} label={t.label} href={`/knowledge/${t.key}`} />
+      ))}
+    </TabList>
   );
 }
 
 export function EmployeesTabs() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const current = pathname === "/employees" ? "list" : pathname.startsWith("/employees/org") ? "org" : "";
   return (
-    <TabPills
-      label="Employees"
-      tabs={[
-        {
-          key: "list",
-          label: "List",
-          link: (
-            <Link to="/employees" className={PILL} activeOptions={{ exact: true }} activeProps={PILL_ON}>
-              List
-            </Link>
-          ),
-        },
-        {
-          key: "org",
-          label: "Org chart",
-          link: (
-            <Link to="/employees/org" className={PILL} activeProps={PILL_ON}>
-              Org chart
-            </Link>
-          ),
-        },
-        {
-          key: "guidelines",
-          label: "Guidelines",
-          link: (
-            <Link to="/knowledge/$tab" params={{ tab: "guidelines" }} className={PILL}>
-              Guidelines
-            </Link>
-          ),
-        },
-      ]}
-    />
+    <TabList aria-label="Employees" size="sm" value={current} onChange={noNavigation}>
+      <Tab value="list" label="List" href="/employees" />
+      <Tab value="org" label="Org chart" href="/employees/org" />
+      <Tab value="guidelines" label="Guidelines" href="/knowledge/guidelines" />
+    </TabList>
+  );
+}
+
+/** Every dialog of these screens: a title, what it asks, and its buttons at the bottom. */
+export function FormDialog({
+  title,
+  start,
+  width = 520,
+  top = false,
+  footer,
+  onClose,
+  children,
+}: {
+  title: string;
+  start?: ReactNode;
+  width?: number;
+  top?: boolean;
+  footer: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Dialog
+      isOpen
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      width={width}
+      maxHeight="calc(100vh - 48px)"
+      purpose="form"
+      padding={0}
+      {...(top ? { position: { top: "14vh" } } : {})}
+    >
+      <Layout
+        header={<DialogHeader title={title} {...(start ? { startContent: start } : {})} />}
+        content={
+          <LayoutContent padding={4}>
+            <div {...stylex.props(styles.body)}>{children}</div>
+          </LayoutContent>
+        }
+        footer={
+          <LayoutFooter hasDivider>
+            <div {...stylex.props(styles.footer)}>{footer}</div>
+          </LayoutFooter>
+        }
+      />
+    </Dialog>
+  );
+}
+
+/** A Selector inside a dialog, where Ctrl Enter on its trigger means the form, not this control. */
+export function DialogSelector(props: ComponentProps<typeof Selector>) {
+  const keys = useContext(KeysContext);
+  const passOn = (event: KeyboardEvent<HTMLSpanElement>) => {
+    if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
+    if ((event.target as Element).getAttribute("aria-expanded") === "true") return;
+    event.preventDefault();
+    event.stopPropagation();
+    keys?.press(event.nativeEvent);
+  };
+  return (
+    <span {...stylex.props(styles.contents)} onKeyDownCapture={passOn}>
+      <Selector width="100%" {...props} />
+    </span>
   );
 }
 
@@ -127,18 +232,25 @@ export function Confirm({
   onClose: () => void;
 }) {
   return (
-    <Dialog open onClose={onClose} title={title} width={460}>
-      <div className="flex flex-col gap-2 p-4">
-        <p className="m-0 text-[15px] font-semibold">{title}</p>
-        <div className="leading-[1.5] text-text2">{body}</div>
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button data-autofocus kind={danger ? "danger" : "primary"} disabled={busy} onClick={onConfirm}>
-          {action}
-        </Button>
-      </div>
-    </Dialog>
+    <FormDialog
+      title={title}
+      width={460}
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button
+            data-autofocus
+            label={action}
+            variant={danger ? "destructive" : "primary"}
+            isDisabled={busy}
+            onClick={onConfirm}
+          />
+        </>
+      }
+    >
+      <div {...stylex.props(styles.confirmBody)}>{body}</div>
+    </FormDialog>
   );
 }
 
@@ -153,12 +265,14 @@ export function shortDay(ms: number): string {
 
 export const hhmm = (ms: number) => new Date(ms).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-export function Empty({ title, children }: { title: string; children?: ReactNode }) {
+export function Empty({ title, description, children }: { title: string; description?: string; children?: ReactNode }) {
   return (
-    <div className="mx-auto flex max-w-[460px] flex-col items-center gap-3 p-10 text-center">
-      <p className="m-0 text-[15px] font-semibold">{title}</p>
-      {children}
-    </div>
+    <EmptyState
+      title={title}
+      headingLevel={2}
+      {...(description ? { description } : {})}
+      {...(children ? { actions: children } : {})}
+    />
   );
 }
 

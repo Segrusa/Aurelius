@@ -93,7 +93,7 @@ test("the board, the ticket panel and My tickets against a real daemon", async (
 
     // Backlog → Done is not a move the board allows.
     await drag(page, card(top), page.getByRole("region", { name: "Done" }));
-    await expect(page.getByText(/Done/).last()).toBeVisible();
+    await expect(page.getByRole("region", { name: "Notifications" }).getByText(/Done/)).toBeVisible();
     expect((await read()).backlog).toContain(top);
 
     // Backlog → Todo starts it, and without a dispatcher it asks for an employee.
@@ -140,7 +140,7 @@ test("the board, the ticket panel and My tickets against a real daemon", async (
     await expect(page.getByRole("complementary", { name: /Second ticket, renamed/ })).toBeVisible();
 
     await nav(page, "Tasks");
-    await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   } finally {
     seed?.dispose();
     await app.close();
@@ -484,7 +484,7 @@ test.describe("states a test daemon cannot produce", () => {
     const opened = Date.now() - started;
     expect(await page.locator("[data-card]").count()).toBeLessThan(120);
     // A card far down the column comes up when it is scrolled to.
-    const todo = page.getByRole("region", { name: "Todo" }).locator(".overflow-y-auto");
+    const todo = page.getByRole("region", { name: "Todo" }).locator("[data-column-scroll]");
     await todo.evaluate((el) => el.scrollTo(0, el.scrollHeight));
     await expect(page.getByRole("button", { name: /Busy ticket 998/ })).toBeVisible();
     const filtering = Date.now();

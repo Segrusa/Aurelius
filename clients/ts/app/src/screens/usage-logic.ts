@@ -15,7 +15,8 @@ export function costText(microUsd: number | null | undefined, estimate: boolean)
 }
 
 /** The colour of a limit's bar: amber from 70%, red from 90%. */
-export const limitTone = (percent: number) => (percent >= 90 ? "bg-red" : percent >= 70 ? "bg-amber" : "bg-acc-text");
+export const limitTone = (percent: number) =>
+  percent >= 90 ? "var(--color-error)" : percent >= 70 ? "var(--color-warning)" : "var(--color-text-accent)";
 
 export const clampPercent = (percent: number) => Math.max(0, Math.min(100, Math.round(percent)));
 

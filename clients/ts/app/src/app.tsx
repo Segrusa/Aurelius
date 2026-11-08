@@ -1,3 +1,5 @@
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { LayerProvider } from "@astryxdesign/core/Layer";
 import { LinkProvider } from "@astryxdesign/core/Link";
 import { Theme } from "@astryxdesign/core/theme";
@@ -34,9 +36,7 @@ import { TasksScreen } from "./screens/tasks";
 import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
 import { precisionTheme } from "./theme/precision/precision";
-import { Button } from "./ui/kit";
 import { RouterLink } from "./ui/router-link";
-import { TooltipProvider } from "./ui/overlay";
 
 /** A screen of the design that is not built yet: says so, and the phase, instead of looking finished. */
 
@@ -175,11 +175,11 @@ const settings = createRoute({
 
 function ScreenFailed({ reset }: { reset: () => void }) {
   return (
-    <div className="m-auto flex max-w-[420px] flex-col items-center gap-3 p-10 text-center">
-      <p className="m-0 text-[15px] font-semibold">This screen ran into a problem.</p>
-      <p className="m-0 text-text2">The rest of the app still works. Try it again, or go to another screen.</p>
-      <Button onClick={reset}>Try again</Button>
-    </div>
+    <EmptyState
+      title="This screen ran into a problem."
+      description="The rest of the app still works. Try it again, or go to another screen."
+      actions={<Button label="Try again" onClick={() => reset()} />}
+    />
   );
 }
 
@@ -237,9 +237,7 @@ export function App({ platform }: { platform: Platform }) {
                 <ConnectionProvider platform={platform} generation={generation}>
                   <Gate onPaired={() => setGeneration((g) => g + 1)}>
                     <KeysProvider>
-                      <TooltipProvider>
-                        <RouterProvider router={router} />
-                      </TooltipProvider>
+                      <RouterProvider router={router} />
                     </KeysProvider>
                   </Gate>
                 </ConnectionProvider>

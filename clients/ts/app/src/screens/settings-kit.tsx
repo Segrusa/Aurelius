@@ -1,7 +1,74 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Heading } from "@astryxdesign/core/Heading";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { Section } from "@astryxdesign/core/Section";
+import { Switch as AstryxSwitch } from "@astryxdesign/core/Switch";
+import { TextInput as AstryxTextInput } from "@astryxdesign/core/TextInput";
+import * as stylex from "@stylexjs/stylex";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type InputHTMLAttributes, type ReactNode, useState } from "react";
+import {
+  createContext,
+  type InputHTMLAttributes,
+  type MouseEventHandler,
+  type ReactNode,
+  use,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useLinkState } from "../connection";
-import { Button } from "../ui/kit";
+import { KeyHint } from "../ui/key-hint";
+
+const styles = stylex.create({
+  group: { display: "flex", flexDirection: "column", gap: 10 },
+  groupTitle: { margin: 0, fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
+  card: {
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 10,
+  },
+  part: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    paddingInline: 16,
+    paddingBlock: 14,
+    borderBlockEndWidth: { default: 1, ":last-child": 0 },
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: "var(--precision-line2)",
+  },
+  row: {
+    gap: 16,
+    borderBlockEndColor: "var(--precision-line2)",
+    paddingInline: 16,
+    paddingBlock: 14,
+    outlineStyle: "none",
+    backgroundColor: {
+      default: "transparent",
+      ":focus-within": "color-mix(in srgb, var(--color-overlay-hover) 40%, transparent)",
+      ":focus": "var(--color-overlay-hover)",
+    },
+  },
+  joined: { borderBlockEndWidth: 0 },
+  title: { display: "block", fontWeight: 500, overflowWrap: "anywhere" },
+  hint: {
+    display: "block",
+    marginBlockStart: 2,
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: "var(--precision-text3)",
+    overflowWrap: "anywhere",
+  },
+  actions: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 8 },
+  keyed: { display: "contents" },
+  question: { fontSize: 12, color: "var(--color-text-secondary)" },
+  form: { display: "flex", alignItems: "center", gap: 8 },
+  muted: { margin: 0, fontSize: 12, lineHeight: 1.5, color: "var(--precision-text3)" },
+  // The input takes its font from these two, and has no styling of its own to pass.
+  field: { "--text-body-size": "12px" },
+  fieldMono: { "--text-body-size": "12px", "--font-family-body": "var(--font-family-code)" },
+});
 
 /** A read of a settings section; refetched by events and after every change here. */
 export function useSetting<T>(name: string, read: () => Promise<T>) {
@@ -36,34 +103,61 @@ export function useChange() {
   return { busy, error, run };
 }
 
+/** True directly in a Group's list, where everything has to be a list item. */
+const InGroup = createContext(false);
+
 export function Problem({ error }: { error: { message: string } | string | null | undefined }) {
+  const inGroup = use(InGroup);
   if (!error) return null;
+  const banner = <Banner status="error" role="alert" title={typeof error === "string" ? error : error.message} />;
+  return inGroup ? <li {...stylex.props(styles.part)}>{banner}</li> : banner;
+}
+
+export function GroupTitle({ children }: { children: ReactNode }) {
   return (
-    <p role="alert" className="m-0 text-red">
-      {typeof error === "string" ? error : error.message}
-    </p>
+    <Heading level={2} xstyle={styles.groupTitle}>
+      {children}
+    </Heading>
   );
 }
 
 /** A titled group. Without a title it is only the card. */
 export function Group({ title, children }: { title?: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-[10px]">
-      {title ? <h2 className="m-0 text-[12px] font-medium text-text3">{title}</h2> : null}
-      <div className="flex flex-col rounded-[10px] border border-line [&>*:not(:last-child)]:border-b [&>*:not(:last-child)]:border-line2">
-        {children}
-      </div>
+    <section {...stylex.props(styles.group)}>
+      {title ? <GroupTitle>{title}</GroupTitle> : null}
+      <Section variant="transparent" padding={0} xstyle={styles.card}>
+        <InGroup value={true}>
+          <List hasDividers>{children}</List>
+        </InGroup>
+      </Section>
     </section>
   );
 }
 
+/** What is in a Group and is not a Row: a form, a notice, what an open Row shows. */
+export function Part({ xstyle, children }: { xstyle?: stylex.StyleXStyles; children: ReactNode }) {
+  return (
+    <li {...stylex.props(styles.part, xstyle)}>
+      <InGroup value={false}>{children}</InGroup>
+    </li>
+  );
+}
+
+function watchHints(changed: () => void) {
+  const watcher = new MutationObserver(changed);
+  watcher.observe(document.documentElement, { attributes: true, attributeFilter: ["data-hints"] });
+  return () => watcher.disconnect();
+}
+
+const hintsOn = () => document.documentElement.hasAttribute("data-hints");
+
 /** A key on a Settings control: the `chord` is shown when shortcut hints are on. */
 export function Keyed({ action, chord, children }: { action: string; chord: string; children: ReactNode }) {
+  const hints = useSyncExternalStore(watchHints, hintsOn);
   return (
-    <span data-key={action} className="contents">
-      <kbd className="hidden rounded-[3px] border border-line px-1 font-mono text-[10px] text-text3 [[data-hints]_&]:inline">
-        {chord}
-      </kbd>
+    <span data-key={action} {...stylex.props(styles.keyed)}>
+      {hints ? <KeyHint>{chord}</KeyHint> : null}
       {children}
     </span>
   );
@@ -72,47 +166,56 @@ export function Keyed({ action, chord, children }: { action: string; chord: stri
 /** Press what this key stands for: in the row that has the focus, otherwise the first on the page. */
 export function pressKeyed(action: string): void {
   // A dialog on top has the keys; nothing behind it goes off.
-  if (document.querySelector('[role="dialog"]')) return;
-  const chosen = `[data-key="${action}"] button:not(:disabled)`;
+  if (document.querySelector("dialog[open]")) return;
+  const chosen = `[data-key="${action}"] :is(button:not(:disabled), input[role=switch]:not([aria-disabled=true]))`;
   const row = document.activeElement?.closest("[data-setting-row]");
-  const button = row?.querySelector<HTMLButtonElement>(chosen) ?? document.querySelector<HTMLButtonElement>(chosen);
-  button?.focus();
-  button?.click();
+  const control = row?.querySelector<HTMLElement>(chosen) ?? document.querySelector<HTMLElement>(chosen);
+  control?.focus();
+  control?.click();
 }
 
 /** Put the cursor in the field with this label. */
 export function focusField(label: string): void {
-  const field = [...document.querySelectorAll("label")]
-    .find((l) => l.textContent?.includes(label))
-    ?.querySelector("input");
-  (field ?? document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`))?.focus();
+  [...document.querySelectorAll("label")].find((l) => l.textContent?.includes(label))?.control?.focus();
 }
 
 export const HINTS_KEY = "always_show_shortcuts";
 
 /** Walk the rows of a Settings page. */
 export function stepRow(by: 1 | -1): void {
-  if (document.querySelector('[role="dialog"]')) return;
+  if (document.querySelector("dialog[open]")) return;
   const rows = [...document.querySelectorAll<HTMLElement>("[data-setting-row]")];
   const at = rows.indexOf(document.activeElement?.closest("[data-setting-row]") as HTMLElement);
   (rows[at + by] ?? (at < 0 ? rows[0] : undefined))?.focus();
 }
 
-export function Row({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children?: ReactNode }) {
+export function Row({
+  title,
+  hint,
+  joined = false,
+  children,
+}: {
+  title: ReactNode;
+  hint?: ReactNode;
+  /** What this row opens follows right under it, without a line between them. */
+  joined?: boolean;
+  children?: ReactNode;
+}) {
   return (
-    <div
+    <ListItem
       data-setting-row
       tabIndex={-1}
-      className="flex items-center gap-4 px-4 py-[14px] outline-none focus-within:bg-sel/40 focus:bg-sel"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="font-medium [overflow-wrap:anywhere]">{title}</div>
-        {hint ? (
-          <div className="mt-[2px] text-[12px] leading-[1.5] text-text3 [overflow-wrap:anywhere]">{hint}</div>
-        ) : null}
-      </div>
-      {children ? <div className="flex flex-none flex-wrap items-center justify-end gap-2">{children}</div> : null}
-    </div>
+      xstyle={[styles.row, joined && styles.joined]}
+      label={<span {...stylex.props(styles.title)}>{title}</span>}
+      description={hint ? <span {...stylex.props(styles.hint)}>{hint}</span> : undefined}
+      endContent={
+        children ? (
+          <InGroup value={false}>
+            <div {...stylex.props(styles.actions)}>{children}</div>
+          </InGroup>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -128,25 +231,46 @@ export function Switch({
   onChange: (on: boolean) => void;
 }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!on)}
-      className={`relative h-[18px] w-8 flex-none cursor-pointer rounded-[9px] border-0 p-0 disabled:cursor-default disabled:opacity-50 ${on ? "bg-acc" : "bg-track"}`}
-    >
-      <span
-        className={`absolute top-[2px] left-[2px] size-[14px] rounded-full bg-white transition-transform duration-[120ms] ${on ? "translate-x-[14px]" : ""}`}
-      />
-    </button>
+    <AstryxSwitch
+      label={label}
+      isLabelHidden
+      size="sm"
+      value={on}
+      isDisabled={Boolean(disabled)}
+      onChange={(next) => onChange(next)}
+    />
   );
 }
 
-export const SmallButton: typeof Button = ({ className = "", ...props }) => (
-  <Button className={`h-7 px-[10px] text-[12px] ${className}`} {...props} />
-);
+const VARIANTS = { primary: "primary", secondary: "secondary", danger: "destructive", ghost: "ghost" } as const;
+
+export function SmallButton({
+  kind = "secondary",
+  type = "button",
+  disabled,
+  title,
+  onClick,
+  children,
+}: {
+  kind?: keyof typeof VARIANTS;
+  type?: "button" | "submit";
+  disabled?: boolean;
+  title?: string | undefined;
+  onClick?: MouseEventHandler<HTMLElement>;
+  children: string;
+}) {
+  return (
+    <Button
+      size="sm"
+      variant={VARIANTS[kind]}
+      type={type}
+      label={children}
+      isDisabled={Boolean(disabled)}
+      {...(title ? { tooltip: title } : {})}
+      {...(onClick ? { onClick } : {})}
+    />
+  );
+}
 
 /** Hard to undo: asks in place, so a stray click does nothing. */
 export function ConfirmButton({
@@ -170,7 +294,7 @@ export function ConfirmButton({
   }
   return (
     <>
-      <span className="text-[12px] text-text2">{question}</span>
+      <span {...stylex.props(styles.question)}>{question}</span>
       <SmallButton
         kind="danger"
         onClick={() => {
@@ -178,7 +302,7 @@ export function ConfirmButton({
           onConfirm();
         }}
       >
-        Yes, {label.toLowerCase()}
+        {`Yes, ${label.toLowerCase()}`}
       </SmallButton>
       <SmallButton onClick={() => setAsking(false)}>Cancel</SmallButton>
     </>
@@ -187,14 +311,42 @@ export function ConfirmButton({
 
 export function TextInput({
   label,
-  className = "",
-  ...props
-}: { label: string } & InputHTMLAttributes<HTMLInputElement>) {
+  showLabel = false,
+  width,
+  mono = false,
+  type = "text",
+  value,
+  onChange,
+  autoFocus = false,
+  disabled = false,
+  placeholder,
+  autoComplete,
+  onKeyDown,
+  ...native
+}: {
+  label: string;
+  showLabel?: boolean;
+  width?: number;
+  mono?: boolean;
+  value: string;
+} & Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "width" | "size" | "className" | "style">) {
   return (
-    <input
-      aria-label={label}
-      className={`h-7 min-w-0 rounded-[6px] border border-btn-line bg-sunk px-2 text-[12px] text-text ${className}`}
-      {...props}
+    <AstryxTextInput
+      {...(native as object)}
+      label={label}
+      isLabelHidden={!showLabel}
+      size="sm"
+      // Astryx types only the text kinds; the load limits stay number fields with their min and step.
+      type={type as "text"}
+      value={value}
+      hasAutoFocus={autoFocus}
+      isDisabled={disabled}
+      controlClassName={stylex.props(mono ? styles.fieldMono : styles.field).className ?? ""}
+      onChange={(_, event) => onChange?.(event)}
+      {...(width === undefined ? {} : { width })}
+      {...(placeholder === undefined ? {} : { placeholder })}
+      {...(autoComplete === undefined ? {} : { autoComplete })}
+      {...(onKeyDown === undefined ? {} : { onKeyDown })}
     />
   );
 }
@@ -216,7 +368,7 @@ export function NameEditor({
   const changed = draft !== null && draft.trim() !== "" && draft.trim() !== value;
   return (
     <form
-      className="flex items-center gap-2"
+      {...stylex.props(styles.form)}
       onSubmit={(event) => {
         event.preventDefault();
         if (!changed) return;
@@ -224,7 +376,7 @@ export function NameEditor({
         setDraft(null);
       }}
     >
-      <TextInput label={label} value={shown} onChange={(e) => setDraft(e.target.value)} className="w-[200px]" />
+      <TextInput label={label} value={shown} onChange={(e) => setDraft(e.target.value)} width={200} />
       {changed ? (
         <SmallButton kind="primary" type="submit" disabled={busy}>
           Save
@@ -240,7 +392,7 @@ export function openWeb(url: string): void {
 }
 
 export function Muted({ children }: { children: ReactNode }) {
-  return <p className="m-0 text-[12px] leading-[1.5] text-text3">{children}</p>;
+  return <p {...stylex.props(styles.muted)}>{children}</p>;
 }
 
 export function when(ms: number | null | undefined): string {

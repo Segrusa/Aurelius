@@ -4,13 +4,14 @@
 @import "@aurelius/app/theme.css";
 @import "@aurelius/app/app.css";
 
-:root[data-os="win32"] main > header {
+:root[data-os="win32"] [data-titlebar] {
   padding-right: 146px;
 }
-/* Windows and macOS draw the window controls over the page: the header bar moves the window, and
+/* Windows and macOS draw the window controls over the page: the title bar moves the window, and
    leaves those controls their room. An open dialog or menu must get its clicks. */
 :root:is([data-os="win32"], [data-os="darwin"]) {
-  & main > header,
+  & [data-titlebar],
+  & [data-sidebar-drag],
   & body::before {
     app-region: drag;
   }
@@ -20,13 +21,15 @@
     inset: 0 0 auto;
     height: 8px;
   }
-  &:has([role="dialog"], [role="menu"], [role="listbox"]) main > header {
+  &:has(dialog[open], [popover]:popover-open) :is([data-titlebar], [data-sidebar-drag]) {
     app-region: no-drag;
   }
-  & header :is(a, button, input, select, textarea, [role="button"], [role="tab"], [tabindex]) {
+  &
+    :is([data-titlebar], [data-sidebar-drag])
+    :is(a, button, input, select, textarea, [role="button"], [role="tab"], [tabindex]) {
     app-region: no-drag;
   }
 }
-:root[data-os="darwin"] body > #root aside:first-child {
+:root[data-os="darwin"] [data-sidebar] {
   padding-top: 36px;
 }

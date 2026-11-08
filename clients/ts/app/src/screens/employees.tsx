@@ -1,5 +1,10 @@
+import { Button } from "@astryxdesign/core/Button";
+import { Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { ProtocolError } from "@aurelius/client";
 import type { EmployeeSummary, ProposalView, TaskView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -7,8 +12,7 @@ import { useConnection, useLinkState } from "../connection";
 import { useEffectiveSets, useEmployees, useOpenTasks, useProposals } from "../data";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { Button, initial, Mark, markColor } from "../ui/kit";
-import { Dialog } from "../ui/overlay";
+import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
 import { EmployeeDialog } from "./employee-dialog";
 import {
@@ -22,7 +26,194 @@ import {
   workOf,
 } from "./employee-logic";
 import { lineDiff } from "./guideline-logic";
-import { AREA, EmployeesTabs, EYEBROW, FIELD, failureOf, PageHead, SMALL } from "./org-kit";
+import { EmployeesTabs, Eyebrow, FormDialog, failureOf, Hint, Page, PageHead, Problem } from "./org-kit";
+
+const CONNECTOR = "var(--precision-connector)";
+
+const styles = stylex.create({
+  proposal: {
+    display: "flex",
+    maxWidth: 720,
+    flexDirection: "column",
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--precision-acc-line)",
+    backgroundColor: "var(--color-background-surface)",
+    paddingInline: 18,
+    paddingBlock: 16,
+  },
+  proposalTitle: { margin: 0, fontSize: 15, fontWeight: 600 },
+  secondary: { margin: 0, lineHeight: 1.5, color: "var(--color-text-secondary)" },
+  clamp: {
+    display: "-webkit-box",
+    overflow: "hidden",
+    whiteSpace: "pre-wrap",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 4,
+  },
+  diff: {
+    margin: 0,
+    maxHeight: 240,
+    overflow: "auto",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    padding: 10,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    lineHeight: "17px",
+    whiteSpace: "pre-wrap",
+  },
+  added: { color: "var(--color-text-accent)" },
+  removed: { color: "var(--color-text-error)" },
+  same: { color: "var(--color-text-secondary)" },
+  warning: { margin: 0, color: "var(--color-text-warning)" },
+  buttons: { display: "flex", justifyContent: "flex-end", gap: 8 },
+  scroll: { minHeight: 0, flex: 1, overflow: "auto" },
+  note: { margin: 0, padding: 24, color: "var(--precision-text3)" },
+  table: { minWidth: 560 },
+  headCell: { fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
+  statusColumn: { width: 150 },
+  guidelinesColumn: { width: 90 },
+  groupCell: {
+    height: 30,
+    backgroundColor: "var(--precision-sunk)",
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--color-text-secondary)",
+  },
+  row: { height: 42 },
+  selected: { backgroundColor: "var(--color-overlay-hover)" },
+  selectedEdge: { boxShadow: "inset 2px 0 0 var(--color-text-accent)" },
+  nameCell: { display: "flex", minWidth: 0, alignItems: "center", gap: 10 },
+  name: {
+    minWidth: 0,
+    overflow: "hidden",
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--color-text-primary)",
+    textDecoration: { default: "none", ":hover": "underline" },
+  },
+  position: {
+    minWidth: 0,
+    overflow: "hidden",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--precision-text3)",
+  },
+  pin: {
+    marginInlineStart: "auto",
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    fontSize: 12,
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+    opacity: { default: 0, ":focus-visible": 1, [stylex.when.ancestor(":hover")]: 1 },
+  },
+  pinned: { color: "var(--color-text-accent)", opacity: 1 },
+  status: { display: "flex", alignItems: "center", gap: 8, fontSize: 12 },
+  dot: { width: 6, height: 6, borderRadius: "50%" },
+  work: {
+    display: "block",
+    overflow: "hidden",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--color-text-secondary)",
+  },
+  quiet: { fontSize: 12, color: "var(--precision-text3)" },
+  orgCard: {
+    display: "flex",
+    width: 220,
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: { default: "var(--color-background-surface)", ":hover": "var(--color-overlay-hover)" },
+    paddingInline: 12,
+    paddingBlock: 10,
+    color: "var(--color-text-primary)",
+    textDecoration: "none",
+    boxShadow: "var(--precision-card-shadow)",
+  },
+  orgWorking: { borderColor: "var(--precision-acc-line)" },
+  orgPaused: { opacity: 0.6 },
+  orgText: { minWidth: 0, flex: 1 },
+  orgName: {
+    display: "block",
+    overflow: "hidden",
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  orgRole: {
+    display: "block",
+    overflow: "hidden",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--precision-text3)",
+  },
+  orgDot: { width: 7, height: 7, flexShrink: 0, borderRadius: "50%" },
+  branch: { display: "flex", listStyleType: "none", flexDirection: "column", alignItems: "center" },
+  stem: { width: 1, height: 22, backgroundColor: CONNECTOR },
+  children: { position: "relative", display: "flex", gap: 16, margin: 0, padding: 0 },
+  child: {
+    position: "relative",
+    display: "flex",
+    listStyleType: "none",
+    flexDirection: "column",
+    alignItems: "center",
+  },
+  bar: { position: "absolute", top: 0, height: 1, backgroundColor: CONNECTOR },
+  barFirst: { insetInlineEnd: -8, insetInlineStart: "50%" },
+  barLast: { insetInlineEnd: "50%", insetInlineStart: -8 },
+  barMiddle: { insetInlineEnd: -8, insetInlineStart: -8 },
+  bare: { margin: 0, padding: 0 },
+  chart: {
+    minHeight: 0,
+    flex: 1,
+    overflow: "auto",
+    paddingInline: 24,
+    paddingBlock: 36,
+    backgroundImage: "radial-gradient(var(--precision-dot) 1px, transparent 1px)",
+    backgroundSize: "20px 20px",
+  },
+  proposals: { display: "flex", flexDirection: "column", alignItems: "center", gap: 12, marginBlockEnd: 24 },
+  chartEmpty: { margin: 0, textAlign: "center", color: "var(--precision-text3)" },
+  roots: {
+    display: "flex",
+    width: "max-content",
+    minWidth: "100%",
+    justifyContent: "center",
+    gap: 28,
+    margin: 0,
+    padding: 0,
+  },
+  legend: {
+    display: "flex",
+    flexShrink: 0,
+    flexWrap: "wrap",
+    gap: 16,
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+    paddingInline: 18,
+    paddingBlock: 8,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  legendItem: { display: "flex", alignItems: "center", gap: 6 },
+});
 
 /** Every list of pins on screen follows a change, the sidebar too. */
 const pinListeners = new Set<(key: string) => void>();
@@ -95,9 +286,9 @@ function ProposalCard({ proposal, all }: { proposal: ProposalView; all: Employee
     }
   };
   return (
-    <article className="flex max-w-[720px] flex-col gap-2 rounded-[10px] border border-acc-line bg-panel px-[18px] py-4">
-      <p className={EYEBROW}>{isInstructions ? "INSTRUCTIONS PROPOSED" : "COLLEAGUE PROPOSED"} · WAITING FOR YOU</p>
-      <h2 className="m-0 text-[15px] font-semibold">
+    <article {...stylex.props(styles.proposal)}>
+      <Eyebrow>{isInstructions ? "INSTRUCTIONS PROPOSED" : "COLLEAGUE PROPOSED"} · WAITING FOR YOU</Eyebrow>
+      <h2 {...stylex.props(styles.proposalTitle)}>
         {isInstructions
           ? self
             ? `${by} proposes new instructions for itself`
@@ -105,7 +296,7 @@ function ProposalCard({ proposal, all }: { proposal: ProposalView; all: Employee
           : `${by} proposes ${proposal.name}`}
       </h2>
       {isInstructions ? null : (
-        <p className="m-0 text-text2">
+        <p {...stylex.props(styles.secondary)}>
           {[proposal.title, proposal.role, proposal.reports_to_name ? `reports to ${proposal.reports_to_name}` : null]
             .filter(Boolean)
             .join(" · ")}
@@ -113,17 +304,20 @@ function ProposalCard({ proposal, all }: { proposal: ProposalView; all: Employee
       )}
       {proposal.reason ? (
         <>
-          <p className={EYEBROW}>WHY</p>
-          <p className="m-0 leading-[1.5] text-text2">{proposal.reason}</p>
+          <Eyebrow>WHY</Eyebrow>
+          <p {...stylex.props(styles.secondary)}>{proposal.reason}</p>
         </>
       ) : null}
       {isInstructions ? (
         <>
-          <p className={EYEBROW}>CHANGE · NOW → PROPOSED</p>
-          <pre className="m-0 max-h-[240px] overflow-auto rounded-[6px] border border-line bg-sunk p-[10px] font-mono text-[12px] leading-[17px] whitespace-pre-wrap">
+          <Eyebrow>CHANGE · NOW → PROPOSED</Eyebrow>
+          <pre {...stylex.props(styles.diff)}>
             {lineDiff(proposal.current_instructions ?? "", proposal.instructions).map((l, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a diff is drawn whole.
-              <div key={i} className={l.mark === "+" ? "text-acc-text" : l.mark === "-" ? "text-red" : "text-text2"}>
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: a diff is drawn whole.
+                key={i}
+                {...stylex.props(l.mark === "+" ? styles.added : l.mark === "-" ? styles.removed : styles.same)}
+              >
                 {l.mark} {l.line}
               </div>
             ))}
@@ -131,77 +325,67 @@ function ProposalCard({ proposal, all }: { proposal: ProposalView; all: Employee
         </>
       ) : (
         <>
-          <p className={EYEBROW}>INSTRUCTIONS</p>
-          <p className="m-0 line-clamp-4 leading-[1.5] whitespace-pre-wrap text-text2">{proposal.instructions}</p>
+          <Eyebrow>INSTRUCTIONS</Eyebrow>
+          <p {...stylex.props(styles.secondary, styles.clamp)}>{proposal.instructions}</p>
         </>
       )}
       {stale ? (
-        <p role="alert" className="m-0 text-red">
+        <Problem>
           {target}'s instructions changed since this was proposed (version {proposal.base_version} →{" "}
           {proposal.current_version}), so it can't be approved. Decline it; the proposer can propose again on the new
           text.
-        </p>
+        </Problem>
       ) : null}
-      {problem ? (
-        <p role="alert" className="m-0 text-red">
-          {problem}
-        </p>
-      ) : null}
-      <div className="flex justify-end gap-2">
-        <Button className={SMALL} disabled={busy} onClick={() => void decide(false)}>
-          Decline
-        </Button>
+      {problem ? <Problem>{problem}</Problem> : null}
+      <div {...stylex.props(styles.buttons)}>
+        <Button size="sm" label="Decline" isDisabled={busy} onClick={() => void decide(false)} />
         {isInstructions && !stale ? (
-          <Button className={SMALL} disabled={busy} onClick={() => setEditing(true)}>
-            Edit and approve…
-          </Button>
+          <Button size="sm" label="Edit and approve…" isDisabled={busy} onClick={() => setEditing(true)} />
         ) : null}
         {stale ? null : (
-          <Button kind="primary" className={SMALL} disabled={busy} onClick={() => void decide(true)}>
-            Approve
-          </Button>
+          <Button size="sm" variant="primary" label="Approve" isDisabled={busy} onClick={() => void decide(true)} />
         )}
       </div>
       {editing ? (
-        <Dialog open onClose={() => setEditing(false)} title="Edit and approve instructions" width={620}>
-          <div className="flex flex-col gap-2 p-4">
-            <p className="m-0 text-[15px] font-semibold">Edit and approve instructions</p>
-            <label className="flex flex-col gap-1 text-[12px] text-text3">
-              Instructions
-              <textarea
-                data-autofocus
-                rows={12}
-                className={AREA}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
+        <FormDialog
+          title="Edit and approve instructions"
+          width={620}
+          onClose={() => setEditing(false)}
+          footer={
+            <>
+              <Button label="Cancel" onClick={() => setEditing(false)} />
+              <Button
+                variant="primary"
+                label="Approve these"
+                isDisabled={busy || text.trim() === ""}
+                onClick={() => void decide(true, text)}
               />
-            </label>
-            <p className="m-0 text-[12px] text-text3">
-              This text replaces the employee's instructions as a new version; the proposer is told it was edited.
-            </p>
-            {text.trim() === "" ? (
-              <p className="m-0 text-amber">Write the instructions to approve, or decline the proposal instead.</p>
-            ) : null}
-          </div>
-          <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-            <Button onClick={() => setEditing(false)}>Cancel</Button>
-            <Button kind="primary" disabled={busy || text.trim() === ""} onClick={() => void decide(true, text)}>
-              Approve these
-            </Button>
-          </div>
-        </Dialog>
+            </>
+          }
+        >
+          <TextArea hasAutoFocus label="Instructions" rows={12} value={text} onChange={setText} />
+          <Hint>
+            This text replaces the employee's instructions as a new version; the proposer is told it was edited.
+          </Hint>
+          {text.trim() === "" ? (
+            <p {...stylex.props(styles.warning)}>Write the instructions to approve, or decline the proposal instead.</p>
+          ) : null}
+        </FormDialog>
       ) : null}
     </article>
   );
 }
 
-export function employeeState(e: EmployeeSummary): { label: string; color: string; dot: string } {
-  if (e.status === "paused") return { label: "Paused", color: "text-text3", dot: "bg-text3" };
-  if (e.working) return { label: "Working", color: "text-acc-text", dot: "bg-acc-text" };
-  return { label: "Available", color: "text-text2", dot: "bg-text3" };
-}
+const STATE_TEXT = "var(--color-text-secondary)";
+const STATE_DIM = "var(--precision-text3)";
+const STATE_ON = "var(--color-text-accent)";
 
-const GRID = "grid grid-cols-[minmax(200px,1.4fr)_150px_minmax(140px,1fr)_90px] items-center gap-3 px-[18px]";
+/** The colors are CSS values, since they are applied inline per employee. */
+export function employeeState(e: EmployeeSummary): { label: string; color: string; dot: string } {
+  if (e.status === "paused") return { label: "Paused", color: STATE_DIM, dot: STATE_DIM };
+  if (e.working) return { label: "Working", color: STATE_ON, dot: STATE_ON };
+  return { label: "Available", color: STATE_TEXT, dot: STATE_DIM };
+}
 
 export function EmployeesScreen() {
   const { hostName } = useLinkState();
@@ -240,99 +424,106 @@ export function EmployeesScreen() {
     selected !== null,
   );
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <Page>
       <PageHead title="Employees" tabs={<EmployeesTabs />}>
-        <input
-          aria-label="Search employees"
+        <TextInput
+          label="Search employees"
+          isLabelHidden
+          size="sm"
+          width={260}
           placeholder="Search employees by name, role or title"
-          className={`${FIELD} !h-7 !w-[260px]`}
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={setQuery}
         />
-        <Button kind="primary" className={SMALL} onClick={() => setAdding(true)}>
-          Add employee
-        </Button>
+        <Button size="sm" variant="primary" label="Add employee" onClick={() => setAdding(true)} />
       </PageHead>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {employees.data && all.length === 0 ? <p className="m-0 p-6 text-text3">No employees yet.</p> : null}
-        {all.length > 0 && flat.length === 0 ? <p className="m-0 p-6 text-text3">Nobody matches.</p> : null}
+      <div {...stylex.props(styles.scroll)}>
+        {employees.data && all.length === 0 ? <p {...stylex.props(styles.note)}>No employees yet.</p> : null}
+        {all.length > 0 && flat.length === 0 ? <p {...stylex.props(styles.note)}>Nobody matches.</p> : null}
         {flat.length > 0 ? (
-          <div className="min-w-[560px]">
-            <div className={`${GRID} h-8 border-b border-line2 text-[12px] text-text3`}>
-              <span>Name</span>
-              <span>Status</span>
-              <span>Working on</span>
-              <span>Guidelines</span>
-            </div>
+          <Table density="compact" hasHover xstyle={styles.table}>
+            <TableHeader>
+              <TableRow isHeaderRow>
+                <TableHeaderCell xstyle={styles.headCell}>Name</TableHeaderCell>
+                <TableHeaderCell xstyle={[styles.headCell, styles.statusColumn]}>Status</TableHeaderCell>
+                <TableHeaderCell xstyle={styles.headCell}>Working on</TableHeaderCell>
+                <TableHeaderCell xstyle={[styles.headCell, styles.guidelinesColumn]}>Guidelines</TableHeaderCell>
+              </TableRow>
+            </TableHeader>
             {groups.map((g) => (
-              <section key={g.label} aria-label={g.label}>
-                <p className="m-0 flex h-[30px] items-center border-b border-line2 bg-sunk px-[18px] text-[12px] font-medium text-text2">
-                  {g.label} · {g.list.length}
-                </p>
+              <TableBody key={g.label} aria-label={g.label}>
+                <TableRow>
+                  <TableCell colSpan={4} xstyle={styles.groupCell}>
+                    {g.label} · {g.list.length}
+                  </TableCell>
+                </TableRow>
                 {g.list.map((e) => {
                   const s = employeeState(e);
                   const work = workOf(e.agents);
                   const set = sets.data?.get(`${e.id}|`);
                   const pinned = pins.includes(e.id);
+                  const isSelected = selected === e.id;
                   return (
-                    // biome-ignore lint/a11y/noStaticElementInteractions: the name is the link; the row only selects.
-                    <div
+                    <TableRow
                       key={e.id}
                       onClick={() => setSelected(e.id)}
-                      onKeyDown={undefined}
-                      className={`${GRID} group min-h-[42px] border-b border-line2 hover:bg-sel ${selected === e.id ? "bg-sel shadow-[inset_2px_0_0_var(--acc-text)]" : ""}`}
+                      {...stylex.props(stylex.defaultMarker(), styles.row, isSelected && styles.selected)}
                     >
-                      <span className="flex min-w-0 items-center gap-[10px]">
-                        <Mark letter={initial(e.name)} color={markColor(e.id)} size={22} radius={6} />
-                        <Link
-                          to="/employees/$id"
-                          params={{ id: e.id }}
-                          className="min-w-0 truncate font-medium text-text no-underline hover:underline"
-                        >
-                          {e.name}
-                        </Link>
-                        <span className="min-w-0 truncate text-[12px] text-text3">{position(e)}</span>
-                        <button
-                          type="button"
-                          aria-label={pinned ? `Unpin ${e.name}` : `Pin ${e.name}`}
-                          aria-pressed={pinned}
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            if (!canPin(pins, e.id)) return toast("Only 5 employees can be pinned. Unpin one first.");
-                            setPins(togglePin(pins, e.id));
-                          }}
-                          className={`ml-auto cursor-pointer border-0 bg-transparent p-0 text-[12px] hover:text-text focus-visible:opacity-100 group-hover:opacity-100 ${pinned ? "text-acc-text" : "text-text3 opacity-0"}`}
-                        >
-                          {pinned ? "★" : "☆"}
-                        </button>
-                      </span>
-                      <span className={`flex items-center gap-2 text-[12px] ${s.color}`}>
-                        <span className={`size-[6px] rounded-full ${s.dot}`} />
-                        {s.label}
-                      </span>
-                      <span className="truncate text-[12px] text-text2">{work?.title ?? ""}</span>
-                      <span className="text-[12px] text-text3">
-                        {set ? `${set.guidelines.length} · ${set.total_chars}` : ""}
-                      </span>
-                    </div>
+                      <TableCell xstyle={isSelected ? styles.selectedEdge : undefined}>
+                        <span {...stylex.props(styles.nameCell)}>
+                          <Mark letter={initial(e.name)} color={markColor(e.id)} size={22} radius={6} />
+                          <Link to="/employees/$id" params={{ id: e.id }} {...stylex.props(styles.name)}>
+                            {e.name}
+                          </Link>
+                          <span {...stylex.props(styles.position)}>{position(e)}</span>
+                          <button
+                            type="button"
+                            aria-label={pinned ? `Unpin ${e.name}` : `Pin ${e.name}`}
+                            aria-pressed={pinned}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              if (!canPin(pins, e.id)) return toast("Only 5 employees can be pinned. Unpin one first.");
+                              setPins(togglePin(pins, e.id));
+                            }}
+                            {...stylex.props(styles.pin, pinned && styles.pinned)}
+                          >
+                            {pinned ? "★" : "☆"}
+                          </button>
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span {...stylex.props(styles.status)} style={{ color: s.color }}>
+                          <span {...stylex.props(styles.dot)} style={{ backgroundColor: s.dot }} />
+                          {s.label}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span {...stylex.props(styles.work)}>{work?.title ?? ""}</span>
+                      </TableCell>
+                      <TableCell>
+                        <span {...stylex.props(styles.quiet)}>
+                          {set ? `${set.guidelines.length} · ${set.total_chars}` : ""}
+                        </span>
+                      </TableCell>
+                    </TableRow>
                   );
                 })}
-              </section>
+              </TableBody>
             ))}
-          </div>
+          </Table>
         ) : null}
       </div>
       {adding ? <EmployeeDialog employee={null} onClose={() => setAdding(false)} /> : null}
-    </div>
+    </Page>
   );
 }
 
 type OrgState = "working" | "you" | "others" | "available";
 const ORG_DOT: Record<OrgState, string> = {
-  working: "bg-acc-text",
-  you: "bg-amber",
-  others: "bg-text2",
-  available: "bg-line2",
+  working: "var(--color-text-accent)",
+  you: "var(--color-text-warning)",
+  others: "var(--color-text-secondary)",
+  available: "var(--precision-line2)",
 };
 const ORG_LABEL: Record<OrgState, string> = {
   working: "Working",
@@ -361,17 +552,18 @@ function OrgCard({ node, tasks }: { node: OrgNode; tasks: TaskView[] }) {
       to="/employees/$id"
       params={{ id: e.id }}
       title={`${e.name} · ${position(e)}`}
-      className={`flex w-[220px] items-center gap-[10px] rounded-[8px] border bg-panel px-3 py-[10px] text-text no-underline shadow-card hover:bg-sel ${working ? "border-acc-line" : "border-line"} ${e.status === "paused" ? "opacity-60" : ""}`}
+      {...stylex.props(styles.orgCard, working && styles.orgWorking, e.status === "paused" && styles.orgPaused)}
     >
       <Mark letter={initial(e.name)} color={markColor(e.id)} size={26} radius={7} />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{e.name}</span>
-        <span className="block truncate text-[12px] text-text3">{e.status === "paused" ? "Paused" : position(e)}</span>
+      <span {...stylex.props(styles.orgText)}>
+        <span {...stylex.props(styles.orgName)}>{e.name}</span>
+        <span {...stylex.props(styles.orgRole)}>{e.status === "paused" ? "Paused" : position(e)}</span>
       </span>
       <span
         role="img"
         aria-label={ORG_LABEL[state]}
-        className={`size-[7px] flex-none rounded-full ${ORG_DOT[state]}`}
+        {...stylex.props(styles.orgDot)}
+        style={{ backgroundColor: ORG_DOT[state] }}
       />
     </Link>
   );
@@ -380,19 +572,24 @@ function OrgCard({ node, tasks }: { node: OrgNode; tasks: TaskView[] }) {
 /** A card with its reports hanging from a bar; the bar spans from the first child's middle to the last's. */
 function OrgBranch({ node, tasks }: { node: OrgNode; tasks: TaskView[] }) {
   return (
-    <li className="flex list-none flex-col items-center">
+    <li {...stylex.props(styles.branch)}>
       <OrgCard node={node} tasks={tasks} />
       {node.children.length > 0 ? (
         <>
-          <span className="h-[22px] w-px bg-(--connector)" />
-          <ul className="relative m-0 flex gap-4 p-0">
+          <span {...stylex.props(styles.stem)} />
+          <ul {...stylex.props(styles.children)}>
             {node.children.map((c, i) => (
-              <li key={c.employee.id} className="relative flex list-none flex-col items-center">
-                <span
-                  className={`absolute top-0 h-px bg-(--connector) ${node.children.length === 1 ? "hidden" : i === 0 ? "right-[-8px] left-1/2" : i === node.children.length - 1 ? "right-1/2 left-[-8px]" : "right-[-8px] left-[-8px]"}`}
-                />
-                <span className="h-[22px] w-px bg-(--connector)" />
-                <ul className="m-0 p-0">
+              <li key={c.employee.id} {...stylex.props(styles.child)}>
+                {node.children.length === 1 ? null : (
+                  <span
+                    {...stylex.props(
+                      styles.bar,
+                      i === 0 ? styles.barFirst : i === node.children.length - 1 ? styles.barLast : styles.barMiddle,
+                    )}
+                  />
+                )}
+                <span {...stylex.props(styles.stem)} />
+                <ul {...stylex.props(styles.bare)}>
                   <OrgBranch node={c} tasks={tasks} />
                 </ul>
               </li>
@@ -413,36 +610,36 @@ export function OrgChartScreen() {
   const tree = useMemo(() => orgTree(all), [all]);
   const pending = (proposals.data ?? []).filter((p) => p.status === "pending");
   const dot = (color: string, label: string) => (
-    <span key={label} className="flex items-center gap-[6px]">
-      <span className={`size-[7px] rounded-full ${color}`} />
+    <span key={label} {...stylex.props(styles.legendItem)}>
+      <span {...stylex.props(styles.orgDot)} style={{ backgroundColor: color }} />
       {label}
     </span>
   );
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <Page>
       <PageHead title="Employees" tabs={<EmployeesTabs />}>
-        <span className="text-[12px] text-text3">
+        <span {...stylex.props(styles.quiet)}>
           Who reports to whom across the company. Change it with Edit (F2) on an employee: Reports to.
         </span>
       </PageHead>
-      <div className="dot-grid min-h-0 flex-1 overflow-auto px-6 py-9">
+      <div {...stylex.props(styles.chart)}>
         {pending.length > 0 ? (
-          <div className="mb-6 flex flex-col items-center gap-3">
+          <div {...stylex.props(styles.proposals)}>
             {pending.map((p) => (
               <ProposalCard key={p.id} proposal={p} all={all} />
             ))}
           </div>
         ) : null}
-        {employees.data && all.length === 0 ? <p className="m-0 text-center text-text3">No employees yet.</p> : null}
-        <ul className="m-0 flex w-max min-w-full justify-center gap-7 p-0">
+        {employees.data && all.length === 0 ? <p {...stylex.props(styles.chartEmpty)}>No employees yet.</p> : null}
+        <ul {...stylex.props(styles.roots)}>
           {tree.map((n) => (
             <OrgBranch key={n.employee.id} node={n} tasks={open} />
           ))}
         </ul>
       </div>
-      <div className="flex flex-none flex-wrap gap-4 border-t border-line2 px-[18px] py-2 text-[12px] text-text3">
+      <div {...stylex.props(styles.legend)}>
         {(["working", "you", "others", "available"] as const).map((k) => dot(ORG_DOT[k], ORG_LABEL[k]))}
       </div>
-    </div>
+    </Page>
   );
 }

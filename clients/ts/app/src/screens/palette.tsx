@@ -1,20 +1,100 @@
+import {
+  CommandPalette,
+  CommandPaletteFooter,
+  CommandPaletteInput,
+  useCommandPaletteContext,
+} from "@astryxdesign/core/CommandPalette";
+import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
-import { Command } from "cmdk";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useChannels, useEmployees, useGuidelines, useProjects, useTickets } from "../data";
 import { hidden } from "../hidden";
 import { keysFor, SHORTCUTS, showChord } from "../keys/keymap";
 import { isMac, useKeyContext, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { SearchIcon } from "../ui/icons";
-import { initial, Kbd, Mark, markColor } from "../ui/kit";
-import { Dialog } from "../ui/overlay";
+import { KeyHint } from "../ui/key-hint";
+import { initial, Mark, markColor } from "../ui/marks";
 import { bareName } from "./chat-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
 import { filterGroups, type PaletteGroup } from "./palette-logic";
 
 // The table's label says what the key does on every page; here it is one command.
 const PALETTE_LABEL: Record<string, string> = { NewItem: "Give work" };
+
+const styles = stylex.create({
+  label: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 },
+  detail: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "var(--precision-text3)",
+  },
+  keys: { marginInlineStart: "auto", flexShrink: 0, fontSize: 11, color: "var(--color-text-secondary)" },
+  hint: { display: "flex", alignItems: "center", gap: 4 },
+});
+
+interface EntryData {
+  group: string;
+  detail: string;
+  mark: string;
+  keys: string;
+}
+
+interface Entry extends SearchableItem<EntryData> {
+  auxiliaryData: EntryData;
+}
+
+function entries(groups: PaletteGroup[]): Entry[] {
+  return groups.flatMap((group) =>
+    group.items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      auxiliaryData: { group: group.label, detail: item.detail, mark: item.mark, keys: item.keys ?? "" },
+    })),
+  );
+}
+
+function renderEntry(item: Entry) {
+  const { detail, mark, keys } = item.auxiliaryData;
+  return (
+    <>
+      {mark ? (
+        <Mark letter={item.label.startsWith("#") ? "#" : initial(item.label)} color={markColor(mark)} size={20} />
+      ) : (
+        <Mark letter="→" color="var(--color-accent)" size={20} />
+      )}
+      <span {...stylex.props(styles.label)}>{item.label}</span>
+      {detail ? <span {...stylex.props(styles.detail)}>{detail}</span> : null}
+      {keys ? <span {...stylex.props(styles.keys)}>{keys}</span> : null}
+    </>
+  );
+}
+
+/** The first row is what Enter takes; what loads while the palette is open comes into the list. */
+function PaletteInput({ groups }: { groups: PaletteGroup[] }) {
+  const context = useCommandPaletteContext();
+  const results = context?.searchResults;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new result set moves the highlight.
+  useEffect(() => {
+    if (results && results.length > 0) context?.setHighlightedIndex(0);
+  }, [results]);
+  const loaded = useRef(groups);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only new data searches again.
+  useEffect(() => {
+    if (loaded.current === groups) return;
+    loaded.current = groups;
+    context?.setSearch(context.search);
+  }, [groups]);
+  return (
+    <CommandPaletteInput
+      label="Command palette"
+      placeholder="Search a project, employee or command"
+      endContent={<KeyHint>esc</KeyHint>}
+    />
+  );
+}
 
 const COLUMN: Record<string, string> = {
   backlog: "Backlog",
@@ -31,7 +111,6 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const keys = useKeys();
   const { kind } = usePlatform();
   const navigate = useNavigate();
-  const [query, setQuery] = useState("");
   const projects = useProjects();
   const { openProjectWindow } = usePlatform();
   const employees = useEmployees();
@@ -147,75 +226,51 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     navigate,
   ]);
 
-  const shown = useMemo(() => filterGroups(query, groups), [query, groups]);
+  const itemsById = useMemo(() => new Map(groups.flatMap((g) => g.items.map((i) => [i.id, i]))), [groups]);
+  // Never the whole list of tickets: each search asks filterGroups, which caps every group.
+  const source = useMemo<SearchSource<Entry>>(
+    () => ({
+      search: (query) => entries(filterGroups(query, groups)),
+      bootstrap: () => entries(filterGroups("", groups)),
+    }),
+    [groups],
+  );
+  // Picking also closes the palette, afterwards; that must not close what the pick just opened.
+  const picked = useRef(false);
 
   return (
-    <Command shouldFilter={false} label="Command palette" className="flex min-h-0 flex-col">
-      <div className="flex h-[52px] flex-none items-center gap-[10px] border-b border-line2 px-4 text-text3">
-        <SearchIcon />
-        <Command.Input
-          data-autofocus
-          value={query}
-          onValueChange={setQuery}
-          aria-label="Search a project, employee or command"
-          placeholder="Search a project, employee or command"
-          className="min-w-0 flex-1 border-0 bg-transparent text-[15px] text-text outline-none placeholder:text-text3"
-        />
-        <Kbd>esc</Kbd>
-      </div>
-      <Command.List className="max-h-[400px] overflow-y-auto p-[6px]">
-        <Command.Empty className="p-4 text-text3">Nothing found.</Command.Empty>
-        {shown.map((group) => (
-          <Command.Group
-            key={group.label}
-            heading={group.label}
-            className="[&_[cmdk-group-heading]]:mx-[10px] [&_[cmdk-group-heading]]:mt-[6px] [&_[cmdk-group-heading]]:mb-1 [&_[cmdk-group-heading]]:text-[12px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-text3"
-          >
-            {group.items.map((item) => (
-              <Command.Item
-                key={item.id}
-                value={item.id}
-                onSelect={() => {
-                  onClose();
-                  item.run();
-                }}
-                className="flex h-9 cursor-pointer items-center gap-[10px] rounded-[7px] px-[10px] data-[selected=true]:bg-sel"
-              >
-                {item.mark ? (
-                  <Mark
-                    letter={item.label.startsWith("#") ? "#" : initial(item.label)}
-                    color={markColor(item.mark)}
-                    size={20}
-                  />
-                ) : (
-                  <Mark letter="→" color="var(--acc)" size={20} />
-                )}
-                <span className="min-w-0 truncate font-medium">{item.label}</span>
-                {item.detail ? <span className="min-w-0 truncate text-text3">{item.detail}</span> : null}
-                {item.keys ? <span className="ml-auto flex-none text-[11px] text-text2">{item.keys}</span> : null}
-              </Command.Item>
-            ))}
-          </Command.Group>
-        ))}
-      </Command.List>
-      <div className="flex h-9 flex-none items-center gap-[14px] border-t border-line2 px-4 text-[12px] text-text3">
-        <span>
-          <Kbd>↑↓</Kbd> select
-        </span>
-        <span>
-          <Kbd>↵</Kbd> open
-        </span>
-      </div>
-    </Command>
+    <CommandPalette
+      isOpen
+      onOpenChange={(open) => {
+        if (!open && !picked.current) onClose();
+      }}
+      searchSource={source}
+      renderItem={renderEntry}
+      onValueChange={(id) => {
+        picked.current = true;
+        onClose();
+        itemsById.get(id)?.run();
+      }}
+      input={<PaletteInput groups={groups} />}
+      emptySearchText="Nothing found."
+      footer={
+        <CommandPaletteFooter>
+          <span {...stylex.props(styles.hint)}>
+            <KeyHint>↑↓</KeyHint> select
+          </span>
+          <span {...stylex.props(styles.hint)}>
+            <KeyHint>↵</KeyHint> open
+          </span>
+        </CommandPaletteFooter>
+      }
+      // Forwarded to its Dialog: results that come and go must not make the palette jump around.
+      {...({ position: { top: "14vh" } } as object)}
+    />
   );
 }
 
 export function Palette() {
   const open = useOpenOverlay() === "palette";
   const { close } = overlays;
-  return (
-    <Dialog open={open} onClose={close} title="Command palette" top>
-      {open ? <PaletteBody onClose={close} /> : null}
-    </Dialog>
-  );
+  return open ? <PaletteBody onClose={close} /> : null;
 }

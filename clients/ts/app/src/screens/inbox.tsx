@@ -1,7 +1,14 @@
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Link } from "@astryxdesign/core/Link";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { ProtocolError } from "@aurelius/client";
 import type { ApprovalView, GuidelineProposalView, NotificationView, ProposalView, TaskView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
@@ -16,7 +23,7 @@ import {
 } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { StatusGlyph } from "../ui/icons";
-import { Button, Kbd, Segments } from "../ui/kit";
+import { KeyHint } from "../ui/key-hint";
 import { toast } from "../ui/toast";
 import { ApprovalCard, PLAN_TOOL, QUESTION_TOOL } from "./approval-card";
 import { taskCounts } from "./board-logic";
@@ -33,19 +40,181 @@ import {
 } from "./inbox-logic";
 import { useFollowLink } from "./links";
 import { messageLink } from "./links-logic";
-import { Confirm } from "./org-kit";
+import { Confirm, Loading, Page, PageHead, Problem } from "./org-kit";
 import { lastFailure } from "./run-logic";
 import { useRetryAnswer } from "./run-tools";
 import { TicketDecision } from "./ticket-panel";
 import { NoConnectionNote, useNoConnection, useTicketNeeds } from "./tickets-kit";
 
+const enter = stylex.keyframes({
+  from: { opacity: 0, transform: "translateY(4px)" },
+});
+
+const styles = stylex.create({
+  actions: { display: "flex", flexShrink: 0, gap: 6 },
+  body: { display: "flex", minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%" },
+  items: {
+    width: "clamp(280px, 36%, 400px)",
+    minWidth: 0,
+    flexShrink: 0,
+    borderRightWidth: 1,
+    borderRightStyle: "solid",
+    borderRightColor: "var(--color-border)",
+  },
+  message: { padding: 18 },
+  detail: { display: "flex", minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%", flexDirection: "column" },
+  detailHead: {
+    display: "flex",
+    height: 44,
+    flexShrink: 0,
+    alignItems: "center",
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--color-border)",
+    paddingInline: 24,
+    color: "var(--precision-text3)",
+  },
+  detailTitle: {
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--color-text-primary)",
+  },
+  position: {
+    marginInlineStart: "auto",
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    whiteSpace: "nowrap",
+  },
+  detailScroll: { minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%", overflowY: "auto" },
+  scroller: { height: "100%", overflowY: "auto" },
+  track: { position: "relative" },
+  groupHead: {
+    position: "absolute",
+    insetInline: 0,
+    top: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    borderBlockWidth: 1,
+    borderBlockStyle: "solid",
+    borderBlockColor: "var(--precision-line2)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingInline: 18,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--color-text-secondary)",
+    listStyleType: "none",
+  },
+  groupDot: { width: 7, height: 7, borderRadius: "50%" },
+  groupCount: { color: "var(--precision-text3)" },
+  row: { position: "absolute", insetInline: 6, top: 2, boxSizing: "border-box", height: 54, borderRadius: 6 },
+  age: { fontSize: 12, color: "var(--precision-text3)" },
+  page: {
+    display: "flex",
+    maxWidth: 760,
+    flexDirection: "column",
+    gap: 20,
+    paddingInline: { default: 24, "@media (min-width: 1280px)": 40 },
+    paddingBlock: 32,
+    animationName: enter,
+    animationDuration: "160ms",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+  },
+  pageWide: { gap: 24 },
+  waitingTag: {
+    display: "inline-flex",
+    height: 22,
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border-warning)",
+    backgroundColor: "var(--color-warning-muted)",
+    paddingInline: 9,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--color-text-warning)",
+  },
+  sentence: {
+    marginTop: 14,
+    marginBottom: 0,
+    fontSize: 22,
+    lineHeight: 1.3,
+    fontWeight: 600,
+    letterSpacing: "-0.015em",
+  },
+  rowTitle: { margin: 0, fontSize: 22, lineHeight: 1.3, fontWeight: 600, letterSpacing: "-0.015em" },
+  description: {
+    marginTop: 8,
+    marginBottom: 0,
+    fontSize: 14,
+    lineHeight: 1.6,
+    color: "var(--color-text-secondary)",
+  },
+  meta: { margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--color-text-secondary)" },
+  command: {
+    overflow: "hidden",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+  },
+  commandHead: {
+    display: "flex",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--precision-line2)",
+    paddingInline: 12,
+    paddingBlock: 8,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  effect: { color: "var(--color-text-warning)" },
+  // Stays one block, and selectable: the words the person is deciding on.
+  pre: {
+    margin: 0,
+    maxHeight: 320,
+    overflow: "auto",
+    padding: 14,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 13,
+    whiteSpace: "pre-wrap",
+    userSelect: "text",
+  },
+  reasons: { margin: 0, listStyleType: "none", padding: 0, color: "var(--color-text-secondary)" },
+  buttons: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  openRun: { order: 1, marginInlineStart: "auto", alignSelf: "center", fontSize: 12 },
+  facts: {
+    margin: 0,
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--precision-line2)",
+    paddingTop: 16,
+  },
+  fact: { display: "grid", minHeight: 30, gridTemplateColumns: "110px minmax(0,1fr)", alignItems: "center" },
+  factKey: { color: "var(--precision-text3)" },
+  factValue: { margin: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  prose: { display: "flex", flexDirection: "column", gap: 6 },
+  proseTitle: { fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
+  proseText: { margin: 0, fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap" },
+  frameHead: { display: "flex", flexDirection: "column", gap: 8 },
+});
+
 const TONES: Record<InboxTone, string> = {
-  amber: "var(--amber)",
-  violet: "var(--violet)",
-  blue: "var(--blue)",
-  green: "var(--acc-text)",
-  muted: "var(--text3)",
-  red: "var(--red)",
+  amber: "var(--color-text-warning)",
+  violet: "var(--precision-violet)",
+  blue: "var(--color-text-info)",
+  green: "var(--color-text-accent)",
+  muted: "var(--precision-text3)",
+  red: "var(--color-text-error)",
 };
 
 const FILTERS: { key: InboxFilter; label: string }[] = [
@@ -98,7 +267,7 @@ export function useInbox() {
   return { groups, loading, error };
 }
 
-type ListItem = { kind: "header"; group: InboxGroup } | { kind: "row"; row: InboxRow };
+type Entry = { kind: "header"; group: InboxGroup } | { kind: "row"; row: InboxRow };
 
 const HEADER_HEIGHT = 32;
 const ROW_HEIGHT = 58;
@@ -113,11 +282,11 @@ function InboxList({
   onSelect: (id: string) => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
-  const items = useMemo<ListItem[]>(
+  const items = useMemo<Entry[]>(
     () =>
       groups.flatMap((group) => [
-        { kind: "header", group } as ListItem,
-        ...group.rows.map((row): ListItem => ({ kind: "row", row })),
+        { kind: "header", group } as Entry,
+        ...group.rows.map((row): Entry => ({ kind: "row", row })),
       ]),
     [groups],
   );
@@ -136,45 +305,36 @@ function InboxList({
   }, [selectedIndex]);
   const now = Date.now();
   return (
-    <div ref={scroller} className="h-full overflow-y-auto">
-      <div className="relative" style={{ height: virtual.getTotalSize() }}>
+    <div ref={scroller} {...stylex.props(styles.scroller)}>
+      <List density="compact" xstyle={styles.track} style={{ height: virtual.getTotalSize() }}>
         {virtual.getVirtualItems().map((v) => {
-          const item = items[v.index] as ListItem;
+          const item = items[v.index] as Entry;
           const place = { transform: `translateY(${v.start}px)`, height: v.size };
           if (item.kind === "header") {
             return (
-              <div
-                key={item.group.key}
-                style={place}
-                className="absolute inset-x-0 top-0 flex items-center gap-2 border-y border-line2 bg-sunk px-[18px] text-[12px] font-medium text-text2"
-              >
-                <span className="size-[7px] rounded-full" style={{ background: TONES[item.group.tone] }} />
+              <li key={item.group.key} style={place} {...stylex.props(styles.groupHead)}>
+                <span {...stylex.props(styles.groupDot)} style={{ background: TONES[item.group.tone] }} />
                 {item.group.label}
-                <span className="text-text3">{item.group.rows.length}</span>
-              </div>
+                <span {...stylex.props(styles.groupCount)}>{item.group.rows.length}</span>
+              </li>
             );
           }
           const { row } = item;
-          const on = row.id === selected;
           return (
-            <div key={row.id} style={place} className="absolute inset-x-0 top-0 flex items-center px-[6px]">
-              <button
-                type="button"
-                onClick={() => onSelect(row.id)}
-                aria-current={on}
-                className={`flex h-[54px] w-full cursor-pointer items-center gap-[10px] rounded-[6px] py-[10px] pr-[14px] pl-3 text-left text-text ${on ? "bg-sel shadow-[inset_2px_0_0_var(--acc-text)]" : "hover:bg-sel"}`}
-              >
-                <StatusGlyph glyph={row.glyph} color={TONES[row.tone]} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{row.title}</span>
-                  <span className="mt-[2px] block truncate text-[12px] text-text3">{row.meta}</span>
-                </span>
-                <span className="text-[12px] text-text3">{age(row.atMs, now)}</span>
-              </button>
-            </div>
+            <ListItem
+              key={row.id}
+              xstyle={styles.row}
+              style={{ transform: `translateY(${v.start}px)` }}
+              label={row.title}
+              description={row.meta}
+              startContent={<StatusGlyph glyph={row.glyph} color={TONES[row.tone]} />}
+              endContent={<span {...stylex.props(styles.age)}>{age(row.atMs, now)}</span>}
+              isSelected={row.id === selected}
+              onClick={() => onSelect(row.id)}
+            />
           );
         })}
-      </div>
+      </List>
     </div>
   );
 }
@@ -183,7 +343,7 @@ function ApprovalDetail({ approval }: { approval: ApprovalView }) {
   // A question and a plan need their answer, not Allow or Deny.
   if (approval.tool === QUESTION_TOOL || approval.tool === PLAN_TOOL) {
     return (
-      <div className="enter flex max-w-[760px] flex-col gap-5 px-6 py-8 xl:px-10" key={approval.id}>
+      <div {...stylex.props(styles.page)} key={approval.id}>
         <ApprovalCard approval={approval} keyed />
       </div>
     );
@@ -224,71 +384,57 @@ function ActionDetail({ approval }: { approval: ApprovalView }) {
   useAction("RejectApproval", () => void decide(false));
 
   return (
-    <div className="enter flex max-w-[760px] flex-col gap-6 px-6 py-8 xl:px-10" key={approval.id}>
+    <div {...stylex.props(styles.page, styles.pageWide)} key={approval.id}>
       <div>
-        <div className="inline-flex h-[22px] items-center gap-[6px] rounded-[11px] border border-amber-line bg-amber-soft px-[9px] text-[12px] font-medium text-amber">
-          Waiting on you · run paused
-        </div>
-        <h2 className="mt-[14px] mb-0 text-[22px] leading-[1.3] font-semibold tracking-[-0.015em]">
+        <div {...stylex.props(styles.waitingTag)}>Waiting on you · run paused</div>
+        <Heading level={2} xstyle={styles.sentence}>
           {approvalSentence(approval)}
-        </h2>
-        {action.description ? (
-          <p className="mt-2 mb-0 text-[14px] leading-[1.6] text-text2">{action.description}</p>
-        ) : null}
+        </Heading>
+        {action.description ? <p {...stylex.props(styles.description)}>{action.description}</p> : null}
       </div>
-      <div className="overflow-hidden rounded-[8px] border border-line bg-sunk">
-        <div className="flex justify-between border-b border-line2 px-3 py-2 text-[12px] text-text3">
+      <div {...stylex.props(styles.command)}>
+        <div {...stylex.props(styles.commandHead)}>
           <span>{action.label}</span>
-          <span className="text-amber">{approval.effect}</span>
+          <span {...stylex.props(styles.effect)}>{approval.effect}</span>
         </div>
-        <pre className="m-0 max-h-[320px] overflow-auto p-[14px] font-mono text-[13px] whitespace-pre-wrap">
-          {action.body}
-        </pre>
+        <pre {...stylex.props(styles.pre)}>{action.body}</pre>
       </div>
       {approval.reasons.length > 0 ? (
-        <ul className="m-0 list-none p-0 text-text2">
+        <ul {...stylex.props(styles.reasons)}>
           {approval.reasons.map((reason) => (
             <li key={reason}>{reason}</li>
           ))}
         </ul>
       ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button kind="primary" disabled={busy} onClick={() => void decide(true)}>
-          Allow once <Kbd onAccent>↵</Kbd>
+      <div {...stylex.props(styles.buttons)}>
+        <Button variant="primary" label="Allow once" isDisabled={busy} onClick={() => void decide(true)}>
+          Allow once <KeyHint onAccent>↵</KeyHint>
         </Button>
         {approval.task_id ? (
-          <Link
-            to="/tasks/$taskId"
-            params={{ taskId: approval.task_id }}
-            className="order-last ml-auto self-center text-[12px] text-acc-text no-underline"
-          >
+          <Link href={`/tasks/${approval.task_id}`} xstyle={styles.openRun}>
             Open run →
           </Link>
         ) : null}
         {eligible ? (
-          <Button disabled={busy} onClick={() => void decide(true, true)}>
-            Always allow <Kbd>⇧↵</Kbd>
+          <Button label="Always allow" isDisabled={busy} onClick={() => void decide(true, true)}>
+            Always allow <KeyHint>⇧↵</KeyHint>
           </Button>
         ) : null}
-        <Button kind="danger" disabled={busy} onClick={() => void decide(false)}>
-          Deny <Kbd>D</Kbd>
+        <Button variant="destructive" label="Deny" isDisabled={busy} onClick={() => void decide(false)}>
+          Deny <KeyHint>D</KeyHint>
         </Button>
       </div>
-      {error ? (
-        <p role="alert" className="m-0 text-red">
-          {error}
-        </p>
-      ) : null}
-      <dl className="m-0 border-t border-line2 pt-4">
+      {error ? <Problem>{error}</Problem> : null}
+      <dl {...stylex.props(styles.facts)}>
         {[
           ["Agent", approval.requester],
           ["Tool", action.label],
           ["Runs on", approval.account],
           ...approval.resources.slice(0, 3).map((r): [string, string] => ["Resource", r]),
         ].map(([key, value]) => (
-          <div key={`${key}${value}`} className="grid min-h-[30px] grid-cols-[110px_minmax(0,1fr)] items-center">
-            <dt className="text-text3">{key}</dt>
-            <dd className="m-0 truncate">{value}</dd>
+          <div key={`${key}${value}`} {...stylex.props(styles.fact)}>
+            <dt {...stylex.props(styles.factKey)}>{key}</dt>
+            <dd {...stylex.props(styles.factValue)}>{value}</dd>
           </div>
         ))}
       </dl>
@@ -298,19 +444,21 @@ function ActionDetail({ approval }: { approval: ApprovalView }) {
 
 function Prose({ title, children }: { title: string; children: string }) {
   return (
-    <div className="flex flex-col gap-[6px]">
-      <span className="text-[12px] font-medium text-text3">{title}</span>
-      <p className="m-0 text-[14px] leading-[1.6] whitespace-pre-wrap">{children}</p>
+    <div {...stylex.props(styles.prose)}>
+      <span {...stylex.props(styles.proseTitle)}>{title}</span>
+      <p {...stylex.props(styles.proseText)}>{children}</p>
     </div>
   );
 }
 
 function DetailFrame({ row, children }: { row: InboxRow; children: ReactNode }) {
   return (
-    <div className="enter flex max-w-[760px] flex-col gap-5 px-6 py-8 xl:px-10" key={row.id}>
-      <div className="flex flex-col gap-2">
-        <h2 className="m-0 text-[22px] leading-[1.3] font-semibold tracking-[-0.015em]">{row.title}</h2>
-        <p className="m-0 text-[14px] leading-[1.6] text-text2">{row.meta}</p>
+    <div {...stylex.props(styles.page)} key={row.id}>
+      <div {...stylex.props(styles.frameHead)}>
+        <Heading level={2} xstyle={styles.rowTitle}>
+          {row.title}
+        </Heading>
+        <p {...stylex.props(styles.meta)}>{row.meta}</p>
       </div>
       {children}
     </div>
@@ -348,14 +496,18 @@ function NotificationDetail({ row, n }: { row: InboxRow; n: NotificationView }) 
       ) : n.reason ? (
         <Prose title="Why you see this">{reasonText(n.reason)}</Prose>
       ) : null}
-      <div className="flex flex-wrap gap-2">
+      <div {...stylex.props(styles.buttons)}>
         {n.ticket_id || n.task_id || n.conversation_id ? (
-          <Button kind="primary" onClick={open}>
-            {n.ticket_id ? "Open ticket" : n.task_id ? "Open task" : "Open chat"} <Kbd onAccent>↵</Kbd>
+          <Button
+            variant="primary"
+            label={n.ticket_id ? "Open ticket" : n.task_id ? "Open task" : "Open chat"}
+            onClick={open}
+          >
+            {n.ticket_id ? "Open ticket" : n.task_id ? "Open task" : "Open chat"} <KeyHint onAccent>↵</KeyHint>
           </Button>
         ) : null}
-        {n.read ? null : <Button onClick={() => void act("notification.mark_read")}>Mark read</Button>}
-        <Button onClick={() => void act("notification.dismiss")}>Dismiss</Button>
+        {n.read ? null : <Button label="Mark read" onClick={() => void act("notification.mark_read")} />}
+        <Button label="Dismiss" onClick={() => void act("notification.dismiss")} />
       </div>
     </DetailFrame>
   );
@@ -388,11 +540,11 @@ function TaskDetail({ row, task }: { row: InboxRow; task: TaskView }) {
       {failure ? <Prose title="Why it stopped">{failure}</Prose> : null}
       {failure && noConnection ? <NoConnectionNote /> : null}
       <Prose title="Goal">{task.goal}</Prose>
-      <div className="flex flex-wrap gap-2">
-        <Button kind="primary" onClick={open}>
-          Open run <Kbd onAccent>↵</Kbd>
+      <div {...stylex.props(styles.buttons)}>
+        <Button variant="primary" label="Open run" onClick={open}>
+          Open run <KeyHint onAccent>↵</KeyHint>
         </Button>
-        {failure ? <Button onClick={retry}>Try again</Button> : null}
+        {failure ? <Button label="Try again" onClick={retry} /> : null}
       </div>
     </DetailFrame>
   );
@@ -417,13 +569,9 @@ function ProposalDetail({ row, proposal }: { row: InboxRow; proposal: ProposalVi
     <DetailFrame row={row}>
       {proposal.reason ? <Prose title="Why">{proposal.reason}</Prose> : null}
       <Prose title="Instructions">{proposal.instructions}</Prose>
-      <div className="flex flex-wrap gap-2">
-        <Button kind="primary" onClick={() => void decide(true)}>
-          Approve
-        </Button>
-        <Button kind="danger" onClick={() => void decide(false)}>
-          Reject
-        </Button>
+      <div {...stylex.props(styles.buttons)}>
+        <Button variant="primary" label="Approve" onClick={() => void decide(true)} />
+        <Button variant="destructive" label="Reject" onClick={() => void decide(false)} />
       </div>
     </DetailFrame>
   );
@@ -454,21 +602,13 @@ function GuidelineDetail({ row, proposal }: { row: InboxRow; proposal: Guideline
   useAction("RejectApproval", () => void decide(false));
   return (
     <DetailFrame row={row}>
-      <div className="flex flex-wrap gap-2">
-        <Button kind="primary" onClick={() => void decide(true)}>
-          Approve
-        </Button>
-        <Link
-          to="/knowledge/guidelines/$id"
-          params={{ id: proposal.guideline_id ?? "new" }}
-          search={{ proposal: proposal.id }}
-          className="inline-flex h-8 items-center rounded-[6px] border border-btn-line bg-btn px-3 text-text no-underline hover:bg-sel"
-        >
-          Edit and approve…
-        </Link>
-        <Button kind="danger" onClick={() => void decide(false)}>
-          Reject
-        </Button>
+      <div {...stylex.props(styles.buttons)}>
+        <Button variant="primary" label="Approve" onClick={() => void decide(true)} />
+        <Button
+          label="Edit and approve…"
+          href={`/knowledge/guidelines/${proposal.guideline_id ?? "new"}?proposal=${proposal.id}`}
+        />
+        <Button variant="destructive" label="Reject" onClick={() => void decide(false)} />
       </div>
     </DetailFrame>
   );
@@ -511,53 +651,62 @@ export function InboxScreen() {
   };
 
   return (
-    <>
-      <header className="flex h-11 flex-none items-center gap-[10px] border-b border-line pr-3 pl-[18px]">
-        <h1 className="m-0 text-[13px] font-medium">Inbox</h1>
-        <div className="ml-2">
-          <Segments label="Filter" value={filter} options={FILTERS} onChange={setFilter} />
-        </div>
-        <span className="ml-auto flex flex-none gap-[6px]">
-          {unread ? <Button onClick={() => void all("notification.mark_all_read")}>Mark all read</Button> : null}
-          {clearable ? <Button onClick={() => setClearing(true)}>Clear all</Button> : null}
+    <Page>
+      <PageHead
+        title="Inbox"
+        tabs={
+          <SegmentedControl label="Filter" size="sm" value={filter} onChange={(next) => setFilter(next as InboxFilter)}>
+            {FILTERS.map((f) => (
+              <SegmentedControlItem key={f.key} value={f.key} label={f.label} />
+            ))}
+          </SegmentedControl>
+        }
+      >
+        <span {...stylex.props(styles.actions)}>
+          {unread ? <Button label="Mark all read" onClick={() => void all("notification.mark_all_read")} /> : null}
+          {clearable ? <Button label="Clear all" onClick={() => setClearing(true)} /> : null}
         </span>
-        {clearing ? (
-          <Confirm
-            title="Clear all results?"
-            body="Every result in your notifications is removed. Approvals waiting for you are not touched."
-            action="Clear all"
-            danger
-            onClose={() => setClearing(false)}
-            onConfirm={() => {
-              setClearing(false);
-              void all("notification.dismiss_all");
-            }}
-          />
-        ) : null}
-      </header>
-      <div className="flex min-h-0 flex-1">
-        <section aria-label="Inbox items" className="w-[clamp(280px,36%,400px)] min-w-0 flex-none border-r border-line">
+      </PageHead>
+      {clearing ? (
+        <Confirm
+          title="Clear all results?"
+          body="Every result in your notifications is removed. Approvals waiting for you are not touched."
+          action="Clear all"
+          danger
+          onClose={() => setClearing(false)}
+          onConfirm={() => {
+            setClearing(false);
+            void all("notification.dismiss_all");
+          }}
+        />
+      ) : null}
+      <div {...stylex.props(styles.body)}>
+        <section aria-label="Inbox items" {...stylex.props(styles.items)}>
           {error ? (
-            <p role="alert" className="m-0 p-[18px] text-red">
-              {error.message}
-            </p>
-          ) : loading ? null : rows.length === 0 ? (
-            <p className="m-0 p-[18px] text-text3">Nothing waits for you.</p>
+            <div {...stylex.props(styles.message)}>
+              <Problem>{error.message}</Problem>
+            </div>
+          ) : loading ? (
+            <Loading rows={6} />
+          ) : rows.length === 0 ? (
+            <div {...stylex.props(styles.message)}>
+              <EmptyState isCompact title="Nothing waits for you." />
+            </div>
           ) : (
             <InboxList groups={shown} selected={selected?.id ?? null} onSelect={setSelectedId} />
           )}
         </section>
-        <section aria-label="Detail" className="flex min-w-0 flex-1 flex-col">
-          <div className="flex h-11 flex-none items-center gap-2 border-b border-line px-6 text-text3">
-            <span className="truncate text-text">{selected?.title ?? ""}</span>
+        <section aria-label="Detail" {...stylex.props(styles.detail)}>
+          <div {...stylex.props(styles.detailHead)}>
+            <span {...stylex.props(styles.detailTitle)}>{selected?.title ?? ""}</span>
             {rows.length > 0 ? (
-              <span className="ml-auto flex flex-none items-center gap-[6px] text-[12px] whitespace-nowrap">
-                {at + 1} / {rows.length} <Kbd>J</Kbd>
-                <Kbd>K</Kbd>
+              <span {...stylex.props(styles.position)}>
+                {at + 1} / {rows.length} <KeyHint>J</KeyHint>
+                <KeyHint>K</KeyHint>
               </span>
             ) : null}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div {...stylex.props(styles.detailScroll)}>
             {selected?.source.kind === "approval" ? (
               <ApprovalDetail key={selected.id} approval={selected.source.approval} />
             ) : selected?.source.kind === "notification" ? (
@@ -572,6 +721,6 @@ export function InboxScreen() {
           </div>
         </section>
       </div>
-    </>
+    </Page>
   );
 }

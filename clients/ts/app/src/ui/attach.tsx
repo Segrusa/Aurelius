@@ -1,11 +1,29 @@
 // Files for a form: chosen, pasted or dropped. Each ends up as a path the server can read
 // (`Platform.pickFiles` and `Platform.keepFiles`); the same limits as the server's.
 
+import { Button } from "@astryxdesign/core/Button";
+import * as stylex from "@stylexjs/stylex";
 import { type ClipboardEvent, type DragEvent, useCallback, useState } from "react";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { Button } from "./kit";
 import { toast } from "./toast";
+
+const styles = stylex.create({
+  row: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 },
+  images: { display: "flex", flexWrap: "wrap", gap: 6, paddingInline: 10, paddingTop: 8 },
+  file: {
+    cursor: "pointer",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: { default: "var(--color-border)", ":hover": "var(--color-border-emphasized)" },
+    backgroundColor: "transparent",
+    paddingInline: 8,
+    paddingBlock: 4,
+    fontSize: 12,
+    color: "var(--color-text-primary)",
+  },
+});
 
 export const FILES_MAX = 8;
 export const FILE_MAX_BYTES = 25 * 1024 * 1024;
@@ -92,15 +110,15 @@ export function useAttachments(kept = 0) {
 
 export function AttachRow({ attach }: { attach: ReturnType<typeof useAttachments> }) {
   return (
-    <div className="flex flex-wrap items-center gap-[6px]">
-      <Button onClick={attach.pick}>Add files…</Button>
+    <div {...stylex.props(styles.row)}>
+      <Button label="Add files…" onClick={attach.pick} />
       {attach.files.map((f) => (
         <button
           key={f.path}
           type="button"
           aria-label={`Remove ${f.name}`}
           onClick={() => attach.remove(f.path)}
-          className="cursor-pointer rounded-[6px] border border-line bg-transparent px-2 py-1 text-[12px] text-text hover:border-btn-line"
+          {...stylex.props(styles.file)}
         >
           {f.name} ×
         </button>
@@ -139,14 +157,14 @@ export function useImagePaste() {
 export function AttachedImages({ images }: { images: ReturnType<typeof useImagePaste> }) {
   if (images.files.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-[6px] px-[10px] pt-2">
+    <div {...stylex.props(styles.images)}>
       {images.files.map((f) => (
         <button
           key={f.path}
           type="button"
           aria-label={`Remove ${f.name}`}
           onClick={() => images.remove(f.path)}
-          className="cursor-pointer rounded-[6px] border border-line bg-transparent px-2 py-1 text-[12px] text-text"
+          {...stylex.props(styles.file)}
         >
           ▣ {f.name} ×
         </button>
