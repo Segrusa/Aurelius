@@ -1,7 +1,6 @@
 import type { TicketView, TimelineCard } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
-  suggestedReplies,
   activityDetail,
   activityText,
   beforeFor,
@@ -26,6 +25,7 @@ import {
   ownerChoosable,
   peopleCount,
   shownCards,
+  suggestedReplies,
   taskCounts,
   ticketNeeds,
 } from "./board-logic";

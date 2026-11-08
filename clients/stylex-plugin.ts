@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import stylex from "@stylexjs/unplugin/vite";
 
 const PREBUILT = /node_modules[\\/](?:\.pnpm[\\/][^\\/]*[\\/]node_modules[\\/])?@astryxdesign[\\/]/;
-const ROOT = fileURLToPath(new URL(".", import.meta.url));
+const ROOT = fileURLToPath(new URL("./ts/app/", import.meta.url));
 /** What the app runs on: Electron's Chromium and current browsers. lightningcss keeps `light-dark()` as is. */
 const TARGETS = { chrome: 125 << 16, safari: 26 << 16, firefox: 147 << 16 };
 /** For Vite's own CSS step, which would otherwise rewrite `light-dark()` and the layers. */

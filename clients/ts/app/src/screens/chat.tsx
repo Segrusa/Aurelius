@@ -1079,7 +1079,7 @@ function Channel({
   return (
     <section aria-label={`#${name}`} {...stylex.props(styles.channel)}>
       <div {...stylex.props(styles.channelMain)}>
-        <header {...stylex.props(styles.top)}>
+        <header data-titlebar {...stylex.props(styles.top)}>
           <Heading level={1} xstyle={styles.title}>
             <span {...stylex.props(styles.hash)}>#</span> {name}
           </Heading>

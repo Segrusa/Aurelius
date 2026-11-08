@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "lint": "biome check clients/ts clients/electron clients/web clients/e2e",
+    "lint": "biome check clients/ts clients/stylex-plugin.ts clients/electron clients/web clients/e2e",
     "deps": "depcruise clients/ts clients/web clients/electron/src --config .dependency-cruiser.cjs",
     "test": "vitest run",
     "test:contract": "vitest run clients/electron/src/main/contract.test.ts",

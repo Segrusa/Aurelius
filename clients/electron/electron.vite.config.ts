@@ -1,9 +1,7 @@
-import { fileURLToPath } from "node:url";
-import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "electron-vite";
 import type { PluginOption } from "vite";
-import { CSS_TARGET, ownStylex } from "../ts/app/stylex-plugin";
+import { CSS_TARGET, ownStylex } from "../stylex-plugin";
 
 // The workspace packages are TypeScript sources: they go into the bundle, and so does what the
 // main process uses, because the packaged app has no node_modules. So does the preload's
@@ -19,16 +17,10 @@ export default defineConfig({
   },
   renderer: {
     root: "src/renderer",
-    resolve: {
-      alias: {
-        "react-style-singleton": fileURLToPath(new URL("../ts/app/src/ui/no-style-singleton.ts", import.meta.url)),
-      },
-    },
     base: "/",
     plugins: [
       ...ownStylex<PluginOption>(),
       react(),
-      tailwindcss(),
       // electron-vite makes these relative whatever `base` says, and a reload on /settings/app would
       // then look for its script under /settings.
       {

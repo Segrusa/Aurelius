@@ -1,6 +1,5 @@
 {
-  "files": { "includes": ["clients/ts/**", "clients/electron/**", "!clients/electron/release", "clients/web/**", "clients/e2e/**", "!**/dist/**", "!**/out/**", "!**/test-results/**", "!**/generated/**", "!**/node_modules/**", "!clients/ts/app/src/theme/precision/precision.*"] },
-  "css": { "parser": { "tailwindDirectives": true } },
+  "files": { "includes": ["clients/ts/**", "clients/stylex-plugin.ts", "clients/electron/**", "!clients/electron/release", "clients/web/**", "clients/e2e/**", "!**/dist/**", "!**/out/**", "!**/test-results/**", "!**/generated/**", "!**/node_modules/**", "!clients/ts/app/src/theme/precision/precision.*"] },
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
   "linter": { "rules": { "preset": "recommended" } }
 }

@@ -119,7 +119,11 @@ export const precisionTheme = defineTheme({
       base: { borderWidth: "1px", borderStyle: "solid", borderColor: "var(--color-border-emphasized)" },
       "variant:ghost": { borderColor: "transparent", backgroundColor: "transparent" },
       "variant:primary": { borderColor: "var(--precision-acc-line)" },
-      "variant:destructive": { borderColor: "var(--color-error)", backgroundColor: "transparent", color: "var(--color-text-error)" },
+      "variant:destructive": {
+        borderColor: "var(--color-error)",
+        backgroundColor: "transparent",
+        color: "var(--color-text-error)",
+      },
     },
     item: {
       selected: { boxShadow: "inset 2px 0 0 var(--color-text-accent)" },

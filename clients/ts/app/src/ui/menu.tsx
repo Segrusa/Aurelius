@@ -34,6 +34,7 @@ export function Menu<T extends string>({
     items[at + (event.key === "j" ? 1 : -1)]?.focus();
   };
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: it only catches keys bubbling out of the menu.
     <span style={{ display: "contents" }} onKeyDown={moveWithJK}>
       <DropdownMenu
         menuMaxHeight={300}

@@ -16,12 +16,6 @@ import { type ComponentProps, type KeyboardEvent, type ReactNode, useContext } f
 import { KeysContext } from "../keys/provider";
 import { useDelayed } from "../ui/use-delayed";
 
-// Tailwind strings for the screens still to migrate (usage, run-tools, settings-accounts); they go with their last importer.
-export const SMALL = "h-7 px-[10px] text-[12px]";
-export const EYEBROW = "m-0 text-[11.5px] font-semibold tracking-[0.04em] text-text3";
-export const FIELD =
-  "h-8 w-full rounded-[6px] border border-btn-line bg-sunk px-2 text-text outline-none placeholder:text-text3 focus:border-acc-text focus-visible:outline-none";
-
 const styles = stylex.create({
   page: { display: "flex", minHeight: 0, flex: 1, flexDirection: "column" },
   head: {

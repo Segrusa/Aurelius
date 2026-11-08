@@ -10,7 +10,9 @@ import { describe, expect, it, vi } from "vitest";
 
 const repo = resolve(import.meta.dirname, "../../../..");
 const core = (file: string) =>
-  import(/* @vite-ignore */ pathToFileURL(resolve(repo, "clients/ts/app/node_modules/@astryxdesign/core/dist", file)).href);
+  import(
+    /* @vite-ignore */ pathToFileURL(resolve(repo, "clients/ts/app/node_modules/@astryxdesign/core/dist", file)).href
+  );
 const hash = (css: string) => `'sha256-${createHash("sha256").update(css, "utf8").digest("base64")}'`;
 
 let written: Promise<string[]> | null = null;

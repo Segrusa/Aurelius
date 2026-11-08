@@ -1,4 +1,6 @@
 /* Astryx, the Precision theme, and the few global rules no component owns. */
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
 @import "./theme/precision/precision.css";

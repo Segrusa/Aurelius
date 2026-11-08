@@ -1,8 +1,8 @@
 // Astryx's links through the router: an in-app href navigates without a reload, the rest stay links.
 
+import { Link } from "@tanstack/react-router";
 import type { Ref } from "react";
 import { type ComponentProps, useMemo } from "react";
-import { Link } from "@tanstack/react-router";
 
 type Props = Omit<ComponentProps<"a">, "href"> & { href?: string; ref?: Ref<HTMLAnchorElement> };
 
