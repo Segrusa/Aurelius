@@ -41,6 +41,57 @@ impl LifecycleStatus {
     }
 }
 
+/// What an employee's runs may do with files and commands (C3), next to its mode:
+/// the level says which tools a run has, the mode which of those are asked first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AccessLevel {
+    /// Every work tool, as a run has without a level of its own.
+    #[default]
+    Inherit,
+    /// Reads and searches the folder; no edits, commands or web.
+    ReadOnly,
+    /// Also changes files; no commands or web.
+    ReadEdit,
+    /// A level of a newer server this client does not know. A run treats it as read-only.
+    #[serde(other)]
+    Unknown,
+}
+
+impl AccessLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AccessLevel::Inherit => "inherit",
+            AccessLevel::ReadOnly => "read_only",
+            AccessLevel::ReadEdit => "read_edit",
+            AccessLevel::Unknown => "unknown",
+        }
+    }
+
+    /// As stored; anything else is `Unknown`, which is the narrowest (a store of a newer version).
+    pub fn parse(text: &str) -> Self {
+        match text {
+            "inherit" => Self::Inherit,
+            "read_only" => Self::ReadOnly,
+            "read_edit" => Self::ReadEdit,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// Whether this is the default, which the JSON leaves out.
+    pub fn is_inherit(&self) -> bool {
+        *self == Self::Inherit
+    }
+
+    /// A level a command may set.
+    pub fn validate(self) -> Result<Self, DomainError> {
+        match self {
+            Self::Unknown => Err(DomainError::OutOfRange { field: "access_level".into(), detail: "unknown level".into() }),
+            level => Ok(level),
+        }
+    }
+}
+
 /// How far an employee may let others work for it, and how it runs its tasks.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskPolicy {
@@ -98,6 +149,9 @@ pub struct CreateEmployee {
     /// None or empty: their prompt shows the first line of the instructions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// What its runs may do with files and commands (C3); none: `Inherit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_level: Option<AccessLevel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -117,6 +171,9 @@ pub struct UpdateEmployee {
     /// an empty text clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// What its runs may do with files and commands (C3). `None` leaves it as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_level: Option<AccessLevel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

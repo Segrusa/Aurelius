@@ -17,6 +17,7 @@
 | Stap | Wire | Oordeel |
 |---|---|---|
 | 1 | `EmployeeSummary.description?`, `employee.create.description?`, `employee.update.description?` (geen veld: blijft; leeg: wist). Fout `out_of_range` boven 160 tekens | additief; geen nieuwe feature-vlag: een oudere server laat het veld weg en negeert het |
+| 2 | `EmployeeSummary.access_level?` (weggelaten bij `inherit`), `employee.create.access_level?`, `employee.update.access_level?` (geen veld: blijft), enum `AccessLevel` met `#[serde(other)] unknown`, feature `employee_access`. Een `update` met dit veld vraagt op afstand de rechten van Approve. C1 gebruikt het bestaande `connection.list` (lezen) en `connection.set_defaults` (schrijven), die al per employee werken | additief; de feature-vlag bestaat omdat de client geen niveau mag tonen dat een oudere server negeert |
 | 3 | Geen | |
 
 Wat later bijkomt, wordt hier per stap toegevoegd voordat de client erop bouwt.

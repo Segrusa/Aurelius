@@ -285,6 +285,8 @@ fn command_needs(command: &Command) -> Needs {
         // Only an owner picks a folder on the server.
         Command::CreateProject(p) if p.folder.is_some() => Needs::Owner,
         Command::CreateEmployee(m) if m.folder.is_some() => Needs::Owner,
+        // The level may widen what an employee's runs can do: like allowing the browser.
+        Command::UpdateEmployee(u) if u.access_level.is_some() => Needs::Cap(Approve),
         Command::CreateProject(_)
         | Command::RenameProject(_)
         | Command::SetProjectDescription(_)
@@ -796,6 +798,14 @@ mod tests {
         assert_eq!(required(&off), cap(Capability::Chat));
         let plan = exec(Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id: ApprovalId::new(), decision: PlanDecision::Approve, feedback: None }));
         assert_eq!(required(&plan), cap(Capability::Approve));
+    }
+
+    #[test]
+    fn changing_an_access_level_takes_the_right_to_approve() {
+        use aurelius_domain::employee::{AccessLevel, UpdateEmployee};
+        let update = |access_level| exec(Command::UpdateEmployee(UpdateEmployee { access_level, description: None, employee_id: aurelius_domain::EmployeeId::new(), name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None }));
+        assert_eq!(required(&update(Some(AccessLevel::Inherit))), cap(Capability::Approve));
+        assert_ne!(required(&update(None)), cap(Capability::Approve), "an ordinary edit leaves it alone");
     }
 
     #[test]

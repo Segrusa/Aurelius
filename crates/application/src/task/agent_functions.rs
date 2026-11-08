@@ -369,7 +369,7 @@ mod tests {
         let run = |c: Command| service.execute(&ctx(), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: c }).unwrap().receipt.result;
         let CommandResult::ProjectCreated { project_id, .. } = run(Command::CreateProject(CreateProject { name: "Demo".into(), description: None, folder: Some(folder.display().to_string()) })) else { panic!() };
         let CommandResult::EmployeeCreated { employee_id, .. } =
-            run(Command::CreateEmployee(CreateEmployee { description: None, name: "Alex".into(), role: "Support".into(), title: None, reports_to: None, instructions: None, folder: None }))
+            run(Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: "Alex".into(), role: "Support".into(), title: None, reports_to: None, instructions: None, folder: None }))
         else {
             panic!()
         };

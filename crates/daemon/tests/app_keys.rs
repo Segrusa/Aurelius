@@ -44,7 +44,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId, ConversationId) {
     else {
         panic!()
     };
-    let employee = CreateEmployee { description: None, name: "Simon".into(), role: "Server".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let employee = CreateEmployee { access_level: None, description: None, name: "Simon".into(), role: "Server".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(employee), None)).await.unwrap().result else { panic!() };
     (project_id, employee_id, conversation_id)
 }

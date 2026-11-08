@@ -2124,10 +2124,10 @@ fn to_envelope(request: Request) -> Option<CommandEnvelope> {
         }
         Request::OpenConversation(_) | Request::OpenGroupChat(_) | Request::LoadChannels | Request::SearchChannels(_) | Request::FollowChannels(_) | Request::FollowThread(_) => return None,
         Request::CreateEmployee { name, role, title, reports_to, instructions, folder } => {
-            envelope(Command::CreateEmployee(employee::CreateEmployee { description: None, name, role, title, reports_to, instructions, folder }), None)
+            envelope(Command::CreateEmployee(employee::CreateEmployee { access_level: None, description: None, name, role, title, reports_to, instructions, folder }), None)
         }
         Request::UpdateEmployee { employee_id, name, role, title, instructions, sequential_tasks, expected_version } => envelope(
-            Command::UpdateEmployee(employee::UpdateEmployee { description: None, employee_id, name, role, title, instructions, sequential_tasks }),
+            Command::UpdateEmployee(employee::UpdateEmployee { access_level: None, description: None, employee_id, name, role, title, instructions, sequential_tasks }),
             Some(expected_version),
         ),
         Request::SetReportsTo { employee_id, reports_to } => envelope(Command::SetEmployeeReportsTo(employee::SetEmployeeReportsTo { employee_id, reports_to }), None),

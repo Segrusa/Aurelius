@@ -42,7 +42,7 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | # | Stap | Stand |
 |---|---|---|
 | 1 | P1, P2, P4, P5, P7, P8 plus scoped view P3 | gebouwd |
-| 2 | C1 UI op de overrides, C3 toegangsniveau | open |
+| 2 | C1 UI op de overrides, C3 toegangsniveau | gebouwd |
 | 3 | C5 scope-regel | gebouwd |
 | 4 | U1, U2, U4 | open |
 | 5 | Mailbox, worker, samenvoegen, parkeren, hybride sessies (R1-R3, R6) | open |

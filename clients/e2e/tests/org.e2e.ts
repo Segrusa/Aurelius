@@ -61,6 +61,18 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByText("Head of things · Lead")).toBeVisible();
     await expect(page.getByText("Plans the work and reviews it.")).toBeVisible();
 
+    // A provider, model and effort of its own, and a level of access.
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("combobox", { name: "Provider" }).click();
+    await page.getByRole("option", { name: /^Inherit/ }).click();
+    await page.getByRole("radio", { name: "High", exact: true }).click();
+    await page.getByRole("radio", { name: "Read only" }).click();
+    await expect(page.getByText(/No edits, commands, web/)).toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(page.getByText("Read only", { exact: true })).toBeVisible();
+    await expect(page.getByText("High", { exact: true })).toBeVisible();
+
     await go(page, "Employees");
     await page.getByRole("button", { name: "Add employee" }).click();
     await page.getByPlaceholder("Name, for example Alex").fill("Pixel");

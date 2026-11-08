@@ -143,7 +143,7 @@ async fn task_with(client: &Client) -> TaskId {
         panic!()
     };
     let _: ProjectId = project_id;
-    let create = CreateEmployee { description: None, name: "Alex".into(), role: "Backend developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, description: None, name: "Alex".into(), role: "Backend developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let _: EmployeeId = employee_id;
     let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: "Do it".into(), goal: "Do the thing".into(), acceptance_criteria: vec![], depends_on: vec![] };

@@ -3,6 +3,7 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Layout, LayoutContent, LayoutPanel } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { expectBody } from "@aurelius/client";
 import type { EmployeeSummary, TaskView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
@@ -16,11 +17,26 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { EmployeeDialog } from "./employee-dialog";
-import { type AgentMode, canPin, MODE_LABELS, nextMode, position, threadGroup, togglePin } from "./employee-logic";
+import {
+  type AgentMode,
+  accessLabel,
+  accessOf,
+  asChoice,
+  canPin,
+  choiceLine,
+  effortName,
+  inheritedRun,
+  MODE_LABELS,
+  nextMode,
+  position,
+  threadGroup,
+  togglePin,
+} from "./employee-logic";
 import { employeeState, pinKey, usePins } from "./employees";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, shortDay } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { useFolderChooser } from "./run-tools";
+import { modelName, useSetting } from "./settings-kit";
 import { taskStateLine } from "./tasks-logic";
 
 const styles = stylex.create({
@@ -145,8 +161,12 @@ export function EmployeePage({ id }: { id: string }) {
   const navigate = useNavigate();
   const platform = usePlatform();
   const folders = useFolderChooser();
-  const { hostName } = useLinkState();
+  const { hostName, features } = useLinkState();
   const employees = useEmployees();
+  const connections = useSetting(
+    "connections",
+    async () => expectBody(await connection.call("connection.list"), "connections").value,
+  );
   const tasks = useAllTasks();
   const employee = employees.data?.find((e) => e.id === id && e.status !== "archived") ?? null;
   const [editing, setEditing] = useState(false);
@@ -197,6 +217,14 @@ export function EmployeePage({ id }: { id: string }) {
   const state = employeeState(e);
   const boss = employees.data?.find((b) => b.id === e.reports_to);
   const pinned = pins.includes(e.id);
+  const own =
+    connections.data?.defaults?.find(
+      (d) => d.purpose === "employee" && d.scope.kind === "employee" && d.scope.id === e.id,
+    )?.settings ?? {};
+  const inherited = inheritedRun(connections.data);
+  const providerChoice = asChoice(own.connection);
+  const providerName =
+    connections.data?.connections?.find((c) => c.id === providerChoice)?.display_name ?? "A removed connection";
   const setMode = () => {
     if (!e.conversation_id) return;
     const mode: AgentMode = nextMode(e.agent_mode);
@@ -343,6 +371,20 @@ export function EmployeePage({ id }: { id: string }) {
                     {e.screen_allowed ? "Allowed" : "Asks"}
                   </Button>
                 </MetadataListItem>
+              </MetadataList>
+              <MetadataList orientation="horizontal" label={{ position: "start" }}>
+                <MetadataListItem label="Provider">
+                  {providerChoice === "inherit" ? choiceLine("inherit", inherited.provider) : providerName}
+                </MetadataListItem>
+                <MetadataListItem label="Model">
+                  {choiceLine(asChoice(own.model), inherited.model && modelName(inherited.model), modelName)}
+                </MetadataListItem>
+                <MetadataListItem label="Effort">
+                  {choiceLine(asChoice(own.effort), inherited.effort && effortName(inherited.effort), effortName)}
+                </MetadataListItem>
+                {features.includes("employee_access") ? (
+                  <MetadataListItem label="Access">{accessLabel(accessOf(e))}</MetadataListItem>
+                ) : null}
               </MetadataList>
               {e.description ? (
                 <section {...stylex.props(styles.section)}>

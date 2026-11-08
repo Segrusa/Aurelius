@@ -56,7 +56,7 @@ async fn run(client: &Client, command: Command) -> CommandResult {
 }
 
 async fn setup(client: &Client) -> (EmployeeId, ProjectId, ConversationId) {
-    let create = CreateEmployee { description: None, name: "Forge".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, description: None, name: "Forge".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = run(client, Command::CreateEmployee(create)).await else { panic!() };
     let CommandResult::ProjectCreated { project_id, .. } = run(client, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })).await else { panic!() };
     let channel = client.channels().await.unwrap().channels.into_iter().find(|c| c.project_id == Some(project_id)).expect("its channel").conversation_id;

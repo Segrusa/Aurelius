@@ -45,7 +45,7 @@ fn project(s: &CommandService) -> ProjectId {
 /// Employees are company-wide; the project only says where the test works.
 fn try_hire(s: &CommandService, _project: ProjectId, name: &str, title: Option<&str>, boss: Option<EmployeeId>) -> Result<(EmployeeId, ConversationId), AppError> {
     let create = CreateEmployee {
-        description: None, name: name.into(),
+        access_level: None, description: None, name: name.into(),
         role: "Dev".into(),
         title: title.map(Into::into),
         reports_to: boss,
@@ -63,8 +63,24 @@ fn hire(s: &CommandService, project: ProjectId, name: &str, title: Option<&str>,
 }
 
 fn retitle(s: &CommandService, employee: EmployeeId, name: &str, title: &str) {
-    let update = UpdateEmployee { description: None, employee_id: employee, name: name.into(), role: "Dev".into(), title: Some(title.into()), instructions: Some(format!("Focus of {name}.")), sequential_tasks: None };
+    let update = UpdateEmployee { access_level: None, description: None, employee_id: employee, name: name.into(), role: "Dev".into(), title: Some(title.into()), instructions: Some(format!("Focus of {name}.")), sequential_tasks: None };
     run(s, Command::UpdateEmployee(update)).unwrap();
+}
+
+#[test]
+fn an_access_level_is_kept_until_an_update_names_another_and_never_an_unknown_one() {
+    use aurelius_domain::employee::AccessLevel;
+    let (_dir, s) = setup();
+    let (ann, _) = hire(&s, ProjectId::new(), "Ann", None, None);
+    let level = |s: &CommandService| s.store().read(|c| aurelius_storage::employees::list_employees(c, &|_| None)).unwrap()[0].access_level;
+    assert_eq!(level(&s), AccessLevel::Inherit, "the default");
+    let update = |access_level| UpdateEmployee { access_level, description: None, employee_id: ann, name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None };
+    run(&s, Command::UpdateEmployee(update(Some(AccessLevel::ReadOnly)))).unwrap();
+    assert_eq!(level(&s), AccessLevel::ReadOnly);
+    run(&s, Command::UpdateEmployee(update(None))).unwrap();
+    assert_eq!(level(&s), AccessLevel::ReadOnly, "an update without it leaves it");
+    assert!(run(&s, Command::UpdateEmployee(update(Some(AccessLevel::Unknown)))).is_err());
+    assert_eq!(level(&s), AccessLevel::ReadOnly);
 }
 
 fn set_boss(s: &CommandService, employee: EmployeeId, boss: Option<EmployeeId>) -> Result<Committed, AppError> {
@@ -234,7 +250,7 @@ fn reports_to_refuses_loops_strangers_and_archived_bosses() {
     // Names are unique in the company (any case), also when renaming.
     let taken = try_hire(&s, other, " ann ", None, None).err().unwrap();
     assert!(taken.message.contains("already exists"), "{}", taken.message);
-    let rename = UpdateEmployee { description: None, employee_id: x, name: "Bob".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None };
+    let rename = UpdateEmployee { access_level: None, description: None, employee_id: x, name: "Bob".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None };
     assert!(run(&s, Command::UpdateEmployee(rename)).is_err());
 
     let (c, _) = hire(&s, p, "Cy", None, None);
@@ -752,7 +768,7 @@ fn a_stale_proposal_conflicts_and_an_old_version_can_be_restored() {
     let run_id = chat_run(&s, t.simon.1);
     assert!(propose_instructions(&s, run_id, None, "Simon works test-first.", &["Migration"]).0);
     // Meanwhile the user changes Simon's instructions themselves.
-    let update = UpdateEmployee { description: None, employee_id: t.simon.0, name: "Simon".into(), role: "Dev".into(), title: None, instructions: Some("Simon writes docs first.".into()), sequential_tasks: None };
+    let update = UpdateEmployee { access_level: None, description: None, employee_id: t.simon.0, name: "Simon".into(), role: "Dev".into(), title: None, instructions: Some("Simon writes docs first.".into()), sequential_tasks: None };
     run(&s, Command::UpdateEmployee(update.clone())).unwrap();
     run(&s, Command::UpdateEmployee(update)).unwrap();
     assert_eq!(s.employee_instruction_versions(t.simon.0).unwrap().current_version, 2, "the same text again is no new version");

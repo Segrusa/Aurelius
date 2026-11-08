@@ -34,7 +34,7 @@ fn exec(s: &Setup, command: Command) -> Result<CommandResult, AppError> {
 }
 
 fn hire(service: &CommandService, user: UserId, name: &str, boss: Option<EmployeeId>) -> EmployeeId {
-    let create = CreateEmployee { description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
     let made = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateEmployee(create) }).unwrap().receipt.result;
     let CommandResult::EmployeeCreated { employee_id, .. } = made else { panic!("{made:?}") };
     employee_id
@@ -219,7 +219,7 @@ fn the_full_thread_stays_readable_with_the_tool() {
 fn the_platform_rules_and_the_roster_are_in_the_system_text() {
     let s = setup();
     let (_, runs) = send(&s, None, "@Ann hello").unwrap();
-    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { description: Some("Reviews Rust.".into()), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None })).unwrap();
+    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { access_level: None, description: Some("Reviews Rust.".into()), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None })).unwrap();
     let system = plan_of(&s, runs[0]).system.unwrap();
     assert!(system.starts_with(crate::run::plan::PLATFORM_RULES), "{system}");
     assert!(system.contains("- @Bo (Dev): Reviews Rust."), "the description: {system}");
@@ -230,7 +230,7 @@ fn the_platform_rules_and_the_roster_are_in_the_system_text() {
 fn a_description_falls_back_to_the_first_instruction_line_and_can_be_cleared() {
     let s = setup();
     let update = |description: Option<&str>, instructions: Option<&str>| {
-        exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { description: description.map(str::to_owned), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: instructions.map(str::to_owned), sequential_tasks: None })).unwrap();
+        exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { access_level: None, description: description.map(str::to_owned), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: instructions.map(str::to_owned), sequential_tasks: None })).unwrap();
     };
     update(None, Some("\nGuards the release.\nMore detail."));
     let roster = |s: &Setup| {
@@ -244,7 +244,7 @@ fn a_description_falls_back_to_the_first_instruction_line_and_can_be_cleared() {
     update(Some(""), Some("\nGuards the release."));
     assert!(roster(&s).ends_with(": Guards the release."), "cleared");
     let too_long = "x".repeat(161);
-    assert!(exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { description: Some(too_long), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None })).is_err());
+    assert!(exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { access_level: None, description: Some(too_long), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None })).is_err());
 }
 
 #[test]
@@ -948,7 +948,7 @@ fn a_message_for_an_owner_whose_main_task_waits_its_turn_runs_nothing_and_comes_
         })
         .unwrap();
     let ann = ticket_view(&s, a).owner_employee_id.unwrap();
-    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { description: None, employee_id: ann, name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: Some(true) })).unwrap();
+    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { access_level: None, description: None, employee_id: ann, name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: Some(true) })).unwrap();
     // The colleague is done: A waits for its turn behind B (as after Send back with a busy owner).
     let st = s.service.store().clone();
     s.service.store().write(move |tx| crate::task::task_runs::continue_when_done(tx, &st, root_a)).unwrap();

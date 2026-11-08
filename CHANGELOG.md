@@ -7,6 +7,7 @@ released separately, each with its own version and changelog:
 ## Unreleased (feat/astryx)
 
 - **Employees as bots.** Employees get platform rules at the front of their prompt (handoffs, a thread's lead, self-contained handoffs, new messages marked, signing on external systems), a description colleagues see, and in a thread they do not lead only what is addressed to them in their prompt; the clients keep showing the whole thread. Memory no longer takes facts of one ticket. Details in [docs/changelog/server.md](docs/changelog/server.md).
+- **Provider, model, effort and access per employee.** The employee dialog chooses the provider, model and effort of an employee, each with Inherit as the default and what that comes to shown beside it. A new access level limits what its runs can do: Inherit keeps every work tool, Read only reads and searches, Read and edit also changes files; without commands, the web, MCP servers or plugins. Changing the level starts a new session.
 
 ## v0.6.0
 

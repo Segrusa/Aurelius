@@ -2,6 +2,29 @@
 // Run: cargo xtask gen-ts
 
 /**
+ * What an employee's runs may do with files and commands (C3), next to its mode:
+ * the level says which tools a run has, the mode which of those are asked first.
+ */
+export type AccessLevel =
+  /**
+   * Every work tool, as a run has without a level of its own.
+   */
+  | "inherit"
+  /**
+   * Also changes files; no commands or web.
+   */
+  | "read_edit"
+  /**
+   * Reads and searches the folder; no edits, commands or web.
+   */
+  | "read_only"
+  /**
+   * A level of a newer server this client does not know. A run treats it as read-only.
+   */
+  | "unknown"
+;
+
+/**
  * One tool use during an answer, shown at its place in the text.
  */
 export interface ActivityView {
@@ -1341,6 +1364,10 @@ export interface CreateAppKey {
 
 export interface CreateEmployee {
   /**
+   * What its runs may do with files and commands (C3); none: `Inherit`.
+   */
+  access_level?: AccessLevel | null;
+  /**
    * What other employees read to know when to hand work to this one (P7).
    * None or empty: their prompt shows the first line of the instructions.
    */
@@ -1664,6 +1691,10 @@ export interface EmployeePlugins {
 }
 
 export interface EmployeeSummary {
+  /**
+   * What its runs may do with files and commands (C3); left out when `Inherit`.
+   */
+  access_level?: AccessLevel;
   agent_mode: AgentMode;
   /**
    * What runs for this employee right now: its own steps,
@@ -6389,6 +6420,10 @@ export interface UpdateCompany {
 }
 
 export interface UpdateEmployee {
+  /**
+   * What its runs may do with files and commands (C3). `None` leaves it as it is.
+   */
+  access_level?: AccessLevel | null;
   /**
    * What other employees read about this one (P7). `None` leaves it as it is;
    * an empty text clears it.

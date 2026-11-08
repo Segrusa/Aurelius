@@ -36,6 +36,7 @@ struct Seen {
     images: usize,
     /// The system text it was given.
     system: String,
+    access: aurelius_domain::employee::AccessLevel,
 }
 
 /// A runtime that keeps sessions like Claude Code does (in memory), answers like
@@ -74,6 +75,10 @@ impl AgentRuntime for Sessions {
                 text: request.turns.iter().map(|t| t.text.as_str()).collect::<Vec<_>>().join("\n---\n"),
                 images: request.turns.iter().map(|t| t.images.len()).sum(),
                 system: request.system.clone().unwrap_or_default(),
+                access: match &request.profile {
+                    ToolProfile::Work { access, .. } => *access,
+                    _ => Default::default(),
+                },
             });
         }
         if request.session == SessionUse::Continue && !self.kept.lock().unwrap().contains(&id) {
@@ -276,6 +281,39 @@ async fn a_changed_history_a_lost_session_or_another_model_starts_a_new_session(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_new_access_level_starts_a_new_session_that_has_only_its_tools() {
+    use aurelius_domain::employee::{AccessLevel, CreateEmployee, SendEmployeeMessage};
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = Sessions::default();
+    let daemon = start_with(dir.path(), Arc::new(runtime.clone())).await;
+    let client = connect(dir.path()).await;
+    claude_code(&client, dir.path()).await;
+    // An employee with a folder of its own: its chat works there.
+    let folder = dir.path().join("work");
+    std::fs::create_dir_all(&folder).unwrap();
+    let hire = CreateEmployee { access_level: None, description: None, name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: Some(folder.display().to_string()) };
+    let CommandResult::EmployeeCreated { employee_id, conversation_id: conversation } = client.execute(envelope(Command::CreateEmployee(hire), None)).await.unwrap().result else { panic!("not hired") };
+    let tell = |text: &str| Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id, text: text.into(), conversation_id: conversation, images: Vec::new(), files: Vec::new(), interrupt: false });
+    let mut runs = Vec::new();
+    for text in ["First question", "Second question", "Third question"] {
+        let CommandResult::EmployeeMessageSent { message_id, run_id, .. } = client.execute(envelope(tell(text), None)).await.unwrap().result else { panic!("not sent") };
+        answered(&client, conversation, message_id, MessageStatus::Complete).await;
+        runs.push(run_id);
+        if text == "Second question" {
+            write(dir.path(), "UPDATE employees SET access_level = 'read_only' WHERE id = ?1", [employee_id.to_string()]);
+        }
+    }
+    let (same, restricted) = (runs[1], runs[2]);
+
+    let seen = runtime.seen();
+    assert_eq!((seen[1].run, seen[1].session, seen[1].access), (same, SessionUse::Continue, AccessLevel::Inherit), "{seen:?}");
+    assert_eq!((seen[2].run, seen[2].session, seen[2].access), (restricted, SessionUse::Keep, AccessLevel::ReadOnly), "a new session: {seen:?}");
+    assert!(seen[2].text.contains("First question"), "the whole conversation: {:?}", seen[2]);
+    assert!(seen[2].system.contains("You can only read and search files there"), "{:?}", seen[2].system);
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_changed_mode_is_told_in_front_of_the_new_message() {
     let dir = tempfile::tempdir().unwrap();
     let runtime = Sessions::default();
@@ -361,7 +399,7 @@ async fn a_task_conversation_goes_on_in_its_session_after_the_task_succeeded() {
     else {
         panic!()
     };
-    let create = CreateEmployee { description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let cmd = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: "Login page".into(), goal: "Fix the login page".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
@@ -509,7 +547,7 @@ async fn after_a_colleagues_result_the_employee_goes_on_in_its_session() {
     backlog_ticket(&client, project_id, "Shared work").await;
     let mut alex = None;
     for name in ["Alex", "Iris"] {
-        let create = CreateEmployee { description: None, name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+        let create = CreateEmployee { access_level: None, description: None, name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
         let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
         alex = alex.or(Some(employee_id));
     }

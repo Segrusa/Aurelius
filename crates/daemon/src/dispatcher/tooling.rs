@@ -36,7 +36,9 @@ pub(super) fn tool_profile(shared: &Arc<Shared>, plan: &ChatRunPlan) -> ToolProf
                 plugins: aurelius_host::plugins::paths_for_run(shared.store(), plan.conversation_id),
                 // Claude Code artifacts (pages on claude.ai), when the user turned them on server-wide.
                 artifacts: plan.artifacts,
+                access: plan.access,
             }
+            .confined()
         }
         None => ToolProfile::TextOnly,
     }

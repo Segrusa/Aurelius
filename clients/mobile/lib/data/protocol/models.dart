@@ -2,6 +2,30 @@
 // Run: cargo xtask gen-dart
 // ignore_for_file: unnecessary_cast, unnecessary_null_aware_operator, unnecessary_non_null_assertion, constant_identifier_names, use_null_aware_elements, unintended_html_in_doc_comment
 
+/// What an employee's runs may do with files and commands (C3), next to its mode:
+/// the level says which tools a run has, the mode which of those are asked first.
+enum AccessLevel {
+  /// Every work tool, as a run has without a level of its own.
+  inherit('inherit'),
+  /// Also changes files; no commands or web.
+  readEdit('read_edit'),
+  /// Reads and searches the folder; no edits, commands or web.
+  readOnly('read_only'),
+  /// A level of a newer server this client does not know. A run treats it as read-only.
+  unknown('unknown');
+
+  const AccessLevel(this.wire);
+
+  final String wire;
+
+  static AccessLevel fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown AccessLevel value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 /// One tool use during an answer, shown at its place in the text.
 final class ActivityView {
   const ActivityView({
@@ -5457,6 +5481,7 @@ final class CreateAppKey {
 
 final class CreateEmployee {
   const CreateEmployee({
+    this.accessLevel,
     this.description,
     this.folder,
     this.instructions,
@@ -5466,6 +5491,8 @@ final class CreateEmployee {
     this.title,
   });
 
+  /// What its runs may do with files and commands (C3); none: `Inherit`.
+  final AccessLevel? accessLevel;
   /// What other employees read to know when to hand work to this one (P7).
   /// None or empty: their prompt shows the first line of the instructions.
   final String? description;
@@ -5480,6 +5507,7 @@ final class CreateEmployee {
   final String? title;
 
   factory CreateEmployee.fromJson(Map<String, dynamic> json) => CreateEmployee(
+    accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
     description: (json['description'] == null ? null : (json['description'] as String)),
     folder: (json['folder'] == null ? null : (json['folder'] as String)),
     instructions: (json['instructions'] == null ? null : (json['instructions'] as String)),
@@ -5490,6 +5518,7 @@ final class CreateEmployee {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (accessLevel != null) 'access_level': accessLevel?.toJson(),
     if (description != null) 'description': description,
     if (folder != null) 'folder': folder,
     if (instructions != null) 'instructions': instructions,
@@ -6158,6 +6187,7 @@ final class EmployeePlugins {
 
 final class EmployeeSummary {
   const EmployeeSummary({
+    this.accessLevel,
     required this.agentMode,
     required this.agents,
     required this.browserAllowed,
@@ -6180,6 +6210,8 @@ final class EmployeeSummary {
     required this.working,
   });
 
+  /// What its runs may do with files and commands (C3); left out when `Inherit`.
+  final AccessLevel? accessLevel;
   final AgentMode agentMode;
   /// What runs for this employee right now: its own steps,
   /// subagents and sub-tasks delegated to colleagues (derived, never stored).
@@ -6218,6 +6250,7 @@ final class EmployeeSummary {
   final bool working;
 
   factory EmployeeSummary.fromJson(Map<String, dynamic> json) => EmployeeSummary(
+    accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
     agentMode: AgentMode.fromJson(json['agent_mode'] as String),
     agents: (json['agents'] as List<dynamic>).map((x0) => AgentView.fromJson(x0 as Map<String, dynamic>)).toList(),
     browserAllowed: (json['browser_allowed'] as bool),
@@ -6241,6 +6274,7 @@ final class EmployeeSummary {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (accessLevel != null) 'access_level': accessLevel?.toJson(),
     'agent_mode': agentMode.toJson(),
     'agents': agents.map((x0) => x0.toJson()).toList(),
     'browser_allowed': browserAllowed,
@@ -20080,6 +20114,7 @@ final class UpdateCompany {
 
 final class UpdateEmployee {
   const UpdateEmployee({
+    this.accessLevel,
     this.description,
     required this.employeeId,
     this.instructions,
@@ -20089,6 +20124,8 @@ final class UpdateEmployee {
     this.title,
   });
 
+  /// What its runs may do with files and commands (C3). `None` leaves it as it is.
+  final AccessLevel? accessLevel;
   /// What other employees read about this one (P7). `None` leaves it as it is;
   /// an empty text clears it.
   final String? description;
@@ -20102,6 +20139,7 @@ final class UpdateEmployee {
   final String? title;
 
   factory UpdateEmployee.fromJson(Map<String, dynamic> json) => UpdateEmployee(
+    accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
     description: (json['description'] == null ? null : (json['description'] as String)),
     employeeId: (json['employee_id'] as String),
     instructions: (json['instructions'] == null ? null : (json['instructions'] as String)),
@@ -20112,6 +20150,7 @@ final class UpdateEmployee {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (accessLevel != null) 'access_level': accessLevel?.toJson(),
     if (description != null) 'description': description,
     'employee_id': employeeId,
     if (instructions != null) 'instructions': instructions,

@@ -1,9 +1,11 @@
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Field } from "@astryxdesign/core/Field";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { expectBody } from "@aurelius/client";
-import type { DefaultsView, EmployeeSummary, RunSettings, Setting2 } from "@aurelius/protocol";
+import type { AccessLevel, DefaultsView, EmployeeSummary, RunSettings, Setting2 } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -15,9 +17,24 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
 import { cycle } from "./dialog-logic";
 import { useModels } from "./dialogs";
-import { type AgentMode, MODE_LABELS, MODES, reportsCandidates } from "./employee-logic";
+import {
+  ACCESS_LEVELS,
+  type AgentMode,
+  accessOf,
+  asChoice,
+  effortName,
+  inheritedRun,
+  inheritLabel,
+  MODE_LABELS,
+  MODES,
+  modelAfterProvider,
+  modelsFor,
+  reportsCandidates,
+  usableConnections,
+} from "./employee-logic";
 import { DialogSelector, FormDialog, failureOf, Hint, Problem, shortDay } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
+import { modelName, useSetting } from "./settings-kit";
 
 const EFFORTS = [
   ["inherit", "Inherit"],
@@ -28,7 +45,6 @@ const EFFORTS = [
   ["max", "Max · Deepest reasoning, slowest"],
 ] as const;
 
-const asChoice = (s: Setting2 | undefined) => (s?.mode === "value" ? s.value : "inherit");
 const asSetting = (v: string): Setting2 => (v === "inherit" ? { mode: "inherit" } : { mode: "value", value: v });
 
 // Selector takes no empty value: "nobody" and "inherit" need a word of their own.
@@ -41,6 +57,7 @@ const styles = stylex.create({
   grow: { minWidth: 0, flex: 1 },
   mono: { fontFamily: "var(--font-family-code)" },
   stack: { display: "flex", flexDirection: "column", gap: 12 },
+  field: { display: "flex", flexDirection: "column", gap: 6 },
   versions: { display: "flex", flexDirection: "column", gap: 4 },
   version: {
     display: "flex",
@@ -74,6 +91,13 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const folders = useFolderChooser();
   const { features } = useLinkState();
   const models = useModels();
+  const list = useSetting(
+    "connections",
+    async () => expectBody(await connection.call("connection.list"), "connections").value,
+  );
+  const connections = usableConnections(list.data?.connections ?? []);
+  const inherited = inheritedRun(list.data);
+  const hasAccess = features.includes("employee_access");
   const employees = useEmployees();
   const [name, setName] = useState(employee?.name ?? "");
   const [role, setRole] = useState(employee?.role ?? "");
@@ -84,6 +108,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const [folder, setFolder] = useState("");
   const [mode, setMode] = useState<AgentMode>(employee?.agent_mode ?? "ask");
   const [sequential, setSequential] = useState(employee?.sequential_tasks ?? false);
+  const [access, setAccess] = useState<AccessLevel>(accessOf(employee));
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +122,14 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
     (defaults.data ?? []).find(
       (d: DefaultsView) => d.purpose === purpose && d.scope.kind === "employee" && d.scope.id === employee?.id,
     )?.settings ?? {};
-  const [picks, setPicks] = useState<{ model?: string; effort?: string; subModel?: string; subEffort?: string }>({});
+  const [picks, setPicks] = useState<{
+    provider?: string;
+    model?: string;
+    effort?: string;
+    subModel?: string;
+    subEffort?: string;
+  }>({});
+  const provider = picks.provider ?? asChoice(stored("employee").connection);
   const model = picks.model ?? asChoice(stored("employee").model);
   const effort = picks.effort ?? asChoice(stored("employee").effort);
   const subModel = picks.subModel ?? asChoice(stored("subagent").model);
@@ -134,6 +166,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
             ...(title.trim() ? { title: title.trim() } : {}),
             ...(reportsTo ? { reports_to: reportsTo } : {}),
             ...(folder.trim() ? { folder: folder.trim() } : {}),
+            ...(access !== "inherit" ? { access_level: access } : {}),
           },
           { retry: false },
         );
@@ -147,13 +180,18 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
         return;
       }
       const scope = { kind: "employee" as const, id: employee.id };
-      if (picks.model !== undefined || picks.effort !== undefined) {
+      if (picks.provider !== undefined || picks.model !== undefined || picks.effort !== undefined) {
         await connection.write(
           "connection.set_defaults",
           {
             scope,
             purpose: "employee",
-            settings: { ...stored("employee"), model: asSetting(model), effort: asSetting(effort) },
+            settings: {
+              ...stored("employee"),
+              connection: asSetting(provider),
+              model: asSetting(model),
+              effort: asSetting(effort),
+            },
           },
           { retry: false },
         );
@@ -186,6 +224,8 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
           description: description.trim(),
           instructions,
           sequential_tasks: sequential,
+          // Only a change: it takes more rights than an ordinary edit on a phone.
+          ...(access !== accessOf(employee) ? { access_level: access } : {}),
         },
         { retry: false, expectedVersion: employee.version },
       );
@@ -242,7 +282,39 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
     value: m.key === "default" ? "inherit" : m.key,
     label: m.key === "default" ? "Inherit" : m.label,
   }));
-  const effortOptions = EFFORTS.map(([value, label]) => ({ value, label }));
+  const ownModels = [
+    { value: "inherit", label: inheritLabel(inherited.model && modelName(inherited.model)) },
+    ...modelsFor(connections, provider).map((m) => ({ value: m, label: modelName(m) })),
+    // A model no connection lists any more still shows as what is stored.
+    ...(model === "inherit" || modelsFor(connections, provider).includes(model)
+      ? []
+      : [{ value: model, label: modelName(model) }]),
+  ];
+  const providerOptions = [
+    { value: "inherit", label: inheritLabel(inherited.provider) },
+    ...connections.map((c) => ({ value: c.id, label: c.display_name })),
+  ];
+  const chooseProvider = (next: string) =>
+    setPicks({ ...picks, provider: next, model: modelAfterProvider(connections, next, model) });
+  const accessField = hasAccess ? (
+    <div {...stylex.props(styles.field)}>
+      <Field isGroupLabel label="Access" inputID="employee-access">
+        <SegmentedControl
+          label="Access"
+          layout="fill"
+          value={access}
+          onChange={(next) => setAccess(next as AccessLevel)}
+        >
+          {ACCESS_LEVELS.map((l) => (
+            <SegmentedControlItem key={l.value} value={l.value} label={l.label} />
+          ))}
+        </SegmentedControl>
+      </Field>
+      <Hint>
+        {ACCESS_LEVELS.find((l) => l.value === access)?.hint ?? "A level of a newer server: its runs are read only."}
+      </Hint>
+    </div>
+  ) : null;
   return (
     <FormDialog
       title={heading}
@@ -299,6 +371,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
       <TextArea label="Instructions" rows={7} value={instructions} onChange={setInstructions} />
       {employee ? null : (
         <>
+          {accessField}
           <div {...stylex.props(styles.folder)}>
             <span {...stylex.props(styles.grow)}>
               <TextInput
@@ -326,19 +399,42 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
               options={MODES.map((m) => ({ value: m, label: MODE_LABELS[m] }))}
             />
             <DialogSelector
+              label="Provider"
+              labelTooltip="Which connection this employee's runs use. Runs stay on your own Claude login."
+              value={provider}
+              onChange={chooseProvider}
+              options={providerOptions}
+            />
+            <DialogSelector
               label="Model"
               labelTooltip="The default for this employee's chat and tasks. A chat or task can override it for itself (Ctrl+M) without changing this."
               value={model}
               onChange={(v) => setPicks({ ...picks, model: v })}
-              options={modelOptions}
-            />
-            <DialogSelector
-              label="Effort"
-              value={effort}
-              onChange={(v) => setPicks({ ...picks, effort: v })}
-              options={effortOptions}
+              options={ownModels}
             />
           </div>
+          <div {...stylex.props(styles.field)}>
+            <Field isGroupLabel label="Effort" inputID="employee-effort">
+              <SegmentedControl
+                label="Effort"
+                layout="fill"
+                value={effort}
+                onChange={(next) => setPicks({ ...picks, effort: next })}
+              >
+                {EFFORTS.map(([value, label]) => (
+                  <SegmentedControlItem key={value} value={value} label={label.split(" · ")[0] as string} />
+                ))}
+              </SegmentedControl>
+            </Field>
+            {effort === "inherit" ? (
+              <Hint>
+                {inherited.effort
+                  ? `Inherits ${effortName(inherited.effort)} from the company default.`
+                  : "Inherits the default of the model."}
+              </Hint>
+            ) : null}
+          </div>
+          {accessField}
           <div>
             <Button
               size="sm"

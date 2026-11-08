@@ -249,6 +249,8 @@ mod schema32_tests;
 #[cfg(test)]
 mod schema33_tests;
 #[cfg(test)]
+mod schema34_tests;
+#[cfg(test)]
 mod schema29_tests;
 #[cfg(test)]
 mod schema30_tests;

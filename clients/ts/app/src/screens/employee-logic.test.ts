@@ -1,15 +1,22 @@
-import type { AgentView, EmployeeSummary } from "@aurelius/protocol";
+import type { AgentView, ConnectionsSnapshot, ConnectionView, EmployeeSummary } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  accessLabel,
+  accessOf,
   canPin,
+  choiceLine,
   employeeGroups,
+  inheritedRun,
   matchesSearch,
+  modelAfterProvider,
+  modelsFor,
   orgTree,
   pinnedFirst,
   position,
   reportsCandidates,
   threadGroup,
   togglePin,
+  usableConnections,
   workOf,
 } from "./employee-logic";
 
@@ -119,5 +126,64 @@ describe("work", () => {
     expect(threadGroup(false, false, now - h, now)).toBe("past");
     expect(threadGroup(false, false, now - 30 * h, now)).toBe("earlier");
     expect(threadGroup(false, true, now - 30 * h, now)).toBe("past");
+  });
+});
+
+describe("what an employee runs on", () => {
+  const conn = (id: string, models: string[], over: Partial<ConnectionView> = {}) =>
+    ({ id, display_name: `Conn ${id}`, models, status: "ready", ...over }) as ConnectionView;
+  const all = [conn("a", ["opus", "sonnet"], { default_model: "sonnet" }), conn("b", ["gpt"])];
+
+  it("offers the models of the chosen connection, or all of them on Inherit", () => {
+    expect(modelsFor(all, "inherit")).toEqual(["opus", "sonnet", "gpt"]);
+    expect(modelsFor(all, "b")).toEqual(["gpt"]);
+  });
+
+  it("drops a model the new connection does not have", () => {
+    expect(modelAfterProvider(all, "b", "opus")).toBe("inherit");
+    expect(modelAfterProvider(all, "a", "opus")).toBe("opus");
+    expect(modelAfterProvider(all, "b", "inherit")).toBe("inherit");
+  });
+
+  it("never offers a disconnected connection", () => {
+    expect(usableConnections([...all, conn("c", [], { status: "disconnected" })]).map((c) => c.id)).toEqual(["a", "b"]);
+  });
+
+  it("says what Inherit comes to from the company's default", () => {
+    const company = (settings: object) =>
+      ({
+        connections: all,
+        defaults: [{ purpose: "employee", scope: { kind: "global" }, settings }],
+      }) as unknown as ConnectionsSnapshot;
+    expect(inheritedRun(undefined)).toEqual({ provider: null, model: null, effort: null });
+    expect(inheritedRun({ connections: all })).toEqual({ provider: null, model: null, effort: null });
+    expect(inheritedRun(company({ connection: { mode: "value", value: "a" } }))).toEqual({
+      provider: "Conn a",
+      model: "sonnet",
+      effort: null,
+    });
+    expect(
+      inheritedRun(
+        company({
+          connection: { mode: "value", value: "a" },
+          model: { mode: "value", value: "opus" },
+          effort: { mode: "value", value: "high" },
+        }),
+      ),
+    ).toEqual({ provider: "Conn a", model: "opus", effort: "high" });
+  });
+
+  it("reads a choice as its value, or as Inherit with what that comes to", () => {
+    expect(choiceLine("inherit", null)).toBe("Inherit");
+    expect(choiceLine("inherit", "Sonnet")).toBe("Inherit · Sonnet");
+    expect(choiceLine("opus", "Sonnet", (v) => v.toUpperCase())).toBe("OPUS");
+  });
+
+  it("treats an employee without a level as Inherit and names an unknown one", () => {
+    expect(accessOf(null)).toBe("inherit");
+    expect(accessOf(m("A"))).toBe("inherit");
+    expect(accessOf(m("A", null, { access_level: "read_only" }))).toBe("read_only");
+    expect(accessLabel("read_edit")).toBe("Read and edit");
+    expect(accessLabel("unknown")).toBe("Unknown");
   });
 });

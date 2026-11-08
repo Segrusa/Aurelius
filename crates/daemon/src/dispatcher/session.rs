@@ -46,14 +46,15 @@ impl Choice {
 /// What a session is started with; a change starts a new one. The mode and the
 /// MCP list may change (the new message says so), the run's bridge always does.
 /// The version of the platform rules is part of it: a resumed session keeps its
-/// system text for up to a day, and never gets other rules (guidelines B6).
+/// system text for up to a day, and never gets other rules (guidelines B6). The
+/// access level is too: a resumed session must not remember tools it no longer has.
 pub(super) fn session_key(plan: &ChatRunPlan, profile: &ToolProfile) -> SessionKey {
     let model = plan.config.model.clone().unwrap_or_default();
     match profile {
-        ToolProfile::Work { folders, browser, playwright, plugins, artifacts, .. } => SessionKey {
+        ToolProfile::Work { folders, browser, playwright, plugins, artifacts, access, .. } => SessionKey {
             model,
             folder: folders.first().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(),
-            profile: serde_json::json!({ "folders": folders, "browser": browser, "playwright": playwright.is_some(), "plugins": plugins, "artifacts": artifacts, "platform_rules": aurelius_application::run::plan::PLATFORM_RULES_VERSION }).to_string(),
+            profile: serde_json::json!({ "folders": folders, "browser": browser, "playwright": playwright.is_some(), "plugins": plugins, "artifacts": artifacts, "platform_rules": aurelius_application::run::plan::PLATFORM_RULES_VERSION, "access": access.as_str() }).to_string(),
         },
         ToolProfile::TextOnly => SessionKey { model, folder: String::new(), profile: "text".into() },
         ToolProfile::Triage { .. } => SessionKey { model, folder: String::new(), profile: "triage".into() },

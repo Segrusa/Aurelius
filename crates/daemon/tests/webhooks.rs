@@ -132,7 +132,7 @@ async fn company(owner: &Client) -> Company {
     else {
         panic!()
     };
-    let jean = CreateEmployee { description: None, name: "Jean".into(), role: "Management".into(), title: Some("CEO".into()), reports_to: None, instructions: None, folder: None };
+    let jean = CreateEmployee { access_level: None, description: None, name: "Jean".into(), role: "Management".into(), title: Some("CEO".into()), reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = owner.execute(envelope(Command::CreateEmployee(jean), None)).await.unwrap().result else { panic!() };
     Company { project: project_id, jean: (employee_id, conversation_id) }
 }

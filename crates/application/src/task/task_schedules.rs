@@ -362,7 +362,7 @@ mod tests {
             panic!()
         };
         let (CommandResult::EmployeeCreated { employee_id, .. }, _) =
-            run(&service, Command::CreateEmployee(CreateEmployee { description: None, name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }))
+            run(&service, Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }))
         else {
             panic!()
         };

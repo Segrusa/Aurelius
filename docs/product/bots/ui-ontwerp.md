@@ -10,11 +10,17 @@
 - **Employee-dialoog:** `TextInput` *Description* boven *Instructions*, met de uitleg *"Shown to other employees so they know when to hand work to this one. Empty: they see the first line of the instructions."*
 - **Employee-pagina:** sectie *DESCRIPTION* boven *INSTRUCTIONS*, alleen als er een is.
 
+## Stap 2: provider, model, effort en toegang (gebouwd)
+
+- **Employee-dialoog (bewerken):** `Selector` *Provider* en *Model*, `SegmentedControl` *Effort* en *Access*. Inherit is de standaard en toont wat dat oplevert (*Inherit · Sonnet 4.5*). Een andere provider beperkt de modellenlijst; een model dat die provider niet heeft gaat terug naar Inherit.
+- **Employee-dialoog (nieuw):** alleen *Access*. Provider, model en effort kies je daarna via Edit.
+- **Employee-pagina:** tweede `MetadataList` met Provider, Model, Effort en Access; wijzigen gaat via Edit.
+- **Toegangsniveaus:** *Inherit* (alle werktools), *Read only* (`Read`, `Glob`, `Grep`), *Read and edit* (daarbij `Edit`, `Write`). Onder Inherit hebben runs geen MCP-servers van de gebruiker, plugins of artifacts; browser en scherm houden hun eigen schakelaar, de bridge blijft zodat ze kunnen overdragen.
+
 ## Latere stappen
 
 | Stap | Scherm | Astryx | Opmerking |
 |---|---|---|---|
-| 2 | Employee-dialoog, tab Settings | `Selector` voor provider en model, `SegmentedControl` voor effort en toegangsniveau | Inherit als standaard, met het geërfde waarde ernaast |
 | 4 | Run card | `ChatToolCalls`, `Card`, statusbadge | Hangt aan de `Reported`-regels en antwoorden die `MessageView.run_id` hebben; eerst nagaan of dat gevuld is voor discussieposts |
 | 4 | Interrupt card | `Card` + `Banner` + `ButtonGroup`, zoals `approval-card` | Eén component voor discussie en Inbox |
 | 4 | Odometer | `MetadataList` in de ticketkop | Calls, tokens in/uit, kosten; per board member in Usage |

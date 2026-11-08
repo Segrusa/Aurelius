@@ -378,6 +378,9 @@ pub struct EmployeeSummary {
     /// prompt then shows the first line of its instructions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// What its runs may do with files and commands (C3); left out when `Inherit`.
+    #[serde(default, skip_serializing_if = "crate::employee::AccessLevel::is_inherit")]
+    pub access_level: crate::employee::AccessLevel,
     /// Projects it has open tasks in (derived, never stored).
     pub projects_active: Vec<ProjectId>,
     pub instructions: Option<String>,

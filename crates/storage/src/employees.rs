@@ -4,7 +4,7 @@
 //! Task conversations carry the task's project.
 
 use crate::{StorageError, now_ms};
-use aurelius_domain::{ConversationId, EmployeeId, ProjectId, employee::LifecycleStatus, views::{AgentView, EmployeeSummary}};
+use aurelius_domain::{ConversationId, EmployeeId, ProjectId, employee::{AccessLevel, LifecycleStatus}, views::{AgentView, EmployeeSummary}};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 pub struct EmployeeRow {
@@ -135,6 +135,26 @@ pub fn set_description(tx: &Transaction<'_>, id: EmployeeId, description: Option
     Ok(())
 }
 
+/// What its runs may do with files and commands (C3). In the transaction of the
+/// create or update that carries it; a run reads it when it is planned.
+pub fn set_access_level(tx: &Transaction<'_>, id: EmployeeId, level: AccessLevel) -> Result<(), StorageError> {
+    tx.execute("UPDATE employees SET access_level = ?2 WHERE id = ?1", params![id.to_string(), level.as_str()])?;
+    Ok(())
+}
+
+/// The access level of the employee behind a conversation; a conversation
+/// without an employee (the project assistant) has no level of its own.
+pub fn access_level_of(conn: &Connection, conversation: ConversationId) -> Result<AccessLevel, StorageError> {
+    let level: Option<String> = conn
+        .query_row(
+            "SELECT m.access_level FROM conversations c JOIN employees m ON m.id = c.employee_id WHERE c.id = ?1",
+            [conversation.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(level.map(|l| AccessLevel::parse(&l)).unwrap_or_default())
+}
+
 pub fn update_employee(
     tx: &Transaction<'_>,
     id: EmployeeId,
@@ -199,7 +219,7 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
         "SELECT m.id, m.name, m.role, m.title, m.reports_to, b.storage_key, m.status, m.version, c.id,
                 EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id IN (SELECT id FROM conversations WHERE employee_id = m.id) AND r.status IN ('created','starting','running','cancelling')),
                 c.agent_mode, m.folder, c.browser_allowed, c.screen_allowed,
-                COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0), m.description
+                COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0), m.description, m.access_level
          FROM employees m
          JOIN conversations c ON c.id = {}
          LEFT JOIN blobs b ON b.id = m.instructions_blob_id
@@ -226,11 +246,12 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             r.get::<_, bool>(13)?,
             r.get::<_, bool>(14)?,
             r.get::<_, String>(15)?,
+            r.get::<_, String>(16)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks, description) = row?;
+        let (id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks, description, access_level) = row?;
         out.push(EmployeeSummary {
             id,
             name,
@@ -238,6 +259,7 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             title,
             reports_to,
             description: (!description.is_empty()).then_some(description),
+            access_level: AccessLevel::parse(&access_level),
             projects_active: Vec::new(),
             instructions: key.as_deref().and_then(read_blob),
             status,

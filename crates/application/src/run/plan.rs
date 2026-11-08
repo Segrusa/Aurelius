@@ -37,6 +37,16 @@ fn trigger_mark(ordinal: u32, created_at_ms: i64, last_answer: Option<(u32, i64)
     }
 }
 
+/// What the system text says a run can do in its folder: the same as its tool list.
+fn access_sentence(level: aurelius_domain::employee::AccessLevel) -> &'static str {
+    use aurelius_domain::employee::AccessLevel;
+    match level {
+        AccessLevel::Inherit => "You can read and change files there, run commands and search the web.",
+        AccessLevel::ReadEdit => "You can read and change files there; you cannot run commands or use the web. When that is needed, hand it to a colleague.",
+        AccessLevel::ReadOnly | AccessLevel::Unknown => "You can only read and search files there; you cannot change files, run commands or use the web. When that is needed, hand it to a colleague.",
+    }
+}
+
 /// Everything the daemon needs to execute a claimed chat run.
 #[derive(Debug, Clone)]
 pub struct ChatRunPlan {
@@ -56,6 +66,8 @@ pub struct ChatRunPlan {
     pub context_error: Option<String>,
     /// An employee at work: its folders (project folder first) and mode.
     pub work: Option<(Vec<std::path::PathBuf>, aurelius_domain::autonomy::AgentMode)>,
+    /// What the employee's runs may do with files and commands (C3).
+    pub access: aurelius_domain::employee::AccessLevel,
     /// The user allows this employee to use the browser (Claude in Chrome or Playwright).
     pub browser: bool,
     /// The browser session (and so tab group) of this run: the employee's id, or the
@@ -355,6 +367,7 @@ User question:
                 };
                 let mode = aurelius_storage::conversations::agent_mode(conn, conversation_id)?;
                 let work = (!folders.is_empty() && !quick).then(|| (folders.clone(), mode));
+                let access = aurelius_storage::employees::access_level_of(conn, conversation_id)?;
                 let browser = work.is_some() && aurelius_storage::conversations::browser_allowed(conn, conversation_id)?;
                 // One browser session per employee: all its conversations and tasks share one tab group.
                 let browser_session = match browser {
@@ -377,10 +390,11 @@ User question:
                 };
                 let system = match &work {
                     Some((folders, _)) => Some(format!(
-                        "{}\n\nYou work in the folder {}{}. You can read and change files there, run commands and search the web. Whatever your mode doesn't allow by itself, Aurelius asks the user first; if something is refused, say so and continue without it. To show the user a file (an image, a report), name its full path: Aurelius attaches it to your answer and the user opens it in the app.",
+                        "{}\n\nYou work in the folder {}{}. {} Whatever your mode doesn't allow by itself, Aurelius asks the user first; if something is refused, say so and continue without it. To show the user a file (an image, a report), name its full path: Aurelius attaches it to your answer and the user opens it in the app.",
                         system.unwrap_or_default(),
                         folders[0].display(),
                         folders.get(1).filter(|w| Some(*w) != channel_folder.as_ref()).map(|w| format!(" (and your own workspace {})", w.display())).unwrap_or_default(),
+                        access_sentence(access),
                     ).trim().to_string()),
                     None => system,
                 };
@@ -729,7 +743,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 // Its answer in the group shows the mode it started in.
                 let group = conv::group_run(conn, run_id)?.map(|g| conv::GroupRun { mode: Some(mode), ..g });
                 let guidelines = guidelines.run;
-                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group, discussion, testing, guidelines }))
+                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group, discussion, testing, guidelines }))
             })
             .map_err(storage_error)
     }

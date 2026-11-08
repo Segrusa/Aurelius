@@ -373,6 +373,9 @@ pub mod feature {
     /// short, text-only run of its own, besides the busy line. No new method, field
     /// or event: the answer is an ordinary employee message in the discussion.
     pub const QUICK_ANSWERS: &str = "quick_answers";
+    /// An employee has an access level (`EmployeeSummary::access_level`, and the
+    /// field on `employee.create` and `employee.update`) that limits its runs' tools.
+    pub const EMPLOYEE_ACCESS: &str = "employee_access";
 }
 
 /// Every feature this build has.
@@ -416,6 +419,7 @@ pub const FEATURES: &[&str] = &[
     feature::PERSONAL_INBOX,
     feature::QUICK_ANSWERS,
     feature::TICKET_FROM_IDEA,
+    feature::EMPLOYEE_ACCESS,
 ];
 
 /// Daemon → client.
