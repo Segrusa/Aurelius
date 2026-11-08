@@ -28,7 +28,7 @@ async fn employee(client: &Client) -> (EmployeeId, ConversationId, PathBuf) {
     let folder = client.projects().await.unwrap().projects.into_iter().find(|p| p.id == project_id).unwrap().folder.expect("folder");
     let CommandResult::EmployeeCreated { employee_id, .. } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { description: None, name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await

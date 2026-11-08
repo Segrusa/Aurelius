@@ -152,6 +152,7 @@ impl CommandService {
     ) -> Result<Committed, AppError> {
         let (name, role, instructions) = employee::validate_fields(&cmd.name, &cmd.role, cmd.instructions.as_deref()).map_err(domain_error)?;
         let title = employee::validate_title(cmd.title.as_deref()).map_err(domain_error)?;
+        let description = employee::validate_description(cmd.description.as_deref()).map_err(domain_error)?;
         let workspace = match cmd.folder.as_deref().filter(|p| !p.trim().is_empty()) {
             Some(p) => Some(self.chosen_folder(p)?),
             None => None,
@@ -165,6 +166,7 @@ impl CommandService {
                 Ok(notice) => notice,
                 Err(refused) => return Ok(Err(refused)),
             };
+            employees::set_description(tx, new.employee_id, description.as_deref())?;
             Ok(Ok((CommandResult::EmployeeCreated { employee_id: new.employee_id, conversation_id: new.conversation_id }, vec![notice])))
         })
     }
@@ -184,8 +186,10 @@ impl CommandService {
         };
         // `None` leaves the title as it is; an empty text clears it.
         let new_title = cmd.title.as_deref().map(|t| employee::validate_title(Some(t))).transpose().map_err(domain_error)?;
+        // `None` leaves the description as it is; an empty text clears it.
+        let new_description = cmd.description.as_deref().map(|d| employee::validate_description(Some(d))).transpose().map_err(domain_error)?;
         let payload = blobs_store
-            .put_json(&serde_json::json!({ "employee_id": cmd.employee_id, "name": name, "role": role, "title": new_title, "sequential_tasks": cmd.sequential_tasks }))
+            .put_json(&serde_json::json!({ "employee_id": cmd.employee_id, "name": name, "role": role, "title": new_title, "sequential_tasks": cmd.sequential_tasks, "description": new_description }))
             .map_err(storage_error)?;
         let employee_id = cmd.employee_id;
         let sequential = cmd.sequential_tasks;
@@ -212,6 +216,9 @@ impl CommandService {
             let version = current.version + 1;
             let title = new_title.clone().unwrap_or(current.title.clone());
             employees::update_employee(tx, employee_id, &name, &role, title.as_deref(), instructions_blob.as_ref().map(|b| b.id.to_string()).as_deref(), version)?;
+            if let Some(description) = &new_description {
+                employees::set_description(tx, employee_id, description.as_deref())?;
+            }
             // Changed instructions are a new version, and the employee's sessions start over with them.
             let (_, changed) = aurelius_storage::instruction_versions::record(tx, employee_id, aurelius_storage::instruction_versions::Source::Edited)?;
             if changed {

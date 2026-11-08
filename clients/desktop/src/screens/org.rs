@@ -427,6 +427,7 @@ pub(crate) mod tests {
             role: "Role".into(),
             title: None,
             reports_to,
+            description: None,
             instructions: None,
             status: LifecycleStatus::Active,
             version: 1,

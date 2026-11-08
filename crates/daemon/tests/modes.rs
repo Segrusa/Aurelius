@@ -109,7 +109,7 @@ async fn a_task_conversation_works_in_the_employees_mode() {
     else {
         panic!()
     };
-    let create = CreateEmployee { name: "Alex".into(), role: "Onderzoeker".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { description: None, name: "Alex".into(), role: "Onderzoeker".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     set_mode(&client, conversation_id, AgentMode::Plan).await;
     let cmd = CreateTask {

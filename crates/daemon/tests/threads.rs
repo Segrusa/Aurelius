@@ -184,7 +184,7 @@ async fn an_employee_named_in_a_reply_answers_in_that_thread() {
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let (_, channel) = project_channel(&client, "Atlas").await;
-    let create = CreateEmployee { name: "Ann".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { description: None, name: "Ann".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap();
     let mut alex = raw(dir.path(), BOARD_MEMBER, NEW).await;
     let root = sent(&mut alex, send(channel, "The build is red.", None)).await;

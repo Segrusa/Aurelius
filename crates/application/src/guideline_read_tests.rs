@@ -33,7 +33,7 @@ fn exec(s: &Setup, command: Command) -> CommandResult {
 }
 
 fn hire(service: &CommandService, user: UserId, name: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
+    let create = CreateEmployee { description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
     let made = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateEmployee(create) }).unwrap().receipt.result;
     let CommandResult::EmployeeCreated { employee_id, .. } = made else { panic!("{made:?}") };
     employee_id

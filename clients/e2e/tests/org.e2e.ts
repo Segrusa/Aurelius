@@ -56,8 +56,10 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByRole("heading", { name: "Orion", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByPlaceholder(/Optional, e.g./).fill("Head of things");
+    await page.getByLabel("Description").fill("Plans the work and reviews it.");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Head of things · Lead")).toBeVisible();
+    await expect(page.getByText("Plans the work and reviews it.")).toBeVisible();
 
     await go(page, "Employees");
     await page.getByRole("button", { name: "Add employee" }).click();

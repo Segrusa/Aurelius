@@ -374,6 +374,10 @@ pub struct EmployeeSummary {
     pub title: Option<String>,
     /// Who this employee reports to; none: a root of the org chart (the management team).
     pub reports_to: Option<EmployeeId>,
+    /// What other employees read about it (P7). Left out when it has none: their
+    /// prompt then shows the first line of its instructions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Projects it has open tasks in (derived, never stored).
     pub projects_active: Vec<ProjectId>,
     pub instructions: Option<String>,

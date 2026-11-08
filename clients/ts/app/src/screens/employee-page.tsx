@@ -344,6 +344,12 @@ export function EmployeePage({ id }: { id: string }) {
                   </Button>
                 </MetadataListItem>
               </MetadataList>
+              {e.description ? (
+                <section {...stylex.props(styles.section)}>
+                  <Eyebrow>DESCRIPTION</Eyebrow>
+                  <p {...stylex.props(styles.instructions)}>{e.description}</p>
+                </section>
+              ) : null}
               {e.instructions ? (
                 <section {...stylex.props(styles.section)}>
                   <Eyebrow>INSTRUCTIONS</Eyebrow>

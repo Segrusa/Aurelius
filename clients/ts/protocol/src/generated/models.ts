@@ -1341,6 +1341,11 @@ export interface CreateAppKey {
 
 export interface CreateEmployee {
   /**
+   * What other employees read to know when to hand work to this one (P7).
+   * None or empty: their prompt shows the first line of the instructions.
+   */
+  description?: string | null;
+  /**
    * Optional own workspace folder: the work folder of its chat.
    */
   folder?: string | null;
@@ -1679,6 +1684,11 @@ export interface EmployeeSummary {
    * protocol 3 (history). Task conversations are not listed.
    */
   conversations: ConversationSummary[];
+  /**
+   * What other employees read about it (P7). Left out when it has none: their
+   * prompt then shows the first line of its instructions.
+   */
+  description?: string | null;
   /**
    * Own workspace folder, if any: the work folder of its chat (in a task the project folder applies).
    */
@@ -6379,6 +6389,11 @@ export interface UpdateCompany {
 }
 
 export interface UpdateEmployee {
+  /**
+   * What other employees read about this one (P7). `None` leaves it as it is;
+   * an empty text clears it.
+   */
+  description?: string | null;
   employee_id: string;
   instructions?: string | null;
   name: string;

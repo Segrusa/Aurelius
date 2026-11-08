@@ -28,7 +28,7 @@
 //! the inbox. Once allowed, the rest of this run (one answer) may look.
 
 use aurelius_client::ClientError;
-use aurelius_client::bridge::{BridgeClient, IdeaKind, EmployeeMemoryOp, EmployeeTaskOp, PermissionAnswer, RunId};
+use aurelius_client::bridge::{BridgeClient, IdeaKind, EmployeeMemoryOp, EmployeeTaskOp, MEMORY_SCOPE_RULE, PermissionAnswer, RunId};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -515,7 +515,7 @@ fn memory_tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "remember",
-            "description": "Store something you want to know later, active at once: a decision you took (and why), project knowledge you learned, or an episode worth remembering. Keep it to one short, self-contained statement. Never store secrets.",
+            "description": format!("Store something you want to know later, active at once: a decision you took (and why), project knowledge you learned, or an episode worth remembering. Keep it to one short, self-contained statement. Never store secrets. {MEMORY_SCOPE_RULE}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -588,13 +588,13 @@ fn task_tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "delegate_task",
-            "description": "Give work to an employee of the company: a part of your task (it stays in your task's project), or, outside a task, something from this conversation. Work always belongs to a ticket: in a task or a ticket's discussion it is that ticket, elsewhere name it with ticket. They work on it as a task in a conversation of their own and their result comes back here. Use it for work that clearly suits them better; do the rest yourself.",
+            "description": "Give work to an employee of the company: a part of your task (it stays in your task's project), or, outside a task, something from this conversation. Work always belongs to a ticket: in a task or a ticket's discussion it is that ticket, elsewhere name it with ticket. They work on it as a task in a conversation of their own and their result comes back here. Use it for work that clearly suits them better; do the rest yourself. They do not see this conversation: the goal and criteria must stand on their own, with the paths or PR number and branch involved and what to report back. Never write \"see above\".",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "employee": { "type": "string", "description": "The colleague's name." },
                     "title": { "type": "string" },
-                    "goal": { "type": "string", "description": "What they must deliver." },
+                    "goal": { "type": "string", "description": "What they must deliver, self-contained: paths or PR number and branch, and what to report back." },
                     "criteria": { "type": "array", "items": { "type": "string" } },
                     "ticket": { "type": "string", "description": "The ticket this work belongs to (#12 or its id; list_tickets shows them): required outside a ticket's task or discussion, ignored inside one. The task gets the ticket's project." }
                 },

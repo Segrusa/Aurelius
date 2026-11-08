@@ -4,6 +4,10 @@ Releases up to v0.6.0 combined the app and the server. From then on they are
 released separately, each with its own version and changelog:
 [server](docs/changelog/server.md) and [desktop app](docs/changelog/desktop.md).
 
+## Unreleased (feat/astryx)
+
+- **Employees as bots.** Employees get platform rules at the front of their prompt (handoffs, a thread's lead, self-contained handoffs, new messages marked, signing on external systems), a description colleagues see, and in a thread they do not lead only what is addressed to them in their prompt; the clients keep showing the whole thread. Memory no longer takes facts of one ticket. Details in [docs/changelog/server.md](docs/changelog/server.md).
+
 ## v0.6.0
 
 The server and the desktop app now have their own releases, a manager

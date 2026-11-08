@@ -218,6 +218,40 @@ pub fn mentions(text: &str, employees: &[(EmployeeId, String)]) -> Vec<EmployeeI
     out
 }
 
+/// One message of a discussion, as the scoped view looks at it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewLine<'a> {
+    /// The employee who wrote it (a name); none: a board member.
+    pub employee: Option<&'a str>,
+    pub text: &'a str,
+}
+
+/// The scoped view (P3): which of `lines` the prompt of `me` shows, or `None` for
+/// all of them: for the thread's lead and for the only employee in the thread (nobody
+/// else wrote or was named). A non-lead sees what names it and what it wrote;
+/// `owner`: it owns the ticket, so a board member's message that names nobody is
+/// addressed to it too (B3). Only the prompt: the clients always show the whole thread.
+pub fn scoped_view(lines: &[ViewLine<'_>], me: (EmployeeId, &str), team: &[(EmployeeId, String)], lead: bool, owner: bool) -> Option<Vec<usize>> {
+    if lead {
+        return None;
+    }
+    let mine = |line: &ViewLine<'_>| line.employee.is_some_and(|name| name.to_lowercase() == me.1.to_lowercase());
+    let named: Vec<Vec<EmployeeId>> = lines.iter().map(|line| mentions(line.text, team)).collect();
+    let alone = lines.iter().zip(&named).all(|(line, named)| (line.employee.is_none() || mine(line)) && named.iter().all(|e| *e == me.0));
+    if alone {
+        return None;
+    }
+    Some(
+        lines
+            .iter()
+            .zip(&named)
+            .enumerate()
+            .filter(|(_, (line, named))| mine(line) || named.contains(&me.0) || (owner && line.employee.is_none() && named.is_empty()))
+            .map(|(index, _)| index)
+            .collect(),
+    )
+}
+
 /// A text at most `max` characters long, cut with "…".
 pub fn shortened(text: &str, max: usize) -> String {
     let text = text.trim();
@@ -241,6 +275,30 @@ mod tests {
         assert!(mentions("no one here, mail bo@bo.com, x-@Bo, x_@Bo, x+@Bo or @Bob", &team).is_empty());
         assert!(mentions("@ Ann", &team).is_empty());
         assert_eq!(mentions("(@Bo)", &team), vec![bo]);
+    }
+
+    fn line<'a>(employee: Option<&'a str>, text: &'a str) -> ViewLine<'a> {
+        ViewLine { employee, text }
+    }
+
+    #[test]
+    fn the_scoped_view_keeps_what_names_me_and_what_i_wrote() {
+        let (ann, bo) = (EmployeeId::new(), EmployeeId::new());
+        let team = vec![(ann, "Ann".to_owned()), (bo, "Bo".to_owned())];
+        let lines = [line(None, "@Bo can you look?"), line(Some("Bo"), "@Ann over to you"), line(Some("ann"), "On it."), line(None, "Thanks all"), line(Some("Bo"), "Looking.")];
+        assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, false, false), Some(vec![1, 2]));
+        // The owner also has what a board member wrote to nobody in particular (B3).
+        assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, false, true), Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn the_lead_and_the_only_employee_see_everything() {
+        let (ann, bo) = (EmployeeId::new(), EmployeeId::new());
+        let team = vec![(ann, "Ann".to_owned()), (bo, "Bo".to_owned())];
+        let lines = [line(None, "@Bo look"), line(Some("Bo"), "Done")];
+        assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, true, false), None, "the lead");
+        assert_eq!(scoped_view(&[line(None, "Hello"), line(Some("Ann"), "Hi @Ann")], (ann, "Ann"), &team, false, false), None, "alone");
+        assert_eq!(scoped_view(&[line(None, "ask @Bo")], (ann, "Ann"), &team, false, false), Some(vec![]), "someone else was named");
     }
 
     #[test]

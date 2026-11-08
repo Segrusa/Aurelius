@@ -27,7 +27,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 }
 
 async fn employee(client: &Client, name: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let created = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap();
     let CommandResult::EmployeeCreated { employee_id, .. } = created.result else { panic!("{:?}", created.result) };
     employee_id

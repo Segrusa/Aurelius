@@ -359,7 +359,7 @@ async fn paired_phone_uses_the_same_sessions_with_limits() {
     let atlas = projects.iter().find(|p| p.name == "Atlas").unwrap();
     let CommandResult::EmployeeCreated { employee_id, .. } = desktop
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { description: None, name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -563,7 +563,7 @@ async fn phone_sets_an_employees_model_and_effort_but_not_its_connection() {
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = desktop
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { description: None, name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await

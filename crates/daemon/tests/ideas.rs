@@ -28,7 +28,7 @@ async fn ideas_are_noted_started_as_tasks_or_dropped() {
         panic!()
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result
@@ -118,7 +118,7 @@ async fn ideas_keep_files_that_go_with_them_into_the_task() {
     let folder = std::path::PathBuf::from(client.projects().await.unwrap().projects.into_iter().find(|p| p.id == project_id).unwrap().folder.expect("folder"));
     let uploads = folder.join(".aurelius").join("uploads");
     let CommandResult::EmployeeCreated { employee_id, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result
@@ -236,7 +236,7 @@ async fn a_refused_ticket_leaves_the_idea_open_and_an_idea_with_a_ticket_or_task
     let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(project("Atlas"), None)).await.unwrap().result else { panic!() };
     let CommandResult::ProjectCreated { project_id: other, .. } = client.execute(envelope(project("Zeta"), None)).await.unwrap().result else { panic!() };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result

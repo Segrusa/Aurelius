@@ -5457,6 +5457,7 @@ final class CreateAppKey {
 
 final class CreateEmployee {
   const CreateEmployee({
+    this.description,
     this.folder,
     this.instructions,
     required this.name,
@@ -5465,6 +5466,9 @@ final class CreateEmployee {
     this.title,
   });
 
+  /// What other employees read to know when to hand work to this one (P7).
+  /// None or empty: their prompt shows the first line of the instructions.
+  final String? description;
   /// Optional own workspace folder: the work folder of its chat.
   final String? folder;
   final String? instructions;
@@ -5476,6 +5480,7 @@ final class CreateEmployee {
   final String? title;
 
   factory CreateEmployee.fromJson(Map<String, dynamic> json) => CreateEmployee(
+    description: (json['description'] == null ? null : (json['description'] as String)),
     folder: (json['folder'] == null ? null : (json['folder'] as String)),
     instructions: (json['instructions'] == null ? null : (json['instructions'] as String)),
     name: (json['name'] as String),
@@ -5485,6 +5490,7 @@ final class CreateEmployee {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (description != null) 'description': description,
     if (folder != null) 'folder': folder,
     if (instructions != null) 'instructions': instructions,
     'name': name,
@@ -6157,6 +6163,7 @@ final class EmployeeSummary {
     required this.browserAllowed,
     required this.conversationId,
     required this.conversations,
+    this.description,
     this.folder,
     this.heartbeat,
     required this.id,
@@ -6185,6 +6192,9 @@ final class EmployeeSummary {
   /// carries mode, heartbeat and memory summaries) and older ones from before
   /// protocol 3 (history). Task conversations are not listed.
   final List<ConversationSummary> conversations;
+  /// What other employees read about it (P7). Left out when it has none: their
+  /// prompt then shows the first line of its instructions.
+  final String? description;
   /// Own workspace folder, if any: the work folder of its chat (in a task the project folder applies).
   final String? folder;
   /// Opt-in heartbeat; `None` = off.
@@ -6213,6 +6223,7 @@ final class EmployeeSummary {
     browserAllowed: (json['browser_allowed'] as bool),
     conversationId: (json['conversation_id'] as String),
     conversations: (json['conversations'] as List<dynamic>).map((x0) => ConversationSummary.fromJson(x0 as Map<String, dynamic>)).toList(),
+    description: (json['description'] == null ? null : (json['description'] as String)),
     folder: (json['folder'] == null ? null : (json['folder'] as String)),
     heartbeat: (json['heartbeat'] == null ? null : HeartbeatView.fromJson(json['heartbeat'] as Map<String, dynamic>)),
     id: (json['id'] as String),
@@ -6235,6 +6246,7 @@ final class EmployeeSummary {
     'browser_allowed': browserAllowed,
     'conversation_id': conversationId,
     'conversations': conversations.map((x0) => x0.toJson()).toList(),
+    if (description != null) 'description': description,
     if (folder != null) 'folder': folder,
     if (heartbeat != null) 'heartbeat': heartbeat?.toJson(),
     'id': id,
@@ -20068,6 +20080,7 @@ final class UpdateCompany {
 
 final class UpdateEmployee {
   const UpdateEmployee({
+    this.description,
     required this.employeeId,
     this.instructions,
     required this.name,
@@ -20076,6 +20089,9 @@ final class UpdateEmployee {
     this.title,
   });
 
+  /// What other employees read about this one (P7). `None` leaves it as it is;
+  /// an empty text clears it.
+  final String? description;
   final String employeeId;
   final String? instructions;
   final String name;
@@ -20086,6 +20102,7 @@ final class UpdateEmployee {
   final String? title;
 
   factory UpdateEmployee.fromJson(Map<String, dynamic> json) => UpdateEmployee(
+    description: (json['description'] == null ? null : (json['description'] as String)),
     employeeId: (json['employee_id'] as String),
     instructions: (json['instructions'] == null ? null : (json['instructions'] as String)),
     name: (json['name'] as String),
@@ -20095,6 +20112,7 @@ final class UpdateEmployee {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (description != null) 'description': description,
     'employee_id': employeeId,
     if (instructions != null) 'instructions': instructions,
     'name': name,

@@ -10,6 +10,9 @@ pub const NAME_MAX: usize = 80;
 pub const ROLE_MAX: usize = 120;
 pub const TITLE_MAX: usize = 80;
 pub const INSTRUCTIONS_MAX: usize = 20_000;
+/// The longest description (characters): a line in every colleague's system text,
+/// no longer than the first instruction line it replaces there (P7).
+pub const DESCRIPTION_MAX: usize = 160;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -91,6 +94,10 @@ pub struct CreateEmployee {
     /// Optional own workspace folder: the work folder of its chat.
     #[serde(default)]
     pub folder: Option<String>,
+    /// What other employees read to know when to hand work to this one (P7).
+    /// None or empty: their prompt shows the first line of the instructions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -106,6 +113,10 @@ pub struct UpdateEmployee {
     /// Run its tasks one at a time; `None` leaves it as it is.
     #[serde(default)]
     pub sequential_tasks: Option<bool>,
+    /// What other employees read about this one (P7). `None` leaves it as it is;
+    /// an empty text clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -146,6 +157,12 @@ pub struct SendEmployeeMessage {
 /// A title as stored: trimmed, empty is none.
 pub fn validate_title(title: Option<&str>) -> Result<Option<String>, DomainError> {
     optional_text("title", title, TITLE_MAX)
+}
+
+/// A description as stored: trimmed, on one line, empty is none.
+pub fn validate_description(description: Option<&str>) -> Result<Option<String>, DomainError> {
+    let flat = description.map(|d| d.split_whitespace().collect::<Vec<_>>().join(" "));
+    optional_text("description", flat.as_deref(), DESCRIPTION_MAX)
 }
 
 /// Validated employee fields: (name, role, instructions).

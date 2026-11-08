@@ -128,6 +128,13 @@ pub fn by_name(conn: &Connection, name: &str) -> Result<Option<EmployeeId>, Stor
     Ok(id.and_then(|i| EmployeeId::parse(&i).ok()))
 }
 
+/// What other employees read about it (P7); `None` clears it. In the transaction
+/// of the create or update that carries it, so it needs no version of its own.
+pub fn set_description(tx: &Transaction<'_>, id: EmployeeId, description: Option<&str>) -> Result<(), StorageError> {
+    tx.execute("UPDATE employees SET description = ?2 WHERE id = ?1", params![id.to_string(), description.unwrap_or("")])?;
+    Ok(())
+}
+
 pub fn update_employee(
     tx: &Transaction<'_>,
     id: EmployeeId,
@@ -192,7 +199,7 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
         "SELECT m.id, m.name, m.role, m.title, m.reports_to, b.storage_key, m.status, m.version, c.id,
                 EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id IN (SELECT id FROM conversations WHERE employee_id = m.id) AND r.status IN ('created','starting','running','cancelling')),
                 c.agent_mode, m.folder, c.browser_allowed, c.screen_allowed,
-                COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0)
+                COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0), m.description
          FROM employees m
          JOIN conversations c ON c.id = {}
          LEFT JOIN blobs b ON b.id = m.instructions_blob_id
@@ -218,17 +225,19 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             r.get::<_, bool>(12)?,
             r.get::<_, bool>(13)?,
             r.get::<_, bool>(14)?,
+            r.get::<_, String>(15)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks) = row?;
+        let (id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks, description) = row?;
         out.push(EmployeeSummary {
             id,
             name,
             role,
             title,
             reports_to,
+            description: (!description.is_empty()).then_some(description),
             projects_active: Vec::new(),
             instructions: key.as_deref().and_then(read_blob),
             status,

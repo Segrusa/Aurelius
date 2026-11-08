@@ -25,7 +25,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 
 /// Employees are company-wide; the project only says where the test works.
 fn new_employee(_project_id: ProjectId, name: &str, role: &str) -> CreateEmployee {
-    CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: Some("Wees kort.".into()), folder: None }
+    CreateEmployee { description: None, name: name.into(), role: role.into(), title: None, reports_to: None, instructions: Some("Wees kort.".into()), folder: None }
 }
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str) -> EmployeeId {
@@ -98,7 +98,7 @@ async fn paused_employee_starts_no_run_and_config_applies_to_new_runs() {
 
     client.execute(envelope(status(alex, LifecycleStatus::Active), None)).await.unwrap();
     let version = client.employees().await.unwrap().employees[0].version;
-    let update = Command::UpdateEmployee(UpdateEmployee { employee_id: alex, name: "Alexandra".into(), role: "Strateeg".into(), title: None, instructions: None, sequential_tasks: None });
+    let update = Command::UpdateEmployee(UpdateEmployee { description: None, employee_id: alex, name: "Alexandra".into(), role: "Strateeg".into(), title: None, instructions: None, sequential_tasks: None });
     client.execute(envelope(update, Some(version))).await.unwrap();
 
     let CommandResult::EmployeeMessageSent { message_id, .. } = client.execute(send(alex, conversation, "Hallo", false)).await.unwrap().result else { panic!() };
@@ -151,7 +151,7 @@ async fn archive_keeps_history_and_blocks_changes() {
     let alex = employee(&client, atlas, "Alex", "Productpartner").await;
     client.execute(envelope(status(alex, LifecycleStatus::Archived), None)).await.unwrap();
     assert!(client.employees().await.unwrap().employees.is_empty());
-    let update = Command::UpdateEmployee(UpdateEmployee { employee_id: alex, name: "X".into(), role: "Y".into(), title: None, instructions: None, sequential_tasks: None });
+    let update = Command::UpdateEmployee(UpdateEmployee { description: None, employee_id: alex, name: "X".into(), role: "Y".into(), title: None, instructions: None, sequential_tasks: None });
     let err = client.execute(envelope(update, None)).await.unwrap_err();
     assert!(err.to_string().contains("archived"));
 

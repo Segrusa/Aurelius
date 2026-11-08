@@ -20,7 +20,7 @@ async fn a_text_only_run_of_an_employee_cannot_propose_a_guideline() {
     // The fake runtime is not Claude Code: its runs are text-only.
     let daemon = start_with_delay(dir.path(), 100).await;
     let client = connect(dir.path()).await;
-    let create = CreateEmployee { name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { description: None, name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let send = SendEmployeeMessage { confirm_secret: false, employee_id, text: "houd me wakker".into(), conversation_id, images: vec![], files: vec![], interrupt: false };
     let CommandResult::EmployeeMessageSent { run_id, .. } = client.execute(envelope(Command::SendEmployeeMessage(send), None)).await.unwrap().result else { panic!() };

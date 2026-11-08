@@ -78,6 +78,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const [name, setName] = useState(employee?.name ?? "");
   const [role, setRole] = useState(employee?.role ?? "");
   const [title, setTitle] = useState(employee?.title ?? "");
+  const [description, setDescription] = useState(employee?.description ?? "");
   const [reportsTo, setReportsTo] = useState(employee?.reports_to ?? "");
   const [instructions, setInstructions] = useState(employee?.instructions ?? "");
   const [folder, setFolder] = useState("");
@@ -129,6 +130,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
             // A role says how they work; without one they are just an employee.
             role: role.trim() || "Employee",
             instructions,
+            ...(description.trim() ? { description: description.trim() } : {}),
             ...(title.trim() ? { title: title.trim() } : {}),
             ...(reportsTo ? { reports_to: reportsTo } : {}),
             ...(folder.trim() ? { folder: folder.trim() } : {}),
@@ -181,6 +183,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
           name: name.trim(),
           role: role.trim(),
           title: title.trim(),
+          description: description.trim(),
           instructions,
           sequential_tasks: sequential,
         },
@@ -286,6 +289,13 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
           ]}
         />
       </div>
+      <TextInput
+        label="Description"
+        description="Shown to other employees so they know when to hand work to this one. Empty: they see the first line of the instructions."
+        placeholder="For example: reviews Rust changes before they merge"
+        value={description}
+        onChange={setDescription}
+      />
       <TextArea label="Instructions" rows={7} value={instructions} onChange={setInstructions} />
       {employee ? null : (
         <>

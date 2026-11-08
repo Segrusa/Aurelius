@@ -41,7 +41,7 @@ fn project(s: &CommandService, name: &str) -> ProjectId {
 }
 
 fn hire(s: &CommandService, name: &str) -> (EmployeeId, ConversationId) {
-    let create = CreateEmployee { name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
+    let create = CreateEmployee { description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
     match run(s, Command::CreateEmployee(create)).unwrap().receipt.result {
         CommandResult::EmployeeCreated { employee_id, conversation_id } => (employee_id, conversation_id),
         other => panic!("unexpected {other:?}"),

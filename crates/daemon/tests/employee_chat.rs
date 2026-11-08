@@ -26,7 +26,7 @@ async fn an_employee_chats_outside_projects_and_keeps_its_task_conversations() {
     else {
         panic!()
     };
-    let create = CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id: alex, conversation_id: chat } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else {
         panic!()
     };

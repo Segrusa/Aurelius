@@ -34,7 +34,7 @@ fn exec(s: &Setup, command: Command) -> Result<CommandResult, AppError> {
 }
 
 fn hire(service: &CommandService, user: UserId, name: &str, boss: Option<EmployeeId>) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
+    let create = CreateEmployee { description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
     let made = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateEmployee(create) }).unwrap().receipt.result;
     let CommandResult::EmployeeCreated { employee_id, .. } = made else { panic!("{made:?}") };
     employee_id
@@ -159,6 +159,100 @@ fn system_lines(s: &Setup, conversation: ConversationId) -> Vec<(SystemLineKind,
 /// Let `employee`'s woken runs end without an answer (so they no longer count as running).
 fn last_woken(s: &Setup, employee: EmployeeId) -> (RunId, ConversationId, u32) {
     *woken(s, employee).last().expect("woken")
+}
+
+/// The update that woke `employee` last, as its main chat has it.
+fn wake_text(s: &Setup, employee: EmployeeId) -> String {
+    messages(s, aurelius_storage_main_chat(s, employee)).into_iter().rev().find(|m| m.update.as_deref() == Some("group")).expect("an update").text
+}
+
+/// What the run of `run` is given: its system text and its turns.
+fn plan_of(s: &Setup, run: RunId) -> crate::run::plan::ChatRunPlan {
+    let payload: String = s.service.store().read(|c| Ok(c.query_row("SELECT payload_json FROM jobs WHERE id = ?1", [run.to_string()], |r| r.get(0))?)).unwrap();
+    s.service.prepare_chat_run(&serde_json::from_str(&payload).unwrap()).unwrap().expect("a plan")
+}
+
+#[test]
+fn a_non_lead_is_woken_with_a_scoped_view_and_the_lead_with_the_whole_thread() {
+    let s = setup();
+    send(&s, None, "@Ann please look at the logs").unwrap();
+    send(&s, None, "@Bo what about the release date").unwrap();
+    send(&s, None, "@Ann and @Cy, one more thing").unwrap();
+
+    // Ann is no lead: what named her, and how much she misses.
+    let ann = wake_text(&s, s.ann);
+    assert!(ann.contains("please look at the logs"), "{ann}");
+    assert!(!ann.contains("release date"), "not addressed to her: {ann}");
+    assert!(ann.contains("Other messages in this thread, not shown here: 1. read_group_chat reads them."), "{ann}");
+    assert!(ann.contains("The lead of this thread is @Atlas."), "{ann}");
+
+    // The CEO leads the general channel: everything, with no note.
+    send(&s, None, "And what does the boss think?").unwrap();
+    let ceo = wake_text(&s, s.ceo);
+    assert!(ceo.contains(r#""text":"@Ann please look at the logs"}"#) && ceo.contains(r#""board_member":true"#) && ceo.contains("release date"), "{ceo}");
+    assert!(!ceo.contains("Scoped view") && ceo.contains("You are the lead of this thread"), "{ceo}");
+}
+
+#[test]
+fn the_owner_of_a_ticket_without_a_responsible_leads_and_sees_all_of_it() {
+    let s = setup();
+    let ticket = new_ticket(&s, "Alone", Some(s.ann));
+    post(&s, ticket, "@Ann first question").unwrap();
+    post(&s, ticket, "A thought in passing").unwrap();
+    post(&s, ticket, "@Ann second question").unwrap();
+    let ann = wake_text(&s, s.ann);
+    assert!(ann.contains("first question") && ann.contains("in passing") && !ann.contains("Scoped view"), "{ann}");
+    assert!(ann.contains("You are the lead of this thread"), "{ann}");
+}
+
+#[test]
+fn the_full_thread_stays_readable_with_the_tool() {
+    let s = setup();
+    send(&s, None, "@Bo private to Bo").unwrap();
+    let (_, runs) = send(&s, None, "@Ann your turn").unwrap();
+    assert!(!wake_text(&s, s.ann).contains("private to Bo"));
+    let (ok, text) = act(&s, runs[0], EmployeeAction::ReadGroupChat { last: None, channel: None });
+    assert!(ok && text.contains("private to Bo") && text.contains("your turn"), "{text}");
+}
+
+#[test]
+fn the_platform_rules_and_the_roster_are_in_the_system_text() {
+    let s = setup();
+    let (_, runs) = send(&s, None, "@Ann hello").unwrap();
+    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { description: Some("Reviews Rust.".into()), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None })).unwrap();
+    let system = plan_of(&s, runs[0]).system.unwrap();
+    assert!(system.starts_with(crate::run::plan::PLATFORM_RULES), "{system}");
+    assert!(system.contains("- @Bo (Dev): Reviews Rust."), "the description: {system}");
+    assert!(system.contains("- @Cy (Dev)"), "{system}");
+}
+
+#[test]
+fn a_description_falls_back_to_the_first_instruction_line_and_can_be_cleared() {
+    let s = setup();
+    let update = |description: Option<&str>, instructions: Option<&str>| {
+        exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { description: description.map(str::to_owned), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: instructions.map(str::to_owned), sequential_tasks: None })).unwrap();
+    };
+    update(None, Some("\nGuards the release.\nMore detail."));
+    let roster = |s: &Setup| {
+        let (_, runs) = send(s, None, "@Ann hello").unwrap();
+        let system = plan_of(s, *runs.last().unwrap()).system.unwrap();
+        system.lines().find(|l| l.starts_with("- @Bo")).unwrap().to_owned()
+    };
+    assert_eq!(roster(&s), "- @Bo (Dev): Guards the release.");
+    update(Some("  Reviews   Rust. "), Some("\nGuards the release."));
+    assert!(roster(&s).ends_with(": Reviews Rust."), "trimmed on one line");
+    update(Some(""), Some("\nGuards the release."));
+    assert!(roster(&s).ends_with(": Guards the release."), "cleared");
+    let too_long = "x".repeat(161);
+    assert!(exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { description: Some(too_long), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None })).is_err());
+}
+
+#[test]
+fn a_message_that_woke_the_run_is_marked_new() {
+    let s = setup();
+    let (_, runs) = send(&s, None, "@Ann start").unwrap();
+    let turn = plan_of(&s, runs[0]).turns.last().unwrap().text.clone();
+    assert!(turn.starts_with("[Group chat · from Owner] (new)\n"), "{turn}");
 }
 
 #[test]
@@ -854,7 +948,7 @@ fn a_message_for_an_owner_whose_main_task_waits_its_turn_runs_nothing_and_comes_
         })
         .unwrap();
     let ann = ticket_view(&s, a).owner_employee_id.unwrap();
-    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { employee_id: ann, name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: Some(true) })).unwrap();
+    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { description: None, employee_id: ann, name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: Some(true) })).unwrap();
     // The colleague is done: A waits for its turn behind B (as after Send back with a busy owner).
     let st = s.service.store().clone();
     s.service.store().write(move |tx| crate::task::task_runs::continue_when_done(tx, &st, root_a)).unwrap();

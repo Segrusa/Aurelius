@@ -24,6 +24,8 @@ use std::time::Duration;
 /// memory jobs (extraction, summaries) always work.
 struct FailingTasks {
     failing: AtomicBool,
+    /// An extraction prompt was seen with the scope rule (C5).
+    scope_rule: AtomicBool,
 }
 
 #[async_trait::async_trait]
@@ -33,6 +35,9 @@ impl AgentRuntime for FailingTasks {
     }
     async fn start(&self, request: RunRequest) -> Result<RunHandle, RuntimeError> {
         let system = request.system.clone().unwrap_or_default();
+        if system.contains(fake::MEMORY_MARKER) && system.contains(aurelius_domain::memory::MEMORY_SCOPE_RULE) {
+            self.scope_rule.store(true, Ordering::SeqCst);
+        }
         let background = [fake::MEMORY_MARKER, fake::SUMMARY_MARKER, fake::CONSOLIDATE_MARKER].iter().any(|m| system.contains(m));
         let behavior = if self.failing.load(Ordering::SeqCst) && !background { fake::FakeBehavior::FailAfterDeltas } else { fake::FakeBehavior::Normal };
         fake::FakeRuntime { delay: Duration::from_millis(1), behavior }.start(request).await
@@ -47,7 +52,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 }
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { description: None, name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     match client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result {
         CommandResult::EmployeeCreated { employee_id, .. } => employee_id,
         other => panic!("{other:?}"),
@@ -97,7 +102,7 @@ async fn extracted(root: &std::path::Path, task: TaskId) {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_task_leaves_a_lesson_that_a_second_failure_reinforces() {
     let dir = tempfile::tempdir().unwrap();
-    let runtime = Arc::new(FailingTasks { failing: AtomicBool::new(false) });
+    let runtime = Arc::new(FailingTasks { failing: AtomicBool::new(false), scope_rule: AtomicBool::new(false) });
     let daemon = start_with(dir.path(), runtime.clone()).await;
     let client = connect(dir.path()).await;
     let atlas = project(&client, "Atlas").await;
@@ -126,7 +131,8 @@ async fn a_failed_task_leaves_a_lesson_that_a_second_failure_reinforces() {
     assert!(detail.evidence.iter().any(|e| e.label == "S1" && e.text.contains("failed")), "{detail:#?}");
     assert!(lesson.sources.iter().any(|s| s.label.starts_with("Task failed")), "the signal's event is the provenance: {:#?}", lesson.sources);
     let version: String = db(dir.path()).query_row("SELECT extraction_version FROM memory_items WHERE id = ?1", [lesson.id.to_string()], |r| r.get(0)).unwrap();
-    assert_eq!(version, "aurelius-extract-2");
+    assert_eq!(version, "aurelius-extract-3");
+    assert!(runtime.scope_rule.load(Ordering::SeqCst), "the extraction prompt has the scope rule");
 
     // The same thing goes wrong again: the lesson is confirmed, not doubled.
     let again = work(&client, atlas, alex, "Migration again", TaskStatus::Failed).await;

@@ -220,7 +220,7 @@ mod tests {
         let service = CommandService::new(std::sync::Arc::new(Store::open(dir.path()).unwrap()));
         let CommandResult::ProjectCreated { project_id, .. } = run(&service, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })) else { panic!() };
         let CommandResult::EmployeeCreated { employee_id, .. } =
-            run(&service, Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }))
+            run(&service, Command::CreateEmployee(CreateEmployee { description: None, name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }))
         else {
             panic!()
         };

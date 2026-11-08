@@ -80,7 +80,7 @@ pub struct Colleague {
     pub id: EmployeeId,
     pub name: String,
     pub role: String,
-    /// First line of the instructions (what the colleague is for).
+    /// What the colleague is for (P7): its description, else the first line of its instructions.
     pub focus: String,
     /// The position on the org chart, if one is set.
     pub title: Option<String>,
@@ -143,7 +143,7 @@ pub(crate) fn employee_identity(conn: &rusqlite::Connection, m: EmployeeId, read
 /// may work in any project), oldest first.
 pub(crate) fn colleagues(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>) -> Result<Vec<Colleague>, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT m.id, m.name, m.role, b.storage_key, m.title, m.reports_to FROM employees m LEFT JOIN blobs b ON b.id = m.instructions_blob_id
+        "SELECT m.id, m.name, m.role, b.storage_key, m.title, m.reports_to, m.description FROM employees m LEFT JOIN blobs b ON b.id = m.instructions_blob_id
          WHERE m.status = 'active' ORDER BY m.created_at_ms, m.id",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -154,26 +154,29 @@ pub(crate) fn colleagues(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Opt
             r.get::<_, Option<String>>(3)?,
             r.get::<_, Option<String>>(4)?,
             r.get::<_, Option<String>>(5)?,
+            r.get::<_, String>(6)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, name, role, key, title, reports_to) = row?;
+        let (id, name, role, key, title, reports_to, description) = row?;
         let Ok(id) = EmployeeId::parse(&id) else { continue };
-        let focus = key.as_deref().and_then(read).and_then(|t| t.lines().map(str::trim).find(|l| !l.is_empty()).map(|l| l.chars().take(160).collect())).unwrap_or_default();
+        let first_line = || key.as_deref().and_then(read).and_then(|t| t.lines().map(str::trim).find(|l| !l.is_empty()).map(|l| l.chars().take(aurelius_domain::employee::DESCRIPTION_MAX).collect()));
+        let focus = if description.is_empty() { first_line().unwrap_or_default() } else { description };
         out.push(Colleague { id, name, role, focus, title, reports_to: reports_to.and_then(|m| EmployeeId::parse(&m).ok()) });
     }
     Ok(out)
 }
 
-/// The colleagues as lines for a system text, in the order given; the
-/// management team (no boss) is marked once there is a chart (someone has a
-/// boss): in a flat company everyone would be.
+/// The colleagues as lines for a system text, in the order given, each with the
+/// `@Name` that reaches them and when to hand them work (P7); the management team
+/// (no boss) is marked once there is a chart (someone has a boss): in a flat
+/// company everyone would be.
 pub(crate) fn colleague_lines(colleagues: &[&Colleague]) -> String {
     let charted = colleagues.iter().any(|c| c.reports_to.is_some());
     let line = |c: &Colleague| {
         let team = if charted && c.reports_to.is_none() { ", management team" } else { "" };
-        if c.focus.is_empty() { format!("- {} ({}{team})", c.name, c.role) } else { format!("- {} ({}{team}): {}", c.name, c.role, c.focus) }
+        if c.focus.is_empty() { format!("- @{} ({}{team})", c.name, c.role) } else { format!("- @{} ({}{team}): {}", c.name, c.role, c.focus) }
     };
     colleagues.iter().map(|c| line(c)).collect::<Vec<_>>().join("\n")
 }

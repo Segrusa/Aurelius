@@ -119,12 +119,12 @@ pub fn answer_for(request: &RunRequest) -> String {
         return text;
     }
     let question = request.turns.iter().rev().find(|t| t.role == TurnRole::User).map(|t| t.text.trim()).unwrap_or("");
-    let shown: String = question.chars().take(200).collect();
+    let shown: String = question.chars().take(400).collect();
     let earlier = request.turns.len().saturating_sub(1);
     let persona = request
         .system
         .as_deref()
-        .and_then(|s| s.strip_prefix("You are "))
+        .and_then(|s| s.strip_prefix("You are ").or_else(|| s.split_once("\n\nYou are ").map(|(_, rest)| rest)))
         .and_then(|s| s.split('.').next())
         .map(|who| format!("[{who}] "))
         .unwrap_or_default();

@@ -38,7 +38,7 @@ async fn ask(root: &Path, run: RunId, call: &str, tool: &str, input: serde_json:
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str) -> EmployeeId {
     match client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { description: None, name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result
@@ -116,7 +116,7 @@ impl AgentRuntime for Holding {
     }
     async fn start(&self, request: RunRequest) -> Result<RunHandle, RuntimeError> {
         let system = request.system.clone().unwrap_or_default();
-        let first = self.hold.split('|').any(|h| system.starts_with(&format!("You are {h}"))) &&system.contains("This conversation is a task you took on") && request.turns.len() == 1 && !request.turns.iter().any(|t| t.text.contains("[Task message"));
+        let first = self.hold.split('|').any(|h| system.contains(&format!("You are {h}"))) &&system.contains("This conversation is a task you took on") && request.turns.len() == 1 && !request.turns.iter().any(|t| t.text.contains("[Task message"));
         let mut text = fake::answer_for(&request);
         if let (true, Some(folder)) = (first, &self.file) {
             let shot = folder.join("scherm 1.png");
@@ -526,7 +526,7 @@ impl AgentRuntime for Unstartable {
         self.inner.probe().await
     }
     async fn start(&self, request: RunRequest) -> Result<RunHandle, RuntimeError> {
-        if self.broken.load(std::sync::atomic::Ordering::SeqCst) && request.system.as_deref().is_some_and(|s| s.starts_with("You are Alex")) {
+        if self.broken.load(std::sync::atomic::Ordering::SeqCst) && request.system.as_deref().is_some_and(|s| s.contains("You are Alex")) {
             return Err(RuntimeError::Unavailable("could not start claude.exe: The filename or extension is too long. (os error 206)".into()));
         }
         self.inner.start(request).await
@@ -777,7 +777,7 @@ async fn a_growing_memory_is_consolidated_by_itself_and_on_request() {
 /// Let an employee work on one task at a time (or not again).
 async fn one_at_a_time(client: &Client, employee_id: EmployeeId, name: &str, role: &str, on: bool) {
     use aurelius_domain::employee::UpdateEmployee;
-    let update = UpdateEmployee { employee_id, name: name.into(), role: role.into(), title: None, instructions: None, sequential_tasks: Some(on) };
+    let update = UpdateEmployee { description: None, employee_id, name: name.into(), role: role.into(), title: None, instructions: None, sequential_tasks: Some(on) };
     client.execute(envelope(Command::UpdateEmployee(update), None)).await.unwrap();
 }
 

@@ -21,6 +21,9 @@
 //!   of them as an update (`[Group chat · from …]`) in their own main chat, where
 //!   a normal run answers it. A woken employee that is not the ticket's owner
 //!   only answers there: the ticket's column and main task stay as they are.
+//! * What a woken employee reads (P2, P3): the lead of the discussion, and unless it
+//!   is the lead or the only employee there, only the messages addressed to it and
+//!   its own, with how many others there are (`ThreadView`). Clients show everything.
 //! * The answer: copied to the discussion as the employee's message when the run
 //!   ends (`mirror_answer`), streamed there live under that message's id meanwhile.
 //! * A ticket on Done (or archived) and the channel of an archived project are
@@ -254,37 +257,161 @@ fn addressees(conn: &rusqlite::Connection, d: &Discussion, text: &str, author: O
     Ok(out)
 }
 
+/// One message of a discussion as a prompt quotes it.
+struct ContextRow {
+    /// The employee who wrote it; none: a board member.
+    employee: Option<String>,
+    /// The board member's username, when the message has one.
+    board_user: Option<String>,
+    text: String,
+}
+
+impl ContextRow {
+    /// As one JSON object `{"from", "text"}` (text cut at `chars`): its newlines stay
+    /// inside the quotes, so no message can pass for another. A board member's names
+    /// them and says it is one (an employee may have the same name).
+    fn json(&self, chars: usize) -> String {
+        let text = group::shortened(&self.text, chars);
+        match &self.board_user {
+            Some(user) => serde_json::json!({ "from": user, "board_member": true, "text": text }),
+            None => serde_json::json!({ "from": self.employee.as_deref().unwrap_or(OWNER), "text": text }),
+        }
+        .to_string()
+    }
+}
+
 /// The latest `limit` messages of a discussion before `before` (all when none),
-/// oldest first, each as one JSON object `{"from", "text"}` (text cut at
-/// `chars`): its newlines stay inside the quotes, so no message can pass for another.
-/// `thread`: those of that thread (its root first) instead of the channel's own.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn discussion_json(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, id: ConversationId, thread: Option<MessageId>, before: Option<MessageId>, limit: u32, chars: usize) -> Result<Vec<String>, StorageError> {
+/// oldest first. `thread`: those of that thread (its root first) instead of the channel's own.
+fn context_rows(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, id: ConversationId, thread: Option<MessageId>, before: Option<MessageId>, limit: u32) -> Result<Vec<ContextRow>, StorageError> {
     let rows = aurelius_storage::discussions::latest_in(conn, id, thread, before, limit)?;
     Ok(rows
         .into_iter()
         .rev()
         .filter_map(|line| {
-            let text = group::shortened(&read(&line.storage_key)?, chars);
-            if text.is_empty() {
+            let text = read(&line.storage_key)?;
+            if text.trim().is_empty() {
                 return None;
             }
-            // A board member's message names them, and says it is one (an employee may have the same name).
-            Some(match (line.author, line.author_user) {
-                (None, Some((_, user))) => serde_json::json!({ "from": user, "board_member": true, "text": text }),
-                (from, _) => serde_json::json!({ "from": from.as_deref().unwrap_or(OWNER), "text": text }),
-            }
-            .to_string())
+            let board_user = match (&line.author, line.author_user) {
+                (None, Some((_, user))) => Some(user),
+                _ => None,
+            };
+            Some(ContextRow { employee: line.author, board_user, text })
         })
         .collect())
 }
 
-/// The context of the latest messages of `id` (of its `thread`, when given)
-/// before `before` (all when none), as a JSON list (empty when there are none):
-/// what a woken employee, or a run under a ticket at its start, gets with it.
-pub(crate) fn context_text(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, id: ConversationId, thread: Option<MessageId>, before: Option<MessageId>) -> Result<String, StorageError> {
-    let lines = discussion_json(conn, read, id, thread, before, CONTEXT_MESSAGES as u32, CONTEXT_CHARS)?;
-    Ok(if lines.is_empty() { String::new() } else { format!("[\n{}\n]", lines.join(",\n")) })
+/// The latest `limit` messages of a discussion before `before` (all when none),
+/// oldest first, each as one JSON object (text cut at `chars`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn discussion_json(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, id: ConversationId, thread: Option<MessageId>, before: Option<MessageId>, limit: u32, chars: usize) -> Result<Vec<String>, StorageError> {
+    Ok(context_rows(conn, read, id, thread, before, limit)?.iter().map(|row| row.json(chars)).collect())
+}
+
+/// Who leads a discussion (P2): whoever sees all of it and is the fallback for a handoff.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Lead {
+    BoardMember(String),
+    Employee(EmployeeId, String),
+}
+
+/// The lead of `d`. On a ticket its responsible board member (an active one), else
+/// its owner; in a project's channel the project's dispatcher, else the CEO; in the
+/// general channel the CEO. None when there is nobody.
+pub(crate) fn lead_of(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, d: &Discussion) -> Result<Option<Lead>, StorageError> {
+    let employee = match &d.place {
+        Place::Ticket(t) => {
+            let view = aurelius_storage::tickets::view(conn, t.id, read)?;
+            if let Some(user) = view.filter(|v| !v.responsible_disabled).and_then(|v| v.responsible_username) {
+                return Ok(Some(Lead::BoardMember(user)));
+            }
+            t.owner
+        }
+        Place::General => ceo(conn)?,
+        Place::Project { project, .. } => match aurelius_storage::company::dispatcher_for(conn, *project)? {
+            Some(dispatcher) => Some(dispatcher),
+            None => ceo(conn)?,
+        },
+    };
+    employee.map(|id| Ok(Lead::Employee(id, employee_name(conn, id)?))).transpose()
+}
+
+/// How many of a discussion's latest messages the scoped view looks through (P3).
+const VIEW_WINDOW: u32 = 60;
+
+/// What a prompt quotes of a discussion for one employee.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct ThreadContext {
+    /// A JSON list, one object per message; empty when there is nothing to quote.
+    pub json: String,
+    /// Says the view is scoped, how much it leaves out and which tool reads that.
+    pub note: Option<String>,
+}
+
+/// A discussion as the prompts of its employees see it: the latest messages, its
+/// lead, and who is who. The clients always show all of it; only a prompt is scoped.
+pub(crate) struct ThreadView {
+    rows: Vec<ContextRow>,
+    team: Vec<(EmployeeId, String)>,
+    lead: Option<Lead>,
+    owner: Option<EmployeeId>,
+    /// The tool that reads what the scoped view leaves out.
+    tool: &'static str,
+}
+
+impl ThreadView {
+    /// The messages of `d` (of its `thread`, when given) before `before` (all when none).
+    pub(crate) fn read(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, d: &Discussion, thread: Option<MessageId>, before: Option<MessageId>) -> Result<Self, StorageError> {
+        Ok(ThreadView {
+            rows: context_rows(conn, read, d.id, thread, before, VIEW_WINDOW)?,
+            team: team(conn)?.into_iter().map(|(id, name, _)| (id, name)).collect(),
+            lead: lead_of(conn, read, d)?,
+            owner: d.ticket().and_then(|t| t.owner),
+            tool: if d.ticket().is_some() { "read_discussion" } else { "read_group_chat" },
+        })
+    }
+
+    /// The whole view: the latest messages, as a board member reads them.
+    fn all(&self) -> Vec<usize> {
+        (0..self.rows.len()).collect()
+    }
+
+    /// What the prompt of `me` quotes (P3): a non-lead that is not alone gets the
+    /// messages addressed to it and its own, and hears how many others there are.
+    pub(crate) fn for_employee(&self, me: EmployeeId) -> ThreadContext {
+        let name = self.team.iter().find(|(id, _)| *id == me).map_or("", |(_, name)| name.as_str());
+        let lines: Vec<group::ViewLine<'_>> = self.rows.iter().map(|row| group::ViewLine { employee: row.employee.as_deref(), text: &row.text }).collect();
+        let lead = matches!(&self.lead, Some(Lead::Employee(id, _)) if *id == me);
+        let Some(shown) = group::scoped_view(&lines, (me, name), &self.team, lead, self.owner == Some(me)) else { return self.quoted(&self.all(), None) };
+        let hidden = self.rows.len() - shown.len();
+        let note = (hidden > 0).then(|| {
+            let count = if self.rows.len() as u32 >= VIEW_WINDOW { format!("{hidden} or more") } else { hidden.to_string() };
+            format!("Scoped view: only the messages addressed to you and your own are shown. Other messages in this thread, not shown here: {count}. {} reads them.", self.tool)
+        });
+        self.quoted(&shown, note)
+    }
+
+    /// The latest of the messages at `indices`, for a prompt.
+    fn quoted(&self, indices: &[usize], note: Option<String>) -> ThreadContext {
+        let start = indices.len().saturating_sub(CONTEXT_MESSAGES);
+        let lines: Vec<String> = indices[start..].iter().map(|i| self.rows[*i].json(CONTEXT_CHARS)).collect();
+        ThreadContext { json: if lines.is_empty() { String::new() } else { format!("[\n{}\n]", lines.join(",\n")) }, note }
+    }
+
+    /// Everything, with nothing left out: for a run that has no tools to read the rest,
+    /// or that is no employee's.
+    pub(crate) fn whole(&self) -> ThreadContext {
+        self.quoted(&self.all(), None)
+    }
+
+    /// The sentence that tells `me` who leads this thread.
+    pub(crate) fn lead_line(&self, me: EmployeeId) -> Option<String> {
+        Some(match self.lead.as_ref()? {
+            Lead::Employee(id, _) if *id == me => "You are the lead of this thread: you see all of it and decide who does what next.".to_owned(),
+            Lead::Employee(_, name) => format!("The lead of this thread is @{name}."),
+            Lead::BoardMember(user) => format!("The lead of this thread is the board member @{user}."),
+        })
+    }
 }
 
 fn reader(store: &Store) -> impl Fn(&str) -> Option<String> + '_ {
@@ -497,7 +624,7 @@ struct Shared<'a> {
 }
 
 /// One message that wakes employees: where and who wrote it, its text, what it
-/// brings along and the messages before it (`context_text`).
+/// brings along and the messages before it (`view`).
 struct Wake<'a> {
     discussion: &'a Discussion,
     from: &'a str,
@@ -506,7 +633,8 @@ struct Wake<'a> {
     board: Option<Option<String>>,
     text: &'a str,
     shared: Shared<'a>,
-    context: String,
+    /// The discussion before this message, as each employee's prompt quotes it.
+    view: ThreadView,
     hop: u32,
     /// The board member of hop 0, whose Claude login the woken runs use.
     login: Option<UserId>,
@@ -520,7 +648,7 @@ struct Wake<'a> {
 fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, (employee, name): (EmployeeId, &str), w: &Wake<'_>) -> Result<Option<(RunId, Vec<EventNotice>)>, StorageError> {
     let Some(chat) = employees::main_chat(tx, employee)? else { return Ok(None) };
     let (d, from, shared, hop) = (w.discussion, w.from, &w.shared, w.hop);
-    let mut body = wake_body(w, employee);
+    let mut body = wake_body(w, employee, w.view.for_employee(employee));
     let place = if w.thread.is_some() { format!("that thread of {}", d.label()) } else { d.label() };
     body.push_str(&format!("\n\n---\n{name}: your answer is posted in {place} under your name. Keep it short."));
     let (update, posted) = crate::task::task_threads::post_note(tx, store, chat, crate::task::task_threads::Speaker::Update { kind: GROUP_KIND, from }, &body)?;
@@ -539,9 +667,9 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
 
 /// The text of an update that wakes `employee` for `w`: the heading and the message
 /// (the board member's own words, or a colleague's quoted), the files, the earlier
-/// messages, and for a ticket the employee does not own, what not to take over.
-/// What tells it where its answer goes is the caller's.
-fn wake_body(w: &Wake<'_>, employee: EmployeeId) -> String {
+/// messages (`context`), the lead, and for a ticket the employee does not own, what
+/// not to take over. What tells it where its answer goes is the caller's.
+fn wake_body(w: &Wake<'_>, employee: EmployeeId, context: ThreadContext) -> String {
     let (d, from, shared) = (w.discussion, w.from, &w.shared);
     let mut body = String::new();
     if let Some(heading) = d.heading() {
@@ -564,8 +692,14 @@ fn wake_body(w: &Wake<'_>, employee: EmployeeId) -> String {
     } else {
         body.push_str(&format!("{from} wrote (JSON-quoted): {}", serde_json::Value::from(w.text.trim())));
     }
-    if !w.context.is_empty() {
-        body.push_str(&format!("\n\n---\nEarlier in {} (oldest first, one JSON object per message):\n{}", d.label(), w.context));
+    if !context.json.is_empty() {
+        body.push_str(&format!("\n\n---\nEarlier in {} (oldest first, one JSON object per message):\n{}", d.label(), context.json));
+    }
+    if let Some(note) = &context.note {
+        body.push_str(&format!("\n\n---\n{note}"));
+    }
+    if let Some(lead) = w.view.lead_line(employee) {
+        body.push_str(&format!("\n\n---\n{lead}"));
     }
     if let Some(t) = d.ticket().filter(|t| t.owner != Some(employee)) {
         body.push_str(&format!(
@@ -738,7 +872,8 @@ fn quick_answer(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlatio
     }
     let d = w.discussion;
     let place = if w.thread.is_some() { format!("that thread of {}", d.label()) } else { d.label() };
-    let mut body = wake_body(w, employee);
+    // It has no tools to read what a scoped view leaves out, so it gets the discussion as it is.
+    let mut body = wake_body(w, employee, w.view.whole());
     body.push_str(&format!(
         "\n\n---\n{name}: you are in the middle of a longer run (for {for_how_long}) on your own work, so this is a quick answer from the side: you have no tools and cannot see your files or that run. \
          Answer from this discussion and what you know, in a few sentences, and say plainly what you cannot see. Do not promise to do work now: your run goes on and follows up when it ends. \
@@ -1126,7 +1261,7 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
         }
     }
     let read = reader(store);
-    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, context: context_text(tx, &read, d.id, thread, Some(message))?, hop: 0, login, thread };
+    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, view: ThreadView::read(tx, &read, d, thread, Some(message))?, hop: 0, login, thread };
     // The owner is mid-run: the board member hears it at once, and gets a quick answer.
     if let (Some(conversation), Some((owner, owner_name))) = (owner_busy, &named.owner) {
         notices.extend(busy_notices(tx, store, meta, correlation, (*owner, owner_name), &w, conversation)?);
@@ -1311,7 +1446,7 @@ pub(crate) fn post_from_run(tx: &Tx<'_>, store: &Store, run: RunId, d: &Discussi
     let read = reader(store);
     // The login of hop 0 goes on with every colleague it wakes (its own run's).
     let login = crate::run::login::of_run(tx, run)?;
-    let w = Wake { discussion: d, from: &name, board: None, text, shared: Shared::default(), context: context_text(tx, &read, d.id, thread, Some(posted))?, hop, login, thread };
+    let w = Wake { discussion: d, from: &name, board: None, text, shared: Shared::default(), view: ThreadView::read(tx, &read, d, thread, Some(posted))?, hop, login, thread };
     let mut woken = Vec::new();
     for (employee, colleague) in &named.awake {
         if let Some((_, n)) = wake(tx, store, &meta, &run.to_string(), (*employee, colleague), &w)? {
