@@ -1,5 +1,5 @@
 {
-  "files": { "includes": ["clients/ts/**", "clients/stylex-plugin.ts", "clients/electron/**", "!clients/electron/release", "clients/web/**", "clients/e2e/**", "!**/dist/**", "!**/out/**", "!**/test-results/**", "!**/generated/**", "!**/node_modules/**", "!clients/ts/app/src/theme/precision/precision.*"] },
+  "files": { "includes": ["clients/ts/**", "clients/stylex-plugin.ts", "clients/electron/**", "!clients/electron/release", "clients/web/**", "clients/e2e/**", "!**/dist/**", "!**/out/**", "!**/test-results/**", "!**/generated/**", "!**/node_modules/**", "!clients/ts/app/src/theme/precision/precision.*", "!clients/ts/app/CLAUDE.md"] },
   "formatter": { "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
   "linter": { "rules": { "preset": "recommended" } }
 }

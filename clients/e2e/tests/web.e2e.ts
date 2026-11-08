@@ -70,7 +70,7 @@ test.describe("against a real daemon", () => {
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await expect(page).toHaveURL(/\/inbox$/);
     await expect(page.getByText("Northwind API")).toBeVisible();
-    await expect(page.getByText("Nothing waits for you.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Nothing waits for you." })).toBeVisible();
 
     // No credential for a script, and none in the address.
     const cookies = await page.context().cookies();
@@ -91,9 +91,9 @@ test.describe("against a real daemon", () => {
 
     // The server goes away and comes back.
     await daemon.stop();
-    await expect(page.getByRole("status")).toHaveText("Reconnecting…");
+    await expect(page.locator('p[role="status"]')).toHaveText("Reconnecting…");
     await daemon.start();
-    await expect(page.getByRole("status")).toBeHidden({ timeout: 30_000 });
+    await expect(page.locator('p[role="status"]')).toBeHidden({ timeout: 30_000 });
     await expect(page.getByText("Seen live")).toBeVisible();
 
     // Settings in a browser: no section fails, and none allows other devices from here.
@@ -171,7 +171,7 @@ test.describe("the Inbox", () => {
     await page.keyboard.press("d");
     await expect.poll(() => writes.length).toBe(2);
     expect(writes[1]).toMatchObject({ params: { approval_id: "b", approve: false } });
-    await expect(page.getByText("Nothing waits for you.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Nothing waits for you." })).toBeVisible();
   });
 
   test("J and K keep the selected row in view, and it fits a narrow window", async ({ page }) => {
@@ -218,10 +218,10 @@ test.describe("the Inbox", () => {
     await expect(position).toContainText("2 / 3");
     await page.keyboard.press("k");
     await expect(position).toContainText("1 / 3");
-    await page.getByRole("button", { name: "Reviews" }).click();
+    await page.getByRole("radio", { name: "Reviews" }).click();
     await expect(position).toContainText("1 / 1");
     await expect(page.getByRole("button", { name: /Ready for your review/ })).toBeVisible();
-    await page.getByRole("button", { name: "Mentions" }).click();
+    await page.getByRole("radio", { name: "Mentions" }).click();
     await expect(page.getByRole("button", { name: /Update 5/ })).toBeVisible();
   });
 

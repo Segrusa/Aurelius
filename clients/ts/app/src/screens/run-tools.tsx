@@ -248,7 +248,7 @@ export function RunMenu({ conversationId, run, models }: { conversationId: strin
 }
 
 /** The whole composed prompt of a run; the server only has it while trace mode is on. */
-export function TraceLink({ run, className: _ignored }: { run: string; className?: string }) {
+export function TraceLink({ run }: { run: string }) {
   const connection = useConnection();
   const on = useKeyed(
     ["settings", "trace"],
@@ -468,15 +468,7 @@ function ScreenshotDialog({ id, onClose }: { id: string; onClose: () => void }) 
 }
 
 /** A screenshot step's link; other steps have none. */
-export function ScreenshotLink({
-  tool,
-  output,
-  className: _ignored,
-}: {
-  tool: string;
-  output?: string | null;
-  className?: string;
-}) {
+export function ScreenshotLink({ tool, output }: { tool: string; output?: string | null }) {
   const [open, setOpen] = useState(false);
   const id = tool === "mcp__aurelius__screenshot" ? screenshotId(output ?? "") : null;
   if (!id) return null;

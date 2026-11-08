@@ -91,6 +91,12 @@ function PaletteInput({ groups }: { groups: PaletteGroup[] }) {
     <CommandPaletteInput
       label="Command palette"
       placeholder="Search a project, employee or command"
+      onKeyDown={(e) => {
+        // Results arrive in a transition: an Enter right after typing finds nothing highlighted yet.
+        if (e.key !== "Enter" || e.nativeEvent.isComposing || context?.highlightedIndex !== -1) return;
+        const first = filterGroups(e.currentTarget.value, groups)[0]?.items[0];
+        if (first) context.selectItem(first.id);
+      }}
       endContent={<KeyHint>esc</KeyHint>}
     />
   );

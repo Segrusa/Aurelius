@@ -185,9 +185,15 @@ test("a link from the operating system opens in the running app; a project gets 
     await expect(page.getByRole("complementary", { name: /From a link/ })).toBeVisible();
 
     await second("aurelius://nonsense");
-    await expect(page.getByText("This isn't a valid Aurelius link.")).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Notifications" }).getByText("This isn't a valid Aurelius link."),
+    ).toBeVisible();
     await second(`aurelius://0190aaaa-0000-7000-8000-000000000000/ticket/${ticket.id}`);
-    await expect(page.getByText("This link is for a server this device isn't paired with.")).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "Notifications" })
+        .getByText("This link is for a server this device isn't paired with."),
+    ).toBeVisible();
 
     // A window per project, not a second one; the page there has no sidebar.
     await page.goto("app://aurelius/projects");

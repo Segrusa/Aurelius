@@ -380,7 +380,10 @@ function TicketCard({
       onClick={() => onOpen(t.id)}
       onContextMenu={(e) => {
         e.preventDefault();
-        onMenu(t, e.clientX, e.clientY);
+        const { clientX: x, clientY: y } = e;
+        // Where the button is still down (Linux, macOS), a popover shown now is light-dismissed by its release.
+        if (e.buttons === 0) onMenu(t, x, y);
+        else window.addEventListener("pointerup", () => setTimeout(() => onMenu(t, x, y)), { once: true });
       }}
       {...attributes}
       {...listeners}

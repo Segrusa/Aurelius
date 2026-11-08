@@ -211,6 +211,8 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page.locator("html")).toHaveAttribute("data-hints", "");
     await page.keyboard.press("h");
     await expect(page.getByRole("switch", { name: "Always show shortcut hints" })).not.toBeChecked();
+    // A switch is an input, but the keys of the page still work from it.
+    await page.getByRole("switch", { name: "Always show shortcut hints" }).focus();
     await page.keyboard.press("j");
     await expect(page.locator("[data-setting-row]:focus")).toHaveCount(1);
   } finally {

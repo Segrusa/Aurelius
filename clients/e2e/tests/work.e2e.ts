@@ -93,7 +93,7 @@ test("the board, the ticket panel and My tickets against a real daemon", async (
 
     // Backlog → Done is not a move the board allows.
     await drag(page, card(top), page.getByRole("region", { name: "Done" }));
-    await expect(page.getByRole("region", { name: "Notifications" }).getByText(/Done/)).toBeVisible();
+    await expect(page.getByRole("region", { name: "Notifications" }).getByText("Start first.")).toBeVisible();
     expect((await read()).backlog).toContain(top);
 
     // Backlog → Todo starts it, and without a dispatcher it asks for an employee.
@@ -461,7 +461,7 @@ test.describe("states a test daemon cannot produce", () => {
       .poll(() => writes.find((w) => w.method === "proposal.decide")?.params)
       .toMatchObject({ proposal_id: "pr1", approve: true });
     await page.getByRole("button", { name: /Update 1 on this ticket/ }).click();
-    await page.getByRole("button", { name: "Dismiss" }).click();
+    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
     await expect
       .poll(() => writes.find((w) => w.method === "notification.dismiss")?.params)
       .toMatchObject({ id: "n1" });

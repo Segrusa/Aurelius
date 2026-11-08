@@ -22,6 +22,14 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
   try {
     const page = await app.firstWindow();
     await expect(page.getByRole("heading", { name: "Create the first board member" })).toBeVisible();
+    // Reloaded, so that what the theme injects at the start is seen too.
+    await page.addInitScript(() => {
+      const seen: string[] = [];
+      (globalThis as unknown as { violations: string[] }).violations = seen;
+      document.addEventListener("securitypolicyviolation", (e) => seen.push(`${e.violatedDirective} ${e.sample}`));
+    });
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Create the first board member" })).toBeVisible();
     expect(page.url()).toBe("app://aurelius/");
 
     // The page has no Node and only the named calls.
@@ -69,7 +77,7 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-    await expect(page.getByText("Nothing waits for you.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Nothing waits for you." })).toBeVisible();
 
     // Fonts and styles came through the CSP: the design's type and panel.
     await page.emulateMedia({ colorScheme: "dark" });
@@ -110,6 +118,7 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
     expect(await region()).toBe("drag");
     await page.keyboard.press("Control+k");
     await expect(page.getByRole("combobox", { name: "Command palette" })).toBeVisible();
+    expect(await page.evaluate(() => (globalThis as unknown as { violations: string[] }).violations)).toEqual([]);
     expect(await region()).toBe("no-drag");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("combobox", { name: "Command palette" })).toHaveCount(0);
@@ -119,7 +128,7 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
       else document.documentElement.setAttribute("data-os", value);
     }, os);
 
-    const reconnecting = page.getByRole("navigation", { name: "Main" }).getByRole("status");
+    const reconnecting = page.locator('p[role="status"]');
     await daemon.stop();
     await expect(reconnecting).toHaveText("Reconnecting…");
     await daemon.start();

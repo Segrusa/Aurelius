@@ -65,7 +65,9 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByPlaceholder(/Free-form role/).fill("Designer");
     await page.getByRole("combobox", { name: "Reports to" }).click();
     await page.getByRole("option", { name: "Orion" }).click();
-    await page.getByRole("button", { name: "Add", exact: true }).click();
+    // Ctrl+Enter on a closed selector still submits the dialog.
+    await page.getByRole("combobox", { name: "Reports to" }).focus();
+    await page.keyboard.press("Control+Enter");
     await expect(page.getByText("Designer · reports to Orion")).toBeVisible();
     await page.getByRole("link", { name: "Employees", exact: true }).first().click();
     await page.getByRole("link", { name: "Org chart" }).click();
@@ -73,7 +75,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
 
     // A guideline: made, linked, changed to a second version, then archived and restored.
     await go(page, "Knowledge");
-    await expect(page.getByText("No guidelines yet")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No guidelines yet" })).toBeVisible();
     await page.getByRole("button", { name: "New guideline" }).first().click();
     await page.getByLabel("Title *").fill("Rust");
     await page.getByRole("textbox", { name: "Text" }).fill("## Rules\n- Keep it small");
@@ -431,7 +433,7 @@ test.describe("scripted organisation", () => {
     await page.getByPlaceholder("GitHub token").fill("Other");
     await page.getByRole("dialog").locator('input[type="password"]').fill("another-secret-value");
     await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
-    await expect(page.getByRole("alert")).toContainText("Refused.");
+    await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Refused.");
     expect(writes.filter((w) => w.method === "vault.create")).toHaveLength(1);
     await stop();
   });

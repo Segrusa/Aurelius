@@ -162,6 +162,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@astryxdesign/core@0.7.11': 01ddc6dab6d88c86264d499ce7525e491b53e3a9c2a6fc22de07ba4ddfc4994a
+
 importers:
 
   .:
@@ -287,10 +290,10 @@ importers:
     dependencies:
       '@astryxdesign/core':
         specifier: 0.7.11
-        version: 0.7.11(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        version: 0.7.11(patch_hash=01ddc6dab6d88c86264d499ce7525e491b53e3a9c2a6fc22de07ba4ddfc4994a)(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@astryxdesign/theme-neutral':
         specifier: 0.7.11
-        version: 0.7.11(@astryxdesign/core@0.7.11(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(@types/react@19.3.0)(react@19.3.1)
+        version: 0.7.11(@astryxdesign/core@0.7.11(patch_hash=01ddc6dab6d88c86264d499ce7525e491b53e3a9c2a6fc22de07ba4ddfc4994a)(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(@types/react@19.3.0)(react@19.3.1)
       '@aurelius/client':
         specifier: workspace:*
         version: link:../client
@@ -342,7 +345,7 @@ importers:
     devDependencies:
       '@astryxdesign/cli':
         specifier: 0.7.11
-        version: 0.7.11(@astryxdesign/core@0.7.11(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(supports-color@7.2.0)
+        version: 0.7.11(@astryxdesign/core@0.7.11(patch_hash=01ddc6dab6d88c86264d499ce7525e491b53e3a9c2a6fc22de07ba4ddfc4994a)(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(supports-color@7.2.0)
       '@types/react':
         specifier: 19.3.0
         version: 19.3.0
@@ -2638,7 +2641,7 @@ snapshots:
       package-manager-detector: 1.9.0
       tinyexec: 1.3.1
 
-  '@astryxdesign/cli@0.7.11(@astryxdesign/core@0.7.11(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(supports-color@7.2.0)':
+  '@astryxdesign/cli@0.7.11(@astryxdesign/core@0.7.11(patch_hash=01ddc6dab6d88c86264d499ce7525e491b53e3a9c2a6fc22de07ba4ddfc4994a)(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(supports-color@7.2.0)':
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@babel/parser': 7.29.8
@@ -2656,21 +2659,21 @@ snapshots:
       recast: 0.23.21
       zod: 4.6.7
     optionalDependencies:
-      '@astryxdesign/core': 0.7.11(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@astryxdesign/core': 0.7.11(patch_hash=01ddc6dab6d88c86264d499ce7525e491b53e3a9c2a6fc22de07ba4ddfc4994a)(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     transitivePeerDependencies:
       - '@babel/preset-env'
       - supports-color
 
-  '@astryxdesign/core@0.7.11(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@astryxdesign/core@0.7.11(patch_hash=01ddc6dab6d88c86264d499ce7525e491b53e3a9c2a6fc22de07ba4ddfc4994a)(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@stylexjs/stylex': 0.19.1
       intl-messageformat: 11.2.15
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
 
-  '@astryxdesign/theme-neutral@0.7.11(@astryxdesign/core@0.7.11(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(@types/react@19.3.0)(react@19.3.1)':
+  '@astryxdesign/theme-neutral@0.7.11(@astryxdesign/core@0.7.11(patch_hash=01ddc6dab6d88c86264d499ce7525e491b53e3a9c2a6fc22de07ba4ddfc4994a)(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1))(@types/react@19.3.0)(react@19.3.1)':
     dependencies:
-      '@astryxdesign/core': 0.7.11(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@astryxdesign/core': 0.7.11(patch_hash=01ddc6dab6d88c86264d499ce7525e491b53e3a9c2a6fc22de07ba4ddfc4994a)(@stylexjs/stylex@0.19.1)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       lucide-react: 1.70.0(@types/react@19.3.0)(react@19.3.1)
       react: 19.3.1
     transitivePeerDependencies:

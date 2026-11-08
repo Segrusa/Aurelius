@@ -19,7 +19,8 @@
     inset: 0 0 auto;
     height: 8px;
   }
-  &:has(dialog[open], [popover]:popover-open) :is([data-titlebar], [data-sidebar-drag]) {
+  /* The toast viewport is a popover="manual" that is always open. */
+  &:has(dialog[open], [popover]:not([popover="manual"]):popover-open) :is([data-titlebar], [data-sidebar-drag]) {
     app-region: no-drag;
   }
   &

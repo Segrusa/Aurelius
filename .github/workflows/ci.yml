@@ -54,6 +54,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm deps
+      - run: pnpm exec astryx theme build src/theme/precision/precisionTheme.ts --check
+        working-directory: clients/ts/app
       - run: pnpm build
       - run: pnpm test
       - run: pnpm --filter @aurelius/electron package

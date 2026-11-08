@@ -67,3 +67,44 @@ for (const theme of ["dark", "light"] as const) {
     }
   });
 }
+
+const ROUTES = [
+  "board",
+  "my-tickets",
+  "tasks",
+  "chat",
+  "employees",
+  "employees/org",
+  "knowledge/guidelines",
+  "projects",
+  "usage",
+  "settings/app",
+];
+
+for (const theme of ["dark", "light"] as const) {
+  test(`every screen, ${theme}`, async ({ page }) => {
+    const site = await serveStatic(WEB_DIST);
+    try {
+      await page.addInitScript((t) => localStorage.setItem("aurelius.appearance", t), theme);
+      await scriptServer(page, {
+        employees: [
+          { id: "e1", name: "Flux", role: "engineer", title: "Engineer", status: "active" },
+          { id: "e2", name: "Atlas", role: "ceo", title: "CEO", status: "active" },
+        ],
+        limits: [{ label: "Weekly limit", percent: 58, resets: "Resets Mon 09:00" }],
+      });
+      const dir = join(REPO, "clients/e2e/test-results/shots");
+      mkdirSync(dir, { recursive: true });
+      for (const route of ROUTES) {
+        await page.goto(`${site.origin}/${route}`);
+        await page.getByRole("navigation").first().waitFor();
+        await page.evaluate(() => document.fonts.ready);
+        await page.waitForTimeout(300);
+        const name = route.replaceAll("/", "-");
+        await page.screenshot({ path: join(dir, `${name}-${theme}.png`), animations: "disabled" });
+      }
+    } finally {
+      site.close();
+    }
+  });
+}

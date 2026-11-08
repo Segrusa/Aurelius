@@ -1,0 +1,30 @@
+diff --git a/dist/theme/tokens.js b/dist/theme/tokens.js
+index ad158d40435eb31344a1277f61ace4fc00910cef..b108aecb43721909cae858ab161cd40507b60381 100644
+--- a/dist/theme/tokens.js
++++ b/dist/theme/tokens.js
+@@ -223,7 +223,25 @@ function evaluateColorFunctions(expr) {
+  *
+  * Pass `theme` as null/undefined to resolve defaults only.
+  */
++const resolvedThemeTokens = new WeakMap();
+ export function resolveThemeTokens(theme, options) {
++    if (theme == null || typeof theme !== 'object' || Object.keys(options ?? {}).some(key => key !== 'mode')) {
++        return computeThemeTokens(theme, options);
++    }
++    let byMode = resolvedThemeTokens.get(theme);
++    if (byMode == null) {
++        byMode = new Map();
++        resolvedThemeTokens.set(theme, byMode);
++    }
++    const mode = options?.mode;
++    let tokens = byMode.get(mode);
++    if (tokens == null) {
++        tokens = computeThemeTokens(theme, options);
++        byMode.set(mode, tokens);
++    }
++    return tokens;
++}
++function computeThemeTokens(theme, options) {
+   const {
+     mode
+   } = options;

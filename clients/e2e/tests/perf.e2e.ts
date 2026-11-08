@@ -234,6 +234,8 @@ test("Electron's cold start until the Inbox is usable", async () => {
       await run.app.close();
     }
     results.electronColdStartMs = times;
+    // Headless on this machine it is about 470 ms; a heavy import in the first chunk would show here.
+    expect(Math.max(...times)).toBeLessThan(1000);
   } finally {
     await daemon.dispose();
     rmSync(profile, { recursive: true, force: true });

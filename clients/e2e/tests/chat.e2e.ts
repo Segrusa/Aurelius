@@ -74,7 +74,7 @@ test.describe("scripted", () => {
       // A refusal puts the words back.
       await bottom(page).fill("nope");
       await bottom(page).press("Enter");
-      await expect(page.getByRole("alert")).toHaveText("Refused by the server.");
+      await expect(page.locator('[role="alert"]:not([data-astryx-live-region])')).toHaveText("Refused by the server.");
       await expect(bottom(page)).toHaveValue("nope");
 
       // A secret is held until it is confirmed.
