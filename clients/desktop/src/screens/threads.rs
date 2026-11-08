@@ -266,6 +266,8 @@ mod tests {
             mode: None,
             author_user: None,
             system: None,
+            awaiting_user: false,
+            run: None,
             thread_parent: None,
             thread_reply_count: None,
             thread_last_reply_ms: None,

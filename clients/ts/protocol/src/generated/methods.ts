@@ -197,6 +197,7 @@ export const METHODS = {
   "remote.get_status": "read",
   "remote.revoke": "host",
   "remote.start_pairing": "host",
+  "run.get_activity": "read",
   "run.get_context": "read",
   "run.get_trace": "read",
   "run.guidelines": "read",
@@ -780,6 +781,10 @@ export interface MethodParams {
    */
   "remote.start_pairing": undefined;
   /**
+   * Every tool call of a run, for an opened run card (feature `run_cards`).
+   */
+  "run.get_activity": { run_id: string };
+  /**
    * The context manifest of one run (context inspector).
    */
   "run.get_context": { run_id: string };
@@ -1021,7 +1026,7 @@ export interface MethodParams {
    * What a conversation or a task used, with the tasks given away from it apart
    * (feature `run_usage`). Give one of the two; a task wins.
    */
-  "usage.get_totals": { conversation_id?: string | null; task_id?: string | null };
+  "usage.get_totals": { conversation_id?: string | null; task_id?: string | null; ticket_id?: string | null };
   /**
    * A new board member (OV-12: `invalid_username`, `weak_password` (also a
    * password of only spaces), `username_taken`; `too_many_attempts` after five

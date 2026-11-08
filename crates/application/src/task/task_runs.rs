@@ -205,23 +205,17 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
     Ok(notices)
 }
 
-/// The text ends on a question: its last non-empty line, without markdown marks, ends with "?".
-fn asks_question(text: &str) -> bool {
-    let last = text.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("");
-    last.trim_end_matches(|c: char| matches!(c, '*' | '_' | '`' | '"' | '\'' | ')' | '”' | '»' | ' ')).ends_with('?')
-}
-
 /// The run of a ticket's main task ended on a question: its closing text, or the last
 /// message it posted in the ticket's discussion, ends with "?".
 fn ends_on_question(tx: &Tx<'_>, st: &Store, task: TaskId, run: RunId, closing: &str) -> Result<bool, StorageError> {
-    if asks_question(closing) {
+    if aurelius_domain::group_chat::asks_question(closing) {
         return Ok(true);
     }
     let Some(ticket) = crate::task::ticket_line::ticket_of(tx, task)? else { return Ok(false) };
     let Some(discussion) = aurelius_storage::discussions::ticket_conversation(tx, ticket)? else { return Ok(false) };
     let key = aurelius_storage::discussions::run_last_post_key(tx, discussion, run)?;
     let posted = key.and_then(|k| st.blobs().read(&k).ok()).and_then(|b| String::from_utf8(b).ok());
-    Ok(posted.is_some_and(|text| asks_question(&text)))
+    Ok(posted.is_some_and(|text| aurelius_domain::group_chat::asks_question(&text)))
 }
 
 /// The question goes to the discussion (unless the run posted it there itself) and the

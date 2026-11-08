@@ -751,7 +751,7 @@ pub(crate) mod tests {
 
     pub(crate) fn msg(role: MessageRole, text: &str) -> MessageView {
         MessageView {
-            edited_at_ms: None, deleted_at_ms: None, editable: false,
+            edited_at_ms: None, deleted_at_ms: None, editable: false, awaiting_user: false, run: None,
             id: MessageId::new(),
             ordinal: 0,
             role,

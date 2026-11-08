@@ -341,11 +341,18 @@ pub enum Method {
         conversation_id: Option<ConversationId>,
         #[serde(default)]
         task_id: Option<aurelius_domain::TaskId>,
+        /// What a ticket used: its tasks and the runs of its discussion (feature `run_cards`).
+        /// Wins over the other two.
+        #[serde(default)]
+        ticket_id: Option<aurelius_domain::TicketId>,
     },
     /// What one run sent to the runtime and what each model call cost; not found
     /// unless trace mode was on for it and it is among the latest (feature `run_trace`).
     #[serde(rename = "run.get_trace")]
     RunGetTrace { run_id: RunId },
+    /// Every tool call of a run, for an opened run card (feature `run_cards`).
+    #[serde(rename = "run.get_activity")]
+    RunGetActivity { run_id: RunId },
     /// Whether runs keep a trace (feature `run_trace`).
     #[serde(rename = "trace.get_setting")]
     TraceGetSetting,

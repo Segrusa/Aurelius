@@ -36,6 +36,13 @@ pub const WAKE_WINDOW_MS: i64 = 60 * 60 * 1000;
 /// the one an employee is busy with; at the cap none starts and the busy line stays.
 pub const QUICK_ANSWER_COST_PER_HOUR_MICRO: i64 = 1_000_000;
 
+/// The text ends on a question: its last non-empty line, without markdown marks, ends with "?".
+/// The one rule for a run that ended on a question (`MessageView::awaiting_user`).
+pub fn asks_question(text: &str) -> bool {
+    let last = text.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("");
+    last.trim_end_matches(|c: char| matches!(c, '*' | '_' | '`' | '"' | '\'' | ')' | '\u{201d}' | '\u{bb}' | ' ')).ends_with('?')
+}
+
 /// A message of the user in the group chat (`group_chat.send`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SendGroupMessage {

@@ -755,7 +755,7 @@ mod tests {
     #[test]
     fn an_item_shows_edits_and_status_but_not_an_answers_files() {
         let mut m = MessageView {
-            edited_at_ms: None, deleted_at_ms: None, editable: false,
+            edited_at_ms: None, deleted_at_ms: None, editable: false, awaiting_user: false, run: None,
             id: MessageId::new(),
             ordinal: 1,
             role: MessageRole::Assistant,

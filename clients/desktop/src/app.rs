@@ -8115,6 +8115,8 @@ mod tests {
             requester: "Alex".into(),
             task_id: None,
             always_allow_eligible: false,
+            ticket_id: None,
+            discussion_id: None,
         }
     }
 

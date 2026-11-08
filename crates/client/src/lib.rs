@@ -912,7 +912,7 @@ impl Client {
 
     /// What a conversation or a task used, with the tasks given away from it apart (feature `run_usage`).
     pub async fn usage_totals(&self, conversation_id: Option<aurelius_domain::ConversationId>, task_id: Option<aurelius_domain::TaskId>) -> Result<aurelius_protocol::UsageTotals, ClientError> {
-        self.read(Method::UsageGetTotals { conversation_id, task_id }, body!(UsageTotals)).await
+        self.read(Method::UsageGetTotals { conversation_id, task_id, ticket_id: None }, body!(UsageTotals)).await
     }
 
     /// What a run sent and what each of its model calls cost (feature `run_trace`).

@@ -16,6 +16,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useConnection } from "../connection";
 import { useAction, useKeyContext } from "../keys/provider";
+import { KeyHint } from "../ui/key-hint";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
 import { approvalAction, approvalSentence } from "./inbox-logic";
@@ -444,7 +445,26 @@ function PlanCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean 
   );
 }
 
-function ActionCard({ approval }: { approval: ApprovalView }) {
+function ActionKeys({
+  eligible,
+  onAllow,
+  onAlways,
+  onDeny,
+}: {
+  eligible: boolean;
+  onAllow: () => void;
+  onAlways: () => void;
+  onDeny: () => void;
+}) {
+  useKeyContext("Decision");
+  useAction("AllowOnce", onAllow);
+  useAction("AlwaysAllow", onAlways, eligible);
+  useAction("DenyApproval", onDeny);
+  useAction("RejectApproval", onDeny);
+  return null;
+}
+
+function ActionCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean }) {
   const { busy, run } = useApprovalWrite();
   const action = approvalAction(approval);
   const eligible = approval.always_allow_eligible ?? false;
@@ -458,13 +478,70 @@ function ActionCard({ approval }: { approval: ApprovalView }) {
     );
   return (
     <Shell title={`Approval needed · ${approvalSentence(approval)}`}>
+      {keyed ? (
+        <ActionKeys
+          eligible={eligible}
+          onAllow={() => void decide(true)}
+          onAlways={() => void decide(true, true)}
+          onDeny={() => void decide(false)}
+        />
+      ) : null}
       <pre {...stylex.props(styles.command)}>{action.body}</pre>
       <div {...stylex.props(styles.footer)}>
         <ButtonGroup label="Decide">
-          <Button variant="primary" label="Allow once" isDisabled={busy} onClick={() => void decide(true)} />
-          {eligible ? <Button label="Always allow" isDisabled={busy} onClick={() => void decide(true, true)} /> : null}
-          <Button variant="destructive" label="Deny" isDisabled={busy} onClick={() => void decide(false)} />
+          <Button variant="primary" label="Allow once" isDisabled={busy} onClick={() => void decide(true)}>
+            Allow once{keyed ? <KeyHint onAccent>↵</KeyHint> : null}
+          </Button>
+          {eligible ? (
+            <Button label="Always allow" isDisabled={busy} onClick={() => void decide(true, true)}>
+              Always allow{keyed ? <KeyHint>⇧↵</KeyHint> : null}
+            </Button>
+          ) : null}
+          <Button variant="destructive" label="Deny" isDisabled={busy} onClick={() => void decide(false)}>
+            Deny{keyed ? <KeyHint>D</KeyHint> : null}
+          </Button>
         </ButtonGroup>
+      </div>
+    </Shell>
+  );
+}
+
+/** An employee's post that waits for the board member, without a question form: answered with one line. */
+export function ReplyCard({ who, onSend }: { who: string; onSend: (text: string) => Promise<unknown> }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const clean = text.trim();
+    if (clean === "" || busy) return;
+    setBusy(true);
+    try {
+      await onSend(clean);
+      setText("");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "This did not work.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Shell title={`${who} is waiting for you`}>
+      <div {...stylex.props(styles.body)}>
+        <TextInput
+          label={`Your answer to ${who}`}
+          isLabelHidden
+          placeholder="Your answer…"
+          value={text}
+          onChange={setText}
+          onEnter={() => void submit()}
+        />
+      </div>
+      <div {...stylex.props(styles.footer)}>
+        <Button
+          variant="primary"
+          label="Send answer"
+          isDisabled={busy || text.trim() === ""}
+          onClick={() => void submit()}
+        />
       </div>
     </Shell>
   );
@@ -473,5 +550,5 @@ function ActionCard({ approval }: { approval: ApprovalView }) {
 export function ApprovalCard({ approval, keyed = false }: { approval: ApprovalView; keyed?: boolean }) {
   if (approval.tool === QUESTION_TOOL) return <QuestionCard approval={approval} keyed={keyed} />;
   if (approval.tool === PLAN_TOOL) return <PlanCard approval={approval} keyed={keyed} />;
-  return <ActionCard approval={approval} />;
+  return <ActionCard approval={approval} keyed={keyed} />;
 }

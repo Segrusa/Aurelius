@@ -18,6 +18,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
   useAllTasks,
+  useApprovals,
   useBoard,
   useCompany,
   useEmployees,
@@ -37,6 +38,7 @@ import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { ApprovalCard, ReplyCard } from "./approval-card";
 import {
   activityDetail,
   activityText,
@@ -59,9 +61,12 @@ import {
   testingNote,
 } from "./board-logic";
 import { canChange, completeMention, mentionSuggestions } from "./chat-logic";
+import { ActivityOutput } from "./chat-message";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { messageLink, ticketLink } from "./links-logic";
 import { FormDialog, Loading, Problem } from "./org-kit";
+import { RunCard, TicketOdometer } from "./run-card";
+import { approvalsFor, waitsOnReply } from "./run-card-logic";
 import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
@@ -144,6 +149,8 @@ const styles = stylex.create({
     paddingInline: 22,
     paddingBlock: 16,
   },
+  // A card clips its content, so in this column it would be squeezed instead of scrolled.
+  interrupt: { flexShrink: 0 },
   message: {
     display: "flex",
     flexDirection: "column",
@@ -946,6 +953,8 @@ function Discussion({
 }) {
   const connection = useConnection();
   const messages = useMessages(conversationId);
+  const approvals = useApprovals();
+  const pending = approvalsFor(approvals.data ?? [], { conversationId, ticketId: t.id });
   const [text, setText] = useState("");
   const { busy, held, error, send, sendAnyway } = useSend(() => setText(""));
   const post = () => {
@@ -1063,6 +1072,24 @@ function Discussion({
             ) : (
               <Markdown text={m.text} />
             )}
+            {m.run ? <RunCard m={m} Output={ActivityOutput} /> : null}
+            {t.column !== "done" && waitsOnReply(m, pending) ? (
+              <ReplyCard
+                who={m.author ?? "An employee"}
+                onSend={(reply) =>
+                  connection.write(
+                    "ticket.post",
+                    { ticket_id: t.id, text: reply, confirm_secret: false },
+                    { retry: false },
+                  )
+                }
+              />
+            ) : null}
+          </div>
+        ))}
+        {pending.map((a) => (
+          <div key={a.id} {...stylex.props(styles.interrupt)}>
+            <ApprovalCard approval={a} />
           </div>
         ))}
       </div>
@@ -1406,6 +1433,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
                 />
               ) : null}
             </div>
+            <TicketOdometer ticketId={t.id} />
           </div>
           <div {...stylex.props(styles.topGate)}>
             {t.column === "review" ? (

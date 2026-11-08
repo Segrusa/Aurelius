@@ -2,7 +2,7 @@
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::{
-    ConversationId, EmployeeId, EventId, MessageId, RunId, UserId,
+    ConversationId, EmployeeId, EventId, MessageId, RunId, TaskId, UserId,
     conversation::{MessageRole, MessageStatus},
 };
 use aurelius_domain::views::{ConversationSummary, MessageView};
@@ -481,7 +481,8 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
     // A store before schema 29 has no edits.
     let edits = if has_edit_columns(conn)? { "m.edited_at_ms, m.deleted_at_ms" } else { "NULL, NULL" };
     let mut stmt = conn.prepare(&format!(
-        "SELECT m.id, m.ordinal, m.role, m.status, b.storage_key, m.created_at_ms, m.run_id, m.reply_to_id,
+        "SELECT m.id, m.ordinal, m.role, m.status, b.storage_key, m.created_at_ms,
+                COALESCE(m.run_id, CASE WHEN json_extract(m.meta_json, '$.kind') = 'group' THEN json_extract(m.meta_json, '$.run_id') END), m.reply_to_id,
                 c.display_name, r.model_id, json_extract(r.resolved_config_json, '$.persona_name'),
                 json_extract(m.meta_json, '$.kind'), json_extract(m.meta_json, '$.from'), json_extract(m.meta_json, '$.approval_id'), json_extract(m.meta_json, '$.files'), json_extract(m.meta_json, '$.uploads'),
                 json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system'), {parent}, {edits}
@@ -558,6 +559,8 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             edited_at_ms: edited,
             deleted_at_ms: deleted,
             editable: false,
+            awaiting_user: false,
+            run: None,
         });
     }
     // The board members who wrote in a discussion (schema 19).
@@ -574,7 +577,8 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
     let waiting = queued_messages(conn, conversation)?;
     for message in out.iter_mut() {
         message.queued = message.role == MessageRole::User && waiting.contains(&message.id);
-        if let Some(run) = message.run_id {
+        // A post stands for its run in the run card, which reads the rest apart.
+        if let (Some(run), false) = (message.run_id, is_post(message)) {
             message.sources = crate::files::sources_for_run(conn, run)?;
             if message.role == MessageRole::Assistant {
                 message.usage = crate::usage::for_run(conn, run)?;
@@ -582,7 +586,112 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
         }
         message.activity = activity_for_message(conn, message.id)?;
     }
+    with_run_cards(conn, &mut out)?;
     Ok(out)
+}
+
+fn is_post(m: &MessageView) -> bool {
+    m.update.as_deref() == Some(aurelius_domain::group_chat::GROUP_KIND) && m.system.is_none()
+}
+
+/// A run's outcome in a discussion: its `Reported` line (the run is found through
+/// the line's task, as it was when the line was written).
+fn reported_task(m: &MessageView) -> Option<TaskId> {
+    m.system.as_ref().filter(|s| s.kind == aurelius_domain::views::SystemLineKind::Reported)?.task_id
+}
+
+/// The run card of each run in `messages`, on the run's last post or `Reported` line:
+/// the rest of the run, its tokens and whether it waits for a board member.
+fn with_run_cards(conn: &Connection, messages: &mut [MessageView]) -> Result<(), StorageError> {
+    if !messages.iter().any(|m| is_post(m) || reported_task(m).is_some()) {
+        return Ok(());
+    }
+    let pending = crate::approvals::pending_runs(conn)?;
+    let mut seen = std::collections::HashSet::new();
+    for m in messages.iter_mut().rev() {
+        if m.deleted_at_ms.is_some() {
+            continue;
+        }
+        if m.run_id.is_none()
+            && let Some(task) = reported_task(m)
+        {
+            m.run_id = run_of_task_at(conn, task, m.created_at_ms)?;
+        }
+        if !is_post(m) && reported_task(m).is_none() {
+            continue;
+        }
+        let Some(run) = m.run_id.filter(|r| seen.insert(*r)) else { continue };
+        m.run = run_brief(conn, run)?;
+        m.usage = crate::usage::for_run(conn, run)?;
+        m.awaiting_user = pending.contains(&run) || (aurelius_domain::group_chat::asks_question(&m.text) && run_ended_waiting(conn, run)?);
+    }
+    Ok(())
+}
+
+/// The latest run of `task` that started by `at_ms`.
+fn run_of_task_at(conn: &Connection, task: TaskId, at_ms: i64) -> Result<Option<RunId>, StorageError> {
+    let run: Option<String> = conn
+        .query_row(
+            "SELECT r.id FROM runs r JOIN tasks t ON t.id = ?1
+             WHERE (r.task_id = t.id OR r.conversation_id = t.conversation_id) AND COALESCE(r.started_at_ms, 0) <= ?2
+             ORDER BY r.started_at_ms DESC LIMIT 1",
+            params![task.to_string(), at_ms],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(run.and_then(|r| RunId::parse(&r).ok()))
+}
+
+fn run_brief(conn: &Connection, run: RunId) -> Result<Option<aurelius_domain::views::RunBrief>, StorageError> {
+    Ok(conn
+        .query_row(
+            "SELECT r.status, (SELECT COUNT(*) FROM run_activity a WHERE a.run_id = r.id), (SELECT COUNT(*) FROM run_activity a WHERE a.run_id = r.id AND a.ok = 0)
+             FROM runs r WHERE r.id = ?1",
+            [run.to_string()],
+            |r| Ok(aurelius_domain::views::RunBrief { status: r.get(0)?, tool_calls: r.get::<_, i64>(1)? as u32, failed_calls: r.get::<_, i64>(2)? as u32 }),
+        )
+        .optional()?)
+}
+
+/// Whether `run` is the last one of a task that waits for a board member's answer.
+fn run_ended_waiting(conn: &Connection, run: RunId) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.id = r.task_id OR t.conversation_id = r.conversation_id
+           WHERE r.id = ?1 AND t.status = 'waiting' AND t.waiting_reason = 'input'
+             AND NOT EXISTS(SELECT 1 FROM runs n WHERE (n.task_id = t.id OR n.conversation_id = t.conversation_id) AND n.started_at_ms > r.started_at_ms))",
+        [run.to_string()],
+        |r| r.get(0),
+    )?)
+}
+
+/// Every tool call of `run` (`run.get_activity`), each cut as `conversation.get` cuts it.
+pub fn activity_for_run(conn: &Connection, run: RunId) -> Result<aurelius_domain::views::RunActivity, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT call_id, tool, input_json, output, ok, text_offset, message_id FROM run_activity WHERE run_id = ?1 ORDER BY started_at_ms, rowid",
+    )?;
+    let rows = stmt.query_map([run.to_string()], |r| {
+        Ok((
+            aurelius_domain::views::ActivityView {
+                call_id: r.get(0)?,
+                tool: r.get(1)?,
+                input: serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default(),
+                output: r.get(3)?,
+                ok: r.get::<_, Option<i64>>(4)?.map(|v| v == 1),
+                offset: r.get::<_, i64>(5)?.max(0) as u32,
+                truncated: false,
+                output_bytes: None,
+            },
+            r.get::<_, String>(6)?,
+        ))
+    })?;
+    let mut calls = Vec::new();
+    let mut message_id = None;
+    for row in rows {
+        let (call, message) = row?;
+        message_id = message_id.or_else(|| MessageId::parse(&message).ok());
+        calls.push(aurelius_domain::activity::preview(call));
+    }
+    Ok(aurelius_domain::views::RunActivity { run_id: run, message_id, calls })
 }
 
 /// Whether `messages` has `thread_parent_id` (schema 26).

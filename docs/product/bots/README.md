@@ -44,7 +44,7 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | 1 | P1, P2, P4, P5, P7, P8 plus scoped view P3 | gebouwd |
 | 2 | C1 UI op de overrides, C3 toegangsniveau | gebouwd |
 | 3 | C5 scope-regel | gebouwd |
-| 4 | U1, U2, U4 | open |
+| 4 | U1, U2, U4 | gebouwd |
 | 5 | Mailbox, worker, samenvoegen, parkeren, hybride sessies (R1-R3, R6) | open |
 | 6 | R4 hop op elk bericht, R5 vastgehouden handoff | open |
 | 7 | R7, C7, U3, U7 | open |

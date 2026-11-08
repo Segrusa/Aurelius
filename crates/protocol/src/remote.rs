@@ -85,6 +85,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::UsageGetHours { .. }
         | Method::UsageGetTotals { .. }
         | Method::RunGetTrace { .. }
+        | Method::RunGetActivity { .. }
         | Method::TraceGetSetting
         | Method::VariantsGetSetting
         | Method::TaskVariants { .. }

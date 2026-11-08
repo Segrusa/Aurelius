@@ -34,6 +34,10 @@ export function bars(days: { day_start_ms: number; tokens: number }[], todayMs: 
   }));
 }
 
+/** Whose share a row of the usage per board member is. */
+export const userRowName = (row: { login_user?: string | null; username?: string | null }): string =>
+  row.username ?? (row.login_user ? "Former board member" : "No Claude login");
+
 /** The answer of `subscription.get`, only when it is of this member's own login (`own_subscription` in the desktop app). */
 export const subscriptionFor = <T extends { login_user?: string | null; fetched_at_ms: number }>(
   data: T | undefined,

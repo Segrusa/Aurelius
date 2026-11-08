@@ -376,6 +376,11 @@ pub mod feature {
     /// An employee has an access level (`EmployeeSummary::access_level`, and the
     /// field on `employee.create` and `employee.update`) that limits its runs' tools.
     pub const EMPLOYEE_ACCESS: &str = "employee_access";
+    /// Run cards and interrupt cards in a discussion, and the odometer (protocol 5,
+    /// additive): `MessageView::run` and `awaiting_user`, `ApprovalView::ticket_id` and
+    /// `discussion_id`, `run.get_activity`, `usage.get_totals` with `ticket_id`,
+    /// `TokenUsage::model_calls`, `UsageSnapshot::by_user`.
+    pub const RUN_CARDS: &str = "run_cards";
 }
 
 /// Every feature this build has.
@@ -420,6 +425,7 @@ pub const FEATURES: &[&str] = &[
     feature::QUICK_ANSWERS,
     feature::TICKET_FROM_IDEA,
     feature::EMPLOYEE_ACCESS,
+    feature::RUN_CARDS,
 ];
 
 /// Daemon → client.
@@ -572,6 +578,7 @@ pub enum ResponseBody {
     UsageHours(UsageHours),
     UsageTotals(UsageTotals),
     RunTrace(RunTrace),
+    RunActivity(RunActivity),
     TraceSetting(TraceSetting),
     VariantsSetting(VariantsSetting),
     TaskVariants(TaskVariantsView),

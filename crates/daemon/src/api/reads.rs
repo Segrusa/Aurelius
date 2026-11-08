@@ -126,17 +126,22 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let store = shared.store().clone();
             storage_task(move || store.read(|c| aurelius_storage::usage::hours(c, day_start_ms, aurelius_host::utc_offset_minutes_at))).await.map(ResponseBody::UsageHours)
         }
-        Method::UsageGetTotals { conversation_id, task_id } => {
+        Method::UsageGetTotals { conversation_id, task_id, ticket_id } => {
             let store = shared.store().clone();
             let totals = storage_task(move || {
-                store.read(|c| match (task_id, conversation_id) {
-                    (Some(task), _) => aurelius_storage::usage::task_totals(c, task).map(Some),
-                    (None, Some(conversation)) => aurelius_storage::usage::conversation_totals(c, conversation).map(Some),
-                    (None, None) => Ok(None),
+                store.read(|c| match (ticket_id, task_id, conversation_id) {
+                    (Some(ticket), _, _) => aurelius_storage::usage::ticket_totals(c, ticket).map(Some),
+                    (None, Some(task), _) => aurelius_storage::usage::task_totals(c, task).map(Some),
+                    (None, None, Some(conversation)) => aurelius_storage::usage::conversation_totals(c, conversation).map(Some),
+                    (None, None, None) => Ok(None),
                 })
             })
             .await?;
-            totals.map(ResponseBody::UsageTotals).ok_or_else(|| ProtocolError::new(ErrorCode::InvalidRequest, "Give a conversation or a task."))
+            totals.map(ResponseBody::UsageTotals).ok_or_else(|| ProtocolError::new(ErrorCode::InvalidRequest, "Give a ticket, a conversation or a task."))
+        }
+        Method::RunGetActivity { run_id } => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(|c| aurelius_storage::conversations::activity_for_run(c, run_id))).await.map(ResponseBody::RunActivity)
         }
         Method::RunGetTrace { run_id } => {
             let s = shared.clone();

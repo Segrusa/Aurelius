@@ -333,6 +333,8 @@ abstract final class Methods {
   static const String remoteRevoke = 'remote.revoke';
   /// A new one-time code (5 minutes) plus the QR payload; the receipt keeps neither.
   static const String remoteStartPairing = 'remote.start_pairing';
+  /// Every tool call of a run, for an opened run card (feature `run_cards`).
+  static const String runGetActivity = 'run.get_activity';
   /// The context manifest of one run (context inspector).
   static const String runGetContext = 'run.get_context';
   /// What one run sent to the runtime and what each model call cost; not found
@@ -1036,6 +1038,14 @@ Map<String, dynamic> remoteGetStatus() => <String, dynamic>{
   'method': Methods.remoteGetStatus,
 };
 
+/// Every tool call of a run, for an opened run card (feature `run_cards`).
+Map<String, dynamic> runGetActivity({required String runId}) => <String, dynamic>{
+  'method': Methods.runGetActivity,
+  'params': <String, dynamic>{
+    'run_id': runId,
+  },
+};
+
 /// The context manifest of one run (context inspector).
 Map<String, dynamic> runGetContext({required String runId}) => <String, dynamic>{
   'method': Methods.runGetContext,
@@ -1293,11 +1303,12 @@ Map<String, dynamic> usageGetHours({required int dayStartMs}) => <String, dynami
 
 /// What a conversation or a task used, with the tasks given away from it apart
 /// (feature `run_usage`). Give one of the two; a task wins.
-Map<String, dynamic> usageGetTotals({String? conversationId, String? taskId}) => <String, dynamic>{
+Map<String, dynamic> usageGetTotals({String? conversationId, String? taskId, String? ticketId}) => <String, dynamic>{
   'method': Methods.usageGetTotals,
   'params': <String, dynamic>{
     if (conversationId != null) 'conversation_id': conversationId,
     if (taskId != null) 'task_id': taskId,
+    if (ticketId != null) 'ticket_id': ticketId,
   },
 };
 

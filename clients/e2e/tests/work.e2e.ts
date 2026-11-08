@@ -118,6 +118,17 @@ test("the board, the ticket panel and My tickets against a real daemon", async (
     await panel.getByRole("tab", { name: "Activity" }).click();
     await expect(panel.getByText("Nothing happened yet.")).toHaveCount(0);
 
+    // The reads behind the run card and the odometer, on the real server (fake-server answers anything).
+    const onBoard = expectBody(await server.call("board.get", { project_id: project?.id ?? null }), "board").value;
+    const second = onBoard.columns.flatMap((c) => c.tickets).find((t) => t.title === "Second ticket, renamed");
+    const totals = expectBody(
+      await server.call("usage.get_totals", { ticket_id: second?.id ?? null }),
+      "usage_totals",
+    ).value;
+    expect(totals.total.input_tokens).toBeGreaterThanOrEqual(0);
+    const none = "00000000-0000-7000-8000-000000000001";
+    expect(expectBody(await server.call("run.get_activity", { run_id: none }), "run_activity").value.calls).toEqual([]);
+
     // Back closes the panel.
     await page.getByRole("heading", { name: "Board" }).click();
     await page.keyboard.press("Escape");
@@ -374,6 +385,106 @@ test.describe("states a test daemon cannot produce", () => {
     await expect
       .poll(() => writes.find((w) => w.method === "employee.send_message")?.params)
       .toMatchObject({ text: "Stop and do this instead." });
+  });
+
+  test("a discussion: run card, interrupt card and odometer", async ({ page }) => {
+    const used = (input: number) => ({
+      runs: 1,
+      input_tokens: input,
+      output_tokens: 200,
+      cached_tokens: 0,
+      cache_creation_tokens: 0,
+      cost_micro_usd: 120000,
+      estimate: false,
+      model_calls: 4,
+    });
+    const discussed = { ...doing, conversation_id: "d3" };
+    const question = approval("q9", {
+      tool: "claude.AskUserQuestion",
+      conversation_id: "main",
+      ticket_id: "t3",
+      run_id: "r9",
+      requester: "Rook",
+      arguments: { questions: [{ question: "Which colour?", options: [{ label: "Green", description: "" }] }] },
+    });
+    const { writes } = await scriptServer(page, {
+      ...script,
+      features: ["ticket_discussion", "run_cards"],
+      board: boardOf([discussed]),
+      tickets: [discussed],
+      details: { t3: { ticket: discussed, root_task: k3, tasks: [k3], as_of_seq: 1 } },
+      approvals: [question],
+      conversations: {
+        d3: messages("d3", [
+          message("m1", "assistant", "Started on it.", {
+            update: "group",
+            author: "Flux",
+            run_id: "r1",
+            run: { status: "running", tool_calls: 2, failed_calls: 1 },
+            usage: used(9000),
+          }),
+          message("m2", "assistant", "Shall I migrate it?", {
+            update: "group",
+            author: "Bo",
+            run_id: "r2",
+            awaiting_user: true,
+            run: { status: "succeeded", tool_calls: 0, failed_calls: 0 },
+          }),
+        ]),
+      },
+      reads: {
+        "usage.get_totals": () => ({
+          type: "usage_totals",
+          value: { own: used(9000), subtasks: [], total: used(9000) },
+        }),
+        "run.get_activity": () => ({
+          type: "run_activity",
+          value: {
+            run_id: "r1",
+            message_id: "x1",
+            calls: [
+              {
+                call_id: "a",
+                offset: 0,
+                tool: "Bash",
+                input: { command: "cargo test" },
+                ok: false,
+                output: "1 failed",
+              },
+            ],
+          },
+        }),
+      },
+    });
+    await page.goto(site.origin);
+    await nav(page, "Board");
+    await page.getByRole("button", { name: /#\d+ Still at work/ }).click();
+    const panel = page.getByRole("complementary", { name: /Still at work/ });
+    await expect(panel.getByText("Tokens in")).toBeVisible();
+    await expect(panel.getByText("9k", { exact: true })).toBeVisible();
+    await expect(panel.getByText("$0.12", { exact: true })).toBeVisible();
+
+    await panel.getByRole("tab", { name: /Discussion/ }).click();
+    const card = panel.locator("[data-run-card]").first();
+    await expect(card.getByText("Running", { exact: true })).toBeVisible();
+    await expect(card.getByText(/2 tool calls · 1 failed · 9\.2k tokens/)).toBeVisible();
+    await card.getByRole("button", { name: /Running/ }).click();
+    await expect(card.getByText("cargo test")).toBeVisible();
+    await card.getByRole("button", { name: "Cancel" }).click();
+    await expect.poll(() => writes.find((w) => w.method === "run.stop")?.params).toMatchObject({ run_id: "r1" });
+
+    await expect(panel.getByRole("radio", { name: "Green" })).toBeVisible();
+    await panel.getByLabel("Your answer to Bo").fill("Yes, please");
+    await panel.getByRole("button", { name: "Send answer" }).first().click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "ticket.post")?.params)
+      .toMatchObject({ ticket_id: "t3", text: "Yes, please" });
+
+    await panel.getByRole("radio", { name: "Green" }).check();
+    await panel.getByRole("button", { name: "Send answer" }).last().click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "approval.answer")?.params)
+      .toMatchObject({ approval_id: "q9", answers: { "Which colour?": "Green" } });
   });
 
   test("a question in the Inbox: the number keys, then Enter", async ({ page }) => {

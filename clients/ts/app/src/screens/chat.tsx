@@ -60,6 +60,8 @@ import {
   NewLine,
 } from "./chat-message";
 import { Held } from "./dialogs";
+import { ChannelOdometer } from "./run-card";
+import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ColumnGlyph } from "./tickets-kit";
 
@@ -956,9 +958,8 @@ function Channel({
   }, [list, store]);
 
   const pending = useMemo(
-    () =>
-      (approvals.data ?? []).filter((a) => a.status === "pending" && a.conversation_id && a.conversation_id === openId),
-    [approvals.data, openId],
+    () => approvalsFor(approvals.data ?? [], { conversationId: openId, ticketId: c?.ticket_id }),
+    [approvals.data, openId, c?.ticket_id],
   );
   const approvalMap = useMemo(() => new Map(pending.map((a) => [a.id, a])), [pending]);
   const onCard = useMemo(() => new Set(list.flatMap((m) => m.approval_id ?? [])), [list]);
@@ -1110,6 +1111,7 @@ function Channel({
                     : `Project channel · you and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`
                   : `You and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`}
           </span>
+          <ChannelOdometer conversationId={openId} />
           {c?.ticket_id ? (
             <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.openTicket)}>
               Open ticket ↗

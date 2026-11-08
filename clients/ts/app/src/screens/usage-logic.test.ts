@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { barHeight, bars, clampPercent, costText, limitTone, subscriptionFor, tokensShort } from "./usage-logic";
+import {
+  barHeight,
+  bars,
+  clampPercent,
+  costText,
+  limitTone,
+  subscriptionFor,
+  tokensShort,
+  userRowName,
+} from "./usage-logic";
+
+describe("userRowName", () => {
+  it("names the board member, one who left, and runs on no login", () => {
+    expect(userRowName({ login_user: "u", username: "grace" })).toBe("grace");
+    expect(userRowName({ login_user: "u" })).toBe("Former board member");
+    expect(userRowName({})).toBe("No Claude login");
+  });
+});
 
 describe("usage numbers", () => {
   it("shortens tokens", () => {

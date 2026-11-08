@@ -358,6 +358,14 @@ pub struct ApprovalView {
     /// servers or Claude in Chrome); answered with `DecideApproval::always_allow`.
     #[serde(default)]
     pub always_allow_eligible: bool,
+    /// The ticket it waits on: of the run's task, or of the discussion that woke
+    /// the run (feature `run_cards`). Left out for other runs and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<crate::TicketId>,
+    /// The discussion (a channel, a ticket's) that woke the run (feature `run_cards`).
+    /// Left out for other runs and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discussion_id: Option<ConversationId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -698,6 +706,37 @@ pub struct MessageView {
     /// `message_edits`), per reader like `ReactionView::mine`. Left out when false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub editable: bool,
+    /// The run behind this message waits for a board member (feature `run_cards`):
+    /// a question or an approval is open, or the post ended a ticket's main task on
+    /// a question (the rule of `group_chat::asks_question`). Only on the run's last
+    /// message in the list. Left out when false and by older servers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub awaiting_user: bool,
+    /// What a run card under this message shows (feature `run_cards`): on a post in a
+    /// discussion and on a `Reported` line, the last one of its run in the list. With
+    /// `usage` for the tokens. Left out for other messages and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<RunBrief>,
+}
+
+/// What the run card of a post shows while folded (`MessageView::run`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunBrief {
+    /// `runs.status`: created | starting | running | waiting | cancelling | succeeded |
+    /// failed | cancelled | unknown. A string, so a new state never breaks a client.
+    pub status: String,
+    pub tool_calls: u32,
+    pub failed_calls: u32,
+}
+
+/// `run.get_activity`: every tool call of a run, for an opened run card (feature `run_cards`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunActivity {
+    pub run_id: RunId,
+    /// The answer the calls are kept with (`activity.get` reads one whole); none without calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<MessageId>,
+    pub calls: Vec<ActivityView>,
 }
 
 /// `message.locate` (feature `message_locate`): where a message of a channel or
@@ -1299,6 +1338,10 @@ pub struct TokenUsage {
     pub cost_micro_usd: Option<i64>,
     /// Some values are not a bill (e.g. subscription: API-equivalent value).
     pub estimate: bool,
+    /// How many model calls those runs made (feature `run_cards`). 0: not known,
+    /// for usage from before the calls were counted and by older servers.
+    #[serde(default)]
+    pub model_calls: u64,
 }
 
 /// `usage.get_totals`: what a conversation or a task used (feature `run_usage`).
@@ -1468,6 +1511,30 @@ pub struct UsageSnapshot {
     pub by_source: Vec<UsageRow>,
     /// Tokens per day, last 14 days (oldest first).
     pub by_day: Vec<UsageDay>,
+    /// Per board member whose Claude login ran it, last 30 days (feature `run_cards`).
+    /// Left out by older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by_user: Vec<UsageUserRow>,
+}
+
+/// One board member's share of the usage (`UsageSnapshot::by_user`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UsageUserRow {
+    /// `runs.login_user`; none: runs on no one's login (an API key, a background run).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_user: Option<String>,
+    /// That board member's name; none when there is none or they are gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    pub runs: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub cost_micro_usd: Option<i64>,
+    pub estimate: bool,
+    #[serde(default)]
+    pub model_calls: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

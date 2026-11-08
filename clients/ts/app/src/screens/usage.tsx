@@ -6,14 +6,14 @@ import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
 import { expectBody } from "@aurelius/client";
-import type { UsageHours, UsageRow, UsageWindow } from "@aurelius/protocol";
+import type { UsageHours, UsageRow, UsageUserRow, UsageWindow } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useKeyed, useSubscription, useUsage } from "../data";
 import { Eyebrow, failureOf, Loading, Page, PageHead, shortDay } from "./org-kit";
-import { bars, clampPercent, costText, limitTone, subscriptionFor, tokensShort } from "./usage-logic";
+import { bars, clampPercent, costText, limitTone, subscriptionFor, tokensShort, userRowName } from "./usage-logic";
 
 const FETCH_AGAIN_MS = 6000;
 const MONO = "var(--font-family-code)";
@@ -264,6 +264,41 @@ function Hours({ day, onMove }: { day: number; onMove: (delta: number) => void }
 }
 
 const COLUMNS = ["Connection", "Model", "Runs", "Input", "Output", "Cost"];
+const USER_COLUMNS = ["Board member", "Runs", "Calls", "Input", "Output", "Cost"];
+
+function People({ rows }: { rows: UsageUserRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <Panel xstyle={[styles.gap2, styles.pad18]}>
+      <Eyebrow>PER BOARD MEMBER · 30 DAYS</Eyebrow>
+      <div {...stylex.props(styles.tableScroll)}>
+        <Table density="compact" xstyle={styles.table}>
+          <TableHeader>
+            <TableRow isHeaderRow>
+              {USER_COLUMNS.map((c) => (
+                <TableHeaderCell key={c} xstyle={styles.headCell}>
+                  {c}
+                </TableHeaderCell>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((r) => (
+              <TableRow key={r.login_user ?? "none"}>
+                <TableCell xstyle={styles.truncate}>{userRowName(r)}</TableCell>
+                <TableCell xstyle={styles.cell}>{r.runs}</TableCell>
+                <TableCell xstyle={styles.cell}>{r.model_calls || "–"}</TableCell>
+                <TableCell xstyle={styles.cellMono}>{tokensShort(r.input_tokens)}</TableCell>
+                <TableCell xstyle={styles.cellMono}>{tokensShort(r.output_tokens)}</TableCell>
+                <TableCell xstyle={styles.cell}>{costText(r.cost_micro_usd, r.estimate)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Panel>
+  );
+}
 
 function Sources({ rows }: { rows: UsageRow[] }) {
   return (
@@ -366,6 +401,7 @@ export function UsageScreen() {
               </Panel>
               {shown !== null ? <Hours day={shown} onMove={move} /> : null}
               <Sources rows={usage.data.by_source} />
+              <People rows={usage.data.by_user ?? []} />
               <p {...stylex.props(styles.note)}>
                 Claude Code on your subscription: costs are the API-equivalent value for reference; you pay nothing
                 extra. API keys: tokens as reported by the provider. The local test runtime estimates tokens (4

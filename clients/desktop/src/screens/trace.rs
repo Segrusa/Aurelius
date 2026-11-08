@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn line_splits_cache_writes_off_the_input() {
-        let u = TokenUsage { runs: 1, input_tokens: 20_300, output_tokens: 1_200, cached_tokens: 45_000, cache_creation_tokens: 8_000, cost_micro_usd: Some(40_000), estimate: false };
+        let u = TokenUsage { runs: 1, input_tokens: 20_300, output_tokens: 1_200, cached_tokens: 45_000, cache_creation_tokens: 8_000, cost_micro_usd: Some(40_000), estimate: false, model_calls: 0 };
         assert_eq!(usage_line(&u), "12.3k in · 1.2k out · 45k cache read · 8k cache write · $0.04");
         assert_eq!(usage_line(&TokenUsage { cost_micro_usd: None, ..u.clone() }), "12.3k in · 1.2k out · 45k cache read · 8k cache write");
     }

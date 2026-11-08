@@ -156,6 +156,7 @@ pub fn with_usage(trace: &mut RunTrace, usage: &aurelius_runtime::Usage) {
         (a, b) => a.or(b),
     };
     total.estimate |= usage.estimate;
+    total.model_calls += usage.steps.len().max(1) as u64;
 }
 
 impl CommandService {

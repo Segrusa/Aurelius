@@ -22,6 +22,8 @@ impl CommandService {
             cache_creation_tokens: usage.cache_creation_tokens,
             cost_micro_usd: usage.cost_micro_usd,
             estimate: usage.estimate,
+            // A runtime that lists no calls (the local one, an API key's) made this one.
+            model_calls: usage.steps.len().max(1) as u64,
         };
         self.store
             .write(move |tx| {

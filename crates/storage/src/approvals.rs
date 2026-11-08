@@ -113,11 +113,20 @@ pub fn pending_for_run(tx: &Transaction<'_>, run: RunId) -> Result<Vec<ApprovalI
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Every run with an open approval or question.
+pub fn pending_runs(conn: &Connection) -> Result<std::collections::HashSet<RunId>, StorageError> {
+    let mut stmt = conn.prepare("SELECT DISTINCT run_id FROM approvals WHERE status = 'pending'")?;
+    let rows = stmt.query_map([], |r| parse(RunId::parse(&r.get::<_, String>(0)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// Pending approvals first, then the 20 most recent decisions.
 pub fn list_approvals(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<ApprovalView>, StorageError> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.status, a.action_digest, e.recorded_at_ms, a.expires_at_ms, a.run_id, r.conversation_id,
-                COALESCE(m.name, rm.name, 'Chat'), b.storage_key, r.task_id
+                COALESCE(m.name, rm.name, 'Chat'), b.storage_key, r.task_id,
+                (SELECT t.ticket_id FROM tasks t WHERE t.id = r.task_id OR t.conversation_id = r.conversation_id LIMIT 1),
+                json_extract(j.payload_json, '$.group.conversation_id')
          FROM approvals a
          JOIN blobs b ON b.id = a.action_blob_id
          JOIN events e ON e.id = a.request_event_id
@@ -125,6 +134,7 @@ pub fn list_approvals(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
          LEFT JOIN conversations c ON c.id = r.conversation_id
          LEFT JOIN employees m ON m.id = c.employee_id
          LEFT JOIN employees rm ON rm.id = r.employee_id
+         LEFT JOIN jobs j ON j.id = a.run_id
          WHERE a.status = 'pending' OR a.id IN (SELECT id FROM approvals WHERE status <> 'pending' ORDER BY decided_at_ms DESC LIMIT 20)
          ORDER BY a.status = 'pending' DESC, e.recorded_at_ms DESC",
     )?;
@@ -140,11 +150,20 @@ pub fn list_approvals(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             r.get::<_, String>(7)?,
             r.get::<_, String>(8)?,
             r.get::<_, Option<String>>(9)?,
+            r.get::<_, Option<String>>(10)?,
+            r.get::<_, Option<String>>(11)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, status, digest, requested, expires, run_id, conversation, requester, key, task) = row?;
+        let (id, status, digest, requested, expires, run_id, conversation, requester, key, task, ticket, discussion) = row?;
+        let discussion = discussion.and_then(|c| ConversationId::parse(&c).ok());
+        // A run woken by a ticket's discussion has no task of the ticket.
+        let ticket = match (ticket.and_then(|t| aurelius_domain::TicketId::parse(&t).ok()), discussion) {
+            (Some(ticket), _) => Some(ticket),
+            (None, Some(d)) => crate::discussions::ticket_of_conversation(conn, d)?,
+            (None, None) => None,
+        };
         let action: serde_json::Value = read_blob(&key).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         let tool = action["tool"].as_str().unwrap_or("");
         out.push(ApprovalView {
@@ -164,6 +183,8 @@ pub fn list_approvals(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             conversation_id: conversation.and_then(|c| ConversationId::parse(&c).ok()),
             requester,
             task_id: task.and_then(|t| aurelius_domain::TaskId::parse(&t).ok()),
+            ticket_id: ticket,
+            discussion_id: discussion,
         });
     }
     Ok(out)

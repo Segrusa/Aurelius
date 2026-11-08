@@ -40,15 +40,22 @@
 
 **BOT-09 Scope-regel (M, C5, B6).** *Given* de extractie na een taak of een `remember`, *Then* staat de regel erbij dat feiten van één ticket of taak in de discussie horen.
 
+## Stap 4: run card, interrupt card en odometer
+
+**BOT-12 Run card (M, U1).** *Als* board member *wil ik* onder een post of een `Reported`-regel zien wat de run deed, *zodat* ik niet naar de taak hoef.
+- *Given* een run die meer dan eens postte, *Then* staat de kaart alleen op zijn laatste post in de lijst.
+- *Given* een lopende run, *Then* pulseert de status en kan ik *Cancel* drukken; *Given* een geopende kaart, *Then* zie ik elke tool call met zijn resultaat.
+
+**BOT-13 Interrupt card (M, U2).** *Given* een open vraag of approval van een run op dit ticket of uit dit kanaal, *Then* staat dezelfde kaart als in de Inbox in de discussie. *Given* een post waarmee de hoofdtaak op een vraag eindigde, *Then* krijgt die een antwoordveld, tenzij er al een vraagkaart van die run open staat.
+
+**BOT-14 Odometer (S, U4, C11).** *Given* een ticket of kanaal met verbruik, *Then* staan calls, tokens in en uit en kosten in de kop; *Given* usage van voor deze stap, *Then* blijft Calls weg in plaats van 0 te tonen. *Given* het Usage-scherm, *Then* een tabel per board member (per Claude-login, 30 dagen).
+
 ## Latere stappen (samengevat; AC's bij de start van de stap)
 
 | Id | Prio | Stap | Wat |
 |---|---|---|---|
 | BOT-10 | M | 2 | Provider, model en effort per employee, met Inherit (C1) |
 | BOT-11 | M | 2 | Toegangsniveau per employee met expliciete `--tools`, in de sessiesleutel (C3) |
-| BOT-12 | M | 4 | Run card onder een antwoord in discussie en Team chat (U1) |
-| BOT-13 | M | 4 | Eén interrupt card voor vraag en approval, in discussie en Inbox (U2) |
-| BOT-14 | S | 4 | Odometer per ticket en per board member (U4, C11) |
 | BOT-15 | M | 5 | Elk wekpad schrijft een inbox-item; de worker leest alleen daaruit (R1) |
 | BOT-16 | M | 5 | Eén run per employee; wachtende items van een thread worden samengevoegd (R2) |
 | BOT-17 | M | 5 | Een thread die op een antwoord wacht is geparkeerd (R3) |

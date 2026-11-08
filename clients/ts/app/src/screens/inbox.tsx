@@ -4,7 +4,6 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { Link } from "@astryxdesign/core/Link";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { ProtocolError } from "@aurelius/client";
 import type { ApprovalView, GuidelineProposalView, NotificationView, ProposalView, TaskView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
@@ -158,40 +157,9 @@ const styles = stylex.create({
     color: "var(--color-text-secondary)",
   },
   meta: { margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--color-text-secondary)" },
-  command: {
-    overflow: "hidden",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border)",
-    backgroundColor: "var(--precision-sunk)",
-  },
-  commandHead: {
-    display: "flex",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomStyle: "solid",
-    borderBottomColor: "var(--precision-line2)",
-    paddingInline: 12,
-    paddingBlock: 8,
-    fontSize: 12,
-    color: "var(--precision-text3)",
-  },
-  effect: { color: "var(--color-text-warning)" },
-  // Stays one block, and selectable: the words the person is deciding on.
-  pre: {
-    margin: 0,
-    maxHeight: 320,
-    overflow: "auto",
-    padding: 14,
-    fontFamily: "var(--font-family-code)",
-    fontSize: 13,
-    whiteSpace: "pre-wrap",
-    userSelect: "text",
-  },
   reasons: { margin: 0, listStyleType: "none", padding: 0, color: "var(--color-text-secondary)" },
   buttons: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
-  openRun: { order: 1, marginInlineStart: "auto", alignSelf: "center", fontSize: 12 },
+  openRun: { alignSelf: "flex-start", fontSize: 12 },
   facts: {
     margin: 0,
     borderTopWidth: 1,
@@ -352,37 +320,7 @@ function ApprovalDetail({ approval }: { approval: ApprovalView }) {
 }
 
 function ActionDetail({ approval }: { approval: ApprovalView }) {
-  const connection = useConnection();
-  const client = useQueryClient();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const action = approvalAction(approval);
-  const eligible = approval.always_allow_eligible ?? false;
-
-  const decide = async (approve: boolean, alwaysAllow = false) => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // Never resent after a reconnect: a decision is only made while the person sees it.
-      await connection.write(
-        "approval.decide",
-        { approval_id: approval.id, action_digest: approval.action_digest, approve, always_allow: alwaysAllow },
-        { retry: false },
-      );
-      await client.invalidateQueries({ queryKey: ["approvals"] });
-    } catch (e) {
-      setError(e instanceof ProtocolError || e instanceof Error ? e.message : "This did not work.");
-      setBusy(false);
-    }
-  };
-
-  useAction("AllowOnce", () => void decide(true));
-  useAction("AlwaysAllow", () => void decide(true, true), eligible);
-  useAction("DenyApproval", () => void decide(false));
-  useKeyContext("Decision");
-  useAction("RejectApproval", () => void decide(false));
-
   return (
     <div {...stylex.props(styles.page, styles.pageWide)} key={approval.id}>
       <div>
@@ -392,13 +330,6 @@ function ActionDetail({ approval }: { approval: ApprovalView }) {
         </Heading>
         {action.description ? <p {...stylex.props(styles.description)}>{action.description}</p> : null}
       </div>
-      <div {...stylex.props(styles.command)}>
-        <div {...stylex.props(styles.commandHead)}>
-          <span>{action.label}</span>
-          <span {...stylex.props(styles.effect)}>{approval.effect}</span>
-        </div>
-        <pre {...stylex.props(styles.pre)}>{action.body}</pre>
-      </div>
       {approval.reasons.length > 0 ? (
         <ul {...stylex.props(styles.reasons)}>
           {approval.reasons.map((reason) => (
@@ -406,29 +337,17 @@ function ActionDetail({ approval }: { approval: ApprovalView }) {
           ))}
         </ul>
       ) : null}
-      <div {...stylex.props(styles.buttons)}>
-        <Button variant="primary" label="Allow once" isDisabled={busy} onClick={() => void decide(true)}>
-          Allow once <KeyHint onAccent>↵</KeyHint>
-        </Button>
-        {approval.task_id ? (
-          <Link href={`/tasks/${approval.task_id}`} xstyle={styles.openRun}>
-            Open run →
-          </Link>
-        ) : null}
-        {eligible ? (
-          <Button label="Always allow" isDisabled={busy} onClick={() => void decide(true, true)}>
-            Always allow <KeyHint>⇧↵</KeyHint>
-          </Button>
-        ) : null}
-        <Button variant="destructive" label="Deny" isDisabled={busy} onClick={() => void decide(false)}>
-          Deny <KeyHint>D</KeyHint>
-        </Button>
-      </div>
-      {error ? <Problem>{error}</Problem> : null}
+      <ApprovalCard approval={approval} keyed />
+      {approval.task_id ? (
+        <Link href={`/tasks/${approval.task_id}`} xstyle={styles.openRun}>
+          Open run →
+        </Link>
+      ) : null}
       <dl {...stylex.props(styles.facts)}>
         {[
           ["Agent", approval.requester],
           ["Tool", action.label],
+          ["Effect", approval.effect],
           ["Runs on", approval.account],
           ...approval.resources.slice(0, 3).map((r): [string, string] => ["Resource", r]),
         ].map(([key, value]) => (

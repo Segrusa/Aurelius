@@ -22,7 +22,7 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
-import { ApprovalCard } from "./approval-card";
+import { ApprovalCard, ReplyCard } from "./approval-card";
 import type { LiveStore } from "./chat-live";
 import { useLive } from "./chat-live";
 import {
@@ -59,6 +59,8 @@ import {
 } from "./chat-logic";
 import { messageLink } from "./links-logic";
 import { overlays } from "./overlays-store";
+import { RunCard } from "./run-card";
+import { waitsOnReply } from "./run-card-logic";
 import { FileChips, KeptFiles, MarkdownChips, ScreenshotLink, TraceLink, useRetryAnswer } from "./run-tools";
 import { stepLine } from "./tasks-logic";
 
@@ -759,6 +761,7 @@ function Header({
 
 function SystemRow({ m }: { m: MessageView }) {
   const { ticketNumber } = useChat();
+  const card = m.run ? <RunCard m={m} Output={ActivityOutput} /> : null;
   const line = m.system;
   if (!line) return <div {...stylex.props(styles.systemBare)}>{m.text}</div>;
   const text = systemText(line, m.text, ticketNumber);
@@ -789,6 +792,7 @@ function SystemRow({ m }: { m: MessageView }) {
           Reason:{reason}
         </Text>
       ) : null}
+      {card}
     </section>
   );
 }
@@ -1185,6 +1189,19 @@ export const MessageRow = memo(function MessageRow({
         )}
         {body}
         {m.queued ? <Queued m={m} /> : null}
+        {m.run ? <RunCard m={m} Output={ActivityOutput} /> : null}
+        {!caps.readOnly && waitsOnReply(m, [...approvals.values()]) ? (
+          <ReplyCard
+            who={who.name}
+            onSend={(text) =>
+              connection.write(
+                "group_chat.send",
+                { text, images: [], files: [], channel, thread_parent: m.thread_parent ?? null, confirm_secret: false },
+                { retry: false },
+              )
+            }
+          />
+        ) : null}
         <Reactions m={m} can={!caps.readOnly} />
         {inThread ? null : <ThreadLink m={m} />}
       </div>

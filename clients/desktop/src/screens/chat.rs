@@ -44,7 +44,7 @@ pub fn with_role(name: &str, role: Option<&str>) -> String {
 /// Its run is what its Stop stops and what its approvals wait on; `mode` is the one it started in.
 pub(crate) fn streaming_answer(id: MessageId, run: aurelius_domain::RunId, author: Option<String>, mode: Option<aurelius_domain::autonomy::AgentMode>) -> aurelius_protocol::MessageView {
     aurelius_protocol::MessageView {
-        edited_at_ms: None, deleted_at_ms: None, editable: false,
+        edited_at_ms: None, deleted_at_ms: None, editable: false, awaiting_user: false, run: None,
         id,
         ordinal: 0,
         role: MessageRole::Assistant,

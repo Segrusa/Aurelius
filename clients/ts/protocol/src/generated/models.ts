@@ -331,6 +331,11 @@ export interface ApprovalView {
   always_allow_eligible?: boolean;
   arguments: unknown;
   conversation_id?: string | null;
+  /**
+   * The discussion (a channel, a ticket's) that woke the run (feature `run_cards`).
+   * Left out for other runs and by older servers.
+   */
+  discussion_id?: string | null;
   effect: string;
   expires_at_ms: number;
   id: string;
@@ -347,6 +352,11 @@ export interface ApprovalView {
    * The task, when a task's conversation asked.
    */
   task_id?: string | null;
+  /**
+   * The ticket it waits on: of the run's task, or of the discussion that woke
+   * the run (feature `run_cards`). Left out for other runs and by older servers.
+   */
+  ticket_id?: string | null;
   tool: string;
 }
 
@@ -3457,6 +3467,13 @@ export interface MessageView {
    * and by older servers.
    */
   author_user?: UserView | null;
+  /**
+   * The run behind this message waits for a board member (feature `run_cards`):
+   * a question or an approval is open, or the post ended a ticket's main task on
+   * a question (the rule of `group_chat::asks_question`). Only on the run's last
+   * message in the list. Left out when false and by older servers.
+   */
+  awaiting_user?: boolean;
   created_at_ms: number;
   /**
    * When the message was deleted (feature `message_edits`): `text` is the
@@ -3505,6 +3522,12 @@ export interface MessageView {
    */
   reply_to?: string | null;
   role: MessageRole;
+  /**
+   * What a run card under this message shows (feature `run_cards`): on a post in a
+   * discussion and on a `Reported` line, the last one of its run in the list. With
+   * `usage` for the tokens. Left out for other messages and by older servers.
+   */
+  run?: RunBrief | null;
   /**
    * Run that produced an assistant message.
    */
@@ -3842,6 +3865,10 @@ export type Method =
   | ({ method: "recurring_task.list"; params: { project_id?: string | null } })
   | ({ method: "remote.get_status" })
   /**
+   * Every tool call of a run, for an opened run card (feature `run_cards`).
+   */
+  | ({ method: "run.get_activity"; params: { run_id: string } })
+  /**
    * The context manifest of one run (context inspector).
    */
   | ({ method: "run.get_context"; params: { run_id: string } })
@@ -3967,7 +3994,7 @@ export type Method =
    * What a conversation or a task used, with the tasks given away from it apart
    * (feature `run_usage`). Give one of the two; a task wins.
    */
-  | ({ method: "usage.get_totals"; params: { conversation_id?: string | null; task_id?: string | null } })
+  | ({ method: "usage.get_totals"; params: { conversation_id?: string | null; task_id?: string | null; ticket_id?: string | null } })
   /**
    * The board members, oldest first (never a password's hash), disabled ones
    * too (`UserView::disabled_at_ms`). Works without a session (the sign-in
@@ -4802,6 +4829,7 @@ export type ResponseBody =
    */
   | ({ type: "receipt"; value: Receipt })
   | ({ type: "remote"; value: RemoteStatus })
+  | ({ type: "run_activity"; value: RunActivity })
   /**
    * `run.guidelines`.
    */
@@ -4917,6 +4945,31 @@ export interface ReviseMemory {
 
 export interface RevokeShare {
   share_id: string;
+}
+
+/**
+ * `run.get_activity`: every tool call of a run, for an opened run card (feature `run_cards`).
+ */
+export interface RunActivity {
+  calls: ActivityView[];
+  /**
+   * The answer the calls are kept with (`activity.get` reads one whole); none without calls.
+   */
+  message_id?: string | null;
+  run_id: string;
+}
+
+/**
+ * What the run card of a post shows while folded (`MessageView::run`).
+ */
+export interface RunBrief {
+  failed_calls: number;
+  /**
+   * `runs.status`: created | starting | running | waiting | cancelling | succeeded |
+   * failed | cancelled | unknown. A string, so a new state never breaks a client.
+   */
+  status: string;
+  tool_calls: number;
 }
 
 /**
@@ -6346,6 +6399,11 @@ export interface TokenUsage {
    */
   estimate: boolean;
   input_tokens: number;
+  /**
+   * How many model calls those runs made (feature `run_cards`). 0: not known,
+   * for usage from before the calls were counted and by older servers.
+   */
+  model_calls?: number;
   output_tokens: number;
   runs: number;
 }
@@ -6604,6 +6662,11 @@ export interface UsageSnapshot {
    */
   by_source: UsageRow[];
   /**
+   * Per board member whose Claude login ran it, last 30 days (feature `run_cards`).
+   * Left out by older servers.
+   */
+  by_user?: UsageUserRow[];
+  /**
    * Today, 7 days, 30 days.
    */
   windows: UsageWindow[];
@@ -6626,6 +6689,28 @@ export interface UsageTotals {
    * `own` plus every subtask.
    */
   total: TokenUsage;
+}
+
+/**
+ * One board member's share of the usage (`UsageSnapshot::by_user`).
+ */
+export interface UsageUserRow {
+  cache_creation_tokens: number;
+  cached_tokens: number;
+  cost_micro_usd?: number | null;
+  estimate: boolean;
+  input_tokens: number;
+  /**
+   * `runs.login_user`; none: runs on no one's login (an API key, a background run).
+   */
+  login_user?: string | null;
+  model_calls?: number;
+  output_tokens: number;
+  runs: number;
+  /**
+   * That board member's name; none when there is none or they are gone.
+   */
+  username?: string | null;
 }
 
 export interface UsageWindow {

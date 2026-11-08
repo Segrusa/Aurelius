@@ -656,6 +656,7 @@ final class ApprovalView {
     this.alwaysAllowEligible = false,
     required this.arguments,
     this.conversationId,
+    this.discussionId,
     required this.effect,
     required this.expiresAtMs,
     required this.id,
@@ -666,6 +667,7 @@ final class ApprovalView {
     required this.runId,
     required this.status,
     this.taskId,
+    this.ticketId,
     required this.tool,
   });
 
@@ -676,6 +678,9 @@ final class ApprovalView {
   final bool alwaysAllowEligible;
   final dynamic arguments;
   final String? conversationId;
+  /// The discussion (a channel, a ticket's) that woke the run (feature `run_cards`).
+  /// Left out for other runs and by older servers.
+  final String? discussionId;
   final String effect;
   final int expiresAtMs;
   final String id;
@@ -688,6 +693,9 @@ final class ApprovalView {
   final ApprovalStatus status;
   /// The task, when a task's conversation asked.
   final String? taskId;
+  /// The ticket it waits on: of the run's task, or of the discussion that woke
+  /// the run (feature `run_cards`). Left out for other runs and by older servers.
+  final String? ticketId;
   final String tool;
 
   factory ApprovalView.fromJson(Map<String, dynamic> json) => ApprovalView(
@@ -696,6 +704,7 @@ final class ApprovalView {
     alwaysAllowEligible: (json['always_allow_eligible'] == null ? false : (json['always_allow_eligible'] as bool)),
     arguments: json['arguments'],
     conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
+    discussionId: (json['discussion_id'] == null ? null : (json['discussion_id'] as String)),
     effect: (json['effect'] as String),
     expiresAtMs: (json['expires_at_ms'] as num).toInt(),
     id: (json['id'] as String),
@@ -706,6 +715,7 @@ final class ApprovalView {
     runId: (json['run_id'] as String),
     status: ApprovalStatus.fromJson(json['status'] as String),
     taskId: (json['task_id'] == null ? null : (json['task_id'] as String)),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
     tool: (json['tool'] as String),
   );
 
@@ -715,6 +725,7 @@ final class ApprovalView {
     'always_allow_eligible': alwaysAllowEligible,
     'arguments': arguments,
     if (conversationId != null) 'conversation_id': conversationId,
+    if (discussionId != null) 'discussion_id': discussionId,
     'effect': effect,
     'expires_at_ms': expiresAtMs,
     'id': id,
@@ -725,6 +736,7 @@ final class ApprovalView {
     'run_id': runId,
     'status': status.toJson(),
     if (taskId != null) 'task_id': taskId,
+    if (ticketId != null) 'ticket_id': ticketId,
     'tool': tool,
   };
 }
@@ -11116,6 +11128,7 @@ final class MessageView {
     this.approvalId,
     this.author,
     this.authorUser,
+    this.awaitingUser,
     required this.createdAtMs,
     this.deletedAtMs,
     this.editable,
@@ -11129,6 +11142,7 @@ final class MessageView {
     this.reactions = const [],
     this.replyTo,
     required this.role,
+    this.run,
     this.runId,
     required this.sources,
     required this.status,
@@ -11154,6 +11168,11 @@ final class MessageView {
   /// a channel's; feature `ticket_discussion`). Left out for other messages
   /// and by older servers.
   final UserView? authorUser;
+  /// The run behind this message waits for a board member (feature `run_cards`):
+  /// a question or an approval is open, or the post ended a ticket's main task on
+  /// a question (the rule of `group_chat::asks_question`). Only on the run's last
+  /// message in the list. Left out when false and by older servers.
+  final bool? awaitingUser;
   final int createdAtMs;
   /// When the message was deleted (feature `message_edits`): `text` is the
   /// line that says so. Left out when it was not and by older servers.
@@ -11184,6 +11203,10 @@ final class MessageView {
   /// For retried answers: the user message this answers again.
   final String? replyTo;
   final MessageRole role;
+  /// What a run card under this message shows (feature `run_cards`): on a post in a
+  /// discussion and on a `Reported` line, the last one of its run in the list. With
+  /// `usage` for the tokens. Left out for other messages and by older servers.
+  final RunBrief? run;
   /// Run that produced an assistant message.
   final String? runId;
   /// Web sources fetched for this answer, cited as [n].
@@ -11230,6 +11253,7 @@ final class MessageView {
     approvalId: (json['approval_id'] == null ? null : (json['approval_id'] as String)),
     author: (json['author'] == null ? null : (json['author'] as String)),
     authorUser: (json['author_user'] == null ? null : UserView.fromJson(json['author_user'] as Map<String, dynamic>)),
+    awaitingUser: (json['awaiting_user'] == null ? null : (json['awaiting_user'] as bool)),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     deletedAtMs: (json['deleted_at_ms'] == null ? null : (json['deleted_at_ms'] as num).toInt()),
     editable: (json['editable'] == null ? null : (json['editable'] as bool)),
@@ -11243,6 +11267,7 @@ final class MessageView {
     reactions: (json['reactions'] == null ? const [] : (json['reactions'] as List<dynamic>).map((x0) => ReactionView.fromJson(x0 as Map<String, dynamic>)).toList()),
     replyTo: (json['reply_to'] == null ? null : (json['reply_to'] as String)),
     role: MessageRole.fromJson(json['role'] as String),
+    run: (json['run'] == null ? null : RunBrief.fromJson(json['run'] as Map<String, dynamic>)),
     runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
     sources: (json['sources'] as List<dynamic>).map((x0) => SourceView.fromJson(x0 as Map<String, dynamic>)).toList(),
     status: MessageStatus.fromJson(json['status'] as String),
@@ -11263,6 +11288,7 @@ final class MessageView {
     if (approvalId != null) 'approval_id': approvalId,
     if (author != null) 'author': author,
     if (authorUser != null) 'author_user': authorUser?.toJson(),
+    if (awaitingUser != null) 'awaiting_user': awaitingUser,
     'created_at_ms': createdAtMs,
     if (deletedAtMs != null) 'deleted_at_ms': deletedAtMs,
     if (editable != null) 'editable': editable,
@@ -11276,6 +11302,7 @@ final class MessageView {
     'reactions': reactions.map((x0) => x0.toJson()).toList(),
     if (replyTo != null) 'reply_to': replyTo,
     'role': role.toJson(),
+    if (run != null) 'run': run?.toJson(),
     if (runId != null) 'run_id': runId,
     'sources': sources.map((x0) => x0.toJson()).toList(),
     'status': status.toJson(),
@@ -11683,6 +11710,13 @@ sealed class Method {
         }
       case 'remote.get_status':
         return const MethodRemoteGetStatus();
+      case 'run.get_activity':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodRunGetActivity(
+          runId: (src['run_id'] as String),
+        );
+        }
       case 'run.get_context':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11884,6 +11918,7 @@ sealed class Method {
           return MethodUsageGetTotals(
           conversationId: (src['conversation_id'] == null ? null : (src['conversation_id'] as String)),
           taskId: (src['task_id'] == null ? null : (src['task_id'] as String)),
+          ticketId: (src['ticket_id'] == null ? null : (src['ticket_id'] as String)),
         );
         }
       case 'user.list':
@@ -12877,6 +12912,23 @@ final class MethodRemoteGetStatus extends Method {
     };
 }
 
+/// Every tool call of a run, for an opened run card (feature `run_cards`).
+final class MethodRunGetActivity extends Method {
+  const MethodRunGetActivity({
+    required this.runId,
+  });
+
+  final String runId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'run.get_activity',
+      'params': <String, dynamic>{
+      'run_id': runId,
+    },
+    };
+}
+
 /// The context manifest of one run (context inspector).
 final class MethodRunGetContext extends Method {
   const MethodRunGetContext({
@@ -13422,10 +13474,14 @@ final class MethodUsageGetTotals extends Method {
   const MethodUsageGetTotals({
     this.conversationId,
     this.taskId,
+    this.ticketId,
   });
 
   final String? conversationId;
   final String? taskId;
+  /// What a ticket used: its tasks and the runs of its discussion (feature `run_cards`).
+  /// Wins over the other two.
+  final String? ticketId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -13433,6 +13489,7 @@ final class MethodUsageGetTotals extends Method {
       'params': <String, dynamic>{
       if (conversationId != null) 'conversation_id': conversationId,
       if (taskId != null) 'task_id': taskId,
+      if (ticketId != null) 'ticket_id': ticketId,
     },
     };
 }
@@ -15286,6 +15343,8 @@ sealed class ResponseBody {
         return ResponseBodyReceipt(value: Receipt.fromJson(json['value'] as Map<String, dynamic>));
       case 'remote':
         return ResponseBodyRemote(value: RemoteStatus.fromJson(json['value'] as Map<String, dynamic>));
+      case 'run_activity':
+        return ResponseBodyRunActivity(value: RunActivity.fromJson(json['value'] as Map<String, dynamic>));
       case 'run_guidelines':
         return ResponseBodyRunGuidelines(value: RunGuidelines.fromJson(json['value'] as Map<String, dynamic>));
       case 'run_trace':
@@ -16272,6 +16331,20 @@ final class ResponseBodyRemote extends ResponseBody {
     };
 }
 
+final class ResponseBodyRunActivity extends ResponseBody {
+  const ResponseBodyRunActivity({
+    required this.value,
+  });
+
+  final RunActivity value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'run_activity',
+      'value': value.toJson(),
+    };
+}
+
 /// `run.guidelines`.
 final class ResponseBodyRunGuidelines extends ResponseBody {
   const ResponseBodyRunGuidelines({
@@ -16875,6 +16948,59 @@ final class RevokeShare {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'share_id': shareId,
+  };
+}
+
+/// `run.get_activity`: every tool call of a run, for an opened run card (feature `run_cards`).
+final class RunActivity {
+  const RunActivity({
+    required this.calls,
+    this.messageId,
+    required this.runId,
+  });
+
+  final List<ActivityView> calls;
+  /// The answer the calls are kept with (`activity.get` reads one whole); none without calls.
+  final String? messageId;
+  final String runId;
+
+  factory RunActivity.fromJson(Map<String, dynamic> json) => RunActivity(
+    calls: (json['calls'] as List<dynamic>).map((x0) => ActivityView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    messageId: (json['message_id'] == null ? null : (json['message_id'] as String)),
+    runId: (json['run_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'calls': calls.map((x0) => x0.toJson()).toList(),
+    if (messageId != null) 'message_id': messageId,
+    'run_id': runId,
+  };
+}
+
+/// What the run card of a post shows while folded (`MessageView::run`).
+final class RunBrief {
+  const RunBrief({
+    required this.failedCalls,
+    required this.status,
+    required this.toolCalls,
+  });
+
+  final int failedCalls;
+  /// `runs.status`: created | starting | running | waiting | cancelling | succeeded |
+  /// failed | cancelled | unknown. A string, so a new state never breaks a client.
+  final String status;
+  final int toolCalls;
+
+  factory RunBrief.fromJson(Map<String, dynamic> json) => RunBrief(
+    failedCalls: (json['failed_calls'] as num).toInt(),
+    status: (json['status'] as String),
+    toolCalls: (json['tool_calls'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'failed_calls': failedCalls,
+    'status': status,
+    'tool_calls': toolCalls,
   };
 }
 
@@ -19911,6 +20037,7 @@ final class TokenUsage {
     this.costMicroUsd,
     required this.estimate,
     required this.inputTokens,
+    this.modelCalls = 0,
     required this.outputTokens,
     required this.runs,
   });
@@ -19922,6 +20049,9 @@ final class TokenUsage {
   /// Some values are not a bill (e.g. subscription: API-equivalent value).
   final bool estimate;
   final int inputTokens;
+  /// How many model calls those runs made (feature `run_cards`). 0: not known,
+  /// for usage from before the calls were counted and by older servers.
+  final int modelCalls;
   final int outputTokens;
   final int runs;
 
@@ -19931,6 +20061,7 @@ final class TokenUsage {
     costMicroUsd: (json['cost_micro_usd'] == null ? null : (json['cost_micro_usd'] as num).toInt()),
     estimate: (json['estimate'] as bool),
     inputTokens: (json['input_tokens'] as num).toInt(),
+    modelCalls: (json['model_calls'] == null ? 0 : (json['model_calls'] as num).toInt()),
     outputTokens: (json['output_tokens'] as num).toInt(),
     runs: (json['runs'] as num).toInt(),
   );
@@ -19941,6 +20072,7 @@ final class TokenUsage {
     if (costMicroUsd != null) 'cost_micro_usd': costMicroUsd,
     'estimate': estimate,
     'input_tokens': inputTokens,
+    'model_calls': modelCalls,
     'output_tokens': outputTokens,
     'runs': runs,
   };
@@ -20534,6 +20666,7 @@ final class UsageSnapshot {
   const UsageSnapshot({
     required this.byDay,
     required this.bySource,
+    this.byUser = const [],
     required this.windows,
   });
 
@@ -20541,18 +20674,23 @@ final class UsageSnapshot {
   final List<UsageDay> byDay;
   /// Per connection and model, last 30 days.
   final List<UsageRow> bySource;
+  /// Per board member whose Claude login ran it, last 30 days (feature `run_cards`).
+  /// Left out by older servers.
+  final List<UsageUserRow> byUser;
   /// Today, 7 days, 30 days.
   final List<UsageWindow> windows;
 
   factory UsageSnapshot.fromJson(Map<String, dynamic> json) => UsageSnapshot(
     byDay: (json['by_day'] as List<dynamic>).map((x0) => UsageDay.fromJson(x0 as Map<String, dynamic>)).toList(),
     bySource: (json['by_source'] as List<dynamic>).map((x0) => UsageRow.fromJson(x0 as Map<String, dynamic>)).toList(),
+    byUser: (json['by_user'] == null ? const [] : (json['by_user'] as List<dynamic>).map((x0) => UsageUserRow.fromJson(x0 as Map<String, dynamic>)).toList()),
     windows: (json['windows'] as List<dynamic>).map((x0) => UsageWindow.fromJson(x0 as Map<String, dynamic>)).toList(),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'by_day': byDay.map((x0) => x0.toJson()).toList(),
     'by_source': bySource.map((x0) => x0.toJson()).toList(),
+    'by_user': byUser.map((x0) => x0.toJson()).toList(),
     'windows': windows.map((x0) => x0.toJson()).toList(),
   };
 }
@@ -20583,6 +20721,61 @@ final class UsageTotals {
     'own': own.toJson(),
     'subtasks': subtasks.map((x0) => x0.toJson()).toList(),
     'total': total.toJson(),
+  };
+}
+
+/// One board member's share of the usage (`UsageSnapshot::by_user`).
+final class UsageUserRow {
+  const UsageUserRow({
+    required this.cacheCreationTokens,
+    required this.cachedTokens,
+    this.costMicroUsd,
+    required this.estimate,
+    required this.inputTokens,
+    this.loginUser,
+    this.modelCalls = 0,
+    required this.outputTokens,
+    required this.runs,
+    this.username,
+  });
+
+  final int cacheCreationTokens;
+  final int cachedTokens;
+  final int? costMicroUsd;
+  final bool estimate;
+  final int inputTokens;
+  /// `runs.login_user`; none: runs on no one's login (an API key, a background run).
+  final String? loginUser;
+  final int modelCalls;
+  final int outputTokens;
+  final int runs;
+  /// That board member's name; none when there is none or they are gone.
+  final String? username;
+
+  factory UsageUserRow.fromJson(Map<String, dynamic> json) => UsageUserRow(
+    cacheCreationTokens: (json['cache_creation_tokens'] as num).toInt(),
+    cachedTokens: (json['cached_tokens'] as num).toInt(),
+    costMicroUsd: (json['cost_micro_usd'] == null ? null : (json['cost_micro_usd'] as num).toInt()),
+    estimate: (json['estimate'] as bool),
+    inputTokens: (json['input_tokens'] as num).toInt(),
+    loginUser: (json['login_user'] == null ? null : (json['login_user'] as String)),
+    modelCalls: (json['model_calls'] == null ? 0 : (json['model_calls'] as num).toInt()),
+    outputTokens: (json['output_tokens'] as num).toInt(),
+    runs: (json['runs'] as num).toInt(),
+    username: (json['username'] == null ? null : (json['username'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'cache_creation_tokens': cacheCreationTokens,
+    'cached_tokens': cachedTokens,
+    if (costMicroUsd != null) 'cost_micro_usd': costMicroUsd,
+    'estimate': estimate,
+    'input_tokens': inputTokens,
+    if (loginUser != null) 'login_user': loginUser,
+    'model_calls': modelCalls,
+    'output_tokens': outputTokens,
+    'runs': runs,
+    if (username != null) 'username': username,
   };
 }
 

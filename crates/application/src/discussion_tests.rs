@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::conversation::discussion;
+use crate::run::approvals::RuntimePermission;
 use crate::task::task_runs::EmployeeAction;
 use aurelius_domain::company::{UpdateProject};
 use aurelius_domain::employee::CreateEmployee;
@@ -1271,7 +1272,7 @@ fn quick_answers_stop_at_the_hourly_cost_cap_and_the_busy_line_stays() {
         .write(move |tx| {
             tx.execute("UPDATE runs SET status = 'succeeded' WHERE id = ?1", [run.to_string()])?;
             let event: String = tx.query_row("SELECT id FROM events LIMIT 1", [], |r| r.get(0))?;
-            let usage = aurelius_storage::usage::NewUsage { input_tokens: 1, output_tokens: 1, cached_tokens: 0, cache_creation_tokens: 0, cost_micro_usd: Some(aurelius_domain::group_chat::QUICK_ANSWER_COST_PER_HOUR_MICRO), estimate: true };
+            let usage = aurelius_storage::usage::NewUsage { input_tokens: 1, output_tokens: 1, cached_tokens: 0, cache_creation_tokens: 0, cost_micro_usd: Some(aurelius_domain::group_chat::QUICK_ANSWER_COST_PER_HOUR_MICRO), estimate: true, model_calls: 1 };
             aurelius_storage::usage::insert(tx, run, aurelius_domain::EventId::parse(&event).unwrap(), &usage)
         })
         .unwrap();
@@ -1297,4 +1298,125 @@ fn a_message_to_a_busy_owner_gets_a_quick_answer_in_the_ticket() {
     // The owner's own run in the task goes on as before: the message still reaches it.
     let after = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap().len();
     assert!(after >= before);
+}
+
+// ---- run cards, interrupt cards and the odometer (U1, U2, U4) ----
+
+fn set_running(s: &Setup, run: RunId, started_at_ms: i64) {
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute("UPDATE runs SET status = 'running', started_at_ms = ?2 WHERE id = ?1", rusqlite::params![run.to_string(), started_at_ms])?;
+            Ok(tx.execute("UPDATE jobs SET state = 'leased', lease_owner = 'test', lease_until_ms = 0 WHERE id = ?1", [run.to_string()])?)
+        })
+        .unwrap();
+}
+
+fn record_usage(s: &Setup, run: RunId, input: u64, login: Option<UserId>) {
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute("UPDATE runs SET login_user = ?2 WHERE id = ?1", rusqlite::params![run.to_string(), login.map(|u| u.to_string())])?;
+            let event: String = tx.query_row("SELECT id FROM events LIMIT 1", [], |r| r.get(0))?;
+            let usage = aurelius_storage::usage::NewUsage { input_tokens: input, output_tokens: 1, cached_tokens: 0, cache_creation_tokens: 0, cost_micro_usd: Some(10), estimate: false, model_calls: 2 };
+            aurelius_storage::usage::insert(tx, run, aurelius_domain::EventId::parse(&event).unwrap(), &usage)
+        })
+        .unwrap();
+}
+
+#[test]
+fn a_post_names_its_run_and_only_the_last_post_of_a_run_has_its_card() {
+    let s = setup();
+    let (t, _, _, _) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.expect("a discussion");
+    let (_, runs) = post(&s, t, "@Bo please look").unwrap();
+    let run = runs[0];
+    set_running(&s, run, 1);
+    assert!(post_in_discussion(&s, run, "First finding.").0);
+    assert!(post_in_discussion(&s, run, "Second finding.").0);
+    record_usage(&s, run, 40, None);
+
+    let all = messages(&s, d);
+    let of = |start: &str| all.iter().find(|m| m.text.starts_with(start)).unwrap().clone();
+    let (first, second) = (of("First finding."), of("Second finding."));
+    assert_eq!((first.run_id, second.run_id), (Some(run), Some(run)), "the run is read from the post's own meta");
+    assert_eq!(first.run, None, "one card per run: on its last post");
+    assert_eq!(first.usage, None);
+    let card = second.run.expect("a card on the last post");
+    assert_eq!((card.status.as_str(), card.tool_calls, card.failed_calls), ("running", 0, 0));
+    assert_eq!(second.usage.map(|u| (u.input_tokens, u.model_calls)), Some((40, 2)));
+    assert!(!second.awaiting_user);
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::conversations::activity_for_run(c, run)).unwrap().calls.len(), 0);
+}
+
+#[test]
+fn an_open_question_of_a_woken_run_is_on_its_ticket_and_marks_its_post() {
+    let s = setup();
+    let (t, _, _, _) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.expect("a discussion");
+    let (_, runs) = post(&s, t, "@Bo which format?").unwrap();
+    let run = runs[0];
+    set_running(&s, run, 1);
+    assert!(post_in_discussion(&s, run, "Looking into it.").0);
+    assert!(!messages(&s, d).iter().any(|m| m.awaiting_user));
+
+    let input = serde_json::json!({ "questions": [{ "question": "Which format?", "header": "Format", "multiSelect": false, "options": [] }] });
+    let RuntimePermission::Pending { approval_id, .. } = s.service.request_runtime_permission(run, Some("q1".into()), "AskUserQuestion", &input).unwrap() else { panic!("a question waits") };
+
+    assert!(messages(&s, d).iter().find(|m| m.text == "Looking into it.").unwrap().awaiting_user, "the post stands for the waiting run");
+    let st = s.service.store().clone();
+    let listed = s.service.store().read(move |c| aurelius_storage::approvals::list_approvals(c, &|k| st.blobs().read(k).ok().and_then(|b| String::from_utf8(b).ok()))).unwrap();
+    let a = listed.iter().find(|a| a.id == approval_id).expect("listed");
+    assert_eq!((a.ticket_id, a.discussion_id), (Some(t), Some(d)));
+}
+
+#[test]
+fn a_reported_line_finds_its_run_and_a_post_that_ended_on_a_question_waits() {
+    let s = setup();
+    let (t, root, _, run) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.expect("a discussion");
+    set_running(&s, run, 1);
+    assert!(post_in_discussion(&s, run, "Shall I go on?").0);
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE tasks SET status = 'waiting', waiting_reason = 'input' WHERE id = ?1", [root.to_string()])?)).unwrap();
+    assert!(messages(&s, d).iter().find(|m| m.text == "Shall I go on?").unwrap().awaiting_user);
+
+    s.service
+        .store()
+        .write(move |tx| {
+            let mut line = SystemLine::new(SystemLineKind::Reported);
+            line.task_id = Some(root);
+            discussion::ticket_line(tx, t, line, "Ann reported back")?;
+            Ok(())
+        })
+        .unwrap();
+    let all = messages(&s, d);
+    let line = all.iter().rfind(|m| m.system.as_ref().is_some_and(|l| l.kind == SystemLineKind::Reported)).unwrap();
+    assert_eq!(line.run_id, Some(run));
+    assert_eq!(line.run.as_ref().map(|c| c.status.as_str()), Some("running"), "the card goes to the line, the run's last word");
+    assert_eq!(all.iter().find(|m| m.text == "Shall I go on?").unwrap().run, None);
+}
+
+#[test]
+fn the_odometer_counts_a_tickets_tasks_and_its_discussion_and_each_login() {
+    let s = setup();
+    let (t, _, _, main) = started_ticket(&s);
+    let (_, woken) = post(&s, t, "@Bo please look").unwrap();
+    record_usage(&s, main, 100, Some(s.user));
+    record_usage(&s, woken[0], 30, None);
+
+    let totals = s.service.store().read(move |c| aurelius_storage::usage::ticket_totals(c, t)).unwrap();
+    assert_eq!((totals.total.runs, totals.total.input_tokens, totals.total.model_calls, totals.total.cost_micro_usd), (2, 130, 4, Some(20)));
+    let empty = new_ticket(&s, "Idle", None);
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::usage::ticket_totals(c, empty)).unwrap().total.runs, 0);
+
+    let snapshot = s.service.store().read(|c| aurelius_storage::usage::snapshot(c, |_| 0)).unwrap();
+    let grace = snapshot.by_user.iter().find(|r| r.username.as_deref() == Some("grace")).expect("grace's login");
+    assert_eq!((grace.runs, grace.input_tokens), (1, 100));
+    assert!(snapshot.by_user.iter().any(|r| r.login_user.is_none() && r.input_tokens == 30), "no one's login is a row too");
+
+    // A channel counts the runs it woke, whose conversation is the employee's own.
+    let general = general(&s);
+    let (_, runs) = send(&s, None, "@Bo a quick one").unwrap();
+    record_usage(&s, runs[0], 7, None);
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::usage::conversation_totals(c, general)).unwrap().total.input_tokens, 7);
 }
