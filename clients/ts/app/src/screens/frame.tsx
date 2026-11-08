@@ -28,7 +28,7 @@ import {
 import { Icon, Logo, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/kit";
 import { Tooltip } from "../ui/overlay";
-import { Toasts, toast } from "../ui/toast";
+import { ToastBridge, toast } from "../ui/toast";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { pinnedFirst } from "./employee-logic";
@@ -452,7 +452,7 @@ export function Frame({ children }: { children: ReactNode }) {
       <Palette />
       <NewTicketDialog />
       <GiveWorkDialog />
-      <Toasts />
+      <ToastBridge />
     </div>
   );
 }

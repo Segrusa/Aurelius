@@ -17,7 +17,7 @@ const SESSION_COOKIE: &str = "aurelius_session";
 const DEVICE_MAX_AGE_SECS: i64 = 365 * 24 * 60 * 60;
 
 pub(crate) const SECURITY_HEADERS: [(&str, &str); 3] = [
-    ("content-security-policy", "default-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"),
+    ("content-security-policy", "default-src 'self'; style-src 'self' 'sha256-K63bSR1LetGtaTb/2K6EIsLtf78i2//qEkOoBZCNcBQ=' 'sha256-0KUt1GaAbAKiIczMgRikTmhynZoYPcw+0bnDtqcsh14='; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"),
     ("x-content-type-options", "nosniff"),
     ("referrer-policy", "no-referrer"),
 ];

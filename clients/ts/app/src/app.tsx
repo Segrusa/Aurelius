@@ -1,7 +1,17 @@
+import { LayerProvider } from "@astryxdesign/core/Layer";
+import { LinkProvider } from "@astryxdesign/core/Link";
+import { Theme } from "@astryxdesign/core/theme";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRootRoute, createRoute, createRouter, Outlet, RouterProvider, redirect } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { type Appearance, AppearanceContext, applyAppearance, readAppearance, saveAppearance } from "./appearance";
+import {
+  type Appearance,
+  AppearanceContext,
+  applyAppearance,
+  readAppearance,
+  saveAppearance,
+  useResolvedMode,
+} from "./appearance";
 import { ConnectionProvider } from "./connection";
 import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
@@ -23,7 +33,9 @@ import { TaskRunScreen } from "./screens/task-run";
 import { TasksScreen } from "./screens/tasks";
 import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
+import { precisionTheme } from "./theme/precision/precision";
 import { Button } from "./ui/kit";
+import { RouterLink } from "./ui/router-link";
 import { TooltipProvider } from "./ui/overlay";
 
 /** A screen of the design that is not built yet: says so, and the phase, instead of looking finished. */
@@ -204,6 +216,7 @@ export function App({ platform }: { platform: Platform }) {
   const [generation, setGeneration] = useState(0);
   const [appearance, setAppearance] = useState<Appearance>(() => readAppearance(platform.storage));
   useEffect(() => applyAppearance(appearance), [appearance]);
+  const mode = useResolvedMode(appearance);
   const look = useMemo(
     () => ({
       appearance,
@@ -217,17 +230,23 @@ export function App({ platform }: { platform: Platform }) {
   return (
     <PlatformProvider value={platform}>
       <AppearanceContext.Provider value={look}>
-        <QueryClientProvider client={client}>
-          <ConnectionProvider platform={platform} generation={generation}>
-            <Gate onPaired={() => setGeneration((g) => g + 1)}>
-              <KeysProvider>
-                <TooltipProvider>
-                  <RouterProvider router={router} />
-                </TooltipProvider>
-              </KeysProvider>
-            </Gate>
-          </ConnectionProvider>
-        </QueryClientProvider>
+        <Theme theme={precisionTheme} mode={mode}>
+          <LayerProvider toast={{ maxVisible: 3, position: "bottomEnd" }}>
+            <LinkProvider component={RouterLink}>
+              <QueryClientProvider client={client}>
+                <ConnectionProvider platform={platform} generation={generation}>
+                  <Gate onPaired={() => setGeneration((g) => g + 1)}>
+                    <KeysProvider>
+                      <TooltipProvider>
+                        <RouterProvider router={router} />
+                      </TooltipProvider>
+                    </KeysProvider>
+                  </Gate>
+                </ConnectionProvider>
+              </QueryClientProvider>
+            </LinkProvider>
+          </LayerProvider>
+        </Theme>
       </AppearanceContext.Provider>
     </PlatformProvider>
   );

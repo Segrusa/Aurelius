@@ -58,8 +58,10 @@ export function KeysProvider({ children }: { children: ReactNode }) {
         const chord = chordOf(event, isMac);
         if (chord === null) return;
         const target = event.target instanceof Element ? event.target : null;
-        const typing = Boolean(target?.closest("input, textarea, select, [contenteditable=true]"));
-        const onControl = Boolean(target?.closest("button, a, [role=menuitem]"));
+        const typing = Boolean(target?.closest("input:not([type=checkbox],[type=radio]), textarea, select, [contenteditable=true]"));
+        const onControl = Boolean(target?.closest(
+            "button, a, [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], input[type=checkbox], input[type=radio]",
+          ));
         const action = actionsFor(chord, { stack, typing, onControl, kind }).find((a) => list(a).length > 0);
         if (action === undefined) return;
         event.preventDefault();

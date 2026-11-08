@@ -2,6 +2,8 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "electron-vite";
+import type { PluginOption } from "vite";
+import { CSS_TARGET, ownStylex } from "../ts/app/stylex-plugin";
 
 // The workspace packages are TypeScript sources: they go into the bundle, and so does what the
 // main process uses, because the packaged app has no node_modules. So does the preload's
@@ -24,6 +26,7 @@ export default defineConfig({
     },
     base: "/",
     plugins: [
+      ...ownStylex<PluginOption>(),
       react(),
       tailwindcss(),
       // electron-vite makes these relative whatever `base` says, and a reload on /settings/app would
@@ -34,6 +37,6 @@ export default defineConfig({
         transformIndexHtml: (html) => html.replaceAll('"./assets/', '"/assets/'),
       },
     ],
-    build: { assetsInlineLimit: 0, rollupOptions: { input: "src/renderer/index.html" } },
+    build: { assetsInlineLimit: 0, cssTarget: CSS_TARGET, rollupOptions: { input: "src/renderer/index.html" } },
   },
 });
