@@ -30,6 +30,7 @@ import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { BoardScreen } from "./board";
+import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { canPin, pinnedFirst, togglePin } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
 import { IdeasBody } from "./ideas";
@@ -51,6 +52,7 @@ import {
 import { overlays } from "./overlays-store";
 import { useFolderChooser } from "./run-tools";
 import { ScheduleDialog } from "./settings-advanced";
+import { openWeb } from "./settings-kit";
 import { TasksScreen } from "./tasks";
 import { taskStateLine } from "./tasks-logic";
 import { VaultBody } from "./vault";
@@ -784,6 +786,57 @@ function Setting({ name, children }: { name: string; children: React.ReactNode }
   );
 }
 
+/** The workspace's styleguide: a link field; Open only for a saved link. */
+function StyleguideRow({ project }: { project: ProjectSummary }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const saved = project.styleguide_url ?? "";
+  const [draft, setDraft] = useState(saved);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => setDraft(saved), [saved]);
+  const dirty = draft.trim() !== saved;
+  const save = async () => {
+    const wrong = artifactProblem(draft);
+    setProblem(wrong);
+    if (wrong) return;
+    try {
+      await connection.write(
+        "project.update",
+        { project_id: project.id, styleguide_url: draft.trim() },
+        { retry: false },
+      );
+      await client.invalidateQueries({ queryKey: ["projects"] });
+    } catch (e) {
+      setProblem(failureOf(e));
+    }
+  };
+  return (
+    <>
+      <Setting name="Styleguide">
+        <span {...stylex.props(styles.settingValue)}>
+          <TextInput
+            label="Styleguide link"
+            isLabelHidden
+            size="sm"
+            width="100%"
+            placeholder={ARTIFACT_PLACEHOLDER}
+            value={draft}
+            onChange={setDraft}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && dirty) void save();
+            }}
+          />
+        </span>
+        {dirty ? <Button size="sm" variant="primary" label="Save" onClick={() => void save()} /> : null}
+        {saved && !dirty ? <Button size="sm" label="Open" onClick={() => openWeb(saved)} /> : null}
+      </Setting>
+      <Setting name="">
+        <span {...stylex.props(styles.dim)}>{problem ?? ARTIFACT_HINT}</span>
+      </Setting>
+    </>
+  );
+}
+
 function WorkspaceSettings({
   project,
   dispatcher,
@@ -796,8 +849,10 @@ function WorkspaceSettings({
   pick: (key: string) => void;
 }) {
   const platform = usePlatform();
+  const { features } = useLinkState();
   return (
     <Panel title="WORKSPACE SETTINGS" right={<Button size="sm" label="Edit…" onClick={onEdit} />}>
+      {features.includes(DESIGN_FEATURE) ? <StyleguideRow project={project} /> : null}
       <Setting name="Folder">
         <code title={project.folder ?? undefined} {...stylex.props(styles.settingValue, styles.mono)}>
           {project.folder ?? "No folder"}

@@ -853,7 +853,7 @@ export interface MethodParams {
    * changes; the owner only through `ticket.assign`; mode and model only while
    * the main task does not run.
    */
-  "ticket.update": { add_files?: string[] | null; clear_deadline?: boolean; confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; labels?: string[] | null; priority?: M.TicketPriority | null; run?: M.TaskRun | null; ticket_id: string; title?: string | null };
+  "ticket.update": { add_files?: string[] | null; clear_deadline?: boolean; confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; design_url?: string | null; labels?: string[] | null; priority?: M.TicketPriority | null; run?: M.TaskRun | null; ticket_id: string; title?: string | null };
   /**
    * Run a ticket on the Claude login of the board member who asks (B4, D3-3):
    * `TicketView::login_user` becomes that board member, never anyone else. The

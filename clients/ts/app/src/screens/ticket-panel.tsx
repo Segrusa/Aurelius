@@ -62,6 +62,7 @@ import {
 } from "./board-logic";
 import { canChange, completeMention, mentionSuggestions } from "./chat-logic";
 import { ActivityOutput } from "./chat-message";
+import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { messageLink, ticketLink } from "./links-logic";
 import { FormDialog, Loading, Problem } from "./org-kit";
@@ -121,6 +122,15 @@ const styles = stylex.create({
     color: "inherit",
   },
   stack: { display: "flex", flexDirection: "column", gap: 8 },
+  designLink: { color: "var(--color-text-accent)", textDecoration: "none" },
+  designChange: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    fontSize: 12,
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+  },
   buttons: { display: "flex", flexWrap: "wrap", gap: 8 },
   buttonsCentered: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
   gateHead: { display: "flex", alignItems: "center", gap: 8, fontWeight: 500 },
@@ -341,6 +351,8 @@ function Editable({
   onSave,
   label,
   placeholder,
+  opened = false,
+  onClose,
 }: {
   value: string;
   enabled: boolean;
@@ -349,8 +361,15 @@ function Editable({
   onSave: (next: string) => Promise<boolean>;
   label: string;
   placeholder?: string;
+  /** Opens as an editor (a link field has no display worth clicking while it has a value). */
+  opened?: boolean;
+  onClose?: () => void;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
+  const [draft, setDraftRaw] = useState<string | null>(opened ? value : null);
+  const setDraft = (next: string | null) => {
+    setDraftRaw(next);
+    if (next === null) onClose?.();
+  };
   if (draft === null) {
     return enabled ? (
       <button
@@ -407,6 +426,51 @@ function Editable({
         <Button label="Cancel" onClick={() => setDraft(null)} />
       </div>
     </div>
+  );
+}
+
+/** A ticket's design: only an Open link when it has one; "None" (click to edit) otherwise. */
+function DesignRow({
+  url,
+  enabled,
+  onSave,
+}: {
+  url: string | null;
+  enabled: boolean;
+  onSave: (text: string) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const field =
+    url && !editing ? (
+      <span {...stylex.props(styles.buttonsCentered)}>
+        <a href={url} target="_blank" rel="noreferrer" {...stylex.props(styles.designLink)}>
+          Open
+        </a>
+        {enabled ? (
+          <button type="button" onClick={() => setEditing(true)} {...stylex.props(styles.designChange)}>
+            Change
+          </button>
+        ) : null}
+      </span>
+    ) : (
+      <Editable
+        value={url ?? ""}
+        enabled={enabled}
+        opened={editing}
+        onClose={() => setEditing(false)}
+        label="Design"
+        placeholder={ARTIFACT_PLACEHOLDER}
+        display={<span {...stylex.props(styles.third)}>None</span>}
+        onSave={onSave}
+      />
+    );
+  return (
+    <Row name="Design">
+      <div {...stylex.props(styles.stack)}>
+        {field}
+        <span {...stylex.props(styles.thirdSmall)}>{ARTIFACT_HINT}</span>
+      </div>
+    </Row>
   );
 }
 
@@ -1541,6 +1605,20 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
                           }}
                         />
                       </Row>
+                      {features.includes(DESIGN_FEATURE) ? (
+                        <DesignRow
+                          url={t.design_url ?? null}
+                          enabled={open}
+                          onSave={async (text) => {
+                            const problem = artifactProblem(text);
+                            if (problem) {
+                              toast(problem);
+                              return false;
+                            }
+                            return update({ design_url: text.trim() });
+                          }}
+                        />
+                      ) : null}
                       {features.includes("ticket_responsible") ? (
                         <Row name="Responsible">
                           {t.responsible_username ?? <span {...stylex.props(styles.third)}>No one</span>}

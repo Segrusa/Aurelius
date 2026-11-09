@@ -882,7 +882,7 @@ export type Command =
    * changes; the owner only through `ticket.assign`; mode and model only while
    * the main task does not run.
    */
-  | ({ type: "update_ticket"; add_files?: string[] | null; clear_deadline?: boolean; confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; labels?: string[] | null; priority?: TicketPriority | null; run?: TaskRun | null; ticket_id: string; title?: string | null })
+  | ({ type: "update_ticket"; add_files?: string[] | null; clear_deadline?: boolean; confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; design_url?: string | null; labels?: string[] | null; priority?: TicketPriority | null; run?: TaskRun | null; ticket_id: string; title?: string | null })
   /**
    * Run a ticket on the Claude login of the board member who asks (B4, D3-3):
    * `TicketView::login_user` becomes that board member, never anyone else. The
@@ -3825,6 +3825,11 @@ export interface ProjectSummary {
   id: string;
   name: string;
   status: ProjectStatus;
+  /**
+   * The workspace's styleguide, a Claude Design artifact (feature `design_links`). A
+   * link only: runs read the artifact themselves. Left out when none and by older servers.
+   */
+  styleguide_url?: string | null;
   version: number;
 }
 
@@ -5570,6 +5575,11 @@ export interface TicketView {
    * Markdown; none when empty.
    */
   description?: string | null;
+  /**
+   * The ticket's design, a Claude Design artifact (feature `design_links`). A link only:
+   * its runs read the artifact themselves. Left out when none and by older servers.
+   */
+  design_url?: string | null;
   done_at_ms?: number | null;
   id: string;
   labels: string[];
@@ -5871,6 +5881,11 @@ export interface UpdateIdea {
 export interface UpdateProject {
   dispatcher?: SetDispatcher | null;
   project_id: string;
+  /**
+   * The workspace's styleguide: a Claude Design artifact link
+   * (`ticket::valid_artifact_url`, feature `design_links`); an empty text clears it.
+   */
+  styleguide_url?: string | null;
 }
 
 export interface UpdateStatus {

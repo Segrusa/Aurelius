@@ -2169,7 +2169,7 @@ Map<String, dynamic> ticketStart({String? employeeId, required String ticketId})
 /// Change the fields of a ticket. Left out: unchanged. The creator never
 /// changes; the owner only through `ticket.assign`; mode and model only while
 /// the main task does not run.
-Map<String, dynamic> ticketUpdate({List<String>? addFiles, bool? clearDeadline, bool? confirmSecret, int? deadlineMs, String? description, List<String>? labels, TicketPriority? priority, TaskRun? run, required String ticketId, String? title}) => <String, dynamic>{
+Map<String, dynamic> ticketUpdate({List<String>? addFiles, bool? clearDeadline, bool? confirmSecret, int? deadlineMs, String? description, String? designUrl, List<String>? labels, TicketPriority? priority, TaskRun? run, required String ticketId, String? title}) => <String, dynamic>{
   'method': Methods.ticketUpdate,
   'params': <String, dynamic>{
     if (addFiles != null) 'add_files': addFiles,
@@ -2177,6 +2177,7 @@ Map<String, dynamic> ticketUpdate({List<String>? addFiles, bool? clearDeadline, 
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
     if (deadlineMs != null) 'deadline_ms': deadlineMs,
     if (description != null) 'description': description,
+    if (designUrl != null) 'design_url': designUrl,
     if (labels != null) 'labels': labels,
     if (priority != null) 'priority': priority.toJson(),
     if (run != null) 'run': run.toJson(),

@@ -87,6 +87,47 @@ async function open(page: Page, path: string, workspace?: string) {
   return site;
 }
 
+test("a workspace and a ticket show their Claude Design link, and an older server shows no field", async ({ page }) => {
+  const link = "https://claude.ai/artifact/9sfwWLbDbQerBZ3jmBSkXS";
+  const linkedTicket = ticket("t1", 21, "backlog", {
+    title: "Atlas ticket",
+    project_id: ATLAS,
+    project_name: "Atlas",
+    design_url: link,
+  });
+  const linked = {
+    ...script,
+    features: [...script.features, "design_links"],
+    projects: [{ ...project(ATLAS, "Atlas"), styleguide_url: link }, project(ZEPHYR, "Zephyr")],
+    details: { t1: { ticket: linkedTicket, root_task: null, tasks: [], as_of_seq: 1 } },
+    tickets: [linkedTicket, inZephyr],
+  };
+  const site = await serveStatic(WEB_DIST);
+  try {
+    await scriptServer(page, linked);
+    await page.goto(`${site.origin}/projects/${ATLAS}`);
+    await expect(page.getByText("Styleguide", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Styleguide link")).toHaveValue(link);
+    await expect(page.getByRole("button", { name: "Open", exact: true }).first()).toBeVisible();
+    await expect(page.getByText("The link only works for people the artifact is shared with.")).toBeVisible();
+
+    await page.goto(`${site.origin}/board?ticket=t1`);
+    const panel = page.getByRole("complementary", { name: /Atlas ticket/ });
+    await expect(panel.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", link);
+    await expect(panel.getByText("The link only works for people the artifact is shared with.")).toBeVisible();
+
+    await scriptServer(page, script);
+    await page.goto(`${site.origin}/projects/${ATLAS}`);
+    await expect(page.getByText("WORKSPACE SETTINGS")).toBeVisible();
+    await expect(page.getByText("Styleguide", { exact: true })).toBeHidden();
+    await page.goto(`${site.origin}/board?ticket=t1`);
+    await expect(page.getByRole("complementary", { name: /Atlas ticket/ })).toBeVisible();
+    await expect(page.getByText("The link only works for people the artifact is shared with.")).toBeHidden();
+  } finally {
+    await site.close();
+  }
+});
+
 test("switching narrows the board, the inbox and the chat, and All projects shows everything", async ({ page }) => {
   const site = await open(page, "/board");
   try {

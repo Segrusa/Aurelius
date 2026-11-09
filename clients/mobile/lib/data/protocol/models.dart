@@ -1527,6 +1527,7 @@ sealed class Command {
           confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
           deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
           description: (json['description'] == null ? null : (json['description'] as String)),
+          designUrl: (json['design_url'] == null ? null : (json['design_url'] as String)),
           labels: (json['labels'] == null ? null : (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           priority: (json['priority'] == null ? null : TicketPriority.fromJson(json['priority'] as String)),
           run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
@@ -2992,6 +2993,7 @@ final class CommandUpdateTicket extends Command {
     this.confirmSecret,
     this.deadlineMs,
     this.description,
+    this.designUrl,
     this.labels,
     this.priority,
     this.run,
@@ -3015,6 +3017,10 @@ final class CommandUpdateTicket extends Command {
   final int? deadlineMs;
   /// An empty text clears it.
   final String? description;
+  /// The ticket's design: a Claude Design artifact link (`valid_artifact_url`,
+  /// feature `design_links`); an empty text clears it. Left out unless it changes,
+  /// so older servers, which refuse unknown fields here, keep working.
+  final String? designUrl;
   /// The whole new list.
   final List<String>? labels;
   final TicketPriority? priority;
@@ -3030,6 +3036,7 @@ final class CommandUpdateTicket extends Command {
       if (confirmSecret != null) 'confirm_secret': confirmSecret,
       if (deadlineMs != null) 'deadline_ms': deadlineMs,
       if (description != null) 'description': description,
+      if (designUrl != null) 'design_url': designUrl,
       if (labels != null) 'labels': labels,
       if (priority != null) 'priority': priority?.toJson(),
       if (run != null) 'run': run?.toJson(),
@@ -12260,6 +12267,7 @@ final class ProjectSummary {
     required this.id,
     required this.name,
     required this.status,
+    this.styleguideUrl,
     required this.version,
   });
 
@@ -12274,6 +12282,9 @@ final class ProjectSummary {
   final String id;
   final String name;
   final ProjectStatus status;
+  /// The workspace's styleguide, a Claude Design artifact (feature `design_links`). A
+  /// link only: runs read the artifact themselves. Left out when none and by older servers.
+  final String? styleguideUrl;
   final int version;
 
   factory ProjectSummary.fromJson(Map<String, dynamic> json) => ProjectSummary(
@@ -12285,6 +12296,7 @@ final class ProjectSummary {
     id: (json['id'] as String),
     name: (json['name'] as String),
     status: ProjectStatus.fromJson(json['status'] as String),
+    styleguideUrl: (json['styleguide_url'] == null ? null : (json['styleguide_url'] as String)),
     version: (json['version'] as num).toInt(),
   );
 
@@ -12297,6 +12309,7 @@ final class ProjectSummary {
     'id': id,
     'name': name,
     'status': status.toJson(),
+    if (styleguideUrl != null) 'styleguide_url': styleguideUrl,
     'version': version,
   };
 }
@@ -17102,6 +17115,7 @@ final class TicketView {
     required this.createdByUsername,
     this.deadlineMs,
     this.description,
+    this.designUrl,
     this.doneAtMs,
     required this.id,
     required this.labels,
@@ -17143,6 +17157,9 @@ final class TicketView {
   final int? deadlineMs;
   /// Markdown; none when empty.
   final String? description;
+  /// The ticket's design, a Claude Design artifact (feature `design_links`). A link only:
+  /// its runs read the artifact themselves. Left out when none and by older servers.
+  final String? designUrl;
   final int? doneAtMs;
   final String id;
   final List<String> labels;
@@ -17195,6 +17212,7 @@ final class TicketView {
     createdByUsername: (json['created_by_username'] as String),
     deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
     description: (json['description'] == null ? null : (json['description'] as String)),
+    designUrl: (json['design_url'] == null ? null : (json['design_url'] as String)),
     doneAtMs: (json['done_at_ms'] == null ? null : (json['done_at_ms'] as num).toInt()),
     id: (json['id'] as String),
     labels: (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
@@ -17232,6 +17250,7 @@ final class TicketView {
     'created_by_username': createdByUsername,
     if (deadlineMs != null) 'deadline_ms': deadlineMs,
     if (description != null) 'description': description,
+    if (designUrl != null) 'design_url': designUrl,
     if (doneAtMs != null) 'done_at_ms': doneAtMs,
     'id': id,
     'labels': labels,
@@ -17765,19 +17784,25 @@ final class UpdateProject {
   const UpdateProject({
     this.dispatcher,
     required this.projectId,
+    this.styleguideUrl,
   });
 
   final SetDispatcher? dispatcher;
   final String projectId;
+  /// The workspace's styleguide: a Claude Design artifact link
+  /// (`ticket::valid_artifact_url`, feature `design_links`); an empty text clears it.
+  final String? styleguideUrl;
 
   factory UpdateProject.fromJson(Map<String, dynamic> json) => UpdateProject(
     dispatcher: (json['dispatcher'] == null ? null : SetDispatcher.fromJson(json['dispatcher'] as Map<String, dynamic>)),
     projectId: (json['project_id'] as String),
+    styleguideUrl: (json['styleguide_url'] == null ? null : (json['styleguide_url'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (dispatcher != null) 'dispatcher': dispatcher?.toJson(),
     'project_id': projectId,
+    if (styleguideUrl != null) 'styleguide_url': styleguideUrl,
   };
 }
 
