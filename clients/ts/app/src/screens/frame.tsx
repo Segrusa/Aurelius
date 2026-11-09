@@ -36,6 +36,7 @@ import { Logo, NAV_ICONS, type NavIcon, NewIcon, SearchIcon } from "../ui/icons"
 import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
+import { ActivityBar } from "./activity-bar";
 import { ChatDock } from "./chat-dock";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
@@ -57,6 +58,16 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     height: "100%",
+    minWidth: 0,
+    minHeight: 0,
+    overflow: "hidden",
+  },
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "0%",
     minWidth: 0,
     minHeight: 0,
     overflow: "hidden",
@@ -549,7 +560,10 @@ export function Frame({ children }: { children: ReactNode }) {
         <GoAction key={action} action={action} to={to} />
       ))}
       <AppShell variant="section" height="fill" mobileNav={false} {...(side ? { sideNav: side } : {})}>
-        <div {...stylex.props(styles.screen)}>{children}</div>
+        <div {...stylex.props(styles.screen)}>
+          <div {...stylex.props(styles.page)}>{children}</div>
+          <ActivityBar />
+        </div>
       </AppShell>
       <Palette />
       <NewTicketDialog />

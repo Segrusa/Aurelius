@@ -1,3 +1,4 @@
+import { ACTIVITY_REFRESH_MS } from "./screens/activity-bar-logic";
 import { ACTIVITY_LIMIT } from "./screens/board-logic";
 // Server data: a read per query key, refetched when an event says its area changed. Events come in
 // bursts while agents work, so a refetch waits for the burst, as the Rust client did (500 ms).
@@ -24,6 +25,7 @@ import { useConnection, useLinkState } from "./connection";
 const COALESCE_MS = 500;
 
 export type Area =
+  | "activity"
   | "approvals"
   | "notifications"
   | "proposals"
@@ -47,7 +49,7 @@ export function areasOf(kind: EventKind | string): Area[] {
   const family = kind.split(".")[0];
   switch (family) {
     case "approval":
-      return ["approvals", "tasks", "notifications", "employees"];
+      return ["approvals", "tasks", "notifications", "employees", "activity"];
     case "notification":
       return ["notifications"];
     case "proposal":
@@ -58,13 +60,13 @@ export function areasOf(kind: EventKind | string): Area[] {
       return ["projects"];
     case "task":
     case "run":
-      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas", "usage", "scheduled"];
+      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas", "usage", "scheduled", "activity"];
     case "conversation":
     case "message":
     case "chat":
       return ["messages"];
     case "ticket":
-      return ["tasks", "notifications", "tickets", "messages"];
+      return ["tasks", "notifications", "tickets", "messages", "activity"];
     case "claude_login":
       return ["subscription", "settings"];
     case "company":
@@ -73,7 +75,7 @@ export function areasOf(kind: EventKind | string): Area[] {
       return ["settings", "employees"];
     // A proposed colleague or new instructions arrive as `employee.*` events.
     case "employee":
-      return ["settings", "employees", "proposals"];
+      return ["settings", "employees", "proposals", "activity"];
     case "idea":
       return ["ideas"];
     case "memory":
@@ -229,6 +231,19 @@ export function useKeyed<T>(key: unknown[], read: () => Promise<T>, wanted = tru
     queryFn: read,
     enabled: wanted && status === "online" && user !== null,
     staleTime: 30_000,
+  });
+}
+
+/** Who is busy and what waits (ticket #50): events refetch it, and every 30 s besides. */
+export function useActivityOverview() {
+  const connection = useConnection();
+  const { status, user, features } = useLinkState();
+  return useQuery({
+    queryKey: ["activity"],
+    queryFn: async () => expectBody(await connection.call("activity.overview"), "activity_overview").value,
+    enabled: status === "online" && user !== null && features.includes("activity_overview"),
+    staleTime: 5_000,
+    refetchInterval: ACTIVITY_REFRESH_MS,
   });
 }
 

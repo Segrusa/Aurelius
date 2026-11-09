@@ -1,4 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
+import { TicketActivityLine } from "./activity-bar";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -1108,6 +1109,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
               }
               onSave={(title) => update({ title: title.trim() })}
             />
+            <TicketActivityLine ticketId={t.id} />
             <div {...stylex.props(styles.chips)}>
               <Chip>
                 <ColumnGlyph kind={t.column} />
