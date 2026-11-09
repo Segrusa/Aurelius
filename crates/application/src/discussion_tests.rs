@@ -1446,3 +1446,113 @@ mod handoff_tests;
 
 #[path = "scheduled_tests.rs"]
 mod scheduled_tests;
+
+// ---- @Everyone (ticket #40) ----
+
+/// A second board member, `ada`, who is not the sender.
+fn second_board_member(s: &Setup) -> UserId {
+    let ada = UserId::new();
+    s.service.store().write(move |tx| aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &ada.to_string(), username: "ada", created_by_user: None, now_ms: 2 }, PHC)).unwrap();
+    ada
+}
+
+fn pause(s: &Setup, employee: EmployeeId) {
+    s.service.store().write(move |tx| tx.execute("UPDATE employees SET status = 'paused' WHERE id = ?1", [employee.to_string()]).map(|_| ()).map_err(Into::into)).unwrap();
+}
+
+/// Who the latest message event of `conversation` named, as `metadata.mentioned_users`.
+fn mentioned_users(s: &Setup) -> Vec<String> {
+    let meta: String = s.service.store().read(|c| Ok(c.query_row("SELECT metadata_json FROM events WHERE type = 'message.user_committed' ORDER BY seq DESC LIMIT 1", [], |r| r.get(0))?)).unwrap();
+    serde_json::from_str::<serde_json::Value>(&meta).unwrap()["mentioned_users"].as_array().map(|a| a.iter().filter_map(|u| u.as_str().map(str::to_owned)).collect()).unwrap_or_default()
+}
+
+fn audience_of(s: &Setup, channel: Option<ConversationId>, reader: Option<UserId>) -> aurelius_domain::views::DiscussionAudience {
+    s.service.store().read(move |c| discussion::discussion_audience(c, channel, reader)).unwrap().expect("a discussion")
+}
+
+#[test]
+fn everyone_in_a_channel_wakes_every_active_employee_once_and_a_paused_one_not() {
+    let s = setup();
+    let ada = second_board_member(&s);
+    pause(&s, s.cy);
+    // Ann is named twice and as @everyone's own name: still one run each.
+    let (to, runs) = send(&s, None, "@Ann @ann and @EVERYONE: standup now").unwrap();
+    let mut expected = vec![s.ceo, s.ann, s.bo];
+    expected.sort_by_key(|e| e.to_string());
+    let mut got = to.clone();
+    got.sort_by_key(|e| e.to_string());
+    assert_eq!((got, runs.len()), (expected, 3), "the paused Cy is not woken, the sender is no employee");
+    for e in [s.ceo, s.ann, s.bo] {
+        assert_eq!(woken(&s, e).len(), 1, "once");
+    }
+    assert!(woken(&s, s.cy).is_empty());
+    // The other board member is told, the sender (grace) is not.
+    assert_eq!(mentioned_users(&s), vec![ada.to_string()]);
+    // Not a word on its own: an email address and a longer name are no @Everyone.
+    let (to, _) = send(&s, Some(channel(&s, s.project)), "mail everyone@example.com or @everyone2 or @Everyone-else").unwrap();
+    assert_eq!(to, vec![s.ceo], "only the dispatcher fallback (the CEO) answers: no @Everyone in it");
+    assert!(mentioned_users(&s).is_empty());
+}
+
+#[test]
+fn everyone_in_a_ticket_reaches_its_owner_workers_and_writers_and_the_board_members_of_it() {
+    let s = setup();
+    let ada = second_board_member(&s);
+    let t = new_ticket(&s, "Login", Some(s.ann));
+    // Bo wrote in the discussion; Cy is only named, Atlas is nowhere in it.
+    let (_, runs) = post(&s, t, "@Bo thoughts? and @Cy FYI").unwrap();
+    let (ok, text) = post_in_discussion(&s, runs[0], "Looks fine.");
+    assert!(ok, "{text}");
+    // Ada follows the ticket.
+    s.service.store().write(move |tx| aurelius_storage::followers::follow(tx, t, ada, aurelius_storage::followers::FollowReason::Manual, 5).map(|_| ())).unwrap();
+    let before_ann = woken(&s, s.ann).len();
+    let (to, _) = post(&s, t, "@Everyone please look").unwrap();
+    let mut got = to;
+    got.sort_by_key(|e| e.to_string());
+    let mut expected = vec![s.ann, s.bo];
+    expected.sort_by_key(|e| e.to_string());
+    assert_eq!(got, expected, "the owner and the writer: not Cy (only named) and not Atlas");
+    assert_eq!(woken(&s, s.cy).len(), 1, "Cy was woken only by the earlier @Cy");
+    assert!(woken(&s, s.ceo).is_empty());
+    // Backlog: the owner is not in the B3 path, so woken as an employee named, once.
+    assert_eq!(woken(&s, s.ann).len(), before_ann + 1);
+    assert_eq!(mentioned_users(&s), vec![ada.to_string()]);
+    assert!(s.service.store().read(move |c| aurelius_storage::followers::is_following(c, t, ada)).unwrap(), "Ada follows as if named");
+}
+
+#[test]
+fn everyone_from_an_employee_wakes_and_tells_nobody() {
+    let s = setup();
+    let _ada = second_board_member(&s);
+    let t = new_ticket(&s, "Login", Some(s.ann));
+    let (_, runs) = post(&s, t, "@Bo thoughts?").unwrap();
+    let (ok, text) = post_in_discussion(&s, runs[0], "@Everyone heads up");
+    assert!(ok, "{text}");
+    assert!(woken(&s, s.ann).is_empty() && woken(&s, s.cy).is_empty() && woken(&s, s.ceo).is_empty());
+    assert_eq!(woken(&s, s.bo).len(), 1, "only the board member's own @Bo woke anyone");
+    let meta: String = s.service.store().read(|c| Ok(c.query_row("SELECT metadata_json FROM events WHERE type = 'task.posted' ORDER BY seq DESC LIMIT 1", [], |r| r.get(0))?)).unwrap();
+    assert!(serde_json::from_str::<serde_json::Value>(&meta).unwrap()["mentioned_users"].is_null(), "{meta}");
+    let (_, runs) = send(&s, None, "@Cy hi").unwrap();
+    let (ok, text) = post_in_channel(&s, runs[0], None, "@everyone");
+    assert!(ok, "{text}");
+    assert!(woken(&s, s.ann).is_empty() && woken(&s, s.bo).len() == 1);
+}
+
+#[test]
+fn the_audience_counts_what_everyone_would_do_and_never_the_reader() {
+    let s = setup();
+    let _ada = second_board_member(&s);
+    pause(&s, s.cy);
+    let general = audience_of(&s, None, Some(s.user));
+    assert_eq!((general.employees, general.paused, general.board_members), (3, 1, 1), "{general:?}");
+    assert_eq!((general.board_usernames, general.paused_names), (vec!["ada".to_owned()], vec!["Cy".to_owned()]));
+    let project = audience_of(&s, Some(channel(&s, s.project)), Some(s.user));
+    assert_eq!((project.employees, project.paused, project.board_members), (3, 1, 1));
+    let t = new_ticket(&s, "Login", Some(s.ann));
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    let ticket = audience_of(&s, Some(d), Some(s.user));
+    assert_eq!((ticket.employees, ticket.employee_names, ticket.paused, ticket.board_usernames), (1, vec!["Ann".to_owned()], 0, vec!["ada".to_owned()]), "grace is the reader; ada is an Owner, so a member of every ticket channel");
+    let seen_by_ada = audience_of(&s, Some(d), Some(_ada));
+    assert_eq!(seen_by_ada.board_usernames, vec!["grace".to_owned()], "the creator is a member of the channel");
+    assert!(s.service.store().read(|c| discussion::discussion_audience(c, Some(ConversationId::new()), None)).unwrap().is_none());
+}

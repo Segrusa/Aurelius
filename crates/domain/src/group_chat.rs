@@ -298,6 +298,18 @@ pub fn shortened(text: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::names_everyone;
+
+    #[test]
+    fn everyone_is_a_whole_word_after_an_at_that_is_not_inside_a_word() {
+        for yes in ["@Everyone", "hi @EVERYONE!", "(@everyone)", "a\n@everyone, b", "@everyone."] {
+            assert!(names_everyone(yes), "{yes}");
+        }
+        for no in ["everyone", "mail me@everyone.com", "a.@everyone", "@everyone2", "@everyone_x", "@everyone-else", "@every one", "@"] {
+            assert!(!names_everyone(no), "{no}");
+        }
+    }
+
     use super::*;
 
     #[test]

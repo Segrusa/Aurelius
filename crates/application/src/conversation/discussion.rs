@@ -566,9 +566,9 @@ fn with_mentions(conn: &rusqlite::Connection, id: ConversationId, text: &str, fr
         return Ok(metadata);
     }
     let Some(d) = load(conn, id)? else { return Ok(metadata) };
-    // `@Everyone` of a board member names the board members of the thread too (the sender
-    // is left out when the row is made: `notify_mentions`).
-    for user in everyone_users(conn, &d, text, from_board, None)? {
+    // `@Everyone` of a board member names the board members of the thread too, but never the sender.
+    let sender = metadata["user_id"].as_str().and_then(|u| UserId::parse(u).ok());
+    for user in everyone_users(conn, &d, text, from_board, sender)? {
         if !named.contains(&user) {
             named.push(user);
         }
