@@ -23,9 +23,17 @@ bool mentionsEveryone(String text) =>
 List<String> withEveryone(List<String> names, {required bool enabled}) => enabled ? [everyoneName, ...names] : names;
 
 /// The line above the composer saying whom `@Everyone` reaches, e.g.
-/// "Wakes 5 employees (1 paused) and notifies 2 board members".
+/// "Orion picks who follows up; 5 employees can read along (1 paused), 2 board
+/// members are told". Without a coordinator (an older server, which wakes them
+/// all): "Wakes 5 employees (1 paused) and notifies 2 board members".
 String everyoneAudienceLine(DiscussionAudience a) {
   String plural(int n, String one, String many) => '$n ${n == 1 ? one : many}';
+  final coordinator = a.coordinator;
+  if (coordinator != null && coordinator.isNotEmpty) {
+    final paused = a.paused > 0 ? ' (${a.paused} paused)' : '';
+    final told = a.boardMembers > 0 ? ', ${plural(a.boardMembers, 'board member', 'board members')} ${a.boardMembers == 1 ? 'is' : 'are'} told' : '';
+    return '$coordinator picks who follows up; ${plural(a.employees, 'employee', 'employees')} can read along$paused$told';
+  }
   final employees = 'Wakes ${plural(a.employees, 'employee', 'employees')}${a.paused > 0 ? ' (${a.paused} paused)' : ''}';
   return a.boardMembers > 0 ? '$employees and notifies ${plural(a.boardMembers, 'board member', 'board members')}' : employees;
 }

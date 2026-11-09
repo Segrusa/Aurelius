@@ -889,14 +889,16 @@ pub struct ChannelsSnapshot {
 
 /// `discussion.audience` (feature `everyone_mention`): whom a board member's
 /// `@Everyone` in one discussion would reach, so a client can say so before it
-/// sends. Never the asking board member: they are not told of their own message.
+/// sends: it wakes the `coordinator`, the others only know of it. Never the asking
+/// board member: they are not told of their own message.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DiscussionAudience {
-    /// Employees `@Everyone` wakes: active, in the discussion.
+    /// Active employees in the discussion, who know of an `@Everyone`: it is in what
+    /// they read when next woken there. It does not wake them (see `coordinator`).
     pub employees: u32,
     /// Their names, in the order of the company.
     pub employee_names: Vec<String>,
-    /// Employees in the discussion who are paused: they are not woken, the message says so.
+    /// Employees in the discussion who are paused.
     pub paused: u32,
     /// Their names.
     pub paused_names: Vec<String>,
@@ -904,6 +906,11 @@ pub struct DiscussionAudience {
     pub board_members: u32,
     /// Their usernames.
     pub board_usernames: Vec<String>,
+    /// The one employee `@Everyone` wakes, who answers or hands over: the ticket's
+    /// owner, else the dispatcher, else the CEO, the first that is active. None
+    /// when there is nobody, or from a server that still wakes all `employees`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coordinator: Option<String>,
 }
 
 /// A message an employee scheduled (`schedule_message`, R7; feature `scheduled_messages`).

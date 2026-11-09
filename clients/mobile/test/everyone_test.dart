@@ -6,9 +6,10 @@ import 'package:aurelius_mobile/data/protocol/models.dart';
 import 'package:aurelius_mobile/features/chat/everyone_audience.dart';
 import 'package:aurelius_mobile/features/team/mentions.dart';
 
-DiscussionAudience audience({int employees = 5, int paused = 1, int boardMembers = 2}) => DiscussionAudience(
+DiscussionAudience audience({int employees = 5, int paused = 1, int boardMembers = 2, String? coordinator}) => DiscussionAudience(
       boardMembers: boardMembers,
       boardUsernames: const [],
+      coordinator: coordinator,
       employeeNames: const [],
       employees: employees,
       paused: paused,
@@ -16,7 +17,13 @@ DiscussionAudience audience({int employees = 5, int paused = 1, int boardMembers
     );
 
 void main() {
-  test('the audience line counts employees, paused ones and board members', () {
+  test('the audience line names the coordinator and who reads along', () {
+    expect(everyoneAudienceLine(audience(coordinator: 'Orion')), 'Orion picks who follows up; 5 employees can read along (1 paused), 2 board members are told');
+    expect(everyoneAudienceLine(audience(employees: 1, paused: 0, boardMembers: 1, coordinator: 'Ann')), 'Ann picks who follows up; 1 employee can read along, 1 board member is told');
+    expect(everyoneAudienceLine(audience(employees: 3, paused: 0, boardMembers: 0, coordinator: 'Ann')), 'Ann picks who follows up; 3 employees can read along');
+  });
+
+  test('an older server keeps the line that counts who is woken', () {
     expect(everyoneAudienceLine(audience()), 'Wakes 5 employees (1 paused) and notifies 2 board members');
     expect(everyoneAudienceLine(audience(employees: 1, paused: 0, boardMembers: 1)), 'Wakes 1 employee and notifies 1 board member');
     expect(everyoneAudienceLine(audience(boardMembers: 0)), 'Wakes 5 employees (1 paused)');

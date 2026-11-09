@@ -264,7 +264,8 @@ pub struct ViewLine<'a> {
 /// else wrote or was named). A non-lead sees what names it, what was handed over to it
 /// and what it wrote;
 /// `owner`: it owns the ticket, so a board member's message that names nobody is
-/// addressed to it too (B3). Only the prompt: the clients always show the whole thread.
+/// addressed to it too (B3). A board member's `@Everyone` is addressed to everyone,
+/// though it woke only one: this is how the others are in the know. Only the prompt: the clients always show the whole thread.
 pub fn scoped_view(lines: &[ViewLine<'_>], me: (EmployeeId, &str), team: &[(EmployeeId, String)], lead: bool, owner: bool) -> Option<Vec<usize>> {
     if lead {
         return None;
@@ -280,7 +281,7 @@ pub fn scoped_view(lines: &[ViewLine<'_>], me: (EmployeeId, &str), team: &[(Empl
             .iter()
             .zip(&named)
             .enumerate()
-            .filter(|(_, (line, named))| mine(line) || line.to == Some(me.0) || named.contains(&me.0) || (owner && line.employee.is_none() && named.is_empty()))
+            .filter(|(_, (line, named))| mine(line) || line.to == Some(me.0) || named.contains(&me.0) || (line.employee.is_none() && (names_everyone(line.text) || (owner && named.is_empty()))))
             .map(|(index, _)| index)
             .collect(),
     )
@@ -335,6 +336,14 @@ mod tests {
         assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, false, false), Some(vec![1, 2]));
         // The owner also has what a board member wrote to nobody in particular (B3).
         assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, false, true), Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn a_board_members_everyone_is_in_everyones_scoped_view_an_employees_is_not() {
+        let (ann, bo) = (EmployeeId::new(), EmployeeId::new());
+        let team = vec![(ann, "Ann".to_owned()), (bo, "Bo".to_owned())];
+        let lines = [line(None, "@Bo look"), line(None, "@Everyone standup"), line(Some("Bo"), "@everyone done")];
+        assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, false, false), Some(vec![1]));
     }
 
     #[test]

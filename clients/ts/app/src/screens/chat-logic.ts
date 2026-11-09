@@ -176,9 +176,14 @@ export function unknownMentions(text: string, people: Mentionable[], archived: s
     .filter((n) => archived.some((a) => same(a, n)) || !people.some((p) => same(p.name, n)));
 }
 
-/** The line under the composer for `@Everyone`: whom the message wakes and tells. */
-export function audienceLine(a: { employees: number; paused: number; board_members: number }): string {
+/** The line under the composer for `@Everyone`: whom the message wakes and tells. Without `coordinator`: an older server, which wakes them all. */
+export function audienceLine(a: { employees: number; paused: number; board_members: number; coordinator?: string | null }): string {
   const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  if (a.coordinator) {
+    const paused = a.paused > 0 ? ` (${a.paused} paused)` : "";
+    const told = a.board_members > 0 ? `, ${plural(a.board_members, "board member")} ${a.board_members === 1 ? "is" : "are"} told` : "";
+    return `${a.coordinator} picks who follows up; ${plural(a.employees, "employee")} can read along${paused}${told}`;
+  }
   const woken = a.employees === 0 ? "Wakes no employees" : `Wakes ${plural(a.employees, "employee")}`;
   const paused = a.paused > 0 ? ` (${a.paused} paused)` : "";
   const board = a.board_members > 0 ? ` and tells ${plural(a.board_members, "board member")}` : "";

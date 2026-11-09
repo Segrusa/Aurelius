@@ -23,6 +23,10 @@
 //! * Held handoffs (R5): a handoff from an employee that still has unread items in
 //!   the thread waits, with a line that says so (`system_action::HANDOFF_HELD`), and goes
 //!   out unchanged once that employee has caught up (`release_handoffs`).
+//! * `@Everyone` of a board member: one employee is woken, the coordinator
+//!   (`coordinator_of`), who answers or hands over; anyone it also names is woken
+//!   too, once. The others are not woken: the message is in their scoped view
+//!   when they are woken in this thread later. The board members are told.
 //! * How: the message, with the latest messages of the discussion (a JSON list,
 //!   so no message can pass for another or for a board member's), goes to each
 //!   of them as an update (`[Group chat · from …]`) in their own conversation for
@@ -224,10 +228,13 @@ struct Addressees {
     awake: Vec<(EmployeeId, String)>,
     paused: Vec<String>,
     owner: Option<(EmployeeId, String)>,
+    /// The message has `@Everyone` and this employee coordinates it (`coordinator_of`).
+    coordinator: Option<EmployeeId>,
 }
 
-/// Who `@Everyone` reaches in a discussion: the employees (not archived; paused
-/// ones too, they get the paused line) and the active board members in it.
+/// Who knows of an `@Everyone` in a discussion: the employees (not archived; paused
+/// ones too, they get the paused line), who read it when next woken here, and the
+/// active board members in it, who are told. Who it wakes is `coordinator_of`.
 ///
 /// * The general channel and a project's channel have no member list: every
 ///   board member and every employee reads them, so every one is in them.
@@ -267,6 +274,25 @@ pub(crate) fn audience(conn: &rusqlite::Connection, d: &Discussion) -> Result<Au
     })
 }
 
+/// The one employee a board member's `@Everyone` in `d` wakes, the first active one
+/// of: a ticket's owner; on a ticket or in a project's channel the dispatcher; the
+/// CEO. `team` is `team(conn)`. None when there is nobody.
+fn coordinator_of(conn: &rusqlite::Connection, d: &Discussion, team: &[(EmployeeId, String, bool)]) -> Result<Option<EmployeeId>, StorageError> {
+    let active = |id: &EmployeeId| team.iter().any(|(e, _, active)| e == id && *active);
+    if let Some(owner) = d.ticket().and_then(|t| t.owner).filter(active) {
+        return Ok(Some(owner));
+    }
+    let project = match &d.place {
+        Place::General => None,
+        Place::Project { project, .. } => Some(*project),
+        Place::Ticket(t) => Some(t.project),
+    };
+    if let Some(dispatcher) = project.map(|p| aurelius_storage::company::dispatcher_for(conn, p)).transpose()?.flatten().filter(active) {
+        return Ok(Some(dispatcher));
+    }
+    Ok(ceo(conn)?.filter(active))
+}
+
 /// The audience of the discussion `channel` (none: the general channel) for the
 /// board member `reader`, who is not counted: what `discussion.audience` answers.
 /// None when the discussion does not exist.
@@ -277,7 +303,9 @@ pub fn discussion_audience(conn: &rusqlite::Connection, channel: Option<Conversa
     };
     let Some(d) = d else { return Ok(None) };
     let a = audience(conn, &d)?;
-    let mut out = aurelius_domain::views::DiscussionAudience::default();
+    let team = team(conn)?;
+    let coordinator = coordinator_of(conn, &d, &team)?.and_then(|c| team.into_iter().find(|(id, _, _)| *id == c)).map(|(_, name, _)| name);
+    let mut out = aurelius_domain::views::DiscussionAudience { coordinator, ..Default::default() };
     for (_, name, active) in a.employees {
         let (count, names) = if active { (&mut out.employees, &mut out.employee_names) } else { (&mut out.paused, &mut out.paused_names) };
         *count += 1;
@@ -304,17 +332,17 @@ fn addressees(conn: &rusqlite::Connection, d: &Discussion, text: &str) -> Result
     let team = team(conn)?;
     let names: Vec<(EmployeeId, String)> = team.iter().map(|(id, name, _)| (*id, name.clone())).collect();
     let mut chosen = group::mentions(text, &names);
-    // `@Everyone` adds everyone in the thread to those named, each once. It wins over
-    // an employee called Everyone: that one is woken as part of it (or named as `@Everyone`
-    // in the audience), never twice. A board member's message only: this is `addressees`.
+    let mut out = Addressees::default();
+    // `@Everyone` adds the one coordinator to those named, once: the others only read it.
+    // It wins over an employee called Everyone, who is not named by it. A board member's
+    // message only: this is `addressees`.
     if group::names_everyone(text) {
-        for (id, _, _) in audience(conn, d)?.employees {
-            if !chosen.contains(&id) {
-                chosen.push(id);
-            }
+        chosen.retain(|id| !team.iter().any(|(e, name, _)| e == id && name.eq_ignore_ascii_case(group::EVERYONE_MENTION)));
+        out.coordinator = coordinator_of(conn, d, &team)?;
+        if let Some(coordinator) = out.coordinator.filter(|c| !chosen.contains(c)) {
+            chosen.push(coordinator);
         }
     }
-    let mut out = Addressees::default();
     match &d.place {
         Place::Ticket(t) if owner_answers(t) => {
             let owner = t.owner.expect("owner_answers needs one");
@@ -748,6 +776,8 @@ struct Wake<'a> {
     thread: Option<MessageId>,
     /// What stands in front of a colleague's text, in place of "handed this over" (`schedule_message`).
     lead_in: Option<String>,
+    /// Who coordinates this `@Everyone` (`coordinator_of`) and gets `EVERYONE_NOTE`.
+    coordinator: Option<EmployeeId>,
 }
 
 /// The thread key of a discussion (`employee_threads`, `employee_inbox`).
@@ -766,6 +796,10 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     let Some(chat) = aurelius_storage::inbox::thread_conversation(tx, employee, &thread_key(w.discussion), &w.discussion.label())? else { return Ok(None) };
     let (d, from, shared, hop) = (w.discussion, w.from, &w.shared, w.hop);
     let mut body = wake_body(w, employee, w.view.for_employee(employee));
+    // Not in a quick answer's body: that run has no tools to hand over with.
+    if w.coordinator == Some(employee) {
+        body.push_str(&format!("\n\n---\n{EVERYONE_NOTE}"));
+    }
     let place = if w.thread.is_some() { format!("that thread of {}", d.label()) } else { d.label() };
     body.push_str(&format!("\n\n---\n{name}: your answer is posted in {place} under your name. Keep it short."));
     let (update, posted) = crate::task::task_threads::post_note(tx, store, chat, crate::task::task_threads::Speaker::Update { kind: GROUP_KIND, from }, &body)?;
@@ -828,6 +862,9 @@ fn wake_body(w: &Wake<'_>, employee: EmployeeId, context: ThreadContext) -> Stri
     body
 }
 
+/// What the coordinator of an `@Everyone` reads, as a woken employee and as the owner in its main task.
+const EVERYONE_NOTE: &str = "This message was addressed to everyone in this thread with @Everyone, and you coordinate it: the others were not woken, unless it names them. Answer it yourself, or use hand_off to the colleague who should follow up. Do not wake several colleagues unless that is really needed.";
+
 /// What separates a copied message from the line that says where to answer it.
 const OWNER_FOOTER_MARK: &str = "\n\n---\n";
 /// How much of a question typed in the task's conversation `owner_answer` quotes.
@@ -853,7 +890,7 @@ const OWNER_QUOTE_CHARS: usize = 200;
 /// A reply in a thread says so, and the update keeps the discussion and the
 /// thread (`thread_parent` in its meta): what the owner posts with
 /// `post_to_discussion` after it goes into that thread (`run_thread`).
-fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &str, text: &str, thread: Option<MessageId>, source: MessageId, busy_in: &mut Option<ConversationId>) -> Result<Option<Vec<EventNotice>>, StorageError> {
+fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &str, text: &str, thread: Option<MessageId>, source: MessageId, coordinates: bool, busy_in: &mut Option<ConversationId>) -> Result<Option<Vec<EventNotice>>, StorageError> {
     use aurelius_domain::task::TaskStatus;
     let Some(root) = t.root_task else { return Ok(Some(vec![])) };
     let Some(row) = aurelius_storage::tasks::load_task(tx, root)? else { return Ok(Some(vec![])) };
@@ -865,7 +902,9 @@ fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &
         return Ok(Some(vec![]));
     }
     let place = if thread.is_some() { "a thread in the discussion" } else { "the discussion" };
-    let body = format!("{}{OWNER_FOOTER_MARK}From {place} of ticket #{}. Answer the board member there with post_to_discussion.", text.trim(), t.number);
+    // The note stays inside the footer: an edit of the message keeps what follows the last mark.
+    let note = if coordinates { format!(" {EVERYONE_NOTE}") } else { String::new() };
+    let body = format!("{}{OWNER_FOOTER_MARK}From {place} of ticket #{}. Answer the board member there with post_to_discussion.{note}", text.trim(), t.number);
     let extra = serde_json::json!({ "discussion": d.id, "thread_parent": thread, "from_message": source });
     let (message, posted) = crate::task::task_threads::post_returning_with(tx, store, conversation, root, crate::task::task_threads::Speaker::Update { kind: "message", from }, &body, extra)?;
     let mut notices = vec![posted];
@@ -1376,7 +1415,7 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
     let mut ended = None;
     let mut owner_busy = None;
     if let (Some((owner, _)), Some(t)) = (&named.owner, d.ticket()) {
-        match to_owner(tx, store, d, t, user.as_deref().unwrap_or(OWNER), text, thread, message, &mut owner_busy)? {
+        match to_owner(tx, store, d, t, user.as_deref().unwrap_or(OWNER), text, thread, message, named.coordinator == Some(*owner), &mut owner_busy)? {
             Some(n) => {
                 notices.extend(n);
                 sent.to.push(*owner);
@@ -1385,7 +1424,7 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
         }
     }
     let read = reader(store);
-    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, view: ThreadView::read(tx, &read, d, thread, Some(message))?, hop: 0, login, thread, lead_in: None };
+    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, view: ThreadView::read(tx, &read, d, thread, Some(message))?, hop: 0, login, thread, lead_in: None, coordinator: named.coordinator };
     // The owner is mid-run: the board member hears it at once, and gets a quick answer.
     if let (Some(_), Some((owner, owner_name))) = (owner_busy, &named.owner) {
         notices.extend(busy_notices(tx, store, meta, correlation, (*owner, owner_name), &w)?);
@@ -1582,7 +1621,7 @@ fn deliver_handoff(tx: &Tx<'_>, store: &Store, h: Handoff<'_>) -> Result<Vec<Eve
     let run = h.run.to_string();
     notices.extend(follow_named(tx, d, h.text, employee_cause(&run))?);
     let read = reader(store);
-    let w = Wake { discussion: d, from: h.from.1, board: None, text: h.text, shared: Shared::default(), view: ThreadView::read(tx, &read, d, h.thread, Some(posted))?, hop: h.hop, login: h.login, thread: h.thread, lead_in: None };
+    let w = Wake { discussion: d, from: h.from.1, board: None, text: h.text, shared: Shared::default(), view: ThreadView::read(tx, &read, d, h.thread, Some(posted))?, hop: h.hop, login: h.login, thread: h.thread, lead_in: None, coordinator: None };
     let meta = serde_json::json!({ "run_id": h.run, "group_post": posted });
     if let Some((_, woken)) = wake(tx, store, &meta, &run, h.to, &w)? {
         notices.extend(woken);
@@ -1602,7 +1641,7 @@ pub(crate) fn deliver_scheduled(tx: &Tx<'_>, store: &Store, d: &Discussion, m: &
     let mut notices = vec![post_in(tx, store, d.id, m.thread_parent, posted, GROUP_KIND, from, &body, extra)?];
     let read = reader(store);
     let lead_in = if own { "You scheduled this for yourself earlier".to_owned() } else { format!("{from} scheduled this for you earlier") };
-    let w = Wake { discussion: d, from, board: None, text: &m.content, shared: Shared::default(), view: ThreadView::read(tx, &read, d, m.thread_parent, Some(posted))?, hop: m.hop, login: m.login_user, thread: m.thread_parent, lead_in: Some(lead_in) };
+    let w = Wake { discussion: d, from, board: None, text: &m.content, shared: Shared::default(), view: ThreadView::read(tx, &read, d, m.thread_parent, Some(posted))?, hop: m.hop, login: m.login_user, thread: m.thread_parent, lead_in: Some(lead_in), coordinator: None };
     // Named even when empty: a run without a login waits for one, it never takes another.
     let meta = serde_json::json!({ "scheduled": m.id, "group_post": posted, "login_user": m.login_user });
     let Some((run, woken)) = wake(tx, store, &meta, &m.id.to_string(), (m.to, to), &w)? else { return Ok(None) };

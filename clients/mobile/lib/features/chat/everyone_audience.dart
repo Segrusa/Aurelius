@@ -8,7 +8,7 @@ import '../../data/everyone.dart';
 import '../../data/protocol/models.dart';
 
 /// Under the composer: whom the `@Everyone` in the text reaches, before it is
-/// sent ("Wakes 5 employees (1 paused) and notifies 2 board members").
+/// sent ("Orion picks who follows up; 5 employees can read along, 2 board members are told").
 ///
 /// It asks [load] once per thread ([channel]: the channel's or discussion's
 /// conversation, null General) after the text starts to contain `@Everyone`,

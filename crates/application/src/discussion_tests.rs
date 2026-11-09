@@ -1470,54 +1470,109 @@ fn audience_of(s: &Setup, channel: Option<ConversationId>, reader: Option<UserId
     s.service.store().read(move |c| discussion::discussion_audience(c, channel, reader)).unwrap().expect("a discussion")
 }
 
+fn set_dispatcher(s: &Setup, employee: EmployeeId) {
+    exec(s, Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: Some(employee) }) })).unwrap();
+}
+
 #[test]
-fn everyone_in_a_channel_wakes_every_active_employee_once_and_a_paused_one_not() {
+fn everyone_in_a_channel_wakes_only_the_ceo_or_the_dispatcher() {
     let s = setup();
     let ada = second_board_member(&s);
-    pause(&s, s.cy);
-    // Ann is named twice and as @everyone's own name: still one run each.
-    let (to, runs) = send(&s, None, "@Ann @ann and @EVERYONE: standup now").unwrap();
-    let mut expected = vec![s.ceo, s.ann, s.bo];
-    expected.sort_by_key(|e| e.to_string());
-    let mut got = to.clone();
-    got.sort_by_key(|e| e.to_string());
-    assert_eq!((got, runs.len()), (expected, 3), "the paused Cy is not woken, the sender is no employee");
-    for e in [s.ceo, s.ann, s.bo] {
-        assert_eq!(woken(&s, e).len(), 1, "once");
+    let (to, runs) = send(&s, None, "@EVERYONE: standup now").unwrap();
+    assert_eq!((to, runs.len()), (vec![s.ceo], 1), "the general channel: the CEO");
+    for e in [s.ann, s.bo, s.cy] {
+        assert!(woken(&s, e).is_empty());
     }
-    assert!(woken(&s, s.cy).is_empty());
+    assert!(wake_text(&s, s.ceo).contains("hand_off"), "{}", wake_text(&s, s.ceo));
     // The other board member is told, the sender (grace) is not.
     assert_eq!(mentioned_users(&s), vec![ada.to_string()]);
+    let project = channel(&s, s.project);
+    let (to, runs) = send(&s, Some(project), "@Everyone hi").unwrap();
+    assert_eq!((to, runs.len()), (vec![s.ceo], 1), "a project without a dispatcher: the CEO");
+    set_dispatcher(&s, s.bo);
+    let (to, runs) = send(&s, Some(project), "@Everyone hi").unwrap();
+    assert_eq!((to, runs.len()), (vec![s.bo], 1), "the project's dispatcher");
+    // Even with a dispatcher, the general channel is the CEO's.
+    let (to, _) = send(&s, None, "@Everyone hi").unwrap();
+    assert_eq!(to, vec![s.ceo]);
     // Not a word on its own: an email address and a longer name are no @Everyone.
-    let (to, _) = send(&s, Some(channel(&s, s.project)), "mail everyone@example.com or @everyone2 or @Everyone-else").unwrap();
-    assert_eq!(to, vec![s.ceo], "only the dispatcher fallback (the CEO) answers: no @Everyone in it");
+    let (to, _) = send(&s, Some(project), "mail everyone@example.com or @everyone2 or @Everyone-else").unwrap();
+    assert_eq!(to, vec![s.bo], "the dispatcher answers as for any message");
+    assert!(!wake_text(&s, s.bo).contains("hand_off"), "{}", wake_text(&s, s.bo));
     assert!(mentioned_users(&s).is_empty());
 }
 
 #[test]
-fn everyone_in_a_ticket_reaches_its_owner_workers_and_writers_and_the_board_members_of_it() {
+fn everyone_with_a_name_wakes_that_one_and_the_coordinator_once_each() {
+    let s = setup();
+    let (to, runs) = send(&s, None, "@Ann @ann and @Everyone look").unwrap();
+    assert_eq!(runs.len(), 2);
+    assert!(to.contains(&s.ann) && to.contains(&s.ceo), "{to:?}");
+    assert!(!wake_text(&s, s.ann).contains("hand_off"), "only the coordinator is asked to coordinate");
+    // Naming the coordinator too: still one run.
+    let (to, runs) = send(&s, None, "@Atlas @Everyone look").unwrap();
+    assert_eq!((to, runs.len()), (vec![s.ceo], 1));
+}
+
+#[test]
+fn a_paused_coordinator_falls_through_to_the_next() {
+    let s = setup();
+    set_dispatcher(&s, s.bo);
+    let t = new_ticket(&s, "Login", Some(s.ann));
+    pause(&s, s.ann);
+    let (to, runs) = post(&s, t, "@Everyone please look").unwrap();
+    assert_eq!((to, runs.len()), (vec![s.bo], 1), "the paused owner: the dispatcher");
+    pause(&s, s.bo);
+    let (to, runs) = post(&s, t, "@Everyone please look").unwrap();
+    assert_eq!((to, runs.len()), (vec![s.ceo], 1), "the paused dispatcher: the CEO");
+    pause(&s, s.ceo);
+    let conversation = ticket_view(&s, t).conversation_id.unwrap();
+    let (to, runs) = post(&s, t, "@Everyone please look").unwrap();
+    assert_eq!((to, runs.len()), (vec![], 0), "nobody is left");
+    assert!(system_lines(&s, conversation).last().unwrap().1.starts_with("Nobody was woken"), "{:?}", system_lines(&s, conversation));
+}
+
+#[test]
+fn everyone_on_a_ticket_wakes_the_owner_or_without_one_the_dispatcher() {
     let s = setup();
     let ada = second_board_member(&s);
     let t = new_ticket(&s, "Login", Some(s.ann));
-    // Bo wrote in the discussion; Cy is only named, Atlas is nowhere in it.
-    let (_, runs) = post(&s, t, "@Bo thoughts? and @Cy FYI").unwrap();
+    // Bo wrote in the discussion: in the thread, but not woken by @Everyone.
+    let (_, runs) = post(&s, t, "@Bo thoughts?").unwrap();
     let (ok, text) = post_in_discussion(&s, runs[0], "Looks fine.");
     assert!(ok, "{text}");
     // Ada follows the ticket.
     s.service.store().write(move |tx| aurelius_storage::followers::follow(tx, t, ada, aurelius_storage::followers::FollowReason::Manual, 5).map(|_| ())).unwrap();
-    let before_ann = woken(&s, s.ann).len();
-    let (to, _) = post(&s, t, "@Everyone please look").unwrap();
-    let mut got = to;
-    got.sort_by_key(|e| e.to_string());
-    let mut expected = vec![s.ann, s.bo];
-    expected.sort_by_key(|e| e.to_string());
-    assert_eq!(got, expected, "the owner and the writer: not Cy (only named) and not Atlas");
-    assert_eq!(woken(&s, s.cy).len(), 1, "Cy was woken only by the earlier @Cy");
-    assert!(woken(&s, s.ceo).is_empty());
-    // Backlog: the owner is not in the B3 path, so woken as an employee named, once.
-    assert_eq!(woken(&s, s.ann).len(), before_ann + 1);
+    let before_bo = woken(&s, s.bo).len();
+    let (to, runs) = post(&s, t, "@Everyone please look").unwrap();
+    assert_eq!((to, runs.len()), (vec![s.ann], 1), "Backlog: the owner, woken as an employee named");
+    assert!(wake_text(&s, s.ann).contains("hand_off"), "{}", wake_text(&s, s.ann));
+    assert_eq!(woken(&s, s.bo).len(), before_bo);
     assert_eq!(mentioned_users(&s), vec![ada.to_string()]);
     assert!(s.service.store().read(move |c| aurelius_storage::followers::is_following(c, t, ada)).unwrap(), "Ada follows as if named");
+    // Bo, woken later, reads the @Everyone.
+    post(&s, t, "@Bo and now?").unwrap();
+    assert!(wake_text(&s, s.bo).contains("@Everyone please look"), "{}", wake_text(&s, s.bo));
+
+    let without = new_ticket(&s, "No owner", None);
+    let (to, _) = post(&s, without, "@Everyone anyone?").unwrap();
+    assert_eq!(to, vec![s.ceo], "no owner, no dispatcher: the CEO");
+    set_dispatcher(&s, s.cy);
+    let (to, _) = post(&s, without, "@Everyone anyone?").unwrap();
+    assert_eq!(to, vec![s.cy], "no owner: the dispatcher");
+}
+
+#[test]
+fn the_owner_as_coordinator_gets_the_instruction_in_its_main_task() {
+    let s = setup();
+    let (t, _, conversation, _) = started_ticket(&s);
+    let (to, runs) = post(&s, t, "@Everyone status?").unwrap();
+    assert_eq!((to, runs), (vec![s.ann], vec![]), "through the main task: no run of its own");
+    let note = messages(&s, conversation).into_iter().last().unwrap();
+    assert!(note.text.starts_with("@Everyone status?") && note.text.contains("post_to_discussion") && note.text.contains("hand_off"), "{}", note.text);
+    post(&s, t, "Plain question").unwrap();
+    let note = messages(&s, conversation).into_iter().last().unwrap();
+    assert!(!note.text.contains("hand_off"), "{}", note.text);
 }
 
 #[test]
@@ -1546,12 +1601,15 @@ fn the_audience_counts_what_everyone_would_do_and_never_the_reader() {
     let general = audience_of(&s, None, Some(s.user));
     assert_eq!((general.employees, general.paused, general.board_members), (3, 1, 1), "{general:?}");
     assert_eq!((general.board_usernames, general.paused_names), (vec!["ada".to_owned()], vec!["Cy".to_owned()]));
+    assert_eq!(general.coordinator.as_deref(), Some("Atlas"));
     let project = audience_of(&s, Some(channel(&s, s.project)), Some(s.user));
     assert_eq!((project.employees, project.paused, project.board_members), (3, 1, 1));
+    assert_eq!(project.coordinator.as_deref(), Some("Atlas"), "no dispatcher");
     let t = new_ticket(&s, "Login", Some(s.ann));
     let d = ticket_view(&s, t).conversation_id.unwrap();
     let ticket = audience_of(&s, Some(d), Some(s.user));
     assert_eq!((ticket.employees, ticket.employee_names, ticket.paused, ticket.board_usernames), (1, vec!["Ann".to_owned()], 0, vec!["ada".to_owned()]), "grace is the reader; ada is an Owner, so a member of every ticket channel");
+    assert_eq!(ticket.coordinator.as_deref(), Some("Ann"));
     let seen_by_ada = audience_of(&s, Some(d), Some(_ada));
     assert_eq!(seen_by_ada.board_usernames, vec!["grace".to_owned()], "the creator is a member of the channel");
     assert!(s.service.store().read(|c| discussion::discussion_audience(c, Some(ConversationId::new()), None)).unwrap().is_none());
