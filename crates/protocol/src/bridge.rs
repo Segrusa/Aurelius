@@ -215,6 +215,11 @@ pub enum EmployeeTaskOp {
     /// A message in a ticket's discussion (the bridge's `post_to_ticket`), as `post_to_group_chat`
     /// does in a channel.
     PostToTicket { ticket: String, message: String },
+    /// A message to itself or a colleague later (the bridge's `schedule_message`): `delay` as
+    /// `10m`, `2h`, `1d`; `to` a name, none for itself. It comes back in the run's thread.
+    ScheduleMessage { delay: String, content: String, #[serde(default, skip_serializing_if = "Option::is_none")] to: Option<String> },
+    /// Replace the employee's own note (the bridge's `scratchpad`), which is in its prompt at every run.
+    Scratchpad { content: String },
     /// Hand the work in the run's thread to a colleague (the bridge's `hand_off`): `to`
     /// a name, `message` self-contained. Waits while the sender has unread items (R5).
     HandOff { to: String, message: String },
@@ -319,6 +324,8 @@ mod tests {
             PostToTicket { .. } => "post_to_ticket",
             HandOff { .. } => "hand_off",
             TellResponsible { .. } => "tell_responsible",
+            ScheduleMessage { .. } => "schedule_message",
+            Scratchpad { .. } => "scratchpad",
         }
     }
 

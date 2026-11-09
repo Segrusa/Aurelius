@@ -1296,6 +1296,23 @@ enum CallStatus {
   String toJson() => wire;
 }
 
+/// `scheduled_message.cancel`: a message an employee scheduled does not go out.
+final class CancelScheduledMessage {
+  const CancelScheduledMessage({
+    required this.messageId,
+  });
+
+  final String messageId;
+
+  factory CancelScheduledMessage.fromJson(Map<String, dynamic> json) => CancelScheduledMessage(
+    messageId: (json['message_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'message_id': messageId,
+  };
+}
+
 final class CancelTask {
   const CancelTask({
     required this.taskId,
@@ -1697,6 +1714,8 @@ sealed class Command {
         );
       case 'attach_file':
         return CommandAttachFile(value: AttachFile.fromJson(json as Map<String, dynamic>));
+      case 'cancel_scheduled_message':
+        return CommandCancelScheduledMessage(value: CancelScheduledMessage.fromJson(json as Map<String, dynamic>));
       case 'cancel_task':
         return CommandCancelTask(value: CancelTask.fromJson(json as Map<String, dynamic>));
       case 'cancel_ticket':
@@ -2142,6 +2161,20 @@ final class CommandAttachFile extends Command {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'attach_file',
+      ...value.toJson(),
+    };
+}
+
+final class CommandCancelScheduledMessage extends Command {
+  const CommandCancelScheduledMessage({
+    required this.value,
+  });
+
+  final CancelScheduledMessage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'cancel_scheduled_message',
       ...value.toJson(),
     };
 }
@@ -3787,6 +3820,10 @@ sealed class CommandResult {
         );
       case 'run_defaults_set':
         return const CommandResultRunDefaultsSet();
+      case 'scheduled_message_cancelled':
+        return CommandResultScheduledMessageCancelled(
+          messageId: (json['message_id'] as String),
+        );
       case 'screen_allowed_set':
         return CommandResultScreenAllowedSet(
           allowed: (json['allowed'] as bool),
@@ -4737,6 +4774,20 @@ final class CommandResultRunDefaultsSet extends CommandResult {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'run_defaults_set',
+    };
+}
+
+final class CommandResultScheduledMessageCancelled extends CommandResult {
+  const CommandResultScheduledMessageCancelled({
+    required this.messageId,
+  });
+
+  final String messageId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'scheduled_message_cancelled',
+      'message_id': messageId,
     };
 }
 
@@ -11577,6 +11628,13 @@ sealed class Method {
         }
       case 'employee.list':
         return const MethodEmployeeList();
+      case 'employee.scratchpad':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodEmployeeScratchpad(
+          employeeId: (src['employee_id'] as String),
+        );
+        }
       case 'event.subscribe':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11829,6 +11887,8 @@ sealed class Method {
           runId: (src['run_id'] as String),
         );
         }
+      case 'scheduled_message.list':
+        return const MethodScheduledMessageList();
       case 'screenshot.get':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11941,6 +12001,14 @@ sealed class Method {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodThreadRead(
           messageId: (src['message_id'] as String),
+        );
+        }
+      case 'thread.waiting':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodThreadWaiting(
+          conversationId: (src['conversation_id'] == null ? null : (src['conversation_id'] as String)),
+          ticketId: (src['ticket_id'] == null ? null : (src['ticket_id'] as String)),
         );
         }
       case 'ticket.followers':
@@ -12383,6 +12451,23 @@ final class MethodEmployeeList extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'employee.list',
+    };
+}
+
+/// An employee's scratchpad (feature `employee_scratchpad`).
+final class MethodEmployeeScratchpad extends Method {
+  const MethodEmployeeScratchpad({
+    required this.employeeId,
+  });
+
+  final String employeeId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.scratchpad',
+      'params': <String, dynamic>{
+      'employee_id': employeeId,
+    },
     };
 }
 
@@ -13083,6 +13168,16 @@ final class MethodRunGuidelines extends Method {
     };
 }
 
+/// Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+final class MethodScheduledMessageList extends Method {
+  const MethodScheduledMessageList();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'scheduled_message.list',
+    };
+}
+
 /// A screenshot the agent took (the id is in its screenshot tool's output).
 final class MethodScreenshotGet extends Method {
   const MethodScreenshotGet({
@@ -13389,6 +13484,27 @@ final class MethodThreadRead extends Method {
       'method': 'thread.read',
       'params': <String, dynamic>{
       'message_id': messageId,
+    },
+    };
+}
+
+/// Who waits to pick up a thread and what is scheduled in it (U3, feature
+/// `scheduled_messages`): a ticket (`ticket_id`) or a channel or chat (`conversation_id`).
+final class MethodThreadWaiting extends Method {
+  const MethodThreadWaiting({
+    this.conversationId,
+    this.ticketId,
+  });
+
+  final String? conversationId;
+  final String? ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'thread.waiting',
+      'params': <String, dynamic>{
+      if (conversationId != null) 'conversation_id': conversationId,
+      if (ticketId != null) 'ticket_id': ticketId,
     },
     };
 }
@@ -15376,6 +15492,8 @@ sealed class ResponseBody {
         return ResponseBodyEmployeeInstructionVersions(value: EmployeeInstructionVersionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_plugins':
         return ResponseBodyEmployeePlugins(value: EmployeePlugins.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_scratchpad':
+        return ResponseBodyEmployeeScratchpad(value: ScratchpadView.fromJson(json['value'] as Map<String, dynamic>));
       case 'employees':
         return ResponseBodyEmployees(value: EmployeesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'file':
@@ -15477,6 +15595,8 @@ sealed class ResponseBody {
           claudeCode: (src['claude_code'] == null ? null : (src['claude_code'] as String)),
         );
         }
+      case 'scheduled_messages':
+        return ResponseBodyScheduledMessages(value: ScheduledMessagesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'screenshot':
         {
           final src = (json['value'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -15518,6 +15638,8 @@ sealed class ResponseBody {
         return ResponseBodyTerminals(value: (json['value'] as List<dynamic>).map((x0) => TerminalSummary.fromJson(x0 as Map<String, dynamic>)).toList());
       case 'thread':
         return ResponseBodyThread(value: ThreadSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'thread_waiting':
+        return ResponseBodyThreadWaiting(value: ThreadWaitingSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'ticket':
         return ResponseBodyTicket(value: TicketDetail.fromJson(json['value'] as Map<String, dynamic>));
       case 'ticket_followers':
@@ -15880,6 +16002,20 @@ final class ResponseBodyEmployeePlugins extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'employee_plugins',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyEmployeeScratchpad extends ResponseBody {
+  const ResponseBodyEmployeeScratchpad({
+    required this.value,
+  });
+
+  final ScratchpadView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_scratchpad',
       'value': value.toJson(),
     };
 }
@@ -16526,6 +16662,20 @@ final class ResponseBodyRuntimeDetected extends ResponseBody {
     };
 }
 
+final class ResponseBodyScheduledMessages extends ResponseBody {
+  const ResponseBodyScheduledMessages({
+    required this.value,
+  });
+
+  final ScheduledMessagesSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'scheduled_messages',
+      'value': value.toJson(),
+    };
+}
+
 /// A screenshot the agent took, as JPEG.
 final class ResponseBodyScreenshot extends ResponseBody {
   const ResponseBodyScreenshot({
@@ -16739,6 +16889,20 @@ final class ResponseBodyThread extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'thread',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyThreadWaiting extends ResponseBody {
+  const ResponseBodyThreadWaiting({
+    required this.value,
+  });
+
+  final ThreadWaitingSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'thread_waiting',
       'value': value.toJson(),
     };
 }
@@ -17115,11 +17279,14 @@ final class RunActivity {
 /// What the run card of a post shows while folded (`MessageView::run`).
 final class RunBrief {
   const RunBrief({
+    this.employeeId,
     required this.failedCalls,
     required this.status,
     required this.toolCalls,
   });
 
+  /// The employee whose run it was, for its scratchpad (feature `employee_scratchpad`).
+  final String? employeeId;
   final int failedCalls;
   /// `runs.status`: created | starting | running | waiting | cancelling | succeeded |
   /// failed | cancelled | unknown. A string, so a new state never breaks a client.
@@ -17127,12 +17294,14 @@ final class RunBrief {
   final int toolCalls;
 
   factory RunBrief.fromJson(Map<String, dynamic> json) => RunBrief(
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
     failedCalls: (json['failed_calls'] as num).toInt(),
     status: (json['status'] as String),
     toolCalls: (json['tool_calls'] as num).toInt(),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (employeeId != null) 'employee_id': employeeId,
     'failed_calls': failedCalls,
     'status': status,
     'tool_calls': toolCalls,
@@ -17366,6 +17535,132 @@ final class RunTrace {
     'tools': tools,
     if (usage != null) 'usage': usage?.toJson(),
     'user_turn': userTurn,
+  };
+}
+
+/// A message an employee scheduled (`schedule_message`, R7; feature `scheduled_messages`).
+final class ScheduledMessageView {
+  const ScheduledMessageView({
+    this.channelId,
+    required this.createdAtMs,
+    required this.dueAtMs,
+    required this.fromEmployee,
+    required this.fromName,
+    required this.id,
+    this.loginName,
+    this.outcome,
+    required this.place,
+    this.runId,
+    required this.state,
+    required this.text,
+    this.ticketId,
+    required this.toEmployee,
+    required this.toName,
+  });
+
+  /// The channel of the Team chat it goes to.
+  final String? channelId;
+  final int createdAtMs;
+  final int dueAtMs;
+  final String fromEmployee;
+  final String fromName;
+  final String id;
+  /// Whose Claude login its run uses: the one of the run that planned it.
+  final String? loginName;
+  /// Why it did not go out.
+  final String? outcome;
+  /// Where it goes, in words ("the discussion of ticket #21").
+  final String place;
+  /// The run it started.
+  final String? runId;
+  /// scheduled | delivered | cancelled | not_delivered. A string, so a new state never breaks a client.
+  final String state;
+  final String text;
+  final String? ticketId;
+  final String toEmployee;
+  final String toName;
+
+  factory ScheduledMessageView.fromJson(Map<String, dynamic> json) => ScheduledMessageView(
+    channelId: (json['channel_id'] == null ? null : (json['channel_id'] as String)),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    dueAtMs: (json['due_at_ms'] as num).toInt(),
+    fromEmployee: (json['from_employee'] as String),
+    fromName: (json['from_name'] as String),
+    id: (json['id'] as String),
+    loginName: (json['login_name'] == null ? null : (json['login_name'] as String)),
+    outcome: (json['outcome'] == null ? null : (json['outcome'] as String)),
+    place: (json['place'] as String),
+    runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
+    state: (json['state'] as String),
+    text: (json['text'] as String),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+    toEmployee: (json['to_employee'] as String),
+    toName: (json['to_name'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (channelId != null) 'channel_id': channelId,
+    'created_at_ms': createdAtMs,
+    'due_at_ms': dueAtMs,
+    'from_employee': fromEmployee,
+    'from_name': fromName,
+    'id': id,
+    if (loginName != null) 'login_name': loginName,
+    if (outcome != null) 'outcome': outcome,
+    'place': place,
+    if (runId != null) 'run_id': runId,
+    'state': state,
+    'text': text,
+    if (ticketId != null) 'ticket_id': ticketId,
+    'to_employee': toEmployee,
+    'to_name': toName,
+  };
+}
+
+/// `scheduled_message.list`: what waits, soonest first, then the latest that went out.
+final class ScheduledMessagesSnapshot {
+  const ScheduledMessagesSnapshot({
+    required this.asOfSeq,
+    required this.messages,
+  });
+
+  final int asOfSeq;
+  final List<ScheduledMessageView> messages;
+
+  factory ScheduledMessagesSnapshot.fromJson(Map<String, dynamic> json) => ScheduledMessagesSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    messages: (json['messages'] as List<dynamic>).map((x0) => ScheduledMessageView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'messages': messages.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// `employee.scratchpad`: an employee's own note (C7; feature `employee_scratchpad`).
+final class ScratchpadView {
+  const ScratchpadView({
+    required this.employeeId,
+    required this.text,
+    this.updatedAtMs,
+  });
+
+  final String employeeId;
+  final String text;
+  /// When it last changed; none when it was never written.
+  final int? updatedAtMs;
+
+  factory ScratchpadView.fromJson(Map<String, dynamic> json) => ScratchpadView(
+    employeeId: (json['employee_id'] as String),
+    text: (json['text'] as String),
+    updatedAtMs: (json['updated_at_ms'] == null ? null : (json['updated_at_ms'] as num).toInt()),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'employee_id': employeeId,
+    'text': text,
+    if (updatedAtMs != null) 'updated_at_ms': updatedAtMs,
   };
 }
 
@@ -19777,6 +20072,63 @@ final class ThreadSnapshot {
     if (readOnly != null) 'read_only': readOnly,
     'replies': replies.map((x0) => x0.toJson()).toList(),
     'root': root.toJson(),
+  };
+}
+
+/// An employee that waits to pick up a thread (U3).
+final class ThreadWaiter {
+  const ThreadWaiter({
+    required this.behind,
+    required this.employeeId,
+    required this.employeeName,
+    this.reason,
+  });
+
+  /// How many threads of this employee go first, counting what it is doing now.
+  final int behind;
+  final String employeeId;
+  final String employeeName;
+  /// What holds it back besides its turn: `limit` (a usage limit), `question`
+  /// (the thread waits for a board member's answer). A string, so a new one never breaks a client.
+  final String? reason;
+
+  factory ThreadWaiter.fromJson(Map<String, dynamic> json) => ThreadWaiter(
+    behind: (json['behind'] as num).toInt(),
+    employeeId: (json['employee_id'] as String),
+    employeeName: (json['employee_name'] as String),
+    reason: (json['reason'] == null ? null : (json['reason'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'behind': behind,
+    'employee_id': employeeId,
+    'employee_name': employeeName,
+    if (reason != null) 'reason': reason,
+  };
+}
+
+/// `thread.waiting`: who waits to pick up a thread and what is scheduled in it (U3, R7).
+final class ThreadWaitingSnapshot {
+  const ThreadWaitingSnapshot({
+    required this.asOfSeq,
+    required this.scheduled,
+    required this.waiters,
+  });
+
+  final int asOfSeq;
+  final List<ScheduledMessageView> scheduled;
+  final List<ThreadWaiter> waiters;
+
+  factory ThreadWaitingSnapshot.fromJson(Map<String, dynamic> json) => ThreadWaitingSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    scheduled: (json['scheduled'] as List<dynamic>).map((x0) => ScheduledMessageView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    waiters: (json['waiters'] as List<dynamic>).map((x0) => ThreadWaiter.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'scheduled': scheduled.map((x0) => x0.toJson()).toList(),
+    'waiters': waiters.map((x0) => x0.toJson()).toList(),
   };
 }
 

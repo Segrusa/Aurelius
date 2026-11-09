@@ -4,7 +4,7 @@
 
 use crate::{
     ApprovalId, AttachmentId, ConversationId, EmployeeId, MemoryId, MessageId, NoteId, ProjectId,
-    ProjectStatus, ProposalId, ProviderId, RunId, TaskId,
+    ProjectStatus, ProposalId, ProviderId, RunId, TaskId, TicketId,
     approval::ApprovalStatus,
     connection::{ConfigScope, Purpose, RunDefaults},
     conversation::{MessageRole, MessageStatus},
@@ -727,6 +727,9 @@ pub struct RunBrief {
     pub status: String,
     pub tool_calls: u32,
     pub failed_calls: u32,
+    /// The employee whose run it was, for its scratchpad (feature `employee_scratchpad`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_id: Option<EmployeeId>,
 }
 
 /// `run.get_activity`: every tool call of a run, for an opened run card (feature `run_cards`).
@@ -1080,6 +1083,75 @@ pub struct ChannelView {
 pub struct ChannelsSnapshot {
     pub as_of_seq: u64,
     pub channels: Vec<ChannelView>,
+}
+
+/// A message an employee scheduled (`schedule_message`, R7; feature `scheduled_messages`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ScheduledMessageView {
+    pub id: crate::ScheduledMessageId,
+    pub from_employee: EmployeeId,
+    pub from_name: String,
+    pub to_employee: EmployeeId,
+    pub to_name: String,
+    pub text: String,
+    pub created_at_ms: i64,
+    pub due_at_ms: i64,
+    /// scheduled | delivered | cancelled | not_delivered. A string, so a new state never breaks a client.
+    pub state: String,
+    /// Where it goes, in words ("the discussion of ticket #21").
+    pub place: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<TicketId>,
+    /// The channel of the Team chat it goes to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<ConversationId>,
+    /// Whose Claude login its run uses: the one of the run that planned it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_name: Option<String>,
+    /// Why it did not go out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    /// The run it started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
+}
+
+/// `scheduled_message.list`: what waits, soonest first, then the latest that went out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ScheduledMessagesSnapshot {
+    pub as_of_seq: u64,
+    pub messages: Vec<ScheduledMessageView>,
+}
+
+/// An employee that waits to pick up a thread (U3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ThreadWaiter {
+    pub employee_id: EmployeeId,
+    pub employee_name: String,
+    /// How many threads of this employee go first, counting what it is doing now.
+    pub behind: u32,
+    /// What holds it back besides its turn: `limit` (a usage limit), `question`
+    /// (the thread waits for a board member's answer). A string, so a new one never breaks a client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// `thread.waiting`: who waits to pick up a thread and what is scheduled in it (U3, R7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ThreadWaitingSnapshot {
+    pub as_of_seq: u64,
+    pub waiters: Vec<ThreadWaiter>,
+    pub scheduled: Vec<ScheduledMessageView>,
+}
+
+/// `employee.scratchpad`: an employee's own note (C7; feature `employee_scratchpad`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ScratchpadView {
+    pub employee_id: EmployeeId,
+    pub text: String,
+    /// When it last changed; none when it was never written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<i64>,
 }
 
 /// One of a board member's lasting chats with an employee (feature `employee_chats`).

@@ -46,6 +46,9 @@ pub struct SessionContext {
     /// set starts a new session, a resumed one never gets other guidelines.
     #[serde(default)]
     pub guidelines: Vec<String>,
+    /// The employee's scratchpad as this session last saw it (C7).
+    #[serde(default)]
+    pub scratchpad: String,
     /// The memories this run's system text has (id, line). Not stored: `memory_ids` is.
     #[serde(skip)]
     pub memories: Vec<(String, String)>,
@@ -277,6 +280,9 @@ pub fn changes(old: &SessionContext, new: &SessionContext, frozen: bool) -> Vec<
     }
     if old.screen != new.screen {
         lines.push(if new.screen { "The user now lets you take screenshots without asking." } else { "Each screenshot is now asked of the user first." }.into());
+    }
+    if old.scratchpad != new.scratchpad {
+        lines.push(if new.scratchpad.is_empty() { "Your scratchpad is empty now.".into() } else { format!("Your scratchpad now reads:\n{}", new.scratchpad) });
     }
     let block = |heading: &str, items: Vec<&String>| (!items.is_empty()).then(|| format!("{heading}\n{}", items.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n")));
     // Lessons are never told in between: they come with the next session's system
@@ -701,6 +707,16 @@ mod tests {
         assert!(turn.text.starts_with("(Since your last answer: Your working mode is now Auto."), "{}", turn.text);
         assert!(turn.text.ends_with("\n\nNext question"));
         assert_eq!(with_note(user_turn("Same"), &[]).text, "Same");
+    }
+
+    #[test]
+    fn a_session_is_told_when_its_scratchpad_changed() {
+        let old = SessionContext { scratchpad: "Focus: A".into(), ..Default::default() };
+        let new = SessionContext { scratchpad: "Focus: B".into(), ..Default::default() };
+        assert_eq!(changes(&old, &new, true), vec!["Your scratchpad now reads:\nFocus: B".to_string()]);
+        assert_eq!(changes(&old, &SessionContext::default(), true), vec!["Your scratchpad is empty now.".to_string()]);
+        assert!(changes(&old, &old, true).is_empty());
+        assert!(changes(&old, &new, false).is_empty(), "its system text has it already");
     }
 
     #[test]

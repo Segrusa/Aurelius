@@ -127,7 +127,7 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     tools.extend(memory_tool_definitions());
     tools.push(suggest_replies_definition());
     tools.extend(project_tool_definitions());
-    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off" | "tell_responsible"))));
+    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off" | "tell_responsible" | "schedule_message" | "scratchpad"))));
     tools.extend(group_chat_tool_definitions());
     tools.extend(vault_tool_definitions());
     tools.extend(board_tool_definitions());
@@ -285,6 +285,8 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
         "hand_off" if !project => EmployeeTaskOp::HandOff { to: text("to"), message: text("message") },
         "tell_responsible" if !project => EmployeeTaskOp::TellResponsible { message: text("message") },
+        "schedule_message" if !project => EmployeeTaskOp::ScheduleMessage { delay: text("delay"), content: text("content"), to: optional("to") },
+        "scratchpad" if !project => EmployeeTaskOp::Scratchpad { content: text("content") },
         "propose_colleague" => EmployeeTaskOp::ProposeColleague {
             name: text("name"),
             role: text("role"),
@@ -638,6 +640,28 @@ fn task_tool_definitions() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "schedule_message",
+            "description": "Send yourself or a colleague a message later, in the thread you work in now: \"check the CI again in 10 minutes\", \"Bo, look at the deploy tomorrow\". It wakes them then with this message, in a ticket's discussion or channel (visible there), or for yourself in your own chat. It uses the login of this run. For what comes back regularly a recurring task is meant; to look around without a reason there is the heartbeat. Limited per run and per thread; the Scheduled page shows what waits and what came of it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "delay": { "type": "string", "description": "When: a number with a unit, 90s, 10m, 2h, 1d or 1h30m. At least a minute, at most 30 days." },
+                    "content": { "type": "string", "description": "The message, self-contained: whoever reads it then does not see this run." },
+                    "to": { "type": "string", "description": "A colleague's name. Leave out for yourself. In your own chat only yourself." }
+                },
+                "required": ["delay", "content"]
+            }
+        }),
+        json!({
+            "name": "scratchpad",
+            "description": "Your scratchpad: one note of your own, always in your prompt in every thread. Replace it with this text (empty clears it). Keep it short and current: what you need everywhere, like your focus or what you are waiting for. Facts of one ticket belong in its discussion, lasting facts in remember.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "content": { "type": "string", "description": "The complete new text." } },
+                "required": ["content"]
+            }
+        }),
+        json!({
             "name": "tell_responsible",
             "description": "On a ticket: send its responsible board member a short message in their private chat with you, when something is for them personally and not for the ticket's discussion. It shows there with a link to this ticket and marked unread. It starts no run, wakes nobody and completes nothing; a question that needs an answer on the ticket belongs in post_to_discussion.",
             "inputSchema": {
@@ -795,6 +819,10 @@ mod tests {
         let names = |project| tool_definitions(project, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(false).contains(&"tell_responsible".to_owned()));
         assert!(!names(true).contains(&"tell_responsible".to_owned()));
+        for tool in ["schedule_message", "scratchpad"] {
+            assert!(names(false).contains(&tool.to_owned()), "{tool}");
+            assert!(!names(true).contains(&tool.to_owned()), "{tool}: the project assistant is nobody");
+        }
     }
 
     #[test]

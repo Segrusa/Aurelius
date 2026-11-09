@@ -665,6 +665,10 @@ pub enum EmployeeAction {
     HandOff { to: String, message: String },
     /// Send the responsible board member of the run's ticket a message in their chat (`employee_chat`).
     TellResponsible { message: String },
+    /// A message to itself or a colleague later in this thread (`conversation::scheduled`).
+    ScheduleMessage { delay: String, content: String, to: Option<String> },
+    /// Replace the employee's own note, which is in its prompt at every run.
+    Scratchpad { content: String },
     /// The dispatcher of a ticket chooses its owner (`triage`; only in a dispatcher's run).
     AssignTicket { employee: String, reason: String },
     /// The tester's verdict on a ticket in Testing (`testing::verdict`; only in
@@ -838,6 +842,13 @@ impl CommandService {
             let message = message.clone();
             return self.store.write(move |tx| crate::conversation::employee_chat::tell_responsible(tx, &st, run, &message)).map_err(storage_error);
         }
+        if let EmployeeAction::ScheduleMessage { delay, content, to } = &action {
+            let (delay, content, to) = (delay.clone(), content.clone(), to.clone());
+            return self.store.write(move |tx| crate::conversation::scheduled::schedule_message(tx, run, &delay, &content, to.as_deref())).map_err(storage_error);
+        }
+        if let EmployeeAction::Scratchpad { content } = &action {
+            return self.write_scratchpad(run, content);
+        }
         if let EmployeeAction::ListTickets { project, column, query, limit } = &action {
             return self
                 .store
@@ -1003,6 +1014,8 @@ impl CommandService {
                     | EmployeeAction::PostToDiscussion { .. }
                     | EmployeeAction::HandOff { .. }
                     | EmployeeAction::TellResponsible { .. }
+                    | EmployeeAction::ScheduleMessage { .. }
+                    | EmployeeAction::Scratchpad { .. }
                     | EmployeeAction::AssignTicket { .. }
                     | EmployeeAction::ReportTestResult { .. }
                     | EmployeeAction::ListTickets { .. }

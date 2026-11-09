@@ -56,6 +56,9 @@ fn method_needs(method: &Method) -> Needs {
         | Method::EmployeeList
         | Method::EmployeeChat { .. }
         | Method::EmployeeChats
+        | Method::ScheduledMessageList
+        | Method::ThreadWaiting { .. }
+        | Method::EmployeeScratchpad { .. }
         | Method::GroupChatGet { .. }
         | Method::ChannelList
         | Method::ChannelSearch { .. }
@@ -307,6 +310,7 @@ fn command_needs(command: &Command) -> Needs {
         | Command::DeleteTaskSchedule(_)
         | Command::SetTaskSchedulePaused(_)
         | Command::RunTaskScheduleNow(_)
+        | Command::CancelScheduledMessage(_)
         | Command::CancelTask(_)
         | Command::AssignTask(_)
         | Command::AddIdea(_)

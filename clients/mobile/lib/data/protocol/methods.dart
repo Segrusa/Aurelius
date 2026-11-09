@@ -134,6 +134,8 @@ abstract final class Methods {
   static const String employeeList = 'employee.list';
   static const String employeeOpenChat = 'employee.open_chat';
   static const String employeeRestoreInstructions = 'employee.restore_instructions';
+  /// An employee's scratchpad (feature `employee_scratchpad`).
+  static const String employeeScratchpad = 'employee.scratchpad';
   static const String employeeSendMessage = 'employee.send_message';
   static const String employeeSetFolder = 'employee.set_folder';
   static const String employeeSetReportsTo = 'employee.set_reports_to';
@@ -347,6 +349,9 @@ abstract final class Methods {
   /// run (the trace's "Guidelines: Rust v3, …"); also without trace mode.
   static const String runGuidelines = 'run.guidelines';
   static const String runStop = 'run.stop';
+  static const String scheduledMessageCancel = 'scheduled_message.cancel';
+  /// Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+  static const String scheduledMessageList = 'scheduled_message.list';
   /// A screenshot the agent took (the id is in its screenshot tool's output).
   static const String screenshotGet = 'screenshot.get';
   static const String secretSet = 'secret.set';
@@ -405,6 +410,9 @@ abstract final class Methods {
   /// the thread (its `thread_unread` goes to none); reading the channel never
   /// does. A message without replies is a thread of none.
   static const String threadRead = 'thread.read';
+  /// Who waits to pick up a thread and what is scheduled in it (U3, feature
+  /// `scheduled_messages`): a ticket (`ticket_id`) or a channel or chat (`conversation_id`).
+  static const String threadWaiting = 'thread.waiting';
   /// Review → Done. Only a board member; only when no linked task still works (B6).
   static const String ticketAccept = 'ticket.accept';
   /// Plan review → Doing: the owner carries the plan out.
@@ -746,6 +754,14 @@ Map<String, dynamic> employeeList() => <String, dynamic>{
   'method': Methods.employeeList,
 };
 
+/// An employee's scratchpad (feature `employee_scratchpad`).
+Map<String, dynamic> employeeScratchpad({required String employeeId}) => <String, dynamic>{
+  'method': Methods.employeeScratchpad,
+  'params': <String, dynamic>{
+    'employee_id': employeeId,
+  },
+};
+
 /// Replay events after `after_seq`, then stream live events (and load/power pushes).
 Map<String, dynamic> eventSubscribe({required int afterSeq}) => <String, dynamic>{
   'method': Methods.eventSubscribe,
@@ -1080,6 +1096,11 @@ Map<String, dynamic> runGuidelines({required String runId}) => <String, dynamic>
   },
 };
 
+/// Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+Map<String, dynamic> scheduledMessageList() => <String, dynamic>{
+  'method': Methods.scheduledMessageList,
+};
+
 /// A screenshot the agent took (the id is in its screenshot tool's output).
 Map<String, dynamic> screenshotGet({required String id}) => <String, dynamic>{
   'method': Methods.screenshotGet,
@@ -1222,6 +1243,16 @@ Map<String, dynamic> threadRead({required String messageId}) => <String, dynamic
   'method': Methods.threadRead,
   'params': <String, dynamic>{
     'message_id': messageId,
+  },
+};
+
+/// Who waits to pick up a thread and what is scheduled in it (U3, feature
+/// `scheduled_messages`): a ticket (`ticket_id`) or a channel or chat (`conversation_id`).
+Map<String, dynamic> threadWaiting({String? conversationId, String? ticketId}) => <String, dynamic>{
+  'method': Methods.threadWaiting,
+  'params': <String, dynamic>{
+    if (conversationId != null) 'conversation_id': conversationId,
+    if (ticketId != null) 'ticket_id': ticketId,
   },
 };
 
@@ -2325,6 +2356,11 @@ Map<String, dynamic> recurringTaskUpdate(UpdateTaskSchedule params) => <String, 
 
 Map<String, dynamic> runStop(StopRun params) => <String, dynamic>{
   'method': Methods.runStop,
+  'params': params.toJson(),
+};
+
+Map<String, dynamic> scheduledMessageCancel(CancelScheduledMessage params) => <String, dynamic>{
+  'method': Methods.scheduledMessageCancel,
   'params': params.toJson(),
 };
 

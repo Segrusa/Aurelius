@@ -56,6 +56,9 @@ pub enum CommandResult {
         employee_id: EmployeeId,
         conversation_id: ConversationId,
     },
+    ScheduledMessageCancelled {
+        message_id: crate::ScheduledMessageId,
+    },
     EmployeeChatOpened {
         conversation_id: ConversationId,
     },

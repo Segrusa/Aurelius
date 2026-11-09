@@ -660,10 +660,14 @@ fn run_of_task_at(conn: &Connection, task: TaskId, at_ms: i64) -> Result<Option<
 fn run_brief(conn: &Connection, run: RunId) -> Result<Option<aurelius_domain::views::RunBrief>, StorageError> {
     Ok(conn
         .query_row(
-            "SELECT r.status, (SELECT COUNT(*) FROM run_activity a WHERE a.run_id = r.id), (SELECT COUNT(*) FROM run_activity a WHERE a.run_id = r.id AND a.ok = 0)
+            "SELECT r.status, (SELECT COUNT(*) FROM run_activity a WHERE a.run_id = r.id), (SELECT COUNT(*) FROM run_activity a WHERE a.run_id = r.id AND a.ok = 0),
+                    COALESCE(r.employee_id, (SELECT c.employee_id FROM conversations c WHERE c.id = r.conversation_id))
              FROM runs r WHERE r.id = ?1",
             [run.to_string()],
-            |r| Ok(aurelius_domain::views::RunBrief { status: r.get(0)?, tool_calls: r.get::<_, i64>(1)? as u32, failed_calls: r.get::<_, i64>(2)? as u32 }),
+            |r| {
+                let employee_id = r.get::<_, Option<String>>(3)?.and_then(|e| aurelius_domain::EmployeeId::parse(&e).ok());
+                Ok(aurelius_domain::views::RunBrief { status: r.get(0)?, tool_calls: r.get::<_, i64>(1)? as u32, failed_calls: r.get::<_, i64>(2)? as u32, employee_id })
+            },
         )
         .optional()?)
 }

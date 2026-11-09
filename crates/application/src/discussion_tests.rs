@@ -1439,3 +1439,6 @@ fn the_odometer_counts_a_tickets_tasks_and_its_discussion_and_each_login() {
 
 #[path = "handoff_tests.rs"]
 mod handoff_tests;
+
+#[path = "scheduled_tests.rs"]
+mod scheduled_tests;

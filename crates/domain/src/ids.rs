@@ -66,6 +66,7 @@ id_type!(AttachmentId);
 id_type!(GrantId);
 id_type!(MemoryId);
 id_type!(ShareId);
+id_type!(ScheduledMessageId);
 id_type!(IdeaId);
 id_type!(TaskScheduleId);
 id_type!(AgentFunctionId);

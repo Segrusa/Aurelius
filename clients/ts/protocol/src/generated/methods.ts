@@ -80,6 +80,7 @@ export const METHODS = {
   "employee.list": "read",
   "employee.open_chat": "command",
   "employee.restore_instructions": "command",
+  "employee.scratchpad": "read",
   "employee.send_message": "command",
   "employee.set_folder": "command",
   "employee.set_reports_to": "command",
@@ -204,6 +205,8 @@ export const METHODS = {
   "run.get_trace": "read",
   "run.guidelines": "read",
   "run.stop": "command",
+  "scheduled_message.cancel": "command",
+  "scheduled_message.list": "read",
   "screenshot.get": "read",
   "secret.set": "host",
   "server.get_health": "read",
@@ -232,6 +235,7 @@ export const METHODS = {
   "terminal.open": "read",
   "terminal.resize": "read",
   "thread.read": "read",
+  "thread.waiting": "read",
   "ticket.accept": "command",
   "ticket.approve_plan": "command",
   "ticket.archive": "command",
@@ -473,6 +477,10 @@ export interface MethodParams {
   "employee.list": undefined;
   "employee.open_chat": M.OpenEmployeeChat;
   "employee.restore_instructions": M.RestoreEmployeeInstructions;
+  /**
+   * An employee's scratchpad (feature `employee_scratchpad`).
+   */
+  "employee.scratchpad": { employee_id: string };
   "employee.send_message": M.SendEmployeeMessage;
   "employee.set_folder": M.SetEmployeeFolder;
   "employee.set_reports_to": M.SetEmployeeReportsTo;
@@ -806,6 +814,11 @@ export interface MethodParams {
    */
   "run.guidelines": { run_id: string };
   "run.stop": M.StopRun;
+  "scheduled_message.cancel": M.CancelScheduledMessage;
+  /**
+   * Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+   */
+  "scheduled_message.list": undefined;
   /**
    * A screenshot the agent took (the id is in its screenshot tool's output).
    */
@@ -890,6 +903,11 @@ export interface MethodParams {
    * does. A message without replies is a thread of none.
    */
   "thread.read": { message_id: string };
+  /**
+   * Who waits to pick up a thread and what is scheduled in it (U3, feature
+   * `scheduled_messages`): a ticket (`ticket_id`) or a channel or chat (`conversation_id`).
+   */
+  "thread.waiting": { conversation_id?: string | null; ticket_id?: string | null };
   /**
    * Review → Done. Only a board member; only when no linked task still works (B6).
    */

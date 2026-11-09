@@ -91,6 +91,11 @@ pub async fn run(shared: Arc<Shared>) {
         if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.deliver_chat_updates()).await {
             shared.publish(notices);
         }
+        // Scheduled messages that came due go out as items of their mailboxes (R7).
+        let s = shared.clone();
+        if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.deliver_scheduled_messages()).await {
+            shared.publish(notices);
+        }
         let s = shared.clone();
         let owner2 = owner.clone();
         // A worker's item first (it becomes a run with a leased job), else a due job.

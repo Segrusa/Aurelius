@@ -154,6 +154,15 @@ pub struct CreateEmployee {
     pub access_level: Option<AccessLevel>,
 }
 
+/// The longest an employee's scratchpad may be (C7): it is in every prompt.
+pub const SCRATCHPAD_MAX: usize = 4_000;
+
+/// `scheduled_message.cancel`: a message an employee scheduled does not go out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CancelScheduledMessage {
+    pub message_id: crate::ScheduledMessageId,
+}
+
 /// `employee.open_chat`: the acting board member's lasting chat with this employee,
 /// made the first time (feature `employee_chats`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -37,6 +37,11 @@ pub(crate) fn channel_thread(channel: ConversationId) -> String {
     format!("channel:{channel}")
 }
 
+/// The key of a conversation of its own (a chat with an employee).
+pub(crate) fn chat_thread(conversation: ConversationId) -> String {
+    format!("chat:{conversation}")
+}
+
 /// The employee whose mailbox a run in `conversation` goes through: none for the
 /// project assistant (assumption 4) and for a quick answer (assumption 2).
 fn mailbox_of(conn: &Connection, conversation: ConversationId) -> Result<Option<EmployeeId>, StorageError> {
@@ -63,7 +68,7 @@ fn thread_of(tx: &Tx<'_>, conversation: ConversationId, group: Option<&GroupRun>
     {
         return Ok((ticket_thread(ticket), Some(ticket)));
     }
-    Ok((format!("chat:{conversation}"), None))
+    Ok((chat_thread(conversation), None))
 }
 
 /// The hop in the queuing metadata of a run no group chat marking carries: a
@@ -81,6 +86,7 @@ fn source_of(tx: &Tx<'_>, group: Option<&GroupRun>, meta: &serde_json::Value, re
         return Ok("employee");
     }
     // A heartbeat names the login of who turned it on, and is nobody's message.
+    // A scheduled message has a hop from its first run, so it is caught just above.
     if meta.get("login_user").is_some() {
         return Ok("system");
     }
@@ -118,6 +124,7 @@ pub(crate) fn enqueue(
     let parked = store::is_parked(tx, &employee.to_string(), &thread)?;
     let kind = match () {
         _ if parked && source == "board" => "resume",
+        _ if ctx_meta.get("scheduled").is_some() => "scheduled",
         _ if ctx_meta.get("login_user").is_some() => "heartbeat",
         _ if ctx_meta.get("task_id").is_some() && ctx_meta.get("origin").is_none() => "task",
         _ => "message",

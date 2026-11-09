@@ -384,6 +384,11 @@ pub mod feature {
     /// A board member's lasting chat with an employee: `employee.open_chat`, `employee.chats`
     /// and `chat.send` to such a chat.
     pub const EMPLOYEE_CHATS: &str = "employee_chats";
+    /// `schedule_message` on the bridge shows to board members: `scheduled_message.list`,
+    /// `scheduled_message.cancel`, and who waits for a thread (`thread.waiting`).
+    pub const SCHEDULED_MESSAGES: &str = "scheduled_messages";
+    /// An employee's scratchpad can be read (`employee.scratchpad`, `RunBrief::employee_id`).
+    pub const EMPLOYEE_SCRATCHPAD: &str = "employee_scratchpad";
 }
 
 /// Every feature this build has.
@@ -430,6 +435,8 @@ pub const FEATURES: &[&str] = &[
     feature::EMPLOYEE_ACCESS,
     feature::RUN_CARDS,
     feature::EMPLOYEE_CHATS,
+    feature::SCHEDULED_MESSAGES,
+    feature::EMPLOYEE_SCRATCHPAD,
 ];
 
 /// Daemon → client.
@@ -529,6 +536,9 @@ pub enum ResponseBody {
     Users(aurelius_domain::user::UsersSnapshot),
     Channels(aurelius_domain::views::ChannelsSnapshot),
     EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot),
+    ScheduledMessages(aurelius_domain::views::ScheduledMessagesSnapshot),
+    ThreadWaiting(aurelius_domain::views::ThreadWaitingSnapshot),
+    EmployeeScratchpad(aurelius_domain::views::ScratchpadView),
     /// `thread.read`.
     Thread(aurelius_domain::views::ThreadSnapshot),
     /// `ticket.followers`.

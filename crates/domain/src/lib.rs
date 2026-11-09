@@ -108,6 +108,7 @@ pub enum Command {
     SetHeartbeat(employee::SetHeartbeat),
     SendEmployeeMessage(employee::SendEmployeeMessage),
     OpenEmployeeChat(employee::OpenEmployeeChat),
+    CancelScheduledMessage(employee::CancelScheduledMessage),
     SendGroupMessage(group_chat::SendGroupMessage),
     DecideProposal(proposal::DecideProposal),
     RestoreEmployeeInstructions(proposal::RestoreEmployeeInstructions),
@@ -211,6 +212,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("set_heartbeat", "heartbeat.set"),
     ("send_employee_message", "employee.send_message"),
     ("open_employee_chat", "employee.open_chat"),
+    ("cancel_scheduled_message", "scheduled_message.cancel"),
     ("send_group_message", "group_chat.send"),
     ("decide_proposal", "proposal.decide"),
     (

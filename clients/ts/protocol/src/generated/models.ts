@@ -611,6 +611,13 @@ export type CallStatus =
   | "succeeded"
 ;
 
+/**
+ * `scheduled_message.cancel`: a message an employee scheduled does not go out.
+ */
+export interface CancelScheduledMessage {
+  message_id: string;
+}
+
 export interface CancelTask {
   task_id: string;
 }
@@ -888,6 +895,7 @@ export type Command =
    */
   | ({ type: "assign_ticket"; employee_id?: string | null; reason?: string | null; ticket_id: string })
   | ({ type: "attach_file" } & AttachFile)
+  | ({ type: "cancel_scheduled_message" } & CancelScheduledMessage)
   | ({ type: "cancel_task" } & CancelTask)
   /**
    * Stop the work on a ticket: its main task is cancelled and it goes back to Backlog.
@@ -1162,6 +1170,7 @@ export type CommandResult =
   | ({ type: "queued_message_sent_now"; conversation_id: string; message_id: string; run_id: string })
   | ({ type: "reply_retried"; run_id: string })
   | ({ type: "run_defaults_set" })
+  | ({ type: "scheduled_message_cancelled"; message_id: string })
   | ({ type: "screen_allowed_set"; allowed: boolean; conversation_id: string })
   /**
    * `server.set_name`: the name clients show now and its version (unchanged
@@ -3743,6 +3752,10 @@ export type Method =
    */
   | ({ method: "employee.list" })
   /**
+   * An employee's scratchpad (feature `employee_scratchpad`).
+   */
+  | ({ method: "employee.scratchpad"; params: { employee_id: string } })
+  /**
    * Replay events after `after_seq`, then stream live events (and load/power pushes).
    */
   | ({ method: "event.subscribe"; params: { after_seq: number } })
@@ -3911,6 +3924,10 @@ export type Method =
    */
   | ({ method: "run.guidelines"; params: { run_id: string } })
   /**
+   * Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+   */
+  | ({ method: "scheduled_message.list" })
+  /**
    * A screenshot the agent took (the id is in its screenshot tool's output).
    */
   | ({ method: "screenshot.get"; params: { id: string } })
@@ -3973,6 +3990,11 @@ export type Method =
    * does. A message without replies is a thread of none.
    */
   | ({ method: "thread.read"; params: { message_id: string } })
+  /**
+   * Who waits to pick up a thread and what is scheduled in it (U3, feature
+   * `scheduled_messages`): a ticket (`ticket_id`) or a channel or chat (`conversation_id`).
+   */
+  | ({ method: "thread.waiting"; params: { conversation_id?: string | null; ticket_id?: string | null } })
   /**
    * Who follows a ticket (feature `ticket_follow`). Not for apps.
    */
@@ -4793,6 +4815,7 @@ export type ResponseBody =
   | ({ type: "employee_chats"; value: EmployeeChatsSnapshot })
   | ({ type: "employee_instruction_versions"; value: EmployeeInstructionVersionsSnapshot })
   | ({ type: "employee_plugins"; value: EmployeePlugins })
+  | ({ type: "employee_scratchpad"; value: ScratchpadView })
   | ({ type: "employees"; value: EmployeesSnapshot })
   /**
    * A file kept with a message.
@@ -4876,6 +4899,7 @@ export type ResponseBody =
    * `None`: Claude Code was not found on the server.
    */
   | ({ type: "runtime_detected"; value: { claude_code?: string | null } })
+  | ({ type: "scheduled_messages"; value: ScheduledMessagesSnapshot })
   /**
    * A screenshot the agent took, as JPEG.
    */
@@ -4906,6 +4930,7 @@ export type ResponseBody =
    * `thread.read`.
    */
   | ({ type: "thread"; value: ThreadSnapshot })
+  | ({ type: "thread_waiting"; value: ThreadWaitingSnapshot })
   | ({ type: "ticket"; value: TicketDetail })
   /**
    * `ticket.followers`.
@@ -5000,6 +5025,10 @@ export interface RunActivity {
  * What the run card of a post shows while folded (`MessageView::run`).
  */
 export interface RunBrief {
+  /**
+   * The employee whose run it was, for its scratchpad (feature `employee_scratchpad`).
+   */
+  employee_id?: string | null;
   failed_calls: number;
   /**
    * `runs.status`: created | starting | running | waiting | cancelling | succeeded |
@@ -5122,6 +5151,65 @@ export interface RunTrace {
    * The prompt as it went in.
    */
   user_turn: string;
+}
+
+/**
+ * A message an employee scheduled (`schedule_message`, R7; feature `scheduled_messages`).
+ */
+export interface ScheduledMessageView {
+  /**
+   * The channel of the Team chat it goes to.
+   */
+  channel_id?: string | null;
+  created_at_ms: number;
+  due_at_ms: number;
+  from_employee: string;
+  from_name: string;
+  id: string;
+  /**
+   * Whose Claude login its run uses: the one of the run that planned it.
+   */
+  login_name?: string | null;
+  /**
+   * Why it did not go out.
+   */
+  outcome?: string | null;
+  /**
+   * Where it goes, in words ("the discussion of ticket #21").
+   */
+  place: string;
+  /**
+   * The run it started.
+   */
+  run_id?: string | null;
+  /**
+   * scheduled | delivered | cancelled | not_delivered. A string, so a new state never breaks a client.
+   */
+  state: string;
+  text: string;
+  ticket_id?: string | null;
+  to_employee: string;
+  to_name: string;
+}
+
+/**
+ * `scheduled_message.list`: what waits, soonest first, then the latest that went out.
+ */
+export interface ScheduledMessagesSnapshot {
+  as_of_seq: number;
+  messages: ScheduledMessageView[];
+}
+
+/**
+ * `employee.scratchpad`: an employee's own note (C7; feature `employee_scratchpad`).
+ */
+export interface ScratchpadView {
+  employee_id: string;
+  text: string;
+  /**
+   * When it last changed; none when it was never written.
+   */
+  updated_at_ms?: number | null;
 }
 
 /**
@@ -6235,6 +6323,32 @@ export interface ThreadSnapshot {
    * as it was before this read marked the thread read).
    */
   root: MessageView;
+}
+
+/**
+ * An employee that waits to pick up a thread (U3).
+ */
+export interface ThreadWaiter {
+  /**
+   * How many threads of this employee go first, counting what it is doing now.
+   */
+  behind: number;
+  employee_id: string;
+  employee_name: string;
+  /**
+   * What holds it back besides its turn: `limit` (a usage limit), `question`
+   * (the thread waits for a board member's answer). A string, so a new one never breaks a client.
+   */
+  reason?: string | null;
+}
+
+/**
+ * `thread.waiting`: who waits to pick up a thread and what is scheduled in it (U3, R7).
+ */
+export interface ThreadWaitingSnapshot {
+  as_of_seq: number;
+  scheduled: ScheduledMessageView[];
+  waiters: ThreadWaiter[];
 }
 
 /**

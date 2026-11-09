@@ -112,7 +112,7 @@ fn command_needs(command: &Command) -> Result<Vec<AppScope>, &'static str> {
         // A discussion is the board members' and the employees' (like the group chat);
         // the summary again is a board member's.
         // A chat with an employee is a board member's own (an app has none).
-        Command::OpenEmployeeChat(_) => Err(NOT_FOR_APPS),
+        Command::OpenEmployeeChat(_) | Command::CancelScheduledMessage(_) => Err(NOT_FOR_APPS),
         Command::SendGroupMessage(_) | Command::PostTicketMessage(_) | Command::ReactToMessage(_) | Command::RetryTicketSummary(_) => Err(NOT_FOR_APPS),
         // A person's responsibility, following and own messages: a board member's.
         Command::SetTicketResponsible(_) | Command::FollowTicket(_) | Command::EditMessage(_) | Command::DeleteMessage(_) => Err(NOT_FOR_APPS),

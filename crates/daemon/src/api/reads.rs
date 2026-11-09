@@ -64,6 +64,9 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             }
         }
         Method::EmployeeChats => employee_chats(shared, reader).await,
+        Method::ScheduledMessageList => scheduled_messages(shared, reader).await,
+        Method::ThreadWaiting { ticket_id, conversation_id } => thread_waiting(shared, reader, ticket_id, conversation_id).await,
+        Method::EmployeeScratchpad { employee_id } => employee_scratchpad(shared, employee_id).await,
         Method::GroupChatGet { channel } => {
             let store = shared.store().clone();
             let found = storage_task(move || {
@@ -418,6 +421,42 @@ async fn employee_chats(shared: &Arc<Shared>, reader: Option<aurelius_domain::Us
     })
     .await?;
     Ok(ResponseBody::EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot { as_of_seq, chats }))
+}
+
+/// What employees scheduled, as far as `reader` may see it.
+async fn scheduled_messages(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let (as_of_seq, messages) = storage_task(move || store.read(|c| Ok((queries::last_seq(c)?, aurelius_storage::scheduled::list(c, reader, 100)?)))).await?;
+    Ok(ResponseBody::ScheduledMessages(aurelius_domain::views::ScheduledMessagesSnapshot { as_of_seq, messages }))
+}
+
+/// Who waits to pick up a thread and what is scheduled in it (U3); a private chat
+/// of someone else does not exist for `reader`.
+async fn thread_waiting(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, ticket: Option<aurelius_domain::TicketId>, conversation: Option<ConversationId>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let found = storage_task(move || {
+        store.read(|c| {
+            if let Some(conversation) = conversation
+                && aurelius_storage::employee_chats::hidden_from(c, conversation, reader)?
+            {
+                return Ok(None);
+            }
+            let Some(key) = aurelius_storage::inbox::thread_of_place(c, ticket, conversation)? else { return Ok(None) };
+            Ok(Some((queries::last_seq(c)?, aurelius_storage::inbox::waiters(c, &key, aurelius_storage::now_ms())?, aurelius_storage::scheduled::of_thread(c, &key, reader)?)))
+        })
+    })
+    .await?;
+    let Some((as_of_seq, waiters, scheduled)) = found else {
+        return Err(ProtocolError::new(ErrorCode::NotFound, "this thread does not exist"));
+    };
+    Ok(ResponseBody::ThreadWaiting(aurelius_domain::views::ThreadWaitingSnapshot { as_of_seq, waiters, scheduled }))
+}
+
+async fn employee_scratchpad(shared: &Arc<Shared>, employee: aurelius_domain::EmployeeId) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let row = storage_task(move || store.read(|c| aurelius_storage::scratchpads::get(c, employee))).await?;
+    let (text, updated_at_ms) = row.map_or((String::new(), None), |(text, at)| (text, Some(at)));
+    Ok(ResponseBody::EmployeeScratchpad(aurelius_domain::views::ScratchpadView { employee_id: employee, text, updated_at_ms }))
 }
 
 /// `reader` read `conversation` (when it is a discussion): it counts as read up

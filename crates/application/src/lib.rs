@@ -229,6 +229,7 @@ impl CommandService {
             Command::StopRun(cmd) => self.stop_run(ctx, &envelope, hash, cmd),
             Command::CreateEmployee(cmd) => self.create_employee(ctx, &envelope, hash, cmd),
             Command::OpenEmployeeChat(cmd) => self.open_employee_chat(ctx, &envelope, hash, cmd),
+            Command::CancelScheduledMessage(cmd) => self.cancel_scheduled_message(ctx, &envelope, hash, cmd),
             Command::UpdateEmployee(cmd) => self.update_employee(ctx, &envelope, hash, cmd),
             Command::SetEmployeeStatus(cmd) => self.set_employee_status(ctx, &envelope, hash, cmd),
             Command::SetProjectStatus(cmd) => self.set_project_status(ctx, &envelope, hash, cmd),

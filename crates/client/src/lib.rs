@@ -735,6 +735,21 @@ impl Client {
         self.read(Method::EmployeeChats, body!(EmployeeChats)).await
     }
 
+    /// Messages employees scheduled: what waits, then what went out.
+    pub async fn scheduled_messages(&self) -> Result<aurelius_domain::views::ScheduledMessagesSnapshot, ClientError> {
+        self.read(Method::ScheduledMessageList, body!(ScheduledMessages)).await
+    }
+
+    /// Who waits to pick up a ticket's thread and what is scheduled in it.
+    pub async fn ticket_waiting(&self, ticket_id: aurelius_domain::TicketId) -> Result<aurelius_domain::views::ThreadWaitingSnapshot, ClientError> {
+        self.read(Method::ThreadWaiting { ticket_id: Some(ticket_id), conversation_id: None }, body!(ThreadWaiting)).await
+    }
+
+    /// An employee's scratchpad.
+    pub async fn employee_scratchpad(&self, employee_id: aurelius_domain::EmployeeId) -> Result<aurelius_domain::views::ScratchpadView, ClientError> {
+        self.read(Method::EmployeeScratchpad { employee_id }, body!(EmployeeScratchpad)).await
+    }
+
     /// The company's group chat (Team chat): the user and every employee.
     pub async fn group_chat(&self) -> Result<MessagesSnapshot, ClientError> {
         self.read(Method::GroupChatGet { channel: None }, body!(Messages)).await

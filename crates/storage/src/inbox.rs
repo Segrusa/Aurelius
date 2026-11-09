@@ -4,7 +4,9 @@
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::{ConversationId, EmployeeId, EventId, RunId, TaskId, TicketId};
+use aurelius_domain::views::ThreadWaiter;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use std::collections::HashSet;
 
 /// A queued item: nothing has been made for it yet.
 pub const QUEUED: &str = "queued";
@@ -385,6 +387,49 @@ pub fn queued_in(conn: &Connection, conversation: ConversationId) -> Result<Vec<
         if let Ok(run) = RunId::parse(&run) {
             out.push((run, message));
         }
+    }
+    Ok(out)
+}
+
+/// The thread key of a ticket, or of a conversation (`channel:`, `chat:`, a ticket's
+/// discussion), the way `thread_of` in the worker makes them. `None`: no such place.
+pub fn thread_of_place(conn: &Connection, ticket: Option<TicketId>, conversation: Option<ConversationId>) -> Result<Option<String>, StorageError> {
+    if let Some(ticket) = ticket {
+        return Ok(Some(format!("ticket:{ticket}")));
+    }
+    let Some(conversation) = conversation else { return Ok(None) };
+    if let Some(ticket) = crate::discussions::ticket_of_conversation(conn, conversation)? {
+        return Ok(Some(format!("ticket:{ticket}")));
+    }
+    let row: Option<(String, Option<String>)> = conn.query_row("SELECT kind, thread_key FROM conversations WHERE id = ?1", [conversation.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    Ok(row.map(|(kind, key)| key.unwrap_or_else(|| if kind == "group" { format!("channel:{conversation}") } else { format!("chat:{conversation}") })))
+}
+
+/// Who waits to pick up `thread` (U3): an employee with queued items there, how many
+/// threads of its go first, and what else holds it back.
+pub fn waiters(conn: &Connection, thread: &str, now: i64) -> Result<Vec<ThreadWaiter>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT i.employee_id, e.name, MIN(i.not_before_ms), MAX(i.last_error_code = 'quota')
+         FROM employee_inbox i JOIN employees e ON e.id = i.employee_id
+         WHERE i.state = 'queued' AND i.thread_key = ?1 GROUP BY i.employee_id ORDER BY MIN(i.created_at_ms)",
+    )?;
+    let rows: Vec<(String, String, i64, Option<i64>)> = stmt.query_map([thread], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let queue = due(conn, now)?;
+    let mut out = Vec::new();
+    for (employee, employee_name, not_before, quota) in rows {
+        let Ok(employee_id) = EmployeeId::parse(&employee) else { continue };
+        // Items of one other thread become one run: they count once.
+        let ahead: HashSet<&str> = queue.iter().filter(|i| i.employee == employee).take_while(|i| i.thread_key != thread).map(|i| i.thread_key.as_str()).collect();
+        let busy = u32::from(!slot_free(conn, &employee)?);
+        let reason = match () {
+            _ if is_parked(conn, &employee, thread)? => Some("question"),
+            _ if not_before > now && quota == Some(1) => Some("limit"),
+            _ => None,
+        };
+        out.push(ThreadWaiter { employee_id, employee_name, behind: ahead.len() as u32 + busy, reason: reason.map(str::to_owned) });
     }
     Ok(out)
 }

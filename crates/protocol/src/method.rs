@@ -34,6 +34,21 @@ pub enum Method {
     /// its messages and settings, as `conversation.get` answers them.
     #[serde(rename = "employee.chat")]
     EmployeeChat { employee_id: EmployeeId },
+    /// Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+    #[serde(rename = "scheduled_message.list")]
+    ScheduledMessageList,
+    /// Who waits to pick up a thread and what is scheduled in it (U3, feature
+    /// `scheduled_messages`): a ticket (`ticket_id`) or a channel or chat (`conversation_id`).
+    #[serde(rename = "thread.waiting")]
+    ThreadWaiting {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ticket_id: Option<aurelius_domain::TicketId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation_id: Option<ConversationId>,
+    },
+    /// An employee's scratchpad (feature `employee_scratchpad`).
+    #[serde(rename = "employee.scratchpad")]
+    EmployeeScratchpad { employee_id: EmployeeId },
     /// The reader's lasting chats with employees, the latest first (feature `employee_chats`).
     #[serde(rename = "employee.chats")]
     EmployeeChats,

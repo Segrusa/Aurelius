@@ -188,7 +188,7 @@ pub(crate) fn of_ticket(conn: &rusqlite::Connection, ticket: TicketId) -> Result
 }
 
 /// The employees of the company that are not archived: (id, name, active).
-fn team(conn: &rusqlite::Connection) -> Result<Vec<(EmployeeId, String, bool)>, StorageError> {
+pub(crate) fn team(conn: &rusqlite::Connection) -> Result<Vec<(EmployeeId, String, bool)>, StorageError> {
     let mut stmt = conn.prepare("SELECT id, name, status FROM employees WHERE status <> 'archived' ORDER BY created_at_ms, id")?;
     let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?;
     let mut out = Vec::new();
@@ -500,7 +500,7 @@ pub(crate) fn system_line(tx: &Tx<'_>, id: ConversationId, line: &SystemLine, te
 }
 
 /// `system_line`, in the thread of `thread` when given (a hint for a reply there).
-fn system_line_in(tx: &Tx<'_>, id: ConversationId, thread: Option<MessageId>, line: &SystemLine, text: Option<&str>) -> Result<EventNotice, StorageError> {
+pub(crate) fn system_line_in(tx: &Tx<'_>, id: ConversationId, thread: Option<MessageId>, line: &SystemLine, text: Option<&str>) -> Result<EventNotice, StorageError> {
     Ok(system_line_event(tx, id, thread, line, text)?.1)
 }
 
@@ -651,10 +651,12 @@ struct Wake<'a> {
     login: Option<UserId>,
     /// The message was a reply in the thread of this one: the answer goes there too.
     thread: Option<MessageId>,
+    /// What stands in front of a colleague's text, in place of "handed this over" (`schedule_message`).
+    lead_in: Option<String>,
 }
 
 /// The thread key of a discussion (`employee_threads`, `employee_inbox`).
-fn thread_key(d: &Discussion) -> String {
+pub(crate) fn thread_key(d: &Discussion) -> String {
     match d.ticket() {
         Some(t) => crate::run::inbox::ticket_thread(t.id),
         None => crate::run::inbox::channel_thread(d.id),
@@ -710,7 +712,8 @@ fn wake_body(w: &Wake<'_>, employee: EmployeeId, context: ThreadContext) -> Stri
         }
         body.push_str(w.text.trim());
     } else {
-        body.push_str(&format!("{from} handed this over to you (JSON-quoted): {}", serde_json::Value::from(w.text.trim())));
+        let lead_in = w.lead_in.clone().unwrap_or_else(|| format!("{from} handed this over to you"));
+        body.push_str(&format!("{lead_in} (JSON-quoted): {}", serde_json::Value::from(w.text.trim())));
     }
     if !context.json.is_empty() {
         body.push_str(&format!("\n\n---\nEarlier in {} (oldest first, one JSON object per message):\n{}", d.label(), context.json));
@@ -1229,7 +1232,7 @@ fn thread_root(conn: &rusqlite::Connection, d: &Discussion, parent: MessageId) -
 /// was woken in (`GroupRun::thread_parent`); for a run in a ticket's main task,
 /// the thread of the latest board member's message that reached it from `d`
 /// (`to_owner`); else none, the channel itself.
-fn run_thread(conn: &rusqlite::Connection, run: RunId, d: &Discussion) -> Result<Option<MessageId>, StorageError> {
+pub(crate) fn run_thread(conn: &rusqlite::Connection, run: RunId, d: &Discussion) -> Result<Option<MessageId>, StorageError> {
     if let Some(marking) = conv::group_run(conn, run)?.filter(|g| g.conversation_id == d.id) {
         return Ok(marking.thread_parent);
     }
@@ -1277,7 +1280,7 @@ fn board_message(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlati
         }
     }
     let read = reader(store);
-    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, view: ThreadView::read(tx, &read, d, thread, Some(message))?, hop: 0, login, thread };
+    let w = Wake { discussion: d, from: OWNER, board: Some(user), text, shared, view: ThreadView::read(tx, &read, d, thread, Some(message))?, hop: 0, login, thread, lead_in: None };
     // The owner is mid-run: the board member hears it at once, and gets a quick answer.
     if let (Some(_), Some((owner, owner_name))) = (owner_busy, &named.owner) {
         notices.extend(busy_notices(tx, store, meta, correlation, (*owner, owner_name), &w)?);
@@ -1398,7 +1401,7 @@ pub(crate) fn run_handoff_thread(conn: &rusqlite::Connection, run: RunId) -> Res
 
 /// The hop of what `run` writes in `d`: one more than the run's, or 1 when a board
 /// member has written in `d` since the newest item that woke it (R4).
-fn next_hop(conn: &rusqlite::Connection, run: RunId, d: &Discussion) -> Result<u32, StorageError> {
+pub(crate) fn next_hop(conn: &rusqlite::Connection, run: RunId, d: &Discussion) -> Result<u32, StorageError> {
     if let Some(since) = aurelius_storage::inbox::woken_at(conn, run)?
         && aurelius_storage::discussions::board_spoke_since(conn, d.id, since)?
     {
@@ -1474,12 +1477,32 @@ fn deliver_handoff(tx: &Tx<'_>, store: &Store, h: Handoff<'_>) -> Result<Vec<Eve
     let run = h.run.to_string();
     notices.extend(follow_named(tx, d, h.text, employee_cause(&run))?);
     let read = reader(store);
-    let w = Wake { discussion: d, from: h.from.1, board: None, text: h.text, shared: Shared::default(), view: ThreadView::read(tx, &read, d, h.thread, Some(posted))?, hop: h.hop, login: h.login, thread: h.thread };
+    let w = Wake { discussion: d, from: h.from.1, board: None, text: h.text, shared: Shared::default(), view: ThreadView::read(tx, &read, d, h.thread, Some(posted))?, hop: h.hop, login: h.login, thread: h.thread, lead_in: None };
     let meta = serde_json::json!({ "run_id": h.run, "group_post": posted });
     if let Some((_, woken)) = wake(tx, store, &meta, &run, h.to, &w)? {
         notices.extend(woken);
     }
     Ok(notices)
+}
+
+/// A scheduled message comes due in a discussion (`schedule_message`): a post under
+/// its sender's name, and it wakes the addressee like a handoff, at the hop it was
+/// planned at, on the login of the run that planned it. `None`: the addressee has no chat.
+pub(crate) fn deliver_scheduled(tx: &Tx<'_>, store: &Store, d: &Discussion, m: &aurelius_storage::scheduled::Due, from: &str, to: &str) -> Result<Option<(RunId, Vec<EventNotice>)>, StorageError> {
+    let own = m.from == m.to;
+    let posted = MessageId::new();
+    let body = if own { format!("Scheduled note from {from}\n\n{}", m.content) } else { format!("{from} scheduled a message for {to}\n\n{}", m.content) };
+    // No run id: this post is not what that run wrote last, so its run card stays where it is.
+    let extra = serde_json::json!({ "hop": m.hop, "employee_id": m.from, "woke": 0, "handoff_to": m.to, "scheduled": m.id });
+    let mut notices = vec![post_in(tx, store, d.id, m.thread_parent, posted, GROUP_KIND, from, &body, extra)?];
+    let read = reader(store);
+    let lead_in = if own { "You scheduled this for yourself earlier".to_owned() } else { format!("{from} scheduled this for you earlier") };
+    let w = Wake { discussion: d, from, board: None, text: &m.content, shared: Shared::default(), view: ThreadView::read(tx, &read, d, m.thread_parent, Some(posted))?, hop: m.hop, login: m.login_user, thread: m.thread_parent, lead_in: Some(lead_in) };
+    // Named even when empty: a run without a login waits for one, it never takes another.
+    let meta = serde_json::json!({ "scheduled": m.id, "group_post": posted, "login_user": m.login_user });
+    let Some((run, woken)) = wake(tx, store, &meta, &m.id.to_string(), (m.to, to), &w)? else { return Ok(None) };
+    notices.extend(woken);
+    Ok(Some((run, notices)))
 }
 
 /// `hand_off`: `run`'s employee gives the work in its thread to the colleague `to`.
