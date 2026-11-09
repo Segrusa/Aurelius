@@ -2,6 +2,7 @@ import type { ActivityView, ChannelView, MessageView } from "@aurelius/protocol"
 import { describe, expect, it } from "vitest";
 import {
   applyReaction,
+  audienceLine,
   authorKey,
   authorOf,
   bareName,
@@ -21,6 +22,7 @@ import {
   markMentions,
   mentionSuggestions,
   mentions,
+  mentionsEveryone,
   mentionsMe,
   newMessagesAt,
   planTitle,
@@ -379,5 +381,37 @@ describe("links between messages", () => {
     expect(mentionsMe("hi @sam!", "Sam")).toBe(true);
     expect(mentionsMe("hi", "Sam")).toBe(false);
     expect(mentionsMe("@sam", null)).toBe(false);
+  });
+});
+
+describe("@Everyone", () => {
+  const people = [{ name: "Flux", kind: "Frontend", employee: true }];
+  it("is offered only when the server has it", () => {
+    expect(mentionSuggestions("@e", people)).toBeNull();
+    expect(mentionSuggestions("@e", people, true)?.found.map((p) => p.name)).toEqual(["Everyone"]);
+    expect(mentionSuggestions("@", people, true)?.found.map((p) => p.name)).toEqual(["Everyone", "Flux"]);
+    expect(mentionSuggestions("@everyone", people, true)).toBeNull();
+  });
+  it("is found as a whole word in any case", () => {
+    expect(mentionsEveryone("hi @everyone, look")).toBe(true);
+    expect(mentionsEveryone("(@EVERYONE)")).toBe(true);
+    expect(mentionsEveryone("mail@everyone.com")).toBe(false);
+    expect(mentionsEveryone("@Everyoneelse")).toBe(false);
+  });
+  it("is no unknown name when offered", () => {
+    expect(unknownMentions("@Everyone", people, [], true)).toEqual([]);
+    expect(unknownMentions("@Everyone", people, [], false)).toEqual(["Everyone"]);
+  });
+  it("shows as a mention when known", () => {
+    expect(markMentions("@everyone go", ["Everyone"], null)).toBe("[@everyone](#@everyone) go");
+  });
+  it("tells whom it wakes", () => {
+    expect(audienceLine({ employees: 5, paused: 1, board_members: 2 })).toBe(
+      "Wakes 5 employees (1 paused) and tells 2 board members",
+    );
+    expect(audienceLine({ employees: 1, paused: 0, board_members: 1 })).toBe(
+      "Wakes 1 employee and tells 1 board member",
+    );
+    expect(audienceLine({ employees: 0, paused: 2, board_members: 0 })).toBe("Wakes no employees (2 paused)");
   });
 });

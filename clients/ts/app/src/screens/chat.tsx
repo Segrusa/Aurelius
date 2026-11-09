@@ -27,15 +27,18 @@ import { ApprovalCard } from "./approval-card";
 import { foldUpdates } from "./board-logic";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import {
+  audienceLine,
   bareName,
   before,
   type Caps,
   channelLabel,
   completeMention,
+  EVERYONE,
   keepOrder,
   localDay,
   type Mentionable,
   mentionSuggestions,
+  mentionsEveryone,
   newMessagesAt,
   ownerAnswers,
   quickReplies,
@@ -572,6 +575,7 @@ export function Composer({
   people,
   archived,
   quick,
+  everyone = false,
   send,
   onSent,
 }: {
@@ -585,6 +589,8 @@ export function Composer({
   people: Mentionable[];
   archived: string[];
   quick: { question: string | null; options: string[] } | null;
+  /** `@Everyone` is offered (the server has it and the writer is a board member). */
+  everyone?: boolean;
   /** Where the words go; none: the channel. */
   send?: (message: { text: string; images: string[]; confirmSecret: boolean }) => Promise<unknown>;
   onSent: () => void;
@@ -658,9 +664,30 @@ export function Composer({
     }
     void go(text);
   };
-  const suggestions = closedOn === text ? null : mentionSuggestions(text, people);
+  const wantsAudience = everyone && mentionsEveryone(text);
+  const [audience, setAudience] = useState<string | null>(null);
+  // One read when `@Everyone` shows up in this thread, after a pause; not one per keystroke.
+  useEffect(() => {
+    if (!wantsAudience) return setAudience(null);
+    let alive = true;
+    const timer = setTimeout(() => {
+      connection
+        .call("discussion.audience", { channel })
+        .then((body) => {
+          if (alive) setAudience(body.type === "discussion_audience" ? audienceLine(body.value) : null);
+        })
+        .catch(() => {
+          if (alive) setAudience(null);
+        });
+    }, 300);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [wantsAudience, channel, connection]);
+  const suggestions = closedOn === text ? null : mentionSuggestions(text, people, everyone);
   const active = suggestions ? Math.min(picked, suggestions.found.length - 1) : 0;
-  const warning = people.length > 0 ? unknownWarning(unknownMentions(text, people, archived)) : null;
+  const warning = people.length > 0 ? unknownWarning(unknownMentions(text, people, archived, everyone)) : null;
   const pick = (name: string) => {
     if (!suggestions) return;
     setText(completeMention(text, suggestions.at, name));
@@ -795,6 +822,10 @@ export function Composer({
       />
       {warning ? (
         <div {...stylex.props(styles.warning)}>{warning}</div>
+      ) : audience ? (
+        <div role="status" {...stylex.props(styles.hint)}>
+          {audience}
+        </div>
       ) : hint ? (
         <div {...stylex.props(styles.hint)}>{hint}</div>
       ) : null}
@@ -811,6 +842,7 @@ function ThreadPanel({
   conversationId,
   people,
   archived,
+  everyone,
   onClose,
   full = false,
 }: {
@@ -823,6 +855,7 @@ function ThreadPanel({
   conversationId: string | null;
   people: Mentionable[];
   archived: string[];
+  everyone: boolean;
   onClose: () => void;
 }) {
   useKeyContext("ThreadPanel");
@@ -889,6 +922,7 @@ function ThreadPanel({
             people={people}
             archived={archived}
             quick={null}
+            everyone={everyone}
             onSent={() => undefined}
           />
         </div>
@@ -976,7 +1010,9 @@ function ChannelBody({
     ],
     [staff, user],
   );
-  const names = useMemo(() => people.map((p) => p.name), [people]);
+  // `@Everyone` is for board members, on a server that has it; the desktop's writer is one.
+  const everyone = features.includes("everyone_mention") && user !== null && user !== undefined;
+  const names = useMemo(() => [...people.map((p) => p.name), ...(everyone ? [EVERYONE] : [])], [people, everyone]);
   const store = useLiveStore(feed.data?.conversation_id);
   const live = useLiveAll(store);
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
@@ -1315,6 +1351,7 @@ function ChannelBody({
               people={people}
               archived={archived}
               quick={quick}
+              everyone={everyone}
               onSent={() => {
                 atBottom.current = true;
                 handle.current?.scrollToIndex({ index: "LAST", align: "end" });
@@ -1335,6 +1372,7 @@ function ChannelBody({
             conversationId={openId ?? null}
             people={people}
             archived={archived}
+            everyone={everyone}
             onClose={() => onThread(null)}
             full={embedded}
           />
