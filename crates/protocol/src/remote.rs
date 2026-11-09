@@ -67,6 +67,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ChannelList
         | Method::ChannelSearch { .. }
         | Method::ThreadRead { .. }
+        | Method::DiscussionAudience { .. }
         | Method::MessageLocate { .. }
         | Method::MessageHistory { .. }
         | Method::CompanyGet

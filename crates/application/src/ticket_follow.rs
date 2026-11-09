@@ -118,16 +118,16 @@ pub(crate) fn newly_mentioned(
         .collect())
 }
 
-/// Everyone a message in a ticket's discussion names follows the ticket.
-pub(crate) fn follow_mentioned(
+/// Every one of `users` follows the ticket as if a message named them.
+pub(crate) fn follow_users(
     tx: &Tx<'_>,
     ticket: TicketId,
     project: ProjectId,
-    text: &str,
+    users: &[UserId],
     cause: &Cause<'_>,
 ) -> Result<Vec<EventNotice>, StorageError> {
     let mut notices = Vec::new();
-    for user in mentioned_board_members(tx, text)? {
+    for &user in users {
         notices.extend(follow(
             tx,
             ticket,

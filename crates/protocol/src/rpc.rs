@@ -271,6 +271,13 @@ pub mod feature {
     /// connections whose `HelloParams::accepts` names `server_name`. The hello's
     /// `host_name`, the pairing text and the pairing poll give the chosen name.
     pub const SERVER_NAME: &str = "server_name";
+    /// `@Everyone` (protocol 5, additive; ticket #40): a board member's message
+    /// with `@Everyone` in a channel or a ticket's discussion wakes every active
+    /// employee in it and tells the board members in it, once each; the read
+    /// `discussion.audience { channel }` counts them before sending
+    /// (`DiscussionAudience`). The text is plain text on the wire: a client
+    /// marks `@Everyone` itself. An employee's `@Everyone` is only text.
+    pub const EVERYONE_MENTION: &str = "everyone_mention";
     /// A channel per ticket (protocol 5, additive; AUR-CHAT-001): the ticket's
     /// discussion is its channel, `#<number>-<slug>` (`ticket_channel_name`).
     /// `channel.list` names ticket channels only to connections whose
@@ -419,6 +426,7 @@ pub const FEATURES: &[&str] = &[
     feature::EMPLOYEE_QUEUE,
     feature::WORKSPACE_FILTERS,
     feature::DESIGN_LINKS,
+    feature::EVERYONE_MENTION,
 ];
 
 /// Daemon → client.
@@ -526,6 +534,8 @@ pub enum ResponseBody {
     EmployeeToolOptions(aurelius_domain::employee_tools::ToolOptions),
     /// `employee.start_profiles`.
     EmployeeStartProfiles(aurelius_domain::employee_tools::StartProfiles),
+    /// `discussion.audience`.
+    DiscussionAudience(aurelius_domain::views::DiscussionAudience),
     /// `thread.read`.
     Thread(aurelius_domain::views::ThreadSnapshot),
     /// `ticket.followers`.

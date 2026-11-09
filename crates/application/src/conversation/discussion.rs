@@ -226,10 +226,94 @@ struct Addressees {
     owner: Option<(EmployeeId, String)>,
 }
 
+/// Who `@Everyone` reaches in a discussion: the employees (not archived; paused
+/// ones too, they get the paused line) and the active board members in it.
+///
+/// * The general channel and a project's channel have no member list: every
+///   board member and every employee reads them, so every one is in them.
+/// * A ticket's discussion: its owner, the employees of its channel (owner and
+///   main task's employee), those with a task anywhere in its task tree, and
+///   those who wrote in the discussion. Board members: the channel's members,
+///   the followers and the responsible one. An employee only named in a message
+///   is not in it (naming is no part of the thread).
+#[derive(Debug, Default)]
+pub(crate) struct Audience {
+    /// (id, name, active), in the order of the company.
+    pub employees: Vec<(EmployeeId, String, bool)>,
+    /// (id, username), in the order the board members signed up.
+    pub users: Vec<(UserId, String)>,
+}
+
+pub(crate) fn audience(conn: &rusqlite::Connection, d: &Discussion) -> Result<Audience, StorageError> {
+    let team = team(conn)?;
+    let board: Vec<(UserId, String)> = aurelius_storage::users::list(conn)?.into_iter().filter(|u| !u.disabled()).filter_map(|u| Some((UserId::parse(&u.id).ok()?, u.username))).collect();
+    let Place::Ticket(t) = &d.place else { return Ok(Audience { employees: team, users: board }) };
+    let mut employees: Vec<EmployeeId> = t.owner.into_iter().collect();
+    let mut users: Vec<UserId> = Vec::new();
+    for member in aurelius_storage::discussions::members(conn, d.id)? {
+        match member {
+            aurelius_storage::discussions::Member::User(user) => users.push(user),
+            aurelius_storage::discussions::Member::Employee(employee) => employees.push(employee),
+        }
+    }
+    employees.extend(aurelius_storage::discussions::ticket_task_employees(conn, t.id)?);
+    let writers = aurelius_storage::discussions::employee_author_names(conn, d.id)?;
+    employees.extend(team.iter().filter(|(_, name, _)| writers.iter().any(|w| w.eq_ignore_ascii_case(name))).map(|(id, _, _)| *id));
+    users.extend(aurelius_storage::followers::active_followers(conn, t.id)?);
+    users.extend(aurelius_storage::tickets::responsible(conn, t.id)?.filter(|r| !r.disabled).map(|r| r.user_id));
+    Ok(Audience {
+        employees: team.into_iter().filter(|(id, _, _)| employees.contains(id)).collect(),
+        users: board.into_iter().filter(|(id, _)| users.contains(id)).collect(),
+    })
+}
+
+/// The audience of the discussion `channel` (none: the general channel) for the
+/// board member `reader`, who is not counted: what `discussion.audience` answers.
+/// None when the discussion does not exist.
+pub fn discussion_audience(conn: &rusqlite::Connection, channel: Option<ConversationId>, reader: Option<UserId>) -> Result<Option<aurelius_domain::views::DiscussionAudience>, StorageError> {
+    let d = match channel {
+        Some(id) => load(conn, id)?,
+        None => general(conn)?,
+    };
+    let Some(d) = d else { return Ok(None) };
+    let a = audience(conn, &d)?;
+    let mut out = aurelius_domain::views::DiscussionAudience::default();
+    for (_, name, active) in a.employees {
+        let (count, names) = if active { (&mut out.employees, &mut out.employee_names) } else { (&mut out.paused, &mut out.paused_names) };
+        *count += 1;
+        names.push(name);
+    }
+    for (_, username) in a.users.into_iter().filter(|(id, _)| Some(*id) != reader) {
+        out.board_members += 1;
+        out.board_usernames.push(username);
+    }
+    Ok(Some(out))
+}
+
+/// The board members `@Everyone` in `text` tells, other than `sender`: none unless
+/// a board member wrote it (`from_board`). An employee's `@Everyone` is only text
+/// (RULE 08: no loop, no burst of cost).
+fn everyone_users(conn: &rusqlite::Connection, d: &Discussion, text: &str, from_board: bool, sender: Option<UserId>) -> Result<Vec<UserId>, StorageError> {
+    if !from_board || !group::names_everyone(text) {
+        return Ok(Vec::new());
+    }
+    Ok(audience(conn, d)?.users.into_iter().map(|(id, _)| id).filter(|id| Some(*id) != sender).collect())
+}
+
 fn addressees(conn: &rusqlite::Connection, d: &Discussion, text: &str) -> Result<Addressees, StorageError> {
     let team = team(conn)?;
     let names: Vec<(EmployeeId, String)> = team.iter().map(|(id, name, _)| (*id, name.clone())).collect();
     let mut chosen = group::mentions(text, &names);
+    // `@Everyone` adds everyone in the thread to those named, each once. It wins over
+    // an employee called Everyone: that one is woken as part of it (or named as `@Everyone`
+    // in the audience), never twice. A board member's message only: this is `addressees`.
+    if group::names_everyone(text) {
+        for (id, _, _) in audience(conn, d)?.employees {
+            if !chosen.contains(&id) {
+                chosen.push(id);
+            }
+        }
+    }
     let mut out = Addressees::default();
     match &d.place {
         Place::Ticket(t) if owner_answers(t) => {
@@ -457,7 +541,7 @@ fn post_in(tx: &Tx<'_>, store: &Store, id: ConversationId, thread: Option<Messag
         actor_id: None,
         correlation: id.to_string(),
         payload: Some(blob.id.to_string()),
-        metadata: with_mentions(tx, id, text, serde_json::json!({ "task_id": null, "kind": kind, "from": from, "message_id": message }))?,
+        metadata: with_mentions(tx, id, text, false, serde_json::json!({ "task_id": null, "kind": kind, "from": from, "message_id": message }))?,
         dedupe: format!("group-post:{message}"),
     })?;
     let mut meta = serde_json::json!({ "kind": kind, "from": from });
@@ -475,12 +559,23 @@ fn post_in(tx: &Tx<'_>, store: &Store, id: ConversationId, thread: Option<Messag
 /// `metadata` of a message event, with who `text` names when it names board members,
 /// where it was written for the row (`ticket_id`, or the channel as `subject`).
 /// `notify` reads this: the text stays in its blob and never reaches a row or a push.
-fn with_mentions(conn: &rusqlite::Connection, id: ConversationId, text: &str, mut metadata: serde_json::Value) -> Result<serde_json::Value, StorageError> {
-    let named = crate::ticket_follow::mentioned_board_members(conn, text)?;
-    if named.is_empty() {
+fn with_mentions(conn: &rusqlite::Connection, id: ConversationId, text: &str, from_board: bool, mut metadata: serde_json::Value) -> Result<serde_json::Value, StorageError> {
+    let mut named = crate::ticket_follow::mentioned_board_members(conn, text)?;
+    let everyone = from_board && group::names_everyone(text);
+    if named.is_empty() && !everyone {
         return Ok(metadata);
     }
     let Some(d) = load(conn, id)? else { return Ok(metadata) };
+    // `@Everyone` of a board member names the board members of the thread too, but never the sender.
+    let sender = metadata["user_id"].as_str().and_then(|u| UserId::parse(u).ok());
+    for user in everyone_users(conn, &d, text, from_board, sender)? {
+        if !named.contains(&user) {
+            named.push(user);
+        }
+    }
+    if named.is_empty() {
+        return Ok(metadata);
+    }
     metadata["mentioned_users"] = serde_json::json!(named);
     match &d.place {
         Place::General => metadata["subject"] = serde_json::json!(GENERAL_SUBJECT),
@@ -1142,7 +1237,7 @@ impl CommandService {
                 actor_id: Some(actor.clone()),
                 correlation: correlation.clone(),
                 payload: Some(text_blob.id.to_string()),
-                metadata: with_mentions(tx, d.id, &text, meta.clone())?,
+                metadata: with_mentions(tx, d.id, &text, true, meta.clone())?,
                 dedupe: format!("cmd:{command_id}:message"),
             })?;
             conv::insert_message_by(tx, NewMessage {
@@ -1187,7 +1282,7 @@ pub(crate) fn decision_feedback(tx: &Tx<'_>, store: &Store, ticket: TicketId, us
         actor_id: meta.get("principal_id").and_then(|p| p.as_str()).map(str::to_owned),
         correlation: command_id.to_owned(),
         payload: Some(blob.id.to_string()),
-        metadata: with_mentions(tx, d.id, text, meta.clone())?,
+        metadata: with_mentions(tx, d.id, text, true, meta.clone())?,
         dedupe: format!("cmd:{command_id}:feedback"),
     })?;
     let message = MessageId::new();
@@ -1210,10 +1305,16 @@ pub(crate) fn decision_feedback(tx: &Tx<'_>, store: &Store, ticket: TicketId, us
 /// Who a message in a ticket's discussion names follows the ticket (US-A2); nothing in
 /// a channel, whose readers do not follow anything.
 fn follow_named(tx: &Tx<'_>, d: &Discussion, text: &str, cause: FollowCause<'_>) -> Result<Vec<EventNotice>, StorageError> {
-    match d.ticket() {
-        Some(t) => crate::ticket_follow::follow_mentioned(tx, t.id, t.project, text, &cause),
-        None => Ok(Vec::new()),
+    let Some(t) = d.ticket() else { return Ok(Vec::new()) };
+    let mut users = crate::ticket_follow::mentioned_board_members(tx, text)?;
+    // `@Everyone` of a board member: the board members of the thread follow it as if named.
+    let sender = cause.meta["user_id"].as_str().and_then(|u| UserId::parse(u).ok());
+    for user in everyone_users(tx, d, text, cause.actor == ActorKind::User, sender)? {
+        if !users.contains(&user) {
+            users.push(user);
+        }
     }
+    crate::ticket_follow::follow_users(tx, t.id, t.project, &users, &cause)
 }
 
 /// An employee's message during `run` caused a follow.

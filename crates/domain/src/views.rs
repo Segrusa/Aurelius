@@ -887,6 +887,25 @@ pub struct ChannelsSnapshot {
     pub channels: Vec<ChannelView>,
 }
 
+/// `discussion.audience` (feature `everyone_mention`): whom a board member's
+/// `@Everyone` in one discussion would reach, so a client can say so before it
+/// sends. Never the asking board member: they are not told of their own message.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DiscussionAudience {
+    /// Employees `@Everyone` wakes: active, in the discussion.
+    pub employees: u32,
+    /// Their names, in the order of the company.
+    pub employee_names: Vec<String>,
+    /// Employees in the discussion who are paused: they are not woken, the message says so.
+    pub paused: u32,
+    /// Their names.
+    pub paused_names: Vec<String>,
+    /// Board members `@Everyone` tells in the Inbox (and makes follow a ticket).
+    pub board_members: u32,
+    /// Their usernames.
+    pub board_usernames: Vec<String>,
+}
+
 /// A message an employee scheduled (`schedule_message`, R7; feature `scheduled_messages`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScheduledMessageView {

@@ -624,6 +624,13 @@ impl Client {
         self.read(Method::ThreadRead { message_id }, body!(Thread)).await
     }
 
+    /// Whom `@Everyone` would reach in `channel` (none: the general channel), for the
+    /// count before sending. Only on a server that `supports`
+    /// `aurelius_protocol::feature::EVERYONE_MENTION` (an older one refuses the method).
+    pub async fn discussion_audience(&self, channel: Option<aurelius_domain::ConversationId>) -> Result<aurelius_domain::views::DiscussionAudience, ClientError> {
+        self.read(Method::DiscussionAudience { channel }, body!(DiscussionAudience)).await
+    }
+
     /// Where a message of a channel or a ticket's discussion is, for a link to it.
     /// Only on a server that `supports` `aurelius_protocol::feature::MESSAGE_LOCATE`.
     pub async fn message_locate(&self, message_id: aurelius_domain::MessageId) -> Result<aurelius_domain::views::MessageLocation, ClientError> {

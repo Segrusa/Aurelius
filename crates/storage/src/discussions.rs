@@ -212,6 +212,30 @@ pub fn members(conn: &Connection, conversation: ConversationId) -> Result<Vec<Me
     Ok(out)
 }
 
+/// The employees who hold a task in ticket `ticket` (its main task and every
+/// delegation below it, finished or not), without repeats.
+pub fn ticket_task_employees(conn: &Connection, ticket: TicketId) -> Result<Vec<EmployeeId>, StorageError> {
+    let mut stmt = conn.prepare("SELECT DISTINCT employee_id FROM tasks WHERE ticket_id = ?1 AND employee_id IS NOT NULL")?;
+    let rows = stmt.query_map([ticket.to_string()], |r| r.get::<_, String>(0))?;
+    let mut out = Vec::new();
+    for row in rows {
+        if let Ok(id) = EmployeeId::parse(&row?) {
+            out.push(id);
+        }
+    }
+    Ok(out)
+}
+
+/// The names the employees who wrote in `conversation` signed with, without repeats.
+pub fn employee_author_names(conn: &Connection, conversation: ConversationId) -> Result<Vec<String>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT json_extract(meta_json, '$.from') FROM messages
+         WHERE conversation_id = ?1 AND role <> 'user' AND json_extract(meta_json, '$.kind') = 'group' AND json_extract(meta_json, '$.from') IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([conversation.to_string()], |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// The Owner: the board members made in the onboarding (by nobody) who are not
 /// disabled. Board members have no roles; the one who set the server up owns it.
 pub fn owners(conn: &Connection) -> Result<Vec<UserId>, StorageError> {

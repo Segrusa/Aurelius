@@ -57,6 +57,7 @@ export const METHODS = {
   "conversation.set_browser_allowed": "command",
   "conversation.set_run": "command",
   "conversation.set_screen_allowed": "command",
+  "discussion.audience": "read",
   "employee.chat": "read",
   "employee.chats": "read",
   "employee.create": "command",
@@ -374,6 +375,14 @@ export interface MethodParams {
   "conversation.set_browser_allowed": M.SetBrowserAllowed;
   "conversation.set_run": M.SetConversationRun;
   "conversation.set_screen_allowed": M.SetScreenAllowed;
+  /**
+   * Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
+   * answered with `DiscussionAudience`, for the reader's own message (the
+   * reader is never counted). `channel`: a channel or a ticket's discussion
+   * (its conversation id, as in `channel.list`); none: the general channel.
+   * Read-only; `@Everyone` itself is plain text in `group_chat.send` / `ticket.post`.
+   */
+  "discussion.audience": { channel?: string | null };
   /**
    * An employee's persistent chat with the user (company scope, no project):
    * its messages and settings, as `conversation.get` answers them.

@@ -231,6 +231,24 @@ pub fn mentions(text: &str, employees: &[(EmployeeId, String)]) -> Vec<EmployeeI
     out
 }
 
+/// The word after `@` that addresses everyone in a discussion (`@Everyone`).
+pub const EVERYONE_MENTION: &str = "everyone";
+
+/// Whether `text` addresses everyone with `@Everyone` (case-insensitive, the
+/// whole word, with the same boundaries as `mentions`: `@` inside a word is an
+/// email address, and the name must end at a character that is not a letter,
+/// digit, `_` or `-`). Whoever may use it is a rule of the discussion engine.
+pub fn names_everyone(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.match_indices('@').any(|(at, _)| {
+        if lower[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '+')) {
+            return false;
+        }
+        let rest = &lower[at + 1..];
+        rest.starts_with(EVERYONE_MENTION) && rest[EVERYONE_MENTION.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_' || c == '-'))
+    })
+}
+
 /// One message of a discussion, as the scoped view looks at it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ViewLine<'a> {
@@ -280,6 +298,18 @@ pub fn shortened(text: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::names_everyone;
+
+    #[test]
+    fn everyone_is_a_whole_word_after_an_at_that_is_not_inside_a_word() {
+        for yes in ["@Everyone", "hi @EVERYONE!", "(@everyone)", "a\n@everyone, b", "@everyone."] {
+            assert!(names_everyone(yes), "{yes}");
+        }
+        for no in ["everyone", "mail me@everyone.com", "a.@everyone", "@everyone2", "@everyone_x", "@everyone-else", "@every one", "@"] {
+            assert!(!names_everyone(no), "{no}");
+        }
+    }
+
     use super::*;
 
     #[test]
