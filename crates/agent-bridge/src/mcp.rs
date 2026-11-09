@@ -330,7 +330,7 @@ fn board_op(name: &str, args: &Value) -> Option<EmployeeTaskOp> {
         "list_tickets" => EmployeeTaskOp::ListTickets { project: optional("project"), column: optional("column"), query: optional("query"), limit: number("limit") },
         "read_ticket" => EmployeeTaskOp::ReadTicket { ticket: text("ticket"), last: number("last") },
         "create_ticket" => EmployeeTaskOp::CreateTicket { project: optional("project"), title: text("title"), description: optional("description"), priority: optional("priority"), labels: list("labels").unwrap_or_default() },
-        "update_ticket" => EmployeeTaskOp::UpdateTicket { ticket: text("ticket"), title: optional("title"), description: args["description"].as_str().map(str::to_owned), priority: optional("priority"), labels: list("labels") },
+        "update_ticket" => EmployeeTaskOp::UpdateTicket { ticket: text("ticket"), title: optional("title"), description: args["description"].as_str().map(str::to_owned), priority: optional("priority"), labels: list("labels"), design_url: args["design_url"].as_str().map(str::to_owned) },
         "move_ticket" => EmployeeTaskOp::MoveTicket { ticket: text("ticket"), column: text("column") },
         "post_to_ticket" => EmployeeTaskOp::PostToTicket { ticket: text("ticket"), message: text("message") },
         _ => return None,
@@ -388,10 +388,10 @@ fn board_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "update_ticket",
-            "description": "Change a ticket's title, description, priority or labels. Management on any open ticket; everyone else only on a ticket they work on. Only what you give changes; a ticket in Done never changes.",
+            "description": "Change a ticket's title, description, priority, labels or design link. Management on any open ticket; everyone else only on a ticket they work on. Only what you give changes; a ticket in Done never changes.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "ticket": ticket, "title": { "type": "string" }, "description": { "type": "string", "description": "The whole new description." }, "priority": priority, "labels": labels },
+                "properties": { "ticket": ticket, "title": { "type": "string" }, "description": { "type": "string", "description": "The whole new description." }, "priority": priority, "labels": labels, "design_url": { "type": "string", "description": "A Claude Design artifact you made for this ticket: https://claude.ai/artifact/<id> or https://claude.ai/code/artifact/<uuid>. Empty clears it." } },
                 "required": ["ticket"]
             }
         }),
@@ -930,7 +930,7 @@ mod tests {
         );
         assert_eq!(
             op("update_ticket", json!({ "ticket": "12", "title": "New", "labels": [] })),
-            Some(EmployeeTaskOp::UpdateTicket { ticket: "12".into(), title: Some("New".into()), description: None, priority: None, labels: Some(vec![]) })
+            Some(EmployeeTaskOp::UpdateTicket { ticket: "12".into(), title: Some("New".into()), description: None, priority: None, labels: Some(vec![]), design_url: None })
         );
         assert_eq!(op("move_ticket", json!({ "ticket": "#12", "column": "todo" })), Some(EmployeeTaskOp::MoveTicket { ticket: "#12".into(), column: "todo".into() }));
         assert_eq!(op("post_to_ticket", json!({ "ticket": "#12", "message": "hi" })), Some(EmployeeTaskOp::PostToTicket { ticket: "#12".into(), message: "hi".into() }));

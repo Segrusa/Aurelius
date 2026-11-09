@@ -355,10 +355,12 @@ pub(crate) struct UpdateInput<'a> {
     pub description: Option<&'a str>,
     pub priority: Option<&'a str>,
     pub labels: Option<&'a [String]>,
+    /// A Claude Design artifact link; empty clears it.
+    pub design_url: Option<&'a str>,
 }
 
-/// `update_ticket`: title, description, priority and labels of an open ticket the employee manages
-/// or works on. Owner, mode, files and deadline are not here.
+/// `update_ticket`: title, description, priority, labels and design link of an open ticket the
+/// employee manages or works on. Owner, mode, files and deadline are not here.
 pub(crate) fn update(tx: &Tx<'_>, st: &Store, run: RunId, input: UpdateInput<'_>) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     let Some(me) = caller(tx, run)? else { return refuse(EMPLOYEES_ONLY) };
     if let Some(why) = plan_mode_refusal(tx, run)? {
@@ -394,8 +396,12 @@ pub(crate) fn update(tx: &Tx<'_>, st: &Store, run: RunId, input: UpdateInput<'_>
         },
         None => None,
     };
-    if title.is_none() && description.is_none() && priority.is_none() && labels.is_none() {
-        return refuse("Give a field to change: title, description, priority or labels.");
+    let design_url = match input.design_url.map(|u| ticket::valid_artifact_url("design_url", u)).transpose() {
+        Ok(d) => d,
+        Err(e) => return refuse(e.to_string()),
+    };
+    if title.is_none() && description.is_none() && priority.is_none() && labels.is_none() && design_url.is_none() {
+        return refuse("Give a field to change: title, description, priority, labels or design_url.");
     }
     let blob = match description.as_ref().and_then(|d| d.as_deref()) {
         Some(text) => {
@@ -415,11 +421,12 @@ pub(crate) fn update(tx: &Tx<'_>, st: &Store, run: RunId, input: UpdateInput<'_>
         labels: labels.as_deref(),
         deadline: None,
         run: None,
+        design_url: design_url.as_ref().map(|d| d.as_deref()),
         files_added: Vec::new(),
     };
     super::write_fields(tx, st, &mut e, &state, &change)?;
     let by = Actor::Employee { employee_id: me.employee };
-    let given: Vec<&str> = [("title", title.is_some()), ("description", description.is_some()), ("priority", priority.is_some()), ("labels", labels.is_some())]
+    let given: Vec<&str> = [("title", title.is_some()), ("description", description.is_some()), ("priority", priority.is_some()), ("labels", labels.is_some()), ("design link", design_url.is_some())]
         .into_iter()
         .filter_map(|(name, given)| given.then_some(name))
         .collect();

@@ -247,6 +247,10 @@ fn command_needs(command: &Command) -> Needs {
         // The level may widen what an employee's runs can do: like allowing the browser.
         // So may its tool list; a new employee's can only narrow what it would get anyway.
         Command::UpdateEmployee(u) if u.access_level.is_some() || u.tool_policy.is_some() => Needs::Cap(Approve),
+        // A design link offers the runs Claude Code's Artifact tool, on a board member's own
+        // login: setting one takes the right to approve, like the browser. Clearing it does not.
+        Command::UpdateProject(p) if p.styleguide_url.as_deref().is_some_and(|u| !u.trim().is_empty()) => Needs::Cap(Approve),
+        Command::UpdateTicket(t) if t.design_url.as_deref().is_some_and(|u| !u.trim().is_empty()) => Needs::Cap(Approve),
         Command::CreateProject(_)
         | Command::RenameProject(_)
         | Command::SetProjectDescription(_)
@@ -719,6 +723,21 @@ mod tests {
         assert_eq!(required(&off), cap(Capability::Chat));
         let plan = exec(Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id: ApprovalId::new(), decision: PlanDecision::Approve, feedback: None }));
         assert_eq!(required(&plan), cap(Capability::Approve));
+    }
+
+    #[test]
+    fn setting_a_design_link_takes_the_right_to_approve() {
+        use aurelius_domain::company::UpdateProject;
+        use aurelius_domain::ticket::UpdateTicket;
+        let project = |styleguide_url: Option<&str>| exec(Command::UpdateProject(UpdateProject { project_id: aurelius_domain::ProjectId::new(), dispatcher: None, styleguide_url: styleguide_url.map(str::to_owned) }));
+        let ticket = |design_url: Option<&str>| exec(Command::UpdateTicket(UpdateTicket { ticket_id: aurelius_domain::TicketId::new(), title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None, design_url: design_url.map(str::to_owned), confirm_secret: false }));
+        let link = Some("https://claude.ai/artifact/abc");
+        assert_eq!(required(&project(link)), cap(Capability::Approve));
+        assert_eq!(required(&ticket(link)), cap(Capability::Approve));
+        for nothing in [None, Some(""), Some("  ")] {
+            assert_eq!(required(&project(nothing)), cap(Capability::TaskControl), "{nothing:?}");
+            assert_eq!(required(&ticket(nothing)), cap(Capability::TaskControl), "{nothing:?}");
+        }
     }
 
     #[test]

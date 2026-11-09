@@ -29,6 +29,10 @@ pub struct ProjectSummary {
     /// The project's own dispatcher for tickets; none: the company's (B5).
     #[serde(default)]
     pub dispatcher_employee_id: Option<EmployeeId>,
+    /// The workspace's styleguide, a Claude Design artifact (feature `design_links`). A
+    /// link only: runs read the artifact themselves. Left out when none and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub styleguide_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

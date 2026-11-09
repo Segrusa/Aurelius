@@ -671,7 +671,7 @@ pub enum EmployeeAction {
     /// A new ticket in Backlog; management only, and it starts nothing.
     CreateTicket { project: Option<String>, title: String, description: Option<String>, priority: Option<String>, labels: Vec<String> },
     /// Title, description, priority or labels of a ticket the employee manages or works on.
-    UpdateTicket { ticket: String, title: Option<String>, description: Option<String>, priority: Option<String>, labels: Option<Vec<String>> },
+    UpdateTicket { ticket: String, title: Option<String>, description: Option<String>, priority: Option<String>, labels: Option<Vec<String>>, design_url: Option<String> },
     /// Management starts a ticket in Backlog (`column` todo); no other move is for an employee.
     MoveTicket { ticket: String, column: String },
     /// A message in the discussion of a ticket.
@@ -858,12 +858,12 @@ impl CommandService {
                 })
                 .map_err(storage_error);
         }
-        if let EmployeeAction::UpdateTicket { ticket, title, description, priority, labels } = &action {
-            let (ticket, title, description, priority, labels) = (ticket.clone(), title.clone(), description.clone(), priority.clone(), labels.clone());
+        if let EmployeeAction::UpdateTicket { ticket, title, description, priority, labels, design_url } = &action {
+            let (ticket, title, description, priority, labels, design_url) = (ticket.clone(), title.clone(), description.clone(), priority.clone(), labels.clone(), design_url.clone());
             return self
                 .store
                 .write(move |tx| {
-                    let input = crate::ticket::agent::UpdateInput { ticket: &ticket, title: title.as_deref(), description: description.as_deref(), priority: priority.as_deref(), labels: labels.as_deref() };
+                    let input = crate::ticket::agent::UpdateInput { ticket: &ticket, title: title.as_deref(), description: description.as_deref(), priority: priority.as_deref(), labels: labels.as_deref(), design_url: design_url.as_deref() };
                     crate::ticket::agent::update(tx, &st, run, input)
                 })
                 .map_err(storage_error);

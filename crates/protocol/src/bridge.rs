@@ -196,8 +196,8 @@ pub enum EmployeeTaskOp {
         #[serde(default)]
         labels: Vec<String>,
     },
-    /// Change a ticket's title, description, priority or labels (the bridge's `update_ticket`):
-    /// management, or the employee who works on the ticket.
+    /// Change a ticket's title, description, priority, labels or design link (the bridge's
+    /// `update_ticket`): management, or the employee who works on the ticket.
     UpdateTicket {
         ticket: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,6 +208,9 @@ pub enum EmployeeTaskOp {
         priority: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         labels: Option<Vec<String>>,
+        /// A Claude Design artifact link; an empty text clears it (feature `design_links`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        design_url: Option<String>,
     },
     /// Start a ticket (the bridge's `move_ticket`): management moves Backlog → Todo; every other
     /// move is refused (a board member's decision, or the work's own).

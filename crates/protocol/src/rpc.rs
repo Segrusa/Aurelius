@@ -368,6 +368,11 @@ pub mod feature {
     /// `approval.list`, `scheduled_message.list`, `activity_log.list`). Older servers
     /// refuse or ignore it, so a client without this feature does not offer workspaces.
     pub const WORKSPACE_FILTERS: &str = "workspace_filters";
+    /// Links to Claude Design artifacts (protocol 5, additive): `ProjectSummary::styleguide_url`
+    /// and `project.update { styleguide_url }`, `TicketView::design_url` and
+    /// `ticket.update { design_url }`. `ticket.updated` says `changed: ["design"]`. A client
+    /// without this feature does not offer the fields (a project or ticket update refuses them).
+    pub const DESIGN_LINKS: &str = "design_links";
 }
 
 /// Every feature this build has.
@@ -413,6 +418,7 @@ pub const FEATURES: &[&str] = &[
     feature::ACTIVITY_LOG,
     feature::EMPLOYEE_QUEUE,
     feature::WORKSPACE_FILTERS,
+    feature::DESIGN_LINKS,
 ];
 
 /// Daemon → client.

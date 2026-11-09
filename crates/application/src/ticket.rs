@@ -620,7 +620,8 @@ impl CommandService {
         };
         let labels = cmd.labels.as_deref().map(ticket::valid_labels).transpose().map_err(domain_error)?;
         let deadline = if cmd.clear_deadline { Some(None) } else { ticket::valid_deadline(cmd.deadline_ms).map_err(domain_error)?.map(Some) };
-        if title.is_none() && description.is_none() && cmd.priority.is_none() && labels.is_none() && deadline.is_none() && cmd.run.is_none() && cmd.add_files.as_deref().unwrap_or_default().is_empty() {
+        let design_url = cmd.design_url.as_deref().map(|u| ticket::valid_artifact_url("design_url", u)).transpose().map_err(domain_error)?;
+        if title.is_none() && description.is_none() && cmd.priority.is_none() && labels.is_none() && deadline.is_none() && cmd.run.is_none() && design_url.is_none() && cmd.add_files.as_deref().unwrap_or_default().is_empty() {
             return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
         }
         let description_blob = match description.as_ref().and_then(|d| d.as_deref()) {
@@ -681,6 +682,7 @@ impl CommandService {
                 labels: labels.as_deref(),
                 deadline,
                 run: cmd.run.as_ref(),
+                design_url: design_url.as_ref().map(|d| d.as_deref()),
                 files_added,
             };
             write_fields(tx, &st, &mut e, &state, &change)?;
@@ -789,9 +791,11 @@ impl CommandService {
     pub(crate) fn update_project(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &UpdateProject) -> Result<Committed, AppError> {
         let by = Actor::BoardMember { user_id: require_board_member(ctx)? };
         let cmd = cmd.clone();
-        let Some(dispatcher) = cmd.dispatcher.map(|d| d.employee_id) else {
+        let dispatcher = cmd.dispatcher.map(|d| d.employee_id);
+        let styleguide = cmd.styleguide_url.as_deref().map(|u| ticket::valid_artifact_url("styleguide_url", u)).transpose().map_err(domain_error)?;
+        if dispatcher.is_none() && styleguide.is_none() {
             return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
-        };
+        }
         let expected = envelope.expected_version;
         let base = Base::of(ctx, envelope);
         self.commit(envelope.command_id, hash, move |tx| {
@@ -804,12 +808,19 @@ impl CommandService {
             if project.status == ProjectStatus::Archived {
                 return rejected(DomainError::ProjectArchived);
             }
-            if let Some(employee) = dispatcher {
+            if let Some(employee) = dispatcher.flatten() {
                 check!(check_employee(tx, employee)?);
             }
-            let version = company_store::set_project_dispatcher(tx, cmd.project_id, dispatcher)?;
+            let version = company_store::update_project(tx, cmd.project_id, dispatcher, styleguide.as_ref().map(|s| s.as_deref()))?;
             let mut e = Events::new(&base, "project", cmd.project_id.to_string(), Some(cmd.project_id), version - 1);
-            e.push(tx, EventKind::ProjectUpdated, json!({ "dispatcher_employee_id": dispatcher, "by": by }))?;
+            let mut payload = json!({ "by": by });
+            if let Some(dispatcher) = dispatcher {
+                payload["dispatcher_employee_id"] = json!(dispatcher);
+            }
+            if styleguide.is_some() {
+                payload["changed"] = json!(["styleguide"]);
+            }
+            e.push(tx, EventKind::ProjectUpdated, payload)?;
             Ok(Ok((CommandResult::ProjectUpdated { project_id: cmd.project_id, version }, e.notices)))
         })
     }
@@ -890,6 +901,8 @@ struct FieldChange<'a> {
     /// `Some(None)` clears the deadline.
     deadline: Option<Option<i64>>,
     run: Option<&'a aurelius_domain::task::RunSettings>,
+    /// `Some(None)` clears the design link.
+    design_url: Option<Option<&'a str>>,
     files_added: Vec<String>,
 }
 
@@ -916,6 +929,7 @@ fn write_fields(tx: &Transaction<'_>, st: &aurelius_storage::Store, e: &mut Even
             deadline_ms: change.deadline,
             owner: None,
             run: change.run,
+            design_url: change.design_url,
         },
     )?;
     let changed: Vec<&str> = [
@@ -925,6 +939,7 @@ fn write_fields(tx: &Transaction<'_>, st: &aurelius_storage::Store, e: &mut Even
         ("labels", change.labels.is_some()),
         ("deadline", change.deadline.is_some()),
         ("run", change.run.is_some()),
+        ("design", change.design_url.is_some()),
         ("files", !change.files_added.is_empty()),
     ]
     .into_iter()

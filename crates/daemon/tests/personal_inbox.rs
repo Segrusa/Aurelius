@@ -44,7 +44,7 @@ impl AgentRuntime for FailMarked {
 }
 
 fn describe(ticket_id: TicketId, text: &str) -> UpdateTicket {
-    UpdateTicket { ticket_id, title: None, description: Some(text.into()), priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None, confirm_secret: false }
+    UpdateTicket { design_url: None, ticket_id, title: None, description: Some(text.into()), priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None, confirm_secret: false }
 }
 
 async fn user_id(client: &Client) -> UserId {

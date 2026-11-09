@@ -73,6 +73,11 @@ pub fn insert(tx: &Transaction<'_>, ticket: &NewTicket<'_>) -> Result<u32, Stora
 }
 
 /// Whose Claude login the ticket's runs use (at first its creator).
+/// The ticket's design link, if it has one.
+pub fn design_url(conn: &Connection, id: TicketId) -> Result<Option<String>, StorageError> {
+    Ok(conn.query_row("SELECT design_url FROM tickets WHERE id = ?1", [id.to_string()], |r| r.get(0)).optional()?.flatten())
+}
+
 pub fn login_user(conn: &Connection, id: TicketId) -> Result<Option<UserId>, StorageError> {
     let user: Option<String> = conn.query_row("SELECT login_user FROM tickets WHERE id = ?1", [id.to_string()], |r| r.get(0)).optional()?;
     Ok(user.and_then(|u| UserId::parse(&u).ok()))
@@ -214,6 +219,8 @@ pub struct TicketFields<'a> {
     pub deadline_ms: Option<Option<i64>>,
     pub owner: Option<Option<EmployeeId>>,
     pub run: Option<&'a RunSettings>,
+    /// `Some(None)`: cleared.
+    pub design_url: Option<Option<&'a str>>,
 }
 
 pub fn update_fields(tx: &Transaction<'_>, id: TicketId, fields: &TicketFields<'_>) -> Result<(), StorageError> {
@@ -238,6 +245,9 @@ pub fn update_fields(tx: &Transaction<'_>, id: TicketId, fields: &TicketFields<'
     }
     if let Some(deadline) = fields.deadline_ms {
         tx.execute("UPDATE tickets SET deadline_ms = ?2 WHERE id = ?1", params![id, deadline])?;
+    }
+    if let Some(design) = fields.design_url {
+        tx.execute("UPDATE tickets SET design_url = ?2 WHERE id = ?1", params![id, design])?;
     }
     if let Some(owner) = fields.owner {
         tx.execute("UPDATE tickets SET owner_employee_id = ?2 WHERE id = ?1", params![id, owner.map(|o| o.to_string())])?;
@@ -376,7 +386,7 @@ const SELECT: &str = "SELECT k.id, k.number, k.project_id, p.name, k.title, db.s
         (EXISTS (SELECT 1 FROM tasks w WHERE w.ticket_id = k.id AND w.status = 'waiting' AND w.waiting_reason = 'login')
          OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state = 'ready' AND j.last_error_code = 'login'
                     AND json_extract(j.payload_json, '$.ticket_id') = k.id)),
-        k.responsible_user_id, ru.username, COALESCE(ru.disabled_at_ms IS NOT NULL, 0)
+        k.responsible_user_id, ru.username, COALESCE(ru.disabled_at_ms IS NOT NULL, 0), k.design_url
      FROM tickets k
      JOIN projects p ON p.id = k.project_id
      JOIN board_columns c ON c.id = k.column_id
@@ -439,6 +449,7 @@ fn ticket_row(r: &Row<'_>) -> rusqlite::Result<(TicketView, Option<String>)> {
             responsible_user_id: r.get::<_, Option<String>>(31)?.and_then(|u| UserId::parse(&u).ok()),
             responsible_username: r.get(32)?,
             responsible_disabled: r.get(33)?,
+            design_url: r.get(34)?,
         },
         description,
     ))

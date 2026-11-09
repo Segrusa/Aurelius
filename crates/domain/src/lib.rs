@@ -379,6 +379,9 @@ pub enum DomainError {
     /// The server's name was refused (A-05); the text says why.
     #[error("{0}")]
     ServerName(String),
+    /// A styleguide or design link that is no Claude artifact; the text says what it must be.
+    #[error("{0}")]
+    ArtifactLink(String),
 }
 
 pub(crate) fn require_text(field: &str, value: &str, max: usize) -> Result<String, DomainError> {

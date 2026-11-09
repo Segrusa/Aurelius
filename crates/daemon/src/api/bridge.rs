@@ -106,7 +106,7 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         EmployeeTaskOp::ListTickets { project, column, query, limit } => EmployeeAction::ListTickets { project, column, query, limit },
         EmployeeTaskOp::ReadTicket { ticket, last } => EmployeeAction::ReadTicket { ticket, last },
         EmployeeTaskOp::CreateTicket { project, title, description, priority, labels } => EmployeeAction::CreateTicket { project, title, description, priority, labels },
-        EmployeeTaskOp::UpdateTicket { ticket, title, description, priority, labels } => EmployeeAction::UpdateTicket { ticket, title, description, priority, labels },
+        EmployeeTaskOp::UpdateTicket { ticket, title, description, priority, labels, design_url } => EmployeeAction::UpdateTicket { ticket, title, description, priority, labels, design_url },
         EmployeeTaskOp::MoveTicket { ticket, column } => EmployeeAction::MoveTicket { ticket, column },
         EmployeeTaskOp::PostToTicket { ticket, message } => EmployeeAction::PostToTicket { ticket, message },
         // Checked in the application (`testing::verdict`): only the open test task of a ticket in Testing.

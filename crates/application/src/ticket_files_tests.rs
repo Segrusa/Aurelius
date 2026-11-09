@@ -82,7 +82,7 @@ fn new_ticket(s: &Setup) -> TicketId {
 }
 
 fn add_files(id: TicketId, files: &[String]) -> Command {
-    Command::UpdateTicket(ticket::UpdateTicket {
+    Command::UpdateTicket(ticket::UpdateTicket { design_url: None,
         confirm_secret: false,
         ticket_id: id,
         title: None,

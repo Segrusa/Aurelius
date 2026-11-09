@@ -189,6 +189,7 @@ fn the_new_answers_have_their_wire_form() {
 
 fn ticket() -> TicketView {
     TicketView {
+        design_url: None,
         id: TicketId::new(),
         number: 12,
         project_id: ProjectId::new(),

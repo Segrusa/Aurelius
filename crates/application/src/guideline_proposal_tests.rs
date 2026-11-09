@@ -434,7 +434,7 @@ fn every_action() -> Vec<EmployeeAction> {
         EmployeeAction::ListTickets { project: None, column: None, query: None, limit: None },
         EmployeeAction::ReadTicket { ticket: "#1".into(), last: None },
         EmployeeAction::CreateTicket { project: None, title: "t".into(), description: None, priority: None, labels: vec![] },
-        EmployeeAction::UpdateTicket { ticket: "#1".into(), title: Some("t".into()), description: None, priority: None, labels: None },
+        EmployeeAction::UpdateTicket { design_url: None, ticket: "#1".into(), title: Some("t".into()), description: None, priority: None, labels: None },
         EmployeeAction::MoveTicket { ticket: "#1".into(), column: "todo".into() },
         EmployeeAction::PostToTicket { ticket: "#1".into(), message: "m".into() },
         EmployeeAction::HandOff { to: "Ann".into(), message: "m".into() },

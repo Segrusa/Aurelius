@@ -712,7 +712,7 @@ async fn following_leaves_the_ticket_version_alone_so_an_older_client_gets_no_co
         (seen.version, seen.updated_at_ms)
     );
     // A client that never hears of the follow writes with the version it has; events go on from there.
-    let update = UpdateTicket {
+    let update = UpdateTicket { design_url: None,
         ticket_id,
         title: Some("Login v2".into()),
         description: None,
@@ -836,7 +836,7 @@ async fn post(client: &Client, ticket_id: TicketId, text: &str) {
 }
 
 fn describe(ticket_id: TicketId, text: &str) -> Command {
-    Command::UpdateTicket(UpdateTicket {
+    Command::UpdateTicket(UpdateTicket { design_url: None,
         ticket_id,
         title: None,
         description: Some(text.into()),

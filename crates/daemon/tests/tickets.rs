@@ -155,7 +155,7 @@ async fn the_dispatcher_is_set_for_the_company_and_per_project() {
     let company = client.company().await.unwrap().company;
     assert_eq!((company.name.as_str(), company.dispatcher_employee_id), ("Segrusa", Some(orion)));
 
-    let set_project = |employee_id| Command::UpdateProject(UpdateProject { project_id: atlas, dispatcher: Some(SetDispatcher { employee_id }) });
+    let set_project = |employee_id| Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: atlas, dispatcher: Some(SetDispatcher { employee_id }) });
     client.ticket_command(set_project(Some(forge)), None).await.unwrap();
     let projects = client.projects().await.unwrap().projects;
     assert_eq!(projects.iter().find(|p| p.id == atlas).unwrap().dispatcher_employee_id, Some(forge));
@@ -180,7 +180,7 @@ async fn start_with_an_owner_then_update_the_fields() {
     assert_ne!(ticket.column, ColumnKind::Backlog);
     assert_eq!((ticket.owner_employee_id, ticket.owner_name.as_deref()), (Some(forge), Some("Forge")));
     // Update: the fields change while the engine works (its moves give the ticket new versions, so none is expected here).
-    let rename = Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("Owned, renamed".into()), description: None, priority: Some(TicketPriority::Low), labels: None, deadline_ms: None, clear_deadline: true, run: None, add_files: None });
+    let rename = Command::UpdateTicket(UpdateTicket { design_url: None, confirm_secret: false, ticket_id: id, title: Some("Owned, renamed".into()), description: None, priority: Some(TicketPriority::Low), labels: None, deadline_ms: None, clear_deadline: true, run: None, add_files: None });
     client.ticket_command(rename, None).await.unwrap();
     let ticket = client.ticket(id).await.unwrap().ticket;
     assert_eq!((ticket.title.as_str(), ticket.priority, ticket.deadline_ms), ("Owned, renamed", TicketPriority::Low, None));
@@ -225,7 +225,7 @@ async fn a_board_member_adds_files_to_an_existing_ticket() {
         .await
         .unwrap();
     let CommandResult::TicketCreated { ticket_id: id, .. } = made.result else { panic!("{:?}", made.result) };
-    let add = |files: Vec<String>| UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: Some(files) };
+    let add = |files: Vec<String>| UpdateTicket { design_url: None, confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: Some(files) };
 
     client.update_ticket(add(vec![path(&log)]), None).await.unwrap();
     let ticket = client.ticket(id).await.unwrap().ticket;

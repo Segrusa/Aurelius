@@ -132,7 +132,7 @@ fn every_ticket_board_and_company_write_needs_a_board_member() {
     let ticket = new_ticket(&s, "Mine");
     let commands = [
         Command::CreateTicket(ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: s.project, title: "x".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None, from_idea: None }),
-        Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: ticket, title: Some("y".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }),
+        Command::UpdateTicket(ticket::UpdateTicket { design_url: None, confirm_secret: false, ticket_id: ticket, title: Some("y".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }),
         Command::MoveTicket(ticket::MoveTicket { ticket_id: ticket, column_id: column(&s, ColumnKind::Todo), before_ticket_id: None }),
         Command::StartTicket(ticket::StartTicket { ticket_id: ticket, employee_id: None }),
         Command::AssignTicket(ticket::AssignTicket { ticket_id: ticket, employee_id: Some(EmployeeId::new()), reason: None }),
@@ -144,7 +144,7 @@ fn every_ticket_board_and_company_write_needs_a_board_member() {
         Command::ArchiveTicket(ticket::ArchiveTicket { ticket_id: ticket }),
         Command::UpdateBoardColumns(ticket::UpdateBoardColumns { columns: vec![] }),
         Command::UpdateCompany(UpdateCompany { name: Some("Acme".into()), dispatcher: None, tester: None }),
-        Command::UpdateProject(UpdateProject { project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: None }) }),
+        Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: None }) }),
         Command::SetTicketResponsible(ticket::SetTicketResponsible { ticket_id: ticket, responsible_user_id: None }),
         Command::FollowTicket(ticket::FollowTicket { ticket_id: ticket, on: true }),
         Command::EditMessage(aurelius_domain::group_chat::EditMessage { message_id: aurelius_domain::MessageId::new(), text: "x".into(), confirm_secret: false }),
@@ -309,7 +309,7 @@ fn plan_review_and_review_are_decided_by_buttons_with_feedback() {
         .collect();
     assert_eq!(said, [("Smaller steps".to_string(), Some(s.user)), ("Add a test".to_string(), Some(s.user))], "no message for an approval without feedback");
     // Done is read-only: no update, no move, no cancel.
-    let err = run(&s, Command::UpdateTicket(ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: Some("New".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None })).unwrap_err();
+    let err = run(&s, Command::UpdateTicket(ticket::UpdateTicket { design_url: None, confirm_secret: false, ticket_id: id, title: Some("New".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None })).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation);
     assert!(run(&s, Command::CancelTicket(ticket::CancelTicket { ticket_id: id })).is_err());
     // But it can leave the board.
@@ -319,10 +319,36 @@ fn plan_review_and_review_are_decided_by_buttons_with_feedback() {
 }
 
 #[test]
+fn a_ticket_keeps_its_design_link_until_it_is_cleared() {
+    let s = setup();
+    let id = new_ticket(&s, "Draft");
+    let design = |url: &str| ticket::UpdateTicket { design_url: Some(url.into()), confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None };
+    let err = run(&s, Command::UpdateTicket(design("https://example.com/artifact/abc"))).unwrap_err();
+    assert!(err.code == ErrorCode::Validation && err.message.contains("Claude artifact link"), "{err:?}");
+    run(&s, Command::UpdateTicket(design("https://claude.ai/code/artifact/8f14e45f-ceea-467f-a22a-2b7a2c55e3b1"))).unwrap();
+    assert_eq!(view(&s, id).design_url.as_deref(), Some("https://claude.ai/code/artifact/8f14e45f-ceea-467f-a22a-2b7a2c55e3b1"));
+    run(&s, Command::UpdateTicket(design(""))).unwrap();
+    assert_eq!(view(&s, id).design_url, None, "cleared");
+}
+
+#[test]
+fn a_project_takes_a_styleguide_link_without_changing_its_dispatcher() {
+    let s = setup();
+    let update = |url: &str| Command::UpdateProject(UpdateProject { styleguide_url: Some(url.into()), project_id: s.project, dispatcher: None });
+    assert!(run(&s, Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: s.project, dispatcher: None })).is_err(), "nothing to change");
+    assert_eq!(run(&s, update("https://example.com")).unwrap_err().code, ErrorCode::Validation);
+    run(&s, update("https://claude.ai/artifact/abc")).unwrap();
+    let styleguide = |s: &Setup| s.service.store().read(|c| aurelius_storage::company::project_styleguide(c, s.project)).unwrap();
+    assert_eq!(styleguide(&s).as_deref(), Some("https://claude.ai/artifact/abc"));
+    run(&s, update("  ")).unwrap();
+    assert_eq!(styleguide(&s), None, "cleared");
+}
+
+#[test]
 fn update_changes_fields_but_never_the_author_and_checks_the_version() {
     let s = setup();
     let id = new_ticket(&s, "Draft");
-    let update = |title: Option<&str>, priority: Option<TicketPriority>| ticket::UpdateTicket {
+    let update = |title: Option<&str>, priority: Option<TicketPriority>| ticket::UpdateTicket { design_url: None,
         confirm_secret: false,
         ticket_id: id,
         title: title.map(str::to_owned),
@@ -349,7 +375,7 @@ fn update_changes_fields_but_never_the_author_and_checks_the_version() {
         .unwrap();
     run_as(&s, Some(other), Command::UpdateTicket(update(None, Some(TicketPriority::High))), None).unwrap();
     assert_eq!(view(&s, id).created_by_user, s.user);
-    let nothing = ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None };
+    let nothing = ticket::UpdateTicket { design_url: None, confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None };
     assert_eq!(run(&s, Command::UpdateTicket(nothing)).unwrap_err().code, ErrorCode::Validation);
 }
 
@@ -387,7 +413,7 @@ fn the_dispatcher_is_set_on_the_company_and_per_project() {
 
     // project.update sets a dispatcher too, so it needs a board member as well (m3).
     let project = s.project;
-    let update = |who: Option<EmployeeId>| Command::UpdateProject(UpdateProject { project_id: project, dispatcher: Some(SetDispatcher { employee_id: who }) });
+    let update = |who: Option<EmployeeId>| Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: project, dispatcher: Some(SetDispatcher { employee_id: who }) });
     assert_eq!(run_as(&s, None, update(Some(forge)), None).unwrap_err().code, ErrorCode::BoardMemberRequired);
     let done = run(&s, update(Some(forge))).unwrap();
     assert!(matches!(done, CommandResult::ProjectUpdated { version: 2, .. }), "{done:?}");
@@ -605,7 +631,7 @@ fn a_deadline_must_be_a_real_moment() {
     assert_eq!(run(&s, Command::CreateTicket(create.clone())).unwrap_err().code, ErrorCode::Validation);
     create.deadline_ms = Some(1_800_000_000_000);
     let CommandResult::TicketCreated { ticket_id: id, .. } = run(&s, Command::CreateTicket(create)).unwrap() else { panic!() };
-    let update = |deadline_ms| ticket::UpdateTicket { confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms, clear_deadline: false, run: None, add_files: None };
+    let update = |deadline_ms| ticket::UpdateTicket { design_url: None, confirm_secret: false, ticket_id: id, title: None, description: None, priority: None, labels: None, deadline_ms, clear_deadline: false, run: None, add_files: None };
     for bad in [0, -1, ticket::DEADLINE_MAX_MS + 1] {
         assert_eq!(run(&s, Command::UpdateTicket(update(Some(bad)))).unwrap_err().code, ErrorCode::Validation, "{bad}");
     }
@@ -817,7 +843,7 @@ fn with_files(s: &Setup) -> (std::path::PathBuf, std::path::PathBuf, Vec<String>
 }
 
 fn add_files(id: TicketId, files: &[String]) -> Command {
-    Command::UpdateTicket(ticket::UpdateTicket {
+    Command::UpdateTicket(ticket::UpdateTicket { design_url: None,
         confirm_secret: false,
         ticket_id: id,
         title: None,

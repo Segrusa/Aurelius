@@ -263,7 +263,7 @@ async fn every_text_command_is_refused_by_name_and_stored_redacted_when_confirme
     let made = b10(root, &client, ticket, "create_ticket", |c| Command::CreateTicket(new_ticket(project_id, None, format!("Deploy with {}", ticket.value), AgentMode::Auto, false, c))).await;
     let CommandResult::TicketCreated { ticket_id, .. } = made.result else { panic!("{:?}", made.result) };
     b10(root, &client, ticket_edit, "update_ticket", |confirm_secret| {
-        Command::UpdateTicket(UpdateTicket {
+        Command::UpdateTicket(UpdateTicket { design_url: None,
             ticket_id,
             title: None,
             description: Some(format!("Deploy with {}", ticket_edit.value)),

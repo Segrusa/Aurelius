@@ -85,14 +85,14 @@ async fn management_makes_and_starts_a_ticket_and_a_plain_agent_cannot() {
     assert!(ok && read.contains("Why."), "{read}");
     let (ok, text) = bridge.employee_act(ann_run, EmployeeTaskOp::MoveTicket { ticket: "#1".into(), column: "todo".into() }).await.unwrap();
     assert!(!ok && text.contains("Only management moves"), "{text}");
-    let (ok, text) = bridge.employee_act(ann_run, EmployeeTaskOp::UpdateTicket { ticket: "#1".into(), title: Some("Ann's".into()), description: None, priority: None, labels: None }).await.unwrap();
+    let (ok, text) = bridge.employee_act(ann_run, EmployeeTaskOp::UpdateTicket { design_url: None, ticket: "#1".into(), title: Some("Ann's".into()), description: None, priority: None, labels: None }).await.unwrap();
     assert!(!ok && text.contains("you work on"), "{text}");
     for column in ["done", "doing", "review", "testing", "plan_review"] {
         let (ok, _) = bridge.employee_act(atlas_run, EmployeeTaskOp::MoveTicket { ticket: "#1".into(), column: column.into() }).await.unwrap();
         assert!(!ok, "{column}");
     }
     assert_eq!(ticket_row(dir.path(), "Export to CSV").unwrap().1, "backlog");
-    let (ok, text) = bridge.employee_act(atlas_run, EmployeeTaskOp::UpdateTicket { ticket: "#1".into(), title: Some("Export to CSV and JSON".into()), description: None, priority: None, labels: None }).await.unwrap();
+    let (ok, text) = bridge.employee_act(atlas_run, EmployeeTaskOp::UpdateTicket { design_url: None, ticket: "#1".into(), title: Some("Export to CSV and JSON".into()), description: None, priority: None, labels: None }).await.unwrap();
     assert!(ok, "{text}");
     let (ok, text) = bridge.employee_act(atlas_run, EmployeeTaskOp::MoveTicket { ticket: "#1".into(), column: "todo".into() }).await.unwrap();
     assert!(ok, "{text}");
