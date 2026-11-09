@@ -2,7 +2,7 @@
 
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import type { EmployeeChatView, EmployeeSummary } from "@aurelius/protocol";
+import type { ChannelView, EmployeeChatView, EmployeeSummary } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
@@ -18,11 +18,13 @@ import {
   type DockState,
   type DockTicket,
   dockAway,
+  dockChannels,
   dockChats,
   dockTickets,
   launcherAway,
   parseDock,
 } from "./chat-dock-logic";
+import { bareName } from "./chat-logic";
 import { EmployeeChat, useChatOpener } from "./employee-chat";
 import { narrow } from "./workspace-logic";
 
@@ -184,6 +186,15 @@ function ChatLine({
   );
 }
 
+function useDockChannels(search: string): ChannelView[] {
+  const channels = useChannels();
+  const workspace = useWorkspace().id;
+  return useMemo(
+    () => dockChannels(narrow(channels.data ?? [], workspace), search),
+    [channels.data, workspace, search],
+  );
+}
+
 function useDockTickets(search: string): DockTicket[] {
   const channels = useChannels();
   const tickets = useTickets();
@@ -232,6 +243,7 @@ function ChatList({
     [chats.data, employees.data, search],
   );
   const tickets = useDockTickets(search);
+  const channelList = useDockChannels(search);
   const now = Date.now();
   const byId = (id: string) => employees.data?.find((e) => e.id === id);
   return (
@@ -278,6 +290,29 @@ function ChatList({
             onOpen={() => onPick(c.conversation_id)}
           />
         ))}
+        {channelList.length > 0 ? <p {...stylex.props(styles.label)}>Channels</p> : null}
+        {channelList.map((c) => (
+          <button
+            key={c.conversation_id}
+            type="button"
+            onClick={() => {
+              onCollapse();
+              void navigate({ to: "/chat", search: { channel: c.conversation_id } });
+            }}
+            {...stylex.props(styles.row)}
+          >
+            <Mark letter="#" color={TICKET_MARK} size={38} radius={12} />
+            <span {...stylex.props(styles.rowText)}>
+              <span {...stylex.props(styles.rowTop)}>
+                <span {...stylex.props(styles.rowName, c.unread > 0 && styles.rowNameNew)}>{bareName(c)}</span>
+                {c.last_activity_ms ? (
+                  <span {...stylex.props(styles.rowAge)}>{chatAge(c.last_activity_ms, now)}</span>
+                ) : null}
+              </span>
+            </span>
+            {c.unread > 0 ? <span title={`${c.unread} unread`} {...stylex.props(styles.dot)} /> : null}
+          </button>
+        ))}
         {tickets.length > 0 ? <p {...stylex.props(styles.label)}>Tickets</p> : null}
         {tickets.map((t) => (
           <TicketLine key={t.conversation} ticket={t} now={now} onOpen={() => onPickTicket(t)} />
@@ -292,7 +327,7 @@ function ChatList({
             </span>
           </button>
         ))}
-        {list.chats.length === 0 && list.others.length === 0 && tickets.length === 0 ? (
+        {list.chats.length === 0 && list.others.length === 0 && tickets.length === 0 && channelList.length === 0 ? (
           <p {...stylex.props(styles.nothing)}>Nobody by that name.</p>
         ) : null}
       </div>

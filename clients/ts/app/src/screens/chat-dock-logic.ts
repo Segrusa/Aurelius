@@ -73,6 +73,14 @@ export function dockTickets(
   return wanted === "" ? all.slice(0, OPEN_TICKETS_SHOWN) : all.filter((t) => t.title.toLowerCase().includes(wanted));
 }
 
+/** The general channel and the project channels, to open in the Team chat; all that match when searching. */
+export function dockChannels(channels: ChannelView[], search: string): ChannelView[] {
+  const wanted = search.trim().toLowerCase();
+  const { general, projects } = sections(channels);
+  const all = [...(general ? [general] : []), ...projects];
+  return wanted === "" ? all : all.filter((c) => bareName(c).toLowerCase().includes(wanted));
+}
+
 /** "now", "5m", "3h", "2d", "1w": the age of a chat. */
 export function chatAge(atMs: number, nowMs: number): string {
   const minutes = Math.max(0, Math.floor((nowMs - atMs) / 60_000));

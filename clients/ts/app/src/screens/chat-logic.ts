@@ -95,10 +95,11 @@ export interface Author {
   human: boolean;
 }
 
-export function authorOf(m: MessageView, roleOf: (name: string) => string | null): Author {
+/** `speaker`: who an unsigned answer is from, in a chat with one employee. */
+export function authorOf(m: MessageView, roleOf: (name: string) => string | null, speaker?: string | null): Author {
   if (m.author_user) return { name: m.author_user.username, kind: "board member", human: true };
   if (m.role === "user") return { name: "Board member", kind: "board member", human: true };
-  const name = m.author?.trim() || "Aurelius";
+  const name = m.author?.trim() || speaker?.trim() || "Aurelius";
   return { name, kind: roleOf(name) ?? "employee", human: false };
 }
 

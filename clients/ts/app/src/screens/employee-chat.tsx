@@ -185,6 +185,7 @@ export function EmployeeChat({ conversationId, compact = false }: { conversation
       conversationId,
       channel: null,
       retryTarget: { employeeId: null },
+      speaker: name,
       flash: null,
     }),
     [store, features, user, name, employeesData, approvalMap, list, lastAnswerId, conversationId],
