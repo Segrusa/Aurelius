@@ -51,7 +51,6 @@ async fn work(client: &Client, project_id: ProjectId, employee_id: EmployeeId, t
         title: title.into(),
         goal: goal.into(),
         acceptance_criteria: vec!["Elk resultaat noemt een bron".into()],
-        depends_on: vec![],
         run: Default::default(),
         files: vec![],
     };

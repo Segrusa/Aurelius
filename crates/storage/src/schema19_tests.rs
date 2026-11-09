@@ -260,7 +260,6 @@ fn a_new_ticket_gets_exactly_one_discussion() {
 
     // The discussion takes no chat messages and no app: only its own write.
     assert!(!f.store.write(move |tx| conversations::conversation_exists(tx, discussion)).unwrap());
-    assert!(!f.store.read(|c| crate::app_keys::project_conversation(c, discussion)).unwrap());
 
     // A second ticket has its own.
     let second = add_ticket(&f, "Write the docs");
@@ -277,7 +276,6 @@ fn a_new_project_gets_its_channel_in_the_same_transaction() {
     assert!(f.store.read(|c| discussions::channel(c, None)).unwrap().is_some(), "the general channel is there too");
     assert_ne!(f.store.read(|c| discussions::channel(c, None)).unwrap(), Some(channel));
     assert!(!f.store.write(move |tx| conversations::conversation_exists(tx, channel)).unwrap());
-    assert!(!f.store.read(|c| crate::app_keys::project_conversation(c, channel)).unwrap());
 
     // A project that fails to be made leaves no channel behind.
     let failed = ProjectId::new();

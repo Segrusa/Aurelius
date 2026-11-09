@@ -14,7 +14,7 @@ use aurelius_storage::{Store, queries};
 use std::sync::Arc;
 
 fn ctx(user: Option<UserId>) -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: user }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: user }
 }
 
 const PHC: &str = "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHRzb21lc2FsdA$CTFhFyS4J4F2nnTR4eM9QwZt1G2y2H7TG3pY1YJ2A5E";
@@ -150,7 +150,7 @@ fn an_employee_can_work_in_another_thread_while_a_run_waits_for_an_approval() {
     let s = setup();
     let (_, first) = say(&s, "first");
     let job = claim(&s).unwrap();
-    let CommandResult::TaskCreated { task_id } = exec(&s, Command::CreateTask(CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id: s.project, employee_id: Some(s.alex), title: "Dark".into(), goal: "Dark mode".into(), acceptance_criteria: vec![], depends_on: vec![] })) else { panic!() };
+    let CommandResult::TaskCreated { task_id } = exec(&s, Command::CreateTask(CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id: s.project, employee_id: Some(s.alex), title: "Dark".into(), goal: "Dark mode".into(), acceptance_criteria: vec![] })) else { panic!() };
     let task_job = s.service.store().write(|tx| queries::claim_due_job(tx, "t", aurelius_storage::now_ms() + 60_000, 45_000, 4)).unwrap().expect("the task's job");
     assert_eq!(task_job.id, task_id.to_string());
     let task = s.service.task_context(task_id).unwrap().unwrap();

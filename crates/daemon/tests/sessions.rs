@@ -431,7 +431,7 @@ async fn a_task_conversation_goes_on_in_its_session_after_the_task_succeeded() {
     };
     let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
-    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: "Login page".into(), goal: "Fix the login page".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: "Login page".into(), goal: "Fix the login page".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     // The task succeeds at its first answer.
     let mut task = None;
@@ -583,7 +583,7 @@ async fn after_a_colleagues_result_the_employee_goes_on_in_its_session() {
     }
 
     // A task conversation: Alex gives a part to Iris while he works, and goes on when it is done.
-    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: alex, title: "Dark mode".into(), goal: "Fix dark mode [wait]".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: alex, title: "Dark mode".into(), goal: "Fix dark mode [wait]".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     let first = running(dir.path(), "task_id", task_id.to_string()).await;
     delegate(dir.path(), first, "Iris", "Dark mode UI").await;

@@ -64,7 +64,6 @@ fn new_task(project_id: aurelius_domain::ProjectId, employee_id: aurelius_domain
         title: title.into(),
         goal: "Doe het".into(),
         acceptance_criteria: vec![],
-        depends_on: vec![],
         run: Default::default(),
         files: vec![],
     })

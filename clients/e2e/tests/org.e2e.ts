@@ -220,7 +220,6 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(
       page.getByRole("region", { name: "Recurring tasks" }).getByText("No recurring tasks yet."),
     ).toBeVisible();
-    await expect(page.getByRole("region", { name: "Heartbeats" })).toHaveCount(0);
   } finally {
     await app.close().catch(() => undefined);
     await daemon.stop();
@@ -652,7 +651,6 @@ test.describe("scripted organisation", () => {
       page.getByRole("region", { name: "What came of them" }).getByText("Not delivered: Pixel is paused."),
     ).toBeVisible();
     await expect(page.getByRole("region", { name: "Recurring tasks" }).getByText("Daily at 09:00")).toBeVisible();
-    await expect(page.getByRole("region", { name: "Heartbeats" })).toHaveCount(0);
 
     await waiting.getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("button", { name: "Take back" }).click();

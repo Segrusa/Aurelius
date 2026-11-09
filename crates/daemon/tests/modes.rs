@@ -119,7 +119,6 @@ async fn a_task_conversation_works_in_the_employees_mode() {
         title: "Onboarding".into(),
         goal: "Vergelijk ideeën".into(),
         acceptance_criteria: vec![],
-        depends_on: vec![],
         run: Default::default(),
         files: vec![],
     };

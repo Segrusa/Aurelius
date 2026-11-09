@@ -3,7 +3,6 @@
 //! before the freeze, as an older client has them: it must read what this server
 //! writes, and a new enum value in a snapshot would fail its whole read (R1).
 
-use crate::app::{NOT_FOR_APPS, required as app_required};
 use crate::channels_tests::enum_values;
 use crate::method::{Method, client_feature};
 use crate::remote::{Capability, Needs, required};
@@ -116,17 +115,15 @@ fn a_refused_message_edit_never_repeats_what_was_sent() {
 }
 
 #[test]
-fn every_new_read_and_write_is_for_devices_and_never_for_apps() {
+fn every_new_read_and_write_is_for_devices() {
     for (method, name) in reads() {
         let call = Call::Read(method);
         assert_eq!(required(&call), Needs::Cap(Capability::Read), "{name}");
-        assert_eq!(app_required(&call), Err(NOT_FOR_APPS), "{name}");
     }
     for (command, name) in writes() {
         let needs = if name.starts_with("ticket.") { Capability::TaskControl } else { Capability::Chat };
         let call = Call::Write(WriteMethod::Domain(command));
         assert_eq!(required(&call), Needs::Cap(needs), "{name}");
-        assert_eq!(app_required(&call), Err(NOT_FOR_APPS), "{name}");
     }
 }
 

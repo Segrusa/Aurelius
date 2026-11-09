@@ -331,7 +331,7 @@ mod tests {
     const HOUR: i64 = 3_600_000;
 
     fn ctx() -> CommandContext {
-        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
+        CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: None }
     }
 
     fn envelope(command: Command) -> CommandEnvelope {

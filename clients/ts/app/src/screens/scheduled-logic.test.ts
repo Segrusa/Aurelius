@@ -1,14 +1,7 @@
-import type { EmployeeSummary, HeartbeatView, ScheduledMessageView, ThreadWaiter } from "@aurelius/protocol";
+import type { ScheduledMessageView, ThreadWaiter } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import { areasOf } from "../data";
-import {
-  heartbeatRule,
-  outcomeText,
-  scheduledLine,
-  splitScheduled,
-  waiterLine,
-  withHeartbeat,
-} from "./scheduled-logic";
+import { outcomeText, scheduledLine, splitScheduled, waiterLine } from "./scheduled-logic";
 
 const waiter = (over: Partial<ThreadWaiter> = {}): ThreadWaiter => ({
   employee_id: "e1",
@@ -28,15 +21,6 @@ const message = (over: Partial<ScheduledMessageView> = {}): ScheduledMessageView
   due_at_ms: 2,
   state: "scheduled",
   place: "the discussion of ticket #21",
-  ...over,
-});
-
-const heartbeat = (over: Partial<HeartbeatView> = {}): HeartbeatView => ({
-  every_minutes: 30,
-  quiet_start_min: 22 * 60,
-  quiet_end_min: 7 * 60,
-  daily_token_budget: 1000,
-  tokens_today: 0,
   ...over,
 });
 
@@ -80,16 +64,8 @@ describe("the Scheduled page", () => {
     expect(outcomeText(message({ state: "newer" }))).toBe("newer");
   });
 
-  it("describes a heartbeat", () => {
-    expect(heartbeatRule(heartbeat())).toBe("Every 30 min · quiet 22:00–07:00");
-    expect(heartbeatRule(heartbeat({ every_minutes: 120, quiet_start_min: 0, quiet_end_min: 0 }))).toBe("Every 2 h");
-    const employees = [{ id: "a", heartbeat: heartbeat() }, { id: "b" }] as unknown as EmployeeSummary[];
-    expect(withHeartbeat(employees).map((e) => e.id)).toEqual(["a"]);
-  });
-
   it("refetches on what changes a schedule and on runs", () => {
     expect(areasOf("recurring_task.changed")).toContain("scheduled");
-    expect(areasOf("heartbeat.changed")).toEqual(expect.arrayContaining(["employees", "scheduled"]));
     expect(areasOf("run.queued")).toContain("scheduled");
   });
 });

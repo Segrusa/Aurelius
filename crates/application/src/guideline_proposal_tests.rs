@@ -20,7 +20,7 @@ use aurelius_storage::Store;
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 fn ctx() -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: None }
 }
 
 fn setup() -> (tempfile::TempDir, CommandService) {
@@ -55,7 +55,7 @@ fn chat_run(s: &CommandService, conversation: ConversationId) -> RunId {
 
 /// A running task of `employee` in `project`, with a run in its conversation.
 fn task_run(s: &CommandService, project: ProjectId, employee: EmployeeId, title: &str) -> (TaskId, RunId) {
-    let create = CreateTask { confirm_secret: false, project_id: project, employee_id: Some(employee), title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: project, employee_id: Some(employee), title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = run(s, Command::CreateTask(create)).unwrap().receipt.result else { panic!() };
     let st = s.store().clone();
     let run_id = s
@@ -209,17 +209,7 @@ fn t20_a_trial_the_project_assistant_and_the_dispatcher_are_refused() {
             )?)
         })
         .unwrap();
-    // A variant trial: a run in a conversation of the task's variants.
-    let bob = hire(&s, "Bob");
-    let trial = chat_run(&s, bob.1);
-    s.store()
-        .write(move |tx| {
-            tx.execute("INSERT INTO task_variant_sets(task_id, phase, count, created_at_ms, updated_at_ms) VALUES (?1, 'probing', 2, 1, 1)", [&task])?;
-            Ok(tx.execute("INSERT INTO task_variants(task_id, n, hint, status, conversation_id, created_at_ms) VALUES (?1, 1, 'small', 'running', ?2, 1)", rusqlite::params![task, bob.1.to_string()])?)
-        })
-        .unwrap();
-
-    for (who, run_id) in [("assistant", assistant), ("dispatcher", triage), ("trial", trial)] {
+    for (who, run_id) in [("assistant", assistant), ("dispatcher", triage)] {
         let (ok, text) = propose(&s, run_id, None, "Small steps", "Work in small steps.");
         assert!(!ok, "{who}: {text}");
     }

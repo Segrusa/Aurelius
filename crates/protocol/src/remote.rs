@@ -83,39 +83,25 @@ fn method_needs(method: &Method) -> Needs {
         | Method::UploadGet { .. }
         | Method::IdeaList { .. }
         | Method::IdeaListAll {}
-        | Method::NoteList { .. }
-        | Method::NoteGet { .. }
         | Method::ProposalList
         | Method::EmployeeInstructionVersions { .. }
         | Method::RecurringTaskList { .. }
-        | Method::ShareList { .. }
         | Method::UsageGet
         | Method::UsageGetHours { .. }
         | Method::UsageGetTotals { .. }
         | Method::RunGetTrace { .. }
         | Method::RunGetActivity { .. }
         | Method::TraceGetSetting
-        | Method::VariantsGetSetting
-        | Method::TaskVariants { .. }
         | Method::LoadGet
         | Method::BrowserGet
-        | Method::ArtifactGetSetting
         | Method::ManagementModeGetSetting
         | Method::AutoAllowGetSetting
-        | Method::ArtifactList { .. }
-        | Method::ArtifactGetContent { .. }
         | Method::McpList
         | Method::McpLoginGet { .. }
         | Method::McpAlwaysAllowList
-        | Method::PluginList
-        | Method::PluginListAvailable
-        | Method::PluginGetForEmployee { .. }
-        | Method::PluginGetForProject { .. }
         | Method::SubscriptionGet { .. }
         | Method::NotificationList
         | Method::EventSubscribe { .. }
-        | Method::GitGetStatus { .. }
-        | Method::GitGetDiff { .. }
         | Method::MarkdownList { .. }
         | Method::MarkdownGet { .. }
         | Method::SubagentList { .. }
@@ -149,27 +135,15 @@ fn method_needs(method: &Method) -> Needs {
         // A board member's own Claude login, from any of their devices (the phone opens the link).
         | Method::ClaudeLoginStatus
         | Method::ClaudeLoginInput(_) => Needs::Cap(Read),
-        // Functions and API keys let outside apps start work on the server.
         // Showing or copying a secret controls what it unlocks, like managing items.
         Method::VaultReveal { .. } => Needs::Cap(TaskControl),
         // The vault key opens every secret of a backup: like backups, only on an owner's device.
         Method::VaultKeyExport(_) => Needs::Owner,
-        Method::AgentFunctionList { .. }
-        | Method::FunctionCallList { .. }
-        | Method::ApiKeyList
-        | Method::AppKeyList
-        | Method::BackupList
+        Method::BackupList
         | Method::PowerGet
         | Method::RemoteGetStatus
         | Method::FsListDir { .. }
-        | Method::ProviderDetectRuntime
-        // A shell on the server can do anything the server can.
-        | Method::TerminalOpen { .. }
-        | Method::TerminalInput { .. }
-        | Method::TerminalResize { .. }
-        | Method::TerminalDetach { .. }
-        | Method::TerminalList { .. }
-        | Method::TerminalClose { .. } => Needs::Owner,
+        | Method::ProviderDetectRuntime => Needs::Owner,
     }
 }
 
@@ -184,15 +158,11 @@ fn host_needs(host: &HostWrite) -> Needs {
         HostWrite::LoadSetLimits(_) => Needs::Cap(Approve),
         // Which browser runs open pages for the user decides what the agent can reach.
         HostWrite::BrowserSet { .. } | HostWrite::BrowserSetBackend { .. } => Needs::Cap(Approve),
-        // Artifacts let the agent publish to the user's claude.ai account: like the browser, an Approve decision.
-        HostWrite::ArtifactSetEnabled { .. } => Needs::Cap(Approve),
         // Whether management may switch its own tasks to Auto decides what runs without asking.
         HostWrite::ManagementModeSetEnabled { .. } => Needs::Cap(Approve),
         HostWrite::AutoAllowSetEnabled { .. } => Needs::Cap(Approve),
         // A server-wide setting like the others in Settings; it only keeps more of what runs send.
         HostWrite::TraceSetEnabled { .. } => Needs::Cap(Approve),
-        // Variants cost k times the tokens: turning them on is the Approve right's.
-        HostWrite::VariantsSetEnabled { .. } => Needs::Cap(Approve),
         // An MCP server is a program or a service the agent can drive: like the browser, an Approve decision.
         HostWrite::McpSet { .. } => Needs::Cap(Approve),
         // Logging in to a server the owner already added is consent to use it, like `mcp.set`;
@@ -200,16 +170,7 @@ fn host_needs(host: &HostWrite) -> Needs {
         HostWrite::McpLoginStart { .. } | HostWrite::McpLoginComplete { .. } | HostWrite::McpLogout { .. } => Needs::Cap(Approve),
         // The always-allow list is managed with the same right that fills it (answering approvals).
         HostWrite::McpAlwaysAllowRemove { .. } => Needs::Cap(Approve),
-        // A plugin can bring hooks, which are commands on the server's computer: Approve, like MCP.
-        HostWrite::PluginPreview { .. }
-        | HostWrite::PluginInstall { .. }
-        | HostWrite::PluginUpdate { .. }
-        | HostWrite::PluginRemove { .. }
-        | HostWrite::PluginSetForEmployee { .. }
-        | HostWrite::PluginSetForProject { .. } => Needs::Cap(Approve),
-        // Notes are project content, like ideas.
-        HostWrite::NoteCreate { .. } | HostWrite::NoteUpdate { .. } | HostWrite::NoteSetPinned { .. } | HostWrite::NoteDelete { .. } => Needs::Cap(TaskControl),
-        // Vault items are company content, managed like projects and notes (MU4-10).
+        // Vault items are company content, managed like projects (MU4-10).
         HostWrite::VaultCreate(_) | HostWrite::VaultUpdate(_) | HostWrite::VaultArchive { .. } => Needs::Cap(TaskControl),
         // Every own client must be able to make the first board member (MU1-20).
         HostWrite::UserCreate(_) => Needs::Cap(Read),
@@ -222,16 +183,6 @@ fn host_needs(host: &HostWrite) -> Needs {
         HostWrite::SecretSet { .. }
         | HostWrite::McpAdd(_)
         | HostWrite::McpRemove { .. }
-        | HostWrite::AgentFunctionCreate(_)
-        | HostWrite::AgentFunctionUpdate(_)
-        | HostWrite::AgentFunctionDelete { .. }
-        | HostWrite::AgentFunctionSetEnabled { .. }
-        | HostWrite::AgentFunctionSetAllEnabled { .. }
-        | HostWrite::ApiKeyCreate { .. }
-        | HostWrite::ApiKeyRevoke { .. }
-        | HostWrite::ApiKeySetFunctions { .. }
-        | HostWrite::AppKeyCreate(_)
-        | HostWrite::AppKeyRevoke { .. }
         | HostWrite::BackupCreate
         | HostWrite::BackupRestore { .. }
         | HostWrite::BackupResume
@@ -272,9 +223,7 @@ fn command_needs(command: &Command) -> Needs {
         | Command::EditMessage(_)
         | Command::DeleteMessage(_)
         | Command::StartProjectConversation(_)
-        | Command::SendProjectMessage(_)
-        | Command::ShareMessage(_)
-        | Command::DiscussTask(_) => Needs::Cap(Chat),
+        | Command::SendProjectMessage(_) => Needs::Cap(Chat),
         Command::SetAgentMode(m) if m.mode == AgentMode::Auto => Needs::Cap(Approve),
         Command::SetAgentMode(_) => Needs::Cap(Chat),
         Command::SetConversationRun(_) => Needs::Cap(Chat),
@@ -308,7 +257,6 @@ fn command_needs(command: &Command) -> Needs {
         | Command::RestoreEmployeeInstructions(_)
         | Command::SetEmployeeStatus(_)
         | Command::SetEmployeeReportsTo(_)
-        | Command::SetHeartbeat(_)
         | Command::CreateTask(_)
         | Command::CreateTaskSchedule(_)
         | Command::UpdateTaskSchedule(_)
@@ -329,7 +277,6 @@ fn command_needs(command: &Command) -> Needs {
         | Command::ForgetMemory(_)
         | Command::PinMemory(_)
         | Command::ConsolidateMemory(_)
-        | Command::RevokeShare(_)
         // Tickets and the board: the same right as making tasks. The review gate
         // (accept, send back) is a board member's on any of the user's own clients.
         | Command::CreateTicket(_)
@@ -368,7 +315,6 @@ fn command_needs(command: &Command) -> Needs {
         // Creates an employee that works on the host: like approving an action.
         Command::DecideApproval(_) | Command::AnswerQuestion(_) | Command::DecidePlan(_) | Command::DecideProposal(_) => Needs::Cap(Approve),
         // Puts the chosen diff into the work folder: like approving an action.
-        Command::ChooseTaskVariant(_) => Needs::Cap(Approve),
         // Model and effort for the next employee runs (the phone's model
         // picker) and for subagents. Only the global default and an employee's own
         // default; other scoped overrides and memory settings need an owner.
@@ -552,13 +498,9 @@ mod tests {
     }
 
     #[test]
-    fn turning_artifacts_on_needs_approve_and_listing_them_read() {
-        assert_eq!(required(&host(HostWrite::ArtifactSetEnabled { enabled: true })), cap(Capability::Approve));
-        assert_eq!(required(&read(Method::ArtifactGetSetting)), cap(Capability::Read));
+    fn turning_trace_on_needs_approve_and_reading_it_read() {
         assert_eq!(required(&host(HostWrite::TraceSetEnabled { enabled: true })), cap(Capability::Approve));
         assert_eq!(required(&read(Method::RunGetTrace { run_id: aurelius_domain::RunId::new() })), cap(Capability::Read));
-        assert_eq!(required(&read(Method::ArtifactList { conversation_id: None, task_id: None, project_id: None })), cap(Capability::Read));
-        assert_eq!(required(&read(Method::ArtifactGetContent { url: "https://claude.ai/artifact/x".into(), version: None })), cap(Capability::Read));
     }
 
     #[test]
@@ -585,10 +527,6 @@ mod tests {
             read(Method::FsListDir { path: None }),
             read(Method::PowerGet),
             read(Method::ProviderDetectRuntime),
-            read(Method::TerminalOpen { conversation_id: ConversationId::new(), cols: 80, rows: 24, fresh: false, terminal_id: None, additional: true }),
-            read(Method::TerminalInput { terminal_id: "t".into(), data_base64: String::new() }),
-            read(Method::TerminalDetach { terminal_id: "t".into() }),
-            read(Method::TerminalList { conversation_id: ConversationId::new() }),
         ] {
             assert_eq!(required(&call), Needs::Owner, "{call:?}");
         }
@@ -631,35 +569,6 @@ mod tests {
             assert!(grants(&Capability::DEVICE_DEFAULT, required(&call)) == Capability::DEVICE_DEFAULT.contains(&Capability::Approve));
         }
         assert_eq!(required(&read(Method::McpLoginGet { login_id: "l".into() })), cap(Capability::Read));
-    }
-
-    #[test]
-    fn agent_functions_and_api_keys_are_for_owners_only() {
-        let id = aurelius_domain::AgentFunctionId::new();
-        for call in [
-            read(Method::AgentFunctionList { project_id: None }),
-            read(Method::FunctionCallList { function_id: None, limit: None }),
-            read(Method::ApiKeyList),
-            host(HostWrite::AgentFunctionDelete { function_id: id }),
-            host(HostWrite::AgentFunctionSetEnabled { function_id: id, enabled: false }),
-            host(HostWrite::AgentFunctionSetAllEnabled { enabled: false }),
-            host(HostWrite::ApiKeyCreate { name: "demo".into(), function_ids: vec![id] }),
-            host(HostWrite::ApiKeyRevoke { key_id: aurelius_domain::ApiKeyId::new() }),
-            read(Method::AppKeyList),
-            host(HostWrite::AppKeyCreate(aurelius_domain::app_key::CreateAppKey {
-                name: "assistant".into(),
-                scopes: vec![aurelius_domain::app_key::AppScope::Read],
-                limit_per_hour: None,
-                limit_concurrent: None,
-                audience: Default::default(),
-                webhook_url: None,
-            })),
-            host(HostWrite::AppKeyRevoke { key_id: aurelius_domain::AppKeyId::new() }),
-        ] {
-            assert_eq!(required(&call), Needs::Owner, "{call:?}");
-            assert!(!grants(&[Capability::Read, Capability::Approve, Capability::Chat], required(&call)));
-            assert!(grants(&[Capability::Owner], required(&call)));
-        }
     }
 
     #[test]

@@ -18,7 +18,6 @@ class InboxSections {
     required this.proposals,
     this.guidelineProposals = const [],
     required this.waitingTasks,
-    this.variantTasks = const [],
     required this.runningTasks,
     required this.answers,
     required this.results,
@@ -38,10 +37,8 @@ class InboxSections {
       approvals: inbox.approvals,
       proposals: inbox.proposals,
       guidelineProposals: inbox.guidelineProposals,
-      // Variants ready to compare show as their compare card (feature `task_variants`).
-      variantTasks: inbox.variantsOn ? open.where((t) => t.variantsReady && !asked.contains(t.id)).toList() : const [],
       // A main task whose decision is someone else's is not yours to wait on (freeze §5).
-      waitingTasks: open.where((t) => taskMark(t) == TaskMark.needsYou && !asked.contains(t.id) && !company.othersTasks.contains(t.id) && !(inbox.variantsOn && t.variantsReady)).toList(),
+      waitingTasks: open.where((t) => taskMark(t) == TaskMark.needsYou && !asked.contains(t.id) && !company.othersTasks.contains(t.id)).toList(),
       // Everything else that has not ended: working, queued, in line or
       // waiting on a colleague.
       runningTasks: open.where((t) => taskMark(t) != TaskMark.needsYou).toList(),
@@ -64,8 +61,6 @@ class InboxSections {
   /// Tasks waiting for the user's input or decision without a pending approval.
   final List<TaskView> waitingTasks;
 
-  /// Tasks whose variants wait for the user to choose one.
-  final List<TaskView> variantTasks;
   final List<TaskView> runningTasks;
   final List<RunningAnswer> answers;
 
@@ -78,7 +73,7 @@ class InboxSections {
   /// The other rows of the personal Inbox: Updates.
   final List<NotificationView> updates;
 
-  int get needsYou => rowsNeedingYou.length + approvals.length + proposals.length + guidelineProposals.length + variantTasks.length + waitingTasks.length;
+  int get needsYou => rowsNeedingYou.length + approvals.length + proposals.length + guidelineProposals.length + waitingTasks.length;
   int get running => runningTasks.length + answers.length;
   int get done => results.length;
   bool get isEmpty => needsYou == 0 && updates.isEmpty && running == 0 && done == 0;

@@ -32,8 +32,6 @@ const MEANINGFUL: &[&str] = &[
     "task.handed_off",
     "task.delegated",
     "task.mode_chosen",
-    "task.variants_ready",
-    "task.variant_chosen",
     "memory.remembered",
     "idea.added",
     "idea.started",
@@ -147,20 +145,6 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
         "task.succeeded" => ("outcome", "COMPLETED", task_title(), format!("{} · checked against the criteria", task_employee()), task_employee()),
         "task.failed" => ("outcome", "FAILED", task_title(), if m["escalated_to"].is_string() { format!("Escalated to {}", s(&m["escalated_to"])) } else { "Task failed".into() }, task_employee()),
         "task.cancelled" => ("decision", "DECISION", format!("{} cancelled", task_title()), String::new(), "You".into()),
-        "task.variants_ready" => (
-            "decision",
-            "VARIANTS",
-            format!("{} was tried in {} ways", task_title(), m["count"].as_u64().unwrap_or(0)),
-            if m["auto"].as_bool() == Some(true) { "The judge chose".into() } else { "Choose one to go on with".into() },
-            "Aurelius".into(),
-        ),
-        "task.variant_chosen" => (
-            "decision",
-            "DECISION",
-            format!("Trial {} of {} chosen", m["n"].as_u64().unwrap_or(0), task_title()),
-            s(&m["hint"]),
-            if m["by"].as_str() == Some("judge") { "Judge".into() } else { "You".into() },
-        ),
         "task.waiting" => ("decision", "WAITING", format!("{} is waiting", task_title()), match s(&m["reason"]).as_str() {
             "escalated" | "input" => "Your decision is needed".into(),
             "escalated_to_boss" => format!("Escalated to {}", s(&m["boss"])),
@@ -357,7 +341,6 @@ pub fn notification_for(event_type: &str, metadata: &serde_json::Value) -> Optio
         "approval.requested" if metadata["tool"].as_str() == Some("claude.AskUserQuestion") => Some(("action", "Claude asks you something")),
         "approval.requested" if metadata["tool"].as_str() == Some("claude.ExitPlanMode") => Some(("action", PLAN_TITLE)),
         "approval.requested" => Some(("action", "Approval needed")),
-        "heartbeat.reported" => Some(("info", "Heartbeat update")),
         // A sub-task's outcome goes to the employee who delegated it, not to the user.
         "task.succeeded" | "task.failed" if metadata["sub_task"].as_bool() == Some(true) => None,
         "task.succeeded" => Some(("info", "Result ready")),
@@ -371,8 +354,6 @@ pub fn notification_for(event_type: &str, metadata: &serde_json::Value) -> Optio
         "employee.instructions_proposed" => Some(("action", "New instructions are proposed")),
         // And so does a guideline (B5): only a board member decides; the subject is its title and proposer.
         "guideline.proposed" => Some(("action", "A guideline is proposed")),
-        // The variants of a task wait for the user's choice (Harness² C).
-        "task.variants_ready" if metadata["auto"].as_bool() != Some(true) => Some(("action", "Variants ready to compare")),
         "connection.changed" if matches!(metadata["status"].as_str(), Some("needs_auth" | "needs_login")) => Some(("warning", "Connection needs sign-in")),
         _ => None,
     }
@@ -942,7 +923,6 @@ pub fn unread_count_for(conn: &Connection, user: Option<&str>) -> Result<u64, St
 const STILL_RELEVANT: &str = concat!("NOT (e.type = 'approval.requested' AND EXISTS (SELECT 1 FROM approvals a WHERE a.id = e.aggregate_id AND a.status <> 'pending'))
      AND NOT (e.type IN ('employee.proposed','employee.instructions_proposed') AND EXISTS (SELECT 1 FROM proposals p WHERE p.id = e.aggregate_id AND p.status <> 'pending'))
      AND NOT (e.type = 'guideline.proposed' AND EXISTS (SELECT 1 FROM guideline_proposals g WHERE g.id = e.aggregate_id AND g.status <> 'pending'))
-     AND NOT (e.type = 'task.variants_ready' AND NOT EXISTS (SELECT 1 FROM task_variant_sets s WHERE s.task_id = e.aggregate_id AND s.phase = 'ready'))
      AND NOT (e.type = 'task.waiting' AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.id = e.aggregate_id AND t.status = 'waiting'))
      AND NOT (n.user_id IS NOT NULL AND json_extract(e.metadata_json, '$.needs') IS 'login' AND ", login_linked_since!(), ")
      AND NOT (n.ticket_id IS NOT NULL AND EXISTS (SELECT 1 FROM tickets k JOIN board_columns c ON c.id = k.column_id WHERE k.id = n.ticket_id AND (c.kind = 'done' OR k.archived_at_ms IS NOT NULL)))

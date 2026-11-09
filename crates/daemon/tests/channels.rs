@@ -15,7 +15,7 @@ async fn raw(root: &std::path::Path, accepts: Vec<String>) -> BoxStream {
     let mut stream = ipc::connect(&aurelius_host::endpoint(root)).await.unwrap();
     // Signed in: a board member's session (the helper's), its token in the hello.
     let token = sign_in(root, &connect_anonymous(root).await, BOARD_MEMBER).await.session_token;
-    let hello = Request::read(1, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts, session_token: Some(token) }));
+    let hello = Request::read(1, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), accepts, session_token: Some(token) }));
     write_frame(&mut stream, &hello).await.unwrap();
     loop {
         if let ServerMessage::Response { request_id: 1, .. } = read_frame::<ServerMessage, _>(&mut stream).await.unwrap().unwrap() {

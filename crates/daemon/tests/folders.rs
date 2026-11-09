@@ -34,7 +34,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str) -> (Employ
 }
 
 fn task(project_id: ProjectId, employee_id: Option<EmployeeId>, title: &str, goal: &str) -> Command {
-    Command::CreateTask(CreateTask { confirm_secret: false, project_id, employee_id, title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] })
+    Command::CreateTask(CreateTask { confirm_secret: false, project_id, employee_id, title: title.into(), goal: goal.into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] })
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -62,7 +62,6 @@ async fn each_project_has_its_own_folder() {
                 title: "Onboarding".into(),
                 goal: "Compare ideas".into(),
                 acceptance_criteria: vec!["Every result cites a source".into()],
-                depends_on: vec![],
                 run: Default::default(),
                 files: vec![],
             }),
@@ -142,100 +141,6 @@ async fn chosen_project_folder_and_employee_workspaces() {
     assert_eq!(folder_of(client.employees().await.unwrap().employees, alex), None);
 
     stop(dir.path(), daemon).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_conversation_shows_the_branch_and_change_of_its_folder() {
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = start(dir.path()).await;
-    let client = connect(dir.path()).await;
-    let (project_id, folder) = project(&client, "Git").await;
-    let (ada, conversation) = employee(&client, project_id, "Ada").await;
-    // The employee's chat works in the employee's own folder.
-    client.execute(envelope(Command::SetEmployeeFolder(aurelius_domain::employee::SetEmployeeFolder { employee_id: ada, path: Some(folder.to_string_lossy().into()) }), None)).await.unwrap();
-
-    // Not a repository yet: no status.
-    assert_eq!(client.git_status(conversation).await.unwrap(), None);
-
-    let git = |args: &[&str]| {
-        let status = std::process::Command::new("git").arg("-C").arg(&folder).args(args).status().unwrap();
-        assert!(status.success(), "git {args:?}");
-    };
-    git(&["init", "--quiet", "--initial-branch=feat/chip"]);
-    git(&["config", "user.name", "Test"]);
-    git(&["config", "user.email", "t@example.com"]);
-    std::fs::write(folder.join("a.txt"), "one\ntwo\n").unwrap();
-    git(&["add", "a.txt"]);
-    git(&["commit", "--quiet", "-m", "initial"]);
-    std::fs::write(folder.join("a.txt"), "one\nthree\nfour\n").unwrap();
-
-    let status = client.git_status(conversation).await.unwrap().expect("a repository");
-    assert_eq!(status.branch.as_deref(), Some("feat/chip"));
-    assert_eq!((status.insertions, status.deletions), (2, 1));
-    assert!(status.files >= 1);
-
-    // The diff view gets the change itself, untracked files apart.
-    std::fs::write(folder.join("new.txt"), "x\n").unwrap();
-    let diff = client.git_diff(conversation).await.unwrap().expect("a repository");
-    assert_eq!(diff.status.branch.as_deref(), Some("feat/chip"));
-    assert!(diff.patch.contains("+three") && diff.patch.contains("-two"), "{}", diff.patch);
-    assert!(!diff.truncated);
-    assert_eq!(diff.untracked, vec!["new.txt".to_string()]);
-    daemon.abort();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_project_conversation_has_git_and_a_terminal() {
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = start(dir.path()).await;
-    let client = connect(dir.path()).await;
-    let (project_id, folder) = project(&client, "Git").await;
-    let (employee_id, employee_conv) = employee(&client, project_id, "Ada").await;
-    client.execute(envelope(Command::SetEmployeeFolder(aurelius_domain::employee::SetEmployeeFolder { employee_id, path: Some(folder.to_string_lossy().into()) }), None)).await.unwrap();
-    let git = |args: &[&str]| {
-        let status = std::process::Command::new("git").arg("-C").arg(&folder).args(args).status().unwrap();
-        assert!(status.success(), "git {args:?}");
-    };
-    git(&["init", "--quiet", "--initial-branch=main"]);
-    git(&["config", "user.name", "Test"]);
-    git(&["config", "user.email", "t@example.com"]);
-    std::fs::write(folder.join("a.txt"), "one\n").unwrap();
-    git(&["add", "a.txt"]);
-    git(&["commit", "--quiet", "-m", "initial"]);
-
-    // An employee conversation and a task conversation keep their Git status and terminal.
-    assert!(client.git_status(employee_conv).await.unwrap().is_some());
-    assert!(client.git_diff(employee_conv).await.unwrap().is_some());
-    let (view, _output) = client.open_terminal(employee_conv, 80, 24, false).await.expect("an employee's terminal");
-    client.close_terminal(&view.terminal_id).await.unwrap();
-    client.execute(envelope(task(project_id, Some(employee_id), "Check", "Look at the repo"), None)).await.unwrap();
-    let mut task_conv = None;
-    for _ in 0..400 {
-        task_conv = client.tasks(None).await.unwrap().tasks.iter().find_map(|t| t.conversation_id);
-        if task_conv.is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    let task_conv = task_conv.expect("a task conversation");
-    assert!(client.git_status(task_conv).await.unwrap().is_some());
-    assert!(client.git_diff(task_conv).await.unwrap().is_some());
-
-    // A project conversation works in the project folder: Git status, diff and terminal too.
-    let CommandResult::ProjectConversationStarted { conversation_id: project_conv, .. } = client
-        .start_project_conversation(aurelius_domain::project_conversation::StartProjectConversation { project_id, start: Default::default() })
-        .await
-        .unwrap()
-        .result
-    else {
-        panic!()
-    };
-    assert!(client.git_status(project_conv).await.unwrap().is_some());
-    assert!(client.git_diff(project_conv).await.unwrap().is_some());
-    let (view, _output) = client.open_terminal(project_conv, 80, 24, false).await.expect("a project conversation's terminal");
-    client.close_terminal(&view.terminal_id).await.unwrap();
-
-    daemon.abort();
 }
 
 #[tokio::test(flavor = "multi_thread")]

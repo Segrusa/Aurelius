@@ -15,7 +15,6 @@ const SYSTEM_PARTS: &[(&str, &str)] = &[
     ("The user allows you to use", "Browser"),
     ("The browser could not be started", "Browser"),
     ("You can look at the user's screen", "Screen"),
-    ("You can publish Claude Code artifacts", "Artifacts"),
     ("Work autonomously:", "Autonomy guidance"),
     ("Your colleagues in this project", "Colleagues"),
 ];

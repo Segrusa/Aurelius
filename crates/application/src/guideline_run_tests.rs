@@ -25,7 +25,7 @@ struct Setup {
 }
 
 fn ctx(user: Option<UserId>) -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: user }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: user }
 }
 
 fn exec(s: &Setup, command: Command) -> CommandResult {
@@ -74,7 +74,7 @@ fn queued(s: &Setup, conversation: ConversationId) -> RunId {
 
 /// A running task of `employee` in the project, with a run in its conversation.
 fn task_run(s: &Setup, employee: EmployeeId) -> RunId {
-    let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(employee), title: "Export".into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(employee), title: "Export".into(), goal: "Do it".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = exec(s, Command::CreateTask(create)) else { panic!() };
     let st = s.service.store().clone();
     s.service

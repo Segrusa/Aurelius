@@ -3,7 +3,7 @@
 //! They live in `domain` so that `storage` and `application` never depend on the wire crate.
 
 use crate::{
-    ApprovalId, AttachmentId, ConversationId, EmployeeId, MemoryId, MessageId, NoteId, ProjectId,
+    ApprovalId, AttachmentId, ConversationId, EmployeeId, MemoryId, MessageId, ProjectId,
     ProjectStatus, ProposalId, ProviderId, RunId, TaskId, TicketId,
     approval::ApprovalStatus,
     connection::{ConfigScope, Purpose, RunDefaults},
@@ -63,7 +63,6 @@ pub struct TaskView {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub result: Option<String>,
-    pub depends_on: Vec<TaskId>,
     /// Actions (and questions) of this task waiting for the user.
     pub pending_approvals: u32,
     /// The task this one was delegated from (a sub-task), and its employee.
@@ -83,18 +82,6 @@ pub struct TaskView {
     pub attachments: Vec<MessageFileView>,
     /// The recurring task this one was made from.
     pub schedule_id: Option<crate::TaskScheduleId>,
-    /// The agent function whose call made this task.
-    pub function_id: Option<crate::AgentFunctionId>,
-    /// The app (the name of its app key) that created this task through
-    /// `aurelius-mcp` (feature `app_keys`); none for the user's own tasks.
-    #[serde(default)]
-    pub created_by_app: Option<String>,
-    /// The app key behind `created_by_app`.
-    #[serde(default)]
-    pub created_by_app_key_id: Option<crate::AppKeyId>,
-    /// Where the task's variants are, when it has some (feature `task_variants`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variant_phase: Option<crate::variants::VariantPhase>,
     /// A finished task (succeeded, failed or cancelled) in whose conversation a
     /// run goes on or waits to start, after the user (or a manager) wrote to it.
     /// The status does not change: clients show such a task as working or
@@ -168,86 +155,6 @@ pub struct TaskScheduleView {
     /// The task from this schedule that is still open, if any.
     pub open_task_id: Option<TaskId>,
     pub created_at_ms: i64,
-}
-
-/// Agent functions. Times are epoch milliseconds.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct AgentFunctionsSnapshot {
-    /// The kill switch: false means every function refuses calls.
-    pub all_enabled: bool,
-    pub functions: Vec<AgentFunctionView>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct AgentFunctionView {
-    pub id: crate::AgentFunctionId,
-    pub project_id: ProjectId,
-    pub employee_id: EmployeeId,
-    pub employee_name: String,
-    pub name: String,
-    pub slug: String,
-    pub description: String,
-    pub instruction_template: String,
-    pub params: Vec<crate::agent_function::FunctionParam>,
-    /// None: the employee's own default mode.
-    pub mode: Option<crate::autonomy::AgentMode>,
-    pub limit_per_day: Option<u32>,
-    pub limit_per_week: Option<u32>,
-    pub enabled: bool,
-    /// Accepted calls in the last 24 hours / 7 days (rolling).
-    pub used_day: u32,
-    pub used_week: u32,
-    pub created_at_ms: i64,
-}
-
-/// An API key; the secret is never part of it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ApiKeyView {
-    pub id: crate::ApiKeyId,
-    pub name: String,
-    pub function_ids: Vec<crate::AgentFunctionId>,
-    pub created_at_ms: i64,
-    pub last_used_ms: Option<i64>,
-    pub revoked_at_ms: Option<i64>,
-}
-
-/// The answer to `api_keys/create`: the secret (`ak_...`) is shown once and not kept.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ApiKeyCreated {
-    pub key: ApiKeyView,
-    pub secret: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct FunctionCallsSnapshot {
-    /// Newest first.
-    pub calls: Vec<FunctionCallView>,
-    pub usage: Vec<FunctionUsageView>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct FunctionCallView {
-    pub id: crate::FunctionCallId,
-    pub function_id: crate::AgentFunctionId,
-    pub function_name: String,
-    pub api_key_id: crate::ApiKeyId,
-    pub api_key_name: String,
-    /// The task the call made (open it like any task).
-    pub task_id: TaskId,
-    /// queued, running, succeeded, failed or cancelled.
-    pub status: crate::agent_function::CallStatus,
-    pub created_at_ms: i64,
-    pub finished_at_ms: Option<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct FunctionUsageView {
-    pub function_id: crate::AgentFunctionId,
-    /// Accepted calls in the last 24 hours / 7 days (rolling).
-    pub used_day: u32,
-    pub used_week: u32,
-    pub limit_per_day: Option<u32>,
-    pub limit_per_week: Option<u32>,
 }
 
 /// A project's ideas.
@@ -415,108 +322,15 @@ pub struct EmployeeSummary {
     pub screen_allowed: bool,
     /// Own workspace folder, if any: the work folder of its chat (in a task the project folder applies).
     pub folder: Option<String>,
-    /// Opt-in heartbeat; `None` = off.
-    pub heartbeat: Option<HeartbeatView>,
     /// It works on one task at a time; the others wait their turn.
     pub sequential_tasks: bool,
     /// Its chats, most recent first: the persistent one (`conversation_id`, it
-    /// carries mode, heartbeat and memory summaries) and older ones from before
+    /// carries mode and memory summaries) and older ones from before
     /// protocol 3 (history). Task conversations are not listed.
     pub conversations: Vec<ConversationSummary>,
     /// What runs for this employee right now: its own steps,
     /// subagents and sub-tasks delegated to colleagues (derived, never stored).
     pub agents: Vec<AgentView>,
-}
-
-/// A page on claude.ai that a Claude Code run published (Claude Code artifact).
-/// The URL is its identity: republishing keeps it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArtifactView {
-    /// `https://claude.ai/artifact/<id>`; private to the user's claude.ai account until shared there.
-    pub url: String,
-    pub title: String,
-    /// The conversation whose run published it first.
-    pub conversation_id: ConversationId,
-    pub task_id: Option<TaskId>,
-    pub project_id: Option<ProjectId>,
-    /// Claude Code's version number of the latest publish (1 on the first).
-    pub version: u32,
-    pub first_published_at_ms: i64,
-    pub last_published_at_ms: i64,
-    /// The server kept the published file of at least one version, so
-    /// `artifact.get_content` can show it; false for pages published before
-    /// servers kept them (and from older servers): show the link instead.
-    #[serde(default)]
-    pub has_content: bool,
-}
-
-/// What kind of file a run published; decides how a client renders it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ArtifactKind {
-    Html,
-    Markdown,
-    /// Neither: show as plain text.
-    Text,
-}
-
-/// The file one publish sent to claude.ai, as the server kept it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArtifactSnapshot {
-    pub version: u32,
-    pub kind: ArtifactKind,
-    /// The published file's name (no folder).
-    pub file_name: String,
-    pub content: String,
-    pub published_at_ms: i64,
-}
-
-/// `artifact.get_content`: an artifact and the kept file of one version.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArtifactContent {
-    pub artifact: ArtifactView,
-    /// Versions with a kept file, newest first (the server keeps the last 20).
-    pub versions: Vec<u32>,
-    /// The asked version, else the newest kept one; none when the server kept
-    /// no file of it (published before servers kept them, larger than 2 MB, or
-    /// not text): show the link instead.
-    pub snapshot: Option<ArtifactSnapshot>,
-}
-
-/// `artifact.list`: newest publish first.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArtifactsSnapshot {
-    pub artifacts: Vec<ArtifactView>,
-}
-
-/// A note of a project as `note.list` shows it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct NoteSummary {
-    pub id: NoteId,
-    pub project_id: ProjectId,
-    /// The first non-empty line without Markdown heading marks; empty for an empty note.
-    pub title: String,
-    /// The text after the title on one line, at most 120 characters.
-    pub preview: String,
-    pub pinned: bool,
-    pub created_at_ms: i64,
-    pub updated_at_ms: i64,
-    /// Goes up by one with every save; `note.update` names the one it edited.
-    pub revision: u64,
-}
-
-/// `note.list`: pinned first, then the last edited first.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct NotesSnapshot {
-    pub notes: Vec<NoteSummary>,
-}
-
-/// One note with its Markdown body (`note.get` and every note write).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct NoteView {
-    #[serde(flatten)]
-    pub summary: NoteSummary,
-    pub body: String,
 }
 
 /// One agent at work for an employee.
@@ -537,32 +351,6 @@ pub struct AgentView {
     pub doing: Option<String>,
     /// A subagent: how many tools it used so far.
     pub steps: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct HeartbeatView {
-    pub every_minutes: u32,
-    pub quiet_start_min: u32,
-    pub quiet_end_min: u32,
-    pub daily_token_budget: u64,
-    pub tokens_today: u64,
-    pub next_due_ms: Option<i64>,
-    /// e.g. "budget" when today's budget is used up.
-    pub waiting: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ShareView {
-    pub id: crate::ShareId,
-    pub title: String,
-    /// Where it came from, e.g. "Chat · How do we …" or "Task · Onboarding".
-    pub source: String,
-    /// project · <name> | employee · <name> | conversation
-    pub destination: String,
-    pub mode: crate::share::ShareMode,
-    pub excerpt: String,
-    pub created_at_ms: i64,
-    pub revoked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1208,7 +996,7 @@ pub struct ActivityLogPage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EmployeeQueueItem {
     pub id: String,
-    /// message, task, heartbeat, resume, scheduled. Text, not an enum.
+    /// message, task, resume, scheduled. Text, not an enum.
     pub kind: String,
     /// board, employee or system.
     pub source: String,
@@ -1336,8 +1124,6 @@ pub struct MessagesSnapshot {
     pub browser_allowed: bool,
     /// The agent may take screenshots without asking each time; off by default (it then asks).
     pub screen_allowed: bool,
-    /// Snapshots shared into this conversation (e.g. a discussed task).
-    pub shares: Vec<ShareView>,
     /// Model and effort chosen for this conversation (unset: the employee's).
     pub run: crate::task::RunSettings,
     /// The employee of a task conversation or an employee chat.
@@ -1547,68 +1333,6 @@ pub struct SubtaskUsage {
     /// Who works on it.
     pub employee_name: Option<String>,
     pub usage: TokenUsage,
-}
-
-/// `variants.get_setting` / `variants.set_enabled`: whether tasks may be tried in
-/// several ways first (feature `task_variants`; off by default).
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
-)]
-pub struct VariantsSetting {
-    pub enabled: bool,
-    /// At most this many variants per task.
-    pub max_variants: u8,
-}
-
-/// A task's variants and the judge's comparison (`task.variants`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TaskVariantsView {
-    pub task_id: TaskId,
-    pub phase: crate::variants::VariantPhase,
-    /// How many variants.
-    pub count: u8,
-    /// The commit the variants started from.
-    pub base_commit: Option<String>,
-    /// The judge's pick, once it compared them.
-    pub judge_pick: Option<u8>,
-    /// What the judge advises to combine, if anything.
-    pub compose: Option<String>,
-    /// The chosen variant and by whom (`user` | `judge`).
-    pub chosen: Option<u8>,
-    pub chosen_by: Option<String>,
-    /// Why it failed (phase `failed`), e.g. the chosen diff did not apply.
-    pub error: Option<String>,
-    pub variants: Vec<TaskVariantView>,
-}
-
-/// One variant of a task.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TaskVariantView {
-    /// 1 to 3.
-    pub n: u8,
-    /// The approach it was told to take.
-    pub hint: String,
-    pub status: crate::variants::VariantStatus,
-    /// Its own conversation (read it like any other).
-    pub conversation_id: Option<ConversationId>,
-    pub run_id: Option<RunId>,
-    /// Files changed, lines added and removed.
-    pub files: u32,
-    pub insertions: u32,
-    pub deletions: u32,
-    /// The diff against `base_commit` (cut at 200 kB; `diff_truncated`).
-    pub diff: String,
-    pub diff_truncated: bool,
-    /// Its closing answer.
-    pub report: String,
-    /// Tool calls that failed or were refused.
-    pub errors: u32,
-    /// The last test or build output it saw (cut), if any.
-    pub tests: Option<String>,
-    pub usage: TokenUsage,
-    /// Its place in the judge's ranking (1 = best) and why.
-    pub rank: Option<u8>,
-    pub judge_note: Option<String>,
 }
 
 /// `trace.get_setting` / `trace.set_enabled`: whether runs keep a trace (feature `run_trace`).

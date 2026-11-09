@@ -54,8 +54,8 @@ impl Choice {
 pub(super) fn session_key(plan: &ChatRunPlan, profile: &ToolProfile) -> SessionKey {
     let model = plan.config.model.clone().unwrap_or_default();
     match profile {
-        ToolProfile::Work { folders, browser, playwright, plugins, artifacts, access, tool_policy, .. } => {
-            let mut key = serde_json::json!({ "folders": folders, "browser": browser, "playwright": playwright.is_some(), "plugins": plugins, "artifacts": artifacts, "platform_rules": aurelius_application::run::plan::PLATFORM_RULES_VERSION, "access": access.as_str() });
+        ToolProfile::Work { folders, browser, playwright, access, tool_policy, .. } => {
+            let mut key = serde_json::json!({ "folders": folders, "browser": browser, "playwright": playwright.is_some(), "platform_rules": aurelius_application::run::plan::PLATFORM_RULES_VERSION, "access": access.as_str() });
             if let Some(tools) = &tool_policy.tools {
                 key["tools"] = serde_json::json!(tools);
             }

@@ -7,8 +7,7 @@
 use crate::remote::{PushConfig, RemoteStatus, PairingCode};
 use crate::views::*;
 use aurelius_domain::{
-    AgentFunctionId, ApiKeyId, ClientId, NoteId, Command, CommandId, CommandResult, ProviderId, EmployeeId, ProjectId,
-    agent_function::{CreateAgentFunction, UpdateAgentFunction},
+    ClientId, Command, CommandId, CommandResult, ProviderId, ProjectId,
     COMMAND_METHODS,
 };
 use schemars::JsonSchema;
@@ -104,27 +103,6 @@ pub enum HostWrite {
     /// Take a tool off the always-allow list: its next call asks again.
     #[serde(rename = "mcp_always_allow.remove")]
     McpAlwaysAllowRemove { tool: String },
-    /// Adds the marketplace behind a link (GitHub URL, `owner/repo` or git URL).
-    #[serde(rename = "plugin.preview")]
-    PluginPreview { source: String },
-    /// Install plugins (`name@marketplace`) and enable them for the given employees and projects.
-    #[serde(rename = "plugin.install")]
-    PluginInstall {
-        ids: Vec<String>,
-        employees: Vec<EmployeeId>,
-        #[serde(default)]
-        projects: Vec<ProjectId>,
-    },
-    #[serde(rename = "plugin.update")]
-    PluginUpdate { id: String },
-    #[serde(rename = "plugin.remove")]
-    PluginRemove { id: String },
-    /// Replace the plugins an employee has enabled; applies from its next run.
-    #[serde(rename = "plugin.set_for_employee")]
-    PluginSetForEmployee { employee_id: EmployeeId, enabled: Vec<String> },
-    /// Replace the plugins a project has enabled (for its project assistant); applies from its next run.
-    #[serde(rename = "plugin.set_for_project")]
-    PluginSetForProject { project_id: ProjectId, enabled: Vec<String> },
     #[serde(rename = "load.set_limits")]
     LoadSetLimits(LoadLimitsUpdate),
     #[serde(rename = "browser.set")]
@@ -132,9 +110,6 @@ pub enum HostWrite {
     /// Claude in Chrome or Playwright, for every run that starts afterwards.
     #[serde(rename = "browser.set_backend")]
     BrowserSetBackend { backend: BrowserBackend },
-    /// Turn Claude Code artifacts on or off for every run that starts afterwards.
-    #[serde(rename = "artifact.set_enabled")]
-    ArtifactSetEnabled { enabled: bool },
     /// Management chooses its own task mode (feature `management_chooses_mode`), for every run
     /// that starts afterwards. On by default.
     #[serde(rename = "management_mode.set_enabled")]
@@ -146,45 +121,6 @@ pub enum HostWrite {
     /// Off also forgets the traces kept so far.
     #[serde(rename = "trace.set_enabled")]
     TraceSetEnabled { enabled: bool },
-    /// Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
-    #[serde(rename = "variants.set_enabled")]
-    VariantsSetEnabled { enabled: bool },
-    /// A new note in a project; answers `Note`.
-    #[serde(rename = "note.create")]
-    NoteCreate { project_id: ProjectId, #[serde(default)] body: String },
-    /// Replace a note's body. Refused with `version_conflict` when the note is no
-    /// longer at `base_revision` (saved elsewhere): load it again with `note.get`.
-    #[serde(rename = "note.update")]
-    NoteUpdate { note_id: NoteId, body: String, base_revision: u64 },
-    #[serde(rename = "note.set_pinned")]
-    NoteSetPinned { note_id: NoteId, pinned: bool },
-    #[serde(rename = "note.delete")]
-    NoteDelete { note_id: NoteId },
-    #[serde(rename = "agent_function.create")]
-    AgentFunctionCreate(CreateAgentFunction),
-    #[serde(rename = "agent_function.update")]
-    AgentFunctionUpdate(UpdateAgentFunction),
-    #[serde(rename = "agent_function.delete")]
-    AgentFunctionDelete { function_id: AgentFunctionId },
-    #[serde(rename = "agent_function.set_enabled")]
-    AgentFunctionSetEnabled { function_id: AgentFunctionId, enabled: bool },
-    /// The kill switch: `enabled: false` makes every function refuse calls.
-    #[serde(rename = "agent_function.set_all_enabled")]
-    AgentFunctionSetAllEnabled { enabled: bool },
-    /// The secret is in the answer once; the receipt keeps none.
-    #[serde(rename = "api_key.create")]
-    ApiKeyCreate { name: String, function_ids: Vec<AgentFunctionId> },
-    #[serde(rename = "api_key.revoke")]
-    ApiKeyRevoke { key_id: ApiKeyId },
-    #[serde(rename = "api_key.set_functions")]
-    ApiKeySetFunctions { key_id: ApiKeyId, function_ids: Vec<AgentFunctionId> },
-    /// A key for an outside app (feature `app_keys`); answers `AppKeyCreated`
-    /// with the secret, once: the receipt keeps none.
-    #[serde(rename = "app_key.create")]
-    AppKeyCreate(aurelius_domain::app_key::CreateAppKey),
-    /// Revoked at once, also for the app's open sessions; answers `AppKey`.
-    #[serde(rename = "app_key.revoke")]
-    AppKeyRevoke { key_id: aurelius_domain::AppKeyId },
     #[serde(rename = "notification.mark_all_read")]
     NotificationMarkAllRead,
     /// One row read, for this board member only (feature `personal_inbox`); answers
@@ -405,34 +341,12 @@ impl HostWrite {
         "mcp.login_complete",
         "mcp.logout",
         "mcp_always_allow.remove",
-        "plugin.preview",
-        "plugin.install",
-        "plugin.update",
-        "plugin.remove",
-        "plugin.set_for_employee",
-        "plugin.set_for_project",
         "load.set_limits",
         "browser.set",
         "browser.set_backend",
-        "artifact.set_enabled",
         "management_mode.set_enabled",
         "auto_allow.set_enabled",
         "trace.set_enabled",
-        "variants.set_enabled",
-        "note.create",
-        "note.update",
-        "note.set_pinned",
-        "note.delete",
-        "agent_function.create",
-        "agent_function.update",
-        "agent_function.delete",
-        "agent_function.set_enabled",
-        "agent_function.set_all_enabled",
-        "api_key.create",
-        "api_key.revoke",
-        "api_key.set_functions",
-        "app_key.create",
-        "app_key.revoke",
         "notification.mark_all_read",
         "notification.mark_read",
         "notification.dismiss",
@@ -494,26 +408,11 @@ pub enum HostResult {
     McpServers(McpServers),
     McpLogin(McpLogin),
     McpAlwaysAllow(McpAlwaysAllow),
-    Plugins(PluginsSnapshot),
-    PluginPreview(PluginPreview),
-    EmployeePlugins(EmployeePlugins),
-    ProjectPlugins(ProjectPlugins),
     Load(LoadSnapshot),
     Browser(BrowserSetting),
-    ArtifactSetting(ArtifactSetting),
     ManagementModeSetting(ManagementModeSetting),
     AutoAllowSetting(AutoAllowSetting),
     TraceSetting(TraceSetting),
-    VariantsSetting(VariantsSetting),
-    /// A note after `note.create`, `note.update` or `note.set_pinned`. A replayed
-    /// receipt has an empty body (receipts keep no note text): load it with `note.get`.
-    Note(aurelius_domain::views::NoteView),
-    AgentFunction(aurelius_domain::views::AgentFunctionView),
-    /// The secret is shown once; a replayed receipt has an empty `secret`.
-    ApiKeyCreated(aurelius_domain::views::ApiKeyCreated),
-    /// The secret is shown once; a replayed receipt has an empty `secret`.
-    AppKeyCreated(aurelius_domain::app_key::AppKeyCreated),
-    AppKey(aurelius_domain::app_key::AppKeyView),
     Backups(BackupsSnapshot),
     Exported { markdown_path: String, json_path: String },
     Power(PowerState),
@@ -538,10 +437,7 @@ impl HostResult {
     /// What a receipt keeps: secrets blanked, so a replay never shows them again.
     pub fn redacted(&self) -> HostResult {
         match self {
-            HostResult::ApiKeyCreated(created) => HostResult::ApiKeyCreated(aurelius_domain::views::ApiKeyCreated { key: created.key.clone(), secret: String::new() }),
-            HostResult::AppKeyCreated(created) => HostResult::AppKeyCreated(aurelius_domain::app_key::AppKeyCreated { key: created.key.clone(), secret: String::new(), webhook_secret: None }),
             HostResult::PairingCode(code) => HostResult::PairingCode(PairingCode { code: String::new(), qr: String::new(), expires_at_ms: code.expires_at_ms, pairing_text: String::new() }),
-            HostResult::Note(note) => HostResult::Note(aurelius_domain::views::NoteView { summary: note.summary.clone(), body: String::new() }),
             HostResult::VaultItem(item) => HostResult::VaultItem(aurelius_domain::vault::VaultItemView { value: None, ..item.clone() }),
             other => other.clone(),
         }
@@ -602,33 +498,6 @@ mod tests {
 
     #[test]
     fn receipts_keep_no_secrets() {
-        let key = aurelius_domain::views::ApiKeyView {
-            id: ApiKeyId::new(),
-            name: "demo".into(),
-            function_ids: vec![],
-            created_at_ms: 1,
-            last_used_ms: None,
-            revoked_at_ms: None,
-        };
-        let created = HostResult::ApiKeyCreated(aurelius_domain::views::ApiKeyCreated { key, secret: "ak_SECRET".into() });
-        assert!(!serde_json::to_string(&created.redacted()).unwrap().contains("SECRET"));
-        let app = aurelius_domain::app_key::AppKeyView {
-            id: aurelius_domain::AppKeyId::new(),
-            name: "assistant".into(),
-            scopes: vec![aurelius_domain::app_key::AppScope::Read],
-            limit_per_hour: None,
-            limit_concurrent: None,
-            created_at_ms: 1,
-            last_used_ms: None,
-            revoked_at_ms: None,
-            tasks_last_hour: 0,
-            tasks_open: 0,
-            audience: Default::default(),
-            webhook_url: None,
-        };
-        let created = HostResult::AppKeyCreated(aurelius_domain::app_key::AppKeyCreated { key: app, secret: "amk_SECRET".into(), webhook_secret: Some("whsec_SECRET".into()) });
-        assert!(!serde_json::to_string(&created.redacted()).unwrap().contains("SECRET"));
-        assert!(serde_json::to_string(&created).unwrap().contains("SECRET"), "the answer itself shows it once");
         let pairing = HostResult::PairingCode(PairingCode { code: "ABCD2345".into(), qr: "{}".into(), expires_at_ms: 9, pairing_text: "aurelius-pair:x".into() });
         let kept = serde_json::to_string(&pairing.redacted()).unwrap();
         assert!(!kept.contains("ABCD2345") && !kept.contains("aurelius-pair"));

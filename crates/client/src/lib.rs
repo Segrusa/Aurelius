@@ -99,24 +99,6 @@ pub enum Target {
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Outcome>>>>;
 
-/// What a built-in terminal sends to this client.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TerminalEvent {
-    Output(Vec<u8>),
-    /// The shell ended (exit code when known).
-    Exit(Option<i32>),
-}
-
-/// Where each terminal's output goes. The route is made when the
-/// `terminal.open` response passes, so output right behind it is never lost.
-#[derive(Default)]
-struct TerminalRoutes {
-    senders: HashMap<String, mpsc::UnboundedSender<TerminalEvent>>,
-    ready: HashMap<String, mpsc::UnboundedReceiver<TerminalEvent>>,
-}
-
-type Terminals = Arc<Mutex<TerminalRoutes>>;
-
 /// Where `power_changed` pushes go (see `Client::power_changes`).
 type PowerRoute = Arc<Mutex<Option<mpsc::UnboundedSender<aurelius_protocol::PowerState>>>>;
 
@@ -151,7 +133,6 @@ pub struct Client {
     revoked: Arc<AtomicBool>,
     /// The server closed the connection (a call after that fails at once).
     closed: Arc<AtomicBool>,
-    terminals: Terminals,
     loads: LoadRoute,
     powers: PowerRoute,
     sessions: SessionRoute,
@@ -180,7 +161,6 @@ fn empty_hello() -> HelloResult {
         client_id: None,
         capabilities: vec![],
         features: vec![],
-        app: None,
         board_members_exist: false,
         user: None,
         must_change_password: false,
@@ -289,44 +269,6 @@ impl Client {
         Ok(client)
     }
 
-    /// An outside app on the service of this computer (feature `app_keys`):
-    /// the session acts for the app of `app_key` (`amk_…`), with its scopes only.
-    /// Refuses a server that does not know app keys, which would give full access.
-    pub async fn connect_app(endpoint: &Endpoint, app_key: &str, client_name: &str) -> Result<Self, ClientError> {
-        let duplex = transport::pipe(endpoint).await?;
-        let (events, _) = mpsc::unbounded_channel();
-        let client = Self::start_as(duplex, None, client_name, Some(app_key.to_owned()), events, None, accepted(&[])).await?;
-        client.require_app()
-    }
-
-    /// An outside app on a server elsewhere, through its gateway (Tailscale
-    /// Serve): the WebSocket opens with the app key itself, no pairing.
-    pub async fn connect_app_remote(url: &str, app_key: &str, client_name: &str) -> Result<Self, ClientError> {
-        let duplex = transport::websocket(url, app_key).await.map_err(|err| match err {
-            ClientError::Unauthorized(_) => ClientError::Unauthorized("The server refused this app key: it was revoked or does not exist.".into()),
-            other => other,
-        })?;
-        let (events, _) = mpsc::unbounded_channel();
-        let client = Self::start_as(duplex, None, client_name, None, events, None, accepted(&[])).await?;
-        client.require_app()
-    }
-
-    /// A session over channels the caller already has to a daemon session
-    /// (the gateway's `/v1/mcp` serves apps in-process this way).
-    pub async fn over_channels(outgoing: mpsc::Sender<Request>, incoming: mpsc::Receiver<ServerMessage>, client_name: &str) -> Result<Self, ClientError> {
-        let (events, _) = mpsc::unbounded_channel();
-        let duplex = transport::Duplex { outgoing, incoming, revoked: Arc::default() };
-        Self::start_as(duplex, None, client_name, None, events, None, accepted(&[])).await
-    }
-
-    /// The app this session acts for; an error when the server did not take the key.
-    fn require_app(self) -> Result<Self, ClientError> {
-        if self.hello.app.is_none() {
-            return Err(ClientError::Unauthorized("This Aurelius server is too old for app keys. Update the server.".into()));
-        }
-        Ok(self)
-    }
-
     async fn start(
         duplex: transport::Duplex,
         remote: Option<RemoteLink>,
@@ -335,14 +277,13 @@ impl Client {
         streams: Option<mpsc::UnboundedSender<StreamDelta>>,
         accepts: Vec<String>,
     ) -> Result<Self, ClientError> {
-        Self::start_as(duplex, remote, client_name, None, events, streams, accepts).await
+        Self::start_as(duplex, remote, client_name, events, streams, accepts).await
     }
 
     async fn start_as(
         duplex: transport::Duplex,
         remote: Option<RemoteLink>,
         client_name: &str,
-        app_key: Option<String>,
         events: mpsc::UnboundedSender<Event>,
         streams: Option<mpsc::UnboundedSender<StreamDelta>>,
         accepts: Vec<String>,
@@ -352,8 +293,6 @@ impl Client {
         let pending_reader = pending.clone();
         let closed: Arc<AtomicBool> = Arc::default();
         let closed_reader = closed.clone();
-        let terminals: Terminals = Arc::default();
-        let terminal_routes = terminals.clone();
         let loads: LoadRoute = Arc::default();
         let load_route = loads.clone();
         let powers: PowerRoute = Arc::default();
@@ -366,12 +305,6 @@ impl Client {
             while let Some(message) = incoming.recv().await {
                 match message {
                     ServerMessage::Response { request_id, outcome } => {
-                        if let Outcome::Ok(ResponseBody::Terminal(view)) = &outcome {
-                            let (tx, rx) = mpsc::unbounded_channel();
-                            let mut routes = terminal_routes.lock().unwrap();
-                            routes.senders.insert(view.terminal_id.clone(), tx);
-                            routes.ready.insert(view.terminal_id.clone(), rx);
-                        }
                         if let Some(waiter) = pending_reader.lock().unwrap().remove(&request_id) {
                             let _ = waiter.send(outcome);
                         }
@@ -391,18 +324,6 @@ impl Client {
                     ServerMessage::StreamAppend(append) => {
                         if let (Some(streams), Some(delta)) = (&streams, rebuild.apply(append)) {
                             let _ = streams.send(calls.apply(delta));
-                        }
-                    }
-                    ServerMessage::TerminalOutput(output) => {
-                        use base64::Engine;
-                        let bytes = base64::engine::general_purpose::STANDARD.decode(&output.data_base64).unwrap_or_default();
-                        if let Some(tx) = terminal_routes.lock().unwrap().senders.get(&output.terminal_id) {
-                            let _ = tx.send(TerminalEvent::Output(bytes));
-                        }
-                    }
-                    ServerMessage::TerminalExit(exit) => {
-                        if let Some(tx) = terminal_routes.lock().unwrap().senders.remove(&exit.terminal_id) {
-                            let _ = tx.send(TerminalEvent::Exit(exit.code));
                         }
                     }
                     ServerMessage::LoadChanged(snapshot) => {
@@ -432,9 +353,9 @@ impl Client {
             pending_reader.lock().unwrap().clear();
         });
 
-        let mut client = Self { outgoing, pending, next_id: AtomicU64::new(1), hello: empty_hello(), remote, revoked, closed, terminals, loads, powers, sessions, accepts: accepts.clone() };
+        let mut client = Self { outgoing, pending, next_id: AtomicU64::new(1), hello: empty_hello(), remote, revoked, closed, loads, powers, sessions, accepts: accepts.clone() };
         let hello = client
-            .call(Method::SessionHello(HelloParams { client_name: client_name.into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key, accepts, session_token: None }))
+            .call(Method::SessionHello(HelloParams { client_name: client_name.into(), client_version: env!("CARGO_PKG_VERSION").into(), accepts, session_token: None }))
             .await;
         match hello {
             Ok(ResponseBody::Hello(result)) => {
@@ -570,7 +491,7 @@ impl Client {
         }
     }
 
-    // ---- files, folders, git, terminal ----
+    // ---- files, folders ----
 
     /// Folders on the server.
     pub async fn list_dir(&self, path: Option<String>) -> Result<aurelius_protocol::DirListing, ClientError> {
@@ -581,16 +502,6 @@ impl Client {
     /// so a folder browser opens straight into it.
     pub async fn create_dir(&self, parent: String, name: String) -> Result<aurelius_protocol::DirListing, ClientError> {
         self.host(HostWrite::FsCreateDir { parent, name }, done!(DirListing)).await
-    }
-
-    /// Branch and uncommitted change where a conversation works.
-    pub async fn git_status(&self, conversation_id: aurelius_domain::ConversationId) -> Result<Option<aurelius_protocol::GitStatusView>, ClientError> {
-        self.read(Method::GitGetStatus { conversation_id }, body!(GitStatus)).await
-    }
-
-    /// The uncommitted change itself.
-    pub async fn git_diff(&self, conversation_id: aurelius_domain::ConversationId) -> Result<Option<aurelius_protocol::GitDiffView>, ClientError> {
-        self.read(Method::GitGetDiff { conversation_id }, body!(GitDiff)).await
     }
 
     /// The subagents running in a conversation's answers.
@@ -604,84 +515,10 @@ impl Client {
         self.read(Method::ActivityGet { message_id, call_id: call_id.to_owned() }, body!(Activity)).await
     }
 
-    /// A shell in the folder the conversation works in (its running one unless
-    /// `fresh`), with its output from now on; a reattach first replays what the
-    /// terminal kept.
-    pub async fn open_terminal(
-        &self,
-        conversation_id: aurelius_domain::ConversationId,
-        cols: u16,
-        rows: u16,
-        fresh: bool,
-    ) -> Result<(aurelius_protocol::TerminalView, mpsc::UnboundedReceiver<TerminalEvent>), ClientError> {
-        self.open_terminal_with(Method::TerminalOpen { conversation_id, cols, rows, fresh, terminal_id: None, additional: false }).await
-    }
-
     /// The server supports an additive feature of this protocol major
     /// (`aurelius_protocol::FEATURES`), e.g. `FEATURE_TERMINAL_MULTI`.
     pub fn supports(&self, feature: &str) -> bool {
         self.hello.features.iter().any(|f| f == feature)
-    }
-
-    /// Attach to exactly this terminal of the conversation (feature
-    /// `terminal.multi`); its scrollback is replayed first.
-    pub async fn attach_terminal(
-        &self,
-        conversation_id: aurelius_domain::ConversationId,
-        terminal_id: &str,
-        cols: u16,
-        rows: u16,
-    ) -> Result<(aurelius_protocol::TerminalView, mpsc::UnboundedReceiver<TerminalEvent>), ClientError> {
-        self.open_terminal_with(Method::TerminalOpen { conversation_id, cols, rows, fresh: false, terminal_id: Some(terminal_id.into()), additional: false })
-            .await
-    }
-
-    /// Another shell beside the conversation's running ones (feature
-    /// `terminal.multi`; at most 4 per conversation).
-    pub async fn open_additional_terminal(
-        &self,
-        conversation_id: aurelius_domain::ConversationId,
-        cols: u16,
-        rows: u16,
-    ) -> Result<(aurelius_protocol::TerminalView, mpsc::UnboundedReceiver<TerminalEvent>), ClientError> {
-        self.open_terminal_with(Method::TerminalOpen { conversation_id, cols, rows, fresh: false, terminal_id: None, additional: true }).await
-    }
-
-    async fn open_terminal_with(&self, open: Method) -> Result<(aurelius_protocol::TerminalView, mpsc::UnboundedReceiver<TerminalEvent>), ClientError> {
-        let view = self.read(open, body!(Terminal)).await?;
-        let output = self.terminals.lock().unwrap().ready.remove(&view.terminal_id).ok_or(ClientError::UnexpectedResponse)?;
-        Ok((view, output))
-    }
-
-    /// Stop getting this terminal's output (feature `terminal.multi`); the
-    /// shell keeps running. Its receiver ends; `attach_terminal` gives a new one.
-    pub async fn detach_terminal(&self, terminal_id: &str) -> Result<(), ClientError> {
-        self.call(Method::TerminalDetach { terminal_id: terminal_id.into() }).await?;
-        let mut routes = self.terminals.lock().unwrap();
-        routes.senders.remove(terminal_id);
-        routes.ready.remove(terminal_id);
-        Ok(())
-    }
-
-    /// The conversation's terminals, oldest first (feature `terminal.multi`).
-    pub async fn list_terminals(&self, conversation_id: aurelius_domain::ConversationId) -> Result<Vec<aurelius_protocol::TerminalSummary>, ClientError> {
-        self.read(Method::TerminalList { conversation_id }, body!(Terminals)).await
-    }
-
-    /// Keystrokes or pasted text.
-    pub async fn terminal_input(&self, terminal_id: &str, bytes: &[u8]) -> Result<(), ClientError> {
-        use base64::Engine;
-        let data_base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-        self.call(Method::TerminalInput { terminal_id: terminal_id.into(), data_base64 }).await.map(|_| ())
-    }
-
-    pub async fn resize_terminal(&self, terminal_id: &str, cols: u16, rows: u16) -> Result<(), ClientError> {
-        self.call(Method::TerminalResize { terminal_id: terminal_id.into(), cols, rows }).await.map(|_| ())
-    }
-
-    /// Ends the shell and what it started.
-    pub async fn close_terminal(&self, terminal_id: &str) -> Result<(), ClientError> {
-        self.call(Method::TerminalClose { terminal_id: terminal_id.into() }).await.map(|_| ())
     }
 
     /// Where Claude Code is installed on the server.
@@ -923,10 +760,6 @@ impl Client {
         self.read(Method::EmployeeInstructionVersions { employee_id }, body!(EmployeeInstructionVersions)).await
     }
 
-    pub async fn shares(&self, project_id: aurelius_domain::ProjectId) -> Result<Vec<aurelius_protocol::ShareView>, ClientError> {
-        self.read(Method::ShareList { project_id }, body!(Shares)).await
-    }
-
     /// Markdown files of a work folder.
     pub async fn markdown_files(&self, scope: aurelius_protocol::FileScope) -> Result<aurelius_protocol::MarkdownFileList, ClientError> {
         self.read(Method::MarkdownList { scope }, body!(MarkdownFiles)).await
@@ -967,21 +800,6 @@ impl Client {
     /// Trace mode on or off for the next runs (off forgets the kept traces); needs the Approve right.
     pub async fn set_trace_enabled(&self, enabled: bool) -> Result<aurelius_protocol::TraceSetting, ClientError> {
         self.host(HostWrite::TraceSetEnabled { enabled }, done!(TraceSetting)).await
-    }
-
-    /// Whether tasks may be tried in several ways first (feature `task_variants`).
-    pub async fn variants_setting(&self) -> Result<aurelius_protocol::VariantsSetting, ClientError> {
-        self.read(Method::VariantsGetSetting, body!(VariantsSetting)).await
-    }
-
-    /// Task variants on or off; needs the Approve right.
-    pub async fn set_variants_enabled(&self, enabled: bool) -> Result<aurelius_protocol::VariantsSetting, ClientError> {
-        self.host(HostWrite::VariantsSetEnabled { enabled }, done!(VariantsSetting)).await
-    }
-
-    /// A task's variants and the judge's comparison.
-    pub async fn task_variants(&self, task_id: aurelius_domain::TaskId) -> Result<aurelius_protocol::TaskVariantsView, ClientError> {
-        self.read(Method::TaskVariants { task_id }, body!(TaskVariants)).await
     }
 
     pub async fn subscription(&self, refresh: bool) -> Result<aurelius_protocol::SubscriptionUsage, ClientError> {
@@ -1039,7 +857,7 @@ impl Client {
     /// board member is this connection's when it is still valid (`HelloResult::user`),
     /// else none (sign in again).
     pub async fn resume(&self, session_token: &str) -> Result<HelloResult, ClientError> {
-        let params = HelloParams { client_name: "aurelius".into(), client_version: env!("CARGO_PKG_VERSION").into(), app_key: None, accepts: self.accepts.clone(), session_token: Some(session_token.into()) };
+        let params = HelloParams { client_name: "aurelius".into(), client_version: env!("CARGO_PKG_VERSION").into(), accepts: self.accepts.clone(), session_token: Some(session_token.into()) };
         self.read(Method::SessionHello(params), body!(Hello)).await
     }
 
@@ -1271,76 +1089,7 @@ impl Client {
         self.execute(envelope(Command::SendQueuedNow(send), None)).await
     }
 
-    // ---- agent functions and API keys (owner right) ----
-
-    /// Agent functions with usage and the kill switch (`None`: all projects).
-    pub async fn agent_functions(&self, project_id: Option<aurelius_domain::ProjectId>) -> Result<aurelius_protocol::AgentFunctionsSnapshot, ClientError> {
-        self.read(Method::AgentFunctionList { project_id }, body!(AgentFunctions)).await
-    }
-
-    pub async fn create_agent_function(&self, cmd: aurelius_domain::agent_function::CreateAgentFunction) -> Result<aurelius_protocol::AgentFunctionView, ClientError> {
-        self.host(HostWrite::AgentFunctionCreate(cmd), done!(AgentFunction)).await
-    }
-
-    pub async fn update_agent_function(&self, cmd: aurelius_domain::agent_function::UpdateAgentFunction) -> Result<aurelius_protocol::AgentFunctionView, ClientError> {
-        self.host(HostWrite::AgentFunctionUpdate(cmd), done!(AgentFunction)).await
-    }
-
-    /// Delete, enable/disable and the kill switch answer with the refreshed list.
-    pub async fn delete_agent_function(&self, function_id: aurelius_domain::AgentFunctionId) -> Result<aurelius_protocol::AgentFunctionsSnapshot, ClientError> {
-        self.host_ok(HostWrite::AgentFunctionDelete { function_id }).await?;
-        self.agent_functions(None).await
-    }
-
-    pub async fn set_agent_function_enabled(&self, function_id: aurelius_domain::AgentFunctionId, enabled: bool) -> Result<aurelius_protocol::AgentFunctionsSnapshot, ClientError> {
-        self.host_ok(HostWrite::AgentFunctionSetEnabled { function_id, enabled }).await?;
-        self.agent_functions(None).await
-    }
-
-    pub async fn set_all_agent_functions_enabled(&self, enabled: bool) -> Result<aurelius_protocol::AgentFunctionsSnapshot, ClientError> {
-        self.host_ok(HostWrite::AgentFunctionSetAllEnabled { enabled }).await?;
-        self.agent_functions(None).await
-    }
-
-    pub async fn function_calls(&self, function_id: Option<aurelius_domain::AgentFunctionId>, limit: Option<u32>) -> Result<aurelius_protocol::FunctionCallsSnapshot, ClientError> {
-        self.read(Method::FunctionCallList { function_id, limit }, body!(FunctionCalls)).await
-    }
-
-    pub async fn api_keys(&self) -> Result<Vec<aurelius_protocol::ApiKeyView>, ClientError> {
-        self.read(Method::ApiKeyList, body!(ApiKeys)).await
-    }
-
-    /// The secret in the answer is shown once and not kept by the server.
-    pub async fn create_api_key(&self, name: String, function_ids: Vec<aurelius_domain::AgentFunctionId>) -> Result<aurelius_protocol::ApiKeyCreated, ClientError> {
-        self.host(HostWrite::ApiKeyCreate { name, function_ids }, done!(ApiKeyCreated)).await
-    }
-
-    pub async fn revoke_api_key(&self, key_id: aurelius_domain::ApiKeyId) -> Result<Vec<aurelius_protocol::ApiKeyView>, ClientError> {
-        self.host_ok(HostWrite::ApiKeyRevoke { key_id }).await?;
-        self.api_keys().await
-    }
-
-    pub async fn set_api_key_functions(&self, key_id: aurelius_domain::ApiKeyId, function_ids: Vec<aurelius_domain::AgentFunctionId>) -> Result<Vec<aurelius_protocol::ApiKeyView>, ClientError> {
-        self.host_ok(HostWrite::ApiKeySetFunctions { key_id, function_ids }).await?;
-        self.api_keys().await
-    }
-
-    /// Keys of outside apps (feature `app_keys`), newest first.
-    pub async fn app_keys(&self) -> Result<Vec<aurelius_domain::app_key::AppKeyView>, ClientError> {
-        self.read(Method::AppKeyList, body!(AppKeys)).await
-    }
-
-    /// The secret in the answer is shown once and not kept by the server.
-    pub async fn create_app_key(&self, key: aurelius_domain::app_key::CreateAppKey) -> Result<aurelius_domain::app_key::AppKeyCreated, ClientError> {
-        self.host(HostWrite::AppKeyCreate(key), done!(AppKeyCreated)).await
-    }
-
-    /// Revoked at once, also for the app's open sessions.
-    pub async fn revoke_app_key(&self, key_id: aurelius_domain::AppKeyId) -> Result<aurelius_domain::app_key::AppKeyView, ClientError> {
-        self.host(HostWrite::AppKeyRevoke { key_id }, done!(AppKey)).await
-    }
-
-    // ---- load, browser, MCP, plugins ----
+    // ---- load, browser, MCP ----
 
     /// The server's load and when new runs may start.
     pub async fn load_snapshot(&self) -> Result<aurelius_protocol::LoadSnapshot, ClientError> {
@@ -1368,16 +1117,6 @@ impl Client {
         self.host(HostWrite::BrowserSetBackend { backend }, done!(Browser)).await
     }
 
-    /// Whether runs may publish Claude Code artifacts.
-    pub async fn artifact_setting(&self) -> Result<aurelius_protocol::ArtifactSetting, ClientError> {
-        self.read(Method::ArtifactGetSetting, body!(ArtifactSetting)).await
-    }
-
-    /// Turn Claude Code artifacts on or off for the next runs; needs the Approve right.
-    pub async fn set_artifacts_enabled(&self, enabled: bool) -> Result<aurelius_protocol::ArtifactSetting, ClientError> {
-        self.host(HostWrite::ArtifactSetEnabled { enabled }, done!(ArtifactSetting)).await
-    }
-
     /// Whether management chooses its own task mode (feature `management_chooses_mode`).
     pub async fn management_mode_setting(&self) -> Result<aurelius_protocol::ManagementModeSetting, ClientError> {
         self.read(Method::ManagementModeGetSetting, body!(ManagementModeSetting)).await
@@ -1396,42 +1135,6 @@ impl Client {
     /// Turn auto-allow on or off from the next tool call; needs the Approve right.
     pub async fn set_auto_allow_enabled(&self, enabled: bool) -> Result<aurelius_protocol::AutoAllowSetting, ClientError> {
         self.host(HostWrite::AutoAllowSetEnabled { enabled }, done!(AutoAllowSetting)).await
-    }
-
-    /// Artifacts runs published, by conversation, task or project (none: all).
-    pub async fn artifacts(&self, conversation_id: Option<aurelius_domain::ConversationId>, task_id: Option<aurelius_domain::TaskId>, project_id: Option<aurelius_domain::ProjectId>) -> Result<Vec<aurelius_domain::views::ArtifactView>, ClientError> {
-        self.read(Method::ArtifactList { conversation_id, task_id, project_id }, body!(Artifacts)).await.map(|s| s.artifacts)
-    }
-
-    /// The kept file of one artifact version (else the newest), to show it in the app.
-    pub async fn artifact_content(&self, url: String, version: Option<u32>) -> Result<aurelius_domain::views::ArtifactContent, ClientError> {
-        self.read(Method::ArtifactGetContent { url, version }, body!(ArtifactContent)).await
-    }
-
-    /// A project's notes, pinned first, then the last edited; `query` searches the text.
-    pub async fn notes(&self, project_id: aurelius_domain::ProjectId, query: Option<String>) -> Result<Vec<aurelius_domain::views::NoteSummary>, ClientError> {
-        self.read(Method::NoteList { project_id, query }, body!(Notes)).await.map(|s| s.notes)
-    }
-
-    pub async fn note(&self, note_id: aurelius_domain::NoteId) -> Result<aurelius_domain::views::NoteView, ClientError> {
-        self.read(Method::NoteGet { note_id }, body!(Note)).await
-    }
-
-    pub async fn create_note(&self, project_id: aurelius_domain::ProjectId, body: String) -> Result<aurelius_domain::views::NoteView, ClientError> {
-        self.host(HostWrite::NoteCreate { project_id, body }, done!(Note)).await
-    }
-
-    /// Save a note edited from `base_revision`; a version conflict means it changed elsewhere.
-    pub async fn update_note(&self, note_id: aurelius_domain::NoteId, body: String, base_revision: u64) -> Result<aurelius_domain::views::NoteView, ClientError> {
-        self.host(HostWrite::NoteUpdate { note_id, body, base_revision }, done!(Note)).await
-    }
-
-    pub async fn set_note_pinned(&self, note_id: aurelius_domain::NoteId, pinned: bool) -> Result<aurelius_domain::views::NoteView, ClientError> {
-        self.host(HostWrite::NoteSetPinned { note_id, pinned }, done!(Note)).await
-    }
-
-    pub async fn delete_note(&self, note_id: aurelius_domain::NoteId) -> Result<(), ClientError> {
-        self.host_ok(HostWrite::NoteDelete { note_id }).await
     }
 
     /// The user's MCP servers and which ones every run uses.
@@ -1484,56 +1187,6 @@ impl Client {
     /// Take a tool off the always-allow list; needs the Approve right.
     pub async fn mcp_always_allow_remove(&self, tool: &str) -> Result<aurelius_protocol::McpAlwaysAllow, ClientError> {
         self.host(HostWrite::McpAlwaysAllowRemove { tool: tool.to_owned() }, done!(McpAlwaysAllow)).await
-    }
-
-    /// Installed plugins and the employees using each.
-    pub async fn plugins_list(&self) -> Result<aurelius_protocol::PluginsSnapshot, ClientError> {
-        self.read(Method::PluginList, body!(Plugins)).await
-    }
-
-    /// Plugins in the marketplaces already added.
-    pub async fn plugins_available(&self) -> Result<aurelius_protocol::PluginCatalog, ClientError> {
-        self.read(Method::PluginListAvailable, body!(PluginCatalog)).await
-    }
-
-    /// Add the marketplace behind a link and list its plugins; needs Approve.
-    pub async fn plugins_preview(&self, source: String) -> Result<aurelius_protocol::PluginPreview, ClientError> {
-        self.host(HostWrite::PluginPreview { source }, done!(PluginPreview)).await
-    }
-
-    /// Install plugins and enable them for these employees and projects; needs Approve.
-    pub async fn plugins_install(&self, ids: Vec<String>, employees: Vec<aurelius_domain::EmployeeId>, projects: Vec<aurelius_domain::ProjectId>) -> Result<aurelius_protocol::PluginsSnapshot, ClientError> {
-        self.host(HostWrite::PluginInstall { ids, employees, projects }, done!(Plugins)).await
-    }
-
-    /// Update one plugin; needs Approve.
-    pub async fn plugin_update(&self, id: String) -> Result<aurelius_protocol::PluginsSnapshot, ClientError> {
-        self.host(HostWrite::PluginUpdate { id }, done!(Plugins)).await
-    }
-
-    /// Uninstall a plugin and take it off every employee; needs Approve.
-    pub async fn plugin_remove(&self, id: String) -> Result<aurelius_protocol::PluginsSnapshot, ClientError> {
-        self.host(HostWrite::PluginRemove { id }, done!(Plugins)).await
-    }
-
-    /// The plugins one employee has enabled.
-    pub async fn employee_plugins(&self, employee_id: aurelius_domain::EmployeeId) -> Result<aurelius_protocol::EmployeePlugins, ClientError> {
-        self.read(Method::PluginGetForEmployee { employee_id }, body!(EmployeePlugins)).await
-    }
-
-    /// Replace an employee's enabled plugins; needs Approve.
-    pub async fn set_employee_plugins(&self, employee_id: aurelius_domain::EmployeeId, enabled: Vec<String>) -> Result<aurelius_protocol::EmployeePlugins, ClientError> {
-        self.host(HostWrite::PluginSetForEmployee { employee_id, enabled }, done!(EmployeePlugins)).await
-    }
-
-    /// The plugins one project has enabled (its project assistant loads them).
-    pub async fn project_plugins(&self, project_id: aurelius_domain::ProjectId) -> Result<aurelius_protocol::ProjectPlugins, ClientError> {
-        self.read(Method::PluginGetForProject { project_id }, body!(ProjectPlugins)).await
-    }
-
-    /// Replace a project's enabled plugins; needs Approve.
-    pub async fn set_project_plugins(&self, project_id: aurelius_domain::ProjectId, enabled: Vec<String>) -> Result<aurelius_protocol::ProjectPlugins, ClientError> {
-        self.host(HostWrite::PluginSetForProject { project_id, enabled }, done!(ProjectPlugins)).await
     }
 
     // ---- pushes ----

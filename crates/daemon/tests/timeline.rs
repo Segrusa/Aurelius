@@ -52,7 +52,6 @@ async fn timeline_tells_the_story_and_notifies_once() {
         title: "Onboarding".into(),
         goal: "Vergelijk ideeën voor onboarding".into(),
         acceptance_criteria: vec!["Elk resultaat noemt een bron".into()],
-        depends_on: vec![],
     };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     for _ in 0..400 {

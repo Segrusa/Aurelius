@@ -36,10 +36,6 @@ pub(super) fn tool_profile(shared: &Arc<Shared>, plan: &ChatRunPlan) -> ToolProf
                 // The user's own MCP servers the user enabled server-wide, of those the ones
                 // this employee may use (C2); none by default.
                 mcp_servers: crate::mcp_servers::configs_for_run(shared, &plan.tool_policy),
-                // The plugins this employee, or for the project assistant this project, has enabled.
-                plugins: aurelius_host::plugins::paths_for_run(shared.store(), plan.conversation_id),
-                // Claude Code artifacts (pages on claude.ai), when the user turned them on server-wide.
-                artifacts: plan.artifacts,
                 access: plan.access,
                 tool_policy: plan.tool_policy.clone(),
             }

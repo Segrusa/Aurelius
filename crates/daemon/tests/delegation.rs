@@ -64,7 +64,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId, EmployeeId) {
 }
 
 async fn create(client: &Client, project_id: ProjectId, employee_id: Option<EmployeeId>, title: &str) -> TaskId {
-    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id, title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id, title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![] };
     match client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result {
         CommandResult::TaskCreated { task_id } => task_id,
         other => panic!("{other:?}"),

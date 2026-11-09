@@ -110,7 +110,6 @@ async fn switch_during(client: &Client, employee: EmployeeId, project: ProjectId
         title: format!("Switch for {file}"),
         goal,
         acceptance_criteria: vec![],
-        depends_on: vec![],
     };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     let conversation = task_conversation(client, task_id).await;

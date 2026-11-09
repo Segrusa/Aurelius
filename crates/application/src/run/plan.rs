@@ -92,8 +92,6 @@ pub struct ChatRunPlan {
     pub screen: bool,
     /// The answer is the project assistant's (a project conversation): it cannot hand over a task.
     pub project_assistant: bool,
-    /// The user turned Claude Code artifacts on server-wide (an employee at work only).
-    pub artifacts: bool,
     /// A management employee works on a task whose mode the user left open and the server lets
     /// management choose: the run offers `set_mode` (an employee at work with Claude Code only).
     pub management_mode: bool,
@@ -144,28 +142,6 @@ pub const PLAN_MODE_GUIDANCE: &str = "Plan mode: only make a plan or analysis. D
 /// What management is told in a task whose mode the user left to it: when to work in Auto and
 /// when to stay in Plan, and that it says why with `set_mode`.
 pub const MODE_CHOICE_GUIDANCE: &str = "\n\nThe user left the mode of this task to you. It starts in Plan mode (read and plan only). Choose with set_mode {mode, reason}, always with a short reason; the user sees your choice and reason in the thread. Choose Auto for clear, well-bounded work that can be undone. Stay in Plan, and present the plan with ExitPlanMode for the user to approve, for large scope, budget, irreversible or external actions, and conflicting goals. You may switch back to Plan later with set_mode when the work turns out bigger or riskier. You cannot approve your own plan: while a plan waits for the user, set_mode is refused.";
-
-/// What a run with artifacts on is told: what they are for.
-pub const ARTIFACT_GUIDANCE: &str = "You can publish Claude Code artifacts: a self-contained HTML (or Markdown) page on claude.ai with the Artifact tool, private to the user's claude.ai account until they share it. Use one when a page shows the result better than text (a report, a dashboard, a comparison, a diff walkthrough), not by default. Publishing goes to the user for approval unless the mode is Auto, and Plan mode blocks it; name the page with a <title>. Give the user the artifact's URL in your answer.";
-
-/// The pages a run with artifacts on already published here, so it updates those
-/// instead of making new ones; `None` when there are none.
-pub fn artifact_list(published: &[aurelius_domain::views::ArtifactView]) -> Option<String> {
-    (!published.is_empty()).then(|| {
-        format!(
-            "Artifacts already published for this conversation or task. To change one, republish to its URL (pass it as `url`; read it first with action \"read\" if this session has not published it) instead of creating a new artifact:\n{}",
-            crate::run::session::artifact_entries(published).join("\n")
-        )
-    })
-}
-
-/// The guidance and the list together.
-pub fn artifact_note(published: &[aurelius_domain::views::ArtifactView]) -> String {
-    match artifact_list(published) {
-        Some(list) => format!("{ARTIFACT_GUIDANCE}\n\n{list}"),
-        None => ARTIFACT_GUIDANCE.to_string(),
-    }
-}
 
 /// The message as a Claude Code slash command (`/name` or `/plugin:name`, then
 /// its arguments), trimmed; `None` for anything else (also a path like `/home/x`).
@@ -416,7 +392,7 @@ User question:
                     None => system,
                 };
                 // What changes more often goes at the end of the system text, after the
-                // memories (task status, plan mode, artifacts published, the task overview):
+                // memories (task status, plan mode, the task overview):
                 // a session keeps the text it started with and is told these changes instead.
                 let mut tail: Vec<String> = Vec::new();
                 // The employee's own note (C7): in every prompt, told again when it changes.
@@ -461,17 +437,6 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 } else {
                     system
                 };
-                // Claude Code artifacts: only for Claude Code at work, when the user turned them on.
-                let artifacts = work.is_some()
-                    && config.provider == Some(aurelius_domain::connection::ProviderKind::ClaudeCode)
-                    && aurelius_storage::artifacts::enabled(conn)?;
-                let system = if artifacts {
-                    tail.extend(artifact_list(&aurelius_storage::artifacts::for_run(conn, conversation_id)?));
-                    Some(format!("{}\n\n{ARTIFACT_GUIDANCE}", system.unwrap_or_default()).trim().to_string())
-                } else {
-                    system
-                };
-
                 // A task's conversation: the task is its context.
                 let own_task = aurelius_storage::tasks::task_for_conversation(conn, conversation_id)?;
                 let task_status: Option<String> = match own_task {
@@ -501,27 +466,6 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                                 text.push_str(MODE_CHOICE_GUIDANCE);
                             }
                         }
-                        Some(text.trim().to_string())
-                    }
-                    None => system,
-                };
-                // A trial of a task (its variants): the task is its context, and the
-                // approach it tries goes in the tail, so the text before it stays the same.
-                let probe = match own_task {
-                    Some(_) => None,
-                    None => aurelius_storage::variants::probe_of_conversation(conn, conversation_id)?,
-                };
-                let system = match &probe {
-                    Some(probe) => {
-                        let mut text = system.unwrap_or_default();
-                        if let Some(view) = aurelius_storage::tasks::task_view(conn, probe.task_id, &read_blob)? {
-                            text.push_str(&format!("\n\n## This conversation is a trial of your task “{}”\nGoal: {}\n", view.title, view.goal.trim()));
-                            for c in &view.criteria {
-                                text.push_str(&format!("- criterion: {c}\n"));
-                            }
-                        }
-                        text.push_str(crate::task::variants::PROBE_GUIDANCE);
-                        tail.push(format!("Your approach in this trial: {}", probe.hint));
                         Some(text.trim().to_string())
                     }
                     None => system,
@@ -665,7 +609,6 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 let mut history_turns: Vec<(u32, Turn)> = ordinals.iter().copied().zip(turns).filter(|(o, _)| *o > through).collect();
                 // The request itself is never part of history.
                 history_turns.retain(|(o, _)| Some(*o) != ordinals.last().copied());
-                let shared = crate::conversation::shares::share_candidates(conn, &scopes, Some(conversation_id), &read_blob)?;
                 let candidates: Vec<crate::memory::context::Candidate> = aurelius_storage::memory::retrieve(conn, &scopes, &request.text)?
                     .into_iter()
                     .filter(|(row, _)| row.kind != aurelius_domain::memory::MemoryKind::ConversationSummary)
@@ -686,7 +629,6 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                         })
                     })
                     .collect();
-                let candidates: Vec<crate::memory::context::Candidate> = shared.into_iter().chain(candidates).collect();
                 let input = crate::memory::context::Input {
                     rules: system.clone().unwrap_or_default(),
                     tail: tail.join("\n\n"),
@@ -731,7 +673,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 // Going on in the conversation's session: only the new messages, with the
                 // attachments again when they changed. The session's own system text goes
                 // with them (Claude Code does not keep it), as it was: what changed since
-                // (status, mode, memories, tasks, artifacts) is told in front of them.
+                // (status, mode, memories, tasks) is told in front of them.
                 let mut context = crate::run::session::context_now(conn, conversation_id, task_status)?;
                 context.memories = memories;
                 context.scratchpad = scratchpad;
@@ -772,7 +714,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 // Its answer in the group shows the mode it started in.
                 let group = conv::group_run(conn, run_id)?.map(|g| conv::GroupRun { mode: Some(mode), ..g });
                 let guidelines = guidelines.run;
-                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, tool_policy, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group, discussion, testing, guidelines }))
+                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, tool_policy, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), management_mode, session, group, discussion, testing, guidelines }))
             })
             .map_err(storage_error)
     }

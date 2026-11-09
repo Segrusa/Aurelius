@@ -100,7 +100,7 @@ void main() {
     expect(projects.single.folder, r'C:\Projects\Atlas');
   });
 
-  test('employees with a title, a boss, heartbeat and what runs for them', () {
+  test('employees with a title, a boss and what runs for them', () {
     final m = (body({
       'type': 'employees',
       'value': {
@@ -124,7 +124,6 @@ void main() {
             'conversations': [
               {'id': 'c1', 'title': 'Launch', 'created_at_ms': 1, 'updated_at_ms': 2, 'message_count': 3},
             ],
-            'heartbeat': {'every_minutes': 60, 'quiet_start_min': 0, 'quiet_end_min': 0, 'daily_token_budget': 0, 'tokens_today': 0},
             'agents': [
               {'kind': 'planning', 'name': 'Iris', 'detail': '', 'since_ms': 1, 'steps': 0},
               {'kind': 'subagent', 'name': 'Explore', 'detail': '', 'since_ms': 1, 'steps': 3, 'doing': 'Read · hero.html', 'prompt': 'Compare the two hero layouts.'},
@@ -142,7 +141,6 @@ void main() {
     expect(m.roleLine, 'Head of content · Writer');
     expect(m.working, isTrue);
     expect(m.agentMode, AgentMode.plan);
-    expect(m.heartbeat!.everyMinutes, 60);
     expect(m.monogram, 'I');
     expect(m.threadTitle('c1'), 'Launch');
     expect(m.threadTitle('other'), 'New conversation');
@@ -418,62 +416,6 @@ void main() {
       expect(lineDiff('a\nb', 'a\nb').every((l) => l.op == DiffOp.same), isTrue);
     });
 
-    test('variants: the run field, the compare view and the choice (task_variants)', () {
-      // 1 sends nothing, as servers without the feature expect.
-      expect(paramsOf(Commands.createTask('p', 'T', 'G', const [])).containsKey('run'), isFalse);
-      expect(paramsOf(Commands.createTask('p', 'T', 'G', const [], run: {'mode': 'auto'}, variants: 3))['run'], {'mode': 'auto', 'variants': 3});
-      expect(Commands.chooseVariant('t', variant: 2), {
-        'method': 'task.choose_variant',
-        'params': {'task_id': 't', 'variant': 2},
-      });
-      expect(Commands.chooseVariant('t')['params'], {'task_id': 't'}, reason: "absent: the judge's pick");
-      expect(variantsCostNote(1), 'One run, as usual.');
-      expect(variantsCostNote(3), contains('3×'));
-
-      final view = (body({
-        'type': 'task_variants',
-        'value': {
-          'task_id': 't', 'phase': 'ready', 'count': 2, 'base_commit': 'abc', 'judge_pick': 2, 'compose': 'Take 2.',
-          'variants': [
-            {
-              'n': 1, 'hint': 'Small patch', 'status': 'done', 'files': 2, 'insertions': 10, 'deletions': 3, 'diff': '+a', 'diff_truncated': false,
-              'report': 'Patched.', 'errors': 0, 'tests': 'passed', 'rank': 2, 'judge_note': 'Fine',
-              'usage': {'input_tokens': 1000, 'output_tokens': 200, 'cache_creation_tokens': 50, 'cached_tokens': 9000, 'estimate': false, 'runs': 1},
-            },
-            {
-              'n': 2, 'hint': 'Refactor', 'status': 'failed', 'files': 0, 'insertions': 0, 'deletions': 0, 'diff': '', 'diff_truncated': false,
-              'report': '', 'errors': 1, 'usage': {'input_tokens': 0, 'output_tokens': 0, 'cache_creation_tokens': 0, 'cached_tokens': 0, 'estimate': true, 'runs': 1},
-            },
-          ],
-        },
-      }) as ResponseBodyTaskVariants)
-          .value;
-      expect(view.phase, VariantPhase.ready);
-      expect(view.judgePick, 2);
-      expect(view.variants.first.changeLine, '2 files · +10 −3');
-      expect(view.variants.first.tokens, 1250, reason: 'input, cache writes and output; cache reads not');
-      expect(view.variants.first.choosable, isTrue);
-      expect(view.variants.last.choosable, isFalse, reason: 'only a done trial can be chosen');
-
-      final setting = (body({'type': 'variants_setting', 'value': {'enabled': true, 'max_variants': 3}}) as ResponseBodyVariantsSetting).value;
-      expect(setting.enabled, isTrue);
-      expect(setting.maxVariants, 3);
-
-      final ready = (ServerMessage.fromJson({'type': 'event', 'seq': 7, 'kind': 'task.variants_ready', 'aggregate_id': 't', 'at_ms': 3}) as ServerMessageEvent).value;
-      expect(ready.kind, EventKind.taskVariantsReady);
-      expect(ready.isTask, isTrue);
-    });
-
-    test('a task with variants ready needs you; trying them reads as such', () {
-      final ready = taskOf(status: TaskStatus.waiting, waitingReason: 'variants', variantPhase: VariantPhase.ready);
-      expect(ready.needsYou, isTrue);
-      expect(ready.variantsReady, isTrue);
-      expect(ready.statusLabel, 'Variants ready to compare');
-      final probing = taskOf(status: TaskStatus.running, variantPhase: VariantPhase.probing);
-      expect(probing.needsYou, isFalse);
-      expect(probing.statusLabel, 'Trying variants');
-      expect(taskOf(status: TaskStatus.running).statusLabel, 'Running', reason: 'no variants, as before');
-    });
   });
 
   test('receipts carry the result of the command', () {

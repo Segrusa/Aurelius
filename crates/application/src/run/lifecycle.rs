@@ -666,8 +666,5 @@ pub(crate) fn commit_end(tx: &aurelius_storage::Tx<'_>, store: &aurelius_storage
     );
     notices.extend(CommandService::invalidate_run_approvals(tx, run_id)?);
     conv::set_run_status(tx, run_id, run_status, error.as_deref())?;
-    if let Some(n) = crate::run::heartbeat::on_run_finished(tx, run_id, end.outcome == RunOutcome::Completed, end.reply)? {
-        notices.push(n);
-    }
     Ok(notices)
 }

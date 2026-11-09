@@ -363,7 +363,8 @@ pub fn events_after(conn: &Connection, after_seq: u64, limit: u32) -> Result<Vec
     let mut out = Vec::new();
     for row in rows {
         let (seq, kind, aggregate_id, project, occurred_at_ms) = row?;
-        let kind = EventKind::parse(&kind).ok_or_else(|| StorageError::Rejected(format!("unknown event type {kind} in the log")))?;
+        // A row of a removed feature stays in the log; clients have no kind for it.
+        let Some(kind) = EventKind::parse(&kind) else { continue };
         out.push(EventNotice {
             seq: seq as u64,
             kind,

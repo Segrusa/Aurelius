@@ -85,7 +85,6 @@ async fn plan_task(client: &Client, employee: EmployeeId, project: ProjectId, go
         title: "Hello file".into(),
         goal: goal.into(),
         acceptance_criteria: vec![],
-        depends_on: vec![],
     };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     task_id

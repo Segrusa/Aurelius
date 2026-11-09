@@ -82,7 +82,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str
 }
 
 async fn task(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str, goal: &str) -> TaskId {
-    let cmd = CreateTask { confirm_secret: false, files: vec![], project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default() };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], run: Default::default() };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     task_id
 }

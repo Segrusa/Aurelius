@@ -3,12 +3,10 @@ import 'dart:typed_data';
 
 import 'package:aurelius_mobile/core/hosts/host.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
-import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/chat/answer_body.dart';
-import 'package:aurelius_mobile/features/chat/git_chip.dart';
 import 'package:aurelius_mobile/features/chat/subagent_chip.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
@@ -255,7 +253,6 @@ void main() {
       when(() => repo.load()).thenAnswer((_) async => loadOf());
       when(() => repo.powerChanges).thenAnswer((_) => const Stream.empty());
       when(() => repo.linkState).thenReturn(online);
-      when(() => repo.gitStatus(any())).thenAnswer((_) async => null);
       when(() => repo.subagents(any())).thenAnswer((_) async => []);
       when(() => repo.projects()).thenAnswer((_) async => []);
       when(() => repo.tasks(projectId: any(named: 'projectId'))).thenAnswer((_) async => []);
@@ -503,39 +500,6 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('the branch chip shows the change; a tap opens the diff', (tester) async {
-      const status = GitStatusView(branch: 'feat/chip', head: 'abc1234', files: 2, insertions: 2, deletions: 1);
-      when(() => repo.gitStatus('main')).thenAnswer((_) async => status);
-      when(() => repo.gitDiff('main')).thenAnswer((_) async => const GitDiffView(
-            status: status,
-            patch: 'diff --git a/a.txt b/a.txt\nindex 1..2 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,3 @@\n one\n-two\n+three\n+four\n',
-            truncated: false,
-            untracked: ['new.txt'],
-          ));
-      await pump(tester, iris(), conversationId: 'main');
-      expect(find.text('feat/chip'), findsOneWidget);
-      expect(find.text('+2'), findsOneWidget);
-      expect(find.text('−1'), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('git-chip')));
-      await tester.pumpAndSettle();
-      verify(() => repo.gitDiff('main')).called(1);
-      expect(find.text('a.txt'), findsOneWidget);
-      expect(find.text('+three'), findsOneWidget);
-      expect(find.text('-two'), findsOneWidget);
-      expect(find.text('new.txt'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    });
-
-    testWidgets('no chip outside Git or without access', (tester) async {
-      when(() => repo.gitStatus('main')).thenThrow(const ProtocolException(ErrorCode.forbidden, 'no access'));
-      await pump(tester, iris(), conversationId: 'main');
-      expect(find.byKey(const Key('git-chip')), findsNothing);
-      await tester.pump(GitChip.poll * 2);
-      verify(() => repo.gitStatus('main')).called(1);
-      expect(tester.takeException(), isNull);
-    });
-
     testWidgets('the subagent chip counts the subagents of this conversation; a tap shows what they do', (tester) async {
       final now = DateTime.now().millisecondsSinceEpoch;
       final busy = iris(agents: [
@@ -611,14 +575,4 @@ void main() {
     });
   });
 
-  test('a working-tree patch splits per file, with its own counts', () {
-    const patch = 'diff --git a/x.rs b/x.rs\r\nindex 1..2\r\n--- a/x.rs\r\n+++ b/x.rs\r\n@@ -1 +1 @@\r\n-old\r\n+new\r\n'
-        'diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n';
-    final files = FileDiff.split(patch);
-    expect(files.map((f) => f.path), ['x.rs', 'logo.png']);
-    expect(files.first.lines, ['@@ -1 +1 @@', '-old', '+new']);
-    expect((files.first.insertions, files.first.deletions), (1, 1));
-    expect(files.last.lines.single, startsWith('Binary files'));
-    expect(const GitStatusView(head: 'abc1234', files: 0, insertions: 0, deletions: 0).label, 'detached abc1234');
-  });
 }

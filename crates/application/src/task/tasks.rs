@@ -47,16 +47,12 @@ pub struct TaskContext {
     /// Employee identity and instructions (trusted system text).
     pub employee_system: String,
     pub policy: TaskPolicy,
-    pub dependencies_done: bool,
-    pub dependency_failed: bool,
     /// The task this one was delegated from, and the employee who follows it up.
     pub parent: Option<ParentInfo>,
     /// Sub-tasks this task's employee delegated, oldest first.
     pub children: Vec<ChildState>,
     /// The last hand-over to this employee: (from, reason).
     pub handed_over_by: Option<(String, String)>,
-    /// The task was tried in several ways first: what came of it (Harness² C).
-    pub variant_note: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,9 +104,6 @@ pub(crate) fn brief_text(ctx: &TaskContext) -> String {
         for c in &ctx.criteria {
             out.push_str(&format!("- {c}\n"));
         }
-    }
-    if let Some(note) = &ctx.variant_note {
-        out.push_str(&format!("\n{note}\n"));
     }
     out
 }
@@ -211,55 +204,18 @@ pub(crate) fn cancel_children(tx: &Tx<'_>, st: &Store, task: TaskId, notices: &m
 }
 
 /// Cancel a task that has not ended, with everything that hangs on it (its
-/// variants, parked runs, sub-tasks), and let whoever waits on it go on.
+/// parked runs, sub-tasks), and let whoever waits on it go on.
 pub(crate) fn cancel_in(tx: &Tx<'_>, st: &Store, task_id: TaskId, correlation: &str, meta: serde_json::Value) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task_id)? else { return Ok(vec![]) };
     let mut notices = crate::task::task_line::set_status(tx, task_id, TaskStatus::Cancelled, None)?.into_vec();
     tx.execute("UPDATE jobs SET state = 'cancelled' WHERE id = ?1 AND state = 'ready'", [task_id.to_string()])?;
     notices.push(task_event(tx, task_id, row.project_id, "task.cancelled", meta)?);
-    // Its variants stop too (their runs are stopped with the task's, their worktrees go).
-    notices.extend(crate::task::variants::stop(tx, task_id, "cancelled")?);
     // Its runs parked for a usage limit end now; they must not start again at the reset.
     notices.extend(crate::run::queue::stop_parked_runs_of_task(tx, st, task_id, correlation)?);
     cancel_children(tx, st, task_id, &mut notices)?;
     wake_parent(tx, task_id)?;
     notices.extend(crate::task::task_runs::origin_released(tx, task_id)?);
     Ok(notices)
-}
-
-/// Whether an app may make this task now: its key still works, its limits
-/// leave room, and Auto only with `approve`. Without `approve` a task that
-/// would follow an employee whose own mode is Auto runs in Ask instead.
-fn app_may_create(tx: &Tx<'_>, key: aurelius_domain::AppKeyId, employee: Option<EmployeeId>, run: &mut aurelius_domain::task::RunSettings) -> Result<Result<(), AppError>, StorageError> {
-    use aurelius_domain::{ErrorCode, app_key::{self, AppScope}, autonomy::AgentMode};
-    let Some(key) = aurelius_storage::app_keys::load(tx, key)?.filter(|k| !k.revoked()) else {
-        return Ok(Err(AppError::new(ErrorCode::Forbidden, "This app key was revoked.")));
-    };
-    let (last_hour, open) = aurelius_storage::app_keys::task_counts(tx, key.id, aurelius_storage::now_ms() - app_key::HOUR_MS)?;
-    if let Some(why) = app_key::over_limit(key.limit_per_hour, key.limit_concurrent, last_hour, open, employee.is_some()) {
-        return Ok(Err(AppError::new(ErrorCode::Validation, why)));
-    }
-    // A management app gives work to the management only (the daemon gate checks this too).
-    if key.audience == app_key::AppAudience::Management {
-        if let Some(m) = employee {
-            if !aurelius_storage::app_keys::management(tx)?.iter().any(|x| x.id == m) {
-                return Ok(Err(AppError::new(ErrorCode::Forbidden, aurelius_domain::app_key::NOT_MANAGEMENT)));
-            }
-        }
-    }
-    if !key.grants(AppScope::Approve) {
-        if run.mode == Some(AgentMode::Auto) {
-            return Ok(Err(AppError::new(ErrorCode::Forbidden, "Auto mode needs the approve scope on this app key.")));
-        }
-        if run.mode.is_none() {
-            if let Some(m) = employee {
-                if aurelius_storage::app_keys::employee_mode(tx, m)? == Some(AgentMode::Auto) {
-                    run.mode = Some(AgentMode::Ask);
-                }
-            }
-        }
-    }
-    Ok(Ok(()))
 }
 
 impl CommandService {
@@ -274,11 +230,9 @@ impl CommandService {
         let task_id = TaskId::new();
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
-        let app = ctx.app.clone();
-        let user = ctx.user_id.filter(|_| app.is_none());
+        let user = ctx.user_id;
         let stored = attachments.clone();
         let committed = self.commit(command_id, hash, move |tx| {
-            let mut run = run;
             let Some((_, project_status)) = employees::project_scope(tx, cmd.project_id)? else {
                 return Ok(Err(domain_error(DomainError::ProjectNotFound(cmd.project_id))));
             };
@@ -298,38 +252,15 @@ impl CommandService {
                     return Ok(Err(domain_error(DomainError::ProviderNotFound(id))));
                 }
             }
-            if let Some(app) = &app {
-                if let Err(refused) = app_may_create(tx, app.key_id, cmd.employee_id, &mut run)? {
-                    return Ok(Err(refused));
-                }
-            }
-            if let Err(refused) = crate::task::variants::check_new(tx, &run, cmd.project_id, cmd.employee_id)? {
-                return Ok(Err(refused));
-            }
-            let edges = store::dependency_edges(tx)?;
-            for dep in &cmd.depends_on {
-                if store::load_task(tx, *dep)?.is_none() {
-                    return Ok(Err(domain_error(DomainError::TaskNotFound(*dep))));
-                }
-                if task::creates_cycle(&edges, task_id, *dep) {
-                    return Ok(Err(domain_error(DomainError::DependencyCycle)));
-                }
-            }
             blobs::register(tx, &goal_blob)?;
             blobs::register(tx, &criteria_blob)?;
             let status = if cmd.employee_id.is_some() { TaskStatus::Queued } else { TaskStatus::Draft };
             store::insert_task(tx, task_id, cmd.project_id, cmd.employee_id, &valid.title, &goal_blob.id.to_string(), &criteria_blob.id.to_string(), status, None)?;
             store::set_task_run(tx, task_id, &run)?;
-            // It runs on the Claude login of the board member who made it (an app's: its key's, B5).
+            // It runs on the Claude login of the board member who made it (B5).
             store::set_login_user(tx, task_id, user.map(|u| u.to_string()).as_deref())?;
-            if let Some(app) = &app {
-                aurelius_storage::app_keys::set_task_app(tx, task_id, app.key_id)?;
-            }
             if stored.is_some() {
                 store::set_attachments(tx, task_id, stored.as_ref())?;
-            }
-            for dep in &cmd.depends_on {
-                store::insert_dependency(tx, task_id, *dep)?;
             }
             let mut created = emit(tx, Ev {
                 aggregate_type: "task",
@@ -517,8 +448,6 @@ impl CommandService {
                     .collect::<Vec<_>>();
                 let handoff_list = store::handoffs(conn, task_id)?;
                 let handed_over_by = handoff_list.last().filter(|h| h.to_id == row.employee_id).map(|h| (h.from.clone(), h.reason.clone()));
-                let (dependencies_done, dependency_failed) = store::dependency_state(conn, task_id)?;
-                let variant_note = crate::task::variants::variant_note(conn, task_id)?;
                 Ok(Some(TaskContext {
                     task_id,
                     project_id: row.project_id,
@@ -531,12 +460,9 @@ impl CommandService {
                     employee_status,
                     employee_system,
                     policy,
-                    dependencies_done,
-                    dependency_failed,
                     parent,
                     children,
                     handed_over_by,
-                    variant_note,
                 }))
             })
             .map_err(storage_error)

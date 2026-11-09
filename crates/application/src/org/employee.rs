@@ -426,8 +426,6 @@ impl CommandService {
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
         let actor = ctx.principal_id.to_string();
-        // An app writing to the employee's chat gets the replies to it (management channel).
-        let app_key = ctx.app.as_ref().map(|a| a.key_id);
         let store = self.store.clone();
         self.commit(command_id, hash, move |tx| {
             let Some(current) = employees::load_employee(tx, employee_id)? else {
@@ -482,11 +480,6 @@ impl CommandService {
             })?;
             crate::conversation::message_images::keep(tx, message_id, &images)?;
             conv::set_message_uploads(tx, message_id, &uploads)?;
-            if chat {
-                if let Some(key) = app_key {
-                    aurelius_storage::app_keys::note_thread(tx, key, conversation_id, employee_id)?;
-                }
-            }
             let mut notices = vec![n];
             if interrupt {
                 notices.extend(crate::run::queue::interrupt_conversation(tx, &store, &meta, &command_id.to_string(), conversation_id)?);

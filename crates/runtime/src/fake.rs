@@ -31,8 +31,6 @@ pub const MODEL_ID: &str = "fake-deterministic-1";
 pub const MEMORY_MARKER: &str = "[[aurelius:memory]]";
 pub const SUMMARY_MARKER: &str = "[[aurelius:summary]]";
 pub const CONSOLIDATE_MARKER: &str = "[[aurelius:consolidate]]";
-pub const VARIANTS_MARKER: &str = "[[aurelius:variants]]";
-pub const JUDGE_MARKER: &str = "[[aurelius:judge]]";
 
 /// Deterministic structured output for the background steps (memory extraction,
 /// consolidation, summaries), picked by a marker in the trusted system text.
@@ -72,19 +70,6 @@ fn scripted(request: &RunRequest) -> Option<String> {
             answer["ticket_summary"] = serde_json::json!(format!("The main task '{title}' was delivered and accepted."));
         }
         return Some(answer.to_string());
-    }
-    if system.contains(VARIANTS_MARKER) {
-        // "Count: k" asks for k approaches.
-        let k = prompt.lines().find_map(|l| l.strip_prefix("Count: ")).and_then(|n| n.trim().parse::<usize>().ok()).unwrap_or(2);
-        let hints: Vec<String> = (1..=k).map(|n| format!("Approach {n}: try it the test-runtime way number {n}")).collect();
-        return Some(serde_json::json!({ "hints": hints }).to_string());
-    }
-    if system.contains(JUDGE_MARKER) {
-        // Prefers the variant with the highest number, so tests can tell its pick from the first.
-        let mut numbers: Vec<u8> = prompt.lines().filter_map(|l| l.strip_prefix("## Variant ")).filter_map(|r| r.split_whitespace().next()?.trim_end_matches(':').parse().ok()).collect();
-        numbers.sort_unstable_by(|a, b| b.cmp(a));
-        let ranking: Vec<serde_json::Value> = numbers.iter().map(|n| serde_json::json!({ "variant": n, "why": format!("variant {n} (test runtime ranking)") })).collect();
-        return Some(serde_json::json!({ "ranking": ranking, "compose": null }).to_string());
     }
     if system.contains(CONSOLIDATE_MARKER) {
         // Merge the memories two by two ("M1 [Decision] text" lines).

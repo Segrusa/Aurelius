@@ -147,42 +147,6 @@ export interface AddIdea {
   title: string;
 }
 
-export interface AgentFunctionView {
-  created_at_ms: number;
-  description: string;
-  employee_id: string;
-  employee_name: string;
-  enabled: boolean;
-  id: string;
-  instruction_template: string;
-  limit_per_day?: number | null;
-  limit_per_week?: number | null;
-  /**
-   * None: the employee's own default mode.
-   */
-  mode?: AgentMode | null;
-  name: string;
-  params: FunctionParam[];
-  project_id: string;
-  slug: string;
-  /**
-   * Accepted calls in the last 24 hours / 7 days (rolling).
-   */
-  used_day: number;
-  used_week: number;
-}
-
-/**
- * Agent functions. Times are epoch milliseconds.
- */
-export interface AgentFunctionsSnapshot {
-  /**
-   * The kill switch: false means every function refuses calls.
-   */
-  all_enabled: boolean;
-  functions: AgentFunctionView[];
-}
-
 export type AgentMode =
   /**
    * File and artifact edits in granted folders go ahead; external actions still ask.
@@ -255,41 +219,6 @@ export interface AnswerQuestion {
   confirm_secret?: boolean;
 }
 
-/**
- * The answer to `api_keys/create`: the secret (`ak_...`) is shown once and not kept.
- */
-export interface ApiKeyCreated {
-  key: ApiKeyView;
-  secret: string;
-}
-
-/**
- * An API key; the secret is never part of it.
- */
-export interface ApiKeyView {
-  created_at_ms: number;
-  function_ids: string[];
-  id: string;
-  last_used_ms?: number | null;
-  name: string;
-  revoked_at_ms?: number | null;
-}
-
-/**
- * Whom an app key may reach (feature `management_channel`).
- */
-export type AppAudience =
-  /**
-   * Everything its scopes allow: today's behaviour, and the default.
-   */
-  | "all"
-  /**
-   * Only the management: the CEO and the CEO's direct reports. Employees below
-   * them cannot be listed, messaged or given tasks, and the project assistant is out of reach.
-   */
-  | "management"
-;
-
 export interface AppError {
   code: ErrorCode;
   /**
@@ -308,70 +237,6 @@ export interface AppError {
    * `guideline_too_large`: the characters, the limit and the combination that overflows.
    */
   too_large?: GuidelineTooLarge | null;
-}
-
-/**
- * The answer to `app_key.create`: the secret (`amk_...`) is shown once and not kept
- * (only its hash is). The webhook secret (`whsec_...`) is shown once as well, but
- * Aurelius has to keep it to sign events.
- */
-export interface AppKeyCreated {
-  key: AppKeyView;
-  secret: string;
-  /**
-   * Only when the key has a webhook (feature `webhooks`).
-   */
-  webhook_secret?: string | null;
-}
-
-/**
- * An app key; the secret is never part of it.
- */
-export interface AppKeyView {
-  /**
-   * Whom it may reach (feature `management_channel`); `all` on older keys.
-   */
-  audience?: AppAudience;
-  created_at_ms: number;
-  id: string;
-  last_used_ms?: number | null;
-  limit_concurrent?: number | null;
-  limit_per_hour?: number | null;
-  name: string;
-  revoked_at_ms?: number | null;
-  scopes: AppScope[];
-  /**
-   * Tasks it created in the last hour (rolling).
-   */
-  tasks_last_hour: number;
-  /**
-   * Its tasks that are open now (queued, running, waiting, in review).
-   */
-  tasks_open: number;
-  /**
-   * Where its events are posted (feature `webhooks`); never the secret.
-   */
-  webhook_url?: string | null;
-}
-
-export type AppScope =
-  | "approve"
-  | "draft"
-  | "read"
-  | "run"
-;
-
-/**
- * Who a session speaks for after it authenticated with an app key (in `HelloResult::app`).
- */
-export interface AppSession {
-  /**
-   * Whom this session may reach (feature `management_channel`).
-   */
-  audience?: AppAudience;
-  key_id: string;
-  name: string;
-  scopes: AppScope[];
 }
 
 export type ApprovalStatus =
@@ -428,94 +293,6 @@ export interface ApprovalView {
 export interface ApprovalsSnapshot {
   approvals: ApprovalView[];
   as_of_seq: number;
-}
-
-/**
- * `artifact.get_content`: an artifact and the kept file of one version.
- */
-export interface ArtifactContent {
-  artifact: ArtifactView;
-  /**
-   * The asked version, else the newest kept one; none when the server kept
-   * no file of it (published before servers kept them, larger than 2 MB, or
-   * not text): show the link instead.
-   */
-  snapshot?: ArtifactSnapshot | null;
-  /**
-   * Versions with a kept file, newest first (the server keeps the last 20).
-   */
-  versions: number[];
-}
-
-/**
- * What kind of file a run published; decides how a client renders it.
- */
-export type ArtifactKind =
-  | "html"
-  | "markdown"
-  /**
-   * Neither: show as plain text.
-   */
-  | "text"
-;
-
-/**
- * `artifact.get_setting` and `artifact.set_enabled`: whether Claude Code runs
- * get the artifact tools (publish pages on claude.ai). Off by default.
- */
-export interface ArtifactSetting {
-  enabled: boolean;
-}
-
-/**
- * The file one publish sent to claude.ai, as the server kept it.
- */
-export interface ArtifactSnapshot {
-  content: string;
-  /**
-   * The published file's name (no folder).
-   */
-  file_name: string;
-  kind: ArtifactKind;
-  published_at_ms: number;
-  version: number;
-}
-
-/**
- * A page on claude.ai that a Claude Code run published (Claude Code artifact).
- * The URL is its identity: republishing keeps it.
- */
-export interface ArtifactView {
-  /**
-   * The conversation whose run published it first.
-   */
-  conversation_id: string;
-  first_published_at_ms: number;
-  /**
-   * The server kept the published file of at least one version, so
-   * `artifact.get_content` can show it; false for pages published before
-   * servers kept them (and from older servers): show the link instead.
-   */
-  has_content?: boolean;
-  last_published_at_ms: number;
-  project_id?: string | null;
-  task_id?: string | null;
-  title: string;
-  /**
-   * `https://claude.ai/artifact/<id>`; private to the user's claude.ai account until shared there.
-   */
-  url: string;
-  /**
-   * Claude Code's version number of the latest publish (1 on the first).
-   */
-  version: number;
-}
-
-/**
- * `artifact.list`: newest publish first.
- */
-export interface ArtifactsSnapshot {
-  artifacts: ArtifactView[];
 }
 
 /**
@@ -666,17 +443,6 @@ export interface BrowserSetting {
 }
 
 /**
- * The status an app sees for a call.
- */
-export type CallStatus =
-  | "cancelled"
-  | "failed"
-  | "queued"
-  | "running"
-  | "succeeded"
-;
-
-/**
  * `scheduled_message.cancel`: a message an employee scheduled does not go out.
  */
 export interface CancelScheduledMessage {
@@ -803,15 +569,6 @@ export interface ChannelView {
 export interface ChannelsSnapshot {
   as_of_seq: number;
   channels: ChannelView[];
-}
-
-/**
- * Pick a variant of a task that waits for the user's choice. `variant: None`
- * lets the judge's pick stand.
- */
-export interface ChooseTaskVariant {
-  task_id: string;
-  variant?: number | null;
 }
 
 /**
@@ -966,7 +723,6 @@ export type Command =
    * Stop the work on a ticket: its main task is cancelled and it goes back to Backlog.
    */
   | ({ type: "cancel_ticket"; ticket_id: string })
-  | ({ type: "choose_task_variant" } & ChooseTaskVariant)
   | ({ type: "consolidate_memory" } & ConsolidateMemory)
   | ({ type: "create_employee" } & CreateEmployee)
   /**
@@ -996,7 +752,6 @@ export type Command =
   | ({ type: "delete_message" } & DeleteMessage)
   | ({ type: "delete_queued_message" } & DeleteQueuedMessage)
   | ({ type: "delete_task_schedule" } & DeleteTaskSchedule)
-  | ({ type: "discuss_task" } & DiscussTask)
   | ({ type: "edit_message" } & EditMessage)
   | ({ type: "follow_ticket" } & FollowTicket)
   | ({ type: "forget_memory" } & ForgetMemory)
@@ -1050,7 +805,6 @@ export type Command =
    * Plan review → Doing in Plan mode: the owner makes a new plan with the feedback.
    */
   | ({ type: "revise_plan"; confirm_secret?: boolean; feedback: string; ticket_id: string })
-  | ({ type: "revoke_share" } & RevokeShare)
   | ({ type: "run_task_schedule_now" } & RunTaskScheduleNow)
   /**
    * Review → Doing with feedback (required) for the owner.
@@ -1075,7 +829,6 @@ export type Command =
   | ({ type: "set_employee_reports_to" } & SetEmployeeReportsTo)
   | ({ type: "set_employee_status" } & SetEmployeeStatus)
   | ({ type: "set_follow_org_chart" } & SetFollowOrgChart)
-  | ({ type: "set_heartbeat" } & SetHeartbeat)
   | ({ type: "set_idea_status" } & SetIdeaStatus)
   | ({ type: "set_project_description" } & SetProjectDescription)
   | ({ type: "set_project_folder" } & SetProjectFolder)
@@ -1095,7 +848,6 @@ export type Command =
    * `UpdateTicket`, where "nobody" and "unchanged" would need two kinds of none.
    */
   | ({ type: "set_ticket_responsible"; responsible_user_id?: string | null; ticket_id: string })
-  | ({ type: "share_message" } & ShareMessage)
   | ({ type: "start_idea" } & StartIdea)
   | ({ type: "start_project_conversation" } & StartProjectConversation)
   /**
@@ -1182,7 +934,6 @@ export type CommandResult =
    * new version (or was made), none for a rejection.
    */
   | ({ type: "guideline_proposal_decided"; guideline_id?: string | null; proposal_id: string; status: ProposalStatus })
-  | ({ type: "heartbeat_set"; employee_id: string; every_minutes: number })
   | ({ type: "idea_added"; idea_id: string })
   | ({ type: "idea_deleted"; idea_id: string })
   | ({ type: "idea_started"; idea_id: string; task_id: string })
@@ -1242,8 +993,6 @@ export type CommandResult =
    * when the name was the same).
    */
   | ({ type: "server_name_set"; name: string; version: number })
-  | ({ type: "share_revoked"; share_id: string })
-  | ({ type: "shared"; memory_id?: string | null; share_id: string })
   /**
    * `guideline.add_starter_set`: the guidelines made (keys already in the library are skipped).
    */
@@ -1253,20 +1002,12 @@ export type CommandResult =
   | ({ type: "task_cancelled"; task_id: string })
   | ({ type: "task_created"; task_id: string })
   /**
-   * The lead employee's chat that now has the task's result as context.
-   */
-  | ({ type: "task_discussed"; conversation_id: string; employee_id: string })
-  /**
    * Also the answer to update, pause and resume.
    */
   | ({ type: "task_schedule_created"; schedule_id: string })
   | ({ type: "task_schedule_deleted"; schedule_id: string })
   | ({ type: "task_schedule_ran"; schedule_id: string; task_id: string })
   | ({ type: "task_schedule_updated"; schedule_id: string })
-  /**
-   * The variant whose diff is applied to the work folder; the task goes on with it.
-   */
-  | ({ type: "task_variant_chosen"; task_id: string; variant: number })
   /**
    * The answer to every other ticket write: where the ticket is now.
    */
@@ -1412,42 +1153,6 @@ export interface ConversationSummary {
   updated_at_ms: number;
 }
 
-export interface CreateAgentFunction {
-  enabled?: boolean;
-  function: FunctionFields;
-  project_id: string;
-}
-
-/**
- * `app_key.create`. The secret is in the answer once.
- */
-export interface CreateAppKey {
-  /**
-   * Whom the app may reach; default `all` (feature `management_channel`).
-   */
-  audience?: AppAudience;
-  /**
-   * Tasks of this app that may be open at once (queued, running, waiting or
-   * in review; drafts do not count); unset: unlimited.
-   */
-  limit_concurrent?: number | null;
-  /**
-   * Tasks it may create in any rolling hour; unset: unlimited.
-   */
-  limit_per_hour?: number | null;
-  /**
-   * The app's name; tasks it creates show it (`TaskView::created_by_app`).
-   */
-  name: string;
-  scopes: AppScope[];
-  /**
-   * Where Aurelius posts this app's events (`http://` or `https://`); unset: no
-   * webhook. A secret for the signature is made with the key and shown once
-   * (`AppKeyCreated::webhook_secret`). Feature `webhooks`.
-   */
-  webhook_url?: string | null;
-}
-
 export interface CreateEmployee {
   /**
    * What its runs may do with files and commands (C3); none: `Inherit`.
@@ -1499,10 +1204,6 @@ export interface CreateTask {
    * (after `looks_like_secret`, B10): it is stored with the value redacted.
    */
   confirm_secret?: boolean;
-  /**
-   * Tasks that must succeed first.
-   */
-  depends_on?: string[];
   /**
    * Without an employee the task stays a draft.
    */
@@ -1681,14 +1382,6 @@ export interface DirListing {
 }
 
 /**
- * Discuss a task with its lead employee: the task's result becomes context
- * of the employee's chat (`CommandResult::TaskDiscussed` names it).
- */
-export interface DiscussTask {
-  task_id: string;
-}
-
-/**
  * A board member changes the text of their own message in a channel or a
  * ticket's discussion (`message.edit`, feature `message_edits`). It wakes nobody.
  * The earlier text stays in the audit log: editing does not erase a secret.
@@ -1791,22 +1484,6 @@ export interface EmployeeInstructionVersionsSnapshot {
 }
 
 /**
- * `plugin.get_for_employee` and `plugin.set_for_employee`.
- */
-export interface EmployeePlugins {
-  employee_id: string;
-  /**
-   * The employee's own plugins. In a task its runs also load the plugins of
-   * the task's project (`plugin.get_for_project`).
-   */
-  enabled: string[];
-  /**
-   * Enabled ids that are no longer installed; they are skipped in runs.
-   */
-  missing: string[];
-}
-
-/**
  * `employee.queue`: what is in an employee's mailbox, what runs first.
  */
 export interface EmployeeQueue {
@@ -1823,7 +1500,7 @@ export interface EmployeeQueueItem {
   hop: number;
   id: string;
   /**
-   * message, task, heartbeat, resume, scheduled. Text, not an enum.
+   * message, task, resume, scheduled. Text, not an enum.
    */
   kind: string;
   not_before_ms: number;
@@ -1872,7 +1549,7 @@ export interface EmployeeSummary {
   conversation_id: string;
   /**
    * Its chats, most recent first: the persistent one (`conversation_id`, it
-   * carries mode, heartbeat and memory summaries) and older ones from before
+   * carries mode and memory summaries) and older ones from before
    * protocol 3 (history). Task conversations are not listed.
    */
   conversations: ConversationSummary[];
@@ -1885,10 +1562,6 @@ export interface EmployeeSummary {
    * Own workspace folder, if any: the work folder of its chat (in a task the project folder applies).
    */
   folder?: string | null;
-  /**
-   * Opt-in heartbeat; `None` = off.
-   */
-  heartbeat?: HeartbeatView | null;
   id: string;
   instructions?: string | null;
   name: string;
@@ -2048,8 +1721,6 @@ export interface Event {
 }
 
 export type EventKind =
-  | "agent_function.changed"
-  | "api_key.changed"
   | "approval.allowed_always"
   | "approval.allowed_by_mode"
   | "approval.answered"
@@ -2062,7 +1733,6 @@ export type EventKind =
   | "approval.plan_revision_requested"
   | "approval.rejected"
   | "approval.requested"
-  | "artifact.published"
   | "attachment.added"
   | "attachment.removed"
   | "board.columns_updated"
@@ -2094,8 +1764,6 @@ export type EventKind =
   | "guideline.restored"
   | "guideline.unlinked"
   | "guideline.updated"
-  | "heartbeat.changed"
-  | "heartbeat.reported"
   | "host.write"
   | "idea.added"
   | "idea.deleted"
@@ -2125,9 +1793,6 @@ export type EventKind =
   | "message.reacted"
   | "message.sent_now"
   | "message.user_committed"
-  | "note.created"
-  | "note.deleted"
-  | "note.updated"
   | "project.archived"
   | "project.created"
   | "project.folder_set"
@@ -2147,8 +1812,6 @@ export type EventKind =
   | "run.waiting"
   | "server.renamed"
   | "settings.follow_org_chart"
-  | "share.granted"
-  | "share.revoked"
   | "task.assigned"
   | "task.cancelled"
   | "task.created"
@@ -2163,12 +1826,6 @@ export type EventKind =
   | "task.run_changed"
   | "task.started"
   | "task.succeeded"
-  | "task.variant_chosen"
-  | "task.variant_probed"
-  | "task.variants_failed"
-  | "task.variants_ready"
-  | "task.variants_started"
-  | "task.variants_stopped"
   | "task.waiting"
   | "ticket.accepted"
   | "ticket.archived"
@@ -2256,125 +1913,6 @@ export interface FollowerView {
  */
 export interface ForgetMemory {
   memory_id: string;
-}
-
-export interface FunctionCallView {
-  api_key_id: string;
-  api_key_name: string;
-  created_at_ms: number;
-  finished_at_ms?: number | null;
-  function_id: string;
-  function_name: string;
-  id: string;
-  /**
-   * queued, running, succeeded, failed or cancelled.
-   */
-  status: CallStatus;
-  /**
-   * The task the call made (open it like any task).
-   */
-  task_id: string;
-}
-
-export interface FunctionCallsSnapshot {
-  /**
-   * Newest first.
-   */
-  calls: FunctionCallView[];
-  usage: FunctionUsageView[];
-}
-
-/**
- * What the user edits; shared by create and update.
- */
-export interface FunctionFields {
-  description?: string;
-  employee_id: string;
-  /**
-   * The instruction with `{{param}}` placeholders.
-   */
-  instruction_template: string;
-  /**
-   * Calls allowed in any rolling 24 hours; unset: unlimited.
-   */
-  limit_per_day?: number | null;
-  /**
-   * Calls allowed in any rolling 7 days; unset: unlimited.
-   */
-  limit_per_week?: number | null;
-  /**
-   * Unset: the employee's own default mode. Auto is allowed; Plan is not
-   * (nobody is there to approve a plan).
-   */
-  mode?: AgentMode | null;
-  name: string;
-  params?: FunctionParam[];
-  /**
-   * The URL name (`/v1/functions/<slug>/calls`); made from the name when empty.
-   */
-  slug?: string;
-}
-
-/**
- * One input the caller passes. Values are text (numbers and booleans are
- * accepted and turned into text).
- */
-export interface FunctionParam {
-  /**
-   * Most characters the value may have.
-   */
-  max_length: number;
-  name: string;
-  required?: boolean;
-}
-
-export interface FunctionUsageView {
-  function_id: string;
-  limit_per_day?: number | null;
-  limit_per_week?: number | null;
-  /**
-   * Accepted calls in the last 24 hours / 7 days (rolling).
-   */
-  used_day: number;
-  used_week: number;
-}
-
-/**
- * `git.get_diff`: the uncommitted change against HEAD. `task.get_diff`
- * uses it too: `status` is then the task's branch, `head` its tip, and the
- * counts are against the task's base.
- */
-export interface GitDiffView {
-  /**
-   * Unified diff of tracked files (staged and unstaged), cut when large.
-   */
-  patch: string;
-  status: GitStatusView;
-  truncated: boolean;
-  /**
-   * New files Git does not track yet (not in `patch`).
-   */
-  untracked: string[];
-}
-
-/**
- * `git.get_status`: where a conversation works, in Git terms.
- */
-export interface GitStatusView {
-  /**
-   * The checked-out branch; `None` when HEAD is detached (see `head`).
-   */
-  branch?: string | null;
-  deletions: number;
-  /**
-   * Uncommitted change against HEAD (untracked files count as files).
-   */
-  files: number;
-  /**
-   * Short commit id of HEAD.
-   */
-  head?: string | null;
-  insertions: number;
 }
 
 /**
@@ -2562,32 +2100,12 @@ export interface HealthResult {
   started_at_ms: number;
 }
 
-export interface HeartbeatView {
-  daily_token_budget: number;
-  every_minutes: number;
-  next_due_ms?: number | null;
-  quiet_end_min: number;
-  quiet_start_min: number;
-  tokens_today: number;
-  /**
-   * e.g. "budget" when today's budget is used up.
-   */
-  waiting?: string | null;
-}
-
 export interface HelloParams {
   /**
    * What this client can take that older clients cannot (`client_feature`).
    * Servers without such a feature ignore the name.
    */
   accepts?: string[];
-  /**
-   * An app key's secret (`amk_...`, feature `app_keys`): the session then acts
-   * for that app, with its scopes only (`HelloResult::app`). A wrong or
-   * revoked key is refused. A server without the feature ignores it, so a
-   * client must check `HelloResult::app` before it goes on.
-   */
-  app_key?: string | null;
   client_name: string;
   client_version: string;
   /**
@@ -2601,11 +2119,6 @@ export interface HelloParams {
 }
 
 export interface HelloResult {
-  /**
-   * The app this session acts for when it authenticated with an app key
-   * (`HelloParams::app_key`, or the key on the gateway); feature `app_keys`.
-   */
-  app?: AppSession | null;
   /**
    * The server has at least one board member; false: the onboarding
    * ("Create the first board member") is all a client shows.
@@ -2660,17 +2173,6 @@ export interface HelloResult {
  * What a host write answers.
  */
 export type HostResult =
-  | ({ type: "agent_function" } & AgentFunctionView)
-  /**
-   * The secret is shown once; a replayed receipt has an empty `secret`.
-   */
-  | ({ type: "api_key_created" } & ApiKeyCreated)
-  | ({ type: "app_key" } & AppKeyView)
-  /**
-   * The secret is shown once; a replayed receipt has an empty `secret`.
-   */
-  | ({ type: "app_key_created" } & AppKeyCreated)
-  | ({ type: "artifact_setting" } & ArtifactSetting)
   | ({ type: "auto_allow_setting" } & AutoAllowSetting)
   | ({ type: "backups" } & BackupsSnapshot)
   | ({ type: "browser" } & BrowserSetting)
@@ -2689,7 +2191,6 @@ export type HostResult =
   | ({ type: "count"; count: number })
   | ({ type: "dir_listing" } & DirListing)
   | ({ type: "done" })
-  | ({ type: "employee_plugins" } & EmployeePlugins)
   | ({ type: "exported"; json_path: string; markdown_path: string })
   | ({ type: "load" } & LoadSnapshot)
   | ({ type: "management_mode_setting" } & ManagementModeSetting)
@@ -2697,18 +2198,10 @@ export type HostResult =
   | ({ type: "mcp_login" } & McpLogin)
   | ({ type: "mcp_servers" } & McpServers)
   /**
-   * A note after `note.create`, `note.update` or `note.set_pinned`. A replayed
-   * receipt has an empty body (receipts keep no note text): load it with `note.get`.
-   */
-  | ({ type: "note" } & NoteView)
-  /**
    * A replayed receipt has empty codes.
    */
   | ({ type: "pairing_code" } & PairingCode)
-  | ({ type: "plugin_preview" } & PluginPreview)
-  | ({ type: "plugins" } & PluginsSnapshot)
   | ({ type: "power" } & PowerState)
-  | ({ type: "project_plugins" } & ProjectPlugins)
   | ({ type: "remote" } & RemoteStatus)
   | ({ type: "shutting_down" })
   | ({ type: "trace_setting" } & TraceSetting)
@@ -2717,7 +2210,6 @@ export type HostResult =
    * `user.disable`: the board member as it is now.
    */
   | ({ type: "user" } & UserView)
-  | ({ type: "variants_setting" } & VariantsSetting)
   /**
    * `vault.create` / `vault.update` / `vault.archive`: the item as it is now.
    * A replayed receipt has no value: read it with `vault.list` or `vault.reveal`.
@@ -2729,33 +2221,6 @@ export type HostResult =
  * Writes only the host can do. Secrets in parameters are never printed.
  */
 export type HostWrite =
-  | ({ method: "agent_function.create"; params: CreateAgentFunction })
-  | ({ method: "agent_function.delete"; params: { function_id: string } })
-  /**
-   * The kill switch: `enabled: false` makes every function refuse calls.
-   */
-  | ({ method: "agent_function.set_all_enabled"; params: { enabled: boolean } })
-  | ({ method: "agent_function.set_enabled"; params: { enabled: boolean; function_id: string } })
-  | ({ method: "agent_function.update"; params: UpdateAgentFunction })
-  /**
-   * The secret is in the answer once; the receipt keeps none.
-   */
-  | ({ method: "api_key.create"; params: { function_ids: string[]; name: string } })
-  | ({ method: "api_key.revoke"; params: { key_id: string } })
-  | ({ method: "api_key.set_functions"; params: { function_ids: string[]; key_id: string } })
-  /**
-   * A key for an outside app (feature `app_keys`); answers `AppKeyCreated`
-   * with the secret, once: the receipt keeps none.
-   */
-  | ({ method: "app_key.create"; params: CreateAppKey })
-  /**
-   * Revoked at once, also for the app's open sessions; answers `AppKey`.
-   */
-  | ({ method: "app_key.revoke"; params: { key_id: string } })
-  /**
-   * Turn Claude Code artifacts on or off for every run that starts afterwards.
-   */
-  | ({ method: "artifact.set_enabled"; params: { enabled: boolean } })
   /**
    * Auto-allow of the safe read-only tools on or off, from the next tool call. On by default.
    */
@@ -2818,17 +2283,6 @@ export type HostWrite =
    * Take a tool off the always-allow list: its next call asks again.
    */
   | ({ method: "mcp_always_allow.remove"; params: { tool: string } })
-  /**
-   * A new note in a project; answers `Note`.
-   */
-  | ({ method: "note.create"; params: { body?: string; project_id: string } })
-  | ({ method: "note.delete"; params: { note_id: string } })
-  | ({ method: "note.set_pinned"; params: { note_id: string; pinned: boolean } })
-  /**
-   * Replace a note's body. Refused with `version_conflict` when the note is no
-   * longer at `base_revision` (saved elsewhere): load it again with `note.get`.
-   */
-  | ({ method: "note.update"; params: { base_revision: number; body: string; note_id: string } })
   | ({ method: "notification.dismiss"; params: { id: string } })
   | ({ method: "notification.dismiss_all" })
   | ({ method: "notification.mark_all_read" })
@@ -2837,24 +2291,6 @@ export type HostWrite =
    * `Count`, 0 when there was nothing to read, so it can be repeated.
    */
   | ({ method: "notification.mark_read"; params: { id: string } })
-  /**
-   * Install plugins (`name@marketplace`) and enable them for the given employees and projects.
-   */
-  | ({ method: "plugin.install"; params: { employees: string[]; ids: string[]; projects?: string[] } })
-  /**
-   * Adds the marketplace behind a link (GitHub URL, `owner/repo` or git URL).
-   */
-  | ({ method: "plugin.preview"; params: { source: string } })
-  | ({ method: "plugin.remove"; params: { id: string } })
-  /**
-   * Replace the plugins an employee has enabled; applies from its next run.
-   */
-  | ({ method: "plugin.set_for_employee"; params: { employee_id: string; enabled: string[] } })
-  /**
-   * Replace the plugins a project has enabled (for its project assistant); applies from its next run.
-   */
-  | ({ method: "plugin.set_for_project"; params: { enabled: string[]; project_id: string } })
-  | ({ method: "plugin.update"; params: { id: string } })
   | ({ method: "power.cancel" })
   | ({ method: "power.shutdown"; params: { when: ShutdownWhen } })
   /**
@@ -2920,10 +2356,6 @@ export type HostWrite =
    * passwords are in no receipt, request hash, event or log. Answers `Done`.
    */
   | ({ method: "user.set_password"; params: SetPasswordParams })
-  /**
-   * Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
-   */
-  | ({ method: "variants.set_enabled"; params: { enabled: boolean } })
   /**
    * Archive ("Delete") an item: runs and employees no longer get it; its audit
    * history stays. Answers `VaultItem`. Not for apps.
@@ -3779,10 +3211,6 @@ export interface MessagesSnapshot {
    * The agent may take screenshots without asking each time; off by default (it then asks).
    */
   screen_allowed: boolean;
-  /**
-   * Snapshots shared into this conversation (e.g. a discussed task).
-   */
-  shares: ShareView[];
 }
 
 export type Method =
@@ -3796,27 +3224,7 @@ export type Method =
    * step and run step, narrowed by what is given. `limit`: at most 200, default 100.
    */
   | ({ method: "activity_log.list"; params: { before_seq?: number | null; category?: string | null; employee_id?: string | null; limit?: number | null; run_id?: string | null; thread_key?: string | null; ticket_number?: number | null } })
-  | ({ method: "agent_function.list"; params: { project_id?: string | null } })
-  | ({ method: "api_key.list" })
-  /**
-   * The keys of outside apps that use `aurelius-mcp`, newest first (feature `app_keys`).
-   */
-  | ({ method: "app_key.list" })
   | ({ method: "approval.list" })
-  /**
-   * The file the server kept of one publish (`version`, else the newest kept),
-   * so a client can show the page without a claude.ai login. Not found for an
-   * unknown URL; `snapshot` is none for pages published before servers kept them.
-   */
-  | ({ method: "artifact.get_content"; params: { url: string; version?: number | null } })
-  /**
-   * Whether runs may publish Claude Code artifacts (pages on claude.ai).
-   */
-  | ({ method: "artifact.get_setting" })
-  /**
-   * Artifacts runs published, newest first: every given filter applies, none lists all.
-   */
-  | ({ method: "artifact.list"; params: { conversation_id?: string | null; project_id?: string | null; task_id?: string | null } })
   /**
    * Whether the safe read-only tools pass without a question (the auto-allow list).
    */
@@ -3911,12 +3319,6 @@ export type Method =
    * Folders on the server: none lists the starting points.
    */
   | ({ method: "fs.list_dir"; params: { path?: string | null } })
-  | ({ method: "function_call.list"; params: { function_id?: string | null; limit?: number | null } })
-  | ({ method: "git.get_diff"; params: { conversation_id: string } })
-  /**
-   * Branch and uncommitted change of the folder a conversation works in; none outside a Git repository.
-   */
-  | ({ method: "git.get_status"; params: { conversation_id: string } })
   /**
    * The company's group chat (Team chat): the user and every employee. Its
    * messages and settings, as `conversation.get` answers them; an employee's
@@ -4011,31 +3413,7 @@ export type Method =
    * discussion; any other is `not_found`, as an unknown one. Not for apps.
    */
   | ({ method: "message.locate"; params: { message_id: string } })
-  /**
-   * One note with its Markdown body.
-   */
-  | ({ method: "note.get"; params: { note_id: string } })
-  /**
-   * A project's notes (summaries), pinned first, then the last edited; `query` searches the text.
-   */
-  | ({ method: "note.list"; params: { project_id: string; query?: string | null } })
   | ({ method: "notification.list" })
-  /**
-   * The plugins one employee has enabled.
-   */
-  | ({ method: "plugin.get_for_employee"; params: { employee_id: string } })
-  /**
-   * The plugins a project has enabled (its project assistant loads them).
-   */
-  | ({ method: "plugin.get_for_project"; params: { project_id: string } })
-  /**
-   * Claude Code plugins installed on the server's computer, with the employees that use each.
-   */
-  | ({ method: "plugin.list" })
-  /**
-   * Plugins offered by the marketplaces already added.
-   */
-  | ({ method: "plugin.list_available" })
   | ({ method: "power.get" })
   | ({ method: "project.list" })
   /**
@@ -4091,7 +3469,6 @@ export type Method =
    * member may list another's (one role). Never a token or its hash.
    */
   | ({ method: "session.list"; params: { user_id?: string | null } })
-  | ({ method: "share.list"; params: { project_id: string } })
   /**
    * The subagents running in the answers of one conversation.
    */
@@ -4101,30 +3478,6 @@ export type Method =
    * Tasks, newest first, company-wide; every given filter applies.
    */
   | ({ method: "task.list"; params: { employee_id?: string | null; project_id?: string | null; state?: TaskListState | null } })
-  /**
-   * A task's variants and the judge's comparison (feature `task_variants`).
-   */
-  | ({ method: "task.variants"; params: { task_id: string } })
-  | ({ method: "terminal.close"; params: { terminal_id: string } })
-  /**
-   * This session stops getting a terminal's output; the shell keeps running and
-   * keeps its scrollback (feature `terminal.multi`).
-   */
-  | ({ method: "terminal.detach"; params: { terminal_id: string } })
-  | ({ method: "terminal.input"; params: { data_base64: string; terminal_id: string } })
-  /**
-   * The terminals of a conversation, oldest first (feature `terminal.multi`).
-   */
-  | ({ method: "terminal.list"; params: { conversation_id: string } })
-  /**
-   * A shell in the folder a conversation works in. Attaches to the running terminal
-   * unless `fresh`; this session then gets its output as `ServerMessage::TerminalOutput`.
-   * With `terminal_id` it attaches to exactly that terminal (its scrollback follows);
-   * with `additional` it starts another terminal beside the running ones
-   * (feature `terminal.multi`; at most 4 per conversation, 8 per server).
-   */
-  | ({ method: "terminal.open"; params: { additional?: boolean; cols: number; conversation_id: string; fresh: boolean; rows: number; terminal_id?: string | null } })
-  | ({ method: "terminal.resize"; params: { cols: number; rows: number; terminal_id: string } })
   /**
    * One thread of a channel (feature `chat_threads`): `message_id` is the
    * message that starts it (a message of a channel or a ticket's discussion
@@ -4217,10 +3570,6 @@ export type Method =
    */
   | ({ method: "user.whoami" })
   /**
-   * Whether tasks may be tried in several ways first (feature `task_variants`).
-   */
-  | ({ method: "variants.get_setting" })
-  /**
    * The audit log, newest first (`VaultAuditPage`): the company's (nothing
    * given), a project's, or every scope's (`all`); one item's with `item_id`.
    * `before`: rows older than that row id; `limit` at most 200 (default 50).
@@ -4263,60 +3612,6 @@ export interface MyTicketsView {
    */
   following: string[];
   tickets: TicketView[];
-}
-
-/**
- * A note of a project as `note.list` shows it.
- */
-export interface NoteSummary {
-  created_at_ms: number;
-  id: string;
-  pinned: boolean;
-  /**
-   * The text after the title on one line, at most 120 characters.
-   */
-  preview: string;
-  project_id: string;
-  /**
-   * Goes up by one with every save; `note.update` names the one it edited.
-   */
-  revision: number;
-  /**
-   * The first non-empty line without Markdown heading marks; empty for an empty note.
-   */
-  title: string;
-  updated_at_ms: number;
-}
-
-/**
- * One note with its Markdown body (`note.get` and every note write).
- */
-export interface NoteView {
-  body: string;
-  created_at_ms: number;
-  id: string;
-  pinned: boolean;
-  /**
-   * The text after the title on one line, at most 120 characters.
-   */
-  preview: string;
-  project_id: string;
-  /**
-   * Goes up by one with every save; `note.update` names the one it edited.
-   */
-  revision: number;
-  /**
-   * The first non-empty line without Markdown heading marks; empty for an empty note.
-   */
-  title: string;
-  updated_at_ms: number;
-}
-
-/**
- * `note.list`: pinned first, then the last edited first.
- */
-export interface NotesSnapshot {
-  notes: NoteSummary[];
 }
 
 export interface NotificationView {
@@ -4464,108 +3759,6 @@ export interface PlanLimitView {
 }
 
 /**
- * `plugins/available`.
- */
-export interface PluginCatalog {
-  offers: PluginOffer[];
-}
-
-/**
- * What a plugin brings (names only).
- */
-export interface PluginComponents {
-  agents: string[];
-  commands: string[];
-  /**
-   * The plugin runs commands on the server's computer at session events.
-   */
-  hooks: boolean;
-  /**
-   * MCP servers it declares; they are not loaded in Aurelius runs.
-   */
-  mcp_servers: string[];
-  skills: string[];
-}
-
-/**
- * An installed Claude Code plugin.
- */
-export interface PluginInfo {
-  components: PluginComponents;
-  description: string;
-  /**
-   * Employees that have it enabled.
-   */
-  employees: string[];
-  /**
-   * `name@marketplace`; the key for every plugin method.
-   */
-  id: string;
-  kind?: PluginKind;
-  marketplace: string;
-  /**
-   * The install folder no longer exists.
-   */
-  missing: boolean;
-  name: string;
-  /**
-   * Projects that have it enabled (for their project assistant).
-   */
-  projects?: string[];
-  /**
-   * The link a skill was added from; `None` for plugins.
-   */
-  source?: string | null;
-  version: string;
-}
-
-/**
- * Whether an entry is a full plugin or a standalone skill that Aurelius wrapped as one.
- */
-export type PluginKind =
-  | "plugin"
-  | "skill"
-;
-
-/**
- * A plugin a marketplace offers.
- */
-export interface PluginOffer {
-  /**
-   * Known when the marketplace carries the plugin's files; otherwise `None`.
-   */
-  components?: PluginComponents | null;
-  description: string;
-  id: string;
-  installed: boolean;
-  kind?: PluginKind;
-  marketplace: string;
-  name: string;
-  /**
-   * The link a skill was added from; `None` for plugins.
-   */
-  source?: string | null;
-}
-
-/**
- * `plugins/preview`.
- */
-export interface PluginPreview {
-  /**
-   * The marketplace's name, as added.
-   */
-  marketplace: string;
-  offers: PluginOffer[];
-}
-
-/**
- * `plugin.list`, `plugin.install`, `plugin.update`, `plugin.remove`.
- */
-export interface PluginsSnapshot {
-  plugins: PluginInfo[];
-}
-
-/**
  * `power.get`, `power.shutdown`, `power.cancel` and `power_changed`.
  */
 export interface PowerState {
@@ -4593,18 +3786,6 @@ export interface ProjectConversationsSnapshot {
    * Most recently active first.
    */
   conversations: ProjectConversationSummary[];
-  project_id: string;
-}
-
-/**
- * `plugin.get_for_project` and `plugin.set_for_project`.
- */
-export interface ProjectPlugins {
-  enabled: string[];
-  /**
-   * Enabled ids that are no longer installed; they are skipped in runs.
-   */
-  missing: string[];
   project_id: string;
 }
 
@@ -4938,14 +4119,8 @@ export type ResponseBody =
    * `activity_log.list`.
    */
   | ({ type: "activity_log"; value: ActivityLogPage })
-  | ({ type: "agent_functions"; value: AgentFunctionsSnapshot })
   | ({ type: "all_ideas"; value: AllIdeasSnapshot })
-  | ({ type: "api_keys"; value: ApiKeyView[] })
-  | ({ type: "app_keys"; value: AppKeyView[] })
   | ({ type: "approvals"; value: ApprovalsSnapshot })
-  | ({ type: "artifact_content"; value: ArtifactContent })
-  | ({ type: "artifact_setting"; value: ArtifactSetting })
-  | ({ type: "artifacts"; value: ArtifactsSnapshot })
   | ({ type: "auto_allow_setting"; value: AutoAllowSetting })
   | ({ type: "backups"; value: BackupsSnapshot })
   | ({ type: "board"; value: BoardView })
@@ -4962,7 +4137,6 @@ export type ResponseBody =
   | ({ type: "effective_guidelines"; value: EffectiveGuidelines })
   | ({ type: "employee_chats"; value: EmployeeChatsSnapshot })
   | ({ type: "employee_instruction_versions"; value: EmployeeInstructionVersionsSnapshot })
-  | ({ type: "employee_plugins"; value: EmployeePlugins })
   /**
    * `employee.queue`.
    */
@@ -4981,9 +4155,6 @@ export type ResponseBody =
    * A file kept with a message.
    */
   | ({ type: "file"; value: { data_base64: string; id: string; media_type: string; name: string } })
-  | ({ type: "function_calls"; value: FunctionCallsSnapshot })
-  | ({ type: "git_diff"; value?: GitDiffView | null })
-  | ({ type: "git_status"; value?: GitStatusView | null })
   /**
    * `guideline.get`.
    */
@@ -5034,14 +4205,9 @@ export type ResponseBody =
    * `ticket.my_tickets`.
    */
   | ({ type: "my_tickets"; value: MyTicketsView })
-  | ({ type: "note"; value: NoteView })
-  | ({ type: "notes"; value: NotesSnapshot })
   | ({ type: "notifications"; value: NotificationsSnapshot })
-  | ({ type: "plugin_catalog"; value: PluginCatalog })
-  | ({ type: "plugins"; value: PluginsSnapshot })
   | ({ type: "power"; value: PowerState })
   | ({ type: "project_conversations"; value: ProjectConversationsSnapshot })
-  | ({ type: "project_plugins"; value: ProjectPlugins })
   | ({ type: "projects"; value: ProjectsSnapshot })
   | ({ type: "proposals"; value: ProposalsSnapshot })
   /**
@@ -5069,7 +4235,6 @@ export type ResponseBody =
    */
   | ({ type: "server_name"; value: ServerNameView })
   | ({ type: "sessions"; value: SessionsSnapshot })
-  | ({ type: "shares"; value: ShareView[] })
   /**
    * `guideline.starter_set`.
    */
@@ -5078,14 +4243,7 @@ export type ResponseBody =
   | ({ type: "subscribed"; value: { replayed_through_seq: number } })
   | ({ type: "subscription"; value: SubscriptionUsage })
   | ({ type: "task_schedules"; value: TaskSchedulesSnapshot })
-  | ({ type: "task_variants"; value: TaskVariantsView })
   | ({ type: "tasks"; value: TasksSnapshot })
-  | ({ type: "terminal"; value: TerminalView })
-  /**
-   * Input, resize, detach or close of a terminal was handled.
-   */
-  | ({ type: "terminal_done" })
-  | ({ type: "terminals"; value: TerminalSummary[] })
   /**
    * `thread.read`.
    */
@@ -5108,7 +4266,6 @@ export type ResponseBody =
   | ({ type: "usage_hours"; value: UsageHours })
   | ({ type: "usage_totals"; value: UsageTotals })
   | ({ type: "users"; value: UsersSnapshot })
-  | ({ type: "variants_setting"; value: VariantsSetting })
   /**
    * `vault.list`.
    */
@@ -5163,10 +4320,6 @@ export type RevealPurpose =
 export interface ReviseMemory {
   content: string;
   memory_id: string;
-}
-
-export interface RevokeShare {
-  share_id: string;
 }
 
 /**
@@ -5532,11 +4685,6 @@ export type ServerMessage =
    * Remote clients only: streamed text as an append.
    */
   | ({ type: "stream_append" } & StreamAppend)
-  | ({ type: "terminal_exit" } & TerminalExit)
-  /**
-   * Built-in terminal: only to sessions that opened it.
-   */
-  | ({ type: "terminal_output" } & TerminalOutput)
 ;
 
 /**
@@ -5660,19 +4808,6 @@ export interface SetFollowOrgChart {
   follow: boolean;
 }
 
-/**
- * Turn an employee's heartbeat on (`every_minutes` > 0) or off (0). Quiet hours
- * are local minutes since midnight; `None` keeps the defaults (22:00–07:00,
- * 20k tokens a day).
- */
-export interface SetHeartbeat {
-  daily_token_budget?: number | null;
-  employee_id: string;
-  every_minutes: number;
-  quiet_end_min?: number | null;
-  quiet_start_min?: number | null;
-}
-
 export interface SetIdeaStatus {
   idea_id: string;
   status: IdeaStatus;
@@ -5765,49 +4900,6 @@ export type Setting2 =
   | ({ mode: "inherit" })
   | ({ mode: "value"; value: string })
 ;
-
-/**
- * Share one chat message with a project or employee.
- */
-export interface ShareMessage {
-  conversation_id: string;
-  message_id: string;
-  mode: ShareMode;
-  target: ShareTarget;
-}
-
-export type ShareMode =
-  /**
-   * Used as context by the destination's agents.
-   */
-  | "context"
-  /**
-   * Also proposed as a memory (the user still accepts it).
-   */
-  | "memory"
-;
-
-export type ShareTarget =
-  | ({ kind: "employee"; id: string })
-  | ({ kind: "project"; id: string })
-;
-
-export interface ShareView {
-  created_at_ms: number;
-  /**
-   * project · <name> | employee · <name> | conversation
-   */
-  destination: string;
-  excerpt: string;
-  id: string;
-  mode: ShareMode;
-  revoked: boolean;
-  /**
-   * Where it came from, e.g. "Chat · How do we …" or "Task · Onboarding".
-   */
-  source: string;
-  title: string;
-}
 
 export type ShutdownWhen =
   /**
@@ -6188,12 +5280,6 @@ export interface TaskRun {
   effort?: string | null;
   mode?: AgentMode | null;
   model?: string | null;
-  /**
-   * Try the task in this many ways first (1 to 3; feature `task_variants`, when
-   * the server's setting is on and the work folder is a git repository).
-   * Left out or 1: no variants.
-   */
-  variants?: number | null;
 }
 
 export interface TaskScheduleView {
@@ -6250,89 +5336,6 @@ export type TaskStatus =
   | "waiting"
 ;
 
-/**
- * One variant of a task.
- */
-export interface TaskVariantView {
-  /**
-   * Its own conversation (read it like any other).
-   */
-  conversation_id?: string | null;
-  deletions: number;
-  /**
-   * The diff against `base_commit` (cut at 200 kB; `diff_truncated`).
-   */
-  diff: string;
-  diff_truncated: boolean;
-  /**
-   * Tool calls that failed or were refused.
-   */
-  errors: number;
-  /**
-   * Files changed, lines added and removed.
-   */
-  files: number;
-  /**
-   * The approach it was told to take.
-   */
-  hint: string;
-  insertions: number;
-  judge_note?: string | null;
-  /**
-   * 1 to 3.
-   */
-  n: number;
-  /**
-   * Its place in the judge's ranking (1 = best) and why.
-   */
-  rank?: number | null;
-  /**
-   * Its closing answer.
-   */
-  report: string;
-  run_id?: string | null;
-  status: VariantStatus;
-  /**
-   * The last test or build output it saw (cut), if any.
-   */
-  tests?: string | null;
-  usage: TokenUsage;
-}
-
-/**
- * A task's variants and the judge's comparison (`task.variants`).
- */
-export interface TaskVariantsView {
-  /**
-   * The commit the variants started from.
-   */
-  base_commit?: string | null;
-  /**
-   * The chosen variant and by whom (`user` | `judge`).
-   */
-  chosen?: number | null;
-  chosen_by?: string | null;
-  /**
-   * What the judge advises to combine, if anything.
-   */
-  compose?: string | null;
-  /**
-   * How many variants.
-   */
-  count: number;
-  /**
-   * Why it failed (phase `failed`), e.g. the chosen diff did not apply.
-   */
-  error?: string | null;
-  /**
-   * The judge's pick, once it compared them.
-   */
-  judge_pick?: number | null;
-  phase: VariantPhase;
-  task_id: string;
-  variants: TaskVariantView[];
-}
-
 export interface TaskView {
   /**
    * Files attached when the task was made, in the work folder's uploads
@@ -6349,24 +5352,10 @@ export interface TaskView {
    */
   conversation_id?: string | null;
   created_at_ms: number;
-  /**
-   * The app (the name of its app key) that created this task through
-   * `aurelius-mcp` (feature `app_keys`); none for the user's own tasks.
-   */
-  created_by_app?: string | null;
-  /**
-   * The app key behind `created_by_app`.
-   */
-  created_by_app_key_id?: string | null;
   criteria: string[];
   delegated_by?: string | null;
-  depends_on: string[];
   employee_id?: string | null;
   employee_name?: string | null;
-  /**
-   * The agent function whose call made this task.
-   */
-  function_id?: string | null;
   goal: string;
   /**
    * Hand-overs between employees, oldest first.
@@ -6414,10 +5403,6 @@ export interface TaskView {
   title: string;
   updated_at_ms: number;
   /**
-   * Where the task's variants are, when it has some (feature `task_variants`).
-   */
-  variant_phase?: VariantPhase | null;
-  /**
    * Why a waiting task waits. A queued task that does not start now has one
    * too (derived, never stored): `in_line` (its employee works on one task at
    * a time and another goes first) or `scheduled` (its start is planned for
@@ -6434,65 +5419,6 @@ export interface TaskView {
 export interface TasksSnapshot {
   as_of_seq: number;
   tasks: TaskView[];
-}
-
-/**
- * The shell ended (exit code when known); the terminal is gone.
- */
-export interface TerminalExit {
-  code?: number | null;
-  terminal_id: string;
-}
-
-/**
- * Output of a terminal, only to the sessions attached to it; never stored.
- */
-export interface TerminalOutput {
-  data_base64: string;
-  terminal_id: string;
-}
-
-/**
- * One terminal of a conversation in `terminal.list`.
- */
-export interface TerminalSummary {
-  /**
-   * The shell still runs (an ended one stays listed until nobody shows it).
-   */
-  alive: boolean;
-  /**
-   * Sessions that get its output now.
-   */
-  attached: number;
-  conversation_id: string;
-  created_at_ms: number;
-  cwd: string;
-  shell: string;
-  terminal_id: string;
-  /**
-   * `Terminal 1`, `Terminal 2`, ...: the lowest number free in the conversation when it started.
-   */
-  title: string;
-}
-
-/**
- * `terminal/open`: the shell this session is now attached to.
- */
-export interface TerminalView {
-  conversation_id: string;
-  /**
-   * The folder the shell started in.
-   */
-  cwd: string;
-  /**
-   * It was already running (its scrollback follows as output).
-   */
-  reattached: boolean;
-  /**
-   * The shell program, e.g. `pwsh.exe`.
-   */
-  shell: string;
-  terminal_id: string;
 }
 
 /**
@@ -6862,11 +5788,6 @@ export interface TraceStep {
   tools: string[];
 }
 
-export interface UpdateAgentFunction {
-  function: FunctionFields;
-  function_id: string;
-}
-
 /**
  * Change the company's name, its dispatcher or its tester; left out: unchanged.
  */
@@ -7178,76 +6099,6 @@ export interface UserView {
  */
 export interface UsersSnapshot {
   users: UserView[];
-}
-
-/**
- * Where a task's variants are.
- */
-export type VariantPhase =
-  /**
-   * The chosen diff goes into the work folder.
-   */
-  | "applying"
-  /**
-   * Chosen and applied: the task went on as usual.
-   */
-  | "done"
-  /**
-   * Something failed (see `error`); the work folder is as it was.
-   */
-  | "failed"
-  /**
-   * The judge compares them.
-   */
-  | "judging"
-  /**
-   * The variants run, one after the other.
-   */
-  | "probing"
-  /**
-   * The cheap model is thinking of approaches.
-   */
-  | "proposing"
-  /**
-   * Waiting for the user's choice (Needs you).
-   */
-  | "ready"
-  /**
-   * Stopped by the user; the work folder is as it was.
-   */
-  | "stopped"
-;
-
-/**
- * One variant's state.
- */
-export type VariantStatus =
-  /**
-   * Stopped.
-   */
-  | "cancelled"
-  /**
-   * Its run completed; the outcome is collected.
-   */
-  | "done"
-  /**
-   * Its run failed.
-   */
-  | "failed"
-  | "running"
-  | "waiting"
-;
-
-/**
- * `variants.get_setting` / `variants.set_enabled`: whether tasks may be tried in
- * several ways first (feature `task_variants`; off by default).
- */
-export interface VariantsSetting {
-  enabled: boolean;
-  /**
-   * At most this many variants per task.
-   */
-  max_variants: number;
 }
 
 /**

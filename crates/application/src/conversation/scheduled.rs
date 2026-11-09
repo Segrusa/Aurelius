@@ -226,7 +226,7 @@ impl CommandService {
 
     /// A board member takes a scheduled message back; someone else's private chat stays theirs.
     pub(crate) fn cancel_scheduled_message(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &CancelScheduledMessage) -> Result<Committed, AppError> {
-        let (id, reader, command) = (cmd.message_id, ctx.user_id.filter(|_| ctx.app.is_none()), envelope.command_id);
+        let (id, reader, command) = (cmd.message_id, ctx.user_id, envelope.command_id);
         self.commit(command, hash, move |tx| {
             if !store::cancel(tx, id, reader)? {
                 return Ok(Err(AppError::new(ErrorCode::NotFound, "This scheduled message is no longer waiting.")));

@@ -3,7 +3,6 @@
 
 use crate::auth::{self, ClaimError, PairState};
 use crate::{Hub, MAX_UPLOAD_BYTES, SESSION_MS, web};
-use aurelius_domain::agent_function::{CallError, CallState, Remaining};
 use aurelius_storage::remote::RemoteClient;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, State, WebSocketUpgrade};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
@@ -24,12 +23,6 @@ pub fn router(hub: Hub) -> Router {
         .route("/v1/ws", get(websocket))
         .route("/v1/upload", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES + 64 * 1024)))
         .route("/v1/push", put(push_register).delete(push_unregister))
-        // MCP over Streamable HTTP for outside apps with an app key (`amk_…`).
-        .route("/v1/mcp", post(crate::mcp::post).get(crate::mcp::not_here).delete(crate::mcp::not_here))
-        // Apps with an API key reach only these two routes (never ws, upload or push).
-        .route("/v1/functions/{slug}/calls", post(function_call))
-        .route("/v1/calls/{call_id}", get(function_call_state))
-        // Not the web client's page below.
         .route("/v1/{*rest}", any(|| async { error(StatusCode::NOT_FOUND, "Not found.") }))
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(hub);
@@ -235,10 +228,6 @@ async fn authed(hub: &Hub, headers: &HeaderMap) -> Result<RemoteClient, Response
             token
         }
     };
-    // An API key is for functions only, an app key for the WebSocket and MCP; neither is a session.
-    if token.starts_with(aurelius_domain::agent_function::KEY_PREFIX) || token.starts_with(aurelius_domain::app_key::KEY_PREFIX) {
-        return Err(error(StatusCode::UNAUTHORIZED, "This credential cannot be used here."));
-    }
     let store = hub.inner.store.clone();
     let verifier = auth::verifier(&token);
     let found = tokio::task::spawn_blocking(move || {
@@ -252,22 +241,15 @@ async fn authed(hub: &Hub, headers: &HeaderMap) -> Result<RemoteClient, Response
     }
 }
 
-/// A paired device with its session token, or an outside app with its app key.
+/// A paired device with its session token.
 async fn websocket(State(hub): State<Hub>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
-    let caller = match bearer(&headers).filter(|t| t.starts_with(aurelius_domain::app_key::KEY_PREFIX)) {
-        Some(secret) => match hub.app_key(&secret).await {
-            Ok(Some(key)) => crate::ws::Caller::App(key),
-            Ok(None) => return error(StatusCode::UNAUTHORIZED, "This app key was revoked or does not exist."),
-            Err(()) => return error(StatusCode::SERVICE_UNAVAILABLE, "The database is busy. Try again."),
-        },
-        None => match authed(&hub, &headers).await {
-            Ok(client) => crate::ws::Caller::Device(client),
-            Err(response) => return response,
-        },
+    let client = match authed(&hub, &headers).await {
+        Ok(client) => client,
+        Err(response) => return response,
     };
     upgrade
         .max_message_size(aurelius_host::frame::MAX_FRAME_BYTES)
-        .on_upgrade(move |socket| crate::ws::serve(hub, caller, socket))
+        .on_upgrade(move |socket| crate::ws::serve(hub, client, socket))
 }
 
 /// One file (`file` field) into this device's inbox. The phone then sends
@@ -368,155 +350,9 @@ async fn push_unregister(State(hub): State<Hub>, headers: HeaderMap) -> Response
     StatusCode::NO_CONTENT.into_response()
 }
 
-/// The hash of the API key in `Authorization: Bearer ak_...`; the secret
-/// itself goes no further. Anything else (a session token too) is refused.
-fn api_key_verifier(headers: &HeaderMap) -> Option<String> {
-    bearer(headers).filter(|t| t.starts_with(aurelius_domain::agent_function::KEY_PREFIX)).map(|t| auth::verifier(&t))
-}
-
-fn function_host(hub: &Hub) -> Result<std::sync::Arc<dyn crate::FunctionHost>, Response> {
-    hub.inner.functions.get().cloned().ok_or_else(|| error(StatusCode::SERVICE_UNAVAILABLE, "Agent functions are not available."))
-}
-
-/// The HTTP status and JSON body for a call that was not accepted.
-fn call_error(err: &CallError) -> (StatusCode, serde_json::Value) {
-    let plain = |status, message: &str| (status, json!({ "error": message }));
-    match err {
-        CallError::Unauthorized => plain(StatusCode::UNAUTHORIZED, "Missing, unknown or revoked API key."),
-        CallError::SwitchedOff => plain(StatusCode::SERVICE_UNAVAILABLE, "Agent functions are switched off."),
-        CallError::NotFound => plain(StatusCode::NOT_FOUND, "Not found."),
-        CallError::Forbidden => plain(StatusCode::FORBIDDEN, "This API key may not call this function."),
-        CallError::BadParams(message) => plain(StatusCode::BAD_REQUEST, message),
-        CallError::Unavailable(message) => plain(StatusCode::CONFLICT, message),
-        CallError::Busy => plain(StatusCode::SERVICE_UNAVAILABLE, "The database is busy. Try again."),
-        CallError::OverLimit(over) => (
-            StatusCode::TOO_MANY_REQUESTS,
-            json!({ "error": "Call limit reached.", "retry_after": over.retry_after_secs, "remaining": remaining_json(over.remaining) }),
-        ),
-    }
-}
-
-fn remaining_json(r: Remaining) -> serde_json::Value {
-    json!({ "day": r.day, "week": r.week })
-}
-
-fn call_error_response(err: CallError) -> Response {
-    let (status, body) = call_error(&err);
-    let mut response = (status, Json(body)).into_response();
-    if let CallError::OverLimit(over) = err {
-        if let Ok(value) = over.retry_after_secs.to_string().parse() {
-            response.headers_mut().insert(header::RETRY_AFTER, value);
-        }
-    }
-    response
-}
-
-#[derive(Deserialize, Default)]
-struct CallBody {
-    #[serde(default)]
-    params: serde_json::Map<String, serde_json::Value>,
-}
-
-/// `POST /v1/functions/{slug}/calls` with `{ "params": { ... } }`.
-async fn function_call(State(hub): State<Hub>, Path(slug): Path<String>, headers: HeaderMap, body: axum::body::Bytes) -> Response {
-    let Some(verifier) = api_key_verifier(&headers) else { return call_error_response(CallError::Unauthorized) };
-    let host = match function_host(&hub) {
-        Ok(host) => host,
-        Err(response) => return response,
-    };
-    let body: CallBody = if body.iter().all(u8::is_ascii_whitespace) {
-        CallBody::default()
-    } else {
-        match serde_json::from_slice(&body) {
-            Ok(body) => body,
-            Err(_) => return error(StatusCode::BAD_REQUEST, "The body must be JSON like {\"params\": {...}}."),
-        }
-    };
-    let called = tokio::task::spawn_blocking(move || host.call(&verifier, &slug, &body.params)).await;
-    match called {
-        Ok(Ok(accepted)) => (
-            StatusCode::ACCEPTED,
-            Json(json!({ "call_id": accepted.call_id.to_string(), "status": "queued", "remaining": remaining_json(accepted.remaining) })),
-        )
-            .into_response(),
-        Ok(Err(err)) => call_error_response(err),
-        Err(_) => call_error_response(CallError::Busy),
-    }
-}
-
-/// `GET /v1/calls/{call_id}`: only for the key that made the call.
-async fn function_call_state(State(hub): State<Hub>, Path(call_id): Path<String>, headers: HeaderMap) -> Response {
-    let Some(verifier) = api_key_verifier(&headers) else { return call_error_response(CallError::Unauthorized) };
-    let host = match function_host(&hub) {
-        Ok(host) => host,
-        Err(response) => return response,
-    };
-    let id = call_id.clone();
-    match tokio::task::spawn_blocking(move || host.state(&verifier, &id)).await {
-        Ok(Ok(state)) => Json(call_state_json(&call_id, &state)).into_response(),
-        Ok(Err(err)) => call_error_response(err),
-        Err(_) => call_error_response(CallError::Busy),
-    }
-}
-
-fn call_state_json(call_id: &str, state: &CallState) -> serde_json::Value {
-    json!({
-        "call_id": call_id,
-        "status": state.status.as_str(),
-        "result": state.result,
-        "created_at": aurelius_domain::agent_function::iso_utc(state.created_at_ms),
-        "finished_at": state.finished_at_ms.map(aurelius_domain::agent_function::iso_utc),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::safe_name;
-    use super::*;
-    use aurelius_domain::agent_function::{CallStatus, OverLimit};
-
-    #[test]
-    fn api_keys_are_recognised_only_by_their_prefix_and_are_hashed() {
-        let mut headers = HeaderMap::new();
-        assert_eq!(api_key_verifier(&headers), None);
-        headers.insert(header::AUTHORIZATION, "Bearer session-token".parse().unwrap());
-        assert_eq!(api_key_verifier(&headers), None, "a session token is not an API key");
-        headers.insert(header::AUTHORIZATION, "Bearer ak_secret".parse().unwrap());
-        let verifier = api_key_verifier(&headers).unwrap();
-        assert_eq!(verifier, auth::verifier("ak_secret"));
-        assert!(!verifier.contains("secret"));
-        // The same hash the application stores when the key is made.
-        assert_eq!(verifier, aurelius_storage::agent_functions::secret_verifier("ak_secret"));
-    }
-
-    #[test]
-    fn call_errors_map_to_http_statuses() {
-        let status = |e: CallError| call_error(&e).0.as_u16();
-        assert_eq!(status(CallError::Unauthorized), 401);
-        assert_eq!(status(CallError::Forbidden), 403);
-        assert_eq!(status(CallError::NotFound), 404);
-        assert_eq!(status(CallError::BadParams("x".into())), 400);
-        assert_eq!(status(CallError::SwitchedOff), 503);
-        let over = OverLimit { retry_after_secs: 90, remaining: Remaining { day: Some(0), week: None } };
-        let (code, body) = call_error(&CallError::OverLimit(over));
-        assert_eq!(code.as_u16(), 429);
-        assert_eq!(body["retry_after"], 90);
-        assert_eq!(body["remaining"], json!({ "day": 0, "week": null }));
-        let response = call_error_response(CallError::OverLimit(over));
-        assert_eq!(response.headers()[header::RETRY_AFTER], "90");
-    }
-
-    #[test]
-    fn a_polled_call_shows_status_report_and_times() {
-        let state = CallState { status: CallStatus::Succeeded, result: Some("# Done".into()), created_at_ms: 0, finished_at_ms: Some(86_400_000) };
-        let json = call_state_json("c1", &state);
-        assert_eq!(json["status"], "succeeded");
-        assert_eq!(json["result"], "# Done");
-        assert_eq!(json["created_at"], "1970-01-01T00:00:00Z");
-        assert_eq!(json["finished_at"], "1970-01-02T00:00:00Z");
-        let waiting = CallState { status: CallStatus::Queued, result: None, created_at_ms: 0, finished_at_ms: None };
-        assert!(call_state_json("c1", &waiting)["finished_at"].is_null());
-    }
 
     #[test]
     fn upload_names_cannot_escape_the_inbox() {

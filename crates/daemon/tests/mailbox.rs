@@ -132,7 +132,7 @@ async fn an_employee_does_one_run_at_a_time_across_its_conversations() {
     wait_status(dir.path(), first, "running").await;
 
     // A task for the same employee waits in its mailbox while the run goes.
-    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id: project, employee_id: Some(alex), title: "Logo".into(), goal: "Maak een logo".into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id: project, employee_id: Some(alex), title: "Logo".into(), goal: "Maak een logo".into(), acceptance_criteria: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     let conn = db(dir.path());
     for _ in 0..600 {

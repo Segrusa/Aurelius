@@ -564,8 +564,8 @@ class AureliusConnection {
       case ServerMessageSignedOut():
         // A sign-out this phone asked for needs no message.
         unawaited(_endSession(_signingOut && message.reason == SignOutReason.loggedOut ? null : message.reason));
-      case ServerMessageStream() || ServerMessageTerminalOutput() || ServerMessageTerminalExit():
-        break; // local IPC and terminals only
+      case ServerMessageStream():
+        break; // local IPC only
     }
   }
 

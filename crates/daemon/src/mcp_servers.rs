@@ -256,7 +256,7 @@ pub async fn add(shared: &Arc<Shared>, params: McpAddParams, user: Option<aureli
         return Err(invalid(format!("A server named '{}' already exists.", params.name)));
     }
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    if let Err(e) = aurelius_host::plugins::claude(&refs, std::time::Duration::from_secs(60)).await {
+    if let Err(e) = aurelius_host::claude_cli::claude(&refs, std::time::Duration::from_secs(60)).await {
         return Err(ProtocolError::new(e.code, redact(&e.message, &secrets_of(&params))));
     }
     if !discover().iter().any(|f| f.name == params.name) {
@@ -278,7 +278,7 @@ pub async fn remove(shared: &Arc<Shared>, name: String, user: Option<aurelius_do
     if !discover().iter().any(|f| f.name == name) {
         return Err(invalid(format!("There is no user-scope server named '{name}'.")));
     }
-    aurelius_host::plugins::claude(&["mcp", "remove", "--scope", "user", &name], std::time::Duration::from_secs(60)).await?;
+    aurelius_host::claude_cli::claude(&["mcp", "remove", "--scope", "user", &name], std::time::Duration::from_secs(60)).await?;
     let shared2 = shared.clone();
     tokio::task::spawn_blocking(move || write_enabled(&shared2, move |names| names.retain(|n| *n != name))).await.map_err(internal)??;
     list(shared, user).await

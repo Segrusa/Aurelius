@@ -419,22 +419,6 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     thread_parent: None,
                 });
             }
-            RuntimeEvent::ArtifactPublished { url, title, version, path } => {
-                // Kept by URL, so later runs republish to the same page; the
-                // published file is kept per version, so clients can show it.
-                let (s, conversation) = (shared.clone(), plan.conversation_id);
-                let folders = plan.work.as_ref().map(|(f, _)| f.clone()).unwrap_or_default();
-                match blocking(move || {
-                    let file = path.and_then(|p| aurelius_application::run::artifacts::read_published_file(&p, &folders));
-                    let published = aurelius_storage::artifacts::Published { url, title, version, file };
-                    s.service.record_artifact(conversation, &published)
-                })
-                .await
-                {
-                    Some(Ok(notices)) => shared.publish(notices),
-                    other => tracing::warn!(run = %plan.run_id, ?other, "could not keep a published artifact"),
-                }
-            }
             // Claude Code compacted on its own while it answered: the next run measures again.
             RuntimeEvent::Compacted { pre_tokens, post_tokens } => {
                 tracing::info!(run = %plan.run_id, pre_tokens, post_tokens, "the runtime compacted the session while it answered");

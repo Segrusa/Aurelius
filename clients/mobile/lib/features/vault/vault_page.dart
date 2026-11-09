@@ -251,7 +251,7 @@ class VaultNotices extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 18),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        line(const ValueKey('vault-r2'), CupertinoIcons.square_stack_3d_up, vaultPluginsNotice),
+        line(const ValueKey('vault-r2'), CupertinoIcons.square_stack_3d_up, vaultMcpNotice),
         line(const ValueKey('vault-r3'), CupertinoIcons.lock_shield, vaultKeyNotice),
         line(const ValueKey('vault-key-export'), CupertinoIcons.desktopcomputer, vaultKeyExportNotice),
       ]),

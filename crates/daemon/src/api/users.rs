@@ -130,9 +130,6 @@ pub(super) async fn create(
     expected_version: Option<u64>,
     params: UserCreateParams,
 ) -> Result<Receipt, ProtocolError> {
-    if peer.app.is_some() {
-        return Err(ProtocolError::new(ErrorCode::Forbidden, aurelius_protocol::app::NOT_FOR_APPS));
-    }
     // Without a session nothing is said about the name or the password once the onboarding is over.
     let bootstrap = peer.session.is_none();
     if bootstrap && whoami(shared, None).await?.board_members_exist {
@@ -159,7 +156,7 @@ pub(super) async fn create(
 /// SEC0 E9): the same per-connection tries, sign-in limits per username,
 /// argon2 work and wrong answer as `user.login`.
 pub(super) async fn confirm_password(shared: &Arc<Shared>, peer: &Peer, attempts: &mut Attempts, password: String) -> Result<UserId, ProtocolError> {
-    let Some(user) = peer.user.filter(|_| peer.app.is_none() && peer.session.is_some()) else {
+    let Some(user) = peer.user.filter(|_| peer.session.is_some()) else {
         return Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "Only a signed-in board member can do this."));
     };
     let now = Instant::now();
@@ -202,7 +199,7 @@ pub struct PeerSession {
 
 /// The hub's view of this connection: its board member and session now.
 fn register(shared: &Shared, peer: &Peer, end: &mpsc::UnboundedSender<SignOutReason>) {
-    let now = peer.user.filter(|_| peer.app.is_none()).map(|u| (peer.session.as_ref().and_then(|s| s.id.clone()), u, device(peer)));
+    let now = peer.user.map(|u| (peer.session.as_ref().and_then(|s| s.id.clone()), u, device(peer)));
     shared.sessions.set(peer.conn, now, end);
 }
 
@@ -255,9 +252,6 @@ fn weaker(phc: &str) -> bool {
 /// member's and that they are not disabled: an end committed before it is seen
 /// there, one after it reaches this connection (R1 M-2).
 pub(super) async fn login(shared: &Arc<Shared>, peer: &mut Peer, attempts: &mut Attempts, end: &mpsc::UnboundedSender<SignOutReason>, params: LoginParams) -> Result<LoginResult, ProtocolError> {
-    if peer.app.is_some() {
-        return Err(ProtocolError::new(ErrorCode::Forbidden, aurelius_protocol::app::NOT_FOR_APPS));
-    }
     let now = Instant::now();
     attempts.take(now)?;
     let LoginParams { username, password, device_name } = params;
@@ -408,7 +402,7 @@ pub(super) struct HelloWho {
 /// marked used, at most once an hour): an end committed before that check is
 /// seen there, one after it reaches this connection (R1 M-2).
 pub(super) async fn hello_session(shared: &Arc<Shared>, peer: &mut Peer, end: &mpsc::UnboundedSender<SignOutReason>, token: Option<String>) -> Result<HelloWho, ProtocolError> {
-    if let (Some(token), None) = (token, &peer.app) {
+    if let Some(token) = token {
         let verifier = super::sessions::verifier(&token);
         let (store, client) = (shared.store().clone(), device(peer));
         let found = storage_task(move || {
@@ -458,7 +452,7 @@ pub(super) async fn hello_session(shared: &Arc<Shared>, peer: &mut Peer, end: &m
             }
         }
     }
-    let user = peer.user.filter(|_| peer.app.is_none());
+    let user = peer.user;
     let who = whoami_of(shared, peer).await?;
     let claude_login = match user {
         Some(user) => Some(claude_login(shared, user).await?),
@@ -542,9 +536,6 @@ async fn claude_login(shared: &Arc<Shared>, user_id: UserId) -> Result<ClaudeLog
 
 /// `session.list`, `claude_login.status`, `claude_login.input`.
 pub(super) async fn session_read(shared: &Arc<Shared>, peer: &Peer, method: Method) -> Result<ResponseBody, ProtocolError> {
-    if peer.app.is_some() {
-        return Err(ProtocolError::new(ErrorCode::Forbidden, aurelius_protocol::app::NOT_FOR_APPS));
-    }
     let Some(me) = peer.user else { return Err(unauthenticated()) };
     match method {
         Method::SessionList { user_id } => {
@@ -595,9 +586,6 @@ fn done() -> serde_json::Value {
 /// `account_write` from parameters without a password. The open connections of
 /// every session that ends close at once.
 pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: CommandContext, key: CommandId, attempts: &mut Attempts, write: HostWrite) -> Result<ResponseBody, ProtocolError> {
-    if peer.app.is_some() {
-        return Err(ProtocolError::new(ErrorCode::Forbidden, aurelius_protocol::app::NOT_FOR_APPS));
-    }
     let Some(me) = peer.user else { return Err(unauthenticated()) };
     let current = peer.session.as_ref().and_then(|s| s.id.clone());
     let named = |s: &Arc<Shared>, id: UserId| {
@@ -778,9 +766,6 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
 /// `out` (this connection). Answers the link's id; a replay answers the same id
 /// and starts nothing.
 pub(super) async fn claude_link(shared: &Arc<Shared>, peer: &Peer, ctx: CommandContext, key: CommandId, out: tokio::sync::mpsc::Sender<aurelius_protocol::ServerMessage>) -> Result<ResponseBody, ProtocolError> {
-    if peer.app.is_some() {
-        return Err(ProtocolError::new(ErrorCode::Forbidden, aurelius_protocol::app::NOT_FOR_APPS));
-    }
     let Some(me) = peer.user else { return Err(unauthenticated()) };
     let s = shared.clone();
     let replay = app_task(move || s.service.host_receipt(key, &aurelius_application::request_hash_of(&("claude_login.link", me, key)))).await?;

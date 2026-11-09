@@ -3,10 +3,8 @@
 
 pub mod extract;
 pub mod files;
-pub mod git;
 pub mod html;
 pub mod web;
-pub mod worktree;
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::Digest;

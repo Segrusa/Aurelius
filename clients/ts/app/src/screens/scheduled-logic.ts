@@ -1,6 +1,6 @@
 // What the Scheduled page and the waiting line under a thread say.
 
-import type { EmployeeSummary, HeartbeatView, ScheduledMessageView, ThreadWaiter } from "@aurelius/protocol";
+import type { ScheduledMessageView, ThreadWaiter } from "@aurelius/protocol";
 
 /** Who waits to pick up a thread, and why, on one line ("Flux — waiting to pick up this thread (behind 2 items)"). */
 export function waiterLine(w: ThreadWaiter): string {
@@ -40,25 +40,4 @@ export function outcomeText(m: ScheduledMessageView): string {
     default:
       return m.state;
   }
-}
-
-function clock(minute: number): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(Math.floor(minute / 60))}:${pad(minute % 60)}`;
-}
-
-/** How often and when a heartbeat is quiet: "Every 30 min · quiet 22:00–07:00". */
-export function heartbeatRule(h: HeartbeatView): string {
-  const every =
-    h.every_minutes >= 60 && h.every_minutes % 60 === 0
-      ? `Every ${h.every_minutes / 60} h`
-      : `Every ${h.every_minutes} min`;
-  return h.quiet_start_min === h.quiet_end_min
-    ? every
-    : `${every} · quiet ${clock(h.quiet_start_min)}–${clock(h.quiet_end_min)}`;
-}
-
-/** The employees with a heartbeat on, as the Scheduled page lists them. */
-export function withHeartbeat(all: readonly EmployeeSummary[]): (EmployeeSummary & { heartbeat: HeartbeatView })[] {
-  return all.filter((e): e is EmployeeSummary & { heartbeat: HeartbeatView } => Boolean(e.heartbeat));
 }

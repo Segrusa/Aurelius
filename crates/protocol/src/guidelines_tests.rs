@@ -2,12 +2,10 @@
 //! the wire, optional filters, board-member writes that apps never make, and
 //! the rights of a paired device.
 
-use crate::app;
 use crate::method::Method;
 use crate::remote::{self, Needs};
 use crate::rpc::{Call, FEATURES, PROTOCOL_MAJOR, Request, feature};
 use crate::write::WriteMethod;
-use aurelius_domain::app_key::{AppAudience, AppScope};
 use aurelius_domain::guideline::*;
 use aurelius_domain::proposal::ProposalStatus;
 use aurelius_domain::remote::Capability;
@@ -100,22 +98,6 @@ fn filters_may_be_left_out_and_required_ids_may_not() {
     assert!(matches!(create, Command::CreateGuideline(CreateGuideline { ref links, .. }) if links.is_empty()));
     let json = serde_json::to_value(&create).unwrap();
     assert!(json.get("links").is_none(), "the request hash of a write without links stays small");
-}
-
-#[test]
-fn apps_neither_read_nor_change_guidelines() {
-    for (method, name) in reads() {
-        let call = Call::Read(method);
-        assert_eq!(app::required(&call), Err(app::NOT_FOR_APPS), "{name}");
-        assert!(app::allowed(&AppScope::ALL, &call).is_err(), "{name}");
-    }
-    for (command, name) in writes() {
-        let call = Call::Write(WriteMethod::Domain(command));
-        assert_eq!(app::required(&call), Err(app::NOT_FOR_APPS), "{name}");
-        for audience in [AppAudience::All, AppAudience::Management] {
-            assert!(app::allowed_for(&AppScope::ALL, audience, &call).is_err(), "{name}");
-        }
-    }
 }
 
 #[test]

@@ -342,21 +342,6 @@ mod tests {
     }
 }
 
-/// Turn an employee's heartbeat on (`every_minutes` > 0) or off (0). Quiet hours
-/// are local minutes since midnight; `None` keeps the defaults (22:00–07:00,
-/// 20k tokens a day).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SetHeartbeat {
-    pub employee_id: EmployeeId,
-    pub every_minutes: u32,
-    #[serde(default)]
-    pub quiet_start_min: Option<u32>,
-    #[serde(default)]
-    pub quiet_end_min: Option<u32>,
-    #[serde(default)]
-    pub daily_token_budget: Option<u64>,
-}
-
 /// Give an employee its own workspace folder (its chat works there), or `None`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SetEmployeeFolder {

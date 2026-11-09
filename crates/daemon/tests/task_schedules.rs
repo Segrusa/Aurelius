@@ -80,7 +80,6 @@ fn new_task(w: &World, title: &str, goal: &str) -> CreateTask {
         title: title.into(),
         goal: goal.into(),
         acceptance_criteria: vec![],
-        depends_on: vec![],
     }
 }
 

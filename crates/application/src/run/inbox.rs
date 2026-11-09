@@ -85,11 +85,7 @@ fn source_of(tx: &Tx<'_>, group: Option<&GroupRun>, meta: &serde_json::Value, re
     if meta.get("origin").and_then(|o| o.as_str()) == Some("delegated") || hop_of(meta) > 0 {
         return Ok("employee");
     }
-    // A heartbeat names the login of who turned it on, and is nobody's message.
     // A scheduled message has a hop from its first run, so it is caught just above.
-    if meta.get("login_user").is_some() {
-        return Ok("system");
-    }
     if meta.get("user_id").is_some_and(|u| !u.is_null()) || meta.get("discussion").is_some() {
         return Ok("board");
     }
@@ -105,8 +101,7 @@ fn source_of(tx: &Tx<'_>, group: Option<&GroupRun>, meta: &serde_json::Value, re
 
 /// Queue a run for `reply_to` through the employee's mailbox, or `None` when the
 /// conversation has none. The run id is the one the run gets when this item is the
-/// last of those a run takes. `with_row`: the run row is made now, for what must refer
-/// to it (a heartbeat's wake, a variant's trial); such an item is never merged.
+/// last of those a run takes.
 pub(crate) fn enqueue(
     tx: &Tx<'_>,
     ctx_meta: &serde_json::Value,
@@ -114,7 +109,6 @@ pub(crate) fn enqueue(
     conversation: ConversationId,
     reply_to: MessageId,
     group: Option<GroupRun>,
-    with_row: bool,
 ) -> Result<Option<(RunId, Vec<EventNotice>)>, StorageError> {
     let Some(employee) = mailbox_of(tx, conversation)? else { return Ok(None) };
     let run = RunId::new();
@@ -125,7 +119,6 @@ pub(crate) fn enqueue(
     let kind = match () {
         _ if parked && source == "board" => "resume",
         _ if ctx_meta.get("scheduled").is_some() => "scheduled",
-        _ if ctx_meta.get("login_user").is_some() => "heartbeat",
         _ if ctx_meta.get("task_id").is_some() && ctx_meta.get("origin").is_none() => "task",
         _ => "message",
     };
@@ -141,11 +134,7 @@ pub(crate) fn enqueue(
         metadata: ctx_meta.clone(),
         dedupe: format!("run:{run}:queued"),
     })?;
-    let mut payload = crate::run::queue::job_payload(run, conversation, MessageId::new(), reply_to, group);
-    if with_row {
-        payload["with_row"] = true.into();
-        make_run(tx, run, conversation, login)?;
-    }
+    let payload = crate::run::queue::job_payload(run, conversation, MessageId::new(), reply_to, group);
     store::insert(tx, NewItem {
         employee,
         thread_key: &thread,
@@ -228,13 +217,9 @@ fn merged_hop(items: &[&Item]) -> u32 {
 }
 
 /// What the worker of `head`'s employee takes together with it: the due items of its
-/// thread in the same conversation, on the same login and of the same urgency, and
-/// never one whose run row exists already. A reply in a channel's thread stays
-/// apart from the channel: its answer goes there.
+/// thread in the same conversation, on the same login and of the same urgency.
+/// A reply in a channel's thread stays apart from the channel: its answer goes there.
 fn merged<'a>(head: &'a Item, due: &'a [Item]) -> Vec<&'a Item> {
-    if head.payload.get("with_row").is_some() {
-        return vec![head];
-    }
     due.iter()
         .filter(|i| {
             i.employee == head.employee
@@ -242,7 +227,6 @@ fn merged<'a>(head: &'a Item, due: &'a [Item]) -> Vec<&'a Item> {
                 && i.conversation == head.conversation
                 && i.login_user == head.login_user
                 && i.priority == head.priority
-                && i.payload.get("with_row").is_none()
                 && thread_parent(i) == thread_parent(head)
         })
         .collect()

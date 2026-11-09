@@ -22,7 +22,6 @@ async fn every_event_of_a_run_leaves_its_adapter_redacted() {
         RuntimeEvent::TextDelta(format!("{tail}, done")),
         RuntimeEvent::Activity(Activity::Started { call_id: "1".into(), tool: "Bash".into(), input: serde_json::json!({ "command": format!("echo {FAKE}") }), parent: None }),
         RuntimeEvent::Activity(Activity::Finished { call_id: "1".into(), ok: true, output: FAKE.into() }),
-        RuntimeEvent::ArtifactPublished { url: format!("https://x/{FAKE}"), title: FAKE.into(), version: None, path: None },
         RuntimeEvent::TextDelta(format!("last {FAKE}")),
         RuntimeEvent::Failed { code: "stream_incomplete".into(), message: format!("stderr: {FAKE}") },
     ] {

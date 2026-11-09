@@ -1,4 +1,4 @@
-//! What the modules that serve the running service (power, terminals, plugins,
+//! What the modules that serve the running service (power,
 //! backups) need from the daemon that owns them.
 
 use aurelius_storage::Store;
@@ -14,7 +14,6 @@ pub trait Service: Send + Sync + 'static {
     /// Turns `true` when the service stops.
     fn shutdown_signal(&self) -> tokio::sync::watch::Receiver<bool>;
     fn power(&self) -> &crate::power::Power;
-    fn terminals(&self) -> &crate::terminal::Terminals;
     /// Work goes on after a restore.
     fn resume_work(&self);
     /// Stop now and start again.

@@ -35,28 +35,16 @@ pub struct CommandContext {
     pub client_id: ClientId,
     pub origin: Origin,
     pub request_id: u64,
-    /// The app whose key this session authenticated with (`aurelius-mcp`);
-    /// none for the user's own clients. Its scopes were checked by the session;
-    /// its limits and the Auto rule are checked where tasks are made.
-    pub app: Option<AppActor>,
     /// The active board member of the connection (`user.use`, `user.create`, or
-    /// the hello's remembered one); none for apps and before the onboarding.
+    /// the hello's remembered one); none before the onboarding.
     pub user_id: Option<aurelius_domain::UserId>,
 }
 
 impl CommandContext {
-    /// The board member acting, never an app: whose Claude login what they make
-    /// or (re)activate runs on (B5).
+    /// The board member acting: whose Claude login what they make or (re)activate runs on (B5).
     pub(crate) fn login_user(&self) -> Option<String> {
-        self.user_id.filter(|_| self.app.is_none()).map(|u| u.to_string())
+        self.user_id.map(|u| u.to_string())
     }
-}
-
-/// An app acting through its app key.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct AppActor {
-    pub key_id: aurelius_domain::AppKeyId,
-    pub name: String,
 }
 
 impl CommandContext {
@@ -67,10 +55,6 @@ impl CommandContext {
             "origin": self.origin,
             "request_id": self.request_id,
         });
-        if let Some(app) = &self.app {
-            meta["app_key_id"] = serde_json::json!(app.key_id);
-            meta["app"] = serde_json::json!(app.name);
-        }
         if let Some(user) = self.user_id {
             meta["user_id"] = serde_json::json!(user);
         }
@@ -143,9 +127,6 @@ pub(crate) fn domain_error(err: DomainError) -> AppError {
         | DomainError::RunNotFound(_)
         | DomainError::ApprovalNotFound(_)
         | DomainError::ProviderNotFound(_)
-        | DomainError::AgentFunctionNotFound(_)
-        | DomainError::ApiKeyNotFound(_)
-        | DomainError::AppKeyNotFound(_)
         | DomainError::ProposalNotFound(_)
         | DomainError::TaskNotFound(_)
         | DomainError::TicketNotFound(_)
@@ -183,7 +164,7 @@ pub fn request_hash(envelope: &CommandEnvelope) -> String {
     hex::encode(Sha256::digest(&canonical))
 }
 
-/// Hash of a request of the host write pipeline (MCP, plugins, ...): the same
+/// Hash of a request of the host write pipeline (MCP, power, ...): the same
 /// key with the same parameters replays, with other parameters it conflicts.
 pub fn request_hash_of<T: serde::Serialize>(value: &T) -> String {
     hex::encode(Sha256::digest(serde_json::to_vec(value).unwrap_or_default()))
@@ -242,7 +223,6 @@ impl CommandService {
             Command::SetRunDefaults(cmd) => self.set_run_defaults(ctx, &envelope, hash, cmd),
             Command::CreateTask(cmd) => self.create_task(ctx, &envelope, hash, cmd),
             Command::CancelTask(cmd) => self.cancel_task(&envelope, hash, cmd),
-            Command::ChooseTaskVariant(cmd) => self.choose_task_variant(&envelope, hash, cmd),
             Command::AssignTask(cmd) => self.assign_task(&envelope, hash, cmd),
             Command::AddIdea(cmd) => self.add_idea(&envelope, hash, cmd),
             Command::UpdateIdea(cmd) => self.update_idea(&envelope, hash, cmd),
@@ -269,12 +249,8 @@ impl CommandService {
             Command::SetScreenAllowed(cmd) => self.set_screen_allowed(ctx, &envelope, hash, cmd),
             Command::DecidePlan(cmd) => self.decide_plan(ctx, &envelope, hash, cmd),
             Command::SetProjectFolder(cmd) => self.set_project_folder(&envelope, hash, cmd),
-            Command::ShareMessage(cmd) => self.share_message(ctx, &envelope, hash, cmd),
-            Command::DiscussTask(cmd) => self.discuss_task(&envelope, hash, cmd),
-            Command::RevokeShare(cmd) => self.revoke_share(&envelope, hash, cmd),
             Command::SetEmployeeFolder(cmd) => self.set_employee_folder(&envelope, hash, cmd),
             Command::DeleteConversation(cmd) => self.delete_conversation(ctx, &envelope, hash, cmd),
-            Command::SetHeartbeat(cmd) => self.set_heartbeat(ctx, &envelope, hash, cmd),
             Command::StartProjectConversation(cmd) => self.start_project_conversation(ctx, &envelope, hash, cmd),
             Command::SendProjectMessage(cmd) => self.send_project_message(ctx, &envelope, hash, cmd),
             Command::DeleteQueuedMessage(cmd) => self.delete_queued_message(ctx, &envelope, hash, cmd),

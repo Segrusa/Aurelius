@@ -156,7 +156,7 @@ pub(crate) fn tell_responsible(tx: &Tx<'_>, st: &Store, run: RunId, message: &st
 impl CommandService {
     /// The acting board member's chat with an employee, made the first time.
     pub(crate) fn open_employee_chat(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &OpenEmployeeChat) -> Result<Committed, AppError> {
-        let user = ctx.user_id.filter(|_| ctx.app.is_none()).ok_or_else(|| domain_error(DomainError::BoardMemberRequired))?;
+        let user = ctx.user_id.ok_or_else(|| domain_error(DomainError::BoardMemberRequired))?;
         let employee = cmd.employee_id;
         self.commit(envelope.command_id, hash, move |tx| {
             match employees::load_employee(tx, employee)?.map(|e| e.status) {

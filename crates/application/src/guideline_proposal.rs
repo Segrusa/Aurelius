@@ -7,8 +7,8 @@
 //!   of the bridge call's run), never in the library: by `g:` id, id or exact
 //!   title (case-insensitive, more than one match is refused). An archived one
 //!   is refused; none is a new guideline. `base_version` is the snapshot's.
-//! - E10: only a live run of an employee, in a conversation; never a variant
-//!   trial, the project assistant or the dispatcher (triage). Text-only runs
+//! - E10: only a live run of an employee, in a conversation; never
+//!   the project assistant or the dispatcher (triage). Text-only runs
 //!   have no bridge; the daemon refuses them before this.
 //! - E11: validated as a guideline write, plus evidence; the open limits are
 //!   counted in the same (immediate) transaction as the insert. B4 waits for the
@@ -54,7 +54,7 @@ impl CommandService {
 
 fn propose(tx: &Tx<'_>, st: &Store, run: RunId, input: GuidelineProposalInput) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     let refuse = |why: String| Ok((false, why, vec![]));
-    let EmployeeRun { employee: me, project, conversation, name } = match employee_run(tx, run, "propose a guideline", "A trial may only read; propose a guideline from the task itself.")? {
+    let EmployeeRun { employee: me, project, conversation, name } = match employee_run(tx, run, "propose a guideline")? {
         Ok(found) => found,
         Err(why) => return refuse(why),
     };
@@ -151,14 +151,12 @@ pub(crate) struct EmployeeRun {
 }
 
 /// E10, for `propose_guideline` and GL-15's `list_guidelines`/`read_guideline`: a
-/// live run of an active employee in one of its conversations, never a trial
-/// (`trial`: the refusal), the project assistant (no employee) or the dispatcher
-/// (no conversation). `what`: what is refused ("propose a guideline").
+/// live run of an active employee in one of its conversations, never the
+/// project assistant (no employee) or the dispatcher (no conversation). `what`: what is refused ("propose a guideline").
 pub(crate) fn employee_run(
     conn: &rusqlite::Connection,
     run: RunId,
     what: &str,
-    trial: &str,
 ) -> Result<Result<EmployeeRun, String>, StorageError> {
     let Some(RunOwner { employee: Some(me), project, conversation: Some(conversation) }) = run_owner(conn, run)? else {
         return Ok(Err(format!("Only an employee can {what}.")));
@@ -166,9 +164,6 @@ pub(crate) fn employee_run(
     let status: String = conn.query_row("SELECT status FROM runs WHERE id = ?1", [run.to_string()], |r| r.get(0))?;
     if matches!(status.as_str(), "succeeded" | "failed" | "cancelled" | "unknown") {
         return Ok(Err("This run has ended.".into()));
-    }
-    if aurelius_storage::variants::probe_of_run(conn, run)?.is_some() {
-        return Ok(Err(trial.into()));
     }
     let employee: Option<(String, String)> = conn.query_row("SELECT name, status FROM employees WHERE id = ?1", [me.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
     let Some((name, _)) = employee.filter(|(_, status)| status == LifecycleStatus::Active.as_str()) else {

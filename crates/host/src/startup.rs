@@ -1,5 +1,5 @@
 //! Optional start at sign-in. Off by default. When on, the
-//! background service starts with Windows so tasks and heartbeats continue
+//! background service starts with Windows so tasks continue
 //! without the window; the app connects to it when opened.
 
 use std::io;

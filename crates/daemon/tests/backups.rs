@@ -78,7 +78,6 @@ async fn backup_restore_paused_scrub_and_export() {
         title: "Onboarding".into(),
         goal: "Compare ideas".into(),
         acceptance_criteria: vec!["Cites a source".into()],
-        depends_on: vec![],
     };
     client.execute(envelope(Command::CreateTask(task), None)).await.unwrap();
     for _ in 0..400 {

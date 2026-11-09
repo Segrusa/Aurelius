@@ -62,7 +62,6 @@ describe("the employee's queue", () => {
   it("says what an item is", () => {
     expect(queueWhat({ kind: "task", source: "board" })).toBe("Task from a board member");
     expect(queueWhat({ kind: "message", source: "employee" })).toBe("Message from a colleague");
-    expect(queueWhat({ kind: "heartbeat", source: "system" })).toBe("Heartbeat");
     expect(queueWhat({ kind: "newer", source: "system" })).toBe("newer");
   });
 

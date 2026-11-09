@@ -1,7 +1,7 @@
 //! Every read method (`<area>.list` / `<area>.get`) as a `ResponseBody`.
-//! Session methods (hello, subscribe, terminal open and detach) are answered by the session itself.
+//! Session methods (hello, subscribe) are answered by the session itself.
 
-use super::{app_task, git, internal, sql, storage_task};
+use super::{app_task, internal, sql, storage_task};
 use crate::{Shared, VERSION};
 use aurelius_domain::{ConversationId, EmployeeId, ProjectId};
 use aurelius_protocol::{
@@ -13,14 +13,12 @@ use aurelius_storage::queries;
 use base64::Engine;
 use std::sync::Arc;
 
-/// `reader`: the board member of the connection (none for an app): reading a
+/// `reader`: the board member of the connection : reading a
 /// discussion (a channel, a ticket's) marks it read for them.
 pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
     match method {
         Method::SessionHello(_)
         | Method::EventSubscribe { .. }
-        | Method::TerminalOpen { .. }
-        | Method::TerminalDetach { .. }
         | Method::UserLogin(_)
         | Method::UserLogout
         | Method::SessionList { .. }
@@ -122,17 +120,6 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::TaskList { project_id, employee_id, state } => tasks(shared, project_id, employee_id, state).await,
         Method::TimelineList(query) => timeline(shared, query).await,
         Method::NotificationList => notifications(shared, reader).await,
-        Method::ShareList { project_id } => {
-            let store = shared.store().clone();
-            storage_task(move || {
-                store.read(|c| {
-                    let read = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
-                    aurelius_storage::shares::for_project(c, project_id, &read)
-                })
-            })
-            .await
-            .map(ResponseBody::Shares)
-        }
         Method::UpdateGet { check } => Ok(ResponseBody::Update(crate::updates::status(shared, check).await)),
         Method::BackupList => Ok(ResponseBody::Backups(aurelius_host::backups::snapshot(&shared.root))),
         // Only the reader's own login (B12); an app has none.
@@ -173,21 +160,9 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let store = shared.store().clone();
             storage_task(move || store.read(aurelius_storage::traces::setting)).await.map(ResponseBody::TraceSetting)
         }
-        Method::VariantsGetSetting => {
-            let store = shared.store().clone();
-            storage_task(move || store.read(aurelius_storage::variants::setting)).await.map(ResponseBody::VariantsSetting)
-        }
-        Method::TaskVariants { task_id } => {
-            let s = shared.clone();
-            app_task(move || s.service.task_variants(task_id)).await.map(ResponseBody::TaskVariants)
-        }
         Method::PowerGet => Ok(ResponseBody::Power(shared.power.state())),
         Method::LoadGet => Ok(ResponseBody::Load(crate::load::snapshot(shared))),
         Method::BrowserGet => Ok(ResponseBody::Browser(aurelius_host::chrome::setting())),
-        Method::ArtifactGetSetting => {
-            let store = shared.store().clone();
-            storage_task(move || store.read(aurelius_storage::artifacts::enabled)).await.map(|enabled| ResponseBody::ArtifactSetting(aurelius_protocol::ArtifactSetting { enabled }))
-        }
         Method::AutoAllowGetSetting => {
             let store = shared.store().clone();
             storage_task(move || store.read(aurelius_storage::auto_allow::enabled)).await.map(|enabled| ResponseBody::AutoAllowSetting(aurelius_protocol::AutoAllowSetting::new(enabled)))
@@ -196,22 +171,9 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let store = shared.store().clone();
             storage_task(move || store.read(aurelius_storage::management_mode::enabled)).await.map(|enabled| ResponseBody::ManagementModeSetting(aurelius_protocol::ManagementModeSetting { enabled }))
         }
-        Method::ArtifactList { conversation_id, task_id, project_id } => {
-            let s = shared.clone();
-            let filter = aurelius_storage::artifacts::Filter { conversation_id, task_id, project_id };
-            app_task(move || s.service.artifacts(filter)).await.map(|artifacts| ResponseBody::Artifacts(aurelius_domain::views::ArtifactsSnapshot { artifacts }))
-        }
-        Method::ArtifactGetContent { url, version } => {
-            let s = shared.clone();
-            app_task(move || s.service.artifact_content(url, version)).await.map(ResponseBody::ArtifactContent)
-        }
         Method::McpList => crate::mcp_servers::list(shared, reader).await.map(ResponseBody::McpServers),
         Method::McpLoginGet { login_id } => crate::mcp_oauth::get(&login_id, reader).map(ResponseBody::McpLogin),
         Method::McpAlwaysAllowList => crate::mcp_servers::always_allow_list(shared).await.map(ResponseBody::McpAlwaysAllow),
-        Method::PluginList => aurelius_host::plugins::list(shared).await.map(ResponseBody::Plugins),
-        Method::PluginListAvailable => aurelius_host::plugins::available().await.map(ResponseBody::PluginCatalog),
-        Method::PluginGetForEmployee { employee_id } => aurelius_host::plugins::employee_get(shared, employee_id).await.map(ResponseBody::EmployeePlugins),
-        Method::PluginGetForProject { project_id } => aurelius_host::plugins::project_get(shared, project_id).await.map(ResponseBody::ProjectPlugins),
         Method::MemoryList { project_id, employee_id } => {
             let store = shared.store().clone();
             storage_task(move || {
@@ -255,14 +217,6 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let s = shared.clone();
             app_task(move || s.service.all_ideas()).await.map(ResponseBody::AllIdeas)
         }
-        Method::NoteList { project_id, query } => {
-            let s = shared.clone();
-            app_task(move || s.service.notes(project_id, query)).await.map(ResponseBody::Notes)
-        }
-        Method::NoteGet { note_id } => {
-            let s = shared.clone();
-            app_task(move || s.service.note(note_id)).await.map(ResponseBody::Note)
-        }
         Method::EmployeeInstructionVersions { employee_id } => {
             let s = shared.clone();
             app_task(move || s.service.employee_instruction_versions(employee_id)).await.map(ResponseBody::EmployeeInstructionVersions)
@@ -274,22 +228,6 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::RecurringTaskList { project_id } => {
             let s = shared.clone();
             app_task(move || s.service.task_schedules(project_id)).await.map(ResponseBody::TaskSchedules)
-        }
-        Method::AgentFunctionList { project_id } => {
-            let s = shared.clone();
-            app_task(move || s.service.agent_functions(project_id)).await.map(ResponseBody::AgentFunctions)
-        }
-        Method::FunctionCallList { function_id, limit } => {
-            let s = shared.clone();
-            app_task(move || s.service.function_calls(function_id, limit)).await.map(ResponseBody::FunctionCalls)
-        }
-        Method::AppKeyList => {
-            let s = shared.clone();
-            app_task(move || s.service.app_keys()).await.map(ResponseBody::AppKeys)
-        }
-        Method::ApiKeyList => {
-            let s = shared.clone();
-            app_task(move || s.service.api_keys()).await.map(ResponseBody::ApiKeys)
         }
         Method::FileGet { id } => {
             let store = shared.store().clone();
@@ -320,8 +258,6 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             .await?;
             found.map(ResponseBody::Context).ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "No context overview was kept for this answer."))
         }
-        Method::GitGetStatus { conversation_id } => git::status(shared, conversation_id).await.map(ResponseBody::GitStatus),
-        Method::GitGetDiff { conversation_id } => git::diff(shared, conversation_id).await.map(ResponseBody::GitDiff),
         Method::MarkdownList { scope } => crate::markdown::list(shared, scope).await.map(ResponseBody::MarkdownFiles),
         Method::MarkdownGet { scope, path } => crate::markdown::read(shared, scope, path).await.map(ResponseBody::MarkdownFile),
         Method::SubagentList { conversation_id } => {
@@ -340,11 +276,6 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::ProviderDetectRuntime => Ok(ResponseBody::RuntimeDetected {
             claude_code: tokio::task::spawn_blocking(aurelius_runtime::claude_code::locate).await.ok().flatten().map(|p| p.display().to_string()),
         }),
-        Method::TerminalInput { terminal_id, data_base64 } => shared.terminals.input(&terminal_id, &data_base64).await.map(|()| ResponseBody::TerminalDone),
-        Method::TerminalList { conversation_id } => aurelius_host::terminal::list(shared, conversation_id).await.map(ResponseBody::Terminals),
-        Method::TerminalResize { terminal_id, cols, rows } => shared.terminals.resize(&terminal_id, cols, rows).map(|()| ResponseBody::TerminalDone),
-        // The attachment stays until the exit has reached this session too.
-        Method::TerminalClose { terminal_id } => shared.terminals.close(&terminal_id).map(|()| ResponseBody::TerminalDone),
     }
 }
 
@@ -550,15 +481,13 @@ async fn messages(shared: &Arc<Shared>, conversation_id: ConversationId, reader:
     // What wakes an employee about a ticket is for the employee; the board member reads its update.
     messages.retain(|m| m.update.as_deref() != Some(aurelius_domain::conversation::TICKET_UPDATE_KIND));
     let store = shared.store().clone();
-    let (attachments, agent_mode, browser_allowed, screen_allowed, shares, run, (employee_id, project_id), read_only) = storage_task(move || {
+    let (attachments, agent_mode, browser_allowed, screen_allowed, run, (employee_id, project_id), read_only) = storage_task(move || {
         store.read(|c| {
-            let read = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
             Ok((
                 aurelius_storage::files::list_attachments(c, conversation_id)?,
                 aurelius_storage::conversations::agent_mode(c, conversation_id)?,
                 aurelius_storage::conversations::browser_allowed(c, conversation_id)?,
                 aurelius_storage::conversations::screen_allowed(c, conversation_id)?,
-                aurelius_storage::shares::for_conversation(c, conversation_id, &read)?,
                 aurelius_storage::conversations::conversation_run(c, conversation_id)?,
                 aurelius_storage::conversations::owner_of(c, conversation_id)?,
                 aurelius_storage::conversations::is_older_employee_chat(c, conversation_id)?,
@@ -574,7 +503,6 @@ async fn messages(shared: &Arc<Shared>, conversation_id: ConversationId, reader:
         agent_mode,
         browser_allowed,
         screen_allowed,
-        shares,
         run,
         employee_id,
         project_id,
@@ -582,25 +510,12 @@ async fn messages(shared: &Arc<Shared>, conversation_id: ConversationId, reader:
     }))
 }
 
-/// The employees (not archived) with their heartbeats.
-fn employee_list(
-    c: &aurelius_storage::Conn,
-    read_blob: &dyn Fn(&str) -> Option<String>,
-) -> Result<Vec<aurelius_domain::views::EmployeeSummary>, aurelius_storage::StorageError> {
-    let mut employees = aurelius_storage::employees::list_employees(c, read_blob)?;
-    let day_start = aurelius_domain::scheduler::heartbeat::local_day_start(aurelius_storage::now_ms(), aurelius_host::utc_offset_minutes_at);
-    for m in employees.iter_mut() {
-        m.heartbeat = aurelius_storage::heartbeats::view(c, m.id, day_start)?;
-    }
-    Ok(employees)
-}
-
 async fn employees(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
     let store = shared.store().clone();
     storage_task(move || {
         store.read(|c| {
             let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
-            let employees = employee_list(c, &read_blob)?;
+            let employees = aurelius_storage::employees::list_employees(c, &read_blob)?;
             Ok(EmployeesSnapshot { as_of_seq: queries::last_seq(c)?, employees })
         })
     })
@@ -616,7 +531,7 @@ async fn company(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
             c.execute_batch("BEGIN DEFERRED")?;
             let result = (|| {
                 let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
-                let employees = employee_list(c, &read_blob)?;
+                let employees = aurelius_storage::employees::list_employees(c, &read_blob)?;
                 let roots = employees
                     .iter()
                     .filter(|e| e.status == aurelius_domain::employee::LifecycleStatus::Active && e.reports_to.is_none_or(|b| !employees.iter().any(|o| o.id == b)))
@@ -824,7 +739,7 @@ async fn tasks(
 /// One guideline read on a read connection: its answer, or a refusal (not found).
 type GuidelineRead = Box<dyn FnOnce(&rusqlite::Connection) -> Result<Result<ResponseBody, ProtocolError>, aurelius_storage::StorageError> + Send>;
 
-/// The guideline reads (feature `guidelines`): board members' clients only, never apps (SEC0 R-d).
+/// The guideline reads (feature `guidelines`): board members' clients only (SEC0 R-d).
 async fn guidelines(shared: &Arc<Shared>, method: Method) -> Result<ResponseBody, ProtocolError> {
     use aurelius_domain::guideline as gl;
     use aurelius_storage::guidelines as store;

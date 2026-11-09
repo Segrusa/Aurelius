@@ -313,7 +313,6 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             browser_allowed,
             screen_allowed,
             folder,
-            heartbeat: None,
             sequential_tasks,
             conversations: Vec::new(),
             agents: Vec::new(),
@@ -565,59 +564,6 @@ pub fn set_reports_to(tx: &Transaction<'_>, employee: EmployeeId, reports_to: Op
         params![employee.to_string(), reports_to.map(|m| m.to_string()), now_ms()],
     )?;
     Ok(())
-}
-
-/// Plugins (`name@marketplace`) an employee has enabled, in the order they were enabled.
-pub fn plugins_of(conn: &Connection, employee: EmployeeId) -> Result<Vec<String>, StorageError> {
-    let mut stmt = conn.prepare("SELECT plugin_id FROM employee_plugins WHERE employee_id = ?1 ORDER BY enabled_at_ms, plugin_id")?;
-    let rows = stmt.query_map([employee.to_string()], |r| r.get(0))?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
-pub fn set_plugins(tx: &Transaction<'_>, employee: EmployeeId, plugins: &[String]) -> Result<(), StorageError> {
-    tx.execute("DELETE FROM employee_plugins WHERE employee_id = ?1", [employee.to_string()])?;
-    let now = now_ms();
-    for (i, plugin) in plugins.iter().enumerate() {
-        tx.execute(
-            "INSERT OR IGNORE INTO employee_plugins(employee_id, plugin_id, enabled_at_ms) VALUES (?1, ?2, ?3)",
-            params![employee.to_string(), plugin, now + i as i64],
-        )?;
-    }
-    Ok(())
-}
-
-/// Which employees use which plugin.
-pub fn plugin_users(conn: &Connection) -> Result<Vec<(String, EmployeeId)>, StorageError> {
-    let mut stmt = conn.prepare("SELECT plugin_id, employee_id FROM employee_plugins ORDER BY plugin_id, employee_id")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, parse(EmployeeId::parse(&r.get::<_, String>(1)?))?)))?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
-/// Plugins (`name@marketplace`) a project has enabled, in the order they were enabled.
-/// Its project assistant and every employee run in its tasks load them.
-pub fn project_plugins_of(conn: &Connection, project: ProjectId) -> Result<Vec<String>, StorageError> {
-    let mut stmt = conn.prepare("SELECT plugin_id FROM project_plugins WHERE project_id = ?1 ORDER BY enabled_at_ms, plugin_id")?;
-    let rows = stmt.query_map([project.to_string()], |r| r.get(0))?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
-pub fn set_project_plugins(tx: &Transaction<'_>, project: ProjectId, plugins: &[String]) -> Result<(), StorageError> {
-    tx.execute("DELETE FROM project_plugins WHERE project_id = ?1", [project.to_string()])?;
-    let now = now_ms();
-    for (i, plugin) in plugins.iter().enumerate() {
-        tx.execute(
-            "INSERT OR IGNORE INTO project_plugins(project_id, plugin_id, enabled_at_ms) VALUES (?1, ?2, ?3)",
-            params![project.to_string(), plugin, now + i as i64],
-        )?;
-    }
-    Ok(())
-}
-
-/// Which projects use which plugin.
-pub fn project_plugin_users(conn: &Connection) -> Result<Vec<(String, ProjectId)>, StorageError> {
-    let mut stmt = conn.prepare("SELECT plugin_id, project_id FROM project_plugins ORDER BY plugin_id, project_id")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, parse(ProjectId::parse(&r.get::<_, String>(1)?))?)))?;
-    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// The server setting "Follow the org chart".

@@ -5,12 +5,11 @@ pub mod chrome;
 pub mod frame;
 pub mod ipc;
 pub mod playwright;
-pub mod plugins;
+pub mod claude_cli;
 pub mod power;
 pub mod secrets;
 mod service;
 pub mod startup;
-pub mod terminal;
 pub mod tray;
 pub mod updater;
 #[cfg(windows)]

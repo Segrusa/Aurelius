@@ -37,7 +37,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str
 
 /// A finished task of the employee: returns the conversation the user can keep talking in.
 async fn task_conversation(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str) -> ConversationId {
-    let task = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: title.into(), goal: "Doe het".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let task = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: title.into(), goal: "Doe het".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(task), None)).await.unwrap().result else { panic!() };
     for _ in 0..400 {
         let tasks = client.tasks(Some(project_id)).await.unwrap().tasks;
@@ -160,7 +160,7 @@ async fn archive_keeps_history_and_blocks_changes() {
     assert!(client.projects().await.unwrap().projects.is_empty());
     // An archived project takes no new work.
     let z = employee(&client, atlas, "Z", "Z").await;
-    let task = CreateTask { confirm_secret: false, project_id: atlas, employee_id: Some(z), title: "T".into(), goal: "G".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let task = CreateTask { confirm_secret: false, project_id: atlas, employee_id: Some(z), title: "T".into(), goal: "G".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let err = client.execute(envelope(Command::CreateTask(task), None)).await.unwrap_err();
     assert!(matches!(err, aurelius_client::ClientError::Protocol(ref p) if p.code == ErrorCode::Validation));
     stop(dir.path(), daemon).await;

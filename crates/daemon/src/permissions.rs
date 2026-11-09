@@ -80,18 +80,6 @@ pub async fn ask(shared: &Arc<Shared>, run_id: RunId, call_id: Option<String>, t
             return Ok(deny("Aurelius refuses commands that print the environment or a vault variable. Use $NAME only inside the command that needs it (for example curl -H \"Authorization: Bearer $NAME\"), and never show its value.".into()));
         }
     }
-    // A trial of a task (variants) runs unattended in its own worktree: nobody is
-    // asked; what stays inside goes, anything outside is refused. That also holds
-    // for what the employee's tool list wants asked first: nobody can answer here,
-    // and the trial works in a copy.
-    let s = shared.clone();
-    let probe = tokio::task::spawn_blocking(move || s.service.probe_worktree(run_id)).await.map_err(|e| ProtocolError::new(ErrorCode::Internal, e.to_string()))??;
-    if let Some(worktree) = probe {
-        return Ok(match aurelius_domain::variants::probe_verdict(&tool, &input, &worktree) {
-            aurelius_domain::variants::ProbeVerdict::Allow => BridgeOutcome::Permission { allow: true, message: None, updated_input: None, updated_permissions: None },
-            aurelius_domain::variants::ProbeVerdict::Deny(why) => deny(why),
-        });
-    }
     let policy = {
         let s = shared.clone();
         tokio::task::spawn_blocking(move || s.service.run_tool_policy(run_id)).await.map_err(|e| ProtocolError::new(ErrorCode::Internal, e.to_string()))??
@@ -149,13 +137,7 @@ pub async fn ask(shared: &Arc<Shared>, run_id: RunId, call_id: Option<String>, t
             .map_err(|e| ProtocolError::new(ErrorCode::Internal, e.to_string()))??;
         // The user's own MCP servers they enabled are let through in Auto like the browser: enabling them is the consent.
         let user_mcp = crate::mcp_servers::tool_is_enabled(shared, &tool).await;
-        // Claude Code artifacts: turning them on is the consent for Auto; a publish
-        // (or any other change on claude.ai) is an external action that Plan blocks.
-        let artifact = aurelius_runtime::claude_code::artifact_call_reads(&tool, &input);
-        if let Some(outcome) = artifact_in_plan(artifact, now) {
-            return Ok(outcome);
-        }
-        let auto_allows = |t: &str| user_mcp || artifact.is_some() || auto_allows(t);
+        let auto_allows = |t: &str| user_mcp || auto_allows(t);
         // An MCP tool the user always allows passes in every mode but Plan.
         if now != AgentMode::Plan && always_allowed(shared, &tool).await? {
             return Ok(BridgeOutcome::Permission { allow: true, message: None, updated_input: None, updated_permissions: None });
@@ -294,13 +276,6 @@ async fn switched(shared: &Arc<Shared>, run_id: RunId) -> Result<Option<AgentMod
 /// user switched on for this employee, never questions, plans or anything else.
 fn auto_allows(tool: &str) -> bool {
     aurelius_application::run::approvals::is_browser_tool(tool) || (aurelius_runtime::claude_code::WORK_TOOLS.contains(&tool) && !aurelius_runtime::claude_code::ALWAYS_ASKED_TOOLS.contains(&tool))
-}
-
-/// Plan mode refuses an artifact call that acts on claude.ai (publish, delete,
-/// data writes, comment replies); reads and other tools are decided as usual.
-fn artifact_in_plan(artifact_reads: Option<bool>, mode: AgentMode) -> Option<BridgeOutcome> {
-    (artifact_reads == Some(false) && mode == AgentMode::Plan)
-        .then(|| deny("Plan mode: publishing or changing artifacts on claude.ai is blocked. Describe the page in your plan; publish it once the plan is approved.".into()))
 }
 
 /// Whether a switched-to mode lets an approval that is already waiting go
@@ -458,24 +433,6 @@ mod tests {
         assert!(!auto_allows("AskUserQuestion") && !auto_allows("ExitPlanMode") && auto_allows("mcp__claude-in-chrome__navigate") && auto_allows("mcp__aurelius-browser__browser_click") && !auto_allows("mcp__other__x"));
     }
 
-    #[test]
-    fn plan_mode_blocks_artifact_publishes_but_not_reads() {
-        let publish = aurelius_runtime::claude_code::artifact_call_reads("Artifact", &serde_json::json!({ "file_path": "a.html" }));
-        let reply = aurelius_runtime::claude_code::artifact_call_reads("ArtifactComments", &serde_json::json!({ "action": "reply", "url": "u" }));
-        let read = aurelius_runtime::claude_code::artifact_call_reads("Artifact", &serde_json::json!({ "action": "read", "url": "u" }));
-        for acts in [publish, reply] {
-            assert!(matches!(artifact_in_plan(acts, AgentMode::Plan), Some(BridgeOutcome::Permission { allow: false, .. })));
-            for mode in [AgentMode::Ask, AgentMode::AcceptEdits, AgentMode::Auto] {
-                assert!(artifact_in_plan(acts, mode).is_none(), "{mode:?} decides as usual");
-            }
-        }
-        assert!(artifact_in_plan(read, AgentMode::Plan).is_none());
-        assert!(artifact_in_plan(None, AgentMode::Plan).is_none(), "other tools are not artifacts");
-        // Ask and Accept edits ask: a switch to Accept edits never waves a publish through.
-        assert!(!covers(AgentMode::AcceptEdits, "Artifact") && !covers(AgentMode::Auto, "Artifact"));
-        // Auto lets artifact calls through only because they are artifact calls (enabling them is the consent).
-        assert!(!auto_allows("Artifact"));
-    }
 }
 
 #[cfg(test)]

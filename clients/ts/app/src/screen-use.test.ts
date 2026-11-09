@@ -37,7 +37,6 @@ describe("the screen counter", () => {
 
 describe("hidden features", () => {
   it("are the desktop's", () => {
-    expect(hidden("Plugins")).toBe(true);
     expect(hidden("ChatAttachments")).toBe(true);
   });
 });

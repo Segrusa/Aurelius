@@ -655,7 +655,7 @@ fn task_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "schedule_message",
-            "description": "Send yourself or a colleague a message later, in the thread you work in now: \"check the CI again in 10 minutes\", \"Bo, look at the deploy tomorrow\". It wakes them then with this message, in a ticket's discussion or channel (visible there), or for yourself in your own chat. It uses the login of this run. For what comes back regularly a recurring task is meant; to look around without a reason there is the heartbeat. Limited per run and per thread; the Scheduled page shows what waits and what came of it.",
+            "description": "Send yourself or a colleague a message later, in the thread you work in now: \"check the CI again in 10 minutes\", \"Bo, look at the deploy tomorrow\". It wakes them then with this message, in a ticket's discussion or channel (visible there), or for yourself in your own chat. It uses the login of this run. For what comes back regularly a recurring task is meant. Limited per run and per thread; the Scheduled page shows what waits and what came of it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

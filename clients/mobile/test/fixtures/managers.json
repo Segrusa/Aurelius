@@ -20,15 +20,6 @@
           "browser_allowed": true,
           "screen_allowed": true,
           "folder": null,
-          "heartbeat": {
-            "every_minutes": 60,
-            "quiet_start_min": 0,
-            "quiet_end_min": 0,
-            "daily_token_budget": 50000,
-            "tokens_today": 1200,
-            "next_due_ms": 5,
-            "waiting": null
-          },
           "sequential_tasks": false,
           "conversations": [
             {

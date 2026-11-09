@@ -97,7 +97,7 @@ impl Org {
         out
     }
 
-    /// The management for an app key with audience `management`: the CEO and
+    /// The management: the CEO and
     /// those who report to the CEO directly (CEO first, then in id order).
     pub fn management(&self, ceo: EmployeeId) -> Vec<EmployeeId> {
         if !self.contains(ceo) {

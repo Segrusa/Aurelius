@@ -7,10 +7,8 @@ mod common;
 use aurelius_client::bridge::BridgeClient;
 use aurelius_client::envelope;
 use aurelius_domain::{
-    Command, CommandId, EmployeeId, ProjectId, RunId,
-    agent_function::{CreateAgentFunction, FunctionFields},
+    Command, CommandId, RunId,
     conversation::SendChatMessage,
-    employee::CreateEmployee,
     project::CreateProject,
 };
 use aurelius_host::ipc::{self, BoxStream, read_frame, write_frame};
@@ -36,7 +34,7 @@ fn tempdir() -> (tempfile::TempDir, PathBuf) {
 async fn raw(root: &Path) -> BoxStream {
     let token = common::sign_in(root, &common::connect_anonymous(root).await, common::BOARD_MEMBER).await.session_token;
     let mut stream = ipc::connect(&aurelius_host::endpoint(root)).await.unwrap();
-    let hello = Request::read(0, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), session_token: Some(token) }));
+    let hello = Request::read(0, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), accepts: Vec::new(), session_token: Some(token) }));
     assert!(matches!(ask(&mut stream, &hello).await, Outcome::Ok(ResponseBody::Hello(h)) if h.user.is_some()), "signed in");
     stream
 }
@@ -60,7 +58,7 @@ fn error_code(outcome: Outcome) -> ErrorCode {
 }
 
 fn hello(request_id: u64, protocol: u16) -> Request {
-    let mut request = Request::read(request_id, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), session_token: None }));
+    let mut request = Request::read(request_id, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), accepts: Vec::new(), session_token: None }));
     request.protocol = protocol;
     request
 }
@@ -280,49 +278,22 @@ async fn the_same_key_replays_and_another_command_with_it_conflicts() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_host_write_replays_from_its_receipt_and_hides_the_api_key_secret() {
+async fn a_host_write_replays_from_its_receipt() {
     let (_dir, root) = tempdir();
     let daemon = start(&root).await;
     let client = connect(&root).await;
 
-    let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(create("Atlas"), None)).await.unwrap().result else { panic!() };
-    let create_employee = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
-    let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create_employee), None)).await.unwrap().result else { panic!() };
-    let function = client.create_agent_function(function_for(project_id, employee_id)).await.unwrap();
-
     let key = CommandId::new();
-    let make = || WriteMethod::Host(HostWrite::ApiKeyCreate { name: "ci".into(), function_ids: vec![function.id] });
+    let make = || WriteMethod::Host(HostWrite::TraceSetEnabled { enabled: true });
     let first = client.write(key, None, make()).await.unwrap();
-    let WriteResult::Host(HostResult::ApiKeyCreated(created)) = &first.result else { panic!("{first:?}") };
+    assert!(matches!(first.result, WriteResult::Host(HostResult::TraceSetting(_))), "{first:?}");
     assert!(!first.replayed);
-    assert!(!created.secret.is_empty(), "the secret is shown once");
 
     let second = client.write(key, None, make()).await.unwrap();
-    let WriteResult::Host(HostResult::ApiKeyCreated(again)) = &second.result else { panic!("{second:?}") };
     assert!(second.replayed);
     assert_eq!(second.committed_seq, first.committed_seq);
-    assert_eq!(again.key, created.key, "the same key, not a second one");
-    assert!(again.secret.is_empty(), "the secret is redacted on replay");
-    assert_eq!(client.api_keys().await.unwrap().len(), 1, "the action was not done twice");
+    assert_eq!(second.result, first.result, "the same answer from the receipt");
     stop(&root, daemon).await;
-}
-
-fn function_for(project_id: ProjectId, employee_id: EmployeeId) -> CreateAgentFunction {
-    CreateAgentFunction {
-        project_id,
-        function: FunctionFields {
-            employee_id,
-            name: "Summarise".into(),
-            slug: String::new(),
-            description: String::new(),
-            instruction_template: "Summarise the project.".into(),
-            params: vec![],
-            mode: None,
-            limit_per_day: None,
-            limit_per_week: None,
-        },
-        enabled: true,
-    }
 }
 
 // ---- the handshake ----
@@ -487,7 +458,7 @@ async fn a_client_that_does_not_accept_server_name_never_gets_server_renamed() {
     let token = common::sign_in(&root, &common::connect_anonymous(&root).await, common::BOARD_MEMBER).await.session_token;
     let mut new = ipc::connect(&aurelius_host::endpoint(&root)).await.unwrap();
     let accepts = vec![aurelius_protocol::client_feature::SERVER_NAME.to_owned()];
-    let hello = Request::read(0, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts, session_token: Some(token) }));
+    let hello = Request::read(0, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), accepts, session_token: Some(token) }));
     assert!(matches!(ask(&mut new, &hello).await, Outcome::Ok(ResponseBody::Hello(h)) if h.host_name == "Thuis"));
     let seen = subscribe_kinds(&mut new, base).await;
     assert_eq!(seen.iter().filter(|k| **k == EventKind::ServerRenamed).count(), 2, "{seen:?}");

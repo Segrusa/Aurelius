@@ -438,7 +438,7 @@ pub fn employee_conversations(conn: &Connection, employee: aurelius_domain::Empl
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-/// The persistent chat of an employee (its first chat): carries mode, heartbeat and summaries.
+/// The persistent chat of an employee (its first chat): carries mode and summaries.
 pub fn is_main_employee_conversation(conn: &Connection, conversation: ConversationId) -> Result<bool, StorageError> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM conversations c WHERE c.id = ?1 AND c.kind = 'employee' AND c.employee_id IS NOT NULL
@@ -808,7 +808,7 @@ pub fn agent_mode(conn: &rusqlite::Connection, conversation: ConversationId) -> 
 }
 
 /// Set the mode of one conversation. Each thread with an employee keeps its own;
-/// the employee's main conversation also governs its task steps and heartbeat.
+/// the employee's main conversation also governs its task steps.
 pub fn set_agent_mode(tx: &Transaction<'_>, conversation: ConversationId, mode: aurelius_domain::autonomy::AgentMode) -> Result<bool, StorageError> {
     Ok(tx.execute("UPDATE conversations SET agent_mode = ?2 WHERE id = ?1", rusqlite::params![conversation.to_string(), mode.as_str()])? == 1)
 }
@@ -849,12 +849,8 @@ pub fn move_run_message_to_end(tx: &Transaction<'_>, run_id: RunId) -> Result<()
 /// Where an employee's conversation works: a task conversation in its project
 /// folder, then the employee's own workspace; an employee chat (no project) in
 /// the employee's own folder only (either may be missing). A standalone chat
-/// never works in one, so it has no Git status or terminal either.
+/// never works in one.
 pub fn work_folders(conn: &rusqlite::Connection, conversation: ConversationId) -> Result<Vec<String>, StorageError> {
-    // A task variant's conversation works in its own worktree, and only there.
-    if let Some(probe) = crate::variants::probe_of_conversation(conn, conversation)? {
-        return Ok(probe.worktree.into_iter().collect());
-    }
     let found: Option<(Option<String>, Option<String>)> = conn
         .query_row(
             "SELECT p.folder, m.folder FROM conversations c LEFT JOIN projects p ON p.id = c.project_id JOIN employees m ON m.id = c.employee_id

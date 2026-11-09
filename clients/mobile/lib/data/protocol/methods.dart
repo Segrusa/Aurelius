@@ -15,39 +15,10 @@ abstract final class Methods {
   /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
   /// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
   static const String activityLogList = 'activity_log.list';
-  static const String agentFunctionCreate = 'agent_function.create';
-  static const String agentFunctionDelete = 'agent_function.delete';
-  static const String agentFunctionList = 'agent_function.list';
-  /// The kill switch: `enabled: false` makes every function refuse calls.
-  static const String agentFunctionSetAllEnabled = 'agent_function.set_all_enabled';
-  static const String agentFunctionSetEnabled = 'agent_function.set_enabled';
-  static const String agentFunctionUpdate = 'agent_function.update';
-  /// The secret is in the answer once; the receipt keeps none.
-  static const String apiKeyCreate = 'api_key.create';
-  static const String apiKeyList = 'api_key.list';
-  static const String apiKeyRevoke = 'api_key.revoke';
-  static const String apiKeySetFunctions = 'api_key.set_functions';
-  /// A key for an outside app (feature `app_keys`); answers `AppKeyCreated`
-  /// with the secret, once: the receipt keeps none.
-  static const String appKeyCreate = 'app_key.create';
-  /// The keys of outside apps that use `aurelius-mcp`, newest first (feature `app_keys`).
-  static const String appKeyList = 'app_key.list';
-  /// Revoked at once, also for the app's open sessions; answers `AppKey`.
-  static const String appKeyRevoke = 'app_key.revoke';
   static const String approvalAnswer = 'approval.answer';
   static const String approvalDecide = 'approval.decide';
   static const String approvalDecidePlan = 'approval.decide_plan';
   static const String approvalList = 'approval.list';
-  /// The file the server kept of one publish (`version`, else the newest kept),
-  /// so a client can show the page without a claude.ai login. Not found for an
-  /// unknown URL; `snapshot` is none for pages published before servers kept them.
-  static const String artifactGetContent = 'artifact.get_content';
-  /// Whether runs may publish Claude Code artifacts (pages on claude.ai).
-  static const String artifactGetSetting = 'artifact.get_setting';
-  /// Artifacts runs published, newest first: every given filter applies, none lists all.
-  static const String artifactList = 'artifact.list';
-  /// Turn Claude Code artifacts on or off for every run that starts afterwards.
-  static const String artifactSetEnabled = 'artifact.set_enabled';
   static const String attachmentAdd = 'attachment.add';
   static const String attachmentRemove = 'attachment.remove';
   /// Whether the safe read-only tools pass without a question (the auto-allow list).
@@ -158,10 +129,6 @@ abstract final class Methods {
   static const String fsCreateDir = 'fs.create_dir';
   /// Folders on the server: none lists the starting points.
   static const String fsListDir = 'fs.list_dir';
-  static const String functionCallList = 'function_call.list';
-  static const String gitGetDiff = 'git.get_diff';
-  /// Branch and uncommitted change of the folder a conversation works in; none outside a Git repository.
-  static const String gitGetStatus = 'git.get_status';
   /// The company's group chat (Team chat): the user and every employee. Its
   /// messages and settings, as `conversation.get` answers them; an employee's
   /// messages carry its name as `author`. Write with `group_chat.send`.
@@ -212,7 +179,6 @@ abstract final class Methods {
   static const String guidelineUpdate = 'guideline.update';
   /// Every version of a guideline, newest first, with its text and source.
   static const String guidelineVersions = 'guideline.versions';
-  static const String heartbeatSet = 'heartbeat.set';
   static const String ideaAdd = 'idea.add';
   static const String ideaDelete = 'idea.delete';
   static const String ideaList = 'idea.list';
@@ -274,17 +240,6 @@ abstract final class Methods {
   /// discussion; any other is `not_found`, as an unknown one. Not for apps.
   static const String messageLocate = 'message.locate';
   static const String messageReact = 'message.react';
-  /// A new note in a project; answers `Note`.
-  static const String noteCreate = 'note.create';
-  static const String noteDelete = 'note.delete';
-  /// One note with its Markdown body.
-  static const String noteGet = 'note.get';
-  /// A project's notes (summaries), pinned first, then the last edited; `query` searches the text.
-  static const String noteList = 'note.list';
-  static const String noteSetPinned = 'note.set_pinned';
-  /// Replace a note's body. Refused with `version_conflict` when the note is no
-  /// longer at `base_revision` (saved elsewhere): load it again with `note.get`.
-  static const String noteUpdate = 'note.update';
   static const String notificationDismiss = 'notification.dismiss';
   static const String notificationDismissAll = 'notification.dismiss_all';
   static const String notificationList = 'notification.list';
@@ -292,24 +247,6 @@ abstract final class Methods {
   /// One row read, for this board member only (feature `personal_inbox`); answers
   /// `Count`, 0 when there was nothing to read, so it can be repeated.
   static const String notificationMarkRead = 'notification.mark_read';
-  /// The plugins one employee has enabled.
-  static const String pluginGetForEmployee = 'plugin.get_for_employee';
-  /// The plugins a project has enabled (its project assistant loads them).
-  static const String pluginGetForProject = 'plugin.get_for_project';
-  /// Install plugins (`name@marketplace`) and enable them for the given employees and projects.
-  static const String pluginInstall = 'plugin.install';
-  /// Claude Code plugins installed on the server's computer, with the employees that use each.
-  static const String pluginList = 'plugin.list';
-  /// Plugins offered by the marketplaces already added.
-  static const String pluginListAvailable = 'plugin.list_available';
-  /// Adds the marketplace behind a link (GitHub URL, `owner/repo` or git URL).
-  static const String pluginPreview = 'plugin.preview';
-  static const String pluginRemove = 'plugin.remove';
-  /// Replace the plugins an employee has enabled; applies from its next run.
-  static const String pluginSetForEmployee = 'plugin.set_for_employee';
-  /// Replace the plugins a project has enabled (for its project assistant); applies from its next run.
-  static const String pluginSetForProject = 'plugin.set_for_project';
-  static const String pluginUpdate = 'plugin.update';
   static const String powerCancel = 'power.cancel';
   static const String powerGet = 'power.get';
   static const String powerShutdown = 'power.shutdown';
@@ -383,35 +320,14 @@ abstract final class Methods {
   /// connection closes at once (`ServerMessage::SignedOut`); the timeline says
   /// who revoked it. Answers `Done`. Not for apps.
   static const String sessionRevoke = 'session.revoke';
-  static const String shareCreate = 'share.create';
-  static const String shareList = 'share.list';
-  static const String shareRevoke = 'share.revoke';
   /// The subagents running in the answers of one conversation.
   static const String subagentList = 'subagent.list';
   static const String subscriptionGet = 'subscription.get';
   static const String taskAssign = 'task.assign';
   static const String taskCancel = 'task.cancel';
-  static const String taskChooseVariant = 'task.choose_variant';
   static const String taskCreate = 'task.create';
-  static const String taskDiscuss = 'task.discuss';
   /// Tasks, newest first, company-wide; every given filter applies.
   static const String taskList = 'task.list';
-  /// A task's variants and the judge's comparison (feature `task_variants`).
-  static const String taskVariants = 'task.variants';
-  static const String terminalClose = 'terminal.close';
-  /// This session stops getting a terminal's output; the shell keeps running and
-  /// keeps its scrollback (feature `terminal.multi`).
-  static const String terminalDetach = 'terminal.detach';
-  static const String terminalInput = 'terminal.input';
-  /// The terminals of a conversation, oldest first (feature `terminal.multi`).
-  static const String terminalList = 'terminal.list';
-  /// A shell in the folder a conversation works in. Attaches to the running terminal
-  /// unless `fresh`; this session then gets its output as `ServerMessage::TerminalOutput`.
-  /// With `terminal_id` it attaches to exactly that terminal (its scrollback follows);
-  /// with `additional` it starts another terminal beside the running ones
-  /// (feature `terminal.multi`; at most 4 per conversation, 8 per server).
-  static const String terminalOpen = 'terminal.open';
-  static const String terminalResize = 'terminal.resize';
   /// One thread of a channel (feature `chat_threads`): `message_id` is the
   /// message that starts it (a message of a channel or a ticket's discussion
   /// that is not itself a reply), answered with the message and its replies,
@@ -555,10 +471,6 @@ abstract final class Methods {
   /// Whether the server has board members, and this connection's session's one.
   /// Works without a session.
   static const String userWhoami = 'user.whoami';
-  /// Whether tasks may be tried in several ways first (feature `task_variants`).
-  static const String variantsGetSetting = 'variants.get_setting';
-  /// Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
-  static const String variantsSetEnabled = 'variants.set_enabled';
   /// Archive ("Delete") an item: runs and employees no longer get it; its audit
   /// history stays. Answers `VaultItem`. Not for apps.
   static const String vaultArchive = 'vault.archive';
@@ -628,50 +540,8 @@ Map<String, dynamic> activityLogList({int? beforeSeq, String? category, String? 
   },
 };
 
-Map<String, dynamic> agentFunctionList({String? projectId}) => <String, dynamic>{
-  'method': Methods.agentFunctionList,
-  'params': <String, dynamic>{
-    if (projectId != null) 'project_id': projectId,
-  },
-};
-
-Map<String, dynamic> apiKeyList() => <String, dynamic>{
-  'method': Methods.apiKeyList,
-};
-
-/// The keys of outside apps that use `aurelius-mcp`, newest first (feature `app_keys`).
-Map<String, dynamic> appKeyList() => <String, dynamic>{
-  'method': Methods.appKeyList,
-};
-
 Map<String, dynamic> approvalList() => <String, dynamic>{
   'method': Methods.approvalList,
-};
-
-/// The file the server kept of one publish (`version`, else the newest kept),
-/// so a client can show the page without a claude.ai login. Not found for an
-/// unknown URL; `snapshot` is none for pages published before servers kept them.
-Map<String, dynamic> artifactGetContent({required String url, int? version}) => <String, dynamic>{
-  'method': Methods.artifactGetContent,
-  'params': <String, dynamic>{
-    'url': url,
-    if (version != null) 'version': version,
-  },
-};
-
-/// Whether runs may publish Claude Code artifacts (pages on claude.ai).
-Map<String, dynamic> artifactGetSetting() => <String, dynamic>{
-  'method': Methods.artifactGetSetting,
-};
-
-/// Artifacts runs published, newest first: every given filter applies, none lists all.
-Map<String, dynamic> artifactList({String? conversationId, String? projectId, String? taskId}) => <String, dynamic>{
-  'method': Methods.artifactList,
-  'params': <String, dynamic>{
-    if (conversationId != null) 'conversation_id': conversationId,
-    if (projectId != null) 'project_id': projectId,
-    if (taskId != null) 'task_id': taskId,
-  },
 };
 
 /// Whether the safe read-only tools pass without a question (the auto-allow list).
@@ -825,29 +695,6 @@ Map<String, dynamic> fsListDir({String? path}) => <String, dynamic>{
   'method': Methods.fsListDir,
   'params': <String, dynamic>{
     if (path != null) 'path': path,
-  },
-};
-
-Map<String, dynamic> functionCallList({String? functionId, int? limit}) => <String, dynamic>{
-  'method': Methods.functionCallList,
-  'params': <String, dynamic>{
-    if (functionId != null) 'function_id': functionId,
-    if (limit != null) 'limit': limit,
-  },
-};
-
-Map<String, dynamic> gitGetDiff({required String conversationId}) => <String, dynamic>{
-  'method': Methods.gitGetDiff,
-  'params': <String, dynamic>{
-    'conversation_id': conversationId,
-  },
-};
-
-/// Branch and uncommitted change of the folder a conversation works in; none outside a Git repository.
-Map<String, dynamic> gitGetStatus({required String conversationId}) => <String, dynamic>{
-  'method': Methods.gitGetStatus,
-  'params': <String, dynamic>{
-    'conversation_id': conversationId,
   },
 };
 
@@ -1024,51 +871,8 @@ Map<String, dynamic> messageLocate({required String messageId}) => <String, dyna
   },
 };
 
-/// One note with its Markdown body.
-Map<String, dynamic> noteGet({required String noteId}) => <String, dynamic>{
-  'method': Methods.noteGet,
-  'params': <String, dynamic>{
-    'note_id': noteId,
-  },
-};
-
-/// A project's notes (summaries), pinned first, then the last edited; `query` searches the text.
-Map<String, dynamic> noteList({required String projectId, String? query}) => <String, dynamic>{
-  'method': Methods.noteList,
-  'params': <String, dynamic>{
-    'project_id': projectId,
-    if (query != null) 'query': query,
-  },
-};
-
 Map<String, dynamic> notificationList() => <String, dynamic>{
   'method': Methods.notificationList,
-};
-
-/// The plugins one employee has enabled.
-Map<String, dynamic> pluginGetForEmployee({required String employeeId}) => <String, dynamic>{
-  'method': Methods.pluginGetForEmployee,
-  'params': <String, dynamic>{
-    'employee_id': employeeId,
-  },
-};
-
-/// The plugins a project has enabled (its project assistant loads them).
-Map<String, dynamic> pluginGetForProject({required String projectId}) => <String, dynamic>{
-  'method': Methods.pluginGetForProject,
-  'params': <String, dynamic>{
-    'project_id': projectId,
-  },
-};
-
-/// Claude Code plugins installed on the server's computer, with the employees that use each.
-Map<String, dynamic> pluginList() => <String, dynamic>{
-  'method': Methods.pluginList,
-};
-
-/// Plugins offered by the marketplaces already added.
-Map<String, dynamic> pluginListAvailable() => <String, dynamic>{
-  'method': Methods.pluginListAvailable,
 };
 
 Map<String, dynamic> powerGet() => <String, dynamic>{
@@ -1177,13 +981,6 @@ Map<String, dynamic> sessionList({String? userId}) => <String, dynamic>{
   },
 };
 
-Map<String, dynamic> shareList({required String projectId}) => <String, dynamic>{
-  'method': Methods.shareList,
-  'params': <String, dynamic>{
-    'project_id': projectId,
-  },
-};
-
 /// The subagents running in the answers of one conversation.
 Map<String, dynamic> subagentList({required String conversationId}) => <String, dynamic>{
   'method': Methods.subagentList,
@@ -1206,72 +1003,6 @@ Map<String, dynamic> taskList({String? employeeId, String? projectId, TaskListSt
     if (employeeId != null) 'employee_id': employeeId,
     if (projectId != null) 'project_id': projectId,
     if (state != null) 'state': state.toJson(),
-  },
-};
-
-/// A task's variants and the judge's comparison (feature `task_variants`).
-Map<String, dynamic> taskVariants({required String taskId}) => <String, dynamic>{
-  'method': Methods.taskVariants,
-  'params': <String, dynamic>{
-    'task_id': taskId,
-  },
-};
-
-Map<String, dynamic> terminalClose({required String terminalId}) => <String, dynamic>{
-  'method': Methods.terminalClose,
-  'params': <String, dynamic>{
-    'terminal_id': terminalId,
-  },
-};
-
-/// This session stops getting a terminal's output; the shell keeps running and
-/// keeps its scrollback (feature `terminal.multi`).
-Map<String, dynamic> terminalDetach({required String terminalId}) => <String, dynamic>{
-  'method': Methods.terminalDetach,
-  'params': <String, dynamic>{
-    'terminal_id': terminalId,
-  },
-};
-
-Map<String, dynamic> terminalInput({required String dataBase64, required String terminalId}) => <String, dynamic>{
-  'method': Methods.terminalInput,
-  'params': <String, dynamic>{
-    'data_base64': dataBase64,
-    'terminal_id': terminalId,
-  },
-};
-
-/// The terminals of a conversation, oldest first (feature `terminal.multi`).
-Map<String, dynamic> terminalList({required String conversationId}) => <String, dynamic>{
-  'method': Methods.terminalList,
-  'params': <String, dynamic>{
-    'conversation_id': conversationId,
-  },
-};
-
-/// A shell in the folder a conversation works in. Attaches to the running terminal
-/// unless `fresh`; this session then gets its output as `ServerMessage::TerminalOutput`.
-/// With `terminal_id` it attaches to exactly that terminal (its scrollback follows);
-/// with `additional` it starts another terminal beside the running ones
-/// (feature `terminal.multi`; at most 4 per conversation, 8 per server).
-Map<String, dynamic> terminalOpen({bool? additional, required int cols, required String conversationId, required bool fresh, required int rows, String? terminalId}) => <String, dynamic>{
-  'method': Methods.terminalOpen,
-  'params': <String, dynamic>{
-    if (additional != null) 'additional': additional,
-    'cols': cols,
-    'conversation_id': conversationId,
-    'fresh': fresh,
-    'rows': rows,
-    if (terminalId != null) 'terminal_id': terminalId,
-  },
-};
-
-Map<String, dynamic> terminalResize({required int cols, required int rows, required String terminalId}) => <String, dynamic>{
-  'method': Methods.terminalResize,
-  'params': <String, dynamic>{
-    'cols': cols,
-    'rows': rows,
-    'terminal_id': terminalId,
   },
 };
 
@@ -1425,11 +1156,6 @@ Map<String, dynamic> userWhoami() => <String, dynamic>{
   'method': Methods.userWhoami,
 };
 
-/// Whether tasks may be tried in several ways first (feature `task_variants`).
-Map<String, dynamic> variantsGetSetting() => <String, dynamic>{
-  'method': Methods.variantsGetSetting,
-};
-
 /// The audit log, newest first (`VaultAuditPage`): the company's (nothing
 /// given), a project's, or every scope's (`all`); one item's with `item_id`.
 /// `before`: rows older than that row id; `limit` at most 200 (default 50).
@@ -1480,86 +1206,6 @@ Map<String, dynamic> vaultReveal({required String itemId, required RevealPurpose
 };
 
 // Writes only the host can do.
-
-Map<String, dynamic> agentFunctionCreate(CreateAgentFunction params) => <String, dynamic>{
-  'method': Methods.agentFunctionCreate,
-  'params': params.toJson(),
-};
-
-Map<String, dynamic> agentFunctionDelete({required String functionId}) => <String, dynamic>{
-  'method': Methods.agentFunctionDelete,
-  'params': <String, dynamic>{
-    'function_id': functionId,
-  },
-};
-
-/// The kill switch: `enabled: false` makes every function refuse calls.
-Map<String, dynamic> agentFunctionSetAllEnabled({required bool enabled}) => <String, dynamic>{
-  'method': Methods.agentFunctionSetAllEnabled,
-  'params': <String, dynamic>{
-    'enabled': enabled,
-  },
-};
-
-Map<String, dynamic> agentFunctionSetEnabled({required bool enabled, required String functionId}) => <String, dynamic>{
-  'method': Methods.agentFunctionSetEnabled,
-  'params': <String, dynamic>{
-    'enabled': enabled,
-    'function_id': functionId,
-  },
-};
-
-Map<String, dynamic> agentFunctionUpdate(UpdateAgentFunction params) => <String, dynamic>{
-  'method': Methods.agentFunctionUpdate,
-  'params': params.toJson(),
-};
-
-/// The secret is in the answer once; the receipt keeps none.
-Map<String, dynamic> apiKeyCreate({required List<String> functionIds, required String name}) => <String, dynamic>{
-  'method': Methods.apiKeyCreate,
-  'params': <String, dynamic>{
-    'function_ids': functionIds,
-    'name': name,
-  },
-};
-
-Map<String, dynamic> apiKeyRevoke({required String keyId}) => <String, dynamic>{
-  'method': Methods.apiKeyRevoke,
-  'params': <String, dynamic>{
-    'key_id': keyId,
-  },
-};
-
-Map<String, dynamic> apiKeySetFunctions({required List<String> functionIds, required String keyId}) => <String, dynamic>{
-  'method': Methods.apiKeySetFunctions,
-  'params': <String, dynamic>{
-    'function_ids': functionIds,
-    'key_id': keyId,
-  },
-};
-
-/// A key for an outside app (feature `app_keys`); answers `AppKeyCreated`
-/// with the secret, once: the receipt keeps none.
-Map<String, dynamic> appKeyCreate(CreateAppKey params) => <String, dynamic>{
-  'method': Methods.appKeyCreate,
-  'params': params.toJson(),
-};
-
-/// Revoked at once, also for the app's open sessions; answers `AppKey`.
-Map<String, dynamic> appKeyRevoke({required String keyId}) => <String, dynamic>{
-  'method': Methods.appKeyRevoke,
-  'params': <String, dynamic>{
-    'key_id': keyId,
-  },
-};
-
-/// Turn Claude Code artifacts on or off for every run that starts afterwards.
-Map<String, dynamic> artifactSetEnabled({required bool enabled}) => <String, dynamic>{
-  'method': Methods.artifactSetEnabled,
-  'params': <String, dynamic>{
-    'enabled': enabled,
-  },
-};
 
 /// Auto-allow of the safe read-only tools on or off, from the next tool call. On by default.
 Map<String, dynamic> autoAllowSetEnabled({required bool enabled}) => <String, dynamic>{
@@ -1699,41 +1345,6 @@ Map<String, dynamic> mcpAlwaysAllowRemove({required String tool}) => <String, dy
   },
 };
 
-/// A new note in a project; answers `Note`.
-Map<String, dynamic> noteCreate({String body = '', required String projectId}) => <String, dynamic>{
-  'method': Methods.noteCreate,
-  'params': <String, dynamic>{
-    'body': body,
-    'project_id': projectId,
-  },
-};
-
-Map<String, dynamic> noteDelete({required String noteId}) => <String, dynamic>{
-  'method': Methods.noteDelete,
-  'params': <String, dynamic>{
-    'note_id': noteId,
-  },
-};
-
-Map<String, dynamic> noteSetPinned({required String noteId, required bool pinned}) => <String, dynamic>{
-  'method': Methods.noteSetPinned,
-  'params': <String, dynamic>{
-    'note_id': noteId,
-    'pinned': pinned,
-  },
-};
-
-/// Replace a note's body. Refused with `version_conflict` when the note is no
-/// longer at `base_revision` (saved elsewhere): load it again with `note.get`.
-Map<String, dynamic> noteUpdate({required int baseRevision, required String body, required String noteId}) => <String, dynamic>{
-  'method': Methods.noteUpdate,
-  'params': <String, dynamic>{
-    'base_revision': baseRevision,
-    'body': body,
-    'note_id': noteId,
-  },
-};
-
 Map<String, dynamic> notificationDismiss({required String id}) => <String, dynamic>{
   'method': Methods.notificationDismiss,
   'params': <String, dynamic>{
@@ -1753,56 +1364,6 @@ Map<String, dynamic> notificationMarkAllRead() => <String, dynamic>{
 /// `Count`, 0 when there was nothing to read, so it can be repeated.
 Map<String, dynamic> notificationMarkRead({required String id}) => <String, dynamic>{
   'method': Methods.notificationMarkRead,
-  'params': <String, dynamic>{
-    'id': id,
-  },
-};
-
-/// Install plugins (`name@marketplace`) and enable them for the given employees and projects.
-Map<String, dynamic> pluginInstall({required List<String> employees, required List<String> ids, List<String> projects = const []}) => <String, dynamic>{
-  'method': Methods.pluginInstall,
-  'params': <String, dynamic>{
-    'employees': employees,
-    'ids': ids,
-    'projects': projects,
-  },
-};
-
-/// Adds the marketplace behind a link (GitHub URL, `owner/repo` or git URL).
-Map<String, dynamic> pluginPreview({required String source}) => <String, dynamic>{
-  'method': Methods.pluginPreview,
-  'params': <String, dynamic>{
-    'source': source,
-  },
-};
-
-Map<String, dynamic> pluginRemove({required String id}) => <String, dynamic>{
-  'method': Methods.pluginRemove,
-  'params': <String, dynamic>{
-    'id': id,
-  },
-};
-
-/// Replace the plugins an employee has enabled; applies from its next run.
-Map<String, dynamic> pluginSetForEmployee({required String employeeId, required List<String> enabled}) => <String, dynamic>{
-  'method': Methods.pluginSetForEmployee,
-  'params': <String, dynamic>{
-    'employee_id': employeeId,
-    'enabled': enabled,
-  },
-};
-
-/// Replace the plugins a project has enabled (for its project assistant); applies from its next run.
-Map<String, dynamic> pluginSetForProject({required List<String> enabled, required String projectId}) => <String, dynamic>{
-  'method': Methods.pluginSetForProject,
-  'params': <String, dynamic>{
-    'enabled': enabled,
-    'project_id': projectId,
-  },
-};
-
-Map<String, dynamic> pluginUpdate({required String id}) => <String, dynamic>{
-  'method': Methods.pluginUpdate,
   'params': <String, dynamic>{
     'id': id,
   },
@@ -1951,14 +1512,6 @@ Map<String, dynamic> userDisable({required String userId}) => <String, dynamic>{
 Map<String, dynamic> userSetPassword(SetPasswordParams params) => <String, dynamic>{
   'method': Methods.userSetPassword,
   'params': params.toJson(),
-};
-
-/// Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
-Map<String, dynamic> variantsSetEnabled({required bool enabled}) => <String, dynamic>{
-  'method': Methods.variantsSetEnabled,
-  'params': <String, dynamic>{
-    'enabled': enabled,
-  },
 };
 
 /// Archive ("Delete") an item: runs and employees no longer get it; its audit
@@ -2251,11 +1804,6 @@ Map<String, dynamic> guidelineUpdate({required String guidelineId, String? text,
   },
 };
 
-Map<String, dynamic> heartbeatSet(SetHeartbeat params) => <String, dynamic>{
-  'method': Methods.heartbeatSet,
-  'params': params.toJson(),
-};
-
 Map<String, dynamic> ideaAdd(AddIdea params) => <String, dynamic>{
   'method': Methods.ideaAdd,
   'params': params.toJson(),
@@ -2416,16 +1964,6 @@ Map<String, dynamic> serverSetName({required String name}) => <String, dynamic>{
   },
 };
 
-Map<String, dynamic> shareCreate(ShareMessage params) => <String, dynamic>{
-  'method': Methods.shareCreate,
-  'params': params.toJson(),
-};
-
-Map<String, dynamic> shareRevoke(RevokeShare params) => <String, dynamic>{
-  'method': Methods.shareRevoke,
-  'params': params.toJson(),
-};
-
 Map<String, dynamic> taskAssign(AssignTask params) => <String, dynamic>{
   'method': Methods.taskAssign,
   'params': params.toJson(),
@@ -2436,18 +1974,8 @@ Map<String, dynamic> taskCancel(CancelTask params) => <String, dynamic>{
   'params': params.toJson(),
 };
 
-Map<String, dynamic> taskChooseVariant(ChooseTaskVariant params) => <String, dynamic>{
-  'method': Methods.taskChooseVariant,
-  'params': params.toJson(),
-};
-
 Map<String, dynamic> taskCreate(CreateTask params) => <String, dynamic>{
   'method': Methods.taskCreate,
-  'params': params.toJson(),
-};
-
-Map<String, dynamic> taskDiscuss(DiscussTask params) => <String, dynamic>{
-  'method': Methods.taskDiscuss,
   'params': params.toJson(),
 };
 

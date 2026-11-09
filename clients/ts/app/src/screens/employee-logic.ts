@@ -21,9 +21,9 @@ export const ACCESS_LEVELS: readonly { value: AccessLevel; label: string; hint: 
   {
     value: "read_only",
     label: "Read only",
-    hint: "Reads and searches files. No edits, commands, web, MCP servers or plugins.",
+    hint: "Reads and searches files. No edits, commands, web or MCP servers.",
   },
-  { value: "read_edit", label: "Read and edit", hint: "Also changes files. No commands, web, MCP servers or plugins." },
+  { value: "read_edit", label: "Read and edit", hint: "Also changes files. No commands, web or MCP servers." },
 ];
 
 export const accessOf = (e: Pick<EmployeeSummary, "access_level"> | null): AccessLevel => e?.access_level ?? "inherit";

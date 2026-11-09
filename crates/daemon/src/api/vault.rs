@@ -1,7 +1,7 @@
 //! The vault (feature `vault`): its reads and writes, answered here before the
 //! host pipeline, so a value never reaches the pipeline's receipts, request
 //! hashes or events (MU4-05 AC2, Sentinel SEC0 E5). Board members with a
-//! session only; apps are refused by the gate (`app::required`). The work is
+//! session only. The work is
 //! in `crate::vault`.
 
 use super::users::Attempts;
@@ -13,9 +13,9 @@ use aurelius_domain::CommandId;
 use std::sync::Arc;
 
 fn board_member(peer: &Peer) -> Result<aurelius_domain::UserId, ProtocolError> {
-    match (peer.app.is_none(), peer.session.as_ref(), peer.user) {
-        (true, Some(session), Some(user)) if !session.must_change_password => Ok(user),
-        (true, Some(_), Some(_)) => Err(ProtocolError::new(ErrorCode::PasswordChangeRequired, "Change your temporary password first.")),
+    match (peer.session.as_ref(), peer.user) {
+        (Some(session), Some(user)) if !session.must_change_password => Ok(user),
+        (Some(_), Some(_)) => Err(ProtocolError::new(ErrorCode::PasswordChangeRequired, "Change your temporary password first.")),
         _ => Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "Only a signed-in board member uses the vault.")),
     }
 }
@@ -105,8 +105,5 @@ mod tests {
         assert_eq!(board_member(&peer).unwrap(), user);
         peer.session = Some(session(true));
         assert_eq!(board_member(&peer).unwrap_err().code, ErrorCode::PasswordChangeRequired);
-        peer.session = Some(session(false));
-        peer.app = Some(super::super::AppPeer { key_id: aurelius_domain::AppKeyId::new(), name: "app".into(), scopes: vec![], audience: Default::default() });
-        assert_eq!(board_member(&peer).unwrap_err().code, ErrorCode::BoardMemberRequired, "never an app");
     }
 }

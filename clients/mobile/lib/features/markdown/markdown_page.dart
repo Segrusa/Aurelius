@@ -11,7 +11,7 @@ import '../../data/aurelius_repository.dart';
 import '../../data/views.dart';
 import '../../data/links.dart' show isAureliusHref;
 import '../../data/markdown_paths.dart';
-import '../artifacts/artifacts.dart' show openExternalLink;
+import '../links/external_link.dart' show openExternalLink;
 import '../links/link_actions.dart' show openAureliusLink;
 import 'links.dart';
 

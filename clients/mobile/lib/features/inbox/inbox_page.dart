@@ -18,7 +18,6 @@ import 'inbox_rows.dart';
 import 'inbox_row_actions.dart';
 import 'inbox_sections.dart';
 import 'plan_review.dart';
-import 'variants_card.dart';
 
 class InboxPage extends StatefulWidget {
   const InboxPage({super.key});
@@ -81,19 +80,6 @@ class _InboxPageState extends State<InboxPage> {
               ),
             for (final g in s.guidelineProposals)
               Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: InboxGuidelineProposal(item: g)),
-            for (final t in s.variantTasks)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: VariantsCard(
-                  task: t,
-                  variants: state.variants[t.id],
-                  subtitle: [company.project(t.projectId)?.name ?? '', t.employeeName ?? ''].where((s) => s.isNotEmpty).join(' · '),
-                  choosing: state.deciding.contains('variants:${t.id}'),
-                  onLoad: () => bloc.add(VariantsRequested(t.id)),
-                  onChoose: (n) => bloc.add(VariantChosen(t.id, variant: n)),
-                  onOpen: () => context.push('/project/${t.projectId}/task/${t.id}'),
-                ),
-              ),
             if (s.rowsNeedingYou.isNotEmpty)
               InsetGroup(dividerIndent: 28, children: [for (final n in s.rowsNeedingYou) _swipeAway(bloc, n, _PersonalTile(row: n))]),
             if (s.waitingTasks.isNotEmpty)

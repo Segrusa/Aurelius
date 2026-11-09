@@ -10,5 +10,4 @@ pub mod message_uploads;
 pub mod overview;
 pub mod project_chat;
 pub(crate) mod scheduled;
-pub mod shares;
 pub mod ticket_channel;

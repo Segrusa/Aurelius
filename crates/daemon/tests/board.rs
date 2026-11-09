@@ -277,7 +277,6 @@ async fn without_a_ticket_a_task_still_succeeds_on_its_report() {
         title: "Plain".into(),
         goal: "No ticket".into(),
         acceptance_criteria: vec![],
-        depends_on: vec![],
         run: Default::default(),
         files: vec![],
     };
@@ -477,7 +476,6 @@ async fn a_ticket_in_done_leaves_one_summary_in_its_projects_memory() {
         title: "Plain".into(),
         goal: "No ticket".into(),
         acceptance_criteria: vec![],
-        depends_on: vec![],
         run: Default::default(),
         files: vec![],
     };

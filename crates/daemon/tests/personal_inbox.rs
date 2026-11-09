@@ -403,7 +403,7 @@ async fn a_failed_main_task_goes_to_followers_instead_of_everyone_and_leaves_whe
 }
 
 async fn plain_task(client: &Client, project_id: ProjectId, owner: EmployeeId, goal: &str) -> aurelius_domain::TaskId {
-    let create = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(owner), title: "Plain".into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let create = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(owner), title: "Plain".into(), goal: goal.into(), acceptance_criteria: vec![] };
     let CommandResult::TaskCreated { task_id, .. } = run(client, Command::CreateTask(create)).await else { panic!() };
     task_id
 }

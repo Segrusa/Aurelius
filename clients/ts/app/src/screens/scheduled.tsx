@@ -1,5 +1,5 @@
-// One page for what comes back by itself: scheduled messages, recurring tasks and heartbeats
-// (Heartbeats follows HIDDEN_FEATURES), and the line under a thread that says who waits for it.
+// One page for what comes back by itself: scheduled messages and recurring tasks, and the line
+// under a thread that says who waits for it.
 
 import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
@@ -10,18 +10,10 @@ import type { ScheduledMessageView, TaskScheduleView } from "@aurelius/protocol"
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useEmployees, useKeyed } from "../data";
-import { hidden } from "../hidden";
+import { useKeyed } from "../data";
 import { toast } from "../ui/toast";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, Problem } from "./org-kit";
-import {
-  heartbeatRule,
-  outcomeText,
-  scheduledLine,
-  splitScheduled,
-  waiterLine,
-  withHeartbeat,
-} from "./scheduled-logic";
+import { outcomeText, scheduledLine, splitScheduled, waiterLine } from "./scheduled-logic";
 import { ScheduleDialog } from "./settings-advanced";
 import { Switch, when } from "./settings-kit";
 import { recurrenceText } from "./settings-logic";
@@ -219,40 +211,6 @@ function RecurringTasks() {
   );
 }
 
-function Heartbeats() {
-  const employees = useEmployees();
-  const list = withHeartbeat(employees.data ?? []);
-  return (
-    <section aria-label="Heartbeats" {...stylex.props(styles.section)}>
-      <Eyebrow>Heartbeats</Eyebrow>
-      {list.length === 0 ? (
-        <EmptyState isCompact title="No heartbeats are on." />
-      ) : (
-        <Table density="compact" xstyle={styles.table}>
-          <TableHeader>
-            <TableRow isHeaderRow>
-              <TableHeaderCell xstyle={styles.headCell}>Who</TableHeaderCell>
-              <TableHeaderCell xstyle={styles.headCell}>Rhythm</TableHeaderCell>
-              <TableHeaderCell xstyle={styles.headCell}>Next</TableHeaderCell>
-              <TableHeaderCell xstyle={styles.headCell}>Waiting</TableHeaderCell>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {list.map((e) => (
-              <TableRow key={e.id}>
-                <TableCell xstyle={styles.message}>{e.name}</TableCell>
-                <TableCell xstyle={styles.quiet}>{heartbeatRule(e.heartbeat)}</TableCell>
-                <TableCell xstyle={styles.quiet}>{when(e.heartbeat.next_due_ms)}</TableCell>
-                <TableCell xstyle={styles.quiet}>{e.heartbeat.waiting ?? ""}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-    </section>
-  );
-}
-
 export function ScheduledScreen() {
   const connection = useConnection();
   const { features } = useLinkState();
@@ -277,7 +235,6 @@ export function ScheduledScreen() {
             <Hint>This server does not have scheduled messages yet.</Hint>
           )}
           <RecurringTasks />
-          {hidden("Heartbeats") ? null : <Heartbeats />}
         </div>
       </div>
     </Page>

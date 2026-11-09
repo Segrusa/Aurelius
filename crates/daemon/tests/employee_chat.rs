@@ -51,7 +51,7 @@ async fn an_employee_chats_outside_projects_and_keeps_its_task_conversations() {
     assert!(client.employee_chat(EmployeeId::new()).await.is_err(), "an unknown employee has no chat");
 
     // Tasks keep their conversation, in the task's project, and the user can still write in it.
-    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: Some(alex), title: "Dark mode".into(), goal: "Werk aan dark mode".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: Some(alex), title: "Dark mode".into(), goal: "Werk aan dark mode".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap();
     let mut conversation = None;
     for _ in 0..600 {

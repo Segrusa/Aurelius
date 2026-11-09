@@ -77,15 +77,12 @@ export function areasOf(kind: EventKind | string): Area[] {
     case "idea":
       return ["ideas"];
     case "memory":
-    case "share":
       return ["memory"];
     case "vault":
       return ["vault"];
     case "recurring_task":
     case "schedule":
       return ["settings", "scheduled"];
-    case "heartbeat":
-      return ["employees", "scheduled"];
     default:
       return [];
   }

@@ -213,7 +213,6 @@ async fn every_text_command_is_refused_by_name_and_stored_redacted_when_confirme
             title: "Rotate the key".into(),
             goal: format!("Rotate {}", task.value),
             acceptance_criteria: vec![format!("{} no longer works", task.value)],
-            depends_on: vec![],
             run: RunSettings::default(),
             files: vec![],
             confirm_secret,

@@ -14,8 +14,7 @@ use rusqlite::Connection;
 ///    after a transient error (requeues);
 ///  - actions and plans the user rejected or sent back for changes;
 ///  - parts delegated from it that failed, were cancelled or came back to the boss;
-///  - the task's own failure;
-///  - the approach chosen from several variants of the task (`task.variant_chosen`).
+///  - the task's own failure.
 pub fn task_signals(conn: &Connection, task: TaskId, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<(EventId, String)>, StorageError> {
     let task = task.to_string();
     let mut found: Vec<(i64, String, String)> = Vec::new();
@@ -107,22 +106,6 @@ pub fn task_signals(conn: &Connection, task: TaskId, read_blob: &dyn Fn(&str) ->
                 _ => format!("The part “{title}” given to {who} came back: it stopped and waits."),
             };
             found.push((seq, event, text));
-        }
-    }
-
-    // Of several variants of the task, the approach that was chosen.
-    {
-        let mut stmt = conn.prepare(
-            "SELECT seq, id, COALESCE(json_extract(metadata_json, '$.hint'), ''), COALESCE(json_extract(metadata_json, '$.variants'), 0), COALESCE(json_extract(metadata_json, '$.by'), '')
-             FROM events WHERE aggregate_type = 'task' AND aggregate_id = ?1 AND type = 'task.variant_chosen' ORDER BY seq",
-        )?;
-        let rows = stmt.query_map([&task], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, String>(4)?)))?;
-        for (seq, event, hint, variants, by) in rows.filter_map(Result::ok) {
-            if hint.trim().is_empty() {
-                continue;
-            }
-            let by = if by == "judge" { "the judge" } else { "the user" };
-            found.push((seq, event, format!("Of {variants} approaches tried side by side, {by} chose: {}", hint.trim())));
         }
     }
 

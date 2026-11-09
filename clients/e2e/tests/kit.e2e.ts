@@ -87,10 +87,6 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await expect(page.getByRole("option", { name: /Northwind API/ }).first()).toBeVisible();
     await palette(page).fill("j");
     await expect(page).toHaveURL(/inbox/);
-    await palette(page).fill("heartbeat");
-    await expect(page.locator(".astryx-command-palette-empty")).toBeVisible();
-    await palette(page).fill("plugin");
-    await expect(page.locator(".astryx-command-palette-empty")).toBeVisible();
     await palette(page).fill("");
     await page.keyboard.press("Control+,");
     await expect(page).toHaveURL(/inbox/);

@@ -299,16 +299,6 @@ export const SHORTCUTS: Shortcut[] = [
     action: "CycleAgentMode",
   },
   {
-    keys: ["alt-h"],
-    context: "Aurelius",
-    navKeys: [],
-    label: "Employee heartbeat: off \u2192 every 30 min \u2192 hourly \u2192 every 4 h",
-    section: "Manager",
-    inPalette: true,
-    action: "CycleHeartbeat",
-    feature: "Heartbeats",
-  },
-  {
     keys: ["alt-b"],
     context: "Aurelius",
     navKeys: [],

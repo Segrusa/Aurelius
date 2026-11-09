@@ -1,7 +1,6 @@
 //! Scheduling rules. Pure functions with explicit time, so
 //! tests run on a fake clock.
 
-pub mod heartbeat;
 pub mod scheduled_message;
 
 use sha2::{Digest, Sha256};

@@ -116,10 +116,6 @@ pub(crate) fn live_run_notice(tx: &Tx<'_>, conversation: ConversationId) -> Resu
 
 /// A run ended: what it means for the task it belongs to.
 pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bool, failed: Option<&str>, answer: &str) -> Result<Vec<EventNotice>, StorageError> {
-    // A trial of a task (its variants): the variant ends, the task job goes on with the next step.
-    if let Some(notices) = crate::task::variants::on_probe_run_finished(tx, st, run, completed, failed, answer)? {
-        return Ok(notices);
-    }
     let task: Option<String> = tx.query_row("SELECT task_id FROM runs WHERE id = ?1 AND conversation_id IS NOT NULL", [run.to_string()], |r| r.get(0)).ok().flatten();
     // A run of a finished task is not linked to it: the task keeps its status, only its live run ends.
     let Some(task) = task.and_then(|t| TaskId::parse(&t).ok()) else {
@@ -422,12 +418,6 @@ pub(crate) fn accept(tx: &Tx<'_>, st: &Store, task: TaskId, report: &str, by: Op
         crate::memory::schedule_extraction(tx, task, ticket, source)?;
     }
     notices.push(succeeded);
-    // Tasks waiting on this one can go.
-    tx.execute(
-        "UPDATE jobs SET not_before_ms = ?2, last_error_code = NULL WHERE state = 'ready'
-         AND id IN (SELECT task_id FROM task_dependencies WHERE requires_task_id = ?1)",
-        (task.to_string(), aurelius_storage::now_ms()),
-    )?;
     notices.extend(after_ended(tx, st, task, &report, true)?);
     Ok(notices)
 }
@@ -1281,8 +1271,8 @@ pub(crate) fn need_project(conn: &rusqlite::Connection, what: &str) -> Result<St
 }
 
 /// Delegate from a conversation that is not a task's: from a project conversation
-/// (the assistant gives an employee work), an employee's chat with the user (it
-/// names the ticket) or its heartbeat. The colleague gets a task of its own on
+/// (the assistant gives an employee work), or an employee's chat with the user (it
+/// names the ticket). The colleague gets a task of its own on
 /// the ticket, whose result comes back in that conversation.
 fn delegate_from_conversation(tx: &Tx<'_>, st: &Store, run: RunId, action: EmployeeAction) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     let EmployeeAction::Delegate { employee, title, goal, criteria, ticket } = action else {

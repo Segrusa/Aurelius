@@ -3,8 +3,8 @@
 
 import 'protocol/protocol.dart';
 
-/// R2 (E21): what the vault screen says about plugins and MCP servers.
-const vaultPluginsNotice = 'Plugins and MCP servers of an employee see the secrets of its runs.';
+/// R2 (E21): what the vault screen says about MCP servers.
+const vaultMcpNotice = 'MCP servers of an employee see the secrets of its runs.';
 
 /// R3 (E21): what the vault screen says about the key on the server.
 const vaultKeyNotice = "On Linux, any process of the daemon's user, also an agent through Bash, can read the key.";

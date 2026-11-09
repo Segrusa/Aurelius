@@ -506,30 +506,6 @@ async fn text_and_url_trade_places_without_a_new_value_and_a_secret_stays_one() 
     stop(dir.path(), daemon).await;
 }
 
-const NOTE_VALUE: &str = "sk-test-FAKE-1212-in-a-note";
-
-/// R1 m7: a project note (runs read it as context) with a vault value is
-/// refused with the item's name, before anything is stored.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_project_note_with_a_vault_value_is_refused() {
-    use aurelius_domain::{Command, CommandResult, project::CreateProject};
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = start(dir.path()).await;
-    let client = connect(dir.path()).await;
-    client.vault_create(create(VaultKind::Secret, "Noted", "NOTED_TOKEN", NOTE_VALUE)).await.unwrap();
-    let created = client.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: "Notes".into(), description: None, folder: None }), None)).await.unwrap();
-    let CommandResult::ProjectCreated { project_id, .. } = created.result else { panic!() };
-
-    let aurelius_client::ClientError::Protocol(err) = client.create_note(project_id, format!("deploy with {NOTE_VALUE}")).await.unwrap_err() else { panic!() };
-    assert_eq!((err.code, err.matched_items), (ErrorCode::LooksLikeSecret, vec!["Noted".to_owned()]));
-    let note = client.create_note(project_id, "deploy with $NOTED_TOKEN".into()).await.unwrap();
-    let edit = client.update_note(note.summary.id, format!("deploy with {NOTE_VALUE}"), note.summary.revision).await.unwrap_err();
-    assert_eq!(code(edit), ErrorCode::LooksLikeSecret);
-    assert_eq!(client.note(note.summary.id).await.unwrap().body, "deploy with $NOTED_TOKEN");
-    stop(dir.path(), daemon).await;
-    assert!(!holds(&database_bytes(dir.path()), "FAKE-1212"), "nothing of it stored");
-}
-
 const EXPORT_VALUE: &str = "sk-test-FAKE-1313-export-told";
 
 /// SEC1 m4: the key goes out only with its line in the general Team chat;
@@ -701,12 +677,6 @@ async fn the_vault_methods_are_for_signed_in_board_members_only() {
     assert!(temporary.user_login("robin", "a-temporary-password-for-robin", "Laptop").await.unwrap().must_change_password);
     assert_eq!(every(&temporary, item.id).await, vec![ErrorCode::PasswordChangeRequired; 7]);
 
-    let key = alex
-        .create_app_key(aurelius_domain::app_key::CreateAppKey { name: "assistant".into(), scopes: aurelius_domain::app_key::AppScope::ALL.to_vec(), limit_per_hour: None, limit_concurrent: None, audience: Default::default(), webhook_url: None })
-        .await
-        .unwrap();
-    let app = Client::connect_app(&aurelius_host::endpoint(dir.path()), &key.secret, "test app").await.unwrap();
-    assert_eq!(every(&app, item.id).await, vec![ErrorCode::Forbidden; 7]);
     // Nothing changed.
     assert_eq!(alex.vault_list(None).await.unwrap().items.len(), 1);
     assert_eq!(alex.vault_list(None).await.unwrap().items[0].name, "Note");

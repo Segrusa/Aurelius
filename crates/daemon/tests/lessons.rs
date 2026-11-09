@@ -61,7 +61,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str) -> Employe
 
 /// Give the employee a task and wait until it ended with `status`.
 async fn work(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str, status: TaskStatus) -> TaskId {
-    let task = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: title.into(), goal: format!("{title} for the release"), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let task = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: title.into(), goal: format!("{title} for the release"), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(task), None)).await.unwrap().result else { panic!("not a task") };
     for _ in 0..400 {
         if client.tasks(Some(project_id)).await.unwrap().tasks.iter().any(|t| t.id == task_id && t.status == status) {

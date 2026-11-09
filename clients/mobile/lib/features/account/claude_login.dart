@@ -63,11 +63,8 @@ String claudeLimitReached(SubscriptionUsage usage) {
   return resets.isEmpty ? 'Limit reached.' : 'Limit reached until ${resets.last}.';
 }
 
-/// B1-2: an app key, schedule or heartbeat runs on the login of whoever makes it.
+/// B1-2: a schedule runs on the login of whoever makes it.
 const ownSubscriptionNote = 'Tasks of this app run on your own Claude subscription.';
-
-/// B1-2, with an API key: whose login its calls use, and SEC3 N3: not for others.
-const apiKeyLoginNote = 'Its calls run on the Claude login of the board member who made it or last set its functions. Only for your own use: don\'t give this key to others. For calls from others, use an employee on an Anthropic API key connection.';
 
 const claudeNoSubscription = 'This login has no Claude subscription (API usage only).';
 

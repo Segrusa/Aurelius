@@ -100,7 +100,6 @@ export const shortRun = (id: string): string => id.slice(-6);
 const KINDS: Record<string, string> = {
   message: "Message",
   task: "Task",
-  heartbeat: "Heartbeat",
   resume: "Answer",
   scheduled: "Scheduled message",
   handoff: "Handoff",

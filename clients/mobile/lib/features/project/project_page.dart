@@ -59,11 +59,9 @@ class ProjectPage extends StatelessWidget {
         length: tabs.length,
         initialIndex: tabs.indexOf(initialTab ?? '').clamp(0, tabs.length - 1),
         child: BlocConsumer<ProjectBloc, ProjectState>(
-          listenWhen: (a, b) => (b.notice != null && a.notice != b.notice) || (b.lastResult != null && a.lastResult != b.lastResult),
+          listenWhen: (a, b) => b.notice != null && a.notice != b.notice,
           listener: (context, state) {
             if (state.notice != null) toast(context, state.notice!);
-            final result = state.lastResult;
-            if (result is CommandResultTaskDiscussed) context.push('/conversation/${result.conversationId}?e=${result.employeeId}');
             context.read<ProjectBloc>().add(const ProjectNoticeShown());
           },
           builder: (context, state) {

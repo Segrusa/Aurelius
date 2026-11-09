@@ -202,7 +202,7 @@ pub(crate) fn team(conn: &rusqlite::Connection) -> Result<Vec<(EmployeeId, Strin
 }
 
 fn ceo(conn: &rusqlite::Connection) -> Result<Option<EmployeeId>, StorageError> {
-    Ok(aurelius_storage::app_keys::management(conn)?.into_iter().find(|m| m.is_ceo).map(|m| m.id))
+    Ok(aurelius_storage::management_mode::management(conn)?.into_iter().find(|m| m.is_ceo).map(|m| m.id))
 }
 
 /// Whether a board member's message without `@Name` goes to the ticket's owner

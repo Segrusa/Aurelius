@@ -129,13 +129,6 @@ event_kinds! {
     MemoryPinned => "memory.pinned",
     MemoryForgotten => "memory.forgotten",
     MemoryAccepted => "memory.accepted",
-    // Task variants (Harness² C); the aggregate is the task.
-    TaskVariantsStarted => "task.variants_started",
-    TaskVariantProbed => "task.variant_probed",
-    TaskVariantsReady => "task.variants_ready",
-    TaskVariantChosen => "task.variant_chosen",
-    TaskVariantsStopped => "task.variants_stopped",
-    TaskVariantsFailed => "task.variants_failed",
     // A later task found the same lesson again (Harness² A); the aggregate is the lesson.
     MemoryReinforced => "memory.reinforced",
     IdeaAdded => "idea.added",
@@ -144,27 +137,15 @@ event_kinds! {
     IdeaStarted => "idea.started",
     IdeaTicketCreated => "idea.ticket_created",
     IdeaDeleted => "idea.deleted",
-    ShareGranted => "share.granted",
-    ShareRevoked => "share.revoked",
     AttachmentAdded => "attachment.added",
     AttachmentRemoved => "attachment.removed",
-    HeartbeatChanged => "heartbeat.changed",
-    HeartbeatReported => "heartbeat.reported",
     WakeRequested => "wake.requested",
     RecurringTaskChanged => "recurring_task.changed",
-    AgentFunctionChanged => "agent_function.changed",
-    ApiKeyChanged => "api_key.changed",
     // An MCP server's OAuth status changed (login, logout); `aggregate_id` is the server name.
     McpAuthChanged => "mcp.auth_changed",
     // A login of `mcp.login_start` ended (succeeded, failed, expired); `aggregate_id` is the login id.
     McpLoginFinished => "mcp.login_finished",
-    // A run published (or republished) a Claude Code artifact; the aggregate is its conversation.
-    ArtifactPublished => "artifact.published",
-    // A note of a project was created, saved (`metadata.revision`), pinned or deleted; the aggregate is the note.
-    NoteCreated => "note.created",
-    NoteUpdated => "note.updated",
-    NoteDeleted => "note.deleted",
-    // A write of the host (MCP, plugins, load, backups, …): the audit record of the write pipeline.
+    // A write of the host (MCP, load, backups, …): the audit record of the write pipeline.
     HostWrite => "host.write",
     // The board (protocol 4); the aggregate is the ticket. `metadata.by` is an `Actor`.
     TicketCreated => "ticket.created",

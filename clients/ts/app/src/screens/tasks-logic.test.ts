@@ -20,7 +20,6 @@ const task = (id: string, over: Partial<TaskView> = {}): TaskView => ({
   children: [],
   created_at_ms: 0,
   criteria: [],
-  depends_on: [],
   handoffs: [],
   pending_approvals: 0,
   project_id: "p",

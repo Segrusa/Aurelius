@@ -275,7 +275,6 @@ dependencies = [
  "aurelius-runtime",
  "aurelius-storage",
  "aurelius-tools",
- "getrandom 0.3.4",
  "hex",
  "image",
  "rusqlite",
@@ -323,12 +322,10 @@ dependencies = [
  "aurelius-daemon",
  "aurelius-domain",
  "aurelius-host",
- "aurelius-mcp",
  "aurelius-protocol",
  "aurelius-remote-gateway",
  "aurelius-runtime",
  "aurelius-storage",
- "aurelius-tools",
  "base64 0.22.1",
  "futures-util",
  "getrandom 0.3.4",
@@ -361,7 +358,6 @@ dependencies = [
 name = "aurelius-domain"
 version = "0.9.1"
 dependencies = [
- "hex",
  "schemars",
  "serde",
  "serde_json",
@@ -385,7 +381,6 @@ dependencies = [
  "hex",
  "ksni",
  "libc",
- "portable-pty",
  "security-framework",
  "serde",
  "serde_json",
@@ -399,21 +394,6 @@ dependencies = [
  "uuid",
  "windows-sys 0.61.2",
  "zip",
-]
-
-[[package]]
-name = "aurelius-mcp"
-version = "0.9.1"
-dependencies = [
- "anyhow",
- "aurelius-client",
- "aurelius-domain",
- "aurelius-host",
- "aurelius-protocol",
- "axum",
- "serde_json",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -433,10 +413,8 @@ dependencies = [
 name = "aurelius-remote-gateway"
 version = "0.9.1"
 dependencies = [
- "aurelius-client",
  "aurelius-domain",
  "aurelius-host",
- "aurelius-mcp",
  "aurelius-protocol",
  "aurelius-runtime",
  "aurelius-storage",

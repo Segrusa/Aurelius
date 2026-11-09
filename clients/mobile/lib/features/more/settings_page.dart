@@ -12,7 +12,6 @@ import '../../core/widgets/widgets.dart' show InfoIcon;
 import '../../data/aurelius_repository.dart';
 import '../../data/run_config.dart';
 import '../../data/views.dart';
-import '../artifacts/artifacts.dart';
 import '../connection/connection_bloc.dart';
 import '../chat/chat_view.dart' show showModelSheet;
 import '../hosts/hosts_bloc.dart';
@@ -21,7 +20,6 @@ import '../power/power_widgets.dart';
 import '../runtime/runtime_bloc.dart';
 import '../server_name/server_name_bloc.dart';
 import '../server_name/server_name_section.dart';
-import 'app_keys_section.dart';
 import 'auto_allow_section.dart';
 import 'mcp_section.dart';
 
@@ -183,7 +181,7 @@ class SettingsPage extends StatelessWidget {
               key: const ValueKey('settings-advanced'),
               leading: const IconTile(CupertinoIcons.slider_horizontal_3),
               title: 'Advanced',
-              trailing: const InfoIcon('Plugins, load, MCP & tools, app keys, recurring tasks.', label: 'Advanced'),
+              trailing: const InfoIcon('Load, MCP & tools, recurring tasks.', label: 'Advanced'),
               chevron: true,
               onTap: () => context.push('/settings/advanced'),
             ),
@@ -213,8 +211,8 @@ class SettingsPage extends StatelessWidget {
 }
 
 /// Settings → Advanced: what the PC itself is set up with, mostly to look at
-/// (it is changed on the desktop): plugins, the load limits, MCP servers and
-/// tools, app keys, the claude.ai account and the recurring tasks.
+/// (it is changed on the desktop): the load limits, MCP servers and tools and
+/// the recurring tasks.
 class AdvancedPage extends StatelessWidget {
   const AdvancedPage({super.key});
 
@@ -228,7 +226,6 @@ class AdvancedPage extends StatelessWidget {
         InsetGroup(
           dividerIndent: 60,
           children: [
-            if (shownInMobileCore('plugins')) GroupRow(key: const ValueKey('advanced-plugins'), leading: const IconTile(Icons.extension), title: 'Plugins', chevron: true, onTap: () => context.push('/plugins')),
             if (shownInMobileCore('recurring'))
             GroupRow(
               key: const ValueKey('advanced-recurring'),
@@ -242,10 +239,7 @@ class AdvancedPage extends StatelessWidget {
         if (shownInMobileCore('load')) LoadLimitsSection(link: link),
         const McpSection(),
         const McpAlwaysAllowSection(),
-        if (shownInMobileCore('artifacts')) const ArtifactsStatus(),
         const AutoAllowSection(),
-        if (shownInMobileCore('app_keys') && shownInMobileCore('api_keys')) const AppKeysSection(),
-        const ClaudeAiAccountSection(),
         const SizedBox(height: 32),
       ],
     );

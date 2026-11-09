@@ -37,7 +37,7 @@ async fn employee(client: &Client) -> (EmployeeId, ConversationId, PathBuf) {
     else {
         panic!()
     };
-    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: "Intro".into(), goal: "Say hello".into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: "Intro".into(), goal: "Say hello".into(), acceptance_criteria: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     for _ in 0..400 {
         if let Some(t) = client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.id == task_id && t.status == TaskStatus::Succeeded) {
@@ -139,7 +139,6 @@ async fn task_attachments_have_ids_and_thumbnails() {
         title: "Look".into(),
         goal: "Look at it".into(),
         acceptance_criteria: vec![],
-        depends_on: vec![],
     };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     let task = client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.id == task_id).unwrap();

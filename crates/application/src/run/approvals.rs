@@ -40,11 +40,7 @@ pub enum RuntimePermission {
 }
 
 /// What a Claude Code tool call can do, for the approval and its audit trail.
-/// An artifact call acts on claude.ai unless its action only reads.
-pub fn runtime_tool_effect(tool: &str, input: &serde_json::Value) -> Effect {
-    if let Some(reads) = aurelius_runtime::claude_code::artifact_call_reads(tool, input) {
-        return if reads { Effect::Read } else { Effect::ExternalWrite };
-    }
+pub fn runtime_tool_effect(tool: &str) -> Effect {
     match tool {
         // A question changes nothing; the user's answer is the decision.
         // A plan changes nothing either; the user's decision is what counts.
@@ -54,52 +50,6 @@ pub fn runtime_tool_effect(tool: &str, input: &serde_json::Value) -> Effect {
         t if SCREEN_TOOLS.contains(&t) => Effect::Read,
         _ => Effect::Execute,
     }
-}
-
-/// Why the inbox asks for an artifact call: what it does on claude.ai.
-pub fn artifact_reason(tool: &str, input: &serde_json::Value) -> String {
-    let action = input["action"].as_str().unwrap_or("publish");
-    let url = input["url"].as_str().unwrap_or("");
-    match tool {
-        "Artifact" if action == "publish" => {
-            let title = artifact_title(input);
-            if url.is_empty() { format!("Publish an artifact to claude.ai: {title}") } else { format!("Publish a new version of the artifact {url}: {title}") }
-        }
-        "Artifact" => format!("{} the artifact {url} on claude.ai.", capitalized(action)),
-        "ArtifactComments" => format!("{} a comment thread on the artifact {url} (claude.ai).", capitalized(action)),
-        _ => format!("Change the data of the artifact {url} on claude.ai ({action})."),
-    }
-}
-
-fn capitalized(word: &str) -> String {
-    let mut chars = word.chars();
-    chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
-}
-
-/// The page's title as claude.ai will show it: the file's `<title>`, else the
-/// `title` argument, else the file name.
-fn artifact_title(input: &serde_json::Value) -> String {
-    let path = input["file_path"].as_str().unwrap_or("");
-    let from_page = std::fs::File::open(path).ok().and_then(|f| {
-        use std::io::Read;
-        let mut head = String::new();
-        f.take(64 * 1024).read_to_string(&mut head).ok()?;
-        title_in(&head)
-    });
-    from_page
-        .or_else(|| input["title"].as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned))
-        .or_else(|| std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| "untitled".into())
-}
-
-/// The text of the first `<title>` element, if any.
-fn title_in(html: &str) -> Option<String> {
-    let lower = html.to_ascii_lowercase();
-    let start = lower.find("<title")?;
-    let open_end = start + lower[start..].find('>')? + 1;
-    let close = open_end + lower[open_end..].find("</title")?;
-    let title: String = html[open_end..close].split_whitespace().collect::<Vec<_>>().join(" ");
-    (!title.is_empty()).then(|| title.chars().take(200).collect())
 }
 
 /// What the user approves: the tool and its exact arguments (object keys are sorted, so
@@ -201,7 +151,7 @@ impl CommandService {
     /// the decision, Claude Code carries out the action itself.
     pub fn request_runtime_permission(&self, run_id: RunId, call_id: Option<String>, tool: &str, input: &serde_json::Value) -> Result<RuntimePermission, AppError> {
         let tool_name = format!("{RUNTIME_TOOL_PREFIX}{tool}");
-        let effect = runtime_tool_effect(tool, input);
+        let effect = runtime_tool_effect(tool);
         let digest = action_digest(&tool_name, input);
         let reasons = if tool == QUESTION_TOOL {
             serde_json::json!(["Claude asks you; it waits for your answer."])
@@ -212,8 +162,6 @@ impl CommandService {
             serde_json::json!([format!("{browser} Aurelius asks in Ask and Accept edits mode; Auto lets it through.")])
         } else if SCREEN_TOOLS.contains(&tool) {
             serde_json::json!(["Looks at your screen; it can show anything that is open. Allowing it counts for the rest of this answer. Turn Screen on for this employee to stop asking."])
-        } else if effect == Effect::ExternalWrite && aurelius_runtime::claude_code::ARTIFACT_TOOLS.contains(&tool) {
-            serde_json::json!([artifact_reason(tool, input), "Acts on your claude.ai account. Aurelius asks in Ask and Accept edits mode; Auto lets it through, Plan mode blocks it."])
         } else if self.run_tool_policy(run_id)?.needs_approval(tool) {
             serde_json::json!(["This employee's tool settings ask first for this, in every mode."])
         } else {

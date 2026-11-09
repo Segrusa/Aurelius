@@ -178,15 +178,6 @@ class ChatAttachmentRemoved extends ChatEvent {
   final String attachmentId;
 }
 
-class ChatShared extends ChatEvent {
-  const ChatShared(this.messageId, {required this.targetKind, required this.targetId, required this.mode});
-
-  final String messageId;
-  final String targetKind;
-  final String targetId;
-  final ShareMode mode;
-}
-
 class ChatNoticeShown extends ChatEvent {
   const ChatNoticeShown();
 }
@@ -285,7 +276,6 @@ class ChatState extends Equatable {
     this.runModel,
     this.runEffort,
     this.history = false,
-    this.shares = const [],
     this.unsent = const [],
     this.images = const [],
     this.files = const [],
@@ -319,7 +309,6 @@ class ChatState extends Equatable {
   /// An older employee chat converted from protocol 2: history only, it
   /// takes no messages (`MessagesSnapshot.read_only`).
   final bool history;
-  final List<ShareView> shares;
   final List<UnsentMessage> unsent;
 
   /// Images for the next message.
@@ -383,7 +372,6 @@ class ChatState extends Equatable {
     bool? screenAllowed,
     (String?, String?)? run,
     bool? history,
-    List<ShareView>? shares,
     List<UnsentMessage>? unsent,
     List<PendingImage>? images,
     List<PendingFile>? files,
@@ -407,7 +395,6 @@ class ChatState extends Equatable {
         runModel: run == null ? runModel : run.$1,
         runEffort: run == null ? runEffort : run.$2,
         history: history ?? this.history,
-        shares: shares ?? this.shares,
         unsent: unsent ?? this.unsent,
         images: images ?? this.images,
         files: files ?? this.files,
@@ -421,7 +408,7 @@ class ChatState extends Equatable {
       );
 
   @override
-  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, shares, unsent, images, files, uploading, notice, loadError, progress, boardMembers, secretCheck, closed];
+  List<Object?> get props => [loading, conversationId, messages, attachments, mode, browserAllowed, screenAllowed, runModel, runEffort, history, unsent, images, files, uploading, notice, loadError, progress, boardMembers, secretCheck, closed];
 }
 
 /// One conversation: an employee's task conversation when [employeeId] is set
@@ -513,10 +500,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<ChatImageRemoved>((e, emit) => emit(state.copyWith(images: state.images.where((i) => i != e.image).toList())));
     on<ChatFileRemoved>((e, emit) => emit(state.copyWith(files: state.files.where((f) => f != e.file).toList())));
     on<ChatAttachmentRemoved>((e, emit) => _run(emit, Commands.removeAttachment(e.attachmentId)));
-    on<ChatShared>((e, emit) => _whenChat(emit, (id) async {
-          await _run(emit, Commands.shareMessage(id, e.messageId, targetKind: e.targetKind, targetId: e.targetId, mode: e.mode));
-          emit(state.copyWith(notice: e.mode == ShareMode.memory ? 'Proposed as memory.' : 'Shared as context.'));
-        }));
     on<ChatNoticeShown>((e, emit) => emit(state.copyWith()));
     on<ChatReopened>((e, emit) => emit(state.copyWith(closed: false)));
     on<ChatReacted>(_react, transformer: sequential());
@@ -655,7 +638,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         screenAllowed: snapshot.screenAllowed,
         run: (snapshot.run.model, snapshot.run.effort),
         history: snapshot.readOnly ?? false,
-        shares: snapshot.shares,
         unsent: state.unsent.where((u) => !u.delivered).toList(),
         clearLoadError: true,
         boardMembers: group && !_membersRead ? await _boardMembers() : null,
