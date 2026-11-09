@@ -59,6 +59,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ScheduledMessageList
         | Method::ThreadWaiting { .. }
         | Method::EmployeeScratchpad { .. }
+        | Method::EmployeeQueue { .. }
+        | Method::ActivityLogList { .. }
         | Method::EmployeeToolOptions
         | Method::EmployeeStartProfiles
         | Method::GroupChatGet { .. }

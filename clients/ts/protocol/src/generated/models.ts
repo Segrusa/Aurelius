@@ -25,6 +25,71 @@ export type AccessLevel =
 ;
 
 /**
+ * One delivery, queue step or run step (R8; feature `activity_log`).
+ */
+export interface ActivityLogEntry {
+  at_ms: number;
+  /**
+   * delivery, queue or run. Text, not an enum: a later value only shows as it is.
+   */
+  category: string;
+  /**
+   * A short code or a tool's name; never the text of a message or a tool's input.
+   */
+  detail?: string | null;
+  employee_id?: string | null;
+  employee_name?: string | null;
+  hop?: number | null;
+  place?: ThreadPlace | null;
+  run_id?: string | null;
+  seq: number;
+  /**
+   * What happened (delivered, claimed, started, tool, ...). Text for the same reason.
+   */
+  step: string;
+  thread_key?: string | null;
+}
+
+/**
+ * `activity_log.list`: the newest rows that match, newest first.
+ */
+export interface ActivityLogPage {
+  as_of_seq: number;
+  entries: ActivityLogEntry[];
+  /**
+   * There are older rows: ask again with `before_seq` as the last row's `seq`.
+   */
+  has_more?: boolean;
+}
+
+/**
+ * What an employee is doing now (U6): the dot in the list. Derived, never stored; a
+ * paused employee is in `status`.
+ */
+export type ActivityState =
+  /**
+   * Nothing for it to do.
+   */
+  | "idle"
+  /**
+   * There is work, but nothing runs yet (its turn, a usage limit, the machine).
+   */
+  | "queued"
+  /**
+   * A state of a newer server this client does not know.
+   */
+  | "unknown"
+  /**
+   * It waits for a board member: an approval, or an answer to a question.
+   */
+  | "waiting"
+  /**
+   * A run of it is going.
+   */
+  | "working"
+;
+
+/**
  * One tool use during an answer, shown at its place in the text.
  */
 export interface ActivityView {
@@ -1741,11 +1806,56 @@ export interface EmployeePlugins {
   missing: string[];
 }
 
+/**
+ * `employee.queue`: what is in an employee's mailbox, what runs first.
+ */
+export interface EmployeeQueue {
+  as_of_seq: number;
+  employee_id: string;
+  items: EmployeeQueueItem[];
+}
+
+/**
+ * One item of an employee's mailbox (U6; feature `employee_queue`).
+ */
+export interface EmployeeQueueItem {
+  created_at_ms: number;
+  hop: number;
+  id: string;
+  /**
+   * message, task, heartbeat, resume, scheduled. Text, not an enum.
+   */
+  kind: string;
+  not_before_ms: number;
+  place: ThreadPlace;
+  /**
+   * The run that works on it; none while it waits.
+   */
+  run_id?: string | null;
+  /**
+   * board, employee or system.
+   */
+  source: string;
+  /**
+   * claimed (a run works on it), queued or held.
+   */
+  state: string;
+  thread_key: string;
+  /**
+   * What holds it back besides its turn: question, limit, later, machine or handoff.
+   */
+  waits_for?: string | null;
+}
+
 export interface EmployeeSummary {
   /**
    * What its runs may do with files and commands (C3); left out when `Inherit`.
    */
   access_level?: AccessLevel;
+  /**
+   * What it is doing now (U6, derived, never stored); left out when idle.
+   */
+  activity_state?: ActivityState;
   agent_mode: AgentMode;
   /**
    * What runs for this employee right now: its own steps,
@@ -1799,6 +1909,11 @@ export interface EmployeeSummary {
    * It works on one task at a time; the others wait their turn.
    */
   sequential_tasks: boolean;
+  /**
+   * Its own provider, model and effort (C1); left out when it inherits them all.
+   * The same as `connection.list` has for its scope, without needing that read.
+   */
+  settings?: RunSettings | null;
   status: LifecycleStatus;
   title?: string | null;
   /**
@@ -3676,6 +3791,11 @@ export type Method =
    * `conversation.get` and live updates shorten (feature `activity_preview`).
    */
   | ({ method: "activity.get"; params: { call_id: string; message_id: string } })
+  /**
+   * The activity log, newest first (R8, feature `activity_log`): every delivery, queue
+   * step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+   */
+  | ({ method: "activity_log.list"; params: { before_seq?: number | null; category?: string | null; employee_id?: string | null; limit?: number | null; run_id?: string | null; thread_key?: string | null; ticket_number?: number | null } })
   | ({ method: "agent_function.list"; params: { project_id?: string | null } })
   | ({ method: "api_key.list" })
   /**
@@ -3763,6 +3883,10 @@ export type Method =
    * The company's employees (not archived), oldest first.
    */
   | ({ method: "employee.list" })
+  /**
+   * What is in an employee's mailbox now (feature `employee_queue`).
+   */
+  | ({ method: "employee.queue"; params: { employee_id: string } })
   /**
    * An employee's scratchpad (feature `employee_scratchpad`).
    */
@@ -4810,6 +4934,10 @@ export type ResponseBody =
    * `activity.get`: one tool call whole.
    */
   | ({ type: "activity"; value: ActivityView })
+  /**
+   * `activity_log.list`.
+   */
+  | ({ type: "activity_log"; value: ActivityLogPage })
   | ({ type: "agent_functions"; value: AgentFunctionsSnapshot })
   | ({ type: "all_ideas"; value: AllIdeasSnapshot })
   | ({ type: "api_keys"; value: ApiKeyView[] })
@@ -4835,6 +4963,10 @@ export type ResponseBody =
   | ({ type: "employee_chats"; value: EmployeeChatsSnapshot })
   | ({ type: "employee_instruction_versions"; value: EmployeeInstructionVersionsSnapshot })
   | ({ type: "employee_plugins"; value: EmployeePlugins })
+  /**
+   * `employee.queue`.
+   */
+  | ({ type: "employee_queue"; value: EmployeeQueue })
   | ({ type: "employee_scratchpad"; value: ScratchpadView })
   /**
    * `employee.start_profiles`.
@@ -6361,6 +6493,22 @@ export interface TerminalView {
    */
   shell: string;
   terminal_id: string;
+}
+
+/**
+ * Where a thread is, as `activity_log.list` and `employee.queue` name it (R8, U6).
+ */
+export interface ThreadPlace {
+  channel_id?: string | null;
+  /**
+   * A board member's chat with an employee, when it is the reader's.
+   */
+  chat_id?: string | null;
+  /**
+   * "#21 Fix login", a channel's name, "Chat with sam", or what is left of it.
+   */
+  label: string;
+  ticket_id?: string | null;
 }
 
 /**

@@ -392,6 +392,13 @@ pub struct EmployeeSummary {
     /// Its tools, MCP servers and what asks first (C2); left out when it has all of its level.
     #[serde(default, skip_serializing_if = "crate::employee_tools::ToolPolicy::is_default")]
     pub tool_policy: crate::employee_tools::ToolPolicy,
+    /// Its own provider, model and effort (C1); left out when it inherits them all.
+    /// The same as `connection.list` has for its scope, without needing that read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<crate::connection::RunDefaults>,
+    /// What it is doing now (U6, derived, never stored); left out when idle.
+    #[serde(default, skip_serializing_if = "crate::employee::ActivityState::is_idle")]
+    pub activity_state: crate::employee::ActivityState,
     /// Projects it has open tasks in (derived, never stored).
     pub projects_active: Vec<ProjectId>,
     pub instructions: Option<String>,
@@ -1145,6 +1152,87 @@ pub struct ThreadWaitingSnapshot {
     pub as_of_seq: u64,
     pub waiters: Vec<ThreadWaiter>,
     pub scheduled: Vec<ScheduledMessageView>,
+}
+
+/// Where a thread is, as `activity_log.list` and `employee.queue` name it (R8, U6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ThreadPlace {
+    /// "#21 Fix login", a channel's name, "Chat with sam", or what is left of it.
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<TicketId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<ConversationId>,
+    /// A board member's chat with an employee, when it is the reader's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<ConversationId>,
+}
+
+/// One delivery, queue step or run step (R8; feature `activity_log`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActivityLogEntry {
+    pub seq: u64,
+    pub at_ms: i64,
+    /// delivery, queue or run. Text, not an enum: a later value only shows as it is.
+    pub category: String,
+    /// What happened (delivered, claimed, started, tool, ...). Text for the same reason.
+    pub step: String,
+    /// A short code or a tool's name; never the text of a message or a tool's input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_id: Option<EmployeeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<ThreadPlace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hop: Option<u32>,
+}
+
+/// `activity_log.list`: the newest rows that match, newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActivityLogPage {
+    pub as_of_seq: u64,
+    pub entries: Vec<ActivityLogEntry>,
+    /// There are older rows: ask again with `before_seq` as the last row's `seq`.
+    #[serde(default)]
+    pub has_more: bool,
+}
+
+/// One item of an employee's mailbox (U6; feature `employee_queue`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeQueueItem {
+    pub id: String,
+    /// message, task, heartbeat, resume, scheduled. Text, not an enum.
+    pub kind: String,
+    /// board, employee or system.
+    pub source: String,
+    /// claimed (a run works on it), queued or held.
+    pub state: String,
+    pub thread_key: String,
+    pub place: ThreadPlace,
+    /// The run that works on it; none while it waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
+    pub hop: u32,
+    pub created_at_ms: i64,
+    pub not_before_ms: i64,
+    /// What holds it back besides its turn: question, limit, later, machine or handoff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waits_for: Option<String>,
+}
+
+/// `employee.queue`: what is in an employee's mailbox, what runs first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeQueue {
+    pub as_of_seq: u64,
+    pub employee_id: EmployeeId,
+    pub items: Vec<EmployeeQueueItem>,
 }
 
 /// `employee.scratchpad`: an employee's own note (C7; feature `employee_scratchpad`).

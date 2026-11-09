@@ -12,6 +12,7 @@ export type MethodGroup = "read" | "host" | "command";
 /** The wire name of every method, with its group. */
 export const METHODS = {
   "activity.get": "read",
+  "activity_log.list": "read",
   "agent_function.create": "host",
   "agent_function.delete": "host",
   "agent_function.list": "read",
@@ -79,6 +80,7 @@ export const METHODS = {
   "employee.instruction_versions": "read",
   "employee.list": "read",
   "employee.open_chat": "command",
+  "employee.queue": "read",
   "employee.restore_instructions": "command",
   "employee.scratchpad": "read",
   "employee.send_message": "command",
@@ -297,6 +299,11 @@ export interface MethodParams {
    * `conversation.get` and live updates shorten (feature `activity_preview`).
    */
   "activity.get": { call_id: string; message_id: string };
+  /**
+   * The activity log, newest first (R8, feature `activity_log`): every delivery, queue
+   * step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+   */
+  "activity_log.list": { before_seq?: number | null; category?: string | null; employee_id?: string | null; limit?: number | null; run_id?: string | null; thread_key?: string | null; ticket_number?: number | null };
   "agent_function.create": M.CreateAgentFunction;
   "agent_function.delete": { function_id: string };
   "agent_function.list": { project_id?: string | null };
@@ -478,6 +485,10 @@ export interface MethodParams {
    */
   "employee.list": undefined;
   "employee.open_chat": M.OpenEmployeeChat;
+  /**
+   * What is in an employee's mailbox now (feature `employee_queue`).
+   */
+  "employee.queue": { employee_id: string };
   "employee.restore_instructions": M.RestoreEmployeeInstructions;
   /**
    * An employee's scratchpad (feature `employee_scratchpad`).

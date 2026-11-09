@@ -4,7 +4,7 @@
 //! Task conversations carry the task's project.
 
 use crate::{StorageError, now_ms};
-use aurelius_domain::{ConversationId, EmployeeId, ProjectId, RunId, employee::{AccessLevel, LifecycleStatus}, employee_tools::{ToolPolicy, tool_policy_in}, views::{AgentView, EmployeeSummary}};
+use aurelius_domain::{ConversationId, EmployeeId, ProjectId, RunId, connection::{ConfigScope, Purpose, RunDefaults}, employee::{AccessLevel, ActivityState, LifecycleStatus}, employee_tools::{ToolPolicy, tool_policy_in}, views::{AgentView, EmployeeSummary}};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 pub struct EmployeeRow {
@@ -301,6 +301,8 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             description: (!description.is_empty()).then_some(description),
             access_level: AccessLevel::parse(&access_level),
             tool_policy: tool_policy_in(&config_json),
+            settings: None,
+            activity_state: ActivityState::Idle,
             projects_active: Vec::new(),
             instructions: key.as_deref().and_then(read_blob),
             status,
@@ -317,7 +319,14 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             agents: Vec::new(),
         });
     }
+    let defaults = crate::connections::list_defaults(conn)?;
     for m in out.iter_mut() {
+        m.settings = defaults
+            .iter()
+            .find(|d| d.purpose == Purpose::Employee && d.scope == ConfigScope::Employee(m.id))
+            .map(|d| d.settings.clone())
+            .filter(|s| *s != RunDefaults::default());
+        m.activity_state = activity_state(conn, m.id)?;
         m.projects_active = projects_active(conn, m.id)?;
         m.conversations = crate::conversations::employee_conversations(conn, m.id)?;
         m.agents = running_agents(conn, m.id)?;
@@ -413,6 +422,26 @@ pub fn running_subagents(conn: &Connection, conversation: ConversationId) -> Res
         out.extend(subagents_of_run(conn, &run, Some(conversation))?);
     }
     Ok(out)
+}
+
+/// What an employee is doing now (`EmployeeSummary::activity_state`).
+pub fn activity_state(conn: &Connection, employee: EmployeeId) -> Result<ActivityState, StorageError> {
+    const ITS_RUN: &str = "FROM runs r JOIN conversations c ON c.id = r.conversation_id WHERE c.employee_id = ?1";
+    const WAITS_ON_APPROVAL: &str = "EXISTS(SELECT 1 FROM approvals a WHERE a.run_id = r.id AND a.status = 'pending')";
+    let state: String = conn.query_row(
+        &format!(
+            "SELECT CASE
+               WHEN EXISTS(SELECT 1 {ITS_RUN} AND r.status IN ('starting','running','cancelling') AND NOT {WAITS_ON_APPROVAL}) THEN 'working'
+               WHEN EXISTS(SELECT 1 {ITS_RUN} AND {WAITS_ON_APPROVAL})
+                 OR EXISTS(SELECT 1 FROM tasks t WHERE t.employee_id = ?1 AND t.status = 'waiting' AND t.waiting_reason = 'input') THEN 'waiting'
+               WHEN EXISTS(SELECT 1 FROM employee_inbox i WHERE i.employee_id = ?1 AND i.state = 'queued')
+                 OR EXISTS(SELECT 1 {ITS_RUN} AND r.status IN ('created','waiting')) THEN 'queued'
+               ELSE 'idle' END"
+        ),
+        [employee.to_string()],
+        |r| r.get(0),
+    )?;
+    Ok(ActivityState::parse(&state))
 }
 
 /// What runs for an employee right now (see `EmployeeSummary::agents`), oldest first.

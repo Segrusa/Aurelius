@@ -2,9 +2,9 @@
 //! employee, per employee and thread, and the state of each thread. What the worker
 //! does with them is in `aurelius_application::run::inbox`.
 
-use crate::{StorageError, now_ms};
-use aurelius_domain::{ConversationId, EmployeeId, EventId, RunId, TaskId, TicketId};
-use aurelius_domain::views::ThreadWaiter;
+use crate::{StorageError, activity_log, now_ms};
+use aurelius_domain::{ConversationId, EmployeeId, EventId, RunId, TaskId, TicketId, UserId};
+use aurelius_domain::views::{EmployeeQueueItem, ThreadWaiter};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::collections::HashSet;
 
@@ -59,12 +59,14 @@ pub fn hold(tx: &Transaction<'_>, item: NewItem<'_>) -> Result<(), StorageError>
 }
 
 fn insert_in(tx: &Transaction<'_>, item: NewItem<'_>, state: &str) -> Result<(), StorageError> {
+    let id = uuid::Uuid::now_v7().to_string();
+    let detail = format!("{} from {}", item.kind, item.source);
     tx.execute(
         "INSERT INTO employee_inbox(id, employee_id, thread_key, ticket_id, conversation_id, kind, source, hop, payload_json,
                                     login_user, task_id, source_event_id, not_before_ms, run_id, created_at_ms, state)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?13, ?15)",
         params![
-            uuid::Uuid::now_v7().to_string(),
+            id,
             item.employee.to_string(),
             item.thread_key,
             item.ticket.map(|t| t.to_string()),
@@ -81,6 +83,7 @@ fn insert_in(tx: &Transaction<'_>, item: NewItem<'_>, state: &str) -> Result<(),
             state,
         ],
     )?;
+    activity_log::item_step(tx, &id, activity_log::DELIVERY, if state == HELD { "held" } else { "delivered" }, Some(&detail), None);
     Ok(())
 }
 
@@ -119,7 +122,9 @@ pub fn releasable_handoffs(conn: &Connection) -> Result<Vec<Item>, StorageError>
 
 /// A held handoff is settled: `done` when delivered, else `cancelled`.
 pub fn settle_handoff(tx: &Transaction<'_>, item: &str, state: &str) -> Result<(), StorageError> {
-    tx.execute("UPDATE employee_inbox SET state = ?2 WHERE id = ?1 AND state = 'held'", [item, state])?;
+    if tx.execute("UPDATE employee_inbox SET state = ?2 WHERE id = ?1 AND state = 'held'", [item, state])? == 1 {
+        activity_log::item_step(tx, item, activity_log::DELIVERY, if state == "done" { "released" } else { "not_delivered" }, None, None);
+    }
     Ok(())
 }
 
@@ -225,15 +230,19 @@ pub fn park(tx: &Transaction<'_>, employee: &str, thread: &str, task: TaskId, ru
          ON CONFLICT(employee_id, thread_key) DO UPDATE SET state = 'parked', parked_task_id = ?3, parked_run_id = ?4, parked_at_ms = ?5",
         params![employee, thread, task.to_string(), run.to_string(), at],
     )?;
+    activity_log::thread_step(tx, "parked", employee, thread, Some(run));
     Ok(())
 }
 
 /// The thread is open again: a `resume` item is being processed.
 pub fn unpark(tx: &Transaction<'_>, employee: &str, thread: &str) -> Result<(), StorageError> {
-    tx.execute(
-        "UPDATE employee_threads SET state = 'open', parked_task_id = NULL, parked_run_id = NULL, parked_at_ms = NULL WHERE employee_id = ?1 AND thread_key = ?2",
+    let opened = tx.execute(
+        "UPDATE employee_threads SET state = 'open', parked_task_id = NULL, parked_run_id = NULL, parked_at_ms = NULL WHERE employee_id = ?1 AND thread_key = ?2 AND state = 'parked'",
         [employee, thread],
     )?;
+    if opened == 1 {
+        activity_log::thread_step(tx, "unparked", employee, thread, None);
+    }
     Ok(())
 }
 
@@ -311,7 +320,9 @@ pub fn conversation_thread(conn: &Connection, conversation: ConversationId) -> R
 pub fn claim(tx: &Transaction<'_>, items: &[String], run: RunId) -> Result<(), StorageError> {
     let at = now_ms();
     for item in items {
-        tx.execute("UPDATE employee_inbox SET state = 'claimed', run_id = ?2 WHERE id = ?1 AND state = 'queued'", params![item, run.to_string()])?;
+        if tx.execute("UPDATE employee_inbox SET state = 'claimed', run_id = ?2 WHERE id = ?1 AND state = 'queued'", params![item, run.to_string()])? == 1 {
+            activity_log::item_step(tx, item, activity_log::QUEUE, "claimed", None, Some(run));
+        }
         tx.execute("INSERT OR IGNORE INTO run_triggers(run_id, item_id, created_at_ms) VALUES (?1, ?2, ?3)", params![run.to_string(), item, at])?;
     }
     Ok(())
@@ -333,6 +344,7 @@ pub fn cancel(tx: &Transaction<'_>, run: RunId) -> Result<Option<Item>, StorageE
     let Some((id, employee, thread_key, conversation, kind, hop, payload, login_user, task, priority, run_text, source_event)) = row else { return Ok(None) };
     drop(stmt);
     tx.execute("UPDATE employee_inbox SET state = 'cancelled' WHERE id = ?1", [&id])?;
+    activity_log::item_step(tx, &id, activity_log::QUEUE, "cancelled", None, None);
     let conversation = ConversationId::parse(&conversation).map_err(|e| StorageError::Rejected(e.to_string()))?;
     let run = RunId::parse(&run_text).map_err(|e| StorageError::Rejected(e.to_string()))?;
     let source_event = EventId::parse(&source_event).map_err(|e| StorageError::Rejected(e.to_string()))?;
@@ -346,6 +358,7 @@ pub fn hurry(tx: &Transaction<'_>, run: RunId) -> Result<(), StorageError> {
          WHERE run_id = ?1 AND state = 'queued'",
         params![run.to_string(), now_ms()],
     )?;
+    activity_log::queued_step(tx, &run.to_string(), "moved_up", None);
     Ok(())
 }
 
@@ -451,18 +464,32 @@ pub fn mark_held(tx: &Transaction<'_>, reason: &str, now: i64) -> Result<Vec<(St
     let rows: Vec<(String, String)> = stmt.query_map(params![now, reason], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
     for (run, _) in &rows {
         tx.execute("UPDATE employee_inbox SET last_error_code = ?2 WHERE run_id = ?1 AND state = 'queued'", params![run, reason])?;
+        activity_log::queued_step(tx, run, "held_back", Some(reason));
     }
     Ok(rows)
 }
 
 /// Hold an item until `until_ms` for `reason` (its login is at a usage limit).
 pub fn defer(tx: &Transaction<'_>, item: &str, until_ms: i64, reason: &str) -> Result<(), StorageError> {
-    tx.execute("UPDATE employee_inbox SET not_before_ms = ?2, last_error_code = ?3 WHERE id = ?1 AND state = 'queued'", params![item, until_ms, reason])?;
+    // A deferred item is looked at again each pass until it is due: once is enough.
+    let changed = tx.execute(
+        "UPDATE employee_inbox SET not_before_ms = ?2, last_error_code = ?3 WHERE id = ?1 AND state = 'queued' AND (not_before_ms IS NOT ?2 OR last_error_code IS NOT ?3)",
+        params![item, until_ms, reason],
+    )?;
+    if changed == 1 {
+        activity_log::item_step(tx, item, activity_log::QUEUE, "deferred", Some(reason), None);
+    }
     Ok(())
 }
 
 /// Items held for `reason` on `login` (none: every login) are due now.
 pub fn wake(tx: &Transaction<'_>, reason: &str, login: Option<&str>, now: i64) -> Result<usize, StorageError> {
+    let mut held = tx.prepare("SELECT id FROM employee_inbox WHERE state = 'queued' AND last_error_code = ?1 AND (?2 IS NULL OR login_user = ?2)")?;
+    let items: Vec<String> = held.query_map(params![reason, login], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    drop(held);
+    for item in &items {
+        activity_log::item_step(tx, item, activity_log::QUEUE, "due_again", Some(reason), None);
+    }
     Ok(tx.execute(
         "UPDATE employee_inbox SET not_before_ms = ?3, last_error_code = NULL WHERE state = 'queued' AND last_error_code = ?1 AND (?2 IS NULL OR login_user = ?2)",
         params![reason, login, now],
@@ -488,4 +515,39 @@ pub fn move_ticket_login(tx: &Transaction<'_>, ticket: TicketId, user: &str, now
         params![ticket.to_string(), user, now],
     )?;
     Ok(())
+}
+
+/// What is in `employee`'s mailbox now (U6): what it works on, what waits in line, and
+/// held handoffs. Someone else's private chat does not exist for `reader`.
+pub fn queue_of(conn: &Connection, employee: EmployeeId, reader: Option<UserId>, now: i64) -> Result<Vec<EmployeeQueueItem>, StorageError> {
+    type Row = (String, String, String, String, String, u32, i64, i64, Option<String>, String);
+    let mut stmt = conn.prepare(
+        "SELECT i.id, i.kind, i.source, i.state, i.thread_key, i.hop, i.created_at_ms, i.not_before_ms, i.last_error_code, i.run_id
+         FROM employee_inbox i LEFT JOIN conversations c ON c.id = i.conversation_id
+         WHERE i.employee_id = ?1 AND (c.board_member_id IS NULL OR c.board_member_id = ?2)
+           AND (i.state IN ('queued', 'held')
+                OR (i.state = 'claimed' AND EXISTS(SELECT 1 FROM runs r WHERE r.id = i.run_id AND r.status IN ('created','starting','running','waiting','cancelling'))))
+         ORDER BY CASE i.state WHEN 'claimed' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, i.priority DESC, i.created_at_ms, i.rowid",
+    )?;
+    let rows: Vec<Row> = stmt
+        .query_map(params![employee.to_string(), reader.map(|u| u.to_string())], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut out = Vec::new();
+    for (id, kind, source, state, thread_key, hop, created_at_ms, not_before_ms, error, run) in rows {
+        let waits_for = match state.as_str() {
+            HELD => Some("handoff"),
+            CLAIMED => None,
+            _ if kind != "resume" && is_parked(conn, &employee.to_string(), &thread_key)? => Some("question"),
+            _ if not_before_ms > now && error.as_deref() == Some("quota") => Some("limit"),
+            _ if not_before_ms > now => Some("later"),
+            _ if error.is_some() => Some("machine"),
+            _ => None,
+        };
+        let run_id = if state == CLAIMED { RunId::parse(&run).ok() } else { None };
+        let place = activity_log::place_of(conn, &thread_key)?;
+        out.push(EmployeeQueueItem { id, kind, source, state, thread_key, place, run_id, hop, created_at_ms, not_before_ms, waits_for: waits_for.map(str::to_owned) });
+    }
+    Ok(out)
 }

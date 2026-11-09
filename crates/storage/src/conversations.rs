@@ -776,10 +776,14 @@ pub fn activity_started(tx: &Transaction<'_>, run: RunId, message: MessageId, ca
 }
 
 pub fn activity_finished(tx: &Transaction<'_>, run: RunId, call_id: &str, ok: bool, output: &str) -> Result<(), StorageError> {
-    tx.execute(
+    let ended = tx.execute(
         "UPDATE run_activity SET ok = ?3, output = ?4, ended_at_ms = ?5 WHERE run_id = ?1 AND call_id = ?2",
         params![run.to_string(), call_id, ok as i64, output, now_ms()],
     )?;
+    if ended > 0 {
+        let tool: Option<String> = tx.query_row("SELECT tool FROM run_activity WHERE run_id = ?1 AND call_id = ?2", [run.to_string(), call_id.to_owned()], |r| r.get(0)).optional()?;
+        crate::activity_log::run_step(tx, &run.to_string(), if ok { "tool" } else { "tool_failed" }, tool.as_deref());
+    }
     Ok(())
 }
 

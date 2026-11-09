@@ -760,6 +760,16 @@ impl Client {
         self.read(Method::EmployeeScratchpad { employee_id }, body!(EmployeeScratchpad)).await
     }
 
+    /// What is in an employee's mailbox now.
+    pub async fn employee_queue(&self, employee_id: aurelius_domain::EmployeeId) -> Result<aurelius_domain::views::EmployeeQueue, ClientError> {
+        self.read(Method::EmployeeQueue { employee_id }, body!(EmployeeQueue)).await
+    }
+
+    /// The newest rows of the activity log of a run, or of everything without one.
+    pub async fn activity_log(&self, run_id: Option<aurelius_domain::RunId>, employee_id: Option<aurelius_domain::EmployeeId>) -> Result<aurelius_domain::views::ActivityLogPage, ClientError> {
+        self.read(Method::ActivityLogList { employee_id, thread_key: None, ticket_number: None, run_id, category: None, before_seq: None, limit: None }, body!(ActivityLog)).await
+    }
+
     /// The company's group chat (Team chat): the user and every employee.
     pub async fn group_chat(&self) -> Result<MessagesSnapshot, ClientError> {
         self.read(Method::GroupChatGet { channel: None }, body!(Messages)).await

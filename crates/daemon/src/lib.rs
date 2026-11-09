@@ -279,6 +279,11 @@ async fn prune_notifications(shared: Arc<Shared>) {
             Ok(Err(err)) => tracing::warn!(error = %err, "could not remove old notifications"),
             Err(err) => tracing::warn!(error = %err, "could not remove old notifications"),
         }
+        let store = shared.store().clone();
+        let pruned = tokio::task::spawn_blocking(move || store.write(|tx| aurelius_storage::activity_log::prune(tx, aurelius_storage::now_ms()))).await;
+        if !matches!(pruned, Ok(Ok(_))) {
+            tracing::warn!("could not remove old rows of the activity log");
+        }
     }
 }
 

@@ -67,6 +67,11 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::ScheduledMessageList => scheduled_messages(shared, reader).await,
         Method::ThreadWaiting { ticket_id, conversation_id } => thread_waiting(shared, reader, ticket_id, conversation_id).await,
         Method::EmployeeScratchpad { employee_id } => employee_scratchpad(shared, employee_id).await,
+        Method::EmployeeQueue { employee_id } => employee_queue(shared, reader, employee_id).await,
+        Method::ActivityLogList { employee_id, thread_key, ticket_number, run_id, category, before_seq, limit } => {
+            let filter = aurelius_storage::activity_log::Filter { employee: employee_id, thread: thread_key, ticket_number, run: run_id, category, before_seq };
+            activity_log(shared, reader, filter, limit).await
+        }
         Method::EmployeeToolOptions => Ok(ResponseBody::EmployeeToolOptions(employee_tool_options())),
         Method::EmployeeStartProfiles => {
             let store = shared.store().clone();
@@ -481,6 +486,25 @@ async fn employee_scratchpad(shared: &Arc<Shared>, employee: aurelius_domain::Em
     let row = storage_task(move || store.read(|c| aurelius_storage::scratchpads::get(c, employee))).await?;
     let (text, updated_at_ms) = row.map_or((String::new(), None), |(text, at)| (text, Some(at)));
     Ok(ResponseBody::EmployeeScratchpad(aurelius_domain::views::ScratchpadView { employee_id: employee, text, updated_at_ms }))
+}
+
+/// What is in an employee's mailbox now, as far as `reader` may see it (U6).
+async fn employee_queue(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, employee_id: aurelius_domain::EmployeeId) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let (as_of_seq, items) = storage_task(move || store.read(|c| Ok((queries::last_seq(c)?, aurelius_storage::inbox::queue_of(c, employee_id, reader, aurelius_storage::now_ms())?)))).await?;
+    Ok(ResponseBody::EmployeeQueue(aurelius_domain::views::EmployeeQueue { as_of_seq, employee_id, items }))
+}
+
+/// How many rows of the activity log one page has at most, and without asking.
+const ACTIVITY_LOG_MAX: u32 = 200;
+const ACTIVITY_LOG_PAGE: u32 = 100;
+
+/// The activity log, as far as `reader` may see it (R8).
+async fn activity_log(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, filter: aurelius_storage::activity_log::Filter, limit: Option<u32>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let limit = limit.unwrap_or(ACTIVITY_LOG_PAGE).clamp(1, ACTIVITY_LOG_MAX);
+    let (as_of_seq, (entries, has_more)) = storage_task(move || store.read(|c| Ok((queries::last_seq(c)?, aurelius_storage::activity_log::list(c, reader, &filter, limit)?)))).await?;
+    Ok(ResponseBody::ActivityLog(aurelius_domain::views::ActivityLogPage { as_of_seq, entries, has_more }))
 }
 
 /// `reader` read `conversation` (when it is a discussion): it counts as read up

@@ -26,6 +26,118 @@ enum AccessLevel {
   String toJson() => wire;
 }
 
+/// One delivery, queue step or run step (R8; feature `activity_log`).
+final class ActivityLogEntry {
+  const ActivityLogEntry({
+    required this.atMs,
+    required this.category,
+    this.detail,
+    this.employeeId,
+    this.employeeName,
+    this.hop,
+    this.place,
+    this.runId,
+    required this.seq,
+    required this.step,
+    this.threadKey,
+  });
+
+  final int atMs;
+  /// delivery, queue or run. Text, not an enum: a later value only shows as it is.
+  final String category;
+  /// A short code or a tool's name; never the text of a message or a tool's input.
+  final String? detail;
+  final String? employeeId;
+  final String? employeeName;
+  final int? hop;
+  final ThreadPlace? place;
+  final String? runId;
+  final int seq;
+  /// What happened (delivered, claimed, started, tool, ...). Text for the same reason.
+  final String step;
+  final String? threadKey;
+
+  factory ActivityLogEntry.fromJson(Map<String, dynamic> json) => ActivityLogEntry(
+    atMs: (json['at_ms'] as num).toInt(),
+    category: (json['category'] as String),
+    detail: (json['detail'] == null ? null : (json['detail'] as String)),
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+    employeeName: (json['employee_name'] == null ? null : (json['employee_name'] as String)),
+    hop: (json['hop'] == null ? null : (json['hop'] as num).toInt()),
+    place: (json['place'] == null ? null : ThreadPlace.fromJson(json['place'] as Map<String, dynamic>)),
+    runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
+    seq: (json['seq'] as num).toInt(),
+    step: (json['step'] as String),
+    threadKey: (json['thread_key'] == null ? null : (json['thread_key'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'at_ms': atMs,
+    'category': category,
+    if (detail != null) 'detail': detail,
+    if (employeeId != null) 'employee_id': employeeId,
+    if (employeeName != null) 'employee_name': employeeName,
+    if (hop != null) 'hop': hop,
+    if (place != null) 'place': place?.toJson(),
+    if (runId != null) 'run_id': runId,
+    'seq': seq,
+    'step': step,
+    if (threadKey != null) 'thread_key': threadKey,
+  };
+}
+
+/// `activity_log.list`: the newest rows that match, newest first.
+final class ActivityLogPage {
+  const ActivityLogPage({
+    required this.asOfSeq,
+    required this.entries,
+    this.hasMore = false,
+  });
+
+  final int asOfSeq;
+  final List<ActivityLogEntry> entries;
+  /// There are older rows: ask again with `before_seq` as the last row's `seq`.
+  final bool hasMore;
+
+  factory ActivityLogPage.fromJson(Map<String, dynamic> json) => ActivityLogPage(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    entries: (json['entries'] as List<dynamic>).map((x0) => ActivityLogEntry.fromJson(x0 as Map<String, dynamic>)).toList(),
+    hasMore: (json['has_more'] == null ? false : (json['has_more'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'entries': entries.map((x0) => x0.toJson()).toList(),
+    'has_more': hasMore,
+  };
+}
+
+/// What an employee is doing now (U6): the dot in the list. Derived, never stored; a
+/// paused employee is in `status`.
+enum ActivityState {
+  /// Nothing for it to do.
+  idle('idle'),
+  /// There is work, but nothing runs yet (its turn, a usage limit, the machine).
+  queued('queued'),
+  /// A state of a newer server this client does not know.
+  unknown('unknown'),
+  /// It waits for a board member: an approval, or an answer to a question.
+  waiting('waiting'),
+  /// A run of it is going.
+  working('working');
+
+  const ActivityState(this.wire);
+
+  final String wire;
+
+  static ActivityState fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown ActivityState value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 /// One tool use during an answer, shown at its place in the text.
 final class ActivityView {
   const ActivityView({
@@ -6347,9 +6459,97 @@ final class EmployeePlugins {
   };
 }
 
+/// `employee.queue`: what is in an employee's mailbox, what runs first.
+final class EmployeeQueue {
+  const EmployeeQueue({
+    required this.asOfSeq,
+    required this.employeeId,
+    required this.items,
+  });
+
+  final int asOfSeq;
+  final String employeeId;
+  final List<EmployeeQueueItem> items;
+
+  factory EmployeeQueue.fromJson(Map<String, dynamic> json) => EmployeeQueue(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    employeeId: (json['employee_id'] as String),
+    items: (json['items'] as List<dynamic>).map((x0) => EmployeeQueueItem.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'employee_id': employeeId,
+    'items': items.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// One item of an employee's mailbox (U6; feature `employee_queue`).
+final class EmployeeQueueItem {
+  const EmployeeQueueItem({
+    required this.createdAtMs,
+    required this.hop,
+    required this.id,
+    required this.kind,
+    required this.notBeforeMs,
+    required this.place,
+    this.runId,
+    required this.source,
+    required this.state,
+    required this.threadKey,
+    this.waitsFor,
+  });
+
+  final int createdAtMs;
+  final int hop;
+  final String id;
+  /// message, task, heartbeat, resume, scheduled. Text, not an enum.
+  final String kind;
+  final int notBeforeMs;
+  final ThreadPlace place;
+  /// The run that works on it; none while it waits.
+  final String? runId;
+  /// board, employee or system.
+  final String source;
+  /// claimed (a run works on it), queued or held.
+  final String state;
+  final String threadKey;
+  /// What holds it back besides its turn: question, limit, later, machine or handoff.
+  final String? waitsFor;
+
+  factory EmployeeQueueItem.fromJson(Map<String, dynamic> json) => EmployeeQueueItem(
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    hop: (json['hop'] as num).toInt(),
+    id: (json['id'] as String),
+    kind: (json['kind'] as String),
+    notBeforeMs: (json['not_before_ms'] as num).toInt(),
+    place: ThreadPlace.fromJson(json['place'] as Map<String, dynamic>),
+    runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
+    source: (json['source'] as String),
+    state: (json['state'] as String),
+    threadKey: (json['thread_key'] as String),
+    waitsFor: (json['waits_for'] == null ? null : (json['waits_for'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'created_at_ms': createdAtMs,
+    'hop': hop,
+    'id': id,
+    'kind': kind,
+    'not_before_ms': notBeforeMs,
+    'place': place.toJson(),
+    if (runId != null) 'run_id': runId,
+    'source': source,
+    'state': state,
+    'thread_key': threadKey,
+    if (waitsFor != null) 'waits_for': waitsFor,
+  };
+}
+
 final class EmployeeSummary {
   const EmployeeSummary({
     this.accessLevel,
+    this.activityState,
     required this.agentMode,
     required this.agents,
     required this.browserAllowed,
@@ -6366,6 +6566,7 @@ final class EmployeeSummary {
     required this.role,
     required this.screenAllowed,
     required this.sequentialTasks,
+    this.settings,
     required this.status,
     this.title,
     this.toolPolicy,
@@ -6375,6 +6576,8 @@ final class EmployeeSummary {
 
   /// What its runs may do with files and commands (C3); left out when `Inherit`.
   final AccessLevel? accessLevel;
+  /// What it is doing now (U6, derived, never stored); left out when idle.
+  final ActivityState? activityState;
   final AgentMode agentMode;
   /// What runs for this employee right now: its own steps,
   /// subagents and sub-tasks delegated to colleagues (derived, never stored).
@@ -6406,6 +6609,9 @@ final class EmployeeSummary {
   final bool screenAllowed;
   /// It works on one task at a time; the others wait their turn.
   final bool sequentialTasks;
+  /// Its own provider, model and effort (C1); left out when it inherits them all.
+  /// The same as `connection.list` has for its scope, without needing that read.
+  final RunSettings? settings;
   final LifecycleStatus status;
   final String? title;
   /// Its tools, MCP servers and what asks first (C2); left out when it has all of its level.
@@ -6416,6 +6622,7 @@ final class EmployeeSummary {
 
   factory EmployeeSummary.fromJson(Map<String, dynamic> json) => EmployeeSummary(
     accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
+    activityState: (json['activity_state'] == null ? null : ActivityState.fromJson(json['activity_state'] as String)),
     agentMode: AgentMode.fromJson(json['agent_mode'] as String),
     agents: (json['agents'] as List<dynamic>).map((x0) => AgentView.fromJson(x0 as Map<String, dynamic>)).toList(),
     browserAllowed: (json['browser_allowed'] as bool),
@@ -6432,6 +6639,7 @@ final class EmployeeSummary {
     role: (json['role'] as String),
     screenAllowed: (json['screen_allowed'] as bool),
     sequentialTasks: (json['sequential_tasks'] as bool),
+    settings: (json['settings'] == null ? null : RunSettings.fromJson(json['settings'] as Map<String, dynamic>)),
     status: LifecycleStatus.fromJson(json['status'] as String),
     title: (json['title'] == null ? null : (json['title'] as String)),
     toolPolicy: (json['tool_policy'] == null ? null : ToolPolicy.fromJson(json['tool_policy'] as Map<String, dynamic>)),
@@ -6441,6 +6649,7 @@ final class EmployeeSummary {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (accessLevel != null) 'access_level': accessLevel?.toJson(),
+    if (activityState != null) 'activity_state': activityState?.toJson(),
     'agent_mode': agentMode.toJson(),
     'agents': agents.map((x0) => x0.toJson()).toList(),
     'browser_allowed': browserAllowed,
@@ -6457,6 +6666,7 @@ final class EmployeeSummary {
     'role': role,
     'screen_allowed': screenAllowed,
     'sequential_tasks': sequentialTasks,
+    if (settings != null) 'settings': settings?.toJson(),
     'status': status.toJson(),
     if (title != null) 'title': title,
     if (toolPolicy != null) 'tool_policy': toolPolicy?.toJson(),
@@ -11554,6 +11764,19 @@ sealed class Method {
           messageId: (src['message_id'] as String),
         );
         }
+      case 'activity_log.list':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodActivityLogList(
+          beforeSeq: (src['before_seq'] == null ? null : (src['before_seq'] as num).toInt()),
+          category: (src['category'] == null ? null : (src['category'] as String)),
+          employeeId: (src['employee_id'] == null ? null : (src['employee_id'] as String)),
+          limit: (src['limit'] == null ? null : (src['limit'] as num).toInt()),
+          runId: (src['run_id'] == null ? null : (src['run_id'] as String)),
+          threadKey: (src['thread_key'] == null ? null : (src['thread_key'] as String)),
+          ticketNumber: (src['ticket_number'] == null ? null : (src['ticket_number'] as num).toInt()),
+        );
+        }
       case 'agent_function.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11643,6 +11866,13 @@ sealed class Method {
         }
       case 'employee.list':
         return const MethodEmployeeList();
+      case 'employee.queue':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodEmployeeQueue(
+          employeeId: (src['employee_id'] as String),
+        );
+        }
       case 'employee.scratchpad':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -12166,6 +12396,45 @@ final class MethodActivityGet extends Method {
     };
 }
 
+/// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
+/// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+final class MethodActivityLogList extends Method {
+  const MethodActivityLogList({
+    this.beforeSeq,
+    this.category,
+    this.employeeId,
+    this.limit,
+    this.runId,
+    this.threadKey,
+    this.ticketNumber,
+  });
+
+  final int? beforeSeq;
+  /// delivery, queue or run.
+  final String? category;
+  final String? employeeId;
+  final int? limit;
+  final String? runId;
+  /// `ticket:<id>`, `channel:<conversation>` or `chat:<conversation>`.
+  final String? threadKey;
+  /// A ticket's thread, by its number.
+  final int? ticketNumber;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'activity_log.list',
+      'params': <String, dynamic>{
+      if (beforeSeq != null) 'before_seq': beforeSeq,
+      if (category != null) 'category': category,
+      if (employeeId != null) 'employee_id': employeeId,
+      if (limit != null) 'limit': limit,
+      if (runId != null) 'run_id': runId,
+      if (threadKey != null) 'thread_key': threadKey,
+      if (ticketNumber != null) 'ticket_number': ticketNumber,
+    },
+    };
+}
+
 final class MethodAgentFunctionList extends Method {
   const MethodAgentFunctionList({
     this.projectId,
@@ -12470,6 +12739,23 @@ final class MethodEmployeeList extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'employee.list',
+    };
+}
+
+/// What is in an employee's mailbox now (feature `employee_queue`).
+final class MethodEmployeeQueue extends Method {
+  const MethodEmployeeQueue({
+    required this.employeeId,
+  });
+
+  final String employeeId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.queue',
+      'params': <String, dynamic>{
+      'employee_id': employeeId,
+    },
     };
 }
 
@@ -15487,6 +15773,8 @@ sealed class ResponseBody {
     switch (tag) {
       case 'activity':
         return ResponseBodyActivity(value: ActivityView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'activity_log':
+        return ResponseBodyActivityLog(value: ActivityLogPage.fromJson(json['value'] as Map<String, dynamic>));
       case 'agent_functions':
         return ResponseBodyAgentFunctions(value: AgentFunctionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'all_ideas':
@@ -15531,6 +15819,8 @@ sealed class ResponseBody {
         return ResponseBodyEmployeeInstructionVersions(value: EmployeeInstructionVersionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_plugins':
         return ResponseBodyEmployeePlugins(value: EmployeePlugins.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_queue':
+        return ResponseBodyEmployeeQueue(value: EmployeeQueue.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_scratchpad':
         return ResponseBodyEmployeeScratchpad(value: ScratchpadView.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_start_profiles':
@@ -15736,6 +16026,21 @@ final class ResponseBodyActivity extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'activity',
+      'value': value.toJson(),
+    };
+}
+
+/// `activity_log.list`.
+final class ResponseBodyActivityLog extends ResponseBody {
+  const ResponseBodyActivityLog({
+    required this.value,
+  });
+
+  final ActivityLogPage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'activity_log',
       'value': value.toJson(),
     };
 }
@@ -16045,6 +16350,21 @@ final class ResponseBodyEmployeePlugins extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'employee_plugins',
+      'value': value.toJson(),
+    };
+}
+
+/// `employee.queue`.
+final class ResponseBodyEmployeeQueue extends ResponseBody {
+  const ResponseBodyEmployeeQueue({
+    required this.value,
+  });
+
+  final EmployeeQueue value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_queue',
       'value': value.toJson(),
     };
 }
@@ -20183,6 +20503,37 @@ final class TerminalView {
     'reattached': reattached,
     'shell': shell,
     'terminal_id': terminalId,
+  };
+}
+
+/// Where a thread is, as `activity_log.list` and `employee.queue` name it (R8, U6).
+final class ThreadPlace {
+  const ThreadPlace({
+    this.channelId,
+    this.chatId,
+    required this.label,
+    this.ticketId,
+  });
+
+  final String? channelId;
+  /// A board member's chat with an employee, when it is the reader's.
+  final String? chatId;
+  /// "#21 Fix login", a channel's name, "Chat with sam", or what is left of it.
+  final String label;
+  final String? ticketId;
+
+  factory ThreadPlace.fromJson(Map<String, dynamic> json) => ThreadPlace(
+    channelId: (json['channel_id'] == null ? null : (json['channel_id'] as String)),
+    chatId: (json['chat_id'] == null ? null : (json['chat_id'] as String)),
+    label: (json['label'] as String),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (channelId != null) 'channel_id': channelId,
+    if (chatId != null) 'chat_id': chatId,
+    'label': label,
+    if (ticketId != null) 'ticket_id': ticketId,
   };
 }
 

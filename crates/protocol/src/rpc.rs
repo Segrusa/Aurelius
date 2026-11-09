@@ -392,6 +392,10 @@ pub mod feature {
     pub const EMPLOYEE_TOOLS: &str = "employee_tools";
     /// `employee.create` takes a start profile (`employee.start_profiles`, C6).
     pub const EMPLOYEE_PROFILES: &str = "employee_profiles";
+    /// The activity log can be read (`activity_log.list`, R8).
+    pub const ACTIVITY_LOG: &str = "activity_log";
+    /// An employee's mailbox can be read (`employee.queue`, U6).
+    pub const EMPLOYEE_QUEUE: &str = "employee_queue";
     /// An employee's scratchpad can be read (`employee.scratchpad`, `RunBrief::employee_id`).
     pub const EMPLOYEE_SCRATCHPAD: &str = "employee_scratchpad";
 }
@@ -444,6 +448,8 @@ pub const FEATURES: &[&str] = &[
     feature::EMPLOYEE_SCRATCHPAD,
     feature::EMPLOYEE_TOOLS,
     feature::EMPLOYEE_PROFILES,
+    feature::ACTIVITY_LOG,
+    feature::EMPLOYEE_QUEUE,
 ];
 
 /// Daemon → client.
@@ -546,6 +552,10 @@ pub enum ResponseBody {
     ScheduledMessages(aurelius_domain::views::ScheduledMessagesSnapshot),
     ThreadWaiting(aurelius_domain::views::ThreadWaitingSnapshot),
     EmployeeScratchpad(aurelius_domain::views::ScratchpadView),
+    /// `employee.queue`.
+    EmployeeQueue(aurelius_domain::views::EmployeeQueue),
+    /// `activity_log.list`.
+    ActivityLog(aurelius_domain::views::ActivityLogPage),
     /// `employee.tool_options`.
     EmployeeToolOptions(aurelius_domain::employee_tools::ToolOptions),
     /// `employee.start_profiles`.

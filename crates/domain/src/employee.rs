@@ -109,6 +109,43 @@ impl Default for TaskPolicy {
     }
 }
 
+/// What an employee is doing now (U6): the dot in the list. Derived, never stored; a
+/// paused employee is in `status`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityState {
+    /// Nothing for it to do.
+    #[default]
+    Idle,
+    /// A run of it is going.
+    Working,
+    /// It waits for a board member: an approval, or an answer to a question.
+    Waiting,
+    /// There is work, but nothing runs yet (its turn, a usage limit, the machine).
+    Queued,
+    /// A state of a newer server this client does not know.
+    #[serde(other)]
+    Unknown,
+}
+
+impl ActivityState {
+    /// As computed in storage; anything else is `Unknown`.
+    pub fn parse(text: &str) -> Self {
+        match text {
+            "idle" => Self::Idle,
+            "working" => Self::Working,
+            "waiting" => Self::Waiting,
+            "queued" => Self::Queued,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// Whether this is the default, which the JSON leaves out.
+    pub fn is_idle(&self) -> bool {
+        *self == Self::Idle
+    }
+}
+
 /// A field that can inherit, hold a value, or be explicitly disabled.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(tag = "mode", content = "value", rename_all = "snake_case")]

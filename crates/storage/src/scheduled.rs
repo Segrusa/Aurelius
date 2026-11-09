@@ -63,6 +63,7 @@ pub fn insert(tx: &Transaction<'_>, new: NewScheduled<'_>) -> Result<ScheduledMe
             now_ms(),
         ],
     )?;
+    crate::activity_log::scheduled_step(tx, id, "scheduled", None);
     Ok(id)
 }
 
@@ -110,22 +111,29 @@ pub fn due(conn: &Connection, now: i64) -> Result<Vec<Due>, StorageError> {
 
 /// It went out, or it could not: `state` with the run it started or why not.
 pub fn settle(tx: &Transaction<'_>, id: ScheduledMessageId, state: &str, run: Option<RunId>, outcome: Option<&str>) -> Result<(), StorageError> {
-    tx.execute(
+    let settled = tx.execute(
         "UPDATE scheduled_messages SET state = ?2, run_id = ?3, outcome = ?4, settled_at_ms = ?5 WHERE id = ?1 AND state = 'scheduled'",
         params![id.to_string(), state, run.map(|r| r.to_string()), outcome, now_ms()],
     )?;
+    if settled == 1 {
+        crate::activity_log::scheduled_step(tx, id, &format!("scheduled_{state}"), None);
+    }
     Ok(())
 }
 
 /// A board member takes it back. False when it is no longer waiting, or `reader` may not see it.
 pub fn cancel(tx: &Transaction<'_>, id: ScheduledMessageId, reader: Option<UserId>) -> Result<bool, StorageError> {
-    Ok(tx.execute(
+    let cancelled = tx.execute(
         &format!(
             "UPDATE scheduled_messages SET state = '{CANCELLED}', settled_at_ms = ?2, outcome = NULL WHERE id = ?1 AND state = 'scheduled'
                AND NOT EXISTS(SELECT 1 FROM conversations c WHERE c.id = chat_id AND c.board_member_id IS NOT NULL AND c.board_member_id IS NOT ?3)"
         ),
         params![id.to_string(), now_ms(), reader.map(|u| u.to_string())],
-    )? == 1)
+    )? == 1;
+    if cancelled {
+        crate::activity_log::scheduled_step(tx, id, "scheduled_cancelled", None);
+    }
+    Ok(cancelled)
 }
 
 /// What `employee` has waiting.

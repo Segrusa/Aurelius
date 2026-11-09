@@ -20,6 +20,7 @@ pub mod conversation_sessions;
 pub mod employees;
 pub mod employee_chats;
 pub mod employee_profiles;
+pub mod activity_log;
 pub mod scheduled;
 pub mod scratchpads;
 pub mod inbox;
@@ -263,6 +264,8 @@ mod schema36_tests;
 mod schema37_tests;
 #[cfg(test)]
 mod schema38_tests;
+#[cfg(test)]
+mod schema39_tests;
 #[cfg(test)]
 mod schema29_tests;
 #[cfg(test)]

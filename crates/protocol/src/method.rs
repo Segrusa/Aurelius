@@ -55,6 +55,31 @@ pub enum Method {
     /// An employee's scratchpad (feature `employee_scratchpad`).
     #[serde(rename = "employee.scratchpad")]
     EmployeeScratchpad { employee_id: EmployeeId },
+    /// What is in an employee's mailbox now (feature `employee_queue`).
+    #[serde(rename = "employee.queue")]
+    EmployeeQueue { employee_id: EmployeeId },
+    /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
+    /// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+    #[serde(rename = "activity_log.list")]
+    ActivityLogList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        employee_id: Option<EmployeeId>,
+        /// `ticket:<id>`, `channel:<conversation>` or `chat:<conversation>`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_key: Option<String>,
+        /// A ticket's thread, by its number.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ticket_number: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_id: Option<aurelius_domain::RunId>,
+        /// delivery, queue or run.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        category: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before_seq: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
     /// The reader's lasting chats with employees, the latest first (feature `employee_chats`).
     #[serde(rename = "employee.chats")]
     EmployeeChats,

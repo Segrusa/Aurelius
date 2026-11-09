@@ -12,6 +12,9 @@ abstract final class Methods {
   /// One tool call of an answer whole: the input and output that
   /// `conversation.get` and live updates shorten (feature `activity_preview`).
   static const String activityGet = 'activity.get';
+  /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
+  /// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+  static const String activityLogList = 'activity_log.list';
   static const String agentFunctionCreate = 'agent_function.create';
   static const String agentFunctionDelete = 'agent_function.delete';
   static const String agentFunctionList = 'agent_function.list';
@@ -133,6 +136,8 @@ abstract final class Methods {
   /// The company's employees (not archived), oldest first.
   static const String employeeList = 'employee.list';
   static const String employeeOpenChat = 'employee.open_chat';
+  /// What is in an employee's mailbox now (feature `employee_queue`).
+  static const String employeeQueue = 'employee.queue';
   static const String employeeRestoreInstructions = 'employee.restore_instructions';
   /// An employee's scratchpad (feature `employee_scratchpad`).
   static const String employeeScratchpad = 'employee.scratchpad';
@@ -608,6 +613,21 @@ Map<String, dynamic> activityGet({required String callId, required String messag
   },
 };
 
+/// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
+/// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+Map<String, dynamic> activityLogList({int? beforeSeq, String? category, String? employeeId, int? limit, String? runId, String? threadKey, int? ticketNumber}) => <String, dynamic>{
+  'method': Methods.activityLogList,
+  'params': <String, dynamic>{
+    if (beforeSeq != null) 'before_seq': beforeSeq,
+    if (category != null) 'category': category,
+    if (employeeId != null) 'employee_id': employeeId,
+    if (limit != null) 'limit': limit,
+    if (runId != null) 'run_id': runId,
+    if (threadKey != null) 'thread_key': threadKey,
+    if (ticketNumber != null) 'ticket_number': ticketNumber,
+  },
+};
+
 Map<String, dynamic> agentFunctionList({String? projectId}) => <String, dynamic>{
   'method': Methods.agentFunctionList,
   'params': <String, dynamic>{
@@ -756,6 +776,14 @@ Map<String, dynamic> employeeInstructionVersions({required String employeeId}) =
 /// The company's employees (not archived), oldest first.
 Map<String, dynamic> employeeList() => <String, dynamic>{
   'method': Methods.employeeList,
+};
+
+/// What is in an employee's mailbox now (feature `employee_queue`).
+Map<String, dynamic> employeeQueue({required String employeeId}) => <String, dynamic>{
+  'method': Methods.employeeQueue,
+  'params': <String, dynamic>{
+    'employee_id': employeeId,
+  },
 };
 
 /// An employee's scratchpad (feature `employee_scratchpad`).
