@@ -1033,7 +1033,7 @@ pub struct EmployeeQueueItem {
     pub hop: u32,
     pub created_at_ms: i64,
     pub not_before_ms: i64,
-    /// What holds it back besides its turn: question, limit, later, machine or handoff.
+    /// What holds it back besides its turn: paused, question, limit, later, machine or handoff.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waits_for: Option<String>,
 }
@@ -1643,4 +1643,90 @@ mod tests {
     fn a_renamed_ticket_gives_the_new_name() {
         assert_ne!(ticket_channel_name(4, "Old title"), ticket_channel_name(4, "New title"));
     }
+}
+
+/// `TicketActivity::state`: an employee works on the ticket now.
+pub const ACTIVITY_RUNNING: &str = "running";
+/// `TicketActivity::state`: work is queued and only waits for a free slot.
+pub const ACTIVITY_WAITING_SLOT: &str = "waiting_slot";
+/// `TicketActivity::state`: its employee is paused, so it does not start.
+pub const ACTIVITY_PAUSED: &str = "paused";
+/// `TicketActivity::state`: waits for something else (see `waits_for`).
+pub const ACTIVITY_WAITING_OTHER: &str = "waiting_other";
+
+/// What an employee works on or waits with (feature `activity_overview`). With
+/// `private` set it is another board member's chat: every other field is empty,
+/// so neither its title nor where it is leaves the server.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActivityWork {
+    /// "#21 Fix login", a task's title, a channel's name; empty when `private`.
+    #[serde(default)]
+    pub label: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub private: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<TicketId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<ConversationId>,
+    /// A chat of the reader's own with an employee.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<ConversationId>,
+}
+
+/// One run that really runs now (feature `activity_overview`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActivityBusy {
+    /// None: the project assistant, which is no employee.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_id: Option<EmployeeId>,
+    pub employee_name: String,
+    /// It was paused during this run: the run finishes, nothing new starts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub employee_paused: bool,
+    pub work: ActivityWork,
+    pub since_ms: i64,
+}
+
+/// One piece of work in line (feature `activity_overview`): one per employee and
+/// thread, since what waits in one thread becomes one run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActivityWaiting {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_id: Option<EmployeeId>,
+    pub employee_name: String,
+    pub work: ActivityWork,
+    /// slot (its employee is busy), machine (a free slot on this machine), paused,
+    /// question, approval, limit, login, later or handoff. Text, not an enum.
+    pub waits_for: String,
+    pub since_ms: i64,
+}
+
+/// Where one ticket stands right now (feature `activity_overview`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TicketActivity {
+    pub ticket_id: TicketId,
+    /// running, waiting_slot, paused or waiting_other. Text, not an enum.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_id: Option<EmployeeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_name: Option<String>,
+    /// With waiting_other: board_member, colleague, approval, question, limit,
+    /// login, later or handoff. Also slot or machine with waiting_slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waits_for: Option<String>,
+    pub since_ms: i64,
+}
+
+/// `activity.overview` (feature `activity_overview`): who is busy, what waits and
+/// on what, and the state of each ticket with work going or held up. A ticket
+/// that is not listed has nothing going on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActivityOverview {
+    pub as_of_seq: u64,
+    pub busy: Vec<ActivityBusy>,
+    pub waiting: Vec<ActivityWaiting>,
+    pub tickets: Vec<TicketActivity>,
 }

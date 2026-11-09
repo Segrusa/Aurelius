@@ -367,6 +367,8 @@ pub mod feature {
     pub const EMPLOYEE_PROFILES: &str = "employee_profiles";
     /// The activity log can be read (`activity_log.list`, R8).
     pub const ACTIVITY_LOG: &str = "activity_log";
+    /// Who is busy and what waits for a slot can be read (`activity.overview`, ticket #50).
+    pub const ACTIVITY_OVERVIEW: &str = "activity_overview";
     /// An employee's mailbox can be read (`employee.queue`, U6).
     pub const EMPLOYEE_QUEUE: &str = "employee_queue";
     /// An employee's scratchpad can be read (`employee.scratchpad`, `RunBrief::employee_id`).
@@ -427,6 +429,7 @@ pub const FEATURES: &[&str] = &[
     feature::WORKSPACE_FILTERS,
     feature::DESIGN_LINKS,
     feature::EVERYONE_MENTION,
+    feature::ACTIVITY_OVERVIEW,
 ];
 
 /// Daemon → client.
@@ -526,6 +529,8 @@ pub enum ResponseBody {
     ScheduledMessages(aurelius_domain::views::ScheduledMessagesSnapshot),
     ThreadWaiting(aurelius_domain::views::ThreadWaitingSnapshot),
     EmployeeScratchpad(aurelius_domain::views::ScratchpadView),
+    /// `activity.overview`.
+    ActivityOverview(aurelius_domain::views::ActivityOverview),
     /// `employee.queue`.
     EmployeeQueue(aurelius_domain::views::EmployeeQueue),
     /// `activity_log.list`.

@@ -119,15 +119,24 @@ pub fn running_runs(conn: &Connection) -> Result<u32, StorageError> {
     Ok(conn.query_row("SELECT COUNT(*) FROM jobs WHERE kind IN ('run.chat', 'task.run') AND state = 'leased'", [], |r| r.get::<_, i64>(0))? as u32)
 }
 
+/// A due job of `j` that must not start: the employee of a chat run is paused, or a
+/// task job was already parked for its paused employee. A task job not parked yet
+/// is still claimed once: `tasks::run_task` starts no work, it only sets the task
+/// to waiting and parks the job, so the card shows why it does not move.
+const PAUSED_JOB: &str = "((j.kind = 'run.chat' AND EXISTS(SELECT 1 FROM employees p WHERE p.status = 'paused' AND p.id = json_extract(j.payload_json, '$.employee_id')))
+    OR (j.kind = 'task.run' AND j.last_error_code = 'paused' AND EXISTS(SELECT 1 FROM tasks t JOIN employees p ON p.id = t.employee_id WHERE t.id = j.id AND p.status = 'paused')))";
+
 /// Whether any work is going or waiting: a run job that is ready or leased,
 /// a run that is created, starting or running, or a task that is queued or
 /// running. What "when all work is done" (`power/shutdown`) waits for.
 pub fn has_work(conn: &Connection) -> Result<bool, StorageError> {
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM jobs WHERE kind IN ('run.chat', 'task.run') AND state IN ('ready', 'leased'))
+        &format!(
+            "SELECT EXISTS(SELECT 1 FROM jobs j WHERE j.kind IN ('run.chat', 'task.run') AND (j.state = 'leased' OR (j.state = 'ready' AND NOT {PAUSED_JOB})))
              OR EXISTS(SELECT 1 FROM runs WHERE status IN ('created', 'starting', 'running'))
-             OR EXISTS(SELECT 1 FROM employee_inbox WHERE state = 'queued')
-             OR EXISTS(SELECT 1 FROM tasks WHERE status IN ('queued', 'running'))",
+             OR EXISTS(SELECT 1 FROM employee_inbox i WHERE i.state = 'queued' AND NOT EXISTS(SELECT 1 FROM employees p WHERE p.id = i.employee_id AND p.status = 'paused'))
+             OR EXISTS(SELECT 1 FROM tasks WHERE status IN ('queued', 'running'))"
+        ),
         [],
         |r| r.get::<_, bool>(0),
     )?)
@@ -141,7 +150,7 @@ pub fn claim_due_job(tx: &Transaction<'_>, owner: &str, now: i64, lease_ms: i64,
     let job = tx
         .query_row(
             &format!(
-                "SELECT {JOB_COLUMNS} FROM jobs j WHERE j.state = 'ready' AND j.not_before_ms <= ?1
+                "SELECT {JOB_COLUMNS} FROM jobs j WHERE j.state = 'ready' AND j.not_before_ms <= ?1 AND NOT {PAUSED_JOB}
                  AND (j.kind NOT IN ('run.chat', 'task.run') OR (
                      (SELECT COUNT(*) FROM jobs a WHERE a.kind IN ('run.chat', 'task.run') AND a.state = 'leased') < ?2
                      AND (j.kind <> 'run.chat' OR (NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
@@ -246,9 +255,11 @@ pub fn mark_held_runs(tx: &Transaction<'_>, reason: &str, now: i64) -> Result<Ve
 /// only the machine's load holds them back.
 pub fn held_runs(conn: &Connection, now: i64) -> Result<u32, StorageError> {
     Ok(crate::inbox::held(conn, now)? + conn.query_row(
-        "SELECT COUNT(*) FROM jobs j WHERE j.kind IN ('run.chat', 'task.run') AND j.state = 'ready' AND j.not_before_ms <= ?1
+        &format!(
+            "SELECT COUNT(*) FROM jobs j WHERE j.kind IN ('run.chat', 'task.run') AND j.state = 'ready' AND j.not_before_ms <= ?1 AND NOT {PAUSED_JOB}
          AND (j.kind <> 'run.chat' OR NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
-             AND json_extract(o.payload_json, '$.conversation_id') = json_extract(j.payload_json, '$.conversation_id')))",
+             AND json_extract(o.payload_json, '$.conversation_id') = json_extract(j.payload_json, '$.conversation_id')))"
+        ),
         [now],
         |r| r.get::<_, i64>(0),
     )? as u32)

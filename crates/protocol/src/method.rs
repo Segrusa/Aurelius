@@ -62,6 +62,10 @@ pub enum Method {
     /// What is in an employee's mailbox now (feature `employee_queue`).
     #[serde(rename = "employee.queue")]
     EmployeeQueue { employee_id: EmployeeId },
+    /// Who is busy and what waits, on what (feature `activity_overview`). Another
+    /// board member's private chat is only counted, with its employee.
+    #[serde(rename = "activity.overview")]
+    ActivityOverview,
     /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
     /// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
     /// `project_id` (feature `workspace_filters`): only threads of that project's tickets,

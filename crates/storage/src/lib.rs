@@ -6,6 +6,7 @@
 //! * Blobs are written to disk *before* the transaction (temp file, fsync,
 //!   atomic rename); a crash can leave an orphan file, never a half-visible row.
 
+pub mod activity;
 pub mod auto_allow;
 pub mod management_mode;
 pub mod backup;

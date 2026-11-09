@@ -66,6 +66,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::ThreadWaiting { ticket_id, conversation_id } => thread_waiting(shared, reader, ticket_id, conversation_id).await,
         Method::EmployeeScratchpad { employee_id } => employee_scratchpad(shared, employee_id).await,
         Method::EmployeeQueue { employee_id } => employee_queue(shared, reader, employee_id).await,
+        Method::ActivityOverview => activity_overview(shared, reader).await,
         Method::ActivityLogList { project_id, employee_id, thread_key, ticket_number, run_id, category, before_seq, limit } => {
             let filter = aurelius_storage::activity_log::Filter { project: project_id, employee: employee_id, thread: thread_key, ticket_number, run: run_id, category, before_seq };
             activity_log(shared, reader, filter, limit).await
@@ -429,6 +430,13 @@ async fn employee_queue(shared: &Arc<Shared>, reader: Option<aurelius_domain::Us
     let store = shared.store().clone();
     let (as_of_seq, items) = storage_task(move || store.read(|c| Ok((queries::last_seq(c)?, aurelius_storage::inbox::queue_of(c, employee_id, reader, aurelius_storage::now_ms())?)))).await?;
     Ok(ResponseBody::EmployeeQueue(aurelius_domain::views::EmployeeQueue { as_of_seq, employee_id, items }))
+}
+
+/// Who is busy and what waits; another board member's private chat stays a count (ticket #50).
+async fn activity_overview(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let overview = storage_task(move || store.read(|c| aurelius_storage::activity::overview(c, reader, aurelius_storage::now_ms()))).await?;
+    Ok(ResponseBody::ActivityOverview(overview))
 }
 
 /// How many rows of the activity log one page has at most, and without asking.
