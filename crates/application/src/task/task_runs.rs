@@ -25,6 +25,11 @@ pub const TASK_GUIDANCE: &str = "This conversation is a task you took on. Start 
 /// What an employee is told when the colleagues' results are in.
 const COLLEAGUES_DONE: &str = "Your colleagues finished their parts (their results are above). Bring everything together and finish with your report.";
 
+/// What the owner is told when the colleagues it handed work to are done.
+const HANDOFFS_DONE: &str = "The colleagues you handed work to are done; read what they wrote in the ticket's discussion. If a review was rejected or anything is still open, deal with it first. Only when everything is done, finish with your report for the board member.";
+/// The same, when a colleague's run failed or was stopped before it had answered.
+const HANDOFF_BROKEN: &str = "A colleague you handed work to did not finish: their run failed or was stopped, or their message was never delivered. Read the ticket's discussion, take the work back or hand it to someone else, and finish with your report for the board member.";
+
 /// `closing_text` does not stop at a closing shorter than this.
 const CLOSING_MIN_CHARS: usize = 80;
 
@@ -222,6 +227,13 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
             notices.extend(wait_for_answer(tx, st, task, &row, run, closing)?);
             return Ok(notices);
         }
+        // The work may lie with a colleague (a handoff, a run in the discussion): the ticket is not
+        // ready for the board member then. It stays in Doing until the last of them has ended.
+        if ticket_busy(tx, task, Some(run))? {
+            notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("dependency"))?);
+            notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "handed_off" }))?);
+            return Ok(notices);
+        }
         notices.extend(complete(tx, st, task, closing)?);
         return Ok(notices);
     }
@@ -275,6 +287,13 @@ fn closing_text<'a>(answer: &'a str, tool_offsets: &[u32]) -> &'a str {
 /// used up): nothing of it runs any more, so the task waits for the user, who
 /// sends the message again in its conversation (as after a stop).
 pub(crate) fn on_run_not_started(tx: &Tx<'_>, st: &Store, run: RunId) -> Result<Vec<EventNotice>, StorageError> {
+    let mut notices = task_not_started(tx, st, run)?;
+    // A colleague's handoff that never ran: the owner must not keep waiting for it.
+    notices.extend(run_settled(tx, st, run, true)?);
+    Ok(notices)
+}
+
+fn task_not_started(tx: &Tx<'_>, st: &Store, run: RunId) -> Result<Vec<EventNotice>, StorageError> {
     let task: Option<String> = tx.query_row("SELECT task_id FROM runs WHERE id = ?1 AND conversation_id IS NOT NULL", [run.to_string()], |r| r.get(0)).ok().flatten();
     let Some(task) = task.and_then(|t| TaskId::parse(&t).ok()) else { return Ok(vec![]) };
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
@@ -559,10 +578,48 @@ fn open_parts(tx: &Tx<'_>, task: TaskId) -> Result<bool, StorageError> {
     Ok(false)
 }
 
+/// Work on the task's ticket (a handoff, a run in its discussion) is open besides `except`.
+fn ticket_busy(tx: &Tx<'_>, task: TaskId, except: Option<RunId>) -> Result<bool, StorageError> {
+    match crate::task::ticket_line::ticket_of(tx, task)? {
+        Some(ticket) => aurelius_storage::inbox::open_on_ticket(tx, ticket, except),
+        None => Ok(false),
+    }
+}
+
 /// A task waiting for its colleagues goes on once none of them is still at work.
 pub(crate) fn continue_when_done(tx: &Tx<'_>, st: &Store, task: TaskId) -> Result<Vec<EventNotice>, StorageError> {
+    continue_with(tx, st, task, COLLEAGUES_DONE, "colleagues_done")
+}
+
+/// A run, handoff or message of `ticket` ended or was cancelled (`except`: that run): when the
+/// main task waits for it and nothing else is open, the owner goes on. `broken`: it did not
+/// finish its work (failed, stopped, never started), which the owner is told, so a ticket
+/// never stays in Doing without somebody on it.
+pub(crate) fn ticket_settled(tx: &Tx<'_>, st: &Store, ticket: TicketId, except: Option<RunId>, broken: bool) -> Result<Vec<EventNotice>, StorageError> {
+    let Some(root) = aurelius_storage::tickets::root_task_of(tx, ticket)? else { return Ok(vec![]) };
+    if aurelius_storage::inbox::open_on_ticket(tx, ticket, except)? {
+        return Ok(vec![]);
+    }
+    // Only a task that waits for its colleagues goes on; one that waits for an answer, a login or the quota does not.
+    if !matches!(store::waiting_cause(tx, root)?.as_deref(), Some("handed_off" | "delegated")) {
+        return Ok(vec![]);
+    }
+    let (text, reason) = if broken { (HANDOFF_BROKEN, "handoff_broken") } else { (HANDOFFS_DONE, "handoff_done") };
+    continue_with(tx, st, root, text, reason)
+}
+
+/// `ticket_settled` for the run that ended: whatever ticket its mailbox item was for.
+pub(crate) fn run_settled(tx: &Tx<'_>, st: &Store, run: RunId, broken: bool) -> Result<Vec<EventNotice>, StorageError> {
+    match aurelius_storage::inbox::ticket_of_run(tx, run)? {
+        Some(ticket) => ticket_settled(tx, st, ticket, Some(run), broken),
+        None => Ok(vec![]),
+    }
+}
+
+/// The owner of a waiting task goes on, told `text`, when nothing of it is still open.
+fn continue_with(tx: &Tx<'_>, st: &Store, task: TaskId, text: &str, reason: &str) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
-    if row.status != TaskStatus::Waiting || open_parts(tx, task)? || live_run(tx, task, None)? {
+    if row.status != TaskStatus::Waiting || open_parts(tx, task)? || live_run(tx, task, None)? || ticket_busy(tx, task, None)? {
         return Ok(vec![]);
     }
     let Some((conversation, _)) = store::task_conversation(tx, task)? else { return Ok(vec![]) };
@@ -573,18 +630,11 @@ pub(crate) fn continue_when_done(tx: &Tx<'_>, st: &Store, task: TaskId) -> Resul
             return in_line(tx, task);
         }
     }
-    let (message, posted) = thread::post_returning(
-        tx,
-        st,
-        conversation,
-        task,
-        Speaker::Update { kind: "status", from: "Aurelius" },
-        COLLEAGUES_DONE,
-    )?;
+    let (message, posted) = thread::post_returning(tx, st, conversation, task, Speaker::Update { kind: "status", from: "Aurelius" }, text)?;
     let mut notices = vec![posted];
     notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
     notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
-    notices.push(task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": "colleagues_done" }))?);
+    notices.push(task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": reason }))?);
     notices.extend(run_for(tx, task, conversation, message)?);
     Ok(notices)
 }

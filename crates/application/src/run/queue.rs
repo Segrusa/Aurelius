@@ -192,6 +192,8 @@ pub(crate) fn request_stop(
         if let Some(conversation) = conv::run_conversation(tx, run_id)? {
             notices.extend(crate::conversation::discussion::mirror_answer(tx, store, run_id, conversation, "", Some("cancelled"), &[], None)?);
         }
+        // A handoff cancelled before it ran: the owner waiting for it goes on.
+        notices.extend(crate::task::task_runs::run_settled(tx, store, run_id, true)?);
     } else {
         conv::set_run_status(tx, run_id, "cancelling", None)?;
     }

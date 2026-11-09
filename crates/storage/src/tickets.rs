@@ -324,6 +324,12 @@ pub fn ticket_of_task(conn: &Connection, task: TaskId) -> Result<Option<TicketId
     Ok(id.and_then(|i| TicketId::parse(&i).ok()))
 }
 
+/// The main task of a ticket, if it has one.
+pub fn root_task_of(conn: &Connection, ticket: TicketId) -> Result<Option<TaskId>, StorageError> {
+    let id: Option<String> = conn.query_row("SELECT root_task_id FROM tickets WHERE id = ?1", [ticket.to_string()], |r| r.get(0)).optional()?.flatten();
+    Ok(id.and_then(|i| TaskId::parse(&i).ok()))
+}
+
 /// Every task linked to a ticket, oldest first.
 pub fn tasks_of_ticket(conn: &Connection, ticket: TicketId) -> Result<Vec<TaskId>, StorageError> {
     let mut stmt = conn.prepare("SELECT id FROM tasks WHERE ticket_id = ?1 ORDER BY created_at_ms, id")?;
