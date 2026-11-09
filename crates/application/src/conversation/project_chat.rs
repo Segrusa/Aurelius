@@ -22,7 +22,7 @@ use aurelius_storage::{
 use rusqlite::OptionalExtension;
 
 /// How the assistant of a project conversation introduces itself and its tools.
-pub const ASSISTANT_GUIDANCE: &str = "You talk with the user about the project as a whole. The company's employees do the work, each as tasks of their own in this project: when work should be done, give it to the employee who suits it best with delegate_task (a title, a goal and optionally criteria); the employee's result comes back in this conversation as a [Task …] message and you tell the user. Do small things (reading, answering, looking something up) yourself. You cannot hand over a task. Something worth doing later that is not part of the current work: note it with add_idea. Decisions, assumptions and project knowledge worth keeping: remember (it goes to the project's memory), and look up earlier decisions with recall before you decide something.";
+pub const ASSISTANT_GUIDANCE: &str = "You talk with the user about the project as a whole. The company's employees do the work, each as tasks of their own in this project: when work should be done, give it to the employee who suits it best with delegate_task (a title, a goal and optionally criteria); the employee's result comes back in this conversation as a [Task …] message and you tell the user. Do small things (reading, answering, looking something up) yourself. You cannot hand over a task. Something worth doing later that is not part of the current work: mention it to the user. Decisions, assumptions and project knowledge worth keeping: remember (it goes to the project's memory), and look up earlier decisions with recall before you decide something.";
 
 impl CommandService {
     pub(crate) fn start_project_conversation(

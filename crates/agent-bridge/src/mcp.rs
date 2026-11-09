@@ -10,7 +10,7 @@
 //! employee's own memory, always on); `list_tasks`, `read_task`,
 //! `list_conversations`, `read_conversation`; `set_mode` (only for management in a task whose
 //! mode is theirs to choose, `--set-mode`); `delegate_task`, `message_task`,
-//! `hand_over_task`, `hand_off`, `add_idea`, `propose_colleague`, `propose_instructions` and `propose_guideline`;
+//! `hand_over_task`, `hand_off`, `propose_colleague`, `propose_instructions` and `propose_guideline`;
 //! `list_guidelines` and `read_guideline` (reading the guidelines, information only); `list_tickets`,
 //! `read_ticket`, `create_ticket`, `update_ticket`, `move_ticket` and `post_to_ticket` (the board; the daemon
 //! decides who may use each); `read_group_chat`
@@ -31,7 +31,7 @@
 //! neither offered nor served.
 
 use aurelius_client::ClientError;
-use aurelius_client::bridge::{BridgeClient, IdeaKind, EmployeeMemoryOp, EmployeeTaskOp, MEMORY_SCOPE_RULE, PermissionAnswer, RunId};
+use aurelius_client::bridge::{BridgeClient, EmployeeMemoryOp, EmployeeTaskOp, MEMORY_SCOPE_RULE, PermissionAnswer, RunId};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -151,20 +151,6 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     if testing {
         tools.push(testing_tool_definition());
     }
-    tools.push(json!({
-        "name": "add_idea",
-        "description": "Note an idea for a project that is worth doing later but is not part of the current work (an improvement, a follow-up, a risk to look at). The user sees it in the project's ideas and decides if and when it becomes a task.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "title": { "type": "string" },
-                "note": { "type": "string", "description": "Why, and what it would take." },
-                "kind": { "type": "string", "enum": ["feature", "bug"], "description": "bug for something broken or behaving wrongly; feature for new or improved behaviour (default feature)." },
-                "project": { "type": "string", "description": "The project (its name) the idea is for: needed in your chat with the user (outside projects); in a task or project conversation it is that project." }
-            },
-            "required": ["title"]
-        }
-    }));
     if set_mode {
         tools.push(json!({
             "name": "set_mode",
@@ -279,7 +265,6 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "read_task" => EmployeeTaskOp::ReadTask { task: text("task") },
         "list_conversations" => EmployeeTaskOp::ListConversations { query: text("query") },
         "read_conversation" => EmployeeTaskOp::ReadConversation { conversation: text("conversation") },
-        "add_idea" => EmployeeTaskOp::AddIdea { title: text("title"), note: text("note"), kind: args["kind"].as_str().and_then(IdeaKind::parse).unwrap_or_default(), project: optional("project") },
         "message_task" => EmployeeTaskOp::MessageTask { task: text("task"), message: text("message"), interrupt: args["interrupt"].as_bool().unwrap_or(true) },
         "delegate_task" => {
             let criteria = args["criteria"].as_array().map(|a| a.iter().filter_map(|c| c.as_str().map(str::to_owned)).collect()).unwrap_or_default();
@@ -822,8 +807,15 @@ mod tests {
         assert!(!names(true).contains(&"hand_over_task".to_owned()));
         assert!(names(false).contains(&"hand_off".to_owned()));
         assert!(!names(true).contains(&"hand_off".to_owned()), "the project assistant is in no thread");
-        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat", "vault_list", "vault_read"] {
+        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat", "vault_list", "vault_read"] {
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
+        }
+    }
+
+    #[test]
+    fn employees_are_offered_no_tool_that_makes_ideas() {
+        for project in [false, true] {
+            assert!(!tool_definitions(project, false, false, false).iter().any(|t| t["name"] == "add_idea"));
         }
     }
 

@@ -67,7 +67,7 @@ async fn own_tools_are_allowed_without_asking() {
 }
 
 /// Plan mode refuses files, commands and external actions, but an employee's own
-/// memory (remember, recall, add_idea) keeps working: the plan-mode guidance says
+/// memory (remember, recall) keeps working: the plan-mode guidance says
 /// so, and the bridge lets them through without asking.
 #[tokio::test(flavor = "multi_thread")]
 async fn own_tools_work_in_plan_mode_and_work_tools_do_not() {
@@ -81,7 +81,7 @@ async fn own_tools_work_in_plan_mode_and_work_tools_do_not() {
     let before = client.approvals().await.unwrap().approvals.len();
 
     let bridge = BridgeClient::connect(dir.path()).await.unwrap();
-    for tool in ["mcp__aurelius__remember", "mcp__aurelius__recall", "mcp__aurelius__add_idea"] {
+    for tool in ["mcp__aurelius__remember", "mcp__aurelius__recall"] {
         assert!(aurelius_runtime::claude_code::MEMORY_TOOLS.contains(&tool), "{tool} is one of the own tools");
         let answer = tokio::time::timeout(Duration::from_secs(5), bridge.permission_ask(run, None, tool.to_string(), serde_json::json!({}))).await.unwrap().unwrap();
         assert!(answer.allow, "{tool} allowed in plan mode without asking");

@@ -64,13 +64,16 @@ pub const SWITCHABLE_TOOLS: &[SwitchableTool] = &[
     tool("mcp__aurelius__post_to_ticket", "Post on other tickets", COMPANY),
     tool("mcp__aurelius__post_to_group_chat", "Post in channels", COMPANY),
     tool("mcp__aurelius__schedule_message", "Schedule messages", COMPANY),
-    tool("mcp__aurelius__add_idea", "Add ideas", COMPANY),
     tool("mcp__aurelius__propose_colleague", "Propose a colleague", COMPANY),
     tool("mcp__aurelius__propose_instructions", "Propose instructions", COMPANY),
     tool("mcp__aurelius__propose_guideline", "Propose a guideline", COMPANY),
     tool("mcp__aurelius__vault_list", "List vault items", COMPANY),
     tool("mcp__aurelius__vault_read", "Use vault items", COMPANY),
 ];
+
+/// Tools that are no longer offered. A list stored while they still were may name them: it stays
+/// valid, and the next save drops them.
+const RETIRED_TOOLS: &[&str] = &["mcp__aurelius__add_idea"];
 
 pub fn is_switchable(name: &str) -> bool {
     SWITCHABLE_TOOLS.iter().any(|t| t.name == name)
@@ -132,6 +135,7 @@ impl ToolPolicy {
                     return Err(out_of_range(format!("a name is 1 to {TOOL_NAME_MAX} characters")));
                 }
             }
+            list.retain(|name| !RETIRED_TOOLS.contains(&name.as_str()));
             list.sort();
             list.dedup();
         }
@@ -223,6 +227,13 @@ mod tests {
 
     fn policy(tools: Option<&[&str]>, approval: &[&str]) -> ToolPolicy {
         ToolPolicy { tools: tools.map(|t| t.iter().map(|s| s.to_string()).collect()), approval_tools: approval.iter().map(|s| s.to_string()).collect(), mcp_servers: None }
+    }
+
+    #[test]
+    fn a_stored_list_that_names_a_retired_tool_stays_valid_and_loses_the_name() {
+        let saved = policy(Some(&["Read", "mcp__aurelius__add_idea"]), &["mcp__aurelius__add_idea"]).validate().unwrap();
+        assert_eq!(saved, policy(Some(&["Read"]), &[]));
+        assert!(!is_switchable("mcp__aurelius__add_idea"));
     }
 
     #[test]

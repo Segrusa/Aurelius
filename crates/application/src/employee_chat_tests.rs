@@ -287,7 +287,7 @@ fn a_non_manager_in_its_chat_is_offered_create_ticket_and_told_it_may() {
     assert!(plan.tool_policy.allows("mcp__aurelius__create_ticket") && !plan.tool_policy.bridge_tools_off().contains(&"create_ticket"));
     let system = plan.system.expect("identity and guidance");
     assert!(system.contains("make an ordinary ticket with create_ticket") && system.contains("whatever your place in the org chart"), "{system}");
-    assert!(!system.contains("name who can"), "{system}");
+    assert!(!system.contains("name who can") && !system.contains("add_idea"), "{system}");
 }
 
 #[test]
