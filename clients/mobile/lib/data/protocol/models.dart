@@ -5761,6 +5761,118 @@ final class EmployeeQueueItem {
   };
 }
 
+/// What a new run of one employee uses, as the run itself would resolve it.
+final class EmployeeRunView {
+  const EmployeeRunView({
+    this.chatEffort,
+    this.chatModel,
+    this.connection,
+    this.effort,
+    required this.effortSource,
+    required this.employeeId,
+    this.model,
+    this.modelDefaultEffort,
+    required this.modelSource,
+    required this.name,
+    required this.own,
+    required this.status,
+    required this.supportedEfforts,
+    this.unsupportedEffort,
+  });
+
+  /// The effort chosen in the employee's chat; it goes before the rest in its chats.
+  final String? chatEffort;
+  /// The model chosen in the employee's chat; it goes before the rest in its chats.
+  final String? chatModel;
+  /// The display name of the connection, if there is one.
+  final String? connection;
+  /// The effort passed to the run; none: the run gets no effort and the model's own applies.
+  final String? effort;
+  final RunValueSource effortSource;
+  final String employeeId;
+  final String? model;
+  /// The model's own effort when none is passed, where that is known.
+  final String? modelDefaultEffort;
+  final RunValueSource modelSource;
+  final String name;
+  /// What is stored for the employee itself: a change sends it back with only the effort changed.
+  final RunSettings own;
+  final LifecycleStatus status;
+  /// The levels this employee's model can use; empty: it has no effort setting.
+  final List<String> supportedEfforts;
+  /// A chosen effort the model cannot use, so runs leave it out.
+  final String? unsupportedEffort;
+
+  factory EmployeeRunView.fromJson(Map<String, dynamic> json) => EmployeeRunView(
+    chatEffort: (json['chat_effort'] == null ? null : (json['chat_effort'] as String)),
+    chatModel: (json['chat_model'] == null ? null : (json['chat_model'] as String)),
+    connection: (json['connection'] == null ? null : (json['connection'] as String)),
+    effort: (json['effort'] == null ? null : (json['effort'] as String)),
+    effortSource: RunValueSource.fromJson(json['effort_source'] as String),
+    employeeId: (json['employee_id'] as String),
+    model: (json['model'] == null ? null : (json['model'] as String)),
+    modelDefaultEffort: (json['model_default_effort'] == null ? null : (json['model_default_effort'] as String)),
+    modelSource: RunValueSource.fromJson(json['model_source'] as String),
+    name: (json['name'] as String),
+    own: RunSettings.fromJson(json['own'] as Map<String, dynamic>),
+    status: LifecycleStatus.fromJson(json['status'] as String),
+    supportedEfforts: (json['supported_efforts'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    unsupportedEffort: (json['unsupported_effort'] == null ? null : (json['unsupported_effort'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (chatEffort != null) 'chat_effort': chatEffort,
+    if (chatModel != null) 'chat_model': chatModel,
+    if (connection != null) 'connection': connection,
+    if (effort != null) 'effort': effort,
+    'effort_source': effortSource.toJson(),
+    'employee_id': employeeId,
+    if (model != null) 'model': model,
+    if (modelDefaultEffort != null) 'model_default_effort': modelDefaultEffort,
+    'model_source': modelSource.toJson(),
+    'name': name,
+    'own': own.toJson(),
+    'status': status.toJson(),
+    'supported_efforts': supportedEfforts,
+    if (unsupportedEffort != null) 'unsupported_effort': unsupportedEffort,
+  };
+}
+
+/// `employee.run_overview` (feature `employee_run_overview`).
+final class EmployeeRunsView {
+  const EmployeeRunsView({
+    required this.company,
+    this.companyModel,
+    this.companyModelDefaultEffort,
+    required this.companySupportedEfforts,
+    required this.employees,
+  });
+
+  /// The stored company-wide default for employee runs.
+  final RunSettings company;
+  final String? companyModel;
+  final String? companyModelDefaultEffort;
+  /// The levels the company's default model can use.
+  final List<String> companySupportedEfforts;
+  final List<EmployeeRunView> employees;
+
+  factory EmployeeRunsView.fromJson(Map<String, dynamic> json) => EmployeeRunsView(
+    company: RunSettings.fromJson(json['company'] as Map<String, dynamic>),
+    companyModel: (json['company_model'] == null ? null : (json['company_model'] as String)),
+    companyModelDefaultEffort: (json['company_model_default_effort'] == null ? null : (json['company_model_default_effort'] as String)),
+    companySupportedEfforts: (json['company_supported_efforts'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    employees: (json['employees'] as List<dynamic>).map((x0) => EmployeeRunView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'company': company.toJson(),
+    if (companyModel != null) 'company_model': companyModel,
+    if (companyModelDefaultEffort != null) 'company_model_default_effort': companyModelDefaultEffort,
+    'company_supported_efforts': companySupportedEfforts,
+    'employees': employees.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 final class EmployeeSummary {
   const EmployeeSummary({
     this.accessLevel,
@@ -10012,6 +10124,8 @@ sealed class Method {
           employeeId: (src['employee_id'] as String),
         );
         }
+      case 'employee.run_overview':
+        return const MethodEmployeeRunOverview();
       case 'employee.scratchpad':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -10729,6 +10843,16 @@ final class MethodEmployeeQueue extends Method {
       'params': <String, dynamic>{
       'employee_id': employeeId,
     },
+    };
+}
+
+/// The model and effort a new run of each employee uses (feature `employee_run_overview`).
+final class MethodEmployeeRunOverview extends Method {
+  const MethodEmployeeRunOverview();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.run_overview',
     };
 }
 
@@ -13132,6 +13256,8 @@ sealed class ResponseBody {
         return ResponseBodyEmployeeInstructionVersions(value: EmployeeInstructionVersionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_queue':
         return ResponseBodyEmployeeQueue(value: EmployeeQueue.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_runs':
+        return ResponseBodyEmployeeRuns(value: EmployeeRunsView.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_scratchpad':
         return ResponseBodyEmployeeScratchpad(value: ScratchpadView.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_start_profiles':
@@ -13565,6 +13691,20 @@ final class ResponseBodyEmployeeQueue extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'employee_queue',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyEmployeeRuns extends ResponseBody {
+  const ResponseBodyEmployeeRuns({
+    required this.value,
+  });
+
+  final EmployeeRunsView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_runs',
       'value': value.toJson(),
     };
 }
@@ -14921,6 +15061,29 @@ final class RunTrace {
     if (usage != null) 'usage': usage?.toJson(),
     'user_turn': userTurn,
   };
+}
+
+/// Where an employee's effective model or effort comes from (`employee.run_overview`).
+enum RunValueSource {
+  /// The company-wide default.
+  company('company'),
+  /// The default model of the connection.
+  connection('connection'),
+  /// Chosen for this employee.
+  employee('employee'),
+  /// Nothing is chosen: the runtime decides (the model's own effort).
+  runtime('runtime');
+
+  const RunValueSource(this.wire);
+
+  final String wire;
+
+  static RunValueSource fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown RunValueSource value: $value'),
+      );
+
+  String toJson() => wire;
 }
 
 /// A message an employee scheduled (`schedule_message`, R7; feature `scheduled_messages`).
