@@ -128,6 +128,7 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         EmployeeTaskOp::PostToGroupChat { message, channel } => EmployeeAction::PostToGroupChat { message, channel },
         EmployeeTaskOp::ReadDiscussion { last } => EmployeeAction::ReadDiscussion { last },
         EmployeeTaskOp::PostToDiscussion { message } => EmployeeAction::PostToDiscussion { message },
+        EmployeeTaskOp::HandOff { to, message } => EmployeeAction::HandOff { to, message },
         EmployeeTaskOp::AssignTicket { employee, reason } => EmployeeAction::AssignTicket { employee, reason },
         // Checked in the application (`ticket::agent`): who may read, make, change, start and post; the
         // writes are not in the trial filter's reading list above, so a trial cannot use them.

@@ -49,9 +49,36 @@ pub(crate) fn live_run(conn: &rusqlite::Connection, task: TaskId, except: Option
 
 /// Queue a run of the task's conversation that answers `reply_to`, counted for the task.
 pub(crate) fn run_for(tx: &Tx<'_>, task: TaskId, conversation: ConversationId, reply_to: MessageId) -> Result<Vec<EventNotice>, StorageError> {
-    let (run, notices) = queue_run(tx, &serde_json::json!({ "task_id": task }), &task.to_string(), conversation, reply_to)?;
+    run_for_at(tx, task, conversation, reply_to, aurelius_storage::inbox::task_hop(tx, task)?)
+}
+
+/// `run_for`, at `hop` (R4): a colleague's `message_task` counts one on from its own run.
+fn run_for_at(tx: &Tx<'_>, task: TaskId, conversation: ConversationId, reply_to: MessageId, hop: u32) -> Result<Vec<EventNotice>, StorageError> {
+    let mut meta = serde_json::json!({ "task_id": task });
+    if hop > 0 {
+        meta["hop"] = hop.into();
+    }
+    let (run, notices) = queue_run(tx, &meta, &task.to_string(), conversation, reply_to)?;
     crate::run::inbox::link_task(tx, run, task)?;
     Ok(notices)
+}
+
+/// The queuing metadata of a run that answers a result coming back: a result counts
+/// no hop, so the run goes on at the hop of the run that delegated (R4).
+fn reported_back(tx: &Tx<'_>, task: TaskId) -> Result<serde_json::Value, StorageError> {
+    let hop = aurelius_storage::inbox::task_hop(tx, task)?.saturating_sub(1);
+    Ok(serde_json::json!({ "origin": "delegated", "task_id": task, "hop": hop }))
+}
+
+/// The hop of a delegation from `run`, or why it is refused (R4; the ticket's limit,
+/// because work always belongs to a ticket).
+fn delegation_hop(tx: &Tx<'_>, run: RunId) -> Result<Result<u32, String>, StorageError> {
+    let hop = aurelius_storage::inbox::run_hop(tx, run)? + 1;
+    Ok(if hop > aurelius_domain::group_chat::TICKET_MAX_HOPS {
+        Err(format!("Delegating further is not allowed now: colleagues already passed this on {} times after a board member's message. Do this part yourself or wait for a board member.", aurelius_domain::group_chat::TICKET_MAX_HOPS))
+    } else {
+        Ok(hop)
+    })
 }
 
 /// Called when a run is queued in a conversation: a run in a live task's
@@ -440,7 +467,7 @@ pub(crate) fn report_to_origin(tx: &Tx<'_>, st: &Store, task: TaskId, speaker: S
     let (message, posted) = thread::post_result(tx, st, conversation, task, task, speaker, text)?;
     let mut notices = vec![posted];
     if !open_from(tx, conversation, Some(task))? && !live_in(tx, conversation, None)? {
-        let (_, queued) = queue_run(tx, &serde_json::json!({ "origin": "delegated", "task_id": task }), &task.to_string(), conversation, message)?;
+        let (_, queued) = queue_run(tx, &reported_back(tx, task)?, &task.to_string(), conversation, message)?;
         notices.extend(queued);
     }
     Ok(notices)
@@ -458,7 +485,7 @@ pub(crate) fn origin_released(tx: &Tx<'_>, task: TaskId) -> Result<Vec<EventNoti
     if !is_result(tx, latest)? {
         return Ok(vec![]);
     }
-    let (_, queued) = queue_run(tx, &serde_json::json!({ "origin": "delegated", "task_id": task }), &task.to_string(), conversation, latest)?;
+    let (_, queued) = queue_run(tx, &reported_back(tx, task)?, &task.to_string(), conversation, latest)?;
     Ok(queued)
 }
 
@@ -485,7 +512,7 @@ pub(crate) fn answer_results(tx: &Tx<'_>, run: RunId, completed: bool) -> Result
     if open_from(tx, conversation, None)? || live_in(tx, conversation, Some(run))? {
         return Ok(vec![]);
     }
-    let (_, queued) = queue_run(tx, &serde_json::json!({ "origin": "delegated", "task_id": task }), &task.to_string(), conversation, message)?;
+    let (_, queued) = queue_run(tx, &reported_back(tx, task)?, &task.to_string(), conversation, message)?;
     Ok(queued)
 }
 
@@ -628,12 +655,14 @@ pub enum EmployeeAction {
     /// The latest messages of a channel of the Team chat (nothing changes); `channel`
     /// none: the run's own (see `discussion::run_channel`).
     ReadGroupChat { last: Option<u32>, channel: Option<String> },
-    /// A message in a channel under the employee's name; wakes the colleagues it names.
+    /// A message in a channel under the employee's name; it wakes nobody.
     PostToGroupChat { message: String, channel: Option<String> },
     /// The latest messages of the discussion of the run's ticket (nothing changes).
     ReadDiscussion { last: Option<u32> },
-    /// A message in the discussion of the run's ticket; wakes the colleagues it names.
+    /// A message in the discussion of the run's ticket; it wakes nobody.
     PostToDiscussion { message: String },
+    /// Hand the work in the run's thread to a colleague (`discussion::hand_off`).
+    HandOff { to: String, message: String },
     /// The dispatcher of a ticket chooses its owner (`triage`; only in a dispatcher's run).
     AssignTicket { employee: String, reason: String },
     /// The tester's verdict on a ticket in Testing (`testing::verdict`; only in
@@ -799,6 +828,10 @@ impl CommandService {
                 })
                 .map_err(storage_error);
         }
+        if let EmployeeAction::HandOff { to, message } = &action {
+            let (to, message) = (to.clone(), message.clone());
+            return self.store.write(move |tx| crate::conversation::discussion::hand_off(tx, &st, run, &to, &message)).map_err(storage_error);
+        }
         if let EmployeeAction::ListTickets { project, column, query, limit } = &action {
             return self
                 .store
@@ -927,6 +960,10 @@ impl CommandService {
                                 return Ok((false, crate::org::refuse_delegation(org, me, to.id, &colleagues), vec![]));
                             }
                         }
+                        let hop = match delegation_hop(tx, run)? {
+                            Ok(hop) => hop,
+                            Err(why) => return Ok((false, why, vec![])),
+                        };
                         // A part inherits the task's ticket; a task without one (recurring, from an app) names one.
                         let named = match crate::task::ticket_line::ticket_of(tx, task)? {
                             Some(_) => None,
@@ -937,7 +974,7 @@ impl CommandService {
                         };
                         let me_name = employees::load_employee(tx, me)?.map(|m| m.name).unwrap_or_default();
                         let note = format!("(Delegated by {me_name} as part of the task \"{}\".)", row.title);
-                        let Some((child, title, mut notices)) = insert_part(tx, &st, row.project_id, Some(me), &to, &title, &goal, &criteria, &note, Some(task), None, None, named)? else {
+                        let Some((child, title, mut notices)) = insert_part(tx, &st, row.project_id, Some(me), &to, &title, &goal, &criteria, &note, Some(task), None, None, named, hop)? else {
                             return Ok((false, "Give the part a title.".to_string(), vec![]));
                         };
                         inherit_mode(tx, run, child, to.id)?;
@@ -958,6 +995,7 @@ impl CommandService {
                     | EmployeeAction::PostToGroupChat { .. }
                     | EmployeeAction::ReadDiscussion { .. }
                     | EmployeeAction::PostToDiscussion { .. }
+                    | EmployeeAction::HandOff { .. }
                     | EmployeeAction::AssignTicket { .. }
                     | EmployeeAction::ReportTestResult { .. }
                     | EmployeeAction::ListTickets { .. }
@@ -1063,7 +1101,7 @@ fn message_task(tx: &Tx<'_>, st: &Store, run: RunId, needle: &str, message: &str
     if interrupt {
         notices.extend(crate::run::queue::interrupt_conversation(tx, st, &serde_json::json!({ "task_id": task, "from_employee": me }), &task.to_string(), conversation)?);
     }
-    notices.extend(run_for(tx, task, conversation, posted_id)?);
+    notices.extend(run_for_at(tx, task, conversation, posted_id, aurelius_storage::inbox::run_hop(tx, run)? + 1)?);
     let how = if interrupt { "interrupted them and they are answering it now" } else { "queued it behind what they are doing" };
     Ok((true, format!("Sent your message to “{}” and {how}. Their answer comes back as the task's result, as before.", row.title), notices))
 }
@@ -1126,6 +1164,7 @@ pub(crate) fn insert_part(
     origin: Option<ConversationId>,
     login: Option<aurelius_domain::UserId>,
     ticket: Option<TicketId>,
+    hop: u32,
 ) -> Result<Option<(TaskId, String, Vec<EventNotice>)>, StorageError> {
     let title = title.trim().chars().take(task::TITLE_MAX).collect::<String>();
     if title.is_empty() {
@@ -1163,7 +1202,7 @@ pub(crate) fn insert_part(
     })?;
     created.project_id = Some(project);
     let notices = vec![created, task_event(tx, child, project, "task.queued", serde_json::json!({}))?];
-    aurelius_storage::events::insert_job(tx, &child.to_string(), crate::task::tasks::TASK_JOB_KIND, event_id, &format!("task:{child}"), &serde_json::json!({ "task_id": child }))?;
+    aurelius_storage::events::insert_job(tx, &child.to_string(), crate::task::tasks::TASK_JOB_KIND, event_id, &format!("task:{child}"), &serde_json::json!({ "task_id": child, "hop": hop }))?;
     Ok(Some((child, title, notices)))
 }
 
@@ -1255,6 +1294,10 @@ fn delegate_from_conversation(tx: &Tx<'_>, st: &Store, run: RunId, action: Emplo
         }
         None => "The project assistant".to_string(),
     };
+    let hop = match delegation_hop(tx, run)? {
+        Ok(hop) => hop,
+        Err(why) => return Ok((false, why, vec![])),
+    };
     // On the login of the run that delegates, not of another run queued in the same conversation.
     let login = crate::run::login::of_run(tx, run)?;
     // A ticket's discussion works for that ticket; any other conversation names one.
@@ -1271,7 +1314,7 @@ fn delegate_from_conversation(tx: &Tx<'_>, st: &Store, run: RunId, action: Emplo
         return Ok((false, "That project is paused or archived; it takes no new work.".to_string(), vec![]));
     }
     let note = format!("(Asked by {asked_by} from a conversation with the user.)");
-    let Some((child, title, mut notices)) = insert_part(tx, st, project, me, &to, &title, &goal, &criteria, &note, None, Some(conversation), login, Some(ticket.id))? else {
+    let Some((child, title, mut notices)) = insert_part(tx, st, project, me, &to, &title, &goal, &criteria, &note, None, Some(conversation), login, Some(ticket.id), hop)? else {
         return Ok((false, "Give the task a title.".to_string(), vec![]));
     };
     inherit_mode(tx, run, child, to.id)?;

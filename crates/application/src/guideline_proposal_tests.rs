@@ -447,6 +447,7 @@ fn every_action() -> Vec<EmployeeAction> {
         EmployeeAction::UpdateTicket { ticket: "#1".into(), title: Some("t".into()), description: None, priority: None, labels: None },
         EmployeeAction::MoveTicket { ticket: "#1".into(), column: "todo".into() },
         EmployeeAction::PostToTicket { ticket: "#1".into(), message: "m".into() },
+        EmployeeAction::HandOff { to: "Ann".into(), message: "m".into() },
     ];
     for action in &all {
         match action {
@@ -472,7 +473,8 @@ fn every_action() -> Vec<EmployeeAction> {
             | EmployeeAction::CreateTicket { .. }
             | EmployeeAction::UpdateTicket { .. }
             | EmployeeAction::MoveTicket { .. }
-            | EmployeeAction::PostToTicket { .. } => {}
+            | EmployeeAction::PostToTicket { .. }
+            | EmployeeAction::HandOff { .. } => {}
         }
     }
     all

@@ -12,7 +12,7 @@
 - **Scoped view:** `group_chat::scoped_view` beslist puur; `ThreadView` in `conversation/discussion.rs` leest maximaal 60 berichten en citeert er zoals eerder maximaal 20. Quick answers en de projectassistent krijgen alles.
 - **Triggers (P5):** `trigger_mark` in `plan.rs`. Wat na het laatste antwoord komt is `(new)`; wat binnenkwam voor de run van dat antwoord eindigde (`runs.ended_at_ms`) krijgt de langere markering. De markering zit in de turn-tekst, niet in `session::item`, dus hervatten breekt niet.
 - **Roster (P7):** `colleagues` leest `employees.description`, met terugval op de eerste instructieregel. Migratie `0033_employee_description.sql`, `schema33_tests.rs`.
-- **P1 met een randvoorwaarde:** een antwoord dat naar de discussie gekopieerd wordt wekt niemand. De regel zegt daarom "post je handoff". Dat blijft zo tot stap 6.
+- **P1 met een randvoorwaarde:** een antwoord dat naar de discussie gekopieerd wordt wekt niemand. Sinds stap 6 (B7) is de handoff de tool `hand_off`; een post wekt ook niemand meer.
 
 ## 2. Geheugen (stap 3, gebouwd)
 
@@ -25,7 +25,7 @@
 | 2 C1, C3 | `claude_code/mod.rs`, `tooling.rs`, `run/session.rs` | Toegangsniveau in `session_key`, net als de platformversie. `connection.set_defaults` draagt C1 al op employee-scope; de UI en een leesmethode zijn nog nodig |
 | 4 U1, U2, U4 | `storage/src/usage.rs`, `views.rs`, `approval-card.tsx` | Nieuw: `ApprovalView.ticket_id`, `MessageView.awaiting_user`, `ticket_id` op `usage.get_totals`, `TokenUsage.model_calls`, usage per `login_user` |
 | 5 mailbox | `employee_inbox`, `employee_threads`, `run_triggers`; `ticket_line::dispatched`, `triage::assign`, `discussion::wake`, `to_owner`, `employee.rs:463`, heartbeat, `make_task`, `agent_functions.rs:303`, `insert_part`, proposals, varianten, ideas | Worker per employee; run en config-/login-snapshot pas bij het claimen. Lease, `lease_epoch`, herstel en `load::admit` blijven. Run-snapshot en `run_guidelines` blijven. Notificaties, `task.*`-webhooks, `list_open_questions`, recurring tasks en functions moeten blijven werken. `run_triggers` kan `trigger_mark` vervangen |
-| 6 R4, R5 | `discussion.rs`, `task_runs.rs` | Assumptie 1. Runresultaten blijven `Reported`; een vastgehouden handoff als `action`-string, geen nieuwe `SystemLineKind` |
+| 6 R4, R5, B7 | `discussion.rs`, `task_runs.rs`, `storage/inbox.rs`, `mcp.rs`, dispatcher | Assumptie 1. Runresultaten blijven `Reported`; een vastgehouden handoff is een `limit`-regel met `action` `handoff_held`, geen nieuwe `SystemLineKind`. Een hop staat in `meta_json` (geen wireveld) en op het inbox-item; een bewerking of verwijdering telt niet. Geen tussentijdse resultaten-hop: een resultaat dat terugkomt telt geen hop |
 | 7 | `crates/storage`, `mcp.rs`, `data.ts` | `schedule_message` en scratchpad in de bridge |
 | 8 C2 | `permissions.rs`, `configs_for_run`, `mcp.rs` | `MEMORY_TOOLS` herzien |
 | 9 C6 | `org/employee.rs`, `employee-dialog.tsx` | Idempotent zoals de guidelines-seed |

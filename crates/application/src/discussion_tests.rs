@@ -128,6 +128,10 @@ fn post_in_discussion(s: &Setup, run: RunId, message: &str) -> (bool, String) {
     act(s, run, EmployeeAction::PostToDiscussion { message: message.into() })
 }
 
+fn hand_off(s: &Setup, run: RunId, to: &str, message: &str) -> (bool, String) {
+    act(s, run, EmployeeAction::HandOff { to: to.into(), message: message.into() })
+}
+
 /// The runs queued for `employee` in its main chat, oldest first: (run, discussion that woke it, hop).
 fn woken(s: &Setup, employee: EmployeeId) -> Vec<(RunId, ConversationId, u32)> {
     s.service
@@ -681,20 +685,19 @@ fn hops_stop_at_max_and_leave_a_system_line_that_wakes_nobody() {
     let names = [("Bo", s.bo), ("Ann", s.ann)];
     for hop in 1..=MAX_HOPS {
         let (name, who) = names[(hop as usize + 1) % 2];
-        let (ok, text) = post_in_channel(&s, run, None, &format!("@{name} your turn"));
+        let (ok, text) = hand_off(&s, run, name, "Your turn: check the release notes and report back.");
         assert!(ok && text.contains(&format!("{name} will answer")), "hop {hop}: {text}");
         let (next, conversation, at) = last_woken(&s, who);
         assert_eq!((conversation, at), (general, hop));
         run = next;
     }
     let before = (woken(&s, s.ann).len(), woken(&s, s.bo).len());
-    // Bo (at hop MAX_HOPS) names Ann and Cy: neither is woken.
-    let (ok, text) = post_in_channel(&s, run, None, "@Ann @Cy again");
-    assert!(ok && text.contains("Limit reached") && text.contains("will not be woken"), "{text}");
+    // Bo (at hop MAX_HOPS) cannot hand over any more.
+    let (ok, text) = hand_off(&s, run, "Ann", "One more.");
+    assert!(!ok && text.contains("Limit reached") && text.contains("will not be woken"), "{text}");
     assert_eq!((woken(&s, s.ann).len(), woken(&s, s.bo).len()), before, "nobody past MAX_HOPS");
-    assert!(woken(&s, s.cy).is_empty());
     let lines = system_lines(&s, general);
-    assert!(lines.contains(&(SystemLineKind::Limit, "Limit reached: Ann, Cy was not woken.".into())), "{lines:?}");
+    assert!(lines.contains(&(SystemLineKind::Limit, "Limit reached: Ann was not woken.".into())), "{lines:?}");
     // The system line itself names them, and is not part of what employees read.
     let read = act(&s, run, EmployeeAction::ReadGroupChat { last: None, channel: None }).1;
     assert!(!read.contains("Limit reached"), "{read}");
@@ -726,30 +729,30 @@ fn waking_posts_are_capped_per_run_and_per_hour_over_three_discussions_together(
     let orbit = channel(&s, s.project);
     let t = new_ticket(&s, "Login", None);
     let d = ticket_view(&s, t).conversation_id.unwrap();
-    // Per run: WAKING_POSTS_PER_RUN waking posts, also when they go to different discussions.
+    // Per run: WAKING_POSTS_PER_RUN handoffs.
     let (_, runs) = send(&s, None, "@Ann hi").unwrap();
     let run = runs[0];
-    assert!(post_in_channel(&s, run, None, "@Bo one").1.contains("Bo will answer"));
-    assert!(post_in_channel(&s, run, Some("Orbit"), "@Bo two").1.contains("Bo will answer"));
+    assert!(hand_off(&s, run, "Bo", "One.").1.contains("Bo will answer"));
+    assert!(hand_off(&s, run, "Bo", "Two.").1.contains("Bo will answer"));
     assert_eq!(WAKING_POSTS_PER_RUN, 2);
-    let (ok, text) = post_in_channel(&s, run, Some("General"), "@Bo three");
-    assert!(ok && text.contains("Limit reached") && text.contains("in this run"), "{text}");
+    let (ok, text) = hand_off(&s, run, "Bo", "Three.");
+    assert!(!ok && text.contains("Limit reached") && text.contains("in this run"), "{text}");
     // Per hour: Ann's runs from three discussions share one budget of WAKING_POSTS_PER_WINDOW.
     let (_, r_orbit) = send(&s, Some(orbit), "@Ann hi").unwrap();
     let (_, r_ticket) = post(&s, t, "@Ann hi").unwrap();
     let (_, r_general) = send(&s, None, "@Ann again").unwrap();
     assert_eq!(WAKING_POSTS_PER_WINDOW, 4);
     // Two waking posts so far (in `run`); two more from two other discussions...
-    assert!(post_in_channel(&s, r_orbit[0], None, "@Cy look").1.contains("Cy will answer"));
-    assert!(post_in_discussion(&s, r_ticket[0], "@Cy look").1.contains("Cy will answer"));
+    assert!(hand_off(&s, r_orbit[0], "Cy", "Look.").1.contains("Cy will answer"));
+    assert!(hand_off(&s, r_ticket[0], "Cy", "Look.").1.contains("Cy will answer"));
     // ...and the fifth, in a third discussion, is refused.
-    let (ok, text) = post_in_channel(&s, r_general[0], None, "@Cy and here");
-    assert!(ok && text.contains("Limit reached") && text.contains("last hour") && text.contains("all channels and tickets together"), "{text}");
+    let (ok, text) = hand_off(&s, r_general[0], "Cy", "And here.");
+    assert!(!ok && text.contains("Limit reached") && text.contains("last hour") && text.contains("all channels and tickets together"), "{text}");
     for conversation in [general, orbit, d] {
         assert!(!messages(&s, conversation).is_empty());
     }
     assert!(system_lines(&s, general).iter().any(|(k, text)| *k == SystemLineKind::Limit && text == "Limit reached: Cy was not woken."));
-    // A post without @ still goes through.
+    // A post still goes through: it wakes nobody.
     let (ok, text) = post_in_channel(&s, r_general[0], None, "No mention.");
     assert_eq!((ok, text.as_str()), (true, "Posted in the group chat."));
 }
@@ -1044,19 +1047,19 @@ fn a_waiting_main_task_takes_the_message_without_resuming() {
 
 #[test]
 fn only_colleagues_that_can_be_woken_use_the_waking_budget() {
-    // Trace m4: a named colleague without a main chat wakes nobody, so the post uses no budget.
+    // Trace m4: a colleague without a main chat cannot be handed to, and that uses no budget.
     let s = setup();
     let (cy, project) = (s.cy, s.project);
     s.service.store().write(move |tx| Ok(tx.execute("UPDATE conversations SET kind = 'task', project_id = ?2 WHERE employee_id = ?1 AND kind = 'employee'", [cy.to_string(), project.to_string()])?)).unwrap();
     let (_, runs) = send(&s, None, "@Ann hi").unwrap();
     let run = runs[0];
     for _ in 0..WAKING_POSTS_PER_RUN + 1 {
-        let (ok, text) = post_in_channel(&s, run, None, "@Cy look");
-        assert!(ok && !text.contains("Limit reached"), "{text}");
+        let (ok, text) = hand_off(&s, run, "Cy", "Look.");
+        assert!(!ok && !text.contains("Limit reached"), "{text}");
     }
-    assert!(post_in_channel(&s, run, None, "@Bo one").1.contains("Bo will answer"));
-    assert!(post_in_channel(&s, run, None, "@Bo two").1.contains("Bo will answer"));
-    assert!(post_in_channel(&s, run, None, "@Bo three").1.contains("Limit reached"));
+    assert!(hand_off(&s, run, "Bo", "One.").1.contains("Bo will answer"));
+    assert!(hand_off(&s, run, "Bo", "Two.").1.contains("Bo will answer"));
+    assert!(hand_off(&s, run, "Bo", "Three.").1.contains("Limit reached"));
 }
 
 #[test]
@@ -1433,3 +1436,6 @@ fn the_odometer_counts_a_tickets_tasks_and_its_discussion_and_each_login() {
     record_usage(&s, runs[0], 7, None);
     assert_eq!(s.service.store().read(move |c| aurelius_storage::usage::conversation_totals(c, general)).unwrap().total.input_tokens, 7);
 }
+
+#[path = "handoff_tests.rs"]
+mod handoff_tests;

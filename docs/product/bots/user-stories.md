@@ -8,7 +8,7 @@
 
 - **A-01:** een lead kan een mens zijn. Op een ticket met Responsible is geen employee lead; de owner is daar dus een niet-lead en leest ook wat een board member zonder naam schrijft, omdat dat aan hem gericht is.
 - **A-02:** "alleen in de thread" betekent: geen andere employee schreef er of werd er genoemd, in de laatste 60 berichten.
-- **A-03:** een antwoord dat Aurelius kopieert naar de discussie wekt niemand (RULE 08). Een handoff is dus een post met `post_to_discussion` of `post_to_group_chat`, tot stap 6 daar anders over beslist.
+- **A-03:** een antwoord dat Aurelius kopieert naar de discussie wekt niemand (RULE 08). Sinds stap 6 (B7) is een handoff de tool `hand_off`; een post wekt niemand meer.
 
 ## Stap 1: promptregels
 
@@ -60,8 +60,9 @@
 | BOT-16 | M | 5 | Eén run per employee; wachtende items van een thread worden samengevoegd (R2) |
 | BOT-17 | M | 5 | Een thread die op een antwoord wacht is geparkeerd (R3) |
 | BOT-18 | M | 5 | `--resume` binnen een thread, herbouw als terugval (R6) |
-| BOT-19 | M | 6 | Hop op elk bericht; een mens zet hem op nul (R4) |
-| BOT-20 | M | 6 | Handoff vastgehouden zolang de zender ongelezen items heeft (R5) |
+| BOT-19 | M | 6 | Hop op elk bericht, ook in delegaties; een mens zet hem op nul (R4). `TICKET_MAX_HOPS` 8 op een ticket, 3 in een kanaal |
+| BOT-20 | M | 6 | Handoff vastgehouden zolang de zender ongelezen items heeft, met een regel "handoff held"; daarna ongewijzigd bezorgd (R5) |
+| BOT-31 | M | 6 | `hand_off(to, message)` is de enige manier om een collega te wekken; een `@Naam` van een employee is alleen een verwijzing (B7) |
 | BOT-21 | S | 7 | `schedule_message` (R7), scratchpad (C7), waiting indicator (U3), Scheduled-pagina (U7) |
 | BOT-22 | S | 8 | Toollijst, approval-vinkjes en MCP per employee (C2) |
 | BOT-23 | S | 9 | Startprofielen bij een nieuwe employee (C6, P6) |

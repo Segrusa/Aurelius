@@ -81,6 +81,11 @@ pub async fn run(shared: Arc<Shared>) {
                 0
             }
         };
+        // Handoffs held for a sender that has caught up go out first (R5).
+        let s = shared.clone();
+        if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.release_handoffs()).await {
+            shared.publish(notices);
+        }
         let s = shared.clone();
         let owner2 = owner.clone();
         // A worker's item first (it becomes a run with a leased job), else a due job.

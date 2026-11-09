@@ -215,6 +215,9 @@ pub enum EmployeeTaskOp {
     /// A message in a ticket's discussion (the bridge's `post_to_ticket`), as `post_to_group_chat`
     /// does in a channel.
     PostToTicket { ticket: String, message: String },
+    /// Hand the work in the run's thread to a colleague (the bridge's `hand_off`): `to`
+    /// a name, `message` self-contained. Waits while the sender has unread items (R5).
+    HandOff { to: String, message: String },
 }
 
 fn yes() -> bool {
@@ -310,6 +313,7 @@ mod tests {
             UpdateTicket { .. } => "update_ticket",
             MoveTicket { .. } => "move_ticket",
             PostToTicket { .. } => "post_to_ticket",
+            HandOff { .. } => "hand_off",
         }
     }
 

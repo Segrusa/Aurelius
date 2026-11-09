@@ -10,6 +10,9 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 pub const QUEUED: &str = "queued";
 /// A run took it.
 pub const CLAIMED: &str = "claimed";
+/// A handoff that waits for its sender to catch up (R5): nothing makes it a run;
+/// `discussion::release_handoffs` delivers it. `payload_json` has what it needs.
+pub const HELD: &str = "held";
 
 /// A new item (`kind`, `source`: see the migration).
 pub struct NewItem<'a> {
@@ -45,10 +48,19 @@ pub struct Item {
 }
 
 pub fn insert(tx: &Transaction<'_>, item: NewItem<'_>) -> Result<(), StorageError> {
+    insert_in(tx, item, QUEUED)
+}
+
+/// Keep a handoff until its sender has caught up (R5), for `item.employee`.
+pub fn hold(tx: &Transaction<'_>, item: NewItem<'_>) -> Result<(), StorageError> {
+    insert_in(tx, item, HELD)
+}
+
+fn insert_in(tx: &Transaction<'_>, item: NewItem<'_>, state: &str) -> Result<(), StorageError> {
     tx.execute(
         "INSERT INTO employee_inbox(id, employee_id, thread_key, ticket_id, conversation_id, kind, source, hop, payload_json,
-                                    login_user, task_id, source_event_id, not_before_ms, run_id, created_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?13)",
+                                    login_user, task_id, source_event_id, not_before_ms, run_id, created_at_ms, state)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?13, ?15)",
         params![
             uuid::Uuid::now_v7().to_string(),
             item.employee.to_string(),
@@ -64,12 +76,15 @@ pub fn insert(tx: &Transaction<'_>, item: NewItem<'_>) -> Result<(), StorageErro
             item.source_event.to_string(),
             now_ms(),
             item.run.to_string(),
+            state,
         ],
     )?;
     Ok(())
 }
 
-fn item_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, String, String, String, u32, String, Option<String>, Option<String>, i64, String, String)> {
+type ItemRow = (String, String, String, String, String, u32, String, Option<String>, Option<String>, i64, String, String);
+
+fn item_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemRow> {
     Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?))
 }
 
@@ -81,6 +96,65 @@ pub fn due(conn: &Connection, now: i64) -> Result<Vec<Item>, StorageError> {
          ORDER BY priority DESC, created_at_ms, rowid",
     )?;
     let rows = stmt.query_map([now], item_from_row)?;
+    collect_items(rows)
+}
+
+/// The held handoffs whose sender has caught up: nothing queued for it in the thread
+/// and no run of it there still going or waiting to go on.
+pub fn releasable_handoffs(conn: &Connection) -> Result<Vec<Item>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT h.id, h.employee_id, h.thread_key, h.conversation_id, h.kind, h.hop, h.payload_json, h.login_user, h.task_id, h.priority, h.run_id, h.source_event_id
+         FROM employee_inbox h WHERE h.state = 'held'
+           AND NOT EXISTS(SELECT 1 FROM employee_inbox q WHERE q.state = 'queued' AND q.thread_key = h.thread_key AND q.employee_id = json_extract(h.payload_json, '$.held_by'))
+           AND NOT EXISTS(SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state IN ('leased', 'ready')
+                          AND json_extract(o.payload_json, '$.employee_id') = json_extract(h.payload_json, '$.held_by')
+                          AND json_extract(o.payload_json, '$.thread_key') = h.thread_key)
+         ORDER BY h.created_at_ms, h.rowid",
+    )?;
+    let rows = stmt.query_map([], item_from_row)?;
+    collect_items(rows)
+}
+
+/// A held handoff is settled: `done` when delivered, else `cancelled`.
+pub fn settle_handoff(tx: &Transaction<'_>, item: &str, state: &str) -> Result<(), StorageError> {
+    tx.execute("UPDATE employee_inbox SET state = ?2 WHERE id = ?1 AND state = 'held'", [item, state])?;
+    Ok(())
+}
+
+/// What `employee` has not read in `thread`: items queued for it.
+pub fn unread(conn: &Connection, employee: EmployeeId, thread: &str) -> Result<u32, StorageError> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM employee_inbox WHERE state = 'queued' AND employee_id = ?1 AND thread_key = ?2",
+        [employee.to_string(), thread.to_owned()],
+        |r| r.get::<_, i64>(0),
+    )? as u32)
+}
+
+/// How many handoffs of `run` are held: they count for its limit as delivered ones do.
+pub fn held_of_run(conn: &Connection, run: RunId) -> Result<u32, StorageError> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM employee_inbox WHERE state = 'held' AND json_extract(payload_json, '$.run') = ?1", [run.to_string()], |r| r.get::<_, i64>(0))? as u32)
+}
+
+/// The hop of a run (R4): what woke it, 0 for a run nobody woke with a hop.
+pub fn run_hop(conn: &Connection, run: RunId) -> Result<u32, StorageError> {
+    let hop: Option<i64> = conn
+        .query_row("SELECT COALESCE(json_extract(payload_json, '$.hop'), json_extract(payload_json, '$.group.hop'), 0) FROM jobs WHERE id = ?1", [run.to_string()], |r| r.get(0))
+        .optional()?;
+    Ok(hop.unwrap_or(0) as u32)
+}
+
+/// The hop of a task (a delegation): 0 for a task a board member started.
+pub fn task_hop(conn: &Connection, task: TaskId) -> Result<u32, StorageError> {
+    let hop: Option<Option<i64>> = conn.query_row("SELECT json_extract(payload_json, '$.hop') FROM jobs WHERE id = ?1", [task.to_string()], |r| r.get(0)).optional()?;
+    Ok(hop.flatten().unwrap_or(0) as u32)
+}
+
+/// When the newest item that woke `run` was written.
+pub fn woken_at(conn: &Connection, run: RunId) -> Result<Option<i64>, StorageError> {
+    Ok(conn.query_row("SELECT MAX(i.created_at_ms) FROM run_triggers t JOIN employee_inbox i ON i.id = t.item_id WHERE t.run_id = ?1", [run.to_string()], |r| r.get(0))?)
+}
+
+fn collect_items(rows: impl Iterator<Item = rusqlite::Result<ItemRow>>) -> Result<Vec<Item>, StorageError> {
     let mut out = Vec::new();
     for row in rows {
         let (id, employee, thread_key, conversation, kind, hop, payload, login_user, task, priority, run, source_event) = row?;

@@ -302,6 +302,16 @@ pub fn waking_posts(conn: &Connection, run: RunId, employee: EmployeeId, since_m
     )?)
 }
 
+/// A board member wrote in `discussion` from `since_ms` on (R4: a human message resets
+/// the hop count). A message deleted since does not count; an edit changes nothing.
+pub fn board_spoke_since(conn: &Connection, discussion: ConversationId, since_ms: i64) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM messages WHERE conversation_id = ?1 AND role = 'user' AND status = 'complete' AND deleted_at_ms IS NULL AND created_at_ms >= ?2)",
+        params![discussion.to_string(), since_ms],
+        |r| r.get(0),
+    )?)
+}
+
 // ---- read markers (migration 20) ----
 
 /// The schema version whose migration keeps how far each board member read.
@@ -405,6 +415,8 @@ pub struct DiscussionLine {
     pub author_user: Option<(UserId, String)>,
     /// The storage key of its text.
     pub storage_key: String,
+    /// The employee a handoff in this message was for.
+    pub handoff_to: Option<EmployeeId>,
 }
 
 /// The latest `limit` messages employees read in a channel or ticket discussion
@@ -426,7 +438,7 @@ pub fn latest_in(conn: &Connection, conversation: ConversationId, thread: Option
     };
     let mut stmt = conn.prepare(&format!(
         "SELECT m.id, CASE WHEN m.role = 'user' THEN NULL ELSE COALESCE(json_extract(m.meta_json, '$.from'), 'Aurelius') END,
-                u.id, u.username, b.storage_key
+                u.id, u.username, b.storage_key, json_extract(m.meta_json, '$.handoff_to')
          FROM messages m JOIN blobs b ON b.id = m.content_blob_id LEFT JOIN users u ON u.id = m.author_user_id
          WHERE m.conversation_id = ?1 AND m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group') AND {only}
            AND (?2 IS NULL OR m.ordinal < (SELECT ordinal FROM messages WHERE id = ?2)) ORDER BY m.ordinal DESC LIMIT ?3"
@@ -436,7 +448,7 @@ pub fn latest_in(conn: &Connection, conversation: ConversationId, thread: Option
             (Some(id), Some(name)) => Some((parse(UserId::parse(&id))?, name)),
             _ => None,
         };
-        Ok(DiscussionLine { id: parse(MessageId::parse(&r.get::<_, String>(0)?))?, author: r.get(1)?, author_user: user, storage_key: r.get(4)? })
+        Ok(DiscussionLine { id: parse(MessageId::parse(&r.get::<_, String>(0)?))?, author: r.get(1)?, author_user: user, storage_key: r.get(4)?, handoff_to: r.get::<_, Option<String>>(5)?.and_then(|e| EmployeeId::parse(&e).ok()) })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }

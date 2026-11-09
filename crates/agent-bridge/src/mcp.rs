@@ -10,7 +10,7 @@
 //! employee's own memory, always on); `list_tasks`, `read_task`,
 //! `list_conversations`, `read_conversation`; `set_mode` (only for management in a task whose
 //! mode is theirs to choose, `--set-mode`); `delegate_task`, `message_task`,
-//! `hand_over_task`, `add_idea`, `propose_colleague`, `propose_instructions` and `propose_guideline`;
+//! `hand_over_task`, `hand_off`, `add_idea`, `propose_colleague`, `propose_instructions` and `propose_guideline`;
 //! `list_guidelines` and `read_guideline` (reading the guidelines, information only); `list_tickets`,
 //! `read_ticket`, `create_ticket`, `update_ticket`, `move_ticket` and `post_to_ticket` (the board; the daemon
 //! decides who may use each); `read_group_chat`
@@ -127,7 +127,7 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     tools.extend(memory_tool_definitions());
     tools.push(suggest_replies_definition());
     tools.extend(project_tool_definitions());
-    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || t["name"] != "hand_over_task"));
+    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off"))));
     tools.extend(group_chat_tool_definitions());
     tools.extend(vault_tool_definitions());
     tools.extend(board_tool_definitions());
@@ -283,6 +283,7 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "vault_list" => EmployeeTaskOp::VaultList { project: optional("project") },
         "vault_read" => EmployeeTaskOp::VaultRead { item: text("item"), project: optional("project") },
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
+        "hand_off" if !project => EmployeeTaskOp::HandOff { to: text("to"), message: text("message") },
         "propose_colleague" => EmployeeTaskOp::ProposeColleague {
             name: text("name"),
             role: text("role"),
@@ -623,6 +624,18 @@ fn task_tool_definitions() -> Vec<Value> {
                 "required": ["employee", "reason"]
             }
         }),
+        json!({
+            "name": "hand_off",
+            "description": "Hand the work in this thread (a ticket's discussion or a channel of the Team chat) to a colleague who should act next. It wakes them in the same thread and shows there as \"You handed over to Them\" with your message. This is the only way to wake a colleague: a name with @ in what you write only refers to them. Do it when someone else really has to act; a reply without a handoff ends the conversation, which is right when the work is done. They do not see your conversation: the message must stand on its own, with the goal, the paths or PR number and branch involved, the acceptance criteria and what to report back. Limited to a few in a row and per run; if you still have unread messages in the thread, it is delivered unchanged once you have read them. To give a colleague a task of its own, use delegate_task.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "to": { "type": "string", "description": "The colleague's name." },
+                    "message": { "type": "string", "description": "What they must do, self-contained. Never write \"see above\"." }
+                },
+                "required": ["to", "message"]
+            }
+        }),
     ]
 }
 
@@ -643,7 +656,7 @@ fn group_chat_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "post_to_group_chat",
-            "description": "Post a short message in a channel of the company's group chat under your name, when the group needs to know something (e.g. a task is done and needs a reviewer). Name a colleague with @Name to wake them: they answer in the same channel. Only the colleagues you name are woken, never yourself, and only a few times in a row after one message of a board member. An answer to a group chat message is posted there by itself; do not post it again.",
+            "description": "Post a short message in a channel of the company's group chat under your name, when the group needs to know something. It wakes nobody: a @Name only refers to a colleague, and @username of a board member notifies them. To have a colleague act, use hand_off. An answer to a group chat message is posted there by itself; do not post it again.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "message": { "type": "string", "description": "A few sentences at most." }, "channel": channel },
@@ -687,7 +700,7 @@ fn discussion_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "post_to_discussion",
-            "description": "Post a short message in the discussion of your ticket under your name: to answer or ask a board member, or to bring in a colleague with @Name (they answer there). The same limits as the group chat apply; a mention past them wakes nobody. A discussion of a ticket on Done can only be read.",
+            "description": "Post a short message in the discussion of your ticket under your name: to answer or ask a board member, with @username so they are told. It wakes nobody: a @Name only refers to a colleague. To have a colleague act, use hand_off. A discussion of a ticket on Done can only be read.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "message": { "type": "string", "description": "A few sentences at most." } },
@@ -759,6 +772,8 @@ mod tests {
         let names = |project| tool_definitions(project, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(false).contains(&"hand_over_task".to_owned()));
         assert!(!names(true).contains(&"hand_over_task".to_owned()));
+        assert!(names(false).contains(&"hand_off".to_owned()));
+        assert!(!names(true).contains(&"hand_off".to_owned()), "the project assistant is in no thread");
         for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat", "vault_list", "vault_read"] {
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
         }

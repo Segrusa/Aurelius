@@ -891,6 +891,9 @@ pub mod system_action {
     /// `by` chose who is responsible for the ticket (`to`: who; on a `moved` line,
     /// so an older client shows `text` and never reads a new `SystemLineKind`).
     pub const RESPONSIBLE: &str = "responsible";
+    /// A handoff waits until its sender has caught up with the thread (R5; `from`
+    /// who holds it, `to` who gets it; on a `limit` line, so `text` says it all).
+    pub const HANDOFF_HELD: &str = "handoff_held";
 }
 
 impl SystemLine {

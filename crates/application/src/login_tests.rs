@@ -280,13 +280,13 @@ fn runs_the_team_chat_wakes_use_the_login_of_hop_0_at_every_hop() {
             .unwrap()
     };
     // Ada brings in Iris (hop 1), Iris brings in Otto (hop 2): still Robin's login, never the employee's chat's last one.
-    let post = |run: RunId, text: &str| {
-        let (ok, said, _) = s.service.employee_action(run, EmployeeAction::PostToGroupChat { message: text.into(), channel: None }).unwrap();
+    let hand = |run: RunId, to: &str| {
+        let (ok, said, _) = s.service.employee_action(run, EmployeeAction::HandOff { to: to.into(), message: "Please check the build and report back.".into() }).unwrap();
         assert!(ok, "{said}");
     };
-    post(hop0, "@Iris please check");
+    hand(hop0, "Iris");
     let hop1 = woken(s.iris.0);
-    post(hop1, "@Otto your turn");
+    hand(hop1, "Otto");
     let hop2 = woken(s.otto.0);
     for (run, hop) in [(hop1, 1), (hop2, 2)] {
         let group = s.service.store().read(|c| aurelius_storage::conversations::group_run(c, run)).unwrap().unwrap();

@@ -11,6 +11,8 @@
 //!   newest is what the run answers; the others are in its context by then.
 //! * Parked (R3): a run that ended on a question parks its thread until a board
 //!   member's item, of kind `resume`, is taken or the task goes on otherwise.
+//! * Hops (R4): an item has a hop; a run has the highest of what it merged, counted from
+//!   the last message of a person, and what it writes or wakes is one higher.
 //! * The run keeps its frozen `login_user` (from the item) and quota parking per
 //!   login: an item whose login waits for a limit waits with it, not on another.
 
@@ -64,12 +66,18 @@ fn thread_of(tx: &Tx<'_>, conversation: ConversationId, group: Option<&GroupRun>
     Ok((format!("chat:{conversation}"), None))
 }
 
+/// The hop in the queuing metadata of a run no group chat marking carries: a
+/// delegated task's, a colleague's `message_task` (R4). 0 otherwise.
+fn hop_of(meta: &serde_json::Value) -> u32 {
+    meta.get("hop").and_then(|h| h.as_u64()).unwrap_or(0) as u32
+}
+
 /// Who an item comes from: a board member, a colleague, or Aurelius itself.
 fn source_of(tx: &Tx<'_>, group: Option<&GroupRun>, meta: &serde_json::Value, reply_to: MessageId) -> Result<&'static str, StorageError> {
     if let Some(group) = group {
         return Ok(if group.hop == 0 { "board" } else { "employee" });
     }
-    if meta.get("origin").and_then(|o| o.as_str()) == Some("delegated") {
+    if meta.get("origin").and_then(|o| o.as_str()) == Some("delegated") || hop_of(meta) > 0 {
         return Ok("employee");
     }
     // A heartbeat names the login of who turned it on, and is nobody's message.
@@ -114,7 +122,7 @@ pub(crate) fn enqueue(
         _ if ctx_meta.get("task_id").is_some() && ctx_meta.get("origin").is_none() => "task",
         _ => "message",
     };
-    let hop = group.as_ref().map_or(0, |g| g.hop);
+    let hop = group.as_ref().map_or(hop_of(ctx_meta), |g| g.hop);
     let (event, notice) = emit(tx, Ev {
         aggregate_type: "run",
         aggregate_id: run.to_string(),
@@ -205,6 +213,13 @@ fn thread_parent(item: &Item) -> Option<String> {
     item.payload["group"]["thread_parent"].as_str().map(str::to_owned)
 }
 
+/// The hop of a run that takes `items` (oldest first): the highest of them, counting
+/// from the last one a person or Aurelius wrote (hop 0), because that resets it (R4).
+fn merged_hop(items: &[&Item]) -> u32 {
+    let from = items.iter().rposition(|i| i.hop == 0).unwrap_or(0);
+    items[from..].iter().map(|i| i.hop).max().unwrap_or(0)
+}
+
 /// What the worker of `head`'s employee takes together with it: the due items of its
 /// thread in the same conversation, on the same login and of the same urgency, and
 /// never one whose run row exists already. A reply in a channel's thread stays
@@ -246,8 +261,10 @@ fn promote(tx: &Tx<'_>, items: &[&Item], lease: Option<(&str, i64, i64)>) -> Res
     let mut payload = last.payload.clone();
     payload["employee_id"] = last.employee.clone().into();
     payload["thread_key"] = last.thread_key.clone().into();
+    let hop = merged_hop(items);
+    payload["hop"] = hop.into();
     if payload.get("group").is_some_and(|g| !g.is_null()) {
-        payload["group"]["hop"] = items.iter().map(|i| i.hop).max().unwrap_or(0).into();
+        payload["group"]["hop"] = hop.into();
     }
     events::insert_job(tx, &run.to_string(), CHAT_RUN_KIND, last.source_event, &format!("run:{run}"), &payload)?;
     let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
@@ -316,6 +333,16 @@ impl CommandService {
                 Ok(queries::claim_due_job(tx, &owner, now, lease_ms, limit)?.map(|job| (job, Vec::new())))
             })
             .map_err(storage_error)
+    }
+
+    /// Handoffs held for a sender that has caught up are delivered now (R5).
+    pub fn release_handoffs(&self) -> Result<Vec<EventNotice>, AppError> {
+        // Read first: this runs at every pass of the dispatcher, and there is almost never one.
+        if self.store.read(store::releasable_handoffs).map_err(storage_error)?.is_empty() {
+            return Ok(Vec::new());
+        }
+        let handoffs = self.store.clone();
+        self.store.write(move |tx| crate::conversation::discussion::release_handoffs(tx, &handoffs)).map_err(storage_error)
     }
 
     /// Note why runs that may start are held back by the machine.

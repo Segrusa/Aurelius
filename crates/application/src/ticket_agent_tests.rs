@@ -508,15 +508,15 @@ fn an_employee_posts_in_a_tickets_discussion_but_not_on_done() {
 }
 
 #[test]
-fn a_post_wakes_only_the_colleague_it_names_within_the_budget() {
+fn a_post_that_names_a_colleague_wakes_nobody() {
     let s = setup();
     let t = new_ticket(&s, "Wake", None);
     let ann = run_of(&s, s.ann, true);
     let in_chats = |s: &Setup| -> i64 { s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM runs", [], |r| r.get(0))?)).unwrap() };
     let before = in_chats(&s);
     let (ok, text) = act(&s, ann, EmployeeAction::PostToTicket { ticket: t.to_string(), message: "@Bo can you look?".into() });
-    assert!(ok && text.contains("Bo will answer there"), "{text}");
-    assert_eq!(in_chats(&s), before + 1, "one run for Bo, none for Ann herself");
+    assert!(ok && text.contains("wakes nobody") && text.contains("hand_off"), "{text}");
+    assert_eq!(in_chats(&s), before, "a name only refers to someone");
 }
 
 /// A run of `employee` on the login of another board member than the setup's.

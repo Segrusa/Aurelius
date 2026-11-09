@@ -27,6 +27,7 @@
 
 | Stap | Scherm | Astryx | Opmerking |
 |---|---|---|---|
+| 6 | Handoff | geen nieuw scherm: een gewoon bericht van de employee ("Flux handed over to Bo" met de boodschap eronder) | Een vastgehouden handoff is een grijze `limit`-regel met `action` `handoff_held` en de tekst "Handoff held: …"; de client toont de tekst. Besluit B7 |
 | 7 | Waiting indicator | `Text` onder de thread-titel | Gevoed uit inbox-items |
 | 7 | Scheduled | `Table` | `Heartbeats` blijft in `HIDDEN_FEATURES`; `areasOf` voor `recurring_task` en `heartbeat` |
 | 8 | Tools per employee | `Table` met `Switch` en approval-`Checkbox` | |

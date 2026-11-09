@@ -65,8 +65,10 @@ De regels die het laten werken:
 | P8 | **Signatuur op externe systemen** | Elke comment op GitHub, Linear enz. wordt getekend als "OpenBot - `@handle`" | Geen regel |
 | P9 | **Bots maken bots** | De lead heeft `create_bot`, `read_bot_instructions`, `update_bot_instructions` | Proposals: employee stelt collega voor, mens keurt goed. Dit houden we |
 
-P1, P2, P4, P5, P7 en P8 staan als platformblok vooraan in de systeemtekst (`run/plan.rs`); P4 staat ook als
-vaste tekst in de delegatie-tool; P6 wordt een set startprofielen (zie §4, C6). P3 is beslist: scoped in de
+P1, P2, P4, P5, P7 en P8 staan als platformblok vooraan in de systeemtekst (`run/plan.rs`). P1 is bij ons
+scherper dan bij OpenBot (9 november, [bots/README.md](bots/README.md) B7): wakker maken gaat alleen met de
+expliciete tool `hand_off`; een `@Naam` in wat een employee schrijft wekt niemand. P4 staat ook als vaste tekst
+in de delegatie-tool; P6 wordt een set startprofielen (zie §4, C6). P3 is beslist: scoped in de
 prompt, volledig in de UI (§6).
 
 ## 4. Configuratie, geheugen en buitenwereld

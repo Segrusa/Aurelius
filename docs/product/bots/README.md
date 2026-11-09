@@ -26,6 +26,7 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | B4 | Wie is de lead (P2) | **Ticket: de Responsible (een board member); zonder actieve Responsible de owner. Kanaal: de projectdispatcher, anders de CEO; General: de CEO** | Sluit aan op B3 en de routering van `fase-a`: de Responsible beslist al over het ticket |
 | B5 | Hervatte sessies en de promptregels | **Het platformblok heeft een versie in de sessiesleutel: een nieuwe versie start een nieuwe sessie**, zoals guidelines B6 | Een hervatte sessie houdt tot 24 uur de bevroren systeemtekst; een notitie overleeft compactie niet |
 | B6 | Geheugen (C5) | **Eén regel, in de extractie én in `remember`:** feiten die alleen in één ticket of taak gelden horen in de discussie | Anders vult het geheugen zich met status die morgen niet meer klopt |
+| B7 | Handoff (vervangt de wekregel van P1, 9 nov) | **Een handoff is een expliciete actie:** de bridge-tool `hand_off(to, message)` schrijft een inbox-item met zijn hop en staat in de discussie als gewoon bericht "Flux handed over to Bo". Een `@Naam` in wat een employee schrijft is alleen een verwijzing en wekt niemand; een antwoord zonder handoff beëindigt het gesprek. Een `@Naam` van een board member wekt nog steeds, en `@username` van een board member meldt die nog steeds. De handoff-regel staat zo in het platformblok; het platformblok krijgt er ook een schrijfregel bij (gewone zinnen, geen ritueel bevestigen, geen verplichte slotregel) | Tekst die toevallig een naam noemt mag niemand wekken; een handoff blijft controleerbaar en wordt door R5 vastgehouden als geheel |
 
 ## Aannames die je kunt omdraaien
 
@@ -46,7 +47,7 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | 3 | C5 scope-regel | gebouwd |
 | 4 | U1, U2, U4 | gebouwd |
 | 5 | Mailbox, worker, samenvoegen, parkeren, hybride sessies (R1-R3, R6) | gebouwd |
-| 6 | R4 hop op elk bericht, R5 vastgehouden handoff | open |
+| 6 | R4 hop op elk bericht, R5 vastgehouden handoff, `hand_off` (B7) | gebouwd |
 | 7 | R7, C7, U3, U7 | open |
 | 8 | C2 tools en MCP per employee | open |
 | 9 | C6 startprofielen | open |
