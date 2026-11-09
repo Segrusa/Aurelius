@@ -31,7 +31,16 @@ pub async fn start_with_delay(root: &Path, delay_ms: u64) -> Daemon {
 }
 
 /// Start a daemon whose every run uses `runtime`.
+///
+/// The runtime reports like an owner would (see `Reporting`): a ticket's work ends in Review,
+/// as these tests were written for. Use `start_without_reports` for an owner that never reports.
 pub async fn start_with(root: &Path, runtime: Arc<dyn AgentRuntime>) -> Daemon {
+    let runtime: Arc<dyn AgentRuntime> = Arc::new(Reporting { inner: runtime, root: root.to_path_buf() });
+    start_without_reports(root, runtime).await
+}
+
+/// `start_with`, whose runtime never calls `report_ready`: a ticket's main task waits for input at the end of its run.
+pub async fn start_without_reports(root: &Path, runtime: Arc<dyn AgentRuntime>) -> Daemon {
     let (tx, rx) = oneshot::channel();
     let handle = tokio::spawn(aurelius_daemon::run_with_runtime(root.to_path_buf(), Some(tx), runtime));
     tokio::time::timeout(Duration::from_secs(10), rx).await.expect("daemon ready").expect("ready signal");
@@ -191,4 +200,39 @@ pub async fn backlog_ticket(client: &Client, project_id: aurelius_domain::Projec
         .unwrap();
     let aurelius_domain::CommandResult::TicketCreated { ticket_id, .. } = made.result else { panic!("{:?}", made.result) };
     ticket_id
+}
+
+/// A runtime that, in a run offered `report_ready` (the owner's run of a ticket's main task),
+/// reports the work ready through the daemon's bridge before the run starts, as an owner
+/// that finished would. Every other run is the inner runtime's, unchanged.
+pub struct Reporting {
+    pub inner: Arc<dyn AgentRuntime>,
+    pub root: std::path::PathBuf,
+}
+
+#[async_trait::async_trait]
+impl AgentRuntime for Reporting {
+    async fn probe(&self) -> aurelius_runtime::RuntimeCapabilities {
+        self.inner.probe().await
+    }
+    async fn start(&self, request: aurelius_runtime::RunRequest) -> Result<aurelius_runtime::RunHandle, aurelius_runtime::RuntimeError> {
+        let offered = request.system.as_deref().is_some_and(|s| s.contains("report_ready")) || request.turns.iter().any(|t| t.text.contains("call report_ready"));
+        if offered && let Ok(bridge) = aurelius_client::bridge::BridgeClient::connect(&self.root).await {
+            let _ = bridge.employee_act(request.run_id, aurelius_protocol::EmployeeTaskOp::ReportReady { report: "Report: the work is done.".into() }).await;
+        }
+        self.inner.start(request).await
+    }
+    fn keeps_sessions(&self) -> bool {
+        self.inner.keeps_sessions()
+    }
+    fn has_session(&self, id: &str) -> bool {
+        self.inner.has_session(id)
+    }
+    fn remove_session(&self, id: &str) {
+        self.inner.remove_session(id)
+    }
+    fn with_vault(&self, vault: aurelius_runtime::claude_code::VaultEnv) -> Option<Arc<dyn AgentRuntime>> {
+        let inner = self.inner.with_vault(vault)?;
+        Some(Arc::new(Reporting { inner, root: self.root.clone() }))
+    }
 }

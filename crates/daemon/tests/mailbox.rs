@@ -70,7 +70,7 @@ struct Setup {
 async fn start_gate(root: &Path) -> Setup {
     let (release, open) = tokio::sync::watch::channel(false);
     let prompts = Arc::new(Mutex::new(Vec::new()));
-    let daemon = start_with(root, Arc::new(Gate { open, last_prompts: prompts.clone() })).await;
+    let daemon = start_without_reports(root, Arc::new(Gate { open, last_prompts: prompts.clone() })).await;
     Setup { daemon, release, prompts }
 }
 

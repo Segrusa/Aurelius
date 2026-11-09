@@ -235,7 +235,10 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
         }
         // A run that ends without it has not finished, with a question mark or without: the ticket
         // stays in Doing, the board member is told, and their answer wakes the owner.
-        if row.status != TaskStatus::Review && report.is_none() {
+        // While the card is in Testing the report is in and `report_ready` is refused: the owner's run
+        // that answers a word there ends as it always did.
+        let testing = matches!(crate::task::ticket_line::root_of(tx, task)?, Some((_, _, aurelius_domain::ticket::ColumnKind::Testing)));
+        if row.status != TaskStatus::Review && !testing && report.is_none() {
             notices.extend(wait_for_answer(tx, st, task, &row, run, closing)?);
             return Ok(notices);
         }
