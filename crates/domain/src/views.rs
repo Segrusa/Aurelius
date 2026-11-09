@@ -1389,7 +1389,7 @@ pub enum RunValueSource {
 
 /// What a new run of one employee uses, as the run itself would resolve it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct EmployeeRunView {
+pub struct EmployeeRunLine {
     pub employee_id: EmployeeId,
     pub name: String,
     pub status: LifecycleStatus,
@@ -1417,7 +1417,7 @@ pub struct EmployeeRunView {
 /// `employee.run_overview` (feature `employee_run_overview`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EmployeeRunsView {
-    pub employees: Vec<EmployeeRunView>,
+    pub employees: Vec<EmployeeRunLine>,
     /// The stored company-wide default for employee runs.
     pub company: crate::connection::RunDefaults,
     pub company_model: Option<String>,

@@ -9,7 +9,7 @@ use aurelius_domain::{
     connection::{self, ConfigScope, Origin, ProviderKind, Purpose, Resolved, RunDefaults, resolve_field},
     employee::Setting,
 };
-use aurelius_domain::views::{EmployeeRunView, EmployeeRunsView, RunValueSource};
+use aurelius_domain::views::{EmployeeRunLine, EmployeeRunsView, RunValueSource};
 use aurelius_domain::{AppError, CommandEnvelope, CommandResult};
 use aurelius_storage::{StorageError, Tx, connections as store_conn};
 use rusqlite::Connection;
@@ -119,7 +119,7 @@ pub fn employee_runs(conn: &Connection) -> Result<EmployeeRunsView, StorageError
         let chat = aurelius_storage::conversations::conversation_run(conn, employee.conversation_id)?;
         let chat_model = chat.model.filter(|m| !m.is_empty());
         let chat_supported = connection::supported_efforts(provider, chat_model.as_deref().or(model));
-        employees.push(EmployeeRunView {
+        employees.push(EmployeeRunLine {
             employee_id: employee.id,
             name: employee.name.clone(),
             status: employee.status,
