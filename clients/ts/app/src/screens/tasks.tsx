@@ -10,13 +10,14 @@ import { useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "../connection";
-import { useAllTasks, useEmployees, useMessages, useProjects } from "../data";
+import { useAllTasks, useEmployees, useMessages } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { KeyHint } from "../ui/key-hint";
 import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import { Loading, Page, PageHead, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { boardOnlyReason } from "./run-logic";
@@ -279,11 +280,10 @@ export function TasksScreen({ projectId }: { projectId?: string } = {}) {
   const navigate = useNavigate();
   const tasks = useAllTasks();
   const employees = useEmployees();
-  const projects = useProjects();
   const [state, setState] = useState<TaskState>("open");
   const [employee, setEmployee] = useState<string | null>(null);
-  const [chosenProject, setProject] = useState<string | null>(null);
-  const project = projectId ?? chosenProject;
+  const workspace = useWorkspace();
+  const project = projectId ?? workspace.id;
   const [folds, setFolds] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const list = tasks.data ?? [];
@@ -318,7 +318,6 @@ export function TasksScreen({ projectId }: { projectId?: string } = {}) {
   useAction("Filter4", () => setState("all"));
 
   const employeeName = employees.data?.find((e) => e.id === employee)?.name ?? "Anyone";
-  const projectName = projects.data?.find((p) => p.id === project)?.name ?? "Any project";
 
   return (
     <Page>
@@ -354,21 +353,6 @@ export function TasksScreen({ projectId }: { projectId?: string } = {}) {
                 </button>
               }
             />
-            {projectId ? null : (
-              <Menu
-                label="Project"
-                options={[
-                  { key: "any", label: "Any project" },
-                  ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
-                ]}
-                onPick={(id) => setProject(id === "any" ? null : id)}
-                trigger={
-                  <button type="button" {...stylex.props(styles.pill)}>
-                    {projectName}
-                  </button>
-                }
-              />
-            )}
           </>
         }
       >

@@ -21,6 +21,7 @@ import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import { cycle, defaultAssignee, parseDeadline, parseLabels, rootsOf, titleOfGoal } from "./dialog-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
 import { modelName, useSetting } from "./settings-kit";
@@ -199,7 +200,8 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const employees = useEmployees();
   const models = useModels();
   const [seed] = useState(() => overlays.prefill());
-  const [projectId, setProjectId] = useState<string | null>(seed?.projectId ?? null);
+  const workspace = useWorkspace();
+  const [projectId, setProjectId] = useState<string | null>(seed?.projectId ?? workspace.id);
   const [title, setTitle] = useState(seed?.title ?? "");
   const [description, setDescription] = useState(seed?.description ?? "");
   const [priority, setPriority] = useState<TicketPriority>("normal");
@@ -401,7 +403,8 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const attach = useAttachments();
   const [effort, setEffort] = useState("default");
   const [picked, setPicked] = useState<string | null>(() => overlays.prefill()?.employeeId ?? null);
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const workspace = useWorkspace();
+  const [projectId, setProjectId] = useState<string | null>(workspace.id);
   const [mode, setMode] = useState("default");
   const [model, setModel] = useState("default");
   const { busy, error, held, send, sendAnyway } = useSend((text) => {
@@ -414,7 +417,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const whoId = picked ?? defaultAssignee(employees.data ?? [], storage.get(LAST_GIVEN));
   const who = active.find((e) => e.id === whoId) ?? null;
   const shownProjects = projects.data ?? [];
-  // Required, without a default: work should not land in a project nobody chose. Only one leaves no choice.
+  // Required: work should not land in a project nobody chose. The workspace chose it, or only one leaves no choice.
   const project = shownProjects.length === 1 ? shownProjects[0] : shownProjects.find((p) => p.id === projectId);
   const ready = Boolean(project) && Boolean(who) && goal.trim() !== "";
 

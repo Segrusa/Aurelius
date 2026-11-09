@@ -126,19 +126,24 @@ function useRead<T>(area: Area, read: () => Promise<T>, staleTime = 30_000, want
   });
 }
 
-export function useApprovals() {
+/** `project` narrows on the server (feature `workspace_filters`), the only place that knows. */
+export function useApprovals(project: string | null = null) {
   const connection = useConnection();
-  return useRead<ApprovalView[]>(
-    "approvals",
-    async () => expectBody(await connection.call("approval.list"), "approvals").value.approvals,
+  return useKeyed<ApprovalView[]>(
+    ["approvals", project],
+    async () =>
+      expectBody(await connection.call("approval.list", project ? { project_id: project } : {}), "approvals").value
+        .approvals,
   );
 }
 
-export function useNotifications() {
+export function useNotifications(project: string | null = null) {
   const connection = useConnection();
-  return useRead<NotificationView[]>(
-    "notifications",
-    async () => expectBody(await connection.call("notification.list"), "notifications").value.notifications,
+  return useKeyed<NotificationView[]>(
+    ["notifications", project],
+    async () =>
+      expectBody(await connection.call("notification.list", project ? { project_id: project } : {}), "notifications")
+        .value.notifications,
   );
 }
 

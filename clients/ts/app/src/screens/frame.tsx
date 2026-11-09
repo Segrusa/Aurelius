@@ -17,7 +17,6 @@ import {
   useLiveQueries,
   useNotifications,
   useOpenTasks,
-  useProjects,
   useSubscription,
   useTickets,
 } from "../data";
@@ -36,18 +35,20 @@ import {
 import { Logo, NAV_ICONS, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
-import { pinnedFirst, recentChats } from "./employee-logic";
+import { recentChats } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
 import { useInbox } from "./inbox";
 import { needsYouCount, newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
-import { useProjectPins } from "./projects";
 import { SettingsSidebar } from "./settings";
 import { useTicketNeeds } from "./tickets-kit";
 import { subscriptionFor } from "./usage-logic";
+import { useOpenedWorkspace, WorkspaceSwitcher } from "./workspace-kit";
+import { narrow } from "./workspace-logic";
 
 const styles = stylex.create({
   // What the screens were written against: a column that fills the shell and scrolls inside.
@@ -144,7 +145,8 @@ function markIcon(letter: string, color: string, size: number, radius: number): 
 
 function NavRow({ to, label, icon, end }: { to: string; label: string; icon: IconType; end?: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const on = path === to || path.startsWith(`${to}/`);
+  // The list of projects is a tab of Knowledge.
+  const on = path === to || path.startsWith(`${to}/`) || (to === "/knowledge" && path.startsWith("/projects"));
   return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
 }
 
@@ -164,7 +166,8 @@ function liveColor(t: TaskView): string {
 
 function Live() {
   const tasks = useOpenTasks();
-  const live = (tasks.data ?? []).filter((t) => t.live_run != null);
+  const workspace = useWorkspace().id;
+  const live = narrow(tasks.data ?? [], workspace).filter((t) => t.live_run != null);
   if (live.length === 0) return null;
   return (
     <div {...stylex.props(styles.group)}>
@@ -308,8 +311,11 @@ function useScreenAction(action: string): void {
 
 /** Something new shows for a moment, wherever you are. */
 function useNoteToasts(): void {
-  const notes = useNotifications();
+  // What is in the workspace, as the Inbox shows it; another workspace's news waits there.
+  const workspace = useWorkspace().id;
+  const notes = useNotifications(workspace);
   const before = useRef<NotificationView[] | null>(null);
+  const beforeOf = useRef(workspace);
   const tasks = useAllTasks();
   const tickets = useTickets();
   const need = useTicketNeeds(tickets.data ?? []);
@@ -324,6 +330,11 @@ function useNoteToasts(): void {
   // biome-ignore lint/correctness/useExhaustiveDependencies: only a new list says something new.
   useEffect(() => {
     if (!notes.data) return;
+    // Another workspace's list is not news.
+    if (beforeOf.current !== workspace) {
+      beforeOf.current = workspace;
+      before.current = null;
+    }
     for (const note of newNotes(before.current, notes.data).slice(0, 3)) {
       // Its conversation is in view: you see it happen.
       if (note.conversation_id && window.location.href.includes(note.conversation_id)) continue;
@@ -403,11 +414,10 @@ function useScreenCounter(): void {
 
 function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (collapsed: boolean) => void }) {
   const channels = useChannels();
-  const chat = useMemo(() => chatBadge(channels.data ?? []), [channels.data]);
+  const workspace = useWorkspace().id;
+  const chat = useMemo(() => chatBadge(narrow(channels.data ?? [], workspace)), [channels.data, workspace]);
   const { open } = overlays;
   const { groups } = useInbox();
-  const projects = useProjects();
-  const [projectPins] = useProjectPins();
   const { hostName, status } = useLinkState();
   const employees = useEmployees();
   const [employeePins] = usePins(pinKey(hostName, "pinned_employees"));
@@ -444,6 +454,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
           )}
         </div>
       }
+      topContent={<WorkspaceSwitcher collapsed={collapsed} />}
       footer={
         <div {...stylex.props(styles.foot)}>
           {status !== "online" && !collapsed ? (
@@ -479,24 +490,6 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
       {/* What only fits written out: the rail keeps the rows above. */}
       {collapsed ? null : (
         <>
-          <div {...stylex.props(styles.group)}>
-            <Link to="/projects" {...stylex.props(styles.sectionLink)}>
-              <SectionLabel>Projects</SectionLabel>
-            </Link>
-            {pinnedFirst(
-              (projects.data ?? []).filter((p) => p.status !== "archived"),
-              projectPins,
-            )
-              .slice(0, 8)
-              .map((p) => (
-                <NavRow
-                  key={p.id}
-                  to={`/projects/${p.id}`}
-                  label={p.name}
-                  icon={markIcon(initial(p.name), markColor(p.id), 15, 4)}
-                />
-              ))}
-          </div>
           {pinnedEmployees.length > 0 ? (
             <div {...stylex.props(styles.group)}>
               <Link to="/employees" {...stylex.props(styles.sectionLink)}>
@@ -524,6 +517,7 @@ export function Frame({ children }: { children: ReactNode }) {
   useLiveQueries();
   const inSettings = useRouterState({ select: (s) => s.location.pathname.startsWith("/settings") });
   useGlobalActions();
+  useOpenedWorkspace();
   useScreenCounter();
   useUpdateNotice();
   useNoteToasts();

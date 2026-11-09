@@ -8,11 +8,10 @@ import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useLinkState } from "../connection";
-import { useBoard, useMyTickets, useProjects } from "../data";
+import { useBoard, useMyTickets } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
-import { usePlatform } from "../platform";
 import { KeyHint } from "../ui/key-hint";
-import { Menu } from "../ui/menu";
+import { useWorkspace } from "../workspace";
 import { inMyTab, MY_TABS, type MyTab } from "./board-logic";
 import { Loading, Page, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
@@ -23,18 +22,6 @@ import { useTicketNeeds } from "./tickets-kit";
 const styles = stylex.create({
   head: { display: "flex", minHeight: 44, alignItems: "center", gap: 10, paddingInlineStart: 18, paddingInlineEnd: 12 },
   title: { margin: 0, fontSize: 13, fontWeight: 500 },
-  pill: {
-    height: 24,
-    cursor: "pointer",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border)",
-    backgroundColor: "transparent",
-    paddingInline: 9,
-    fontSize: 12,
-    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
-  },
   tabCount: { color: "var(--precision-text3)" },
   actions: { marginInlineStart: "auto", display: "flex", gap: 6 },
   body: { position: "relative", minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%" },
@@ -67,11 +54,8 @@ export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
   const supported = features.includes("my_tickets");
   const [includeDone, setIncludeDone] = useState(false);
   const [chosen, setChosen] = useState<MyTab | null>(null);
-  const { storage } = usePlatform();
-  const projects = useProjects();
-  // The same project filter as the Board's.
-  const [project, setProject] = useState<string | null>(() => storage.get("board_project") || null);
-  const mine = useMyTickets(project, includeDone, supported);
+  const workspace = useWorkspace();
+  const mine = useMyTickets(workspace.id, includeDone, supported);
   const board = useBoard(null);
   const tickets = useMemo(() => mine.data?.tickets ?? [], [mine.data]);
   const need = useTicketNeeds(tickets);
@@ -113,24 +97,6 @@ export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
     <Page>
       <LayoutHeader hasDivider padding={0} data-titlebar>
         <div {...stylex.props(styles.head)}>
-          <Menu
-            label="Project"
-            value={project ?? "all"}
-            options={[
-              { key: "all", label: "All projects" },
-              ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
-            ]}
-            onPick={(id) => {
-              const next = id === "all" ? null : id;
-              setProject(next);
-              storage.set("board_project", next ?? "");
-            }}
-            trigger={
-              <button type="button" {...stylex.props(styles.pill)}>
-                {projects.data?.find((p) => p.id === project)?.name ?? "All projects"}
-              </button>
-            }
-          />
           <Heading level={1} xstyle={styles.title}>
             My tickets
           </Heading>

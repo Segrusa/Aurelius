@@ -12,6 +12,7 @@ import { useConnection } from "../connection";
 import { useEmployees, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { AttachRow, useAttachments } from "../ui/attach";
+import { useWorkspace } from "../workspace";
 import { DialogSelector, FormDialog } from "./org-kit";
 import { FileChips } from "./run-tools";
 import {
@@ -696,7 +697,8 @@ export function ScheduleDialog({
   const [goal, setGoal] = useState(schedule?.goal ?? "");
   const [criteria, setCriteria] = useState((schedule?.criteria ?? []).join("\n"));
   const [employee, setEmployee] = useState(schedule?.employee_id ?? "");
-  const [project, setProject] = useState(schedule?.project_id ?? projectId ?? "");
+  const workspace = useWorkspace();
+  const [project, setProject] = useState(schedule?.project_id ?? projectId ?? workspace.id ?? "");
   const [form, setForm] = useState(start);
   const { busy, error, run } = useChange();
   const [problem, setProblem] = useState<string | null>(null);

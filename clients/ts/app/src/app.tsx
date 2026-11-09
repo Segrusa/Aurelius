@@ -42,16 +42,19 @@ import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
 import { precisionTheme } from "./theme/precision/precision";
 import { RouterLink } from "./ui/router-link";
+import { useWorkspace, WorkspaceProvider } from "./workspace";
 
 /** A screen of the design that is not built yet: says so, and the phase, instead of looking finished. */
 
 const root = createRootRoute({
   component: () => (
-    <LinkFollower>
-      <Frame>
-        <Outlet />
-      </Frame>
-    </LinkFollower>
+    <WorkspaceProvider>
+      <LinkFollower>
+        <Frame>
+          <Outlet />
+        </Frame>
+      </LinkFollower>
+    </WorkspaceProvider>
   ),
 });
 const index = createRoute({
@@ -141,7 +144,10 @@ const knowledge = createRoute({
   component: function KnowledgeRoute() {
     const { tab } = knowledge.useParams();
     const { project: start } = knowledge.useSearch();
-    if (tab === "memory") return <MemoryBody key={start ?? ""} projectId={null} start={start ?? null} />;
+    const workspace = useWorkspace();
+    if (tab === "memory") {
+      return <MemoryBody key={workspace.id ?? start ?? ""} projectId={workspace.id} start={start ?? null} />;
+    }
     if (tab === "ideas" && !hidden("Ideas")) return <IdeasBody projectId={null} />;
     if (tab === "vault" && !hidden("Vault")) return <VaultScreen />;
     return <GuidelinesScreen />;

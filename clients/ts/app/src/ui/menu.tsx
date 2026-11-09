@@ -2,7 +2,7 @@
 
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
-import { cloneElement, type KeyboardEvent, type ReactElement, useContext } from "react";
+import { cloneElement, type KeyboardEvent, type ReactElement, type ReactNode, useContext } from "react";
 import { KeysContext } from "../keys/provider";
 
 export function Menu<T extends string>({
@@ -15,7 +15,7 @@ export function Menu<T extends string>({
   onOpenChange,
 }: {
   trigger: ReactElement;
-  options: { key: T; label: string; danger?: boolean }[];
+  options: { key: T; label: string; danger?: boolean; icon?: ReactNode; dividerBefore?: boolean }[];
   value?: T;
   onPick: (key: T) => void;
   label: string;
@@ -55,12 +55,16 @@ export function Menu<T extends string>({
             },
           })
         }
-        items={options.map((o) => ({
-          label: o.label,
-          onClick: () => onPick(o.key),
-          ...(o.danger ? { variant: "destructive" as const } : {}),
-          ...(o.key === value ? { endContent: <Icon icon="check" size="sm" color="accent" /> } : {}),
-        }))}
+        items={options.flatMap((o) => [
+          ...(o.dividerBefore ? [{ type: "divider" as const }] : []),
+          {
+            label: o.label,
+            onClick: () => onPick(o.key),
+            ...(o.icon ? { icon: o.icon } : {}),
+            ...(o.danger ? { variant: "destructive" as const } : {}),
+            ...(o.key === value ? { endContent: <Icon icon="check" size="sm" color="accent" /> } : {}),
+          },
+        ])}
       />
     </span>
   );

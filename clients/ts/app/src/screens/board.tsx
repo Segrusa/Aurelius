@@ -33,13 +33,14 @@ import { useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useBoard, useCompany, useEmployees, useMembers, useProjects } from "../data";
+import { useBoard, useCompany, useEmployees, useMembers } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { NewIcon } from "../ui/icons";
 import { KeyHint } from "../ui/key-hint";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import {
   beforeFor,
   columnShown,
@@ -562,8 +563,8 @@ export function BoardScreen({
   const { features, user, hostId } = useLinkState();
   const me = user?.id ?? null;
   const write = useTicketWrite();
-  const [chosenProject, setProject] = useState<string | null>(() => storage.get("board_project"));
-  const project = projectId ?? chosenProject;
+  const workspace = useWorkspace();
+  const project = projectId ?? workspace.id;
   const [owner, setOwner] = useState<OwnerFilter>({ kind: "anyone" });
   const [responsible, setResponsible] = useState<ResponsibleFilter>({ kind: "anyone" });
   const members = useMembers();
@@ -578,7 +579,6 @@ export function BoardScreen({
   const [deleting, setDeleting] = useState<TicketView | null>(null);
   const platform = usePlatform();
   const [pending, setPending] = useState<Pending>(null);
-  const projects = useProjects();
   const employees = useEmployees();
   const board = useBoard(project);
   const [renaming, setRenaming] = useState(false);
@@ -816,7 +816,6 @@ export function BoardScreen({
       : owner.kind === "none"
         ? "No owner yet"
         : (employees.data?.find((e) => e.id === owner.id)?.name ?? "Someone");
-  const projectName = projects.data?.find((p) => p.id === project)?.name ?? "All projects";
   const active = dragging ? all.find((t) => t.id === dragging) : undefined;
 
   return (
@@ -844,26 +843,6 @@ export function BoardScreen({
                 Needs you · {needsCount}
               </button>
             ) : null}
-            {projectId ? null : (
-              <Menu
-                label="Project"
-                value={project ?? "all"}
-                options={[
-                  { key: "all", label: "All projects" },
-                  ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
-                ]}
-                onPick={(id) => {
-                  const next = id === "all" ? null : id;
-                  setProject(next);
-                  storage.set("board_project", next ?? "");
-                }}
-                trigger={
-                  <button type="button" {...stylex.props(styles.pill)}>
-                    {projectName}
-                  </button>
-                }
-              />
-            )}
             <Menu
               label="Owner"
               options={[

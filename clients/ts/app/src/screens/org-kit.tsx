@@ -123,12 +123,16 @@ const KNOWLEDGE: { key: string; label: string; feature?: Feature }[] = shown([
 
 export function KnowledgeTabs() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const current = KNOWLEDGE.find((t) => pathname.startsWith(`/knowledge/${t.key}`))?.key ?? "";
+  const current =
+    pathname === "/projects"
+      ? "projects"
+      : (KNOWLEDGE.find((t) => pathname.startsWith(`/knowledge/${t.key}`))?.key ?? "");
   return (
     <TabList aria-label="Knowledge" size="sm" value={current} onChange={noNavigation}>
       {KNOWLEDGE.map((t) => (
         <Tab key={t.key} value={t.key} label={t.label} href={`/knowledge/${t.key}`} />
       ))}
+      <Tab value="projects" label="Projects" href="/projects" />
     </TabList>
   );
 }

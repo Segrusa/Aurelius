@@ -400,19 +400,22 @@ export function MemoryBody({
     <Page>
       {chrome ? (
         <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
-          <Selector
-            label="Memory of"
-            isLabelHidden
-            size="sm"
-            value={project ?? ""}
-            onChange={(v) => {
-              setPicked(v);
-              setWho(undefined);
-            }}
-            options={(projects.data ?? [])
-              .filter((p) => p.status !== "archived")
-              .map((p) => ({ value: p.id, label: p.name }))}
-          />
+          {/* A workspace is one project: nothing to choose. */}
+          {projectId ? null : (
+            <Selector
+              label="Memory of"
+              isLabelHidden
+              size="sm"
+              value={project ?? ""}
+              onChange={(v) => {
+                setPicked(v);
+                setWho(undefined);
+              }}
+              options={(projects.data ?? [])
+                .filter((p) => p.status !== "archived")
+                .map((p) => ({ value: p.id, label: p.name }))}
+            />
+          )}
           <Button size="sm" label="Consolidate" isDisabled={!project} onClick={() => void consolidate()} />
         </PageHead>
       ) : null}

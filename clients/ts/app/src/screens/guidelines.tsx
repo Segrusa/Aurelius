@@ -27,6 +27,7 @@ import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import {
   ABOUT,
   affectedLine,
@@ -89,6 +90,7 @@ import {
   Problem,
   shortDay,
 } from "./org-kit";
+import { guidelineReach, guidelinesIn } from "./workspace-logic";
 
 const enter = stylex.keyframes({ from: { opacity: 0, transform: "translateY(4px)" } });
 
@@ -268,6 +270,7 @@ const styles = stylex.create({
   toneOver: { backgroundColor: "var(--color-text-error)" },
   toneClose: { backgroundColor: "var(--color-text-warning)" },
   toneCalm: { backgroundColor: "var(--color-text-accent)" },
+  company: { marginInlineStart: 8, fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
   appliesRow: {
     display: "flex",
     alignItems: "center",
@@ -399,7 +402,12 @@ export function GuidelinesScreen() {
   const gone = useArchivedGuidelines(archived);
   const proposals = useGuidelineProposals();
   const source = archived ? gone : active;
-  const list = useMemo(() => shown(source.data ?? [], query, sort, names), [source.data, query, sort, names]);
+  const workspace = useWorkspace().id;
+  const inHere = useMemo(
+    () => guidelinesIn(source.data ?? [], workspace, names.employees),
+    [source.data, workspace, names.employees],
+  );
+  const list = useMemo(() => shown(inHere, query, sort, names), [inHere, query, sort, names]);
   const writable = canEdit(user);
   const open = (id: string) => void navigate({ to: "/knowledge/guidelines/$id", params: { id } });
   useAction("NewGuideline", () => open("new"), writable);
@@ -519,6 +527,14 @@ export function GuidelinesScreen() {
                       <TableCell>
                         <Link to="/knowledge/guidelines/$id" params={{ id: g.id }} {...stylex.props(styles.link)}>
                           {g.title}
+                          {workspace !== null && guidelineReach(g, workspace, names.employees) === "company" ? (
+                            <span
+                              title="For the whole company, not only this workspace"
+                              {...stylex.props(styles.company)}
+                            >
+                              Company
+                            </span>
+                          ) : null}
                           {waiting > 0 ? (
                             <span
                               title={waiting === 1 ? "1 proposal waits for you" : `${waiting} proposals wait for you`}

@@ -22,6 +22,7 @@ import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
+import { useWorkspace } from "../workspace";
 import { ApprovalCard } from "./approval-card";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import {
@@ -65,6 +66,7 @@ import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
 import { ColumnGlyph } from "./tickets-kit";
+import { homeChannel, narrow } from "./workspace-logic";
 
 const enter = stylex.keyframes({
   from: { opacity: 0, transform: "translateY(4px)" },
@@ -442,6 +444,7 @@ function ChannelList({
 }) {
   const connection = useConnection();
   const { features } = useLinkState();
+  const workspace = useWorkspace().id;
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<ChannelView[] | null>(null);
   const [ticketsAll, setTicketsAll] = useState(false);
@@ -462,7 +465,7 @@ function ChannelList({
       connection
         .call("channel.search", { query: text })
         .then((body) => {
-          if (alive) setFound(body.type === "channels" ? body.value.channels : local());
+          if (alive) setFound(body.type === "channels" ? narrow(body.value.channels, workspace) : local());
         })
         .catch(() => {
           if (alive) setFound(local());
@@ -472,7 +475,7 @@ function ChannelList({
       alive = false;
       clearTimeout(timer);
     };
-  }, [query, channels, connection, features]);
+  }, [query, channels, connection, features, workspace]);
 
   const eyebrow = stylex.props(styles.eyebrow);
   const more = stylex.props(styles.more);
@@ -1271,11 +1274,16 @@ export function ChatScreen({
 }) {
   const navigate = useNavigate();
   const channels = useChannels();
-  const list = useMemo(() => channels.data ?? [], [channels.data]);
+  const workspace = useWorkspace().id;
+  const all = useMemo(() => channels.data ?? [], [channels.data]);
+  const list = useMemo(() => narrow(all, workspace), [all, workspace]);
   const s = useMemo(() => sections(list), [list]);
   const general = s.general;
-  // general reads as "no channel": the one older servers have.
-  const openC = channel ? (list.find((c) => c.conversation_id === channel) ?? null) : general;
+  // general reads as "no channel": the one older servers have. A workspace opens on its project's.
+  const home = workspace === null ? general : homeChannel(list, workspace);
+  const shownChannel = channel ?? (workspace === null ? null : (home?.conversation_id ?? null));
+  // A linked channel of another project shows while the workspace moves to it.
+  const openC = channel ? (all.find((c) => c.conversation_id === channel) ?? null) : home;
   const asParam = (c: ChannelView) => (c === general || c.kind === "general" ? undefined : c.conversation_id);
   const open = (c: ChannelView) => {
     const param = asParam(c);
@@ -1293,7 +1301,7 @@ export function ChatScreen({
     [navigate],
   );
   // A channel that went away: back to general.
-  const gone = channel !== null && channels.data !== undefined && !list.some((c) => c.conversation_id === channel);
+  const gone = channel !== null && channels.data !== undefined && !all.some((c) => c.conversation_id === channel);
   useEffect(() => {
     if (gone) void navigate({ to: "/chat", search: {} });
   }, [gone, navigate]);
@@ -1313,16 +1321,23 @@ export function ChatScreen({
 
   return (
     <div {...stylex.props(styles.screen)}>
-      {list.length > 0 ? <ChannelList channels={list} open={channel} onOpen={open} /> : null}
-      <Channel
-        key={channel ?? "general"}
-        channel={channel}
-        c={openC}
-        thread={thread}
-        message={message}
-        onThread={onThread}
-        general={channel === null}
-      />
+      {list.length > 0 ? <ChannelList channels={list} open={shownChannel} onOpen={open} /> : null}
+      {workspace !== null && shownChannel === null ? (
+        // Without this the feed would be the general channel's.
+        channels.data ? (
+          <EmptyState isCompact title="No channel in this workspace yet." />
+        ) : null
+      ) : (
+        <Channel
+          key={shownChannel ?? "general"}
+          channel={shownChannel}
+          c={openC}
+          thread={thread}
+          message={message}
+          onThread={onThread}
+          general={shownChannel === null}
+        />
+      )}
     </div>
   );
 }

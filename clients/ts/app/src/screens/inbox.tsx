@@ -24,6 +24,7 @@ import { useAction, useKeyContext } from "../keys/provider";
 import { StatusGlyph } from "../ui/icons";
 import { KeyHint } from "../ui/key-hint";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import { ApprovalCard, PLAN_TOOL, QUESTION_TOOL } from "./approval-card";
 import { taskCounts } from "./board-logic";
 import {
@@ -44,6 +45,7 @@ import { lastFailure } from "./run-logic";
 import { useRetryAnswer } from "./run-tools";
 import { TicketDecision } from "./ticket-panel";
 import { NoConnectionNote, useNoConnection, useTicketNeeds } from "./tickets-kit";
+import { guidelineProposalsIn, narrow } from "./workspace-logic";
 
 const enter = stylex.keyframes({
   from: { opacity: 0, transform: "translateY(4px)" },
@@ -193,11 +195,12 @@ const FILTERS: { key: InboxFilter; label: string }[] = [
 ];
 
 export function useInbox() {
-  const approvals = useApprovals();
+  const workspace = useWorkspace().id;
+  const approvals = useApprovals(workspace);
   const proposals = useProposals();
   const guidelineProposals = useGuidelineProposals();
   const tasks = useOpenTasks();
-  const notifications = useNotifications();
+  const notifications = useNotifications(workspace);
   const { features } = useLinkState();
   const responsible = features.includes("ticket_responsible");
   const tickets = useTickets(responsible);
@@ -206,10 +209,11 @@ export function useInbox() {
     () =>
       buildInbox({
         approvals: approvals.data ?? [],
-        proposals: proposals.data ?? [],
-        guidelineProposals: guidelineProposals.data ?? [],
+        // Who to hire is the company's, not a project's.
+        proposals: workspace === null ? (proposals.data ?? []) : [],
+        guidelineProposals: guidelineProposalsIn(guidelineProposals.data ?? [], workspace),
         // Freeze §5: a ticket's main task only when its ticket needs this board member.
-        tasks: (tasks.data ?? []).filter((t) =>
+        tasks: narrow(tasks.data ?? [], workspace).filter((t) =>
           taskCounts(
             t,
             responsible,
@@ -220,6 +224,7 @@ export function useInbox() {
         notifications: notifications.data ?? [],
       }),
     [
+      workspace,
       approvals.data,
       proposals.data,
       guidelineProposals.data,
@@ -535,6 +540,7 @@ function GuidelineDetail({ row, proposal }: { row: InboxRow; proposal: Guideline
 
 export function InboxScreen() {
   const { groups, loading, error } = useInbox();
+  const workspace = useWorkspace();
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const shown = useMemo(() => filterInbox(groups, filter), [groups, filter]);
@@ -609,7 +615,12 @@ export function InboxScreen() {
             <Loading rows={6} />
           ) : rows.length === 0 ? (
             <div {...stylex.props(styles.message)}>
-              <EmptyState isCompact title="Nothing waits for you." />
+              <EmptyState
+                isCompact
+                title={
+                  workspace.project ? `Nothing waits for you in ${workspace.project.name}.` : "Nothing waits for you."
+                }
+              />
             </div>
           ) : (
             <InboxList groups={shown} selected={selected?.id ?? null} onSelect={setSelectedId} />

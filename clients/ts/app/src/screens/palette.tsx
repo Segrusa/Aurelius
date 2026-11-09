@@ -15,9 +15,12 @@ import { isMac, useKeyContext, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
+import { useWorkspace } from "../workspace";
 import { bareName } from "./chat-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
 import { filterGroups, type PaletteGroup } from "./palette-logic";
+import { useSwitchWorkspace } from "./workspace-kit";
+import { guidelinesIn, narrow, openProjects } from "./workspace-logic";
 
 // The table's label says what the key does on every page; here it is one command.
 const PALETTE_LABEL: Record<string, string> = { NewItem: "Give work" };
@@ -90,7 +93,7 @@ function PaletteInput({ groups }: { groups: PaletteGroup[] }) {
   return (
     <CommandPaletteInput
       label="Command palette"
-      placeholder="Search a project, employee or command"
+      placeholder="Search a workspace, ticket, employee or command"
       onKeyDown={(e) => {
         // Results arrive in a transition: an Enter right after typing finds nothing highlighted yet.
         if (e.key !== "Enter" || e.nativeEvent.isComposing || context?.highlightedIndex !== -1) return;
@@ -123,22 +126,63 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const tickets = useTickets();
   const guidelines = useGuidelines();
   const channels = useChannels();
+  const workspace = useWorkspace();
+  const switchTo = useSwitchWorkspace();
+  // The workspace's id as the only thing the search depends on: `switchTo` changes every render.
+  const switchRef = useRef(switchTo);
+  switchRef.current = switchTo;
 
   const groups = useMemo<PaletteGroup[]>(() => {
     const go = (to: string) => () => void navigate({ to });
+    const here = workspace.id;
     const commands = SHORTCUTS.filter((s) => s.inPalette && keys.has(s.action) && !(s.feature && hidden(s.feature)));
     const shown = new Set<string>();
     return [
-      {
-        label: "Projects",
-        items: (projects.data ?? []).map((p) => ({
-          id: `project:${p.id}`,
-          label: p.name,
-          detail: "Open project",
-          mark: p.id,
-          run: () => void navigate({ to: "/projects/$id", params: { id: p.id } }),
-        })),
-      },
+      ...(workspace.available && !workspace.locked
+        ? [
+            {
+              label: "Workspaces",
+              items: [
+                {
+                  id: "workspace:all",
+                  label: "All projects",
+                  detail: "Switch workspace",
+                  mark: "",
+                  run: () => switchRef.current(null),
+                },
+                ...openProjects(projects.data ?? []).map((p) => ({
+                  id: `workspace:${p.id}`,
+                  label: p.name,
+                  detail: "Switch workspace",
+                  mark: p.id,
+                  run: () => switchRef.current(p.id),
+                })),
+                ...(here
+                  ? [
+                      {
+                        id: "workspace:settings",
+                        label: "Workspace settings",
+                        detail: workspace.project?.name ?? "",
+                        mark: here,
+                        run: () => void navigate({ to: "/projects/$id", params: { id: here } }),
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ]
+        : [
+            {
+              label: "Projects",
+              items: (projects.data ?? []).map((p) => ({
+                id: `project:${p.id}`,
+                label: p.name,
+                detail: "Open project",
+                mark: p.id,
+                run: () => void navigate({ to: "/projects/$id", params: { id: p.id } }),
+              })),
+            },
+          ]),
       ...(openProjectWindow
         ? [
             {
@@ -155,7 +199,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         : []),
       {
         label: "Tickets",
-        items: (tickets.data ?? []).map((t) => ({
+        items: narrow(tickets.data ?? [], here).map((t) => ({
           id: `ticket:${t.id}`,
           label: `#${t.number} ${t.title}`,
           detail: [COLUMN[t.column] ?? t.column, t.owner_name].filter(Boolean).join(" · "),
@@ -165,7 +209,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       },
       {
         label: "Channels",
-        items: (channels.data ?? []).map((c) => ({
+        items: narrow(channels.data ?? [], here).map((c) => ({
           id: `channel:${c.conversation_id}`,
           label: `Go to #${bareName(c)}`,
           detail: "Team chat",
@@ -189,7 +233,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       },
       {
         label: "Guidelines",
-        items: (guidelines.data ?? [])
+        items: guidelinesIn(guidelines.data ?? [], here, employees.data ?? [])
           .filter((g) => !g.archived)
           .map((g) => ({
             id: `guideline:${g.id}`,
@@ -221,6 +265,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       },
     ];
   }, [
+    workspace,
     openProjectWindow,
     projects.data,
     tickets.data,

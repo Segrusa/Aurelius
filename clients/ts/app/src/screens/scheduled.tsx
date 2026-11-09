@@ -13,6 +13,7 @@ import { useConnection, useLinkState } from "../connection";
 import { useKeyed } from "../data";
 import { hidden } from "../hidden";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, Problem } from "./org-kit";
 import { outcomeText, scheduledLine, splitScheduled, waiterLine } from "./scheduled-logic";
 import { ScheduleDialog } from "./settings-advanced";
@@ -140,9 +141,14 @@ function Messages({ list }: { list: ScheduledMessageView[] }) {
 function RecurringTasks() {
   const connection = useConnection();
   const [editing, setEditing] = useState<TaskScheduleView | "new" | null>(null);
+  const workspace = useWorkspace().id;
   const list = useKeyed(
-    ["scheduled", "recurring"],
-    async () => expectBody(await connection.call("recurring_task.list", {}), "task_schedules").value.schedules,
+    ["scheduled", "recurring", workspace],
+    async () =>
+      expectBody(
+        await connection.call("recurring_task.list", workspace ? { project_id: workspace } : {}),
+        "task_schedules",
+      ).value.schedules,
   );
   const write = (run: Promise<unknown>) =>
     run.catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
@@ -216,9 +222,14 @@ export function ScheduledScreen() {
   const connection = useConnection();
   const { features } = useLinkState();
   const supported = features.includes("scheduled_messages");
+  const workspace = useWorkspace().id;
   const list = useKeyed(
-    ["scheduled", "messages"],
-    async () => expectBody(await connection.call("scheduled_message.list"), "scheduled_messages").value.messages,
+    ["scheduled", "messages", workspace],
+    async () =>
+      expectBody(
+        await connection.call("scheduled_message.list", workspace ? { project_id: workspace } : {}),
+        "scheduled_messages",
+      ).value.messages,
     supported,
   );
   return (

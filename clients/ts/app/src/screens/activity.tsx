@@ -15,6 +15,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useEmployees } from "../data";
+import { useWorkspace } from "../workspace";
 import {
   ACTIVITY_CATEGORIES,
   type ActivityCategory,
@@ -43,17 +44,18 @@ const styles = stylex.create({
   more: { display: "flex", justifyContent: "center" },
 });
 
-function useActivityLog(filters: ActivityFilters, wanted: boolean) {
+function useActivityLog(filters: ActivityFilters, wanted: boolean, project: string | null) {
   const connection = useConnection();
   const { status, user } = useLinkState();
   return useInfiniteQuery({
-    queryKey: ["employees", "activity_log", filters],
+    queryKey: ["employees", "activity_log", filters, project],
     enabled: wanted && status === "online" && user !== null,
     staleTime: 30_000,
     initialPageParam: undefined as number | undefined,
     queryFn: async ({ pageParam }) =>
       expectBody(
         await connection.call("activity_log.list", {
+          ...(project ? { project_id: project } : {}),
           ...(filters.employee ? { employee_id: filters.employee } : {}),
           ...(filters.thread ? { thread_key: filters.thread } : {}),
           ...(filters.ticket ? { ticket_number: filters.ticket } : {}),
@@ -111,7 +113,8 @@ export function ActivitySection({ filters }: { filters: ActivityFilters }) {
   const navigate = useNavigate();
   const employees = useEmployees();
   const supported = features.includes("activity_log");
-  const log = useActivityLog(filters, supported);
+  const workspace = useWorkspace();
+  const log = useActivityLog(filters, supported, workspace.id);
   const [query, setQuery] = useState("");
   const go = (next: ActivityFilters) =>
     void navigate({ to: "/settings/$section", params: { section: "activity" }, search: { ...next } });
@@ -137,6 +140,10 @@ export function ActivitySection({ filters }: { filters: ActivityFilters }) {
     <div {...stylex.props(styles.page)}>
       {supported ? (
         <>
+          {/* The switcher is not in sight here: Settings has its own sidebar. */}
+          {workspace.project ? (
+            <Hint>Only {workspace.project.name}. Switch to All projects to see everything.</Hint>
+          ) : null}
           <div {...stylex.props(styles.filters)}>
             <Selector
               label="Employee"

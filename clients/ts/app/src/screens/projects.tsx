@@ -28,6 +28,7 @@ import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import { BoardScreen } from "./board";
 import { canPin, pinnedFirst, togglePin } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
@@ -41,6 +42,7 @@ import {
   FormDialog,
   failureOf,
   Hint,
+  KnowledgeTabs,
   Loading,
   Page,
   PageHead,
@@ -202,6 +204,18 @@ const styles = stylex.create({
     color: "var(--precision-text3)",
   },
   fill: { display: "flex", minHeight: 0, flex: 1 },
+  settingRow: {
+    display: "flex",
+    minHeight: 42,
+    alignItems: "center",
+    gap: 10,
+    borderBlockEndWidth: { default: 1, ":last-child": 0 },
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: "var(--precision-line2)",
+    paddingInline: 14,
+  },
+  settingName: { width: 90, flexShrink: 0, color: "var(--precision-text3)" },
+  settingValue: { minWidth: 0, flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
 });
 
 const COUNT_WORDS = ["", "One", "Two", "Three"];
@@ -459,6 +473,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
   const client = useQueryClient();
   const platform = usePlatform();
   const navigate = useNavigate();
+  const workspace = useWorkspace();
   const [scheduling, setScheduling] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const refresh = () =>
@@ -467,6 +482,9 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
       .then(() => client.invalidateQueries({ queryKey: ["projects"] }));
   const options = project
     ? [
+        ...(workspace.available && !workspace.locked && workspace.id !== project.id
+          ? [{ key: "switch", label: "Switch to this workspace" }]
+          : []),
         ...(platform.openProjectWindow && !platform.windowProject
           ? [{ key: "window", label: "Open in new window" }]
           : []),
@@ -492,6 +510,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
   const pick = (key: string) => {
     if (!project) return;
     if (key === "edit") onEdit();
+    else if (key === "switch") workspace.choose(project.id);
     else if (key === "memory") onMemory();
     else if (key === "folder" && project.folder) void platform.openFolder?.(project.folder);
     else if (key === "pause")
@@ -623,7 +642,7 @@ function ProjectRow({
             type="button"
             aria-label={`${pinned ? "Unpin" : "Pin"} ${project.name}`}
             aria-pressed={pinned}
-            title={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
+            title={pinned ? "Unpin from the top of the switcher" : "Pin to the top of the switcher"}
             onClick={onPin}
             {...stylex.props(styles.pin, pinned && styles.pinned)}
           >
@@ -675,7 +694,7 @@ export function ProjectsScreen() {
   });
   return (
     <Page>
-      <PageHead title="Projects">
+      <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
         <Button size="sm" variant="primary" label="New project" onClick={() => setAdding(true)} />
       </PageHead>
       <div {...stylex.props(styles.scroll)}>
@@ -737,6 +756,11 @@ const TABS: { key: ProjectTab; label: string; feature?: Feature }[] = shown([
 /** A hidden tab in a URL opens the overview. */
 export const projectTabShown = (tab: string): boolean => TABS.some((t) => t.key === tab);
 
+// With a sidebar these two are its screens, narrowed to the workspace. A project window has no
+// sidebar, so there they stay tabs.
+const SIDEBAR_SCREENS: ProjectTab[] = ["board", "tasks"];
+const tabsOf = (hasSidebar: boolean) => TABS.filter((t) => !hasSidebar || !SIDEBAR_SCREENS.includes(t.key));
+
 function Panel({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
     <Card padding={0} xstyle={styles.card}>
@@ -751,7 +775,65 @@ function Panel({ title, right, children }: { title: string; right?: React.ReactN
   );
 }
 
-function Overview({ project }: { project: ProjectSummary }) {
+function Setting({ name, children }: { name: string; children: React.ReactNode }) {
+  return (
+    <div {...stylex.props(styles.settingRow)}>
+      <span {...stylex.props(styles.settingName)}>{name}</span>
+      {children}
+    </div>
+  );
+}
+
+function WorkspaceSettings({
+  project,
+  dispatcher,
+  onEdit,
+  pick,
+}: {
+  project: ProjectSummary;
+  dispatcher: string;
+  onEdit: () => void;
+  pick: (key: string) => void;
+}) {
+  const platform = usePlatform();
+  return (
+    <Panel title="WORKSPACE SETTINGS" right={<Button size="sm" label="Edit…" onClick={onEdit} />}>
+      <Setting name="Folder">
+        <code title={project.folder ?? undefined} {...stylex.props(styles.settingValue, styles.mono)}>
+          {project.folder ?? "No folder"}
+        </code>
+        {platform.openFolder && project.folder ? (
+          <Button size="sm" label="Open" onClick={() => pick("folder")} />
+        ) : null}
+      </Setting>
+      <Setting name="Dispatcher">
+        <span {...stylex.props(styles.settingValue)}>{dispatcher}</span>
+      </Setting>
+      <Setting name="Status">
+        <span {...stylex.props(styles.settingValue)}>{project.status === "paused" ? "Paused" : "Active"}</span>
+        <Button size="sm" label={project.status === "paused" ? "Resume" : "Pause"} onClick={() => pick("pause")} />
+      </Setting>
+      <Setting name="Export">
+        <span {...stylex.props(styles.settingValue, styles.dim)}>Markdown + JSON, into its folder</span>
+        <Button size="sm" label="Export" onClick={() => pick("export")} />
+      </Setting>
+      <Setting name="Archive">
+        <span {...stylex.props(styles.settingValue, styles.dim)}>Nothing is deleted; the history is kept</span>
+        <Button size="sm" variant="destructive" label="Archive…" onClick={() => pick("archive")} />
+      </Setting>
+    </Panel>
+  );
+}
+
+function Overview({
+  project,
+  onEdit,
+  pick,
+}: {
+  project: ProjectSummary;
+  onEdit: () => void;
+  pick: (key: string) => void;
+}) {
   const connection = useConnection();
   const client = useQueryClient();
   const employees = useEmployees();
@@ -774,6 +856,10 @@ function Overview({ project }: { project: ProjectSummary }) {
   const added = linked.reduce((n, g) => n + g.chars, 0);
   const channel = channels.data?.find((c) => c.project_id === project.id && !c.ticket_id);
   const row = stylex.props(styles.rowLink);
+  const { windowProject } = usePlatform();
+  const workspace = useWorkspace();
+  const dispatcher =
+    employees.data?.find((e) => e.id === project.dispatcher_employee_id)?.name ?? "The company's dispatcher";
   return (
     <div {...stylex.props(styles.overview)}>
       {project.status === "paused" ? (
@@ -822,9 +908,20 @@ function Overview({ project }: { project: ProjectSummary }) {
       <Panel
         title={`TASKS · ${open.length} OPEN`}
         right={
-          <Link to="/projects/$id" params={{ id: project.id }} search={{ tab: "tasks" }} {...stylex.props(styles.link)}>
-            All →
-          </Link>
+          windowProject === null ? (
+            <Link to="/tasks" onClick={() => workspace.choose(project.id)} {...stylex.props(styles.link)}>
+              All →
+            </Link>
+          ) : (
+            <Link
+              to="/projects/$id"
+              params={{ id: project.id }}
+              search={{ tab: "tasks" }}
+              {...stylex.props(styles.link)}
+            >
+              All →
+            </Link>
+          )
         }
       >
         {open.length === 0 ? <p {...stylex.props(styles.note)}>No open tasks.</p> : null}
@@ -895,12 +992,17 @@ function Overview({ project }: { project: ProjectSummary }) {
           </p>
         ) : null}
       </Panel>
+      <WorkspaceSettings project={project} dispatcher={dispatcher} onEdit={onEdit} pick={pick} />
     </div>
   );
 }
 
-export function ProjectPage({ id, tab }: { id: string; tab: ProjectTab }) {
+export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab }) {
   const navigate = useNavigate();
+  const { windowProject } = usePlatform();
+  const workspace = useWorkspace();
+  const tabs = tabsOf(windowProject === null);
+  const tab = tabs.some((t) => t.key === asked) ? asked : "overview";
   const projects = useProjects();
   const project = projects.data?.find((p) => p.id === id) ?? null;
   const [editing, setEditing] = useState(false);
@@ -915,8 +1017,8 @@ export function ProjectPage({ id, tab }: { id: string; tab: ProjectTab }) {
       }),
   );
   const go = (delta: number) => {
-    const at = TABS.findIndex((t) => t.key === tab);
-    const next = TABS[(at + delta + TABS.length) % TABS.length];
+    const at = tabs.findIndex((t) => t.key === tab);
+    const next = tabs[(at + delta + tabs.length) % tabs.length];
     if (next) void navigate({ to: "/projects/$id", params: { id }, search: { tab: next.key } });
   };
   useAction("NextTab", () => go(1));
@@ -959,18 +1061,30 @@ export function ProjectPage({ id, tab }: { id: string; tab: ProjectTab }) {
             <span {...stylex.props(styles.truncatedName)}>{project.name}</span>
           </>
         }
-        tabs={
-          <TabList aria-label="Project" size="sm" value={tab} onChange={() => {}}>
-            {TABS.map((t) => (
-              <Tab key={t.key} value={t.key} label={t.label} href={`/projects/${id}?tab=${t.key}`} />
-            ))}
-          </TabList>
-        }
+        {...(tabs.length > 1
+          ? {
+              tabs: (
+                <TabList aria-label="Project" size="sm" value={tab} onChange={() => {}}>
+                  {tabs.map((t) => (
+                    <Tab key={t.key} value={t.key} label={t.label} href={`/projects/${id}?tab=${t.key}`} />
+                  ))}
+                </TabList>
+              ),
+            }
+          : {})}
       >
         {project.folder ? (
           <code title={project.folder} {...stylex.props(styles.path)}>
             {project.folder}
           </code>
+        ) : null}
+        {workspace.available && !workspace.locked && workspace.id !== project.id ? (
+          <Button
+            size="sm"
+            variant="primary"
+            label="Switch to this workspace"
+            onClick={() => workspace.choose(project.id)}
+          />
         ) : null}
         <Button size="sm" label="Edit project" onClick={() => setEditing(true)} />
         <Menu
@@ -980,7 +1094,7 @@ export function ProjectPage({ id, tab }: { id: string; tab: ProjectTab }) {
           trigger={<IconButton size="sm" label={`More for ${project.name}`} icon="⋯" />}
         />
       </PageHead>
-      {tab === "overview" ? <Overview project={project} /> : null}
+      {tab === "overview" ? <Overview project={project} onEdit={() => setEditing(true)} pick={pick} /> : null}
       {tab === "board" ? <BoardScreen ticket={undefined} projectId={project.id} /> : null}
       {tab === "tasks" ? <TasksScreen projectId={project.id} /> : null}
       {tab === "ideas" ? <IdeasBody projectId={project.id} chrome={false} /> : null}
