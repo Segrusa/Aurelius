@@ -162,6 +162,11 @@ class AureliusRepository {
   /// The earlier texts of an edited message, newest first (feature `message_edits`).
   Future<MessageHistoryView> messageEdits(String messageId) async => (await _ask<ResponseBodyMessageHistory>(messageHistory(messageId: messageId))).value;
 
+  /// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`):
+  /// [channel] is the project channel's or ticket discussion's conversation; null is General.
+  Future<DiscussionAudience> discussionAudienceOf({String? channel}) async =>
+      (await _ask<ResponseBodyDiscussionAudience>(discussionAudience(channel: channel))).value;
+
   /// Where a message is, for a link to it (feature `message_locate`).
   Future<MessageLocation> messageLocation(String messageId) async => (await _ask<ResponseBodyMessageLocation>(messageLocate(messageId: messageId))).value;
 

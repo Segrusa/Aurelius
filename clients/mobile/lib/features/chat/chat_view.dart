@@ -21,12 +21,14 @@ import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/channels.dart';
 import '../../data/discussion.dart';
+import '../../data/everyone.dart';
 import '../../data/links.dart' show messageLocateFeature;
 import '../../data/views.dart';
 import '../../data/markdown_paths.dart';
 import '../../data/run_config.dart';
 import '../runtime/runtime_bloc.dart';
 import '../company/company_bloc.dart';
+import 'everyone_audience.dart';
 import '../connection/connection_bloc.dart';
 import '../company_org/employee_run_sheet.dart';
 import '../inbox/inbox_bloc.dart';
@@ -366,6 +368,9 @@ class _MessagesState extends State<_Messages> {
   /// The active board member: a message naming them is marked (B9).
   String? _me;
 
+  /// The server understands `@Everyone` (ticket #40): it is suggested and marked.
+  bool get _everyone => context.read<ConnectionBloc>().state.has(everyoneFeature);
+
   /// [ChatView.revealMessage] was acted on: once, not again on every new message.
   bool _revealed = false;
 
@@ -502,12 +507,14 @@ class _MessagesState extends State<_Messages> {
     ];
     // Newest at the bottom; the list starts there and holds still when you
     // scroll up while text comes in.
-    return FollowingList(
+    final list = FollowingList(
       key: _list,
       items: items,
       liveFrom: live < 0 ? state.messages.length : live,
       resetKey: state.conversationId,
     );
+    // A ticket's discussion marks no names, only `@Everyone` (ticket #40).
+    return group && _everyone ? MentionScope(known: const [everyoneName], child: list) : list;
   }
 
   /// A channel of the Slack-style Team chat (AUR-CHAT-001 §2): everyone
@@ -517,7 +524,7 @@ class _MessagesState extends State<_Messages> {
     final company = context.watch<CompanyBloc>().state;
     final me = _me;
     final employees = [for (final p in mentionables(company)) p.$1];
-    final known = [...employees, ...state.boardMembers];
+    final known = withEveryone([...employees, ...state.boardMembers], enabled: _everyone);
     final source = widget.config.source;
     final made = source == null ? const <String, TicketRef>{} : ticketsFromMessages(state.messages);
     final lastSummary = state.messages.where((m) => m.system?.kind == SystemLineKind.summary || m.system?.kind == SystemLineKind.summaryFailed).lastOrNull?.id;
@@ -1616,7 +1623,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
     if (text.trim().isEmpty && bloc.state.images.isEmpty && bloc.state.files.isEmpty) return;
     // A name that is nobody (or archived) wakes no one: said, never silently (MU2-04 AC5).
     if (bloc.group) {
-      final known = [for (final p in mentionables(context.read<CompanyBloc>().state)) p.$1, ...bloc.state.boardMembers];
+      final known = withEveryone([for (final p in mentionables(context.read<CompanyBloc>().state)) p.$1, ...bloc.state.boardMembers], enabled: context.read<ConnectionBloc>().state.has(everyoneFeature));
       final nobody = unknownMentions(text, known);
       if (nobody.isNotEmpty) toast(context, '${nobody.map((n) => '@$n').join(', ')} ${nobody.length == 1 ? 'is' : 'are'} nobody here: no one is woken for ${nobody.length == 1 ? 'it' : 'them'}.');
     }
@@ -1823,11 +1830,12 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                     for (final u in state.boardMembers)
                       if (u != me) (u, 'board member'),
                   ];
-                  final found = mentionSuggestions(value.text, [for (final p in people) p.$1]);
+                  final everyone = context.read<ConnectionBloc>().state.has(everyoneFeature);
+                  final found = mentionSuggestions(value.text, withEveryone([for (final p in people) p.$1], enabled: everyone));
                   if (found == null) return const SizedBox.shrink();
                   return MentionRow(
                     found: found.$2,
-                    roles: {for (final p in people) p.$1: p.$2},
+                    roles: {for (final p in people) p.$1: p.$2, everyoneName: everyoneRole},
                     onPick: (name) {
                       final text = completeMention(value.text, found.$1, name);
                       _text.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
@@ -1835,6 +1843,13 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                     },
                   );
                 },
+              ),
+            // Before sending: whom an `@Everyone` in the text reaches (ticket #40).
+            if (group && context.read<ConnectionBloc>().state.has(everyoneFeature))
+              EveryoneAudienceLine(
+                text: _text,
+                channel: context.read<ChatBloc>().discussion ? state.conversationId : context.read<ChatBloc>().channel,
+                load: (channel) => context.read<AureliusRepository>().discussionAudienceOf(channel: channel),
               ),
             if (state.images.isNotEmpty)
               Padding(
