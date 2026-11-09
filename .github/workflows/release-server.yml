@@ -6,10 +6,6 @@
 # The app's updater only installs packages whose signature verifies against the
 # public key compiled into the app; the private key exists only as the
 # AURELIUS_SIGNING_KEY secret.
-# The zip also carries aurelius-mcp.exe (for outside apps; the updater does not
-# replace it), and the docker job publishes its Linux image to
-# ghcr.io/segrusa/aurelius-mcp:<version> and :latest, only after the Windows
-# release succeeded.
 name: release-server
 
 on:
@@ -32,8 +28,6 @@ jobs:
   release:
     runs-on: windows-latest
     timeout-minutes: 90
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
       CARGO_TERM_COLOR: never
@@ -56,17 +50,15 @@ jobs:
           restore-keys: windows-
 
       - name: Version matches the tag
-        id: version
         shell: pwsh
         run: |
           $version = (Select-String -Path crates/daemon/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           if ("server-v$version" -ne $env:TAG) { throw "crates/daemon/Cargo.toml version $version does not match tag $env:TAG" }
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Build
         shell: pwsh
-        run: cargo build --release --locked -p aurelius-daemon -p aurelius-client -p aurelius-agent-bridge -p aurelius-host -p aurelius-mcp
+        run: cargo build --release --locked -p aurelius-daemon -p aurelius-client -p aurelius-agent-bridge -p aurelius-host
 
       - name: Package and sign
         shell: pwsh
@@ -76,7 +68,7 @@ jobs:
           $zip = "aurelius-server-$env:VERSION-windows-x64.zip"
           New-Item -ItemType Directory -Force dist | Out-Null
           ./scripts/licenses.ps1 -Out target/release/THIRD-PARTY-LICENSES.md
-          Compress-Archive -Path target/release/aurelius-daemon.exe, target/release/aurelius-ctl.exe, target/release/aurelius-bridge.exe, target/release/aurelius-mcp.exe, target/release/THIRD-PARTY-LICENSES.md -DestinationPath "dist/$zip" -Force
+          Compress-Archive -Path target/release/aurelius-daemon.exe, target/release/aurelius-ctl.exe, target/release/aurelius-bridge.exe, target/release/THIRD-PARTY-LICENSES.md -DestinationPath "dist/$zip" -Force
           ./target/release/aurelius-release.exe sign "dist/$zip"
           ./target/release/aurelius-release.exe verify "dist/$zip"
           (Get-FileHash "dist/$zip" -Algorithm SHA256).Hash.ToLower() + "  $zip" | Out-File -Encoding ascii "dist/$zip.sha256"
@@ -97,46 +89,3 @@ jobs:
           } else {
             gh release create $env:TAG dist/* --title "Aurelius server $env:VERSION" --notes-file notes.md --repo $env:GITHUB_REPOSITORY
           }
-
-  # The aurelius-mcp Docker image (Dockerfile, linux/amd64), tagged with the
-  # server version and latest. Runs only after the release job, so a tag whose
-  # version check or build fails publishes no image.
-  docker:
-    needs: release
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: read
-      packages: write
-    env:
-      IMAGE: ghcr.io/segrusa/aurelius-mcp
-      VERSION: ${{ needs.release.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ env.VERSION }}
-            ${{ env.IMAGE }}:latest
-          labels: |
-            org.opencontainers.image.title=aurelius-mcp
-            org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=aurelius-mcp
-          cache-to: type=gha,mode=max,scope=aurelius-mcp
