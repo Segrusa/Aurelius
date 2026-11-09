@@ -23,6 +23,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useRunGuidelines } from "../data";
@@ -273,18 +274,13 @@ const styles = stylex.create({
   reactionMine: { borderColor: "var(--color-text-accent)", backgroundColor: "var(--color-overlay-hover)" },
   editBox: { display: "flex", flexDirection: "column", gap: 8 },
   editActions: { display: "flex", gap: 8 },
-  // In the rows' group-hover: hidden until the row is hovered or holds focus, and open while its menu is.
+  // Only mounted for the one active row (see the bar state below), so it never needs a CSS hover rule.
   rowBar: {
     position: "absolute",
     top: -18,
     right: 8,
     zIndex: 2,
-    display: {
-      default: "none",
-      [stylex.when.ancestor(":hover")]: "flex",
-      [stylex.when.ancestor(":focus-within")]: "flex",
-      ":has([aria-expanded='true'])": "flex",
-    },
+    display: "flex",
     alignItems: "center",
     gap: 2,
     height: 36,
@@ -993,6 +989,38 @@ function EditBox({ m, onDone }: { m: MessageView; onDone: () => void }) {
   );
 }
 
+// The message bar: at most one row owns it. The row under the pointer (or the one with keyboard focus) is active;
+// it stays active while its "More actions" menu is open, and is dropped when the pointer leaves, the window
+// loses the pointer or focus, or the list scrolls.
+const bar: { id: string | null; menu: boolean } = { id: null, menu: false };
+const barListeners = new Set<() => void>();
+function barSet(id: string | null, menu = bar.menu) {
+  if (bar.id === id && bar.menu === menu) return;
+  bar.id = id;
+  bar.menu = menu;
+  for (const f of barListeners) f();
+}
+function barRelease(id: string) {
+  if (bar.id === id && !bar.menu) barSet(null);
+}
+function barDrop() {
+  if (!bar.menu) barSet(null);
+}
+function useBarActive(id: string): boolean {
+  return useSyncExternalStore(
+    (f) => {
+      barListeners.add(f);
+      return () => barListeners.delete(f);
+    },
+    () => bar.id === id,
+  );
+}
+if (typeof document !== "undefined") {
+  document.addEventListener("scroll", barDrop, { capture: true, passive: true });
+  document.documentElement.addEventListener("mouseleave", barDrop);
+  window.addEventListener("blur", barDrop);
+}
+
 function RowBar({
   m,
   onEdit,
@@ -1074,6 +1102,13 @@ function RowBar({
           label="More actions"
           options={more}
           onPick={pick}
+          onOpenChange={(open) => {
+            if (open) barSet(m.id, true);
+            else {
+              bar.menu = false;
+              barDrop();
+            }
+          }}
           trigger={
             <BarButton label="More actions">
               <Icon name="more" size={16} weight={2.4} />
@@ -1184,8 +1219,7 @@ export const MessageRow = memo(function MessageRow({
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   // A row's menus are only built once it is pointed at or focused: with 2,000 messages, scrolling mounts many rows.
-  const [touched, setTouched] = useState(false);
-  const touch = () => setTouched(true);
+  const active = useBarActive(m.id);
   const retry = useRetryAnswer(
     conversationId,
     messages,
@@ -1231,8 +1265,19 @@ export const MessageRow = memo(function MessageRow({
   };
   return (
     <div
-      onPointerEnter={touch}
-      onFocusCapture={touch}
+      onPointerEnter={() => {
+        if (!bar.menu) barSet(m.id);
+      }}
+      onPointerMove={() => {
+        if (bar.id !== m.id && !bar.menu) barSet(m.id);
+      }}
+      onPointerLeave={() => barRelease(m.id)}
+      onFocusCapture={(e) => {
+        if (!bar.menu && (e.target as Element).matches(":focus-visible")) barSet(m.id);
+      }}
+      onBlurCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) barRelease(m.id);
+      }}
       {...stylex.props(
         styles.row,
         grouped ? styles.rowGrouped : styles.rowFull,
@@ -1284,7 +1329,7 @@ export const MessageRow = memo(function MessageRow({
         <Reactions m={m} can={!caps.readOnly} />
         {inThread ? null : <ThreadLink m={m} />}
       </div>
-      {!touched || editing || m.deleted_at_ms || m.status === "partial" ? null : (
+      {!active || editing || m.deleted_at_ms || m.status === "partial" ? null : (
         <RowBar m={m} name={who.name} onEdit={() => setEditing(true)} onDelete={() => setDeleting(true)} />
       )}
       {deleting ? (
