@@ -18,14 +18,16 @@ import {
   useNotifications,
   useOpenTasks,
   useProposals,
+  useTicket,
   useTickets,
 } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { StatusGlyph } from "../ui/icons";
 import { KeyHint } from "../ui/key-hint";
+import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
-import { ApprovalCard, PLAN_TOOL, QUESTION_TOOL } from "./approval-card";
+import { ApprovalCard, PLAN_TOOL, QUESTION_TOOL, ReplyCard } from "./approval-card";
 import { taskCounts } from "./board-logic";
 import {
   age,
@@ -37,6 +39,7 @@ import {
   type InboxGroup,
   type InboxRow,
   type InboxTone,
+  openQuestion,
 } from "./inbox-logic";
 import { useFollowLink } from "./links";
 import { messageLink } from "./links-logic";
@@ -161,6 +164,7 @@ const styles = stylex.create({
   meta: { margin: 0, fontSize: 14, lineHeight: 1.6, color: "var(--color-text-secondary)" },
   reasons: { margin: 0, listStyleType: "none", padding: 0, color: "var(--color-text-secondary)" },
   buttons: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  question: { minWidth: 0 },
   openRun: { alignSelf: "flex-start", fontSize: 12 },
   facts: {
     margin: 0,
@@ -450,7 +454,12 @@ function reasonText(reason: string): string {
 
 function TaskDetail({ row, task }: { row: InboxRow; task: TaskView }) {
   const navigate = useNavigate();
-  const open = () => void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } });
+  const connection = useConnection();
+  const ticketId = task.ticket_id ?? null;
+  const open = () => {
+    if (ticketId) void navigate({ to: "/board", search: { ticket: ticketId } });
+    else void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } });
+  };
   useAction("OpenSelected", open);
   const stopped = task.waiting_reason === "input";
   const chat = useMessages(stopped ? task.conversation_id : null);
@@ -458,15 +467,42 @@ function TaskDetail({ row, task }: { row: InboxRow; task: TaskView }) {
   const failure = lastFailure(list);
   const retry = useRetryAnswer(task.conversation_id, list, { employeeId: task.employee_id ?? null });
   const noConnection = useNoConnection();
+  // What was asked stands in the ticket's discussion; here it is read and answered in one go.
+  const ticket = useTicket(stopped ? ticketId : null);
+  const discussion = useMessages(ticket.data?.ticket.conversation_id ?? null);
+  const question = openQuestion(discussion.data?.messages ?? []);
+  const who = task.employee_name ?? "The employee";
   return (
     <DetailFrame row={row}>
       {task.ticket_id && task.waiting_reason === "plan_review" ? <TicketDecision id={task.ticket_id} /> : null}
       {failure ? <Prose title="Why it stopped">{failure}</Prose> : null}
       {failure && noConnection ? <NoConnectionNote /> : null}
-      <Prose title="Goal">{task.goal}</Prose>
+      {question ? (
+        <>
+          <div {...stylex.props(styles.question)}>
+            <Markdown text={question.text} />
+          </div>
+          <ReplyCard
+            who={who}
+            onSend={(text) =>
+              connection.write(
+                "ticket.post",
+                { ticket_id: ticketId as string, text, confirm_secret: false },
+                { retry: false },
+              )
+            }
+          />
+        </>
+      ) : (
+        <Prose title="Goal">{task.goal}</Prose>
+      )}
       <div {...stylex.props(styles.buttons)}>
-        <Button variant="primary" label="Open run" onClick={open}>
-          Open run <KeyHint onAccent>↵</KeyHint>
+        <Button
+          variant={question ? "secondary" : "primary"}
+          label={ticketId ? "Open ticket" : "Open run"}
+          onClick={open}
+        >
+          {ticketId ? "Open ticket" : "Open run"} <KeyHint onAccent={!question}>↵</KeyHint>
         </Button>
         {failure ? <Button label="Try again" onClick={retry} /> : null}
       </div>

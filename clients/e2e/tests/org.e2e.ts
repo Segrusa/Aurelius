@@ -806,7 +806,7 @@ test.describe("scripted organisation", () => {
       "/talk/c1",
     );
     await expect(page.getByLabel("Who waits for this thread")).toHaveText(
-      "Orion — waiting to pick up this thread (behind 2 items)",
+      "Orion is waiting to pick up this thread (behind 2 items)",
     );
     await stop();
   });

@@ -61,12 +61,11 @@ import {
   testingNote,
 } from "./board-logic";
 import { canChange, completeMention, mentionSuggestions } from "./chat-logic";
-import { ActivityOutput } from "./chat-message";
 import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { messageLink, ticketLink } from "./links-logic";
 import { FormDialog, Loading, Problem } from "./org-kit";
-import { RunCard, TicketOdometer } from "./run-card";
+import { RunNote, TicketOdometer } from "./run-card";
 import { approvalsFor, waitsOnReply } from "./run-card-logic";
 import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
@@ -1137,7 +1136,7 @@ function Discussion({
             ) : (
               <Markdown text={m.text} />
             )}
-            {m.run ? <RunCard m={m} Output={ActivityOutput} /> : null}
+            <RunNote m={m} />
             {t.column !== "done" && waitsOnReply(m, pending) ? (
               <ReplyCard
                 who={m.author ?? "An employee"}

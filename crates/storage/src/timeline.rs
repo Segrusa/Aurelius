@@ -964,6 +964,12 @@ pub fn dismiss_for(tx: &rusqlite::Transaction<'_>, id: &str, user: Option<&str>)
     Ok(own + shared)
 }
 
+/// `user` wrote in the discussion of `ticket`: the mentions of them there have been dealt with.
+pub fn clear_ticket_mentions_for(tx: &rusqlite::Transaction<'_>, ticket: &str, user: Option<&str>) -> Result<usize, StorageError> {
+    let Some(user) = viewer(user) else { return Ok(0) };
+    Ok(tx.execute("DELETE FROM notifications WHERE ticket_id = ?1 AND user_id = ?2 AND reason = 'mention'", params![ticket, user])?)
+}
+
 /// `dismiss_for`, of everything in `user`'s Inbox.
 pub fn dismiss_all_for(tx: &rusqlite::Transaction<'_>, user: Option<&str>) -> Result<usize, StorageError> {
     let Some(user) = viewer(user) else { return Ok(0) };

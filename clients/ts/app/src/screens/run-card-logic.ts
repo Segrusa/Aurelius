@@ -1,6 +1,6 @@
 // What a run card, an interrupt card and the odometer say. Pure, so they are tested without a screen.
 
-import type { ApprovalView, MessageView, RunBrief, TokenUsage } from "@aurelius/protocol";
+import type { ApprovalView, MessageView, TokenUsage } from "@aurelius/protocol";
 import { costText, tokensShort } from "./usage-logic";
 
 export interface RunState {
@@ -32,17 +32,6 @@ export function runState(status: string, waiting: boolean): RunState {
     default:
       return { label: status, variant: "neutral", running: false };
   }
-}
-
-/** "3 tool calls · 1 failed · 14.2k tokens" */
-export function runLine(brief: RunBrief, usage: TokenUsage | null | undefined): string {
-  return [
-    brief.tool_calls === 1 ? "1 tool call" : `${brief.tool_calls} tool calls`,
-    brief.failed_calls > 0 ? `${brief.failed_calls} failed` : null,
-    usage ? `${tokensShort(usage.input_tokens + usage.output_tokens)} tokens` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
 }
 
 /** Whether a message asks the reader something that no question or approval card already asks. */

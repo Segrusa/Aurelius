@@ -588,7 +588,7 @@ function AuditLog({ projectId, all }: { projectId: string | null; all: boolean }
                 <span {...stylex.props(styles.cellText)}>{actionText(r)}</span>
               </TableCell>
               <TableCell>
-                <span {...stylex.props(styles.cellText)}>{r.item_name ?? "—"}</span>
+                <span {...stylex.props(styles.cellText)}>{r.item_name ?? "-"}</span>
               </TableCell>
               <TableCell>
                 <span {...stylex.props(styles.cellText, styles.dim)}>{via(r)}</span>

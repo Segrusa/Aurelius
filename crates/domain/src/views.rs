@@ -1046,6 +1046,9 @@ pub struct EmployeeChatView {
     /// What the employee wrote since the board member last read it.
     pub unread: u32,
     pub last_activity_ms: i64,
+    /// The start of the latest message, for a list of chats.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 /// `employee.chats`: the reader's chats that have something in them, the latest first.

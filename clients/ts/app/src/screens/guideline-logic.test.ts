@@ -205,7 +205,7 @@ describe("library", () => {
       shown: "Bridge, Forge, Schema +2".replace("Schema", "Nexus"),
       all: "Bridge, Forge, Nexus, Schema, ▸ aurelius",
     });
-    expect(appliesTo([], n).shown).toBe("— not linked");
+    expect(appliesTo([], n).shown).toBe("Not linked");
     expect(appliesTo([{ kind: "employee", id: "gone" }], n).shown).toBe("An employee (archived)");
   });
   it("banner", () => {

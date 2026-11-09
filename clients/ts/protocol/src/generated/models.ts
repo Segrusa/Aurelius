@@ -1433,6 +1433,10 @@ export interface EmployeeChatView {
   employee_name: string;
   last_activity_ms: number;
   /**
+   * The start of the latest message, for a list of chats.
+   */
+  preview?: string | null;
+  /**
    * What the employee wrote since the board member last read it.
    */
   unread: number;

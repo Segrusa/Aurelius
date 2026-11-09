@@ -72,5 +72,5 @@ fn a_board_member_has_one_chat_per_employee_and_the_main_chat_stays_the_oldest()
     assert!(!store.read(move |c| chats::hidden_from(c, first, Some(grace))).unwrap());
     assert!(store.read(move |c| chats::hidden_from(c, first, Some(robin))).unwrap());
     assert!(store.read(move |c| chats::hidden_from(c, first, None)).unwrap());
-    assert!(store.read(move |c| chats::list(c, grace)).unwrap().is_empty(), "an empty chat is not listed");
+    assert!(store.read(move |c| chats::list(c, grace, |_| None)).unwrap().is_empty(), "an empty chat is not listed");
 }

@@ -8,6 +8,8 @@ export const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const DAY_MS = 86_400_000;
 export const SHOW_MORE_AFTER = 15;
 export const REACTIONS = ["✓", "👀", "👍", "🎉", "❓", "❗", "🙏", "🚀"];
+/** Those the bar above a message offers at one click. */
+export const QUICK_REACTIONS = ["👍", "✓", "👀"];
 const FOLD_LINES = 20;
 const REPLY_LABEL_CHARS = 40;
 const TODO_TOOL = "TodoWrite";
@@ -286,7 +288,7 @@ export function webSearchSummary(output: string): string {
       .map((l) => {
         const url = l.url ?? "";
         const site = (url.split("/")[2] ?? url).replace(/^www\./, "");
-        return `- [${(l.title ?? url).replace(/[[\]]/g, "")}](<${url}>) — ${site}`;
+        return `- [${(l.title ?? url).replace(/[[\]]/g, "")}](<${url}>) · ${site}`;
       })
       .join("\n");
   } catch {
@@ -468,17 +470,6 @@ const latest = (activity: ActivityView[], tool: string) =>
     .filter((a) => a.tool === tool)
     .reduce<ActivityView | null>((best, a) => (!best || a.offset >= best.offset ? a : best), null);
 
-export function todos(activity: ActivityView[]): Todo[] | null {
-  const input = latest(activity, TODO_TOOL)?.input as { todos?: unknown } | undefined;
-  if (!Array.isArray(input?.todos)) return null;
-  const list = (input.todos as { status?: string; activeForm?: string; content?: string }[]).flatMap((t): Todo[] => {
-    const state: TodoState = t.status === "completed" ? "done" : t.status === "in_progress" ? "doing" : "open";
-    const text = (state === "doing" ? (t.activeForm ?? t.content) : t.content)?.trim();
-    return text ? [{ text, state }] : [];
-  });
-  return list.length > 0 ? list : null;
-}
-
 export function quickReplies(activity: ActivityView[]): { question: string | null; options: string[] } | null {
   const input = latest(activity, SUGGEST_TOOL)?.input as { options?: unknown; question?: unknown } | undefined;
   if (!Array.isArray(input?.options)) return null;
@@ -529,12 +520,6 @@ function kind(tool: string): [string, string, string] {
     default:
       return ["Ran a tool", "Ran {n} tools", "Running a tool"];
   }
-}
-
-export function currentStep(activity: ActivityView[]): string | null {
-  const open = activity.filter((a) => (a.ok === null || a.ok === undefined) && !isProgressTool(a.tool));
-  if (open.length === 0) return null;
-  return kind(open.reduce((best, a) => (a.offset >= best.offset ? a : best)).tool)[2];
 }
 
 export function runLabel(run: ActivityView[]): string {
@@ -680,7 +665,7 @@ export function prefill(
     .trim()
     .split("\n")
     .map((l) => (l === "" ? ">" : `> ${l}`));
-  return { title, description: `${quoted.join("\n")}\n\n— ${author} in ${place} · ${when}` };
+  return { title, description: `${quoted.join("\n")}\n\nFrom ${author} in ${place} · ${when}` };
 }
 
 export const canMakeTicket = (m: MessageView) =>
@@ -711,25 +696,6 @@ export function indexOfByte(text: string, bytes: number): number {
 }
 
 export type Segment = { kind: "text"; text: string } | { kind: "steps"; steps: ActivityView[] };
-
-/** An answer in the order it was written: its text, cut where runs of steps with nothing between happened. */
-export function segments(text: string, activity: ActivityView[]): Segment[] {
-  const steps = activity.filter((a) => !isProgressTool(a.tool)).sort((a, b) => a.offset - b.offset);
-  const out: Segment[] = [];
-  let from = 0;
-  for (const step of steps) {
-    const at = Math.max(from, indexOfByte(text, step.offset));
-    const between = text.slice(from, at);
-    if (between.trim() !== "") out.push({ kind: "text", text: between });
-    from = at;
-    const last = out.at(-1);
-    if (last?.kind === "steps") last.steps.push(step);
-    else out.push({ kind: "steps", steps: [step] });
-  }
-  const rest = text.slice(from);
-  if (rest.trim() !== "") out.push({ kind: "text", text: rest });
-  return out;
-}
 
 /** Who runs `runId`, from the employees' working agents. */
 export function runAuthor(

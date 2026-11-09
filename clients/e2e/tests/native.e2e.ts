@@ -216,7 +216,7 @@ test("a link from the operating system opens in the running app; a project gets 
     await expect(window.getByText("Northwind API").first()).toBeVisible();
     await expect(window.getByRole("navigation", { name: /main|Sidebar/i })).toBeHidden();
     const titles = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.getTitle()));
-    expect(titles).toContain("Northwind API — Aurelius");
+    expect(titles).toContain("Northwind API · Aurelius");
     // Asking again brings that window forward instead of a third.
     await page
       .getByRole("button", { name: /More|Project menu|Project actions/ })

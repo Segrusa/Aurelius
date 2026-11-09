@@ -26,15 +26,15 @@ const message = (over: Partial<ScheduledMessageView> = {}): ScheduledMessageView
 
 describe("the waiting line", () => {
   it("says who waits and behind how much", () => {
-    expect(waiterLine(waiter())).toBe("Flux — waiting to pick up this thread");
-    expect(waiterLine(waiter({ behind: 1 }))).toBe("Flux — waiting to pick up this thread (behind 1 item)");
-    expect(waiterLine(waiter({ behind: 2 }))).toBe("Flux — waiting to pick up this thread (behind 2 items)");
+    expect(waiterLine(waiter())).toBe("Flux is waiting to pick up this thread");
+    expect(waiterLine(waiter({ behind: 1 }))).toBe("Flux is waiting to pick up this thread (behind 1 item)");
+    expect(waiterLine(waiter({ behind: 2 }))).toBe("Flux is waiting to pick up this thread (behind 2 items)");
   });
 
   it("names what holds it back other than its turn", () => {
     expect(waiterLine(waiter({ reason: "limit" }))).toContain("usage limit");
     expect(waiterLine(waiter({ reason: "question" }))).toContain("answer");
-    expect(waiterLine(waiter({ reason: "newer" }))).toBe("Flux — waiting to pick up this thread");
+    expect(waiterLine(waiter({ reason: "newer" }))).toBe("Flux is waiting to pick up this thread");
   });
 
   it("tells a reminder from a message to a colleague", () => {

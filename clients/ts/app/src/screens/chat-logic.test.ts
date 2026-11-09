@@ -11,7 +11,6 @@ import {
   chatBadge,
   clock,
   completeMention,
-  currentStep,
   dayLabel,
   fold,
   indexOfByte,
@@ -32,10 +31,8 @@ import {
   replies,
   replyLabel,
   rowActions,
-  runLabel,
   saveOf,
   sections,
-  segments,
   splitBlocks,
   stepChannel,
   streamTo,
@@ -43,7 +40,6 @@ import {
   threadLabel,
   threadLine,
   ticketFrom,
-  todos,
   typingMention,
   unknownMentions,
   unknownWarning,
@@ -210,7 +206,7 @@ describe("folding", () => {
 describe("web search", () => {
   it("turns results into links", () => {
     const out = 'Search\nLinks: [{"title":"A [b]","url":"https://www.x.org/p"}]\nrest';
-    expect(webSearchSummary(out)).toBe("- [A b](<https://www.x.org/p>) — x.org");
+    expect(webSearchSummary(out)).toBe("- [A b](<https://www.x.org/p>) · x.org");
     expect(webSearchSummary("plain")).toBe("plain");
     expect(webSearchSummary("Links: [{bad}]")).toBe("Links: [{bad}]");
   });
@@ -316,26 +312,6 @@ describe("threads and reactions", () => {
 });
 
 describe("progress", () => {
-  it("reads the latest checklist", () => {
-    const a: ActivityView[] = [
-      { ...step("TodoWrite", true, 0), input: { todos: [{ content: "old", status: "pending" }] } },
-      {
-        ...step("TodoWrite", true, 5),
-        input: {
-          todos: [
-            { content: "Run tests", activeForm: "Running tests", status: "in_progress" },
-            { content: "Ship", status: "completed" },
-            { content: " ", status: "pending" },
-          ],
-        },
-      },
-    ];
-    expect(todos(a)).toEqual([
-      { text: "Running tests", state: "doing" },
-      { text: "Ship", state: "done" },
-    ]);
-    expect(todos([])).toBeNull();
-  });
   it("reads quick replies", () => {
     const with_ = (options: unknown) => [
       { ...step("mcp__aurelius__suggest_replies", true), input: { question: " Q? ", options } },
@@ -344,15 +320,6 @@ describe("progress", () => {
     expect(quickReplies(with_(["a"]))).toBeNull();
     expect(replyLabel("x".repeat(40))).toHaveLength(40);
     expect(replyLabel("x".repeat(41))).toBe(`${"x".repeat(39)}…`);
-  });
-  it("words steps", () => {
-    expect(runLabel([step("Bash", true)])).toBe("Ran a command");
-    expect(runLabel([step("Bash", true), step("Bash", false)])).toBe("Ran 2 commands · 1 failed");
-    expect(runLabel([step("Bash", true), step("Read", true)])).toBe("Ran 2 steps");
-    expect(runLabel([step("Read", null)])).toBe("Reading a file");
-    expect(currentStep([step("Bash", true), step("Grep", null, 2), step("TodoWrite", null, 3)])).toBe(
-      "Searching the files",
-    );
   });
 });
 
@@ -377,7 +344,7 @@ describe("tickets and edits", () => {
   it("prefills a ticket", () => {
     const p = prefill("# Title\n\nbody", "Flux", "#general", "11:02");
     expect(p.title).toBe("Title");
-    expect(p.description).toBe("> # Title\n>\n> body\n\n— Flux in #general · 11:02");
+    expect(p.description).toBe("> # Title\n>\n> body\n\nFrom Flux in #general · 11:02");
     expect(prefill("", "a", "b", "c").title).toBe("From a message");
     expect(canMakeTicket(msg())).toBe(true);
     expect(canMakeTicket(msg({ text: " " }))).toBe(false);
@@ -394,11 +361,6 @@ describe("an answer in order", () => {
     expect(indexOfByte("é€x", 2)).toBe(1);
     expect(indexOfByte("é€x", 5)).toBe(2);
     expect(indexOfByte("😀x", 4)).toBe(2);
-  });
-  it("puts steps between the text and joins neighbours", () => {
-    const parts = segments("before after", [step("Bash", true, 7), step("Read", true, 7), step("TodoWrite", true, 0)]);
-    expect(parts.map((p) => p.kind)).toEqual(["text", "steps", "text"]);
-    expect(parts[1]).toMatchObject({ steps: [{ tool: "Bash" }, { tool: "Read" }] });
   });
 });
 

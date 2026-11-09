@@ -578,7 +578,7 @@ function openProjectWindow(id: string, name: string): void {
       ...(place ? place.bounds : { width: 1180, height: 780 }),
       minWidth: MIN_WIDTH,
       minHeight: MIN_HEIGHT,
-      title: `${name} — Aurelius`,
+      title: `${name} · Aurelius`,
     },
     `/projects/${encodeURIComponent(id)}`,
   );
