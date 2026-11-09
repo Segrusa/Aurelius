@@ -5762,8 +5762,8 @@ final class EmployeeQueueItem {
 }
 
 /// What a new run of one employee uses, as the run itself would resolve it.
-final class EmployeeRunView {
-  const EmployeeRunView({
+final class EmployeeRunLine {
+  const EmployeeRunLine({
     this.chatEffort,
     this.chatModel,
     this.connection,
@@ -5803,7 +5803,7 @@ final class EmployeeRunView {
   /// A chosen effort the model cannot use, so runs leave it out.
   final String? unsupportedEffort;
 
-  factory EmployeeRunView.fromJson(Map<String, dynamic> json) => EmployeeRunView(
+  factory EmployeeRunLine.fromJson(Map<String, dynamic> json) => EmployeeRunLine(
     chatEffort: (json['chat_effort'] == null ? null : (json['chat_effort'] as String)),
     chatModel: (json['chat_model'] == null ? null : (json['chat_model'] as String)),
     connection: (json['connection'] == null ? null : (json['connection'] as String)),
@@ -5854,14 +5854,14 @@ final class EmployeeRunsView {
   final String? companyModelDefaultEffort;
   /// The levels the company's default model can use.
   final List<String> companySupportedEfforts;
-  final List<EmployeeRunView> employees;
+  final List<EmployeeRunLine> employees;
 
   factory EmployeeRunsView.fromJson(Map<String, dynamic> json) => EmployeeRunsView(
     company: RunSettings.fromJson(json['company'] as Map<String, dynamic>),
     companyModel: (json['company_model'] == null ? null : (json['company_model'] as String)),
     companyModelDefaultEffort: (json['company_model_default_effort'] == null ? null : (json['company_model_default_effort'] as String)),
     companySupportedEfforts: (json['company_supported_efforts'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    employees: (json['employees'] as List<dynamic>).map((x0) => EmployeeRunView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    employees: (json['employees'] as List<dynamic>).map((x0) => EmployeeRunLine.fromJson(x0 as Map<String, dynamic>)).toList(),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{

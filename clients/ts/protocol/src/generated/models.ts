@@ -1563,7 +1563,7 @@ export interface EmployeeQueueItem {
 /**
  * What a new run of one employee uses, as the run itself would resolve it.
  */
-export interface EmployeeRunView {
+export interface EmployeeRunLine {
   /**
    * The effort chosen in the employee's chat; it goes before the rest in its chats.
    */
@@ -1618,7 +1618,7 @@ export interface EmployeeRunsView {
    * The levels the company's default model can use.
    */
   company_supported_efforts: string[];
-  employees: EmployeeRunView[];
+  employees: EmployeeRunLine[];
 }
 
 export interface EmployeeSummary {
