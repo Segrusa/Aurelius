@@ -180,3 +180,25 @@ fn a_deleted_message_serves_no_upload_and_no_file() {
     store.write(|tx| conversations::mark_message_deleted(tx, msg(PLAIN), "gone", 600)).unwrap();
     assert_eq!(served(&store), (None, false), "after the delete nothing is served");
 }
+
+#[test]
+fn an_answer_without_a_persona_is_signed_by_the_employee_of_its_run() {
+    let (_dir, store) = channel();
+    let employee = aurelius_domain::EmployeeId::new();
+    store
+        .write(move |tx| {
+            crate::employees::insert_employee(tx, employee, "Trace", "Code Review Engineer", None, None, None, &serde_json::json!({}), ConversationId::new())?;
+            tx.execute(
+                "INSERT INTO runs(id, employee_id, conversation_id, attempt, runtime_kind, model_id, resolved_config_json, status) VALUES (?1, ?2, ?3, 1, 'claude', 'm', '{}', 'succeeded')",
+                rusqlite::params!["01a1c02d-f736-75cc-ad91-d37a13b6739e", employee.to_string(), CHANNEL],
+            )?;
+            tx.execute("UPDATE messages SET role = 'assistant', run_id = '01a1c02d-f736-75cc-ad91-d37a13b6739e' WHERE id = ?1", [FEEDBACK])?;
+            Ok(())
+        })
+        .unwrap();
+    let messages = store.read(|c| conversations::list_messages(c, conv(CHANNEL), &text)).unwrap();
+    let answer = messages.iter().find(|m| m.id == msg(FEEDBACK)).unwrap();
+    assert_eq!(answer.author.as_deref(), Some("Trace"));
+    let plain = messages.iter().find(|m| m.id == msg(PLAIN)).unwrap();
+    assert_eq!(plain.author, None, "a board member's message has no employee author");
+}

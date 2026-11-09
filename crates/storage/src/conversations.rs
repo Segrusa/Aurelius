@@ -498,7 +498,7 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
     let mut stmt = conn.prepare(&format!(
         "SELECT m.id, m.ordinal, m.role, m.status, b.storage_key, m.created_at_ms,
                 COALESCE(m.run_id, CASE WHEN json_extract(m.meta_json, '$.kind') = 'group' THEN json_extract(m.meta_json, '$.run_id') END), m.reply_to_id,
-                c.display_name, r.model_id, json_extract(r.resolved_config_json, '$.persona_name'),
+                c.display_name, r.model_id, COALESCE(json_extract(r.resolved_config_json, '$.persona_name'), (SELECT e.name FROM employees e WHERE e.id = r.employee_id)),
                 json_extract(m.meta_json, '$.kind'), json_extract(m.meta_json, '$.from'), json_extract(m.meta_json, '$.approval_id'), json_extract(m.meta_json, '$.files'), json_extract(m.meta_json, '$.uploads'),
                 json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system'), {parent}, {edits}
          FROM messages m LEFT JOIN blobs b ON b.id = m.content_blob_id
