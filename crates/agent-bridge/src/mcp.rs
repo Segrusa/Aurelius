@@ -825,7 +825,7 @@ mod tests {
 
     #[test]
     fn the_project_assistant_cannot_hand_a_task_over() {
-        let names = |project| tool_definitions(project, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |project| tool_definitions(project, false, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(false).contains(&"hand_over_task".to_owned()));
         assert!(!names(true).contains(&"hand_over_task".to_owned()));
         assert!(names(false).contains(&"hand_off".to_owned()));
@@ -838,13 +838,13 @@ mod tests {
     #[test]
     fn employees_are_offered_no_tool_that_makes_ideas() {
         for project in [false, true] {
-            assert!(!tool_definitions(project, false, false, false).iter().any(|t| t["name"] == "add_idea"));
+            assert!(!tool_definitions(project, false, false, false, false).iter().any(|t| t["name"] == "add_idea"));
         }
     }
 
     #[test]
     fn a_tool_the_employee_has_off_is_not_offered() {
-        let mut tools = tool_definitions(false, false, false, false);
+        let mut tools = tool_definitions(false, false, false, false, false);
         switch_off(&mut tools, &["create_ticket".to_owned()]);
         let names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(!names.contains(&"create_ticket") && names.contains(&"move_ticket") && names.contains(&"approve"));
@@ -853,7 +853,7 @@ mod tests {
     /// SEC0 E10/E12: the employee's tool, not the project assistant's or the dispatcher's, and no links to choose.
     #[test]
     fn tell_responsible_is_an_employees_tool_not_the_project_assistants() {
-        let names = |project| tool_definitions(project, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |project| tool_definitions(project, false, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(false).contains(&"tell_responsible".to_owned()));
         assert!(!names(true).contains(&"tell_responsible".to_owned()));
         for tool in ["schedule_message", "scratchpad"] {
@@ -864,7 +864,7 @@ mod tests {
 
     #[test]
     fn propose_guideline_is_an_employees_tool_without_links() {
-        let find = |project| tool_definitions(project, false, false, false).into_iter().find(|t| t["name"] == "propose_guideline");
+        let find = |project| tool_definitions(project, false, false, false, false).into_iter().find(|t| t["name"] == "propose_guideline");
         let tool = find(false).expect("an employee proposes guidelines");
         assert!(find(true).is_none(), "the project assistant has no block of its own");
         assert!(!triage_tool_definitions().iter().any(|t| t["name"] == "propose_guideline"), "the dispatcher does not propose");
@@ -882,16 +882,16 @@ mod tests {
     #[test]
     fn the_guideline_reading_tools_are_an_employees_and_say_no_rule_and_no_rights() {
         for name in ["list_guidelines", "read_guideline"] {
-            let find = |project| tool_definitions(project, false, false, false).into_iter().find(|t| t["name"] == name);
+            let find = |project| tool_definitions(project, false, false, false, false).into_iter().find(|t| t["name"] == name);
             let tool = find(false).unwrap_or_else(|| panic!("an employee has {name}"));
             assert!(find(true).is_none(), "the project assistant has no {name}");
             assert!(!triage_tool_definitions().iter().any(|t| t["name"] == name), "the dispatcher has no {name}");
             let says = tool["description"].as_str().unwrap();
             assert!(says.contains("not a rule for this run") && says.contains("guidelines never give rights"), "{name}: {says}");
         }
-        let read = tool_definitions(false, false, false, false).into_iter().find(|t| t["name"] == "read_guideline").unwrap();
+        let read = tool_definitions(false, false, false, false, false).into_iter().find(|t| t["name"] == "read_guideline").unwrap();
         assert_eq!(read["inputSchema"]["required"], json!(["guideline"]));
-        let list = tool_definitions(false, false, false, false).into_iter().find(|t| t["name"] == "list_guidelines").unwrap();
+        let list = tool_definitions(false, false, false, false, false).into_iter().find(|t| t["name"] == "list_guidelines").unwrap();
         assert!(list["inputSchema"]["properties"].as_object().unwrap().is_empty());
     }
 
@@ -899,19 +899,19 @@ mod tests {
     fn the_dispatcher_has_only_assign_ticket_and_recall() {
         let names: Vec<String> = triage_tool_definitions().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
         assert_eq!(names, ["assign_ticket", "recall"]);
-        assert!(!tool_definitions(false, false, true, false).iter().any(|t| t["name"] == "assign_ticket"), "no other run can assign a ticket");
+        assert!(!tool_definitions(false, false, true, false, false).iter().any(|t| t["name"] == "assign_ticket"), "no other run can assign a ticket");
     }
 
     #[test]
     fn set_mode_is_offered_only_when_the_daemon_asks_for_it() {
-        let names = |set_mode| tool_definitions(false, set_mode, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |set_mode| tool_definitions(false, set_mode, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(!names(false).contains(&"set_mode".to_owned()));
         assert!(names(true).contains(&"set_mode".to_owned()));
     }
 
     #[test]
     fn the_discussion_tools_are_offered_only_under_a_ticket() {
-        let names = |discussion| tool_definitions(false, false, discussion, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        let names = |discussion| tool_definitions(false, false, discussion, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         for tool in ["read_discussion", "post_to_discussion"] {
             assert!(!names(false).contains(&tool.to_owned()), "{tool}");
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
@@ -972,7 +972,7 @@ mod tests {
     #[test]
     fn there_is_no_tool_for_a_board_members_decisions() {
         let forbidden = ["accept_ticket", "approve_plan", "revise_plan", "send_back_ticket", "cancel_ticket", "archive_ticket", "delete_ticket", "set_responsible", "start_ticket", "assign_ticket", "approve_ticket", "send_back"];
-        let offered: Vec<String> = tool_definitions(false, true, true, true).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+        let offered: Vec<String> = tool_definitions(false, true, true, true, true).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
         for tool in forbidden {
             assert!(!offered.contains(&tool.to_owned()), "{tool} is offered");
             assert!(board_op(tool, &json!({ "ticket": "#1", "column": "done" })).is_none(), "{tool} maps to an op");
