@@ -63,6 +63,7 @@ import { Held } from "./dialogs";
 import { ChannelOdometer } from "./run-card";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
+import { ThreadWaiting } from "./scheduled";
 import { ColumnGlyph } from "./tickets-kit";
 
 const enter = stylex.keyframes({
@@ -1123,6 +1124,7 @@ function Channel({
             </Link>
           ) : null}
         </header>
+        <ThreadWaiting conversationId={openId} />
         {contextOf ? <ContextDialog run={contextOf} onClose={() => setContextOf(null)} /> : null}
         <ChatProvider value={ctx}>
           <FeedIdsProvider value={{ conversationId: openId ?? null }}>

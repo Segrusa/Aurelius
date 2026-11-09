@@ -39,7 +39,8 @@ export type Area =
   | "ideas"
   | "usage"
   | "memory"
-  | "vault";
+  | "vault"
+  | "scheduled";
 
 /** The areas an event may have changed. An event of a newer server changes nothing here. */
 export function areasOf(kind: EventKind | string): Area[] {
@@ -57,7 +58,7 @@ export function areasOf(kind: EventKind | string): Area[] {
       return ["projects"];
     case "task":
     case "run":
-      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas", "usage"];
+      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas", "usage", "scheduled"];
     case "conversation":
     case "message":
     case "chat":
@@ -82,7 +83,9 @@ export function areasOf(kind: EventKind | string): Area[] {
       return ["vault"];
     case "recurring_task":
     case "schedule":
-      return ["settings"];
+      return ["settings", "scheduled"];
+    case "heartbeat":
+      return ["employees", "scheduled"];
     default:
       return [];
   }

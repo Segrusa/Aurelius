@@ -37,6 +37,7 @@ import { employeeState, pinKey, usePins } from "./employees";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, shortDay } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { useFolderChooser } from "./run-tools";
+import { ScratchpadSection } from "./scratchpad";
 import { modelName, useSetting } from "./settings-kit";
 import { taskStateLine } from "./tasks-logic";
 
@@ -403,6 +404,7 @@ export function EmployeePage({ id }: { id: string }) {
                   <p {...stylex.props(styles.instructions)}>{e.instructions}</p>
                 </section>
               ) : null}
+              <ScratchpadSection employeeId={e.id} />
               {mine.length === 0 ? (
                 <div {...stylex.props(styles.noTasks)}>
                   <p {...stylex.props(styles.noTasksTitle)}>{e.name} has no tasks yet.</p>

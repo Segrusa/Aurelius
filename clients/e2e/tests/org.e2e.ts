@@ -3,6 +3,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { _electron, expect, type Page, test } from "@playwright/test";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
 import { message, messages, scriptServer } from "./fake-server";
@@ -173,6 +174,27 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByLabel("The vault key, shown once")).toBeVisible();
     await page.getByRole("button", { name: "Done" }).click();
     await expect(page.getByLabel("The vault key, shown once")).toBeHidden();
+    // The Scheduled page over the real daemon: what an employee planned (no real run here,
+    // so a row in the store), then taken back through the real write.
+    const store = new DatabaseSync(join(daemon.data, "data", "aurelius.sqlite"));
+    store
+      .prepare(
+        `INSERT INTO scheduled_messages(id, from_employee_id, to_employee_id, content, thread_key, place, planned_by_run, due_at_ms, created_at_ms)
+         SELECT '00000000-0000-7000-8000-00000000e701', id, id, 'Check the deploy again.', 'chat:x', 'its own chat', 'r1', ?, ? FROM employees LIMIT 1`,
+      )
+      .run(Date.now() + 3_600_000, Date.now());
+    store.close();
+    await go(page, "Scheduled");
+    const waiting = page.getByRole("region", { name: "Scheduled messages" });
+    await expect(waiting.getByText("Check the deploy again.")).toBeVisible();
+    await waiting.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Take back" }).click();
+    await expect(page.getByRole("region", { name: "What came of them" }).getByText("Taken back")).toBeVisible();
+    await expect(waiting.getByText("No messages are scheduled.")).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Recurring tasks" }).getByText("No recurring tasks yet."),
+    ).toBeVisible();
+    await expect(page.getByRole("region", { name: "Heartbeats" })).toHaveCount(0);
   } finally {
     await app.close().catch(() => undefined);
     await daemon.stop();
@@ -534,6 +556,107 @@ test.describe("scripted organisation", () => {
       text: "Call it Vega",
     });
     expect(writes.filter((w) => w.method === "group_chat.send")).toHaveLength(0);
+    await stop();
+  });
+
+  test("the Scheduled page lists what comes back and a chat shows who waits for it", async ({ page }) => {
+    const planned = {
+      from_employee: "e1",
+      from_name: "Orion",
+      to_employee: "e1",
+      to_name: "Orion",
+      created_at_ms: 1,
+      due_at_ms: Date.now() + 3_600_000,
+      place: "the discussion of ticket #21",
+      ticket_id: "t1",
+    };
+    const { writes, stop } = await scripted(
+      page,
+      {
+        features: ["scheduled_messages"],
+        reads: {
+          "scheduled_message.list": () => ({
+            type: "scheduled_messages",
+            value: {
+              as_of_seq: 1,
+              messages: [
+                { ...planned, id: "s1", text: "Check the CI of PR 12.", state: "scheduled" },
+                {
+                  ...planned,
+                  id: "s2",
+                  text: "Look at the deploy.",
+                  to_employee: "e2",
+                  to_name: "Pixel",
+                  state: "not_delivered",
+                  outcome: "Pixel is paused.",
+                },
+              ],
+            },
+          }),
+          "recurring_task.list": () => ({
+            type: "task_schedules",
+            value: {
+              as_of_seq: 1,
+              schedules: [
+                {
+                  id: "r1",
+                  title: "Weekly report",
+                  goal: "Report",
+                  criteria: [],
+                  employee_id: "e1",
+                  employee_name: "Orion",
+                  recurrence: { kind: "daily", at_minute: 540 },
+                  paused: false,
+                  run: {},
+                  attachments: [],
+                  created_at_ms: 1,
+                },
+              ],
+            },
+          }),
+        },
+      },
+      "/scheduled",
+    );
+    await expect(page.getByRole("heading", { name: "Scheduled" })).toBeVisible();
+    const waiting = page.getByRole("region", { name: "Scheduled messages" });
+    await expect(waiting.getByRole("row", { name: /Check the CI of PR 12/ })).toContainText("Orion");
+    await expect(waiting.getByRole("link", { name: "the discussion of ticket #21" })).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "What came of them" }).getByText("Not delivered: Pixel is paused."),
+    ).toBeVisible();
+    await expect(page.getByRole("region", { name: "Recurring tasks" }).getByText("Daily at 09:00")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Heartbeats" })).toHaveCount(0);
+
+    await waiting.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Take back" }).click();
+    await expect.poll(() => writes.filter((w) => w.method === "scheduled_message.cancel").length).toBe(1);
+    expect(writes.find((w) => w.method === "scheduled_message.cancel")?.params).toMatchObject({ message_id: "s1" });
+    await stop();
+  });
+
+  test("under a chat's title stands who waits to pick it up and what is scheduled", async ({ page }) => {
+    const { stop } = await scripted(
+      page,
+      {
+        features: ["scheduled_messages", "employee_chats"],
+        conversations: { c1: messages("c1", [message("m1", "assistant", "Noted.")]) },
+        reads: {
+          "thread.waiting": () => ({
+            type: "thread_waiting",
+            value: {
+              as_of_seq: 1,
+              waiters: [{ employee_id: "e1", employee_name: "Orion", behind: 2 }],
+              scheduled: [],
+            },
+          }),
+        },
+      },
+      "/talk/c1",
+    );
+    await expect(page.getByLabel("Who waits for this thread")).toHaveText(
+      "Orion — waiting to pick up this thread (behind 2 items)",
+    );
     await stop();
   });
 });

@@ -52,6 +52,18 @@
 - **Threads (R6):** een ticket of channel krijgt per employee een eigen, verborgen conversation met een eigen `--resume`-sessie. Modus, browser, scherm en runinstellingen komen bij elke wek uit de hoofdchat. Berichten in de hoofdchat zelf blijven `chat:<conversation>`.
 - **Quota en login:** per board member. Een run die op de limiet van de een wacht houdt de thread niet vast voor het werk op de login van de ander.
 
+## Stap 7 (gebouwd): geplande berichten, scratchpad, wachtrij en Scheduled-pagina
+
+- **`schedule_message` (R7).** De bridge-tool `schedule_message(delay, content, to?)` schrijft een rij in de nieuwe tabel `scheduled_messages`, niet in `employee_inbox`: we willen ook na bezorging weten wat ervan kwam. De dispatcher bezorgt elke ronde wat aan de beurt is (`deliver_scheduled_messages`) met het gewone wekpad, dus via de mailbox.
+- **Login (aanname 5).** De rij bewaart de login van de plannende run, ook als die leeg is. Bij bezorging gaat die login mee als `login_user`; er is geen terugval op een andere login.
+- **Grenzen.** Vertraging van 1 minuut tot 30 dagen in de vorm `90s`, `10m`, `2h`, `1d`, `1h30m`; 4000 tekens; 5 per run; 20 openstaand per employee. Elke bezorging telt een hop, dus een employee die zichzelf steeds opnieuw plant, stopt op de hopgrens.
+- **Waar het mag.** In een ticket of kanaal aan zichzelf of een collega. In het eigen gesprek met een board member alleen aan zichzelf; een run zonder thread buiten dat gesprek wordt geweigerd.
+- **Niet bezorgd.** Een gesloten thread of een gepauzeerde collega geeft de uitkomst `not_delivered` met een reden en een `limit`-regel; het bericht verdwijnt niet stil.
+- **Scratchpad (C7).** Tabel `employee_scratchpads`, maximaal 4000 tekens, in het veranderlijke deel van de prompt. Een hervatte sessie krijgt de nieuwe tekst via `SessionContext.changes`, dus geen nieuwe platformversie.
+- **Waiting indicator (U3).** `thread.waiting` telt per employee de andere threads die eerder aan de beurt zijn, plus één als er al een run loopt, en geeft de geplande berichten van die thread mee. "De thread telt als actief" is dus alleen zichtbaar als die regel; hij parkeert niets.
+- **Scheduled-pagina (U7).** Eén scherm met geplande berichten, uitkomsten, recurring tasks en heartbeats. De sectie Heartbeats volgt `HIDDEN_FEATURES`. Geplande berichten uit een privégesprek zijn alleen zichtbaar voor dat board member.
+- **Geen nieuwe `EventKind`.** Die enum heeft geen catch-all; de bestaande `recurring_task.changed` met `aggregate_type` `scheduled_message` is genoeg voor `areasOf`.
+
 ## Stap 13 (gebouwd): gesprekken met employees
 
 - **Tabellen:** migratie `0037_employee_chats.sql`: `conversations.board_member_id` (uniek per employee en board member) en `chat_tickets` met `review_arrivals` en `reviews_told`. Opslag in `crates/storage/src/employee_chats.rs`, de logica in `crates/application/src/conversation/employee_chat.rs`.

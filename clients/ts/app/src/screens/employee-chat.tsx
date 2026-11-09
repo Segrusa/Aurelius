@@ -20,6 +20,7 @@ import { useLiveAll, useLiveStore } from "./chat-live";
 import { before, localDay, quickReplies, streamTo } from "./chat-logic";
 import { type ChatContext, ChatProvider, DayLine, FeedIdsProvider, LiveRow, MessageRow } from "./chat-message";
 import { approvalsFor } from "./run-card-logic";
+import { ThreadWaiting } from "./scheduled";
 
 const styles = stylex.create({
   screen: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column" },
@@ -203,6 +204,7 @@ export function EmployeeChatScreen({ conversationId }: { conversationId: string 
           {live.length > 0 ? `${name} answering` : employee ? (employee.title ?? employee.role) : ""}
         </span>
       </header>
+      <ThreadWaiting conversationId={conversationId} />
       <ChatProvider value={ctx}>
         <FeedIdsProvider value={{ conversationId }}>
           <div {...stylex.props(styles.feedBox)}>

@@ -31,6 +31,7 @@ import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { MyTicketsScreen } from "./screens/my-tickets";
 import { ProjectPage, ProjectsScreen } from "./screens/projects";
+import { ScheduledScreen } from "./screens/scheduled";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
 import { TasksScreen } from "./screens/tasks";
@@ -167,6 +168,7 @@ const project = createRoute({
 });
 
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
+const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
 const settingsIndex = createRoute({
   getParentRoute: () => root,
   path: "/settings",
@@ -205,6 +207,7 @@ const router = createRouter({
     settingsIndex,
     settings,
     usage,
+    scheduled,
     orgChart,
     employee,
     employees,

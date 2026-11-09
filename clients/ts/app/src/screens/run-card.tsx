@@ -15,6 +15,7 @@ import { useKeyed } from "../data";
 import { toast } from "../ui/toast";
 import { Loading, Problem } from "./org-kit";
 import { odometerEmpty, odometerItems, odometerLine, runLine, runState } from "./run-card-logic";
+import { ScratchpadButton } from "./scratchpad";
 import { stepLine } from "./tasks-logic";
 
 const styles = stylex.create({
@@ -71,6 +72,7 @@ function Transcript({ run, Output }: { run: string; Output: CallOutput }) {
 /** Folded: state, calls and tokens; opened: what the run did, call by call. */
 export function RunCard({ m, Output }: { m: MessageView; Output: CallOutput }) {
   const connection = useConnection();
+  const { features } = useLinkState();
   const [open, setOpen] = useState(false);
   const brief = m.run;
   const run = m.run_id;
@@ -101,6 +103,9 @@ export function RunCard({ m, Output }: { m: MessageView; Output: CallOutput }) {
           </div>
         ) : null}
       </Collapsible>
+      {brief.employee_id && features.includes("employee_scratchpad") ? (
+        <ScratchpadButton employeeId={brief.employee_id} />
+      ) : null}
       {state.running ? <Button size="sm" label="Cancel" onClick={() => void stop()} /> : null}
     </div>
   );

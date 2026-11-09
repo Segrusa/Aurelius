@@ -56,3 +56,7 @@
 | P-207 | Hoeveel gesprekken in de zijbalk | Vier, op volgorde van de laatste activiteit; favorieten of een volledige lijst bouwen we niet |
 | P-208 | Melding bij een bericht uit een ticket | Alleen ongelezen (stip in de zijbalk), geen notificatie: P-82 verandert niet |
 | P-209 | Interrupt-kaarten in een gesprek | Alleen voor een echte beslissing: de employee vraagt gewone dingen in zijn tekst. Dat staat in de richtlijn van de run; de server dwingt het niet af |
+| P-210 | Wie kan een gepland bericht terugnemen | Alleen een board member, op de Scheduled-pagina met een bevestiging. Een employee heeft geen tool om het terug te nemen: een lopende planning op de pagina is genoeg om in te grijpen |
+| P-211 | Mag de gebruiker de scratchpad bewerken | Nee, alleen lezen. Het is de eigen notitie van de employee; instructies horen in de instructies en het geheugen is een andere plek |
+| P-212 | Waar staat de wachtrij | Onder de titel van een ticket of gesprek, alleen als er iemand wacht of iets gepland staat. Geen lege regel, en geen aparte pagina |
+| P-213 | Een plek in de navigatie | Scheduled is één pagina voor alles wat later vanzelf komt; de instellingen van recurring tasks blijven waar ze waren |

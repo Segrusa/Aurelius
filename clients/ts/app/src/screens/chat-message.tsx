@@ -832,6 +832,8 @@ function UpdateCard({ m }: { m: MessageView }) {
         return ["MODE CHOSEN", false];
       case "ticket_note":
         return ["FROM A TICKET", false];
+      case "scheduled":
+        return ["SCHEDULED", false];
       default:
         return ["UPDATE", false];
     }

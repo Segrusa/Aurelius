@@ -69,6 +69,7 @@ import { RunCard, TicketOdometer } from "./run-card";
 import { approvalsFor, waitsOnReply } from "./run-card-logic";
 import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
+import { ThreadWaiting } from "./scheduled";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
 import {
   ColumnGlyph,
@@ -1434,6 +1435,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
               ) : null}
             </div>
             <TicketOdometer ticketId={t.id} />
+            <ThreadWaiting ticketId={t.id} />
           </div>
           <div {...stylex.props(styles.topGate)}>
             {t.column === "review" ? (
