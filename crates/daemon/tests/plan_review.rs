@@ -158,6 +158,32 @@ async fn a_tickets_plan_waits_for_the_board_and_is_revised_then_approved() {
     common::stop(dir.path(), daemon).await;
 }
 
+/// Ticket #47: `ExitPlanMode` without text (its plan file could not be saved)
+/// is no plan: Claude is told to write it out, and its answer becomes the plan.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_exit_plan_mode_is_refused_and_the_answer_becomes_the_plan() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = common::start_with_delay(dir.path(), 40).await;
+    let client = common::connect_as(dir.path(), "grace").await;
+    let (planner, atlas) = setup(&client).await;
+    let id = planned_ticket(&client, atlas, planner, Some(AgentMode::Plan)).await;
+    let doing = until(&client, id, ColumnKind::Doing, TaskStatus::Running).await;
+    let conversation = doing.root_task.as_ref().unwrap().conversation_id.expect("a conversation");
+    let run = live_run(dir.path(), conversation).await;
+    let bridge = BridgeClient::connect(dir.path()).await.unwrap();
+    let answer = tokio::time::timeout(Duration::from_secs(5), bridge.permission_ask(run, Some("plan-1".into()), "ExitPlanMode".into(), serde_json::json!({}))).await.expect("answered at once").unwrap();
+    assert!(!answer.allow);
+    assert!(answer.message.as_deref().unwrap().contains("complete plan as your reply"), "{:?}", answer.message);
+    let plans = |messages: &[aurelius_domain::views::MessageView]| messages.iter().filter(|m| m.update.as_deref() == Some("plan")).map(|m| m.text.clone()).collect::<Vec<_>>();
+    assert!(plans(&client.messages(conversation).await.unwrap().messages).is_empty(), "nothing to review yet");
+
+    until(&client, id, ColumnKind::PlanReview, TaskStatus::Waiting).await;
+    let messages = client.messages(conversation).await.unwrap().messages;
+    let answered = messages.iter().rev().find(|m| m.role == aurelius_domain::conversation::MessageRole::Assistant && m.update.is_none()).expect("the run answered").text.clone();
+    assert_eq!(plans(&messages), [answered.trim().to_owned()], "the answer is the plan, once");
+    common::stop(dir.path(), daemon).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn without_plan_mode_plan_review_is_skipped() {
     let dir = tempfile::tempdir().unwrap();
