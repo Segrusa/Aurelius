@@ -1382,6 +1382,38 @@ export interface DirListing {
 }
 
 /**
+ * `discussion.audience` (feature `everyone_mention`): whom a board member's
+ * `@Everyone` in one discussion would reach, so a client can say so before it
+ * sends. Never the asking board member: they are not told of their own message.
+ */
+export interface DiscussionAudience {
+  /**
+   * Board members `@Everyone` tells in the Inbox (and makes follow a ticket).
+   */
+  board_members: number;
+  /**
+   * Their usernames.
+   */
+  board_usernames: string[];
+  /**
+   * Their names, in the order of the company.
+   */
+  employee_names: string[];
+  /**
+   * Employees `@Everyone` wakes: active, in the discussion.
+   */
+  employees: number;
+  /**
+   * Employees in the discussion who are paused: they are not woken, the message says so.
+   */
+  paused: number;
+  /**
+   * Their names.
+   */
+  paused_names: string[];
+}
+
+/**
  * A board member changes the text of their own message in a channel or a
  * ticket's discussion (`message.edit`, feature `message_edits`). It wakes nobody.
  * The earlier text stays in the audit log: editing does not erase a secret.
@@ -3285,6 +3317,14 @@ export type Method =
    */
   | ({ method: "conversation.get"; params: { conversation_id: string } })
   /**
+   * Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
+   * answered with `DiscussionAudience`, for the reader's own message (the
+   * reader is never counted). `channel`: a channel or a ticket's discussion
+   * (its conversation id, as in `channel.list`); none: the general channel.
+   * Read-only; `@Everyone` itself is plain text in `group_chat.send` / `ticket.post`.
+   */
+  | ({ method: "discussion.audience"; params: { channel?: string | null } })
+  /**
    * An employee's persistent chat with the user (company scope, no project):
    * its messages and settings, as `conversation.get` answers them.
    */
@@ -4152,6 +4192,10 @@ export type ResponseBody =
   | ({ type: "connections"; value: ConnectionsSnapshot })
   | ({ type: "context"; value: ContextView })
   | ({ type: "dir_listing"; value: DirListing })
+  /**
+   * `discussion.audience`.
+   */
+  | ({ type: "discussion_audience"; value: DiscussionAudience })
   /**
    * `guideline.effective`.
    */

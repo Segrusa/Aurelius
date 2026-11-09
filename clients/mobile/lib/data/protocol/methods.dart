@@ -100,6 +100,12 @@ abstract final class Methods {
   static const String conversationSetBrowserAllowed = 'conversation.set_browser_allowed';
   static const String conversationSetRun = 'conversation.set_run';
   static const String conversationSetScreenAllowed = 'conversation.set_screen_allowed';
+  /// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
+  /// answered with `DiscussionAudience`, for the reader's own message (the
+  /// reader is never counted). `channel`: a channel or a ticket's discussion
+  /// (its conversation id, as in `channel.list`); none: the general channel.
+  /// Read-only; `@Everyone` itself is plain text in `group_chat.send` / `ticket.post`.
+  static const String discussionAudience = 'discussion.audience';
   /// An employee's persistent chat with the user (company scope, no project):
   /// its messages and settings, as `conversation.get` answers them.
   static const String employeeChat = 'employee.chat';
@@ -634,6 +640,18 @@ Map<String, dynamic> conversationGet({required String conversationId}) => <Strin
   'method': Methods.conversationGet,
   'params': <String, dynamic>{
     'conversation_id': conversationId,
+  },
+};
+
+/// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
+/// answered with `DiscussionAudience`, for the reader's own message (the
+/// reader is never counted). `channel`: a channel or a ticket's discussion
+/// (its conversation id, as in `channel.list`); none: the general channel.
+/// Read-only; `@Everyone` itself is plain text in `group_chat.send` / `ticket.post`.
+Map<String, dynamic> discussionAudience({String? channel}) => <String, dynamic>{
+  'method': Methods.discussionAudience,
+  'params': <String, dynamic>{
+    if (channel != null) 'channel': channel,
   },
 };
 

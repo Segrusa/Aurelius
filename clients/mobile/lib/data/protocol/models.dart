@@ -5396,6 +5396,51 @@ final class DirListing {
   };
 }
 
+/// `discussion.audience` (feature `everyone_mention`): whom a board member's
+/// `@Everyone` in one discussion would reach, so a client can say so before it
+/// sends. Never the asking board member: they are not told of their own message.
+final class DiscussionAudience {
+  const DiscussionAudience({
+    required this.boardMembers,
+    required this.boardUsernames,
+    required this.employeeNames,
+    required this.employees,
+    required this.paused,
+    required this.pausedNames,
+  });
+
+  /// Board members `@Everyone` tells in the Inbox (and makes follow a ticket).
+  final int boardMembers;
+  /// Their usernames.
+  final List<String> boardUsernames;
+  /// Their names, in the order of the company.
+  final List<String> employeeNames;
+  /// Employees `@Everyone` wakes: active, in the discussion.
+  final int employees;
+  /// Employees in the discussion who are paused: they are not woken, the message says so.
+  final int paused;
+  /// Their names.
+  final List<String> pausedNames;
+
+  factory DiscussionAudience.fromJson(Map<String, dynamic> json) => DiscussionAudience(
+    boardMembers: (json['board_members'] as num).toInt(),
+    boardUsernames: (json['board_usernames'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    employeeNames: (json['employee_names'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    employees: (json['employees'] as num).toInt(),
+    paused: (json['paused'] as num).toInt(),
+    pausedNames: (json['paused_names'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'board_members': boardMembers,
+    'board_usernames': boardUsernames,
+    'employee_names': employeeNames,
+    'employees': employees,
+    'paused': paused,
+    'paused_names': pausedNames,
+  };
+}
+
 /// A board member changes the text of their own message in a channel or a
 /// ticket's discussion (`message.edit`, feature `message_edits`). It wakes nobody.
 /// The earlier text stays in the audit log: editing does not erase a secret.
@@ -9935,6 +9980,13 @@ sealed class Method {
           conversationId: (src['conversation_id'] as String),
         );
         }
+      case 'discussion.audience':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodDiscussionAudience(
+          channel: (src['channel'] == null ? null : (src['channel'] as String)),
+        );
+        }
       case 'employee.chat':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -10583,6 +10635,27 @@ final class MethodConversationGet extends Method {
       'method': 'conversation.get',
       'params': <String, dynamic>{
       'conversation_id': conversationId,
+    },
+    };
+}
+
+/// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
+/// answered with `DiscussionAudience`, for the reader's own message (the
+/// reader is never counted). `channel`: a channel or a ticket's discussion
+/// (its conversation id, as in `channel.list`); none: the general channel.
+/// Read-only; `@Everyone` itself is plain text in `group_chat.send` / `ticket.post`.
+final class MethodDiscussionAudience extends Method {
+  const MethodDiscussionAudience({
+    this.channel,
+  });
+
+  final String? channel;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'discussion.audience',
+      'params': <String, dynamic>{
+      if (channel != null) 'channel': channel,
     },
     };
 }
@@ -13049,6 +13122,8 @@ sealed class ResponseBody {
         return ResponseBodyContext(value: ContextView.fromJson(json['value'] as Map<String, dynamic>));
       case 'dir_listing':
         return ResponseBodyDirListing(value: DirListing.fromJson(json['value'] as Map<String, dynamic>));
+      case 'discussion_audience':
+        return ResponseBodyDiscussionAudience(value: DiscussionAudience.fromJson(json['value'] as Map<String, dynamic>));
       case 'effective_guidelines':
         return ResponseBodyEffectiveGuidelines(value: EffectiveGuidelines.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_chats':
@@ -13417,6 +13492,21 @@ final class ResponseBodyDirListing extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'dir_listing',
+      'value': value.toJson(),
+    };
+}
+
+/// `discussion.audience`.
+final class ResponseBodyDiscussionAudience extends ResponseBody {
+  const ResponseBodyDiscussionAudience({
+    required this.value,
+  });
+
+  final DiscussionAudience value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'discussion_audience',
       'value': value.toJson(),
     };
 }
