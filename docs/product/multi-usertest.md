@@ -2,11 +2,11 @@
 
 *Titan · 2026-11-09 · basis: main @ 1a19f67 (fase 1 t/m 4 + tickets 40-43 gemerged), `docs/tailscale.md`, `docs/mobile.md`, `target/aur-mu-03/eindrapport.md`, `target/aur-mu-04/eindrapport.md`, `spike-claude-logins.md`*
 
-Niets hieronder is uitgevoerd door agents: de gereedheid komt uit de code, de docs en de eerdere QA-rapporten. De test zelf doet de Owner met de testers.
+De gereedheid (§1) komt uit de code, de docs en de eerdere QA-rapporten. Op verzoek van de Owner zijn de scenario's daarna uitgevoerd op een aparte dev-instantie, zie §5. De test met echte mensen doet de Owner met de testers.
 
 ## Go / no-go
 
-**GO, onder voorwaarden.** Een tweede board member kan vandaag worden toegevoegd. Er is geen blokkerende bug bekend. Voor de test moeten wel vier dingen geregeld zijn (zie §2, de rijen "vóór de test"): Tailscale-ACL en uitnodiging, een eigen Claude-abonnement voor de tester, je akkoord op de licentiekwestie, en je akkoord op het restrisico "alle runs als dezelfde OS-user" (testers zijn vertrouwde mensen, geen vreemden).
+**GO, onder voorwaarden.** Een tweede board member kan vandaag worden toegevoegd. Er is geen blokkerende bug bekend, en de scenario's slagen op serverniveau (§5). Voor de test moeten wel vier dingen geregeld zijn (zie §2, de rijen "vóór de test"): Tailscale-ACL en uitnodiging, een eigen Claude-abonnement voor de tester, je akkoord op de licentiekwestie, en je akkoord op het restrisico "alle runs als dezelfde OS-user" (testers zijn vertrouwde mensen, geen vreemden).
 
 ## 1. Gereedheid: tweede board member toevoegen
 
@@ -55,12 +55,12 @@ Voorbereiding: een testproject "Multi-test", drie accounts (jij = Alex, tester 1
 |---|---|---|---|
 | S1 | Login en eigen Claude-login | Robin logt in, koppelt Claude (Connect), maakt een ticket, start het. | De run draait op Robins login (Settings toont zijn e-mail en plan), niet op die van Alex. Zonder koppeling: ticket krijgt `needs: login`. |
 | S2 | Team chat (algemeen kanaal en projectkanaal) | Alex en Robin posten tegelijk, ook vanaf mobiel; Sam leest mee. | Berichten verschijnen live bij iedereen, juiste auteur, geen dubbele of verloren berichten, volgorde logisch. |
-| S3 | Ticketdiscussie en @mentions | Alex post in een ticket, noemt `@Robin` en `@Forge`. Robin antwoordt zonder mention. | Mention geeft Robin een melding; `@Forge` wekt de employee; een bericht zonder mention in Review/Doing bereikt de eigenaar (ticket #14/#42). |
-| S4 | @Everyone | Alex post `@Everyone` in een kanaal en een ticketdiscussie. | De publiekslijn ("audience") staat vóór het versturen; alle board members krijgen een melding; geen employees worden massaal gewekt (RULE 08-vangnet: max 2 wekkende posts per run). |
+| S3 | Ticketdiscussie en @mentions | Alex post in een ticket, noemt `@Robin` en `@Forge`. Robin antwoordt zonder mention. | Mention geeft Robin een melding; `@Forge` wekt de employee; een bericht zonder mention in Review/Doing bereikt de eigenaar (ticket #14/#42). In Plan review wekt het niemand: het wacht in de taak van de eigenaar tot de volgende run. |
+| S4 | @Everyone | Alex post `@Everyone` in een kanaal en een ticketdiscussie. | De publiekslijn ("audience") staat vóór het versturen. In een kanaal krijgen alle andere board members een melding; in een ticket alleen volgers, leden en de Responsible. Wie al een ongelezen melding op dat ticket heeft, houdt één rij (die wordt samengevoegd). De employees in de thread worden gewekt; een `@Everyone` van een employee wekt niemand. |
 | S5 | Approvals: wie mag beslissen | Een run vraagt een approval (bv. een commando of plan). Alex en Robin zien het allebei. Beide proberen te beslissen, gelijktijdig. Aanmaker versus niet-aanmaker. | Eén beslissing telt; de tweede krijgt een duidelijke melding ("al beslist"), geen dubbele uitvoering. Noteer of een niet-aanmaker mag beslissen en of dat zo bedoeld is (alle board members hebben één rol). |
 | S6 | Quota en login per user | Robin laat veel runs lopen tot zijn limiet (of simuleer via een kleine run). Alex werkt door. | Alleen Robins runs wachten ("Waiting for Robin's limit until …"); Alex loopt door; na reset hervat Robin. Geen fallback naar Alex' login. "Run on my login" is een bewuste keuze van de lezer (Inbox van de aanmaker) en mag alleen zijn eigen login gebruiken. |
 | S7 | Leasen en notificaties | Twee tickets tegelijk gestart door Alex en Robin; kijk naar Inbox en meldingen op desktop en mobiel van beiden; sluit de app van Robin en kijk of de melding later komt (iPhone: push). | Elke board member krijgt alleen de meldingen voor zijn eigen tickets en mentions; jobs worden maar door één run geleased; geen dubbele runs op dezelfde job. |
-| S8 | Gelijktijdig werk aan hetzelfde ticket | Alex en Robin bewerken tegelijk titel/beschrijving, slepen het ticket naar een andere kolom, voegen bestanden toe en posten in de discussie. Terwijl een run bezig is. | Geen verloren wijziging zonder melding; de tweede schrijver krijgt een conflict of ziet de update live; een ticket blijft in Doing zolang een handoff/run open is (#42); Done alleen door een board member. |
+| S8 | Gelijktijdig werk aan hetzelfde ticket | Alex en Robin bewerken tegelijk titel/beschrijving, slepen het ticket naar een andere kolom, voegen bestanden toe en posten in de discussie. Terwijl een run bezig is. | Tegelijk bewerken van hetzelfde veld: de laatste schrijver wint, zonder conflictmelding, en de ander ziet de update live. Slepen naar Backlog annuleert het lopende werk; een ticket blijft in Doing zolang een handoff/run open is (#42); Done alleen door een board member. |
 | S9 | Intrekken en wachtwoord | Alex trekt Robins sessie of apparaat in; reset Robins wachtwoord. | De client van Robin valt uit binnen seconden, krijgt geen events meer; na reset moet het wachtwoord gewijzigd worden. |
 | S10 | Vault (kort) | Alex zet een item in het testproject; Robin leest de naam, toont de waarde (audit). | Waarde komt nooit in chat, discussie of prompt; de audit toont wie wat toonde. |
 
@@ -75,6 +75,36 @@ Voorbereiding: een testproject "Multi-test", drie accounts (jij = Alex, tester 1
 - **Fixrondes:** alleen echte bugs starten een fixronde (ik verdeel het werk), met alleen de tests van de geraakte crates. Ideeën en minors worden gebundeld na de test.
 - **Blokkadelogboek:** (leeg bij de start) per blokkerende fout: ticket, scenario, voorstel.
 - **Na de test:** één samenvatting door mij met aantal bevindingen per ernst en een advies voor Team-seats, sandbox-isolatie en vervolg.
+
+## 5. Uitvoering op een dev-instantie (2026-11-09)
+
+Testopzet: debug-build van main 1a19f67, `test-daemon.sh` met eigen datamap in `/tmp`, geen Tailscale, een nep-`claude`, drie gelijktijdige board members via het protocol over IPC. De live daemon en data zijn niet aangeraakt. Bewijs staat in `target/ticket-44/`.
+
+**Niet gedekt:** de desktop- en mobiele schermen, de remote gateway met pairing, push-meldingen, een echt tweede Claude-account (R3), en de deny-regels met een echte `claude` (R1). De nep-`claude` voert geen tools uit. Die punten blijven voor de test met mensen.
+
+| # | Uitkomst | Wat is waargenomen |
+|---|---|---|
+| S1 | PASS | Robins run draait op Robins loginmap, Sam zonder login krijgt `needs: login` en er start niets. Loginmappen 0700. |
+| S2 | PASS | 2×30 berichten tegelijk: 60 van 60, geen dubbele, dezelfde volgorde bij alle drie, juiste auteur, live events bij iedereen. Herhaalde idempotency-key wordt `replayed`. |
+| S3 | PASS | `@robin` geeft Robin een melding en Sam niet, `@Forge` wekt Forge. Zonder mention tijdens een run: vervolgrun van de eigenaar. |
+| S4 | PASS | Publiek klopt per plek, verzender telt niet mee. Kanaal: robin en sam elk +1. |
+| S5 | PASS | 6 races alex-goedkeuren tegen robin-weigeren: telkens precies één geslaagd, de run kreeg de beslissing van de winnaar, de ander "already handled". Een verkeerde digest geeft geen toestemming. Elke board member mag beslissen, ook zonder band met het ticket. |
+| S6 | PASS | Robin op limiet: alleen Robin wacht, Alex loopt door op de eigen login, Robin hervat op de eigen login, geen fallback. Hervatten gebeurt op een afgeronde minuut. |
+| S7 | PASS | 12 tickets tegelijk door 2 users: 12 unieke nummers, elk exact 1 run, geen dubbele jobs, meldingen alleen bij de aanmaker (6/6, Sam 0). Replay na herverbinden werkt. |
+| S8 | PASS, met opmerking | 3 schrijvers tegelijk: geen fouten, verschillende velden blijven behouden, op hetzelfde veld wint de laatste zonder conflict (M1). Done zonder Accept en Accept buiten Review geweigerd. Plan goedkeuren door 3 tegelijk: één geslaagd, één run. |
+| S9 | PASS | Intrekken verbreekt de verbinding meteen. Reset beëindigt de sessies, daarna is alles geblokkeerd tot het wachtwoord gewijzigd is. Oud wachtwoord werkt niet meer. |
+| S10 | PASS | Waarde niet in lijst, wel via reveal met audit (wie, wat). Waarde in chat wordt eerst tegengehouden; na bevestigen opgeslagen als `«secret:QA_TOKEN»`. De waarde staat in geen enkel bestand in de datamap. |
+
+Daemonlog: 0 errors of panics. 49 runs, geen vastgelopen job.
+
+**Blokkerende fouten: geen gevonden.**
+
+| # | Ernst | Bevinding | Voorstel |
+|---|---|---|---|
+| M1 | Minor | `ticket.update` kent geen versiecheck: bij gelijktijdig bewerken van hetzelfde veld gaat de eerste wijziging zonder melding verloren (de ander ziet wel de nieuwe waarde live). | Na de test: optionele `expected_version` en een conflictmelding. Geen fix vooraf. |
+| M2 | Minor | `ticket.use_my_login` zonder eigen Claude-login antwoordt succes, maar het ticket blijft op `needs: login`. | Weigeren met een duidelijke fout. Geen fix vooraf; alleen zichtbaar als de knop aan iemand zonder login wordt getoond. |
+| O1 | Let op | Elke board member kan het wachtwoord van een ander resetten, ook dat van de Owner, en zet die daarmee uit (bewezen: robin → alex; zie ook R6). Slepen naar Backlog annuleert andermans lopende werk. | Past bij één rol, maar spreek het af met de testers. |
+| O2 | Let op | De server start niet alles tegelijk (`load:max_runs`, `load:cpu`). | Testers kunnen wachttijd zien; niet als bug melden. |
 
 ## Wat de Owner nu moet beslissen of doen
 
