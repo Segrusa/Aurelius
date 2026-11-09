@@ -58,3 +58,23 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | 13 | Gesprekken met employees (B8) | gebouwd |
 
 **Risico's:** de mailbox raakt elk wekpad, en de login- en quota-regels zijn de plek waar dat stil mis kan gaan. Parallelle runs vergroten het risico op "ordinary, individual usage" uit de spike. Eén lange branch over client, server en protocol zonder tussentijdse merge.
+
+## Verwijderde functies
+
+*2026-11-09 · besluit van Sébastien.* Om de app zo eenvoudig mogelijk te maken zijn deze functies verwijderd. De reden is telkens dezelfde: nul rijen in de productiedatabase en geen scherm in de React-client.
+
+| Wat | Wat er weg is |
+|---|---|
+| Oude GPUI-desktopclient | `clients/desktop` en `third_party/gpui-base`; Electron (`clients/electron` met `clients/ts/app`) vervangt hem. De iconen staan nu in `clients/electron/assets`. Seed-richtlijn `g3-desktop-gpui-kit` zit niet meer in de startset; bestaande installaties houden hun rij. |
+| Notities, Shares | `note.*`, `share.*`. `task.discuss` draaide op Shares en is daarmee ook weg, net als de knop "Discuss in Chat" op mobiel. |
+| Taakvarianten | `task.variants`, `task.choose_variant`, `variants.*`, `probe_worktree` en de varianten-afhandeling in mailbox en dispatcher. |
+| Taakafhankelijkheden | `depends_on` bij taken. Wachtreden `dependency` blijft bestaan voor delegaties. |
+| Oude artifacts | `artifact.*`; staat los van Claude Design. Het taakrapport via `write_artifact_file` blijft. |
+| Plugins | `plugin.*`, `employee_plugins`, `project_plugins`. |
+| Heartbeats | De periodieke wekker per employee. Voor wat regelmatig terugkomt zijn er terugkerende taken en geplande berichten. |
+| App keys, API keys, agent functions | Sleutels voor externe apps en functies met hun aanroepen. Omdat `aurelius-mcp` alleen met een app key werkt, zijn ook die crate, de Docker-image, `/v1/mcp`, `/v1/functions`, `/v1/calls` en het management channel (`ask_management`) weg. API keys van een connection (de sleutel voor een provider) blijven. |
+| Webhooks | `webhook_outbox` en de levering van `task.*`-events. |
+| Terminal | `terminal.*`. |
+| Git-weergave | `git.get_diff` en `git.get_status`, met de git-chip in de mobiele chat. |
+
+Er is geen tabel gedropt en geen migratie aangepast: de ongebruikte lege tabellen en kolommen (zoals `created_by_app_key_id`) blijven staan, en `PROTOCOL_MAJOR` blijft 5. Oude events van verwijderde soorten worden bij het lezen overgeslagen.

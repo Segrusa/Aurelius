@@ -47,8 +47,8 @@ which names a run may get, and the risks that remain.
 ## What a run gets
 
 - Only a **work run** (Claude Code with its tools: chats, tasks, a ticket's
-  main task and its delegations). Trials of a task's variants, text-only
-  runs, triage and summaries get nothing.
+  main task and its delegations). Text-only runs, triage and summaries get
+  nothing.
 - The items of the company and of the run's project; a project item with the
   name or key of a company item replaces it there. A project's items never
   reach another project's runs.
@@ -93,9 +93,9 @@ These are accepted (Sentinel SEC0/SEC1); know them before you store a value.
   transcript in the board member's Claude login folder. What the run printed
   there (a value included) is Claude Code's, not Aurelius': Aurelius cannot
   redact it.
-- **R2, plugins and MCP servers inherit the environment.** A plugin or MCP
-  server the run starts gets the run's environment, vault variables included.
-  Add only plugins and MCP servers you trust.
+- **R2, MCP servers inherit the environment.** An MCP server the run starts
+  gets the run's environment, vault variables included. Add only MCP servers
+  you trust.
 - **R3, the key on the same disk.** On Linux (and Windows test instances) the
   key file is on the same disk as the database; a run's Bash runs as the same
   user and could read both (Aurelius' file tools are denied `secrets/`, and
