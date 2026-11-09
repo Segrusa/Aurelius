@@ -26,6 +26,41 @@ enum AccessLevel {
   String toJson() => wire;
 }
 
+/// One run that really runs now (feature `activity_overview`).
+final class ActivityBusy {
+  const ActivityBusy({
+    this.employeeId,
+    required this.employeeName,
+    this.employeePaused,
+    required this.sinceMs,
+    required this.work,
+  });
+
+  /// None: the project assistant, which is no employee.
+  final String? employeeId;
+  final String employeeName;
+  /// It was paused during this run: the run finishes, nothing new starts.
+  final bool? employeePaused;
+  final int sinceMs;
+  final ActivityWork work;
+
+  factory ActivityBusy.fromJson(Map<String, dynamic> json) => ActivityBusy(
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+    employeeName: (json['employee_name'] as String),
+    employeePaused: (json['employee_paused'] == null ? null : (json['employee_paused'] as bool)),
+    sinceMs: (json['since_ms'] as num).toInt(),
+    work: ActivityWork.fromJson(json['work'] as Map<String, dynamic>),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (employeeId != null) 'employee_id': employeeId,
+    'employee_name': employeeName,
+    if (employeePaused != null) 'employee_paused': employeePaused,
+    'since_ms': sinceMs,
+    'work': work.toJson(),
+  };
+}
+
 /// One delivery, queue step or run step (R8; feature `activity_log`).
 final class ActivityLogEntry {
   const ActivityLogEntry({
@@ -112,6 +147,37 @@ final class ActivityLogPage {
   };
 }
 
+/// `activity.overview` (feature `activity_overview`): who is busy, what waits and
+/// on what, and the state of each ticket with work going or held up. A ticket
+/// that is not listed has nothing going on.
+final class ActivityOverview {
+  const ActivityOverview({
+    required this.asOfSeq,
+    required this.busy,
+    required this.tickets,
+    required this.waiting,
+  });
+
+  final int asOfSeq;
+  final List<ActivityBusy> busy;
+  final List<TicketActivity> tickets;
+  final List<ActivityWaiting> waiting;
+
+  factory ActivityOverview.fromJson(Map<String, dynamic> json) => ActivityOverview(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    busy: (json['busy'] as List<dynamic>).map((x0) => ActivityBusy.fromJson(x0 as Map<String, dynamic>)).toList(),
+    tickets: (json['tickets'] as List<dynamic>).map((x0) => TicketActivity.fromJson(x0 as Map<String, dynamic>)).toList(),
+    waiting: (json['waiting'] as List<dynamic>).map((x0) => ActivityWaiting.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'busy': busy.map((x0) => x0.toJson()).toList(),
+    'tickets': tickets.map((x0) => x0.toJson()).toList(),
+    'waiting': waiting.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 /// What an employee is doing now (U6): the dot in the list. Derived, never stored; a
 /// paused employee is in `status`.
 enum ActivityState {
@@ -188,6 +254,83 @@ final class ActivityView {
     if (outputBytes != null) 'output_bytes': outputBytes,
     'tool': tool,
     if (truncated != null) 'truncated': truncated,
+  };
+}
+
+/// One piece of work in line (feature `activity_overview`): one per employee and
+/// thread, since what waits in one thread becomes one run.
+final class ActivityWaiting {
+  const ActivityWaiting({
+    this.employeeId,
+    required this.employeeName,
+    required this.sinceMs,
+    required this.waitsFor,
+    required this.work,
+  });
+
+  final String? employeeId;
+  final String employeeName;
+  final int sinceMs;
+  /// slot (its employee is busy), machine (a free slot on this machine), paused,
+  /// question, approval, limit, login, later or handoff. Text, not an enum.
+  final String waitsFor;
+  final ActivityWork work;
+
+  factory ActivityWaiting.fromJson(Map<String, dynamic> json) => ActivityWaiting(
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+    employeeName: (json['employee_name'] as String),
+    sinceMs: (json['since_ms'] as num).toInt(),
+    waitsFor: (json['waits_for'] as String),
+    work: ActivityWork.fromJson(json['work'] as Map<String, dynamic>),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (employeeId != null) 'employee_id': employeeId,
+    'employee_name': employeeName,
+    'since_ms': sinceMs,
+    'waits_for': waitsFor,
+    'work': work.toJson(),
+  };
+}
+
+/// What an employee works on or waits with (feature `activity_overview`). With
+/// `private` set it is another board member's chat: every other field is empty,
+/// so neither its title nor where it is leaves the server.
+final class ActivityWork {
+  const ActivityWork({
+    this.channelId,
+    this.chatId,
+    this.label = '',
+    this.private,
+    this.taskId,
+    this.ticketId,
+  });
+
+  final String? channelId;
+  /// A chat of the reader's own with an employee.
+  final String? chatId;
+  /// "#21 Fix login", a task's title, a channel's name; empty when `private`.
+  final String label;
+  final bool? private;
+  final String? taskId;
+  final String? ticketId;
+
+  factory ActivityWork.fromJson(Map<String, dynamic> json) => ActivityWork(
+    channelId: (json['channel_id'] == null ? null : (json['channel_id'] as String)),
+    chatId: (json['chat_id'] == null ? null : (json['chat_id'] as String)),
+    label: (json['label'] == null ? '' : (json['label'] as String)),
+    private: (json['private'] == null ? null : (json['private'] as bool)),
+    taskId: (json['task_id'] == null ? null : (json['task_id'] as String)),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (channelId != null) 'channel_id': channelId,
+    if (chatId != null) 'chat_id': chatId,
+    'label': label,
+    if (private != null) 'private': private,
+    if (taskId != null) 'task_id': taskId,
+    if (ticketId != null) 'ticket_id': ticketId,
   };
 }
 
@@ -5729,7 +5872,7 @@ final class EmployeeQueueItem {
   /// claimed (a run works on it), queued or held.
   final String state;
   final String threadKey;
-  /// What holds it back besides its turn: question, limit, later, machine or handoff.
+  /// What holds it back besides its turn: paused, question, limit, later, machine or handoff.
   final String? waitsFor;
 
   factory EmployeeQueueItem.fromJson(Map<String, dynamic> json) => EmployeeQueueItem(
@@ -9920,6 +10063,8 @@ sealed class Method {
           messageId: (src['message_id'] as String),
         );
         }
+      case 'activity.overview':
+        return const MethodActivityOverview();
       case 'activity_log.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -10421,6 +10566,17 @@ final class MethodActivityGet extends Method {
       'call_id': callId,
       'message_id': messageId,
     },
+    };
+}
+
+/// Who is busy and what waits, on what (feature `activity_overview`). Another
+/// board member's private chat is only counted, with its employee.
+final class MethodActivityOverview extends Method {
+  const MethodActivityOverview();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'activity.overview',
     };
 }
 
@@ -13098,6 +13254,8 @@ sealed class ResponseBody {
         return ResponseBodyActivity(value: ActivityView.fromJson(json['value'] as Map<String, dynamic>));
       case 'activity_log':
         return ResponseBodyActivityLog(value: ActivityLogPage.fromJson(json['value'] as Map<String, dynamic>));
+      case 'activity_overview':
+        return ResponseBodyActivityOverview(value: ActivityOverview.fromJson(json['value'] as Map<String, dynamic>));
       case 'all_ideas':
         return ResponseBodyAllIdeas(value: AllIdeasSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'approvals':
@@ -13324,6 +13482,21 @@ final class ResponseBodyActivityLog extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'activity_log',
+      'value': value.toJson(),
+    };
+}
+
+/// `activity.overview`.
+final class ResponseBodyActivityOverview extends ResponseBody {
+  const ResponseBodyActivityOverview({
+    required this.value,
+  });
+
+  final ActivityOverview value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'activity_overview',
       'value': value.toJson(),
     };
 }
@@ -17109,6 +17282,46 @@ final class ThreadWaitingSnapshot {
     'as_of_seq': asOfSeq,
     'scheduled': scheduled.map((x0) => x0.toJson()).toList(),
     'waiters': waiters.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// Where one ticket stands right now (feature `activity_overview`).
+final class TicketActivity {
+  const TicketActivity({
+    this.employeeId,
+    this.employeeName,
+    required this.sinceMs,
+    required this.state,
+    required this.ticketId,
+    this.waitsFor,
+  });
+
+  final String? employeeId;
+  final String? employeeName;
+  final int sinceMs;
+  /// running, waiting_slot, paused or waiting_other. Text, not an enum.
+  final String state;
+  final String ticketId;
+  /// With waiting_other: board_member, colleague, approval, question, limit,
+  /// login, later or handoff. Also slot or machine with waiting_slot.
+  final String? waitsFor;
+
+  factory TicketActivity.fromJson(Map<String, dynamic> json) => TicketActivity(
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+    employeeName: (json['employee_name'] == null ? null : (json['employee_name'] as String)),
+    sinceMs: (json['since_ms'] as num).toInt(),
+    state: (json['state'] as String),
+    ticketId: (json['ticket_id'] as String),
+    waitsFor: (json['waits_for'] == null ? null : (json['waits_for'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (employeeId != null) 'employee_id': employeeId,
+    if (employeeName != null) 'employee_name': employeeName,
+    'since_ms': sinceMs,
+    'state': state,
+    'ticket_id': ticketId,
+    if (waitsFor != null) 'waits_for': waitsFor,
   };
 }
 
