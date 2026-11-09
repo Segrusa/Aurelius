@@ -18,7 +18,7 @@
 # The build is signed ad hoc (no Apple Developer ID yet). After an update macOS
 # may ask once whether Aurelius may use its Keychain items: choose "Always Allow".
 #
-# Needs: Xcode (gpui compiles Metal shaders), rustup (rust-toolchain.toml picks
+# Needs: Xcode, rustup (rust-toolchain.toml picks
 # the toolchain). One-time: chmod +x scripts/*.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."

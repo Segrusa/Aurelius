@@ -1,5 +1,5 @@
 // Every action has a keyboard shortcut. This table is the single source of truth: it registers the
-// bindings and feeds the command palette. Port of clients/desktop/src/keymap.rs, in its notation:
+// bindings and feeds the command palette. Its notation:
 // `secondary` is Cmd on macOS and Ctrl elsewhere. An action does nothing until a screen handles it.
 
 import type { Feature } from "../hidden";

@@ -722,7 +722,7 @@ pub struct StarterGuideline {
     pub employees: &'static [&'static str],
 }
 
-const STARTER: [StarterGuideline; 8] = [
+const STARTER: [StarterGuideline; 7] = [
     StarterGuideline {
         key: "g1",
         title: "Rust style",
@@ -736,13 +736,6 @@ const STARTER: [StarterGuideline; 8] = [
         text: include_str!("../seed/guidelines/g2-flutter-dart.md"),
         level: GuidelineLevel::Employee,
         employees: &["Bridge", "Flux"],
-    },
-    StarterGuideline {
-        key: "g3",
-        title: "Desktop app (gpui-kit)",
-        text: include_str!("../seed/guidelines/g3-desktop-gpui-kit.md"),
-        level: GuidelineLevel::Employee,
-        employees: &["Flux", "Bridge"],
     },
     StarterGuideline {
         key: "g4",

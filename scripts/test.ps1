@@ -2,7 +2,7 @@
 # released separately; each release runs only its own part plus the shared
 # crates (the contract between them).
 #   scripts/test.ps1 -Part server     the shared crates + everything of the background server
-#   scripts/test.ps1 -Part desktop    the shared crates + the desktop app
+#   scripts/test.ps1 -Part desktop    the shared crates + the Electron app's TypeScript
 #   scripts/test.ps1 -Part shared     only the shared crates (protocol, client, domain, platform)
 #   scripts/test.ps1                  everything (-Part all)
 # -List prints the packages without running anything.
@@ -18,14 +18,12 @@ $shared = @("aurelius-domain", "aurelius-protocol", "aurelius-host", "aurelius-c
 $server = @(
     "aurelius-storage", "aurelius-application", "aurelius-runtime", "aurelius-tools", "aurelius-daemon", "aurelius-remote-gateway", "aurelius-agent-bridge", "xtask"
 )
-# clients\desktop still builds until it is removed; the app's own tests run at the end of this script.
-$desktop = @("aurelius-desktop")
 
 $packages = switch ($Part) {
     "server" { $shared + $server }
-    "desktop" { $shared + $desktop }
+    "desktop" { $shared }
     "shared" { $shared }
-    default { $shared + $server + $desktop }
+    default { $shared + $server }
 }
 if ($List) { $packages; return }
 

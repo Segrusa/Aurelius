@@ -1,4 +1,4 @@
-// The Tasks page's filter and tree, pure. Port of clients/desktop/src/screens/tasks.rs.
+// The Tasks page's filter and tree, pure.
 
 import type { TaskStatus, TaskView } from "@aurelius/protocol";
 import { isWaiting } from "./inbox-logic";

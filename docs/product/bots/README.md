@@ -11,7 +11,7 @@
 
 **Vraag:** employees worden echte, aparte bots zoals in OpenBot: een eigen mailbox, een worker die één run tegelijk doet, eigen instellingen en geheugen, een eigen `@Naam`.
 **Scope:** de twaalf stappen van §8 van de feature set, elk server, protocol en React-client in Astryx.
-**Buiten scope:** nieuwe schermen in `clients/mobile` en de oude GPUI-client `clients/desktop` (die blijft wel compileren). Wat we bewust niet overnemen staat in §7 van de feature set.
+**Buiten scope:** nieuwe schermen in `clients/mobile`. De oude GPUI-client is inmiddels verwijderd, zie [Verwijderde functies](#verwijderde-functies). Wat we bewust niet overnemen staat in §7 van de feature set.
 **Protocol:** additief binnen 5, zie [freeze.md](freeze.md).
 
 ## Beslissingen

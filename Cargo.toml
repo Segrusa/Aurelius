@@ -14,10 +14,7 @@ members = [
     "crates/mcp",
     "crates/agent-bridge",
     "xtask",
-    "clients/desktop",
 ]
-# Vendored crates are patched dependencies, not workspace members.
-exclude = ["third_party"]
 
 [workspace.package]
 version = "0.9.1"
@@ -71,7 +68,3 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 opt-level = 1
 debug = false
-
-# gpui-base 0.7.0 plus a link hover hook; see third_party/gpui-base/PATCHED.md.
-[patch.crates-io]
-gpui-base = { path = "third_party/gpui-base" }

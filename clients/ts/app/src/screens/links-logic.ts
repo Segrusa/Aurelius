@@ -1,5 +1,5 @@
 // `aurelius://<host_id>/ticket/<ticket_id>` and `aurelius://<host_id>/message/<message_id>`: they
-// hold no secret, and only say where something is (clients/desktop/src/screens/links.rs).
+// hold no secret, and only say where something is.
 
 export interface AppLink {
   host: string;

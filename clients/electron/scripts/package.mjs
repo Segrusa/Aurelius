@@ -33,7 +33,7 @@ try {
     join(staging, "package.json"),
     JSON.stringify({ name: "aurelius", productName: "Aurelius", version, type: "module", main: "out/main/index.js" }),
   );
-  const assets = join(repo, "clients/desktop/assets");
+  const assets = join(repo, "clients/electron/assets");
   const [made] = await packager({
     dir: staging,
     out: join(staging, "made"),

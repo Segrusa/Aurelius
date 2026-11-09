@@ -10,7 +10,7 @@
 4. **Nooit** een nieuwe waarde in een enum zonder `#[serde(other)]`: de Flutter-app gooit dan het hele antwoord weg.
 5. Geen nieuwe enum-waarde in een snapshot, geen nieuwe `SystemLineKind` of `MessageRole`; een nieuwe `EventKind` alleen achter `accepts`/`hides_kind`. Runresultaten blijven `SystemLineKind::Reported`.
 6. Na elke wijziging `cargo xtask gen-ts` én `gen-dart` draaien en committen; de drift-test moet slagen.
-7. `clients/desktop` moet blijven compileren.
+7. ~~`clients/desktop` moet blijven compileren.~~ Vervallen: de GPUI-client is verwijderd (9 nov).
 
 ## Vastgelegd
 

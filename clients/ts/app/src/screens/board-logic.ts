@@ -1,4 +1,4 @@
-// The Board's rules, pure. Port of clients/desktop/src/screens/board.rs (ui-ontwerp §3, §5, §6): a
+// The Board's rules, pure. (ui-ontwerp §3, §5, §6): a
 // drag, "Move to…" and the buttons follow one table. The server decides again; this keeps the client honest.
 
 import type {

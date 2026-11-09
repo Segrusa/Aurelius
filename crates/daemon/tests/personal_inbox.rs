@@ -664,7 +664,7 @@ struct OldNotification {
     task_id: Option<aurelius_domain::TaskId>,
 }
 
-/// The tab of an older desktop client (`note_kind`, `clients/desktop/src/app.rs`).
+/// The tab of an older desktop client (`note_kind`).
 fn old_tab(n: &OldNotification) -> &'static str {
     match (n.severity, n.target_type.as_str()) {
         (OldSeverity::Action, _) => "needs_you",

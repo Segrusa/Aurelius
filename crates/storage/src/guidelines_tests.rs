@@ -556,7 +556,7 @@ fn a_run_keeps_the_versions_it_got_in_block_order() {
 // ---------------------------------------------------------------- the seed and the starter set
 
 /// The sizes of docs/product/guidelines/seed.md (characters, with line ends).
-const SEED_SIZES: [(&str, u32); 8] = [("g1", 1477), ("g2", 790), ("g3", 743), ("g4", 1188), ("g5", 849), ("g6", 977), ("p1", 1114), ("p2", 1344)];
+const SEED_SIZES: [(&str, u32); 7] = [("g1", 1477), ("g2", 790), ("g4", 1188), ("g5", 849), ("g6", 977), ("p1", 1114), ("p2", 1344)];
 const TEAM: [&str; 14] = ["Forge", "Flux", "Bridge", "Nexus", "Schema", "Sentinel", "Pulse", "Orbit", "Trace", "Titan", "Orion", "Nova", "Pixel", "Atlas"];
 
 #[test]
@@ -576,7 +576,7 @@ fn the_starter_set_is_seed_md_and_stays_within_the_limits() {
         .collect();
     assert!(per_run.iter().all(|(_, n)| *n <= MAX_RUN_CHARS));
     let largest = per_run.iter().max_by_key(|(_, n)| *n).unwrap();
-    assert_eq!(*largest, ("Bridge", 7_505), "GL-18 AC5");
+    assert_eq!(*largest, ("Sentinel", 6_949), "GL-18 AC5");
     assert_eq!(per_run.iter().find(|(n, _)| *n == "Orbit").unwrap().1, 3_646);
     assert_eq!(project, 2_458);
 }
@@ -689,7 +689,7 @@ fn add_starter_set_adds_unlinked_guidelines_and_skips_taken_titles() {
 
     let again = w.store.write(move |tx| guidelines::add_starter_set(tx, &["g1", "g2"], alex, 61)).unwrap();
     assert_eq!((again.added.len(), again.skipped.as_slice()), (1, ["g1"].as_slice()));
-    rejected(w.store.write(move |tx| guidelines::add_starter_set(tx, &["g3", "g9"], alex, 62)), guidelines::UNKNOWN_STARTER);
+    rejected(w.store.write(move |tx| guidelines::add_starter_set(tx, &["g4", "g9"], alex, 62)), guidelines::UNKNOWN_STARTER);
     assert_eq!(w.store.read(|c| guidelines::list(c, false)).unwrap().len(), 3, "an unknown key adds nothing");
 }
 

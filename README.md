@@ -14,10 +14,7 @@ Aurelius has a desktop app (Windows and macOS), a mobile app (iPhone and Android
 
 **From source:** you need Rust via [rustup](https://rustup.rs) (the pinned toolchain installs itself) and CMake. Windows also needs the Visual Studio 2022 Build Tools with the C++ workload, and macOS needs the Xcode command line tools.
 
-```bash
-cargo build --release -p aurelius-desktop -p aurelius-daemon -p aurelius-client
-./target/release/aurelius
-```
+On Linux and macOS, `scripts/install-linux.sh` and `scripts/install-mac.sh` build and install everything, and `scripts/install-production.ps1` does so on Windows. They also need Node.js (see `.node-version`).
 
 The app starts the server for you.
 

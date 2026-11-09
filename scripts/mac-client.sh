@@ -13,7 +13,7 @@
 # from the server (Settings → Remote access → N → Copy pairing text), Enter,
 # then "Allow as owner" on the server.
 #
-# Needs: Xcode (gpui compiles Metal shaders), rustup (rust-toolchain.toml picks
+# Needs: Xcode, rustup (rust-toolchain.toml picks
 # the toolchain), Tailscale signed in to the same tailnet as the server.
 # One-time: chmod +x scripts/mac-client.sh
 set -euo pipefail
