@@ -943,6 +943,7 @@ export type Command =
    * Unknown fields (such as the old `position`) are refused.
    */
   | ({ type: "move_ticket"; before_ticket_id?: string | null; column_id: string; ticket_id: string })
+  | ({ type: "open_employee_chat" } & OpenEmployeeChat)
   | ({ type: "pin_memory" } & PinMemory)
   /**
    * A board member writes in a ticket's discussion (feature `ticket_discussion`).
@@ -1082,6 +1083,7 @@ export type CommandResult =
   | ({ type: "connection_removed"; connection_id: string })
   | ({ type: "conversation_deleted"; conversation_id: string })
   | ({ type: "conversation_run_set"; conversation_id: string })
+  | ({ type: "employee_chat_opened"; conversation_id: string })
   | ({ type: "employee_created"; conversation_id: string; employee_id: string })
   | ({ type: "employee_folder_set"; employee_id: string; folder?: string | null })
   /**
@@ -1645,6 +1647,28 @@ export interface EffectiveGuidelines {
   limit_chars: number;
   project_id?: string | null;
   total_chars: number;
+}
+
+/**
+ * One of a board member's lasting chats with an employee (feature `employee_chats`).
+ */
+export interface EmployeeChatView {
+  conversation_id: string;
+  employee_id: string;
+  employee_name: string;
+  last_activity_ms: number;
+  /**
+   * What the employee wrote since the board member last read it.
+   */
+  unread: number;
+}
+
+/**
+ * `employee.chats`: the reader's chats that have something in them, the latest first.
+ */
+export interface EmployeeChatsSnapshot {
+  as_of_seq: number;
+  chats: EmployeeChatView[];
 }
 
 /**
@@ -3707,6 +3731,10 @@ export type Method =
    */
   | ({ method: "employee.chat"; params: { employee_id: string } })
   /**
+   * The reader's lasting chats with employees, the latest first (feature `employee_chats`).
+   */
+  | ({ method: "employee.chats" })
+  /**
    * The versions of an employee's instructions, newest first (feature `instruction_proposals`).
    */
   | ({ method: "employee.instruction_versions"; params: { employee_id: string } })
@@ -4175,6 +4203,14 @@ export interface NotificationView {
 export interface NotificationsSnapshot {
   notifications: NotificationView[];
   unread: number;
+}
+
+/**
+ * `employee.open_chat`: the acting board member's lasting chat with this employee,
+ * made the first time (feature `employee_chats`).
+ */
+export interface OpenEmployeeChat {
+  employee_id: string;
 }
 
 export type Outcome =
@@ -4754,6 +4790,7 @@ export type ResponseBody =
    * `guideline.effective`.
    */
   | ({ type: "effective_guidelines"; value: EffectiveGuidelines })
+  | ({ type: "employee_chats"; value: EmployeeChatsSnapshot })
   | ({ type: "employee_instruction_versions"; value: EmployeeInstructionVersionsSnapshot })
   | ({ type: "employee_plugins"; value: EmployeePlugins })
   | ({ type: "employees"; value: EmployeesSnapshot })

@@ -127,7 +127,7 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     tools.extend(memory_tool_definitions());
     tools.push(suggest_replies_definition());
     tools.extend(project_tool_definitions());
-    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off"))));
+    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off" | "tell_responsible"))));
     tools.extend(group_chat_tool_definitions());
     tools.extend(vault_tool_definitions());
     tools.extend(board_tool_definitions());
@@ -284,6 +284,7 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "vault_read" => EmployeeTaskOp::VaultRead { item: text("item"), project: optional("project") },
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
         "hand_off" if !project => EmployeeTaskOp::HandOff { to: text("to"), message: text("message") },
+        "tell_responsible" if !project => EmployeeTaskOp::TellResponsible { message: text("message") },
         "propose_colleague" => EmployeeTaskOp::ProposeColleague {
             name: text("name"),
             role: text("role"),
@@ -636,6 +637,15 @@ fn task_tool_definitions() -> Vec<Value> {
                 "required": ["to", "message"]
             }
         }),
+        json!({
+            "name": "tell_responsible",
+            "description": "On a ticket: send its responsible board member a short message in their private chat with you, when something is for them personally and not for the ticket's discussion. It shows there with a link to this ticket and marked unread. It starts no run, wakes nobody and completes nothing; a question that needs an answer on the ticket belongs in post_to_discussion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "message": { "type": "string", "description": "What they should read, on its own." } },
+                "required": ["message"]
+            }
+        }),
     ]
 }
 
@@ -780,6 +790,13 @@ mod tests {
     }
 
     /// SEC0 E10/E12: the employee's tool, not the project assistant's or the dispatcher's, and no links to choose.
+    #[test]
+    fn tell_responsible_is_an_employees_tool_not_the_project_assistants() {
+        let names = |project| tool_definitions(project, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        assert!(names(false).contains(&"tell_responsible".to_owned()));
+        assert!(!names(true).contains(&"tell_responsible".to_owned()));
+    }
+
     #[test]
     fn propose_guideline_is_an_employees_tool_without_links() {
         let find = |project| tool_definitions(project, false, false, false).into_iter().find(|t| t["name"] == "propose_guideline");

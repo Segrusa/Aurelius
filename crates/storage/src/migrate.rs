@@ -75,6 +75,7 @@ pub const MIGRATIONS: &[Migration] = &[
     plain(34, include_str!("../../../migrations/0034_employee_access_level.sql")),
     plain(35, include_str!("../../../migrations/0035_usage_model_calls.sql")),
     plain(36, include_str!("../../../migrations/0036_employee_inbox.sql")),
+    plain(37, include_str!("../../../migrations/0037_employee_chats.sql")),
 ];
 
 /// The last schema of protocol 2 (managers per project). The v0.6 import writes

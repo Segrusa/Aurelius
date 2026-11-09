@@ -381,6 +381,9 @@ pub mod feature {
     /// `discussion_id`, `run.get_activity`, `usage.get_totals` with `ticket_id`,
     /// `TokenUsage::model_calls`, `UsageSnapshot::by_user`.
     pub const RUN_CARDS: &str = "run_cards";
+    /// A board member's lasting chat with an employee: `employee.open_chat`, `employee.chats`
+    /// and `chat.send` to such a chat.
+    pub const EMPLOYEE_CHATS: &str = "employee_chats";
 }
 
 /// Every feature this build has.
@@ -426,6 +429,7 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_FROM_IDEA,
     feature::EMPLOYEE_ACCESS,
     feature::RUN_CARDS,
+    feature::EMPLOYEE_CHATS,
 ];
 
 /// Daemon → client.
@@ -524,6 +528,7 @@ pub enum ResponseBody {
     Tickets(aurelius_domain::ticket::TicketsSnapshot),
     Users(aurelius_domain::user::UsersSnapshot),
     Channels(aurelius_domain::views::ChannelsSnapshot),
+    EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot),
     /// `thread.read`.
     Thread(aurelius_domain::views::ThreadSnapshot),
     /// `ticket.followers`.

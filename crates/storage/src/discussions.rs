@@ -331,7 +331,7 @@ pub fn mark_read(tx: &Transaction<'_>, user: UserId, conversation: ConversationI
     tx.execute(
         "INSERT INTO discussion_reads(user_id, conversation_id, read_through, read_at_ms)
          SELECT ?1, c.id, COALESCE((SELECT MAX(ordinal) FROM messages WHERE conversation_id = c.id), 0), ?3
-         FROM conversations c WHERE c.id = ?2 AND c.kind IN ('group', 'ticket') AND EXISTS (SELECT 1 FROM users WHERE id = ?1)
+         FROM conversations c WHERE c.id = ?2 AND (c.kind IN ('group', 'ticket') OR c.board_member_id = ?1) AND EXISTS (SELECT 1 FROM users WHERE id = ?1)
          ON CONFLICT(user_id, conversation_id) DO UPDATE SET read_through = MAX(read_through, excluded.read_through), read_at_ms = excluded.read_at_ms",
         params![user.to_string(), conversation.to_string(), now_ms()],
     )?;

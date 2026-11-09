@@ -154,6 +154,13 @@ pub struct CreateEmployee {
     pub access_level: Option<AccessLevel>,
 }
 
+/// `employee.open_chat`: the acting board member's lasting chat with this employee,
+/// made the first time (feature `employee_chats`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OpenEmployeeChat {
+    pub employee_id: EmployeeId,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdateEmployee {
     pub employee_id: EmployeeId,

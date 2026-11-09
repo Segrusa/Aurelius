@@ -107,6 +107,7 @@ pub enum Command {
     SetFollowOrgChart(employee::SetFollowOrgChart),
     SetHeartbeat(employee::SetHeartbeat),
     SendEmployeeMessage(employee::SendEmployeeMessage),
+    OpenEmployeeChat(employee::OpenEmployeeChat),
     SendGroupMessage(group_chat::SendGroupMessage),
     DecideProposal(proposal::DecideProposal),
     RestoreEmployeeInstructions(proposal::RestoreEmployeeInstructions),
@@ -209,6 +210,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("set_follow_org_chart", "company.set_follow_org_chart"),
     ("set_heartbeat", "heartbeat.set"),
     ("send_employee_message", "employee.send_message"),
+    ("open_employee_chat", "employee.open_chat"),
     ("send_group_message", "group_chat.send"),
     ("decide_proposal", "proposal.decide"),
     (

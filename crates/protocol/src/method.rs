@@ -34,6 +34,9 @@ pub enum Method {
     /// its messages and settings, as `conversation.get` answers them.
     #[serde(rename = "employee.chat")]
     EmployeeChat { employee_id: EmployeeId },
+    /// The reader's lasting chats with employees, the latest first (feature `employee_chats`).
+    #[serde(rename = "employee.chats")]
+    EmployeeChats,
     /// The company's group chat (Team chat): the user and every employee. Its
     /// messages and settings, as `conversation.get` answers them; an employee's
     /// messages carry its name as `author`. Write with `group_chat.send`.

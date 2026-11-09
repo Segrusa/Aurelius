@@ -218,6 +218,10 @@ pub enum EmployeeTaskOp {
     /// Hand the work in the run's thread to a colleague (the bridge's `hand_off`): `to`
     /// a name, `message` self-contained. Waits while the sender has unread items (R5).
     HandOff { to: String, message: String },
+    /// Send the responsible board member of the run's ticket a message in their chat with
+    /// this employee (the bridge's `tell_responsible`), with a link to the ticket. Marked
+    /// unread there; it starts no run and completes nothing.
+    TellResponsible { message: String },
 }
 
 fn yes() -> bool {
@@ -314,6 +318,7 @@ mod tests {
             MoveTicket { .. } => "move_ticket",
             PostToTicket { .. } => "post_to_ticket",
             HandOff { .. } => "hand_off",
+            TellResponsible { .. } => "tell_responsible",
         }
     }
 

@@ -12,6 +12,7 @@ import { useConnection, useLinkState } from "../connection";
 import {
   useAllTasks,
   useChannels,
+  useEmployeeChats,
   useEmployees,
   useLiveQueries,
   useNotifications,
@@ -36,7 +37,7 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
-import { pinnedFirst } from "./employee-logic";
+import { pinnedFirst, recentChats } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
 import { useInbox } from "./inbox";
 import { needsYouCount, newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
@@ -181,6 +182,30 @@ function Live() {
                 <span {...stylex.props(styles.dot)} style={{ background: liveColor(t) }} />
               </span>
             }
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+/** The board member's latest chats with employees. */
+function RecentChats() {
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const chats = recentChats(useEmployeeChats().data ?? []);
+  if (chats.length === 0) return null;
+  return (
+    <div {...stylex.props(styles.group)}>
+      <SectionLabel>Chats</SectionLabel>
+      {chats.map((c) => {
+        const to = `/talk/${c.conversation_id}`;
+        return (
+          <NavRow
+            key={c.conversation_id}
+            to={to}
+            label={c.employee_name}
+            icon={markIcon(initial(c.employee_name), markColor(c.employee_id), 15, 4)}
+            end={<Counted dot={c.unread > 0 && path !== to} />}
           />
         );
       })}
@@ -484,6 +509,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
               ))}
             </div>
           ) : null}
+          <RecentChats />
           <Live />
         </>
       )}

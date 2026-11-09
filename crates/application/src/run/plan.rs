@@ -260,7 +260,7 @@ impl CommandService {
                         (m.ordinal, ended.unwrap_or(m.created_at_ms))
                     });
                 let mark = |m: &aurelius_domain::views::MessageView| -> &'static str {
-                    let from_outside = m.update.is_some() || m.role == MessageRole::User;
+                    let from_outside = (m.update.is_some() && m.update.as_deref() != Some(aurelius_domain::conversation::TICKET_NOTE_KIND)) || m.role == MessageRole::User;
                     if from_outside && m.ordinal <= cutoff && run_of(m).is_none() { trigger_mark(m.ordinal, m.created_at_ms, last_answer) } else { "" }
                 };
                 // Each message that goes in, with its turn: all of them for a new session,
@@ -291,6 +291,9 @@ impl CommandService {
                                 None => Turn { role: TurnRole::User, text: format!("{label}\n{text}"), images: Vec::new() },
                             }
                         }
+                        // A ticket from this chat reached Review; what the employee itself sent from a ticket.
+                        (Some(kind), _) if kind == aurelius_domain::conversation::TICKET_UPDATE_KIND => Turn { role: TurnRole::User, text: format!("[Ticket update from Aurelius]{}\n{text}", mark(m)), images: Vec::new() },
+                        (Some(kind), _) if kind == aurelius_domain::conversation::TICKET_NOTE_KIND => Turn { role: TurnRole::User, text: format!("[What you sent this board member from a ticket]\n{text}"), images: Vec::new() },
                         // Task updates (findings of subagents, colleagues) reach the employee as input.
                         (Some(kind), from) => Turn { role: TurnRole::User, text: format!("[Task {kind} · from {}]{}\n{text}", from.as_deref().unwrap_or("Aurelius"), mark(m)), images: Vec::new() },
                         (None, _) if m.role == MessageRole::User => {
@@ -507,7 +510,10 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                         let mut text = system.unwrap_or_default();
                         match project.and_then(|p| crate::queries_project_name(conn, p)) {
                             Some(name) => text.push_str(&format!("\n\nYou work in the project {name}.")),
-                            None => text.push_str(&format!("\n\n{CHAT_GUIDANCE}")),
+                            None => match aurelius_storage::employee_chats::of_conversation(conn, conversation_id)? {
+                                Some(chat) => text.push_str(&format!("\n\n{}", crate::conversation::employee_chat::guidance(&chat.username))),
+                                None => text.push_str(&format!("\n\n{CHAT_GUIDANCE}")),
+                            },
                         }
                         if let (None, Some((_, name))) = (project, &channel_project) {
                             text.push_str(&format!("\n\nThe message you answer now comes from the project {name}: answer in its context, with its memory"));

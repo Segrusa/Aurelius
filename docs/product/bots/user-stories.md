@@ -73,3 +73,8 @@
 | BOT-28 | C | 12 | Living Office (U8) |
 | BOT-29 | M | 5-11 | Notificaties alleen volgens P-82: niet voor run gestart of gestopt, delegaties of berichten zonder mention |
 | BOT-30 | M | 5-6 | Bewerken of verwijderen wekt niemand en telt geen hop |
+| BOT-32 | M | 13 | Eén blijvend gesprek per board member per employee (Chat op de Employees-lijst en de pagina van de employee); via de mailbox, op de login van dat board member; alleen dat board member leest en schrijft; oudere gesprekken blijven alleen-lezen |
+| BOT-33 | S | 13 | De zijbalk toont de laatste vier gesprekken van het board member, met een stip bij ongelezen |
+| BOT-34 | M | 13 | Is het werk concreet, dan maakt de employee gewone tickets en linkt ze in zijn antwoord. De server legt de koppeling vast. Een chat is nooit ouder van een ticket en wacht nooit op een ticket |
+| BOT-35 | M | 13 | Komt zo'n ticket in Review, dan schrijft dezelfde employee een kort bericht in dat gesprek, ongevraagd. Eén bericht per aankomst in Review; wat tegelijk wacht wordt één bericht; een gepauzeerde employee schrijft pas als hij terug is |
+| BOT-36 | M | 13 | Bridge-tool `tell_responsible(message)`: een bericht aan de Responsible van het ticket in zijn gesprek met deze employee, met een link naar het ticket en ongelezen gemarkeerd. Start geen run, rondt niets af, geeft geen notificatie (P-82) |

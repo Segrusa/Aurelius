@@ -16,6 +16,7 @@ import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useOpenChat } from "./employee-chat";
 import { EmployeeDialog } from "./employee-dialog";
 import {
   type AgentMode,
@@ -163,6 +164,7 @@ export function EmployeePage({ id }: { id: string }) {
   const folders = useFolderChooser();
   const { hostName, features } = useLinkState();
   const employees = useEmployees();
+  const openChat = useOpenChat();
   const connections = useSetting(
     "connections",
     async () => expectBody(await connection.call("connection.list"), "connections").value,
@@ -306,6 +308,9 @@ export function EmployeePage({ id }: { id: string }) {
             <Link to="/chat" {...stylex.props(styles.headLink)}>
               Talk in Team chat
             </Link>
+            {features.includes("employee_chats") && e.status === "active" ? (
+              <Button size="sm" label="Chat" onClick={() => openChat(e.id)} />
+            ) : null}
             <Button size="sm" label="Edit" onClick={() => setEditing(true)} />
             <Menu
               label={`More for ${e.name}`}

@@ -423,7 +423,7 @@ pub fn employee_conversations(conn: &Connection, employee: aurelius_domain::Empl
         "SELECT c.id, c.title, c.created_at_ms,
                 COALESCE((SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = c.id), c.created_at_ms),
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id)
-         FROM conversations c WHERE c.kind = 'employee' AND c.employee_id = ?1 AND c.archived_at_ms IS NULL AND c.quick_answer = 0 AND c.thread_key IS NULL
+         FROM conversations c WHERE c.kind = 'employee' AND c.employee_id = ?1 AND c.archived_at_ms IS NULL AND c.quick_answer = 0 AND c.thread_key IS NULL AND c.board_member_id IS NULL
          ORDER BY 4 DESC, c.created_at_ms DESC",
     )?;
     let rows = stmt.query_map([employee.to_string()], |r| {
@@ -451,7 +451,7 @@ pub fn is_main_employee_conversation(conn: &Connection, conversation: Conversati
 /// An older chat of an employee (converted from protocol 2): history, it takes no messages.
 pub fn is_older_employee_chat(conn: &Connection, conversation: ConversationId) -> Result<bool, StorageError> {
     Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM conversations c WHERE c.id = ?1 AND c.kind = 'employee'
+        "SELECT EXISTS(SELECT 1 FROM conversations c WHERE c.id = ?1 AND c.kind = 'employee' AND c.board_member_id IS NULL
            AND c.id <> (SELECT id FROM conversations WHERE employee_id = c.employee_id AND kind = 'employee' ORDER BY created_at_ms, id LIMIT 1))",
         [conversation.to_string()],
         |r| r.get(0),

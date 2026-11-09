@@ -228,6 +228,7 @@ impl CommandService {
             Command::RetryReply(cmd) => self.retry_reply(ctx, &envelope, hash, cmd),
             Command::StopRun(cmd) => self.stop_run(ctx, &envelope, hash, cmd),
             Command::CreateEmployee(cmd) => self.create_employee(ctx, &envelope, hash, cmd),
+            Command::OpenEmployeeChat(cmd) => self.open_employee_chat(ctx, &envelope, hash, cmd),
             Command::UpdateEmployee(cmd) => self.update_employee(ctx, &envelope, hash, cmd),
             Command::SetEmployeeStatus(cmd) => self.set_employee_status(ctx, &envelope, hash, cmd),
             Command::SetProjectStatus(cmd) => self.set_project_status(ctx, &envelope, hash, cmd),
@@ -717,6 +718,8 @@ mod discussion_tests;
 
 #[cfg(test)]
 mod login_tests;
+#[cfg(test)]
+mod employee_chat_tests;
 
 #[cfg(test)]
 mod guideline_tests;

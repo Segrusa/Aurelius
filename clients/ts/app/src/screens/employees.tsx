@@ -14,6 +14,7 @@ import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
+import { useOpenChat } from "./employee-chat";
 import { EmployeeDialog } from "./employee-dialog";
 import {
   canPin,
@@ -388,9 +389,10 @@ export function employeeState(e: EmployeeSummary): { label: string; color: strin
 }
 
 export function EmployeesScreen() {
-  const { hostName } = useLinkState();
+  const { hostName, features } = useLinkState();
   const navigate = useNavigate();
   const employees = useEmployees();
+  const openChat = useOpenChat();
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
@@ -489,6 +491,17 @@ export function EmployeesScreen() {
                           >
                             {pinned ? "★" : "☆"}
                           </button>
+                          {features.includes("employee_chats") && e.status === "active" ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              label="Chat"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                openChat(e.id);
+                              }}
+                            />
+                          ) : null}
                         </span>
                       </TableCell>
                       <TableCell>

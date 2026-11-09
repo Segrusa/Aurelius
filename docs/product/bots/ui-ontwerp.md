@@ -23,6 +23,13 @@
 - **Interrupt card (U2):** één component (`ApprovalCard` plus `ReplyCard`) in de discussie, de Team chat en de Inbox. Een vraag of approval staat in de discussie via `ApprovalView.ticket_id` / `discussion_id`. Een post met `awaiting_user` zonder open approval krijgt een antwoordveld; in een kanaal gaat dat via `group_chat.send`, in een ticket via `ticket.post`.
 - **Odometer (U4):** `MetadataList` in de ticketkop (Calls, Tokens in, Tokens out, Cost), één regel in de kop van een kanaal, en een tabel per board member op het Usage-scherm. Geen rij of odometer zolang er niets verbruikt is.
 
+## Stap 13: gesprekken met employees (gebouwd)
+
+- **Chat:** een knop op elke actieve rij van de Employees-lijst en in de kop van de pagina van de employee. Hij opent het gesprek van dit board member, dat de eerste keer wordt gemaakt (`/talk/<conversation>`).
+- **Zijbalk:** groep "Chats" boven Live, in de gewone zijbalkstijl, de laatste vier met de naam en het merkteken van de employee en een stip bij ongelezen. Een gesprek zonder berichten staat er niet in. In de ingeklapte zijbalk niet.
+- **Scherm:** dezelfde berichtrijen, approvalkaarten en het invoerveld als de Team chat, maar zonder threads, reacties en `@`-suggesties. Een gepauzeerde of gearchiveerde employee: geen invoerveld, wel een regel die het zegt.
+- **Berichten uit een ticket:** een regel met het label FROM A TICKET en de link. De aanleiding van een update uit Review is onzichtbaar; wat de board member leest is het bericht van de employee zelf.
+
 ## Latere stappen
 
 | Stap | Scherm | Astryx | Opmerking |
@@ -45,3 +52,7 @@
 | P-203 | Eén run, meerdere posts | Eén kaart, op de laatste post van de run in de lijst, zodat tokens niet dubbel lijken |
 | P-204 | Wanneer wacht een post op iemand | Open approval of vraag van zijn run, of een post waarmee de hoofdtaak van een ticket op een vraag eindigde (`group_chat::asks_question`, dezelfde regel als `ends_on_question`) |
 | P-205 | Oude runs zonder model calls | `model_calls` 0 betekent onbekend: de odometer laat Calls dan weg, de tabel toont een streepje |
+| P-206 | Hoe heet de actie | "Chat", en de bestaande link "Talk in Team chat" blijft ernaast: dat is een andere plek |
+| P-207 | Hoeveel gesprekken in de zijbalk | Vier, op volgorde van de laatste activiteit; favorieten of een volledige lijst bouwen we niet |
+| P-208 | Melding bij een bericht uit een ticket | Alleen ongelezen (stip in de zijbalk), geen notificatie: P-82 verandert niet |
+| P-209 | Interrupt-kaarten in een gesprek | Alleen voor een echte beslissing: de employee vraagt gewone dingen in zijn tekst. Dat staat in de richtlijn van de run; de server dwingt het niet af |

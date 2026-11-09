@@ -543,7 +543,7 @@ function ChannelList({
   );
 }
 
-function Composer({
+export function Composer({
   draftKey,
   channel,
   threadParent,
@@ -554,6 +554,7 @@ function Composer({
   people,
   archived,
   quick,
+  send,
   onSent,
 }: {
   draftKey: string;
@@ -566,6 +567,8 @@ function Composer({
   people: Mentionable[];
   archived: string[];
   quick: { question: string | null; options: string[] } | null;
+  /** Where the words go; none: the channel. */
+  send?: (message: { text: string; images: string[]; confirmSecret: boolean }) => Promise<unknown>;
   onSent: () => void;
 }) {
   const connection = useConnection();
@@ -601,18 +604,20 @@ function Composer({
     setHeld(null);
     setBusy(true);
     try {
-      await connection.write(
-        "group_chat.send",
-        {
-          text: clean,
-          images: images.paths,
-          files: [],
-          channel,
-          thread_parent: threadParent,
-          confirm_secret: confirmSecret,
-        },
-        { retry: false },
-      );
+      if (send) await send({ text: clean, images: images.paths, confirmSecret });
+      else
+        await connection.write(
+          "group_chat.send",
+          {
+            text: clean,
+            images: images.paths,
+            files: [],
+            channel,
+            thread_parent: threadParent,
+            confirm_secret: confirmSecret,
+          },
+          { retry: false },
+        );
       images.clear();
       void client.invalidateQueries({ queryKey: ["messages"] });
       onSent();
@@ -637,7 +642,7 @@ function Composer({
   };
   const suggestions = closedOn === text ? null : mentionSuggestions(text, people);
   const active = suggestions ? Math.min(picked, suggestions.found.length - 1) : 0;
-  const warning = unknownWarning(unknownMentions(text, people, archived));
+  const warning = people.length > 0 ? unknownWarning(unknownMentions(text, people, archived)) : null;
   const pick = (name: string) => {
     if (!suggestions) return;
     setText(completeMention(text, suggestions.at, name));

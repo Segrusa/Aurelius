@@ -46,6 +46,10 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::ProjectList => projects(shared).await,
         Method::JobList => jobs(shared).await,
         Method::ConversationGet { conversation_id } => {
+            let store = shared.store().clone();
+            if storage_task(move || store.read(|c| aurelius_storage::employee_chats::hidden_from(c, conversation_id, reader))).await? {
+                return Err(ProtocolError::new(ErrorCode::NotFound, format!("conversation {conversation_id} does not exist")));
+            }
             let body = messages(shared, conversation_id, reader).await?;
             mark_read(shared, reader, conversation_id).await;
             Ok(body)
@@ -59,6 +63,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
                 None => Err(ProtocolError::new(ErrorCode::NotFound, format!("employee {employee_id} does not exist"))),
             }
         }
+        Method::EmployeeChats => employee_chats(shared, reader).await,
         Method::GroupChatGet { channel } => {
             let store = shared.store().clone();
             let found = storage_task(move || {
@@ -399,6 +404,22 @@ async fn jobs(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
     Ok(ResponseBody::Jobs(JobsSnapshot { as_of_seq, jobs }))
 }
 
+/// The chats of `reader` with employees; none without a board member.
+async fn employee_chats(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let (as_of_seq, chats) = storage_task(move || {
+        store.read(|c| {
+            let chats = match reader {
+                Some(user) => aurelius_storage::employee_chats::list(c, user)?,
+                None => Vec::new(),
+            };
+            Ok((queries::last_seq(c)?, chats))
+        })
+    })
+    .await?;
+    Ok(ResponseBody::EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot { as_of_seq, chats }))
+}
+
 /// `reader` read `conversation` (when it is a discussion): it counts as read up
 /// to its latest message. A failure only costs the unread count; the read still answers.
 async fn mark_read(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, conversation: ConversationId) {
@@ -439,6 +460,8 @@ async fn messages(shared: &Arc<Shared>, conversation_id: ConversationId, reader:
             }
         }
     }
+    // What wakes an employee about a ticket is for the employee; the board member reads its update.
+    messages.retain(|m| m.update.as_deref() != Some(aurelius_domain::conversation::TICKET_UPDATE_KIND));
     let store = shared.store().clone();
     let (attachments, agent_mode, browser_allowed, screen_allowed, shares, run, (employee_id, project_id), read_only) = storage_task(move || {
         store.read(|c| {

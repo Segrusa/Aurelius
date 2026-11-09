@@ -74,9 +74,11 @@ export const METHODS = {
   "conversation.set_run": "command",
   "conversation.set_screen_allowed": "command",
   "employee.chat": "read",
+  "employee.chats": "read",
   "employee.create": "command",
   "employee.instruction_versions": "read",
   "employee.list": "read",
+  "employee.open_chat": "command",
   "employee.restore_instructions": "command",
   "employee.send_message": "command",
   "employee.set_folder": "command",
@@ -456,6 +458,10 @@ export interface MethodParams {
    * its messages and settings, as `conversation.get` answers them.
    */
   "employee.chat": { employee_id: string };
+  /**
+   * The reader's lasting chats with employees, the latest first (feature `employee_chats`).
+   */
+  "employee.chats": undefined;
   "employee.create": M.CreateEmployee;
   /**
    * The versions of an employee's instructions, newest first (feature `instruction_proposals`).
@@ -465,6 +471,7 @@ export interface MethodParams {
    * The company's employees (not archived), oldest first.
    */
   "employee.list": undefined;
+  "employee.open_chat": M.OpenEmployeeChat;
   "employee.restore_instructions": M.RestoreEmployeeInstructions;
   "employee.send_message": M.SendEmployeeMessage;
   "employee.set_folder": M.SetEmployeeFolder;

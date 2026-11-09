@@ -278,7 +278,13 @@ pub fn thread_conversation(tx: &Transaction<'_>, employee: EmployeeId, thread: &
             id
         }
     };
-    // The main chat's switches (mode, browser, screen, model and effort) count for its threads too.
+    follow_main_chat(tx, id, employee)?;
+    Ok(Some(id))
+}
+
+/// The switches of the employee's main chat (mode, browser, screen, model and effort)
+/// count for `conversation` too: its threads and its chats with board members.
+pub fn follow_main_chat(tx: &Transaction<'_>, conversation: ConversationId, employee: EmployeeId) -> Result<(), StorageError> {
     let main = crate::employees::main_chat_of("?2");
     tx.execute(
         &format!(
@@ -289,9 +295,9 @@ pub fn thread_conversation(tx: &Transaction<'_>, employee: EmployeeId, thread: &
                 run_json = (SELECT run_json FROM conversations WHERE id = {main})
              WHERE id = ?1"
         ),
-        [id.to_string(), employee.to_string()],
+        [conversation.to_string(), employee.to_string()],
     )?;
-    Ok(Some(id))
+    Ok(())
 }
 
 /// The thread key of a conversation that is a thread's own, if it is one.

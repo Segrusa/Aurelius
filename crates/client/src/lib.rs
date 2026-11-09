@@ -730,6 +730,11 @@ impl Client {
         self.read(Method::EmployeeChat { employee_id }, body!(Messages)).await
     }
 
+    /// The signed-in board member's chats with employees, the latest first.
+    pub async fn employee_chats(&self) -> Result<aurelius_domain::views::EmployeeChatsSnapshot, ClientError> {
+        self.read(Method::EmployeeChats, body!(EmployeeChats)).await
+    }
+
     /// The company's group chat (Team chat): the user and every employee.
     pub async fn group_chat(&self) -> Result<MessagesSnapshot, ClientError> {
         self.read(Method::GroupChatGet { channel: None }, body!(Messages)).await

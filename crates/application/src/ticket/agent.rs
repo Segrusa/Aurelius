@@ -323,7 +323,19 @@ pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>
     notices.extend(ticket_channel::opened_by(tx, id, user, by, false)?);
     notices.extend(agent_line(tx, id, by, "created this ticket")?);
     let project_name = crate::queries_project_name(tx, project).unwrap_or_default();
-    Ok((true, format!("Created ticket #{number} “{title}” in project {project_name}, in Backlog. It does not start by itself: a manager starts it (move_ticket to todo) or a board member."), notices))
+    // Made in a board member's chat: that chat hears when it reaches Review.
+    let from_chat = match aurelius_storage::conversations::run_conversation(tx, run)? {
+        Some(c) if aurelius_storage::employee_chats::of_conversation(tx, c)?.is_some() => Some(c),
+        _ => None,
+    };
+    let link = match from_chat {
+        Some(chat) => {
+            aurelius_storage::employee_chats::link_ticket(tx, id, chat)?;
+            format!(" Link it in your reply as {}.", crate::conversation::employee_chat::ticket_link(st, id, number))
+        }
+        None => String::new(),
+    };
+    Ok((true, format!("Created ticket #{number} “{title}” in project {project_name}, in Backlog. It does not start by itself: a manager starts it (move_ticket to todo) or a board member.{link}"), notices))
 }
 
 fn settle_created(tx: &Tx<'_>, id: TicketId, e: Events) -> Result<Vec<EventNotice>, StorageError> {

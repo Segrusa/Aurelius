@@ -52,3 +52,11 @@
 - **Threads (R6):** een ticket of channel krijgt per employee een eigen, verborgen conversation met een eigen `--resume`-sessie. Modus, browser, scherm en runinstellingen komen bij elke wek uit de hoofdchat. Berichten in de hoofdchat zelf blijven `chat:<conversation>`.
 - **Quota en login:** per board member. Een run die op de limiet van de een wacht houdt de thread niet vast voor het werk op de login van de ander.
 
+## Stap 13 (gebouwd): gesprekken met employees
+
+- **Tabellen:** migratie `0037_employee_chats.sql`: `conversations.board_member_id` (uniek per employee en board member) en `chat_tickets` met `review_arrivals` en `reviews_told`. Opslag in `crates/storage/src/employee_chats.rs`, de logica in `crates/application/src/conversation/employee_chat.rs`.
+- **Hoofdchat:** ongemoeid. Een gesprek is een conversation met `kind = 'employee'` en een `board_member_id`; `employee_conversations`, `is_older_employee_chat` en de overzichten slaan het over.
+- **Login:** `run::login::for_run` kiest het board member van het gesprek, ook voor een update uit Review. Geen terugval; zonder login wacht de run als altijd.
+- **Update uit Review:** `ticket_line::review_lines` telt de aankomst in dezelfde transactie als de verplaatsing. Een pas van de dispatcher schrijft per gesprek één verborgen aanleiding (`ticket_update`) en zet `reviews_told` in één transactie, dus niets dubbel en niets kwijt na een herstart. De aanleiding gaat de mailbox in; wat daar nog wacht voegt de worker samen.
+- **`tell_responsible`:** schrijft alleen een `ticket_note` in het gesprek van de Responsible (zo nodig gemaakt). Geen run, geen wijziging op het ticket, geen `notifies`.
+- **Begrensd:** `create_ticket` blijft voor managers. Een employee zonder dat recht zegt in het gesprek wie het ticket wel kan maken.

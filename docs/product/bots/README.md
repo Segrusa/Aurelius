@@ -26,6 +26,7 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | B4 | Wie is de lead (P2) | **Ticket: de Responsible (een board member); zonder actieve Responsible de owner. Kanaal: de projectdispatcher, anders de CEO; General: de CEO** | Sluit aan op B3 en de routering van `fase-a`: de Responsible beslist al over het ticket |
 | B5 | Hervatte sessies en de promptregels | **Het platformblok heeft een versie in de sessiesleutel: een nieuwe versie start een nieuwe sessie**, zoals guidelines B6 | Een hervatte sessie houdt tot 24 uur de bevroren systeemtekst; een notitie overleeft compactie niet |
 | B6 | Geheugen (C5) | **Eén regel, in de extractie én in `remember`:** feiten die alleen in één ticket of taak gelden horen in de discussie | Anders vult het geheugen zich met status die morgen niet meer klopt |
+| B8 | Praten met een employee (9 nov) | **Eén blijvend gesprek per board member per employee, naast de hoofdchat, via de mailbox met thread `chat:<conversation>` op de login van dat board member.** Een ticket uit zo'n gesprek wordt door de server gekoppeld; komt het in Review, dan schrijft dezelfde employee een kort bericht in dat gesprek | Praten moet vanzelf gaan, zonder een nieuw soort werk: tickets blijven gewone tickets, en een chat is nooit de ouder van een ticket en wacht er nooit op |
 | B7 | Handoff (vervangt de wekregel van P1, 9 nov) | **Een handoff is een expliciete actie:** de bridge-tool `hand_off(to, message)` schrijft een inbox-item met zijn hop en staat in de discussie als gewoon bericht "Flux handed over to Bo". Een `@Naam` in wat een employee schrijft is alleen een verwijzing en wekt niemand; een antwoord zonder handoff beëindigt het gesprek. Een `@Naam` van een board member wekt nog steeds, en `@username` van een board member meldt die nog steeds. De handoff-regel staat zo in het platformblok; het platformblok krijgt er ook een schrijfregel bij (gewone zinnen, geen ritueel bevestigen, geen verplichte slotregel) | Tekst die toevallig een naam noemt mag niemand wekken; een handoff blijft controleerbaar en wordt door R5 vastgehouden als geheel |
 
 ## Aannames die je kunt omdraaien
@@ -51,8 +52,9 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | 7 | R7, C7, U3, U7 | open |
 | 8 | C2 tools en MCP per employee | open |
 | 9 | C6 startprofielen | open |
-| 10 | C9 externe actoren, C10 Telegram | open |
+| 10 | C9 externe actoren, C10 Telegram | vervallen (besluit gebruiker) |
 | 11 | R8 activity log, U6 | open |
-| 12 | U8 Living Office | open |
+| 12 | U8 Living Office | vervallen (besluit gebruiker) |
+| 13 | Gesprekken met employees (B8) | gebouwd |
 
 **Risico's:** de mailbox raakt elk wekpad, en de login- en quota-regels zijn de plek waar dat stil mis kan gaan. Parallelle runs vergroten het risico op "ordinary, individual usage" uit de spike. Eén lange branch over client, server en protocol zonder tussentijdse merge.

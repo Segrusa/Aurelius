@@ -1389,7 +1389,7 @@ pub(crate) fn run_channel(conn: &rusqlite::Connection, run: RunId, named: Option
 }
 
 /// The thread a run hands work over in: its ticket's discussion, else the channel that woke it.
-fn run_handoff_thread(conn: &rusqlite::Connection, run: RunId) -> Result<Option<Discussion>, StorageError> {
+pub(crate) fn run_handoff_thread(conn: &rusqlite::Connection, run: RunId) -> Result<Option<Discussion>, StorageError> {
     Ok(match run_discussion(conn, run)? {
         Some(d) => Some(d),
         None => waking_discussion(conn, run)?,

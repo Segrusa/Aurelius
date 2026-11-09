@@ -1082,6 +1082,24 @@ pub struct ChannelsSnapshot {
     pub channels: Vec<ChannelView>,
 }
 
+/// One of a board member's lasting chats with an employee (feature `employee_chats`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeChatView {
+    pub conversation_id: ConversationId,
+    pub employee_id: EmployeeId,
+    pub employee_name: String,
+    /// What the employee wrote since the board member last read it.
+    pub unread: u32,
+    pub last_activity_ms: i64,
+}
+
+/// `employee.chats`: the reader's chats that have something in them, the latest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeChatsSnapshot {
+    pub as_of_seq: u64,
+    pub chats: Vec<EmployeeChatView>,
+}
+
 /// A file the user sent to an employee, copied into its work folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MessageFileView {

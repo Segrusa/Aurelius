@@ -125,11 +125,14 @@ abstract final class Methods {
   /// An employee's persistent chat with the user (company scope, no project):
   /// its messages and settings, as `conversation.get` answers them.
   static const String employeeChat = 'employee.chat';
+  /// The reader's lasting chats with employees, the latest first (feature `employee_chats`).
+  static const String employeeChats = 'employee.chats';
   static const String employeeCreate = 'employee.create';
   /// The versions of an employee's instructions, newest first (feature `instruction_proposals`).
   static const String employeeInstructionVersions = 'employee.instruction_versions';
   /// The company's employees (not archived), oldest first.
   static const String employeeList = 'employee.list';
+  static const String employeeOpenChat = 'employee.open_chat';
   static const String employeeRestoreInstructions = 'employee.restore_instructions';
   static const String employeeSendMessage = 'employee.send_message';
   static const String employeeSetFolder = 'employee.set_folder';
@@ -723,6 +726,11 @@ Map<String, dynamic> employeeChat({required String employeeId}) => <String, dyna
   'params': <String, dynamic>{
     'employee_id': employeeId,
   },
+};
+
+/// The reader's lasting chats with employees, the latest first (feature `employee_chats`).
+Map<String, dynamic> employeeChats() => <String, dynamic>{
+  'method': Methods.employeeChats,
 };
 
 /// The versions of an employee's instructions, newest first (feature `instruction_proposals`).
@@ -2037,6 +2045,11 @@ Map<String, dynamic> conversationSetScreenAllowed(SetScreenAllowed params) => <S
 
 Map<String, dynamic> employeeCreate(CreateEmployee params) => <String, dynamic>{
   'method': Methods.employeeCreate,
+  'params': params.toJson(),
+};
+
+Map<String, dynamic> employeeOpenChat(OpenEmployeeChat params) => <String, dynamic>{
+  'method': Methods.employeeOpenChat,
   'params': params.toJson(),
 };
 

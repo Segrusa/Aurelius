@@ -304,6 +304,7 @@ pub(crate) fn answered_in_review(tx: &Tx<'_>, st: &Store, task: TaskId, run: Run
 /// The card of the main task `root` is in Review: `ticket.review` and the
 /// Review line (MU2-03), a card with the main task for a board member.
 pub(crate) fn review_lines(tx: &Tx<'_>, ticket: TicketId, project: ProjectId, root: TaskId) -> Result<Vec<EventNotice>, StorageError> {
+    aurelius_storage::employee_chats::reached_review(tx, ticket)?;
     let by = worked_by(tx, root)?;
     let mut notices = vec![ticket_event(tx, ticket, project, EventKind::TicketReview, by, json!({ "task_id": root }))?];
     let mut line = SystemLine::new(SystemLineKind::Review);

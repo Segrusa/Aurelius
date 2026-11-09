@@ -56,6 +56,9 @@ pub enum CommandResult {
         employee_id: EmployeeId,
         conversation_id: ConversationId,
     },
+    EmployeeChatOpened {
+        conversation_id: ConversationId,
+    },
     EmployeeUpdated {
         employee_id: EmployeeId,
         version: u64,

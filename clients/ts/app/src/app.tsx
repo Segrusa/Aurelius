@@ -19,6 +19,7 @@ import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
 import { BoardScreen } from "./screens/board";
 import { ChatScreen } from "./screens/chat";
+import { EmployeeChatScreen } from "./screens/employee-chat";
 import { EmployeePage } from "./screens/employee-page";
 import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
 import { Frame } from "./screens/frame";
@@ -110,6 +111,14 @@ const employee = createRoute({
     return <EmployeePage key={id} id={id} />;
   },
 });
+const employeeChat = createRoute({
+  getParentRoute: () => root,
+  path: "/talk/$conversationId",
+  component: function EmployeeChatRoute() {
+    const { conversationId } = employeeChat.useParams();
+    return <EmployeeChatScreen key={conversationId} conversationId={conversationId} />;
+  },
+});
 const knowledgeIndex = createRoute({
   getParentRoute: () => root,
   path: "/knowledge",
@@ -192,6 +201,7 @@ const router = createRouter({
     tasks,
     taskRun,
     chat,
+    employeeChat,
     settingsIndex,
     settings,
     usage,

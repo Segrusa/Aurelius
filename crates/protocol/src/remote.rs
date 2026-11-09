@@ -55,6 +55,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ConversationGet { .. }
         | Method::EmployeeList
         | Method::EmployeeChat { .. }
+        | Method::EmployeeChats
         | Method::GroupChatGet { .. }
         | Method::ChannelList
         | Method::ChannelSearch { .. }
@@ -257,6 +258,7 @@ fn command_needs(command: &Command) -> Needs {
         | Command::AttachFile(_)
         | Command::RemoveAttachment(_)
         | Command::SendEmployeeMessage(_)
+        | Command::OpenEmployeeChat(_)
         | Command::SendGroupMessage(_)
         | Command::PostTicketMessage(_)
         | Command::ReactToMessage(_)

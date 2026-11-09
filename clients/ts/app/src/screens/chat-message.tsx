@@ -61,7 +61,15 @@ import { messageLink } from "./links-logic";
 import { overlays } from "./overlays-store";
 import { RunCard } from "./run-card";
 import { waitsOnReply } from "./run-card-logic";
-import { FileChips, KeptFiles, MarkdownChips, ScreenshotLink, TraceLink, useRetryAnswer } from "./run-tools";
+import {
+  FileChips,
+  KeptFiles,
+  MarkdownChips,
+  type RetryTarget,
+  ScreenshotLink,
+  TraceLink,
+  useRetryAnswer,
+} from "./run-tools";
 import { stepLine } from "./tasks-logic";
 
 const OUTPUT_LINES = 400;
@@ -349,6 +357,8 @@ export interface ChatContext {
   lastAnswer: string | null;
   conversationId: string | null;
   channel: string | null;
+  /** Where a retried question goes; none: the channel. */
+  retryTarget?: RetryTarget;
   /** The message a link led to, marked for a moment. */
   flash: string | null;
 }
@@ -820,6 +830,8 @@ function UpdateCard({ m }: { m: MessageView }) {
         return ["MESSAGE FROM", false];
       case "mode_chosen":
         return ["MODE CHOSEN", false];
+      case "ticket_note":
+        return ["FROM A TICKET", false];
       default:
         return ["UPDATE", false];
     }
@@ -1095,7 +1107,7 @@ export const MessageRow = memo(function MessageRow({
   grouped: boolean;
   inThread?: boolean;
 }) {
-  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId, channel } = useChat();
+  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId, channel, retryTarget } = useChat();
   const made = useMemo(() => ticketFrom(messages, m.id), [messages, m.id]);
   const { flash } = useChat();
   const connection = useConnection();
@@ -1105,7 +1117,11 @@ export const MessageRow = memo(function MessageRow({
   // A row's menus are only built once it is pointed at or focused: with 2,000 messages, scrolling mounts many rows.
   const [touched, setTouched] = useState(false);
   const touch = () => setTouched(true);
-  const retry = useRetryAnswer(conversationId, messages, { channel, threadParent: m.thread_parent ?? null });
+  const retry = useRetryAnswer(
+    conversationId,
+    messages,
+    retryTarget ?? { channel, threadParent: m.thread_parent ?? null },
+  );
   if (m.system || isSystemLine(m, true)) return <SystemRow m={m} />;
   const who = authorOf(m, roleOf);
   const body = m.deleted_at_ms ? (

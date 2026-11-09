@@ -474,7 +474,8 @@ fn every_action() -> Vec<EmployeeAction> {
             | EmployeeAction::UpdateTicket { .. }
             | EmployeeAction::MoveTicket { .. }
             | EmployeeAction::PostToTicket { .. }
-            | EmployeeAction::HandOff { .. } => {}
+            | EmployeeAction::HandOff { .. }
+            | EmployeeAction::TellResponsible { .. } => {}
         }
     }
     all

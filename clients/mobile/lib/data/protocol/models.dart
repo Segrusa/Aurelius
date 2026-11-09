@@ -1784,6 +1784,8 @@ sealed class Command {
           columnId: (json['column_id'] as String),
           ticketId: (json['ticket_id'] as String),
         );
+      case 'open_employee_chat':
+        return CommandOpenEmployeeChat(value: OpenEmployeeChat.fromJson(json as Map<String, dynamic>));
       case 'pin_memory':
         return CommandPinMemory(value: PinMemory.fromJson(json as Map<String, dynamic>));
       case 'post_ticket_message':
@@ -2605,6 +2607,20 @@ final class CommandMoveTicket extends Command {
       if (beforeTicketId != null) 'before_ticket_id': beforeTicketId,
       'column_id': columnId,
       'ticket_id': ticketId,
+    };
+}
+
+final class CommandOpenEmployeeChat extends Command {
+  const CommandOpenEmployeeChat({
+    required this.value,
+  });
+
+  final OpenEmployeeChat value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'open_employee_chat',
+      ...value.toJson(),
     };
 }
 
@@ -3584,6 +3600,10 @@ sealed class CommandResult {
         return CommandResultConversationRunSet(
           conversationId: (json['conversation_id'] as String),
         );
+      case 'employee_chat_opened':
+        return CommandResultEmployeeChatOpened(
+          conversationId: (json['conversation_id'] as String),
+        );
       case 'employee_created':
         return CommandResultEmployeeCreated(
           conversationId: (json['conversation_id'] as String),
@@ -4064,6 +4084,20 @@ final class CommandResultConversationRunSet extends CommandResult {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'conversation_run_set',
+      'conversation_id': conversationId,
+    };
+}
+
+final class CommandResultEmployeeChatOpened extends CommandResult {
+  const CommandResultEmployeeChatOpened({
+    required this.conversationId,
+  });
+
+  final String conversationId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_chat_opened',
       'conversation_id': conversationId,
     };
 }
@@ -6098,6 +6132,61 @@ final class EffectiveGuidelines {
     'limit_chars': limitChars,
     if (projectId != null) 'project_id': projectId,
     'total_chars': totalChars,
+  };
+}
+
+/// One of a board member's lasting chats with an employee (feature `employee_chats`).
+final class EmployeeChatView {
+  const EmployeeChatView({
+    required this.conversationId,
+    required this.employeeId,
+    required this.employeeName,
+    required this.lastActivityMs,
+    required this.unread,
+  });
+
+  final String conversationId;
+  final String employeeId;
+  final String employeeName;
+  final int lastActivityMs;
+  /// What the employee wrote since the board member last read it.
+  final int unread;
+
+  factory EmployeeChatView.fromJson(Map<String, dynamic> json) => EmployeeChatView(
+    conversationId: (json['conversation_id'] as String),
+    employeeId: (json['employee_id'] as String),
+    employeeName: (json['employee_name'] as String),
+    lastActivityMs: (json['last_activity_ms'] as num).toInt(),
+    unread: (json['unread'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'conversation_id': conversationId,
+    'employee_id': employeeId,
+    'employee_name': employeeName,
+    'last_activity_ms': lastActivityMs,
+    'unread': unread,
+  };
+}
+
+/// `employee.chats`: the reader's chats that have something in them, the latest first.
+final class EmployeeChatsSnapshot {
+  const EmployeeChatsSnapshot({
+    required this.asOfSeq,
+    required this.chats,
+  });
+
+  final int asOfSeq;
+  final List<EmployeeChatView> chats;
+
+  factory EmployeeChatsSnapshot.fromJson(Map<String, dynamic> json) => EmployeeChatsSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    chats: (json['chats'] as List<dynamic>).map((x0) => EmployeeChatView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'chats': chats.map((x0) => x0.toJson()).toList(),
   };
 }
 
@@ -11477,6 +11566,8 @@ sealed class Method {
           employeeId: (src['employee_id'] as String),
         );
         }
+      case 'employee.chats':
+        return const MethodEmployeeChats();
       case 'employee.instruction_versions':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -12255,6 +12346,16 @@ final class MethodEmployeeChat extends Method {
       'params': <String, dynamic>{
       'employee_id': employeeId,
     },
+    };
+}
+
+/// The reader's lasting chats with employees, the latest first (feature `employee_chats`).
+final class MethodEmployeeChats extends Method {
+  const MethodEmployeeChats();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.chats',
     };
 }
 
@@ -13901,6 +14002,24 @@ final class NotificationsSnapshot {
   };
 }
 
+/// `employee.open_chat`: the acting board member's lasting chat with this employee,
+/// made the first time (feature `employee_chats`).
+final class OpenEmployeeChat {
+  const OpenEmployeeChat({
+    required this.employeeId,
+  });
+
+  final String employeeId;
+
+  factory OpenEmployeeChat.fromJson(Map<String, dynamic> json) => OpenEmployeeChat(
+    employeeId: (json['employee_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'employee_id': employeeId,
+  };
+}
+
 sealed class Outcome {
   const Outcome();
 
@@ -15251,6 +15370,8 @@ sealed class ResponseBody {
         return ResponseBodyDirListing(value: DirListing.fromJson(json['value'] as Map<String, dynamic>));
       case 'effective_guidelines':
         return ResponseBodyEffectiveGuidelines(value: EffectiveGuidelines.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_chats':
+        return ResponseBodyEmployeeChats(value: EmployeeChatsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_instruction_versions':
         return ResponseBodyEmployeeInstructionVersions(value: EmployeeInstructionVersionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_plugins':
@@ -15717,6 +15838,20 @@ final class ResponseBodyEffectiveGuidelines extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'effective_guidelines',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyEmployeeChats extends ResponseBody {
+  const ResponseBodyEmployeeChats({
+    required this.value,
+  });
+
+  final EmployeeChatsSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_chats',
       'value': value.toJson(),
     };
 }
