@@ -30,7 +30,6 @@ import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../company_org/employee_run_sheet.dart';
 import '../inbox/inbox_bloc.dart';
-import '../../app/mobile_core.dart';
 import '../load/load_widgets.dart';
 import '../team/mentions.dart';
 import 'answer_body.dart';
@@ -1348,15 +1347,6 @@ class _AssistantMessage extends StatelessWidget {
                   Navigator.pop(sheet);
                 },
               ),
-            if (message.runId != null && shownInMobileCore('context'))
-              ListTile(
-                leading: const Icon(Icons.manage_search),
-                title: const Text('What went into this answer'),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  context.push('/context/${message.runId}');
-                },
-              ),
             for (final s in message.sources)
               ListTile(
                 dense: true,
@@ -1659,8 +1649,8 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
 
   void _queue() => _send();
 
-  /// The photo and file rows of "+" (ticket #19): hidden in a chat, but a ticket's discussion keeps its attachments.
-  bool _canAttach(ChatBloc bloc) => shownInMobileCore('chat_attach') || bloc.ticketId != null;
+  /// The photo and file rows of "+": only a ticket's discussion keeps its attachments.
+  bool _canAttach(ChatBloc bloc) => bloc.ticketId != null;
 
   /// "+": a photo or file, and what this agent may use (the browser, the
   /// screen), each on or off.

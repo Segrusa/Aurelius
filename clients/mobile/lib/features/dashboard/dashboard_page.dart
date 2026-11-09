@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../app/mobile_core.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
 import '../../core/widgets/refresh.dart';
@@ -84,16 +83,15 @@ class DashboardPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
               ],
-              GroupHeader('Management Team', action: shownInMobileCore('company') ? 'Org chart' : null, onAction: shownInMobileCore('company') ? () => context.push('/company?view=chart') : null),
+              const GroupHeader('Management Team'),
               InsetGroup(
                 dividerIndent: 70,
                 children: [
                   if (team.isEmpty)
                     GroupRow(
                       title: 'Nobody yet',
-                      subtitle: shownInMobileCore('company') ? 'Add employees under More › Company.' : 'Add employees on the PC.',
+                      subtitle: 'Add employees on the PC.',
                       chevron: false,
-                      onTap: shownInMobileCore('company') ? () => context.push('/company') : null,
                     ),
                   for (final m in team) EmployeeRow(key: ValueKey('team-${m.id}'), employee: m, state: state),
                 ],

@@ -10,7 +10,6 @@ import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/company_org/employee_page.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
-import 'package:aurelius_mobile/features/power/power_bloc.dart';
 import 'package:aurelius_mobile/features/project/task_page.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:aurelius_mobile/features/team/mentions.dart';
@@ -31,7 +30,6 @@ class MockInboxBloc extends MockBloc<InboxEvent, InboxState> implements InboxBlo
 
 class MockConnectionBloc extends MockBloc<ConnectionEvent, LinkState> implements ConnectionBloc {}
 
-class MockPowerBloc extends MockBloc<PowerEvent, PowerBlocState> implements PowerBloc {}
 
 class MockCompanyBloc extends MockBloc<CompanyEvent, CompanyState> implements CompanyBloc {}
 
@@ -223,14 +221,14 @@ void main() {
     setUp(() => router = AppRouter(host));
     tearDown(() => router.dispose());
 
-    test('Team chat is the first tab and the Board the second; hidden screens keep their routes (ticket #19)', () {
+    test('Team chat is the first tab and the Board the second', () {
       final shell = router.config.configuration.routes.whereType<StatefulShellRoute>().single;
       final first = [for (final b in shell.branches) (b.routes.first as GoRoute).path];
       expect(first, ['/team', '/board', '/inbox', '/more']);
       expect(first, shellTabPatterns);
       expect(router.config.routeInformationProvider.value.uri.path, '/team', reason: 'the app opens on the Team chat');
       final paths = pathsOf(router.config.configuration.routes);
-      expect(paths, containsAll(['/tasks', '/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board']));
+      expect(paths, containsAll(['/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board']));
       expect(first.length, shellTabs.length, reason: 'one tab per branch');
     });
 
@@ -250,8 +248,6 @@ void main() {
       whenListen(inboxBloc, const Stream<InboxState>.empty(), initialState: inbox);
       final connection = MockConnectionBloc();
       whenListen(connection, const Stream<LinkState>.empty(), initialState: online);
-      final power = MockPowerBloc();
-      whenListen(power, const Stream<PowerBlocState>.empty(), initialState: const PowerBlocState());
       final router = GoRouter(initialLocation: '/team', routes: [
         StatefulShellRoute.indexedStack(
           builder: (context, state, shell) => HomeShell(shell: shell),
@@ -268,7 +264,6 @@ void main() {
           providers: [
             BlocProvider<InboxBloc>.value(value: inboxBloc),
             BlocProvider<ConnectionBloc>.value(value: connection),
-            BlocProvider<PowerBloc>.value(value: power),
           ],
           child: MaterialApp.router(theme: aureliusTheme(), routerConfig: router),
         ),

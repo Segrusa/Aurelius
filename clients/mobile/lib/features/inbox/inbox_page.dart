@@ -11,7 +11,6 @@ import '../../core/widgets/refresh.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
 import '../company_org/employee_widgets.dart' show ProposalCard;
-import '../guidelines/guideline_proposal_card.dart';
 import '../project/task_status_mark.dart';
 import 'inbox_bloc.dart';
 import 'inbox_rows.dart';
@@ -78,8 +77,6 @@ class _InboxPageState extends State<InboxPage> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                 child: ProposalCard(proposal: p, onDecide: (approve, note, instructions) => bloc.add(ProposalDecided(p, approve: approve, note: note, instructions: instructions))),
               ),
-            for (final g in s.guidelineProposals)
-              Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: InboxGuidelineProposal(item: g)),
             if (s.rowsNeedingYou.isNotEmpty)
               InsetGroup(dividerIndent: 28, children: [for (final n in s.rowsNeedingYou) _swipeAway(bloc, n, _PersonalTile(row: n))]),
             if (s.waitingTasks.isNotEmpty)

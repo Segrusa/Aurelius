@@ -17,7 +17,6 @@ import '../../data/views.dart';
 import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
-import '../guidelines/target_guidelines_page.dart';
 import '../connection/connection_banner.dart';
 import '../dashboard/give_work.dart';
 import 'employee_run_sheet.dart';
@@ -131,8 +130,6 @@ class EmployeePage extends StatelessWidget {
                           subtitle: projects.isEmpty ? 'No open tasks' : projects.map((p) => p.name).join(', '),
                           chevron: false,
                         ),
-                        // What its runs get besides the instructions (Guidelines, ui §6.3).
-                        GuidelinesRow(target: GuidelineTargetEmployee(id: m.id)),
                       ],
                     ),
                     if (!archived) ...[
