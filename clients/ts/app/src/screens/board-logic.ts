@@ -511,3 +511,15 @@ export function suggestedReplies(report: string | null): SuggestedReply[] {
   replies.push({ label: "Explain what you did", text: "Explain in a few lines what you changed and why." });
   return replies;
 }
+
+/** A span on the board's scrolling row, in pixels from its start. */
+export type BoardSpan = { start: number; end: number };
+
+/** Where the row scrolls to show a card. `stops` are the scroll positions that start the row at a column, so a move
+ * never leaves a column cut in half at the edge; a card that is already in view moves nothing. */
+export function scrollToShow(card: BoardSpan, stops: number[], scroll: number, width: number): number {
+  if (card.start >= scroll && card.end <= scroll + width) return scroll;
+  const fitting = stops.filter((stop) => stop <= card.start && stop + width >= card.end);
+  if (fitting.length === 0) return card.start;
+  return card.end > scroll + width ? (fitting[0] as number) : (fitting[fitting.length - 1] as number);
+}

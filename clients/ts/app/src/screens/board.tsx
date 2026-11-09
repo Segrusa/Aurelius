@@ -51,6 +51,7 @@ import {
   type Needs,
   type OwnerFilter,
   type ResponsibleFilter,
+  scrollToShow,
   shownCards,
 } from "./board-logic";
 import { Held, useSend } from "./dialogs";
@@ -210,9 +211,11 @@ const styles = stylex.create({
     overflowX: "auto",
     backgroundColor: "var(--color-background-muted)",
     paddingBlock: 12,
-    paddingInlineStart: 14,
-    paddingInlineEnd: 12,
+    // As wide as the gap: a row that starts at a column shows nothing of the one before it.
+    paddingInline: 12,
   },
+  // Room behind the last column, so that with the panel open it can start the row as well.
+  lastStop: { width: 248, flexShrink: 0 },
   hidden: { display: "flex", width: 170, flexShrink: 0, flexDirection: "column", gap: 4, paddingInline: 6 },
   hiddenHead: {
     display: "flex",
@@ -601,9 +604,24 @@ export function BoardScreen({
   // The panel takes room from the board: the opened card stays in view.
   useEffect(() => {
     if (!ticket) return;
-    const frame = requestAnimationFrame(() =>
-      document.querySelector(`[data-card="${ticket}"]`)?.scrollIntoView({ inline: "nearest", block: "nearest" }),
-    );
+    const frame = requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-card="${ticket}"]`);
+      const row = card?.closest<HTMLElement>("[data-board-columns]");
+      if (!card || !row) return;
+      const edge = row.getBoundingClientRect().left;
+      const first = row.firstElementChild?.getBoundingClientRect().left ?? edge;
+      const stops = [...row.children].map((c) => c.getBoundingClientRect().left - first);
+      const box = card.getBoundingClientRect();
+      const inRow = (x: number) => x - edge + row.scrollLeft;
+      // A plain scrollIntoView stops wherever the card just fits: that left Backlog half behind the sidebar.
+      row.scrollLeft = scrollToShow(
+        { start: inRow(box.left), end: inRow(box.right) },
+        stops,
+        row.scrollLeft,
+        row.clientWidth,
+      );
+      card.scrollIntoView({ inline: "nearest", block: "nearest" });
+    });
     return () => cancelAnimationFrame(frame);
   }, [ticket]);
   const filter = useMemo(
@@ -962,7 +980,7 @@ export function BoardScreen({
                     onDragEnd={drop}
                     onDragCancel={() => setDragging(null)}
                   >
-                    <div {...stylex.props(styles.columns)}>
+                    <div data-board-columns {...stylex.props(styles.columns)}>
                       {shown
                         .filter((c) => !hidden.includes(c.column.kind))
                         .map((c) => (
@@ -999,6 +1017,7 @@ export function BoardScreen({
                             ))}
                         </div>
                       ) : null}
+                      {ticket ? <div aria-hidden {...stylex.props(styles.lastStop)} /> : null}
                     </div>
                     <DragOverlay dropAnimation={null}>
                       {active ? (
