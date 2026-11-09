@@ -112,6 +112,16 @@ pub enum Method {
     /// accept `ticket_channels` gets no ticket channels here either.
     #[serde(rename = "channel.search")]
     ChannelSearch { query: String },
+    /// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
+    /// answered with `DiscussionAudience`, for the reader's own message (the
+    /// reader is never counted). `channel`: a channel or a ticket's discussion
+    /// (its conversation id, as in `channel.list`); none: the general channel.
+    /// Read-only; `@Everyone` itself is plain text in `group_chat.send` / `ticket.post`.
+    #[serde(rename = "discussion.audience")]
+    DiscussionAudience {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel: Option<ConversationId>,
+    },
     /// One thread of a channel (feature `chat_threads`): `message_id` is the
     /// message that starts it (a message of a channel or a ticket's discussion
     /// that is not itself a reply), answered with the message and its replies,
