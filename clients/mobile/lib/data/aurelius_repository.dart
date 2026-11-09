@@ -370,7 +370,7 @@ class AureliusRepository {
   Future<void> unregisterPush() async => connection.api.unregisterPush(host, await connection.sessionToken());
 }
 
-/// What needs the signed-in board member, shared by the company and CarPlay.
+/// What needs the signed-in board member, used by the company.
 extension NeedsMeReads on AureliusRepository {
   /// [othersMainTasks] of [tasks]. Reads the board only when a main task waits
   /// on a server with a Responsible; a failed read leaves them counted as before.

@@ -308,7 +308,7 @@ bool needsMe(TicketView ticket, TicketState state, {String? me}) {
 bool decidedByOther(TicketView ticket, TicketState state, {String? me}) => state.needsYou && !needsMe(ticket, state, me: me);
 
 /// The ids in [tasks] of main tasks that wait for a decision that is someone
-/// else's ([needsMe], freeze §5): Dashboard, Waiting tasks and CarPlay do not
+/// else's ([needsMe], freeze §5): Dashboard and Waiting tasks do not
 /// count them. A main task whose ticket is not in [tickets] counts as before.
 Set<String> othersMainTasks(List<TaskView> tasks, Iterable<TicketView> tickets, {String? me}) {
   final byId = {for (final t in tickets) t.id: t};
