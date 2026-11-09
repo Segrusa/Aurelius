@@ -2,7 +2,7 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Dialog } from "@astryxdesign/core/Dialog";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Layout, LayoutContent, LayoutFooter, LayoutHeader } from "@astryxdesign/core/Layout";
@@ -15,6 +15,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { type ComponentProps, type KeyboardEvent, type ReactNode, useContext } from "react";
 import { type Feature, shown } from "../hidden";
 import { KeysContext } from "../keys/provider";
+import { DialogHead } from "../ui/dialog-head";
 import { useDelayed } from "../ui/use-delayed";
 
 const styles = stylex.create({
@@ -41,7 +42,7 @@ const styles = stylex.create({
   },
   hint: { margin: 0, fontSize: 12, color: "var(--precision-text3)" },
   body: { display: "flex", flexDirection: "column", gap: 12 },
-  footer: { display: "flex", justifyContent: "flex-end", gap: 8 },
+  footer: { display: "flex", justifyContent: "flex-end", gap: 8, paddingInline: 16, paddingBlock: 12 },
   confirmBody: { lineHeight: 1.5, color: "var(--color-text-secondary)" },
   loading: { display: "flex", flexDirection: "column", gap: 8, padding: 24 },
   contents: { display: "contents" },
@@ -180,7 +181,7 @@ export function FormDialog({
       {...(top ? { position: { top: "14vh" } } : {})}
     >
       <Layout
-        header={<DialogHeader title={title} {...(start ? { startContent: start } : {})} />}
+        header={<DialogHead title={title} {...(start ? { startContent: start } : {})} />}
         content={
           <LayoutContent padding={4}>
             <div {...stylex.props(styles.body)}>{children}</div>

@@ -1,6 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Dialog } from "@astryxdesign/core/Dialog";
 import { LayoutFooter } from "@astryxdesign/core/Layout";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -17,6 +17,7 @@ import { isMac, useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { AttachRow, useAttachments } from "../ui/attach";
 import { Chip } from "../ui/chip";
+import { DialogHead } from "../ui/dialog-head";
 import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
@@ -262,7 +263,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <DialogHeader
+      <DialogHead
         title="New ticket"
         onOpenChange={(next) => {
           if (!next) onClose();
@@ -482,7 +483,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <DialogHeader
+      <DialogHead
         title="Give work"
         subtitle="starts right away, or with a plan for you to approve"
         endContent={

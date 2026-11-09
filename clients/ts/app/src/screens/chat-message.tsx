@@ -17,6 +17,7 @@ import { useConnection, useLinkState } from "../connection";
 import { useRunGuidelines } from "../data";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
+import { DialogHead } from "../ui/dialog-head";
 import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
@@ -331,6 +332,7 @@ const styles = stylex.create({
   liveRow: { display: "flex", gap: 12, paddingTop: 8 },
   liveName: { display: "flex", alignItems: "baseline", gap: 8 },
   footer: { display: "flex", justifyContent: "flex-end", gap: 8 },
+  dialogFooter: { paddingInline: 16, paddingBlock: 12 },
 });
 
 /** The small, quiet line used all over a row. */
@@ -707,7 +709,7 @@ function EditedLink({ id }: { id: string }) {
           purpose="form"
           padding={0}
         >
-          <DialogHeader
+          <DialogHead
             title="Earlier versions"
             onOpenChange={(open) => {
               if (!open) setVersions(null);
@@ -1237,12 +1239,12 @@ export const MessageRow = memo(function MessageRow({
           purpose="form"
           padding={0}
         >
-          <DialogHeader title="Delete this message?" />
+          <DialogHead title="Delete this message?" />
           <div {...stylex.props(styles.dialogBody)}>
             <Text color="secondary">The channel keeps a line saying a message was deleted.</Text>
           </div>
           <LayoutFooter hasDivider>
-            <div {...stylex.props(styles.footer)}>
+            <div {...stylex.props(styles.footer, styles.dialogFooter)}>
               <Button label="Cancel" onClick={() => setDeleting(false)} />
               <Button
                 data-autofocus
