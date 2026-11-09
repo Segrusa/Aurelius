@@ -1238,6 +1238,31 @@ fn a_mention_of_a_busy_employee_also_gets_a_quick_answer_that_wakes_nobody() {
 }
 
 #[test]
+fn a_quick_answer_is_told_of_no_tool_it_lacks_and_an_ordinary_run_still_is() {
+    let s = setup();
+    send(&s, None, "@Bo first").unwrap();
+    go_running(&s, s.bo);
+    let (_, runs) = send(&s, None, "@Bo status?").unwrap();
+    let (_, quick) = quick_runs(&s, s.bo).unwrap();
+    let (bo, note_run) = (s.bo, runs[0]);
+    s.service.store().write(move |tx| aurelius_storage::scratchpads::set(tx, bo, "Focus: login", note_run)).unwrap();
+    let system_of = |run: RunId| {
+        let job = s.service.store().read(move |c| Ok(c.query_row("SELECT payload_json FROM jobs WHERE json_extract(payload_json, '$.run_id') = ?1", [run.to_string()], |r| r.get::<_, String>(0))?)).unwrap();
+        s.service.prepare_chat_run(&serde_json::from_str(&job).unwrap()).unwrap().expect("a plan").system.unwrap_or_default()
+    };
+    let (answer, ordinary) = (system_of(quick[0].0), system_of(runs[0]));
+    let guided = ["suggest_replies", "list_tickets", "read_ticket", "post_to_ticket", "update_ticket", "create_ticket", "move_ticket", "delegate_task", "hand_over_task", "message_task", "hand_off", "post_to_group_chat", "read_group_chat", "scratchpad tool"];
+    for tool in guided {
+        assert!(!answer.contains(tool), "a quick answer has no {tool}: {answer}");
+        assert!(ordinary.contains(tool), "an ordinary run is still told of {tool}: {ordinary}");
+    }
+    for tool in aurelius_domain::employee_tools::SWITCHABLE_TOOLS.iter().filter_map(|t| t.name.strip_prefix(aurelius_domain::employee_tools::BRIDGE_TOOL_PREFIX)).filter(|t| t.contains('_')) {
+        assert!(!answer.contains(tool), "a quick answer has no {tool}: {answer}");
+    }
+    assert!(answer.contains("Focus: login") && answer.contains("@Cy"), "its note and who its colleagues are stay: {answer}");
+}
+
+#[test]
 fn a_quick_answer_that_fails_posts_nothing_and_only_one_runs_at_a_time() {
     let s = setup();
     let general = general(&s);

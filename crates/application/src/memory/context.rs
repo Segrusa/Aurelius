@@ -349,6 +349,9 @@ pub fn place_without_question(candidates: Vec<Candidate>, now_ms: i64) -> Vec<(C
     out
 }
 
+/// Behind a memory that was cut. Named so a run without `recall` can leave it out.
+pub(crate) const RECALL_NOTE: &str = " (recall has the full text)";
+
 /// A memory as it goes into the system text: at most `MEMORY_LINE_CHARS`.
 fn shortened(text: &str) -> String {
     let text = text.trim();
@@ -356,7 +359,7 @@ fn shortened(text: &str) -> String {
         return text.to_owned();
     }
     let cut: String = text.chars().take(MEMORY_LINE_CHARS).collect();
-    format!("{}… (recall has the full text)", cut.trim_end())
+    format!("{}…{RECALL_NOTE}", cut.trim_end())
 }
 
 /// What an image costs in context: roughly what Claude counts (width × height / 750)
