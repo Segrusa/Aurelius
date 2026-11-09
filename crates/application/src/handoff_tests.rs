@@ -240,3 +240,82 @@ fn the_scoped_view_of_a_colleague_shows_what_was_handed_over_to_it() {
     let update = wake_text(&s, s.cy);
     assert!(update.contains("Take the logout") && update.contains("Scoped view"), "handed to Cy earlier, in the view: {update}");
 }
+
+/// Bo's run ends, as the dispatcher's end of a run does for the ticket (`ending`: how).
+fn colleague_ends(s: &Setup, run: RunId, broken: bool) {
+    let st = s.service.store().clone();
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute("UPDATE runs SET status = ?2 WHERE id = ?1", [run.to_string(), if broken { "failed" } else { "succeeded" }.to_owned()])?;
+            crate::task::task_runs::run_settled(tx, &st, run, broken)
+        })
+        .unwrap();
+}
+
+fn review_lines(s: &Setup, d: ConversationId) -> usize {
+    system_lines(s, d).iter().filter(|(k, _)| *k == SystemLineKind::Review).count()
+}
+
+#[test]
+fn a_ticket_stays_in_doing_while_a_handoff_is_open_and_reports_once_when_it_is_done() {
+    use aurelius_domain::task::TaskStatus;
+    let s = setup();
+    let (t, root, conversation, run) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    // The owner hands the review to Bo and ends its run, as Flux did on ticket #41.
+    assert!(hand_off(&s, run, "Bo", "Review branch fix/x.").0);
+    end_run(&s, run, "Committed the fix; Trace reviews it now. Nothing else is open on my side.");
+    assert_eq!(task_status(&s, root), TaskStatus::Waiting);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Doing, "the work lies with a colleague");
+    assert_eq!(review_lines(&s, d), 0, "no 'ready for review' before the review is in");
+
+    // Bo is done: the owner is woken to deal with the outcome, the ticket is still in Doing.
+    let (bo_run, _, _) = last_woken(&s, s.bo);
+    colleague_ends(&s, bo_run, false);
+    assert_eq!(task_status(&s, root), TaskStatus::Running);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Doing);
+    assert_eq!(review_lines(&s, d), 0);
+    let told = messages(&s, conversation).into_iter().last().unwrap().text;
+    assert!(told.contains("colleagues you handed work to are done"), "{told}");
+
+    // The owner's last run reports: now, and only now, the ticket goes to Review, with one line.
+    let next = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap()[0].0;
+    end_run(&s, next, "The review passed; the fix is ready.");
+    assert_eq!(task_status(&s, root), TaskStatus::Review);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
+    assert_eq!(review_lines(&s, d), 1);
+}
+
+#[test]
+fn a_handoff_that_fails_gives_the_ticket_back_to_its_owner_instead_of_leaving_it_in_doing() {
+    use aurelius_domain::task::TaskStatus;
+    let s = setup();
+    let (t, root, conversation, run) = started_ticket(&s);
+    assert!(hand_off(&s, run, "Bo", "Review branch fix/x.").0);
+    end_run(&s, run, "Handed the review to Bo.");
+    assert_eq!(task_status(&s, root), TaskStatus::Waiting);
+    let (bo_run, _, _) = last_woken(&s, s.bo);
+    colleague_ends(&s, bo_run, true);
+    assert_eq!(task_status(&s, root), TaskStatus::Running, "the owner is on it again");
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Doing);
+    let told = messages(&s, conversation).into_iter().last().unwrap().text;
+    assert!(told.contains("did not finish"), "{told}");
+}
+
+#[test]
+fn the_owner_is_not_woken_while_a_second_colleague_still_works() {
+    use aurelius_domain::task::TaskStatus;
+    let s = setup();
+    let (_, root, _, run) = started_ticket(&s);
+    assert!(hand_off(&s, run, "Bo", "Review branch fix/x.").0);
+    let (bo_run, _, _) = last_woken(&s, s.bo);
+    // Bo hands on to Cy before it ends: the ticket is still not Ann's to report.
+    assert!(hand_off(&s, bo_run, "Cy", "Check the cookie.").0);
+    end_run(&s, run, "Handed the review to Bo.");
+    colleague_ends(&s, bo_run, false);
+    assert_eq!(task_status(&s, root), TaskStatus::Waiting, "Cy's run is still open");
+    let (cy_run, _, _) = last_woken(&s, s.cy);
+    colleague_ends(&s, cy_run, false);
+    assert_eq!(task_status(&s, root), TaskStatus::Running);
+}

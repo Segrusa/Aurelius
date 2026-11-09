@@ -648,6 +648,8 @@ pub(crate) fn commit_end(tx: &aurelius_storage::Tx<'_>, store: &aurelius_storage
         _ => None,
     };
     notices.extend(crate::task::task_runs::on_run_finished(tx, store, run_id, end.outcome == RunOutcome::Completed, failed, end.reply)?);
+    // A colleague's run on a ticket whose owner waits for it: the last one to end gives the ticket back.
+    notices.extend(crate::task::task_runs::run_settled(tx, store, run_id, end.outcome != RunOutcome::Completed)?);
     // Results of tasks given from here that came in during this run.
     notices.extend(crate::task::task_runs::answer_results(tx, run_id, end.outcome == RunOutcome::Completed)?);
     notices.push(

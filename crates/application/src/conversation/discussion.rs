@@ -1606,6 +1606,10 @@ pub(crate) fn release_handoffs(tx: &Tx<'_>, store: &Store) -> Result<Vec<EventNo
         if let Some(why) = d.read_only().or_else(|| (!active).then(|| format!("{to_name} is paused."))) {
             aurelius_storage::inbox::settle_handoff(tx, &item.id, "cancelled")?;
             notices.push(system_line_in(tx, d.id, thread, &SystemLine::new(SystemLineKind::Limit), Some(&format!("The handoff from {from_name} to {to_name} was not delivered: {why}")))?);
+            // The owner may be waiting for it: nothing is coming, so it goes on.
+            if let Some(ticket) = d.ticket() {
+                notices.extend(crate::task::task_runs::ticket_settled(tx, store, ticket.id, None, true)?);
+            }
             continue;
         }
         aurelius_storage::inbox::settle_handoff(tx, &item.id, "done")?;

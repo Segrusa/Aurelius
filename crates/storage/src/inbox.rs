@@ -142,6 +142,26 @@ pub fn held_of_run(conn: &Connection, run: RunId) -> Result<u32, StorageError> {
     Ok(conn.query_row("SELECT COUNT(*) FROM employee_inbox WHERE state = 'held' AND json_extract(payload_json, '$.run') = ?1", [run.to_string()], |r| r.get::<_, i64>(0))? as u32)
 }
 
+/// Whether work on `ticket` is still open besides `except`: a handoff or message
+/// waiting in a mailbox (queued, or held until its sender has read), or a run that
+/// has taken one and has not ended. The ticket is not ready for its board member
+/// while this is so.
+pub fn open_on_ticket(conn: &Connection, ticket: TicketId, except: Option<RunId>) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM employee_inbox i WHERE i.ticket_id = ?1 AND i.run_id <> COALESCE(?2, '')
+           AND (i.state IN ('queued', 'held')
+                OR (i.state = 'claimed' AND EXISTS(SELECT 1 FROM runs r WHERE r.id = i.run_id AND r.status IN ('created','starting','running','waiting','cancelling')))))",
+        rusqlite::params![ticket.to_string(), except.map(|r| r.to_string())],
+        |r| r.get(0),
+    )?)
+}
+
+/// The ticket the mailbox item of `run` was for, if it had one.
+pub fn ticket_of_run(conn: &Connection, run: RunId) -> Result<Option<TicketId>, StorageError> {
+    let ticket: Option<Option<String>> = conn.query_row("SELECT ticket_id FROM employee_inbox WHERE run_id = ?1", [run.to_string()], |r| r.get(0)).optional()?;
+    Ok(ticket.flatten().and_then(|t| TicketId::parse(&t).ok()))
+}
+
 /// The hop of a run (R4): what woke it, 0 for a run nobody woke with a hop.
 pub fn run_hop(conn: &Connection, run: RunId) -> Result<u32, StorageError> {
     let hop: Option<i64> = conn
