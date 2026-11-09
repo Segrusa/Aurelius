@@ -213,7 +213,7 @@ fn the_dispatcher_is_a_manager_by_structure_and_a_plain_agent_is_not() {
     let before = counts(&s);
     let (ok, text) = act(&s, run_of(&s, s.ann, true), create_action("From an agent"));
     let after = counts(&s);
-    assert!(!ok && text.contains("Only management creates tickets") && text.contains("add_idea"), "{text}");
+    assert!(!ok && text.contains("Only management creates tickets") && text.contains("Ask a manager"), "{text}");
     // The run row of the test itself is the only difference.
     assert_eq!(before[..3], after[..3].to_vec()[..3], "no event, ticket or task");
     assert_eq!(before[4..], after[4..], "no job, message or blob");

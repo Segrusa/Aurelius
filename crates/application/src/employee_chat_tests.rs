@@ -23,6 +23,8 @@ struct Setup {
     robin: UserId,
     /// Head of the org chart with a report, so it may make tickets.
     atlas: EmployeeId,
+    /// Reports to Atlas: no management, and no dispatcher either.
+    bo: EmployeeId,
     main: ConversationId,
 }
 
@@ -48,8 +50,8 @@ fn setup() -> Setup {
     run(Command::CreateProject(CreateProject { name: "Orbit".into(), description: None, folder: None }));
     let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Atlas".into(), role: "Lead".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id: atlas, conversation_id: main } = run(Command::CreateEmployee(create)) else { panic!() };
-    run(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Bo".into(), role: "Dev".into(), title: None, reports_to: Some(atlas), instructions: None, folder: None }));
-    Setup { _dir: dir, service, grace, robin, atlas, main }
+    let CommandResult::EmployeeCreated { employee_id: bo, .. } = run(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Bo".into(), role: "Dev".into(), title: None, reports_to: Some(atlas), instructions: None, folder: None })) else { panic!() };
+    Setup { _dir: dir, service, grace, robin, atlas, bo, main }
 }
 
 fn open(s: &Setup, user: UserId) -> ConversationId {
@@ -209,6 +211,98 @@ fn a_chat_lasts_it_cannot_be_deleted() {
     say(&s, s.grace, chat, "Hello").unwrap();
     let delete = Command::DeleteConversation(aurelius_domain::conversation::DeleteConversation { conversation_id: chat });
     assert!(exec(&s, s.grace, delete).is_err());
+}
+
+fn open_with(s: &Setup, user: UserId, employee: EmployeeId) -> ConversationId {
+    match exec(s, user, Command::OpenEmployeeChat(OpenEmployeeChat { employee_id: employee })).unwrap() {
+        CommandResult::EmployeeChatOpened { conversation_id } => conversation_id,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A run of `employee` in `conversation`, on the board member's login.
+fn run_of_in(s: &Setup, employee: EmployeeId, conversation: ConversationId) -> RunId {
+    let run = RunId::new();
+    let login = s.grace.to_string();
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute(
+                "INSERT INTO runs(id, conversation_id, employee_id, attempt, runtime_kind, model_id, resolved_config_json, status, started_at_ms, login_user) VALUES (?1, ?2, ?3, 1, 'fake', '', '{}', 'running', 1, ?4)",
+                rusqlite::params![run.to_string(), conversation.to_string(), employee.to_string(), login],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    run
+}
+
+#[test]
+fn a_non_manager_makes_a_ticket_in_its_chat_and_the_review_update_comes_back_there() {
+    let s = setup();
+    let chat = open_with(&s, s.grace, s.bo);
+    let (ok, text, _) = s.service.employee_action(run_of_in(&s, s.bo, chat), create_action("From Bo's chat")).unwrap();
+    assert!(ok, "{text}");
+    assert!(text.contains("aurelius://") && text.contains("Link it in your reply"), "{text}");
+    let id: String = s.service.store().read(|c| Ok(c.query_row("SELECT id FROM tickets WHERE title = 'From Bo''s chat'", [], |r| r.get(0))?)).unwrap();
+    let ticket = TicketId::parse(&id).unwrap();
+    assert_eq!(column(&s, ticket), ColumnKind::Backlog, "it starts nothing");
+    in_review(&s, ticket);
+    assert!(!s.service.deliver_chat_updates().unwrap().is_empty());
+    let told = of_kind(&s, chat, TICKET_UPDATE_KIND);
+    assert_eq!(told.len(), 1, "the update comes back to the chat it was made in");
+    assert!(told[0].text.contains("From Bo's chat"), "{}", told[0].text);
+}
+
+#[test]
+fn a_non_manager_cannot_make_a_ticket_from_a_ticket_discussion_or_its_own_workspace() {
+    let s = setup();
+    let (ticket, _) = ticket_from(&s, open(&s, s.grace), "A ticket to talk about");
+    let discussion: String = s.service.store().read(move |c| Ok(c.query_row("SELECT conversation_id FROM tickets WHERE id = ?1", [ticket.to_string()], |r| r.get(0))?)).unwrap();
+    let discussion = ConversationId::parse(&discussion).unwrap();
+    let workspace: String = s.service.store().read({ let bo = s.bo; move |c| Ok(c.query_row("SELECT id FROM conversations WHERE employee_id = ?1 AND board_member_id IS NULL", [bo.to_string()], |r| r.get(0))?) }).unwrap();
+    let workspace = ConversationId::parse(&workspace).unwrap();
+    for conversation in [discussion, workspace] {
+        let (ok, text, _) = s.service.employee_action(run_of_in(&s, s.bo, conversation), create_action("Not from a chat")).unwrap();
+        assert!(!ok && text.contains("Only management creates tickets"), "{text}");
+    }
+}
+
+#[test]
+fn the_chat_of_another_employee_does_not_count() {
+    let s = setup();
+    let atlas_chat = open(&s, s.grace);
+    let (ok, text, _) = s.service.employee_action(run_of_in(&s, s.bo, atlas_chat), create_action("Bo in Atlas' chat")).unwrap();
+    assert!(!ok && text.contains("Only management creates tickets"), "{text}");
+}
+
+#[test]
+fn a_non_manager_in_its_chat_is_offered_create_ticket_and_told_it_may() {
+    let s = setup();
+    use_real_mailbox(s.bo);
+    let chat = open_with(&s, s.grace, s.bo);
+    say(&s, s.grace, chat, "Could you pick this up?").unwrap();
+    let (job, _) = s.service.claim_next_work("t", 45_000, 4).unwrap().expect("the worker takes it");
+    let plan = s.service.prepare_chat_run(&job.payload).unwrap().expect("a run to prepare");
+    assert!(plan.tool_policy.allows("mcp__aurelius__create_ticket") && !plan.tool_policy.bridge_tools_off().contains(&"create_ticket"));
+    let system = plan.system.expect("identity and guidance");
+    assert!(system.contains("make an ordinary ticket with create_ticket") && system.contains("whatever your place in the org chart"), "{system}");
+    assert!(!system.contains("name who can"), "{system}");
+}
+
+#[test]
+fn a_tool_list_without_create_ticket_also_holds_in_a_chat() {
+    let s = setup();
+    use aurelius_domain::employee_tools::ToolPolicy;
+    let policy = ToolPolicy { tools: Some(vec!["Read".into()]), ..Default::default() };
+    let hire = CreateEmployee { access_level: None, tool_policy: Some(policy), start_profile: None, description: None, name: "Cid".into(), role: "Dev".into(), title: None, reports_to: Some(s.atlas), instructions: None, folder: None };
+    let CommandResult::EmployeeCreated { employee_id: cid, .. } = exec(&s, s.grace, Command::CreateEmployee(hire)).unwrap() else { panic!() };
+    use_real_mailbox(cid);
+    let chat = open_with(&s, s.grace, cid);
+    say(&s, s.grace, chat, "Could you pick this up?").unwrap();
+    let (job, _) = s.service.claim_next_work("t", 45_000, 4).unwrap().expect("the worker takes it");
+    let plan = s.service.prepare_chat_run(&job.payload).unwrap().expect("a run to prepare");
+    assert!(!plan.tool_policy.allows("mcp__aurelius__create_ticket") && plan.tool_policy.bridge_tools_off().contains(&"create_ticket"), "not offered, so not callable");
 }
 
 #[test]
