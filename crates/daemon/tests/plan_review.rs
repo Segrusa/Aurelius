@@ -17,7 +17,7 @@ use aurelius_domain::{Command, CommandResult, ConversationId, EmployeeId, ErrorC
 use std::time::Duration;
 
 async fn setup(client: &Client) -> (EmployeeId, ProjectId) {
-    let create = CreateEmployee { access_level: None, description: None, name: "Planner".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Planner".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let CommandResult::ProjectCreated { project_id, .. } =
         client.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }), None)).await.unwrap().result

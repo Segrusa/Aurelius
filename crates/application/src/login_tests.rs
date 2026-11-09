@@ -49,7 +49,7 @@ fn setup() -> Setup {
     run(Command::SetFollowOrgChart(aurelius_domain::employee::SetFollowOrgChart { follow: false }));
     let CommandResult::ProjectCreated { project_id, .. } = run(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })) else { panic!() };
     let hire = |name: &str| {
-        let create = CreateEmployee { access_level: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
+        let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
         let CommandResult::EmployeeCreated { employee_id, conversation_id } = run(Command::CreateEmployee(create)) else { panic!() };
         (employee_id, conversation_id)
     };

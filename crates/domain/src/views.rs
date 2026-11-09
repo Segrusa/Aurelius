@@ -389,6 +389,9 @@ pub struct EmployeeSummary {
     /// What its runs may do with files and commands (C3); left out when `Inherit`.
     #[serde(default, skip_serializing_if = "crate::employee::AccessLevel::is_inherit")]
     pub access_level: crate::employee::AccessLevel,
+    /// Its tools, MCP servers and what asks first (C2); left out when it has all of its level.
+    #[serde(default, skip_serializing_if = "crate::employee_tools::ToolPolicy::is_default")]
+    pub tool_policy: crate::employee_tools::ToolPolicy,
     /// Projects it has open tasks in (derived, never stored).
     pub projects_active: Vec<ProjectId>,
     pub instructions: Option<String>,

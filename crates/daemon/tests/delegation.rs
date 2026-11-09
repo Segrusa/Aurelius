@@ -38,7 +38,7 @@ async fn ask(root: &Path, run: RunId, call: &str, tool: &str, input: serde_json:
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str) -> EmployeeId {
     match client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result
@@ -777,7 +777,7 @@ async fn a_growing_memory_is_consolidated_by_itself_and_on_request() {
 /// Let an employee work on one task at a time (or not again).
 async fn one_at_a_time(client: &Client, employee_id: EmployeeId, name: &str, role: &str, on: bool) {
     use aurelius_domain::employee::UpdateEmployee;
-    let update = UpdateEmployee { access_level: None, description: None, employee_id, name: name.into(), role: role.into(), title: None, instructions: None, sequential_tasks: Some(on) };
+    let update = UpdateEmployee { access_level: None, tool_policy: None, description: None, employee_id, name: name.into(), role: role.into(), title: None, instructions: None, sequential_tasks: Some(on) };
     client.execute(envelope(Command::UpdateEmployee(update), None)).await.unwrap();
 }
 

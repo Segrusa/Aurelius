@@ -4,7 +4,7 @@
 //! Task conversations carry the task's project.
 
 use crate::{StorageError, now_ms};
-use aurelius_domain::{ConversationId, EmployeeId, ProjectId, employee::{AccessLevel, LifecycleStatus}, views::{AgentView, EmployeeSummary}};
+use aurelius_domain::{ConversationId, EmployeeId, ProjectId, RunId, employee::{AccessLevel, LifecycleStatus}, employee_tools::{ToolPolicy, tool_policy_in}, views::{AgentView, EmployeeSummary}};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 pub struct EmployeeRow {
@@ -142,6 +142,44 @@ pub fn set_access_level(tx: &Transaction<'_>, id: EmployeeId, level: AccessLevel
     Ok(())
 }
 
+/// Which tools it has and which ask first (C2), in `config_json`. The sessions start
+/// over by themselves: a tool list is in their key.
+pub fn set_tool_policy(tx: &Transaction<'_>, id: EmployeeId, policy: &ToolPolicy) -> Result<(), StorageError> {
+    let setting = if policy.is_default() { serde_json::json!({ "mode": "inherit" }) } else { serde_json::json!({ "mode": "value", "value": policy }) };
+    tx.execute("UPDATE employees SET config_json = json_set(config_json, '$.tool_policy', json(?2)) WHERE id = ?1", params![id.to_string(), setting.to_string()])?;
+    Ok(())
+}
+
+/// The profile it was hired from (C6).
+pub fn set_start_profile(tx: &Transaction<'_>, id: EmployeeId, key: &str) -> Result<(), StorageError> {
+    tx.execute("UPDATE employees SET config_json = json_set(config_json, '$.start_profile', ?2) WHERE id = ?1", params![id.to_string(), key])?;
+    Ok(())
+}
+
+/// The tool policy of the employee behind a conversation; none without an employee.
+pub fn tool_policy_of(conn: &Connection, conversation: ConversationId) -> Result<ToolPolicy, StorageError> {
+    let config: Option<String> = conn
+        .query_row("SELECT m.config_json FROM conversations c JOIN employees m ON m.id = c.employee_id WHERE c.id = ?1", [conversation.to_string()], |r| r.get(0))
+        .optional()?;
+    Ok(config.map(|c| tool_policy_in(&c)).unwrap_or_default())
+}
+
+/// The tool policy of the employee a run works for, as it is now: what asks first
+/// holds at once, also for a run already going. None for a run without an employee.
+pub fn tool_policy_of_run(conn: &Connection, run: RunId) -> Result<ToolPolicy, StorageError> {
+    let config: Option<String> = conn
+        .query_row(
+            "SELECT m.config_json FROM runs r
+             LEFT JOIN conversations c ON c.id = r.conversation_id
+             JOIN employees m ON m.id = COALESCE(r.employee_id, c.employee_id)
+             WHERE r.id = ?1",
+            [run.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(config.map(|c| tool_policy_in(&c)).unwrap_or_default())
+}
+
 /// The access level of the employee behind a conversation; a conversation
 /// without an employee (the project assistant) has no level of its own.
 pub fn access_level_of(conn: &Connection, conversation: ConversationId) -> Result<AccessLevel, StorageError> {
@@ -220,7 +258,7 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
                 EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id IN (SELECT id FROM conversations WHERE employee_id = m.id) AND r.status IN ('created','starting','running','cancelling'))
                   OR EXISTS(SELECT 1 FROM employee_inbox i WHERE i.employee_id = m.id AND i.state = 'queued'),
                 c.agent_mode, m.folder, c.browser_allowed, c.screen_allowed,
-                COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0), m.description, m.access_level
+                COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0), m.description, m.access_level, m.config_json
          FROM employees m
          JOIN conversations c ON c.id = {}
          LEFT JOIN blobs b ON b.id = m.instructions_blob_id
@@ -248,11 +286,12 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             r.get::<_, bool>(14)?,
             r.get::<_, String>(15)?,
             r.get::<_, String>(16)?,
+            r.get::<_, String>(17)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks, description, access_level) = row?;
+        let (id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks, description, access_level, config_json) = row?;
         out.push(EmployeeSummary {
             id,
             name,
@@ -261,6 +300,7 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             reports_to,
             description: (!description.is_empty()).then_some(description),
             access_level: AccessLevel::parse(&access_level),
+            tool_policy: tool_policy_in(&config_json),
             projects_active: Vec::new(),
             instructions: key.as_deref().and_then(read_blob),
             status,

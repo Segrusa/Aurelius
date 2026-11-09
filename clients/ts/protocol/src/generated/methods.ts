@@ -85,6 +85,8 @@ export const METHODS = {
   "employee.set_folder": "command",
   "employee.set_reports_to": "command",
   "employee.set_status": "command",
+  "employee.start_profiles": "read",
+  "employee.tool_options": "read",
   "employee.update": "command",
   "event.subscribe": "read",
   "file.get": "read",
@@ -485,6 +487,14 @@ export interface MethodParams {
   "employee.set_folder": M.SetEmployeeFolder;
   "employee.set_reports_to": M.SetEmployeeReportsTo;
   "employee.set_status": M.SetEmployeeStatus;
+  /**
+   * The catalogue of start profiles (feature `employee_profiles`).
+   */
+  "employee.start_profiles": undefined;
+  /**
+   * The tools that can be switched per employee (feature `employee_tools`).
+   */
+  "employee.tool_options": undefined;
   "employee.update": M.UpdateEmployee;
   /**
    * Replay events after `after_seq`, then stream live events (and load/power pushes).

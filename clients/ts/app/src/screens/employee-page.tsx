@@ -33,6 +33,7 @@ import {
   threadGroup,
   togglePin,
 } from "./employee-logic";
+import { policyLine } from "./employee-tools-logic";
 import { employeeState, pinKey, usePins } from "./employees";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, shortDay } from "./org-kit";
 import { overlays } from "./overlays-store";
@@ -390,6 +391,9 @@ export function EmployeePage({ id }: { id: string }) {
                 </MetadataListItem>
                 {features.includes("employee_access") ? (
                   <MetadataListItem label="Access">{accessLabel(accessOf(e))}</MetadataListItem>
+                ) : null}
+                {features.includes("employee_tools") && policyLine(e.tool_policy ?? {}) ? (
+                  <MetadataListItem label="Tools">{policyLine(e.tool_policy ?? {})}</MetadataListItem>
                 ) : null}
               </MetadataList>
               {e.description ? (

@@ -46,6 +46,12 @@ pub enum Method {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         conversation_id: Option<ConversationId>,
     },
+    /// The tools that can be switched per employee (feature `employee_tools`).
+    #[serde(rename = "employee.tool_options")]
+    EmployeeToolOptions,
+    /// The catalogue of start profiles (feature `employee_profiles`).
+    #[serde(rename = "employee.start_profiles")]
+    EmployeeStartProfiles,
     /// An employee's scratchpad (feature `employee_scratchpad`).
     #[serde(rename = "employee.scratchpad")]
     EmployeeScratchpad { employee_id: EmployeeId },

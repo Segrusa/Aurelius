@@ -5585,7 +5585,9 @@ final class CreateEmployee {
     required this.name,
     this.reportsTo,
     required this.role,
+    this.startProfile,
     this.title,
+    this.toolPolicy,
   });
 
   /// What its runs may do with files and commands (C3); none: `Inherit`.
@@ -5600,8 +5602,12 @@ final class CreateEmployee {
   /// Who this employee reports to (not archived); none: a root (the management team).
   final String? reportsTo;
   final String role;
+  /// A key of `employee.start_profiles` (C6). What this command leaves out comes from there.
+  final String? startProfile;
   /// The position on the org chart ("Head of engineering"); free text, at most 80 characters.
   final String? title;
+  /// Which tools and MCP servers it has and which ask first (C2); none: all of its level.
+  final ToolPolicy? toolPolicy;
 
   factory CreateEmployee.fromJson(Map<String, dynamic> json) => CreateEmployee(
     accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
@@ -5611,7 +5617,9 @@ final class CreateEmployee {
     name: (json['name'] as String),
     reportsTo: (json['reports_to'] == null ? null : (json['reports_to'] as String)),
     role: (json['role'] as String),
+    startProfile: (json['start_profile'] == null ? null : (json['start_profile'] as String)),
     title: (json['title'] == null ? null : (json['title'] as String)),
+    toolPolicy: (json['tool_policy'] == null ? null : ToolPolicy.fromJson(json['tool_policy'] as Map<String, dynamic>)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -5622,7 +5630,9 @@ final class CreateEmployee {
     'name': name,
     if (reportsTo != null) 'reports_to': reportsTo,
     'role': role,
+    if (startProfile != null) 'start_profile': startProfile,
     if (title != null) 'title': title,
+    if (toolPolicy != null) 'tool_policy': toolPolicy?.toJson(),
   };
 }
 
@@ -6358,6 +6368,7 @@ final class EmployeeSummary {
     required this.sequentialTasks,
     required this.status,
     this.title,
+    this.toolPolicy,
     required this.version,
     required this.working,
   });
@@ -6397,6 +6408,8 @@ final class EmployeeSummary {
   final bool sequentialTasks;
   final LifecycleStatus status;
   final String? title;
+  /// Its tools, MCP servers and what asks first (C2); left out when it has all of its level.
+  final ToolPolicy? toolPolicy;
   final int version;
   /// Derived presence: a run of this employee is active (never stored).
   final bool working;
@@ -6421,6 +6434,7 @@ final class EmployeeSummary {
     sequentialTasks: (json['sequential_tasks'] as bool),
     status: LifecycleStatus.fromJson(json['status'] as String),
     title: (json['title'] == null ? null : (json['title'] as String)),
+    toolPolicy: (json['tool_policy'] == null ? null : ToolPolicy.fromJson(json['tool_policy'] as Map<String, dynamic>)),
     version: (json['version'] as num).toInt(),
     working: (json['working'] as bool),
   );
@@ -6445,6 +6459,7 @@ final class EmployeeSummary {
     'sequential_tasks': sequentialTasks,
     'status': status.toJson(),
     if (title != null) 'title': title,
+    if (toolPolicy != null) 'tool_policy': toolPolicy?.toJson(),
     'version': version,
     'working': working,
   };
@@ -11635,6 +11650,10 @@ sealed class Method {
           employeeId: (src['employee_id'] as String),
         );
         }
+      case 'employee.start_profiles':
+        return const MethodEmployeeStartProfiles();
+      case 'employee.tool_options':
+        return const MethodEmployeeToolOptions();
       case 'event.subscribe':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -12468,6 +12487,26 @@ final class MethodEmployeeScratchpad extends Method {
       'params': <String, dynamic>{
       'employee_id': employeeId,
     },
+    };
+}
+
+/// The catalogue of start profiles (feature `employee_profiles`).
+final class MethodEmployeeStartProfiles extends Method {
+  const MethodEmployeeStartProfiles();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.start_profiles',
+    };
+}
+
+/// The tools that can be switched per employee (feature `employee_tools`).
+final class MethodEmployeeToolOptions extends Method {
+  const MethodEmployeeToolOptions();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.tool_options',
     };
 }
 
@@ -15494,6 +15533,10 @@ sealed class ResponseBody {
         return ResponseBodyEmployeePlugins(value: EmployeePlugins.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_scratchpad':
         return ResponseBodyEmployeeScratchpad(value: ScratchpadView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_start_profiles':
+        return ResponseBodyEmployeeStartProfiles(value: StartProfiles.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_tool_options':
+        return ResponseBodyEmployeeToolOptions(value: ToolOptions.fromJson(json['value'] as Map<String, dynamic>));
       case 'employees':
         return ResponseBodyEmployees(value: EmployeesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'file':
@@ -16016,6 +16059,36 @@ final class ResponseBodyEmployeeScratchpad extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'employee_scratchpad',
+      'value': value.toJson(),
+    };
+}
+
+/// `employee.start_profiles`.
+final class ResponseBodyEmployeeStartProfiles extends ResponseBody {
+  const ResponseBodyEmployeeStartProfiles({
+    required this.value,
+  });
+
+  final StartProfiles value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_start_profiles',
+      'value': value.toJson(),
+    };
+}
+
+/// `employee.tool_options`.
+final class ResponseBodyEmployeeToolOptions extends ResponseBody {
+  const ResponseBodyEmployeeToolOptions({
+    required this.value,
+  });
+
+  final ToolOptions value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_tool_options',
       'value': value.toJson(),
     };
 }
@@ -18931,6 +19004,84 @@ final class StartIdea {
   };
 }
 
+/// One entry of the catalogue in the repo (`employee.start_profiles`, C6).
+final class StartProfile {
+  const StartProfile({
+    this.accessLevel,
+    required this.description,
+    this.hired = const [],
+    required this.instructions,
+    required this.key,
+    required this.label,
+    required this.name,
+    required this.role,
+    required this.summary,
+    this.title,
+    this.toolPolicy,
+  });
+
+  final AccessLevel? accessLevel;
+  final String description;
+  /// The employees (not archived) that started from this profile.
+  final List<String> hired;
+  final String instructions;
+  /// Stable key for `employee.create` (`engineer`, `chief_of_staff`, ...).
+  final String key;
+  final String label;
+  /// A suggested name; another employee may already have it.
+  final String name;
+  final String role;
+  /// One sentence for the picker.
+  final String summary;
+  final String? title;
+  final ToolPolicy? toolPolicy;
+
+  factory StartProfile.fromJson(Map<String, dynamic> json) => StartProfile(
+    accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
+    description: (json['description'] as String),
+    hired: (json['hired'] == null ? const [] : (json['hired'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    instructions: (json['instructions'] as String),
+    key: (json['key'] as String),
+    label: (json['label'] as String),
+    name: (json['name'] as String),
+    role: (json['role'] as String),
+    summary: (json['summary'] as String),
+    title: (json['title'] == null ? null : (json['title'] as String)),
+    toolPolicy: (json['tool_policy'] == null ? null : ToolPolicy.fromJson(json['tool_policy'] as Map<String, dynamic>)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (accessLevel != null) 'access_level': accessLevel?.toJson(),
+    'description': description,
+    'hired': hired,
+    'instructions': instructions,
+    'key': key,
+    'label': label,
+    'name': name,
+    'role': role,
+    'summary': summary,
+    if (title != null) 'title': title,
+    if (toolPolicy != null) 'tool_policy': toolPolicy?.toJson(),
+  };
+}
+
+/// `employee.start_profiles` (feature `employee_profiles`).
+final class StartProfiles {
+  const StartProfiles({
+    required this.profiles,
+  });
+
+  final List<StartProfile> profiles;
+
+  factory StartProfiles.fromJson(Map<String, dynamic> json) => StartProfiles(
+    profiles: (json['profiles'] as List<dynamic>).map((x0) => StartProfile.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'profiles': profiles.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 /// A new, empty project conversation. It is named after its first message.
 final class StartProjectConversation {
   const StartProjectConversation({
@@ -20565,6 +20716,82 @@ final class TokenUsage {
   };
 }
 
+/// One line of `employee.tool_options`.
+final class ToolOption {
+  const ToolOption({
+    required this.group,
+    required this.label,
+    required this.levels,
+    required this.name,
+  });
+
+  final String group;
+  final String label;
+  /// The access levels that have this tool at all.
+  final List<AccessLevel> levels;
+  final String name;
+
+  factory ToolOption.fromJson(Map<String, dynamic> json) => ToolOption(
+    group: (json['group'] as String),
+    label: (json['label'] as String),
+    levels: (json['levels'] as List<dynamic>).map((x0) => AccessLevel.fromJson(x0 as String)).toList(),
+    name: (json['name'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'group': group,
+    'label': label,
+    'levels': levels.map((x0) => x0.toJson()).toList(),
+    'name': name,
+  };
+}
+
+/// `employee.tool_options` (feature `employee_tools`).
+final class ToolOptions {
+  const ToolOptions({
+    required this.tools,
+  });
+
+  final List<ToolOption> tools;
+
+  factory ToolOptions.fromJson(Map<String, dynamic> json) => ToolOptions(
+    tools: (json['tools'] as List<dynamic>).map((x0) => ToolOption.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'tools': tools.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// `EmployeeConfig::tool_policy` (C2).
+final class ToolPolicy {
+  const ToolPolicy({
+    this.approvalTools = const [],
+    this.mcpServers,
+    this.tools,
+  });
+
+  /// The tools that always go to a board member first, in every mode:
+  /// a tool of [`SWITCHABLE_TOOLS`], or a whole MCP server as `mcp__<server>__*`.
+  final List<String> approvalTools;
+  /// The MCP servers it may use, of those enabled server-wide. None: all of them.
+  final List<String>? mcpServers;
+  /// The switchable tools it has. None: all that its level gives.
+  final List<String>? tools;
+
+  factory ToolPolicy.fromJson(Map<String, dynamic> json) => ToolPolicy(
+    approvalTools: (json['approval_tools'] == null ? const [] : (json['approval_tools'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    mcpServers: (json['mcp_servers'] == null ? null : (json['mcp_servers'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    tools: (json['tools'] == null ? null : (json['tools'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'approval_tools': approvalTools,
+    if (mcpServers != null) 'mcp_servers': mcpServers,
+    if (tools != null) 'tools': tools,
+  };
+}
+
 final class TraceImage {
   const TraceImage({
     required this.bytes,
@@ -20741,6 +20968,7 @@ final class UpdateEmployee {
     required this.role,
     this.sequentialTasks,
     this.title,
+    this.toolPolicy,
   });
 
   /// What its runs may do with files and commands (C3). `None` leaves it as it is.
@@ -20756,6 +20984,9 @@ final class UpdateEmployee {
   final bool? sequentialTasks;
   /// `None` leaves the title as it is; an empty text clears it.
   final String? title;
+  /// Which tools and MCP servers it has and which ask first (C2). `None` leaves it
+  /// as it is; an empty policy is all of its level.
+  final ToolPolicy? toolPolicy;
 
   factory UpdateEmployee.fromJson(Map<String, dynamic> json) => UpdateEmployee(
     accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
@@ -20766,6 +20997,7 @@ final class UpdateEmployee {
     role: (json['role'] as String),
     sequentialTasks: (json['sequential_tasks'] == null ? null : (json['sequential_tasks'] as bool)),
     title: (json['title'] == null ? null : (json['title'] as String)),
+    toolPolicy: (json['tool_policy'] == null ? null : ToolPolicy.fromJson(json['tool_policy'] as Map<String, dynamic>)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -20777,6 +21009,7 @@ final class UpdateEmployee {
     'role': role,
     if (sequentialTasks != null) 'sequential_tasks': sequentialTasks,
     if (title != null) 'title': title,
+    if (toolPolicy != null) 'tool_policy': toolPolicy?.toJson(),
   };
 }
 

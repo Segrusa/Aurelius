@@ -47,6 +47,17 @@ fn access_sentence(level: aurelius_domain::employee::AccessLevel) -> &'static st
     }
 }
 
+/// What the system text says about tools when the employee has a list of its own
+/// (C2): the work tools it has at this level, nothing more.
+fn tools_sentence(access: aurelius_domain::employee::AccessLevel, policy: &aurelius_domain::employee_tools::ToolPolicy) -> Option<String> {
+    policy.tools.as_ref()?;
+    let on: Vec<&str> = aurelius_runtime::claude_code::work_tools(access, policy).into_iter().filter(|t| aurelius_domain::employee_tools::is_switchable(t)).collect();
+    Some(match on.is_empty() {
+        true => "You have no file, command or web tools. When that is needed, hand it to a colleague.".to_owned(),
+        false => format!("Of the file, command and web tools you only have {}. When something else is needed, hand it to a colleague.", on.join(", ")),
+    })
+}
+
 /// Everything the daemon needs to execute a claimed chat run.
 #[derive(Debug, Clone)]
 pub struct ChatRunPlan {
@@ -68,6 +79,8 @@ pub struct ChatRunPlan {
     pub work: Option<(Vec<std::path::PathBuf>, aurelius_domain::autonomy::AgentMode)>,
     /// What the employee's runs may do with files and commands (C3).
     pub access: aurelius_domain::employee::AccessLevel,
+    /// The employee's own tools, MCP servers and what asks first (C2).
+    pub tool_policy: aurelius_domain::employee_tools::ToolPolicy,
     /// The user allows this employee to use the browser (Claude in Chrome or Playwright).
     pub browser: bool,
     /// The browser session (and so tab group) of this run: the employee's id, or the
@@ -371,6 +384,7 @@ User question:
                 let mode = aurelius_storage::conversations::agent_mode(conn, conversation_id)?;
                 let work = (!folders.is_empty() && !quick).then(|| (folders.clone(), mode));
                 let access = aurelius_storage::employees::access_level_of(conn, conversation_id)?;
+                let tool_policy = aurelius_storage::employees::tool_policy_of(conn, conversation_id)?;
                 let browser = work.is_some() && aurelius_storage::conversations::browser_allowed(conn, conversation_id)?;
                 // One browser session per employee: all its conversations and tasks share one tab group.
                 let browser_session = match browser {
@@ -397,7 +411,7 @@ User question:
                         system.unwrap_or_default(),
                         folders[0].display(),
                         folders.get(1).filter(|w| Some(*w) != channel_folder.as_ref()).map(|w| format!(" (and your own workspace {})", w.display())).unwrap_or_default(),
-                        access_sentence(access),
+                        tools_sentence(access, &tool_policy).unwrap_or_else(|| access_sentence(access).to_owned()),
                     ).trim().to_string()),
                     None => system,
                 };
@@ -758,7 +772,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 // Its answer in the group shows the mode it started in.
                 let group = conv::group_run(conn, run_id)?.map(|g| conv::GroupRun { mode: Some(mode), ..g });
                 let guidelines = guidelines.run;
-                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group, discussion, testing, guidelines }))
+                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, tool_policy, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), artifacts, management_mode, session, group, discussion, testing, guidelines }))
             })
             .map_err(storage_error)
     }

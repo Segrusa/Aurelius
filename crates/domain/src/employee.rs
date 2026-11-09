@@ -124,10 +124,15 @@ pub enum Setting<T> {
 pub struct EmployeeConfig {
     pub identity: String,
     pub memory_policy: Setting<String>,
-    pub tool_policy: Setting<String>,
+    /// Which tools and MCP servers it has and which ask first (C2).
+    #[serde(default, deserialize_with = "crate::employee_tools::lenient_tool_policy")]
+    pub tool_policy: Setting<crate::employee_tools::ToolPolicy>,
     pub autonomy_policy: Setting<String>,
     pub task_policy: TaskPolicy,
     pub runtime_selection: Setting<String>,
+    /// The catalogue entry it was hired from (C6); a copy, the catalogue never changes it afterwards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -152,6 +157,12 @@ pub struct CreateEmployee {
     /// What its runs may do with files and commands (C3); none: `Inherit`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access_level: Option<AccessLevel>,
+    /// Which tools and MCP servers it has and which ask first (C2); none: all of its level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_policy: Option<crate::employee_tools::ToolPolicy>,
+    /// A key of `employee.start_profiles` (C6). What this command leaves out comes from there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_profile: Option<String>,
 }
 
 /// The longest an employee's scratchpad may be (C7): it is in every prompt.
@@ -190,6 +201,10 @@ pub struct UpdateEmployee {
     /// What its runs may do with files and commands (C3). `None` leaves it as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub access_level: Option<AccessLevel>,
+    /// Which tools and MCP servers it has and which ask first (C2). `None` leaves it
+    /// as it is; an empty policy is all of its level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_policy: Option<crate::employee_tools::ToolPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

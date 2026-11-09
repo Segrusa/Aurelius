@@ -19,6 +19,7 @@ pub mod message_edits;
 pub mod conversation_sessions;
 pub mod employees;
 pub mod employee_chats;
+pub mod employee_profiles;
 pub mod scheduled;
 pub mod scratchpads;
 pub mod inbox;

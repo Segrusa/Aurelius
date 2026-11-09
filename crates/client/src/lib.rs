@@ -746,6 +746,16 @@ impl Client {
     }
 
     /// An employee's scratchpad.
+    /// `employee.tool_options`.
+    pub async fn employee_tool_options(&self) -> Result<aurelius_domain::employee_tools::ToolOptions, ClientError> {
+        self.read(Method::EmployeeToolOptions, body!(EmployeeToolOptions)).await
+    }
+
+    /// `employee.start_profiles`.
+    pub async fn employee_start_profiles(&self) -> Result<aurelius_domain::employee_tools::StartProfiles, ClientError> {
+        self.read(Method::EmployeeStartProfiles, body!(EmployeeStartProfiles)).await
+    }
+
     pub async fn employee_scratchpad(&self, employee_id: aurelius_domain::EmployeeId) -> Result<aurelius_domain::views::ScratchpadView, ClientError> {
         self.read(Method::EmployeeScratchpad { employee_id }, body!(EmployeeScratchpad)).await
     }

@@ -26,7 +26,7 @@ async fn project(client: &Client, name: &str) -> (ProjectId, PathBuf) {
 }
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str) -> (EmployeeId, ConversationId) {
-    let create = CreateEmployee { access_level: None, description: None, name: name.into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else {
         panic!()
     };
@@ -128,7 +128,7 @@ async fn chosen_project_folder_and_employee_workspaces() {
     // Alex gets an own workspace; Sam works in the project folder only.
     let workspace = dir.path().join("alex-space");
     std::fs::create_dir_all(&workspace).unwrap();
-    let create = CreateEmployee { access_level: None, description: None, name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: Some(workspace.display().to_string()) };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: Some(workspace.display().to_string()) };
     let CommandResult::EmployeeCreated { employee_id: alex, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let (sam, _) = employee(&client, project_id, "Sam").await;
     let folder_of = |employees: Vec<aurelius_protocol::EmployeeSummary>, id: EmployeeId| employees.into_iter().find(|m| m.id == id).unwrap().folder;

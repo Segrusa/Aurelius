@@ -20,7 +20,7 @@ async fn employee_conversation(client: &Client, name: &str) -> (ConversationId, 
     let folder = client.projects().await.unwrap().projects.into_iter().find(|p| p.id == project_id).unwrap().folder.expect("folder");
     // The employee's chat works in the employee's own folder (here the project's).
     let CommandResult::EmployeeCreated { conversation_id, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: format!("Ada of {name}"), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: Some(folder.clone()) }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: format!("Ada of {name}"), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: Some(folder.clone()) }), None))
         .await
         .unwrap()
         .result

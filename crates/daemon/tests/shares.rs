@@ -27,7 +27,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 async fn employee(client: &Client, project_id: ProjectId, name: &str) -> EmployeeId {
     match client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: name.into(), role: "Researcher".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Researcher".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await

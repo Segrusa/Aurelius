@@ -76,7 +76,7 @@ async fn start_gate(root: &Path) -> Setup {
 
 async fn project_with_alex(client: &Client) -> (ProjectId, EmployeeId, ConversationId) {
     let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }), None)).await.unwrap().result else { panic!() };
-    let create = CreateEmployee { access_level: None, description: None, name: "Alex".into(), role: "Backend developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Backend developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     (project_id, employee_id, conversation_id)
 }

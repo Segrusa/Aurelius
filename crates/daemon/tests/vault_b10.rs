@@ -124,7 +124,7 @@ fn nothing_left(root: &Path, secrets: &[Secret]) {
 }
 
 async fn setup(client: &Client) -> (EmployeeId, ProjectId) {
-    let create = CreateEmployee { access_level: None, description: None, name: "Builder".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Builder".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let project = CreateProject { name: "Atlas".into(), description: None, folder: None };
     let CommandResult::ProjectCreated { project_id, .. } = client.execute(aurelius_client::envelope(Command::CreateProject(project), None)).await.unwrap().result else { panic!() };

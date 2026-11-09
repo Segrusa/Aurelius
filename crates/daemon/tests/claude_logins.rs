@@ -291,7 +291,7 @@ async fn signing_in_as_another_board_member_ends_the_earlier_ones_sign_in_and_te
     claude_code(&alex, &program).await;
     let folder = dir.path().join("shell-folder");
     std::fs::create_dir_all(&folder).unwrap();
-    let create = aurelius_domain::employee::CreateEmployee { access_level: None, description: None, name: "Shell".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: Some(folder.display().to_string()) };
+    let create = aurelius_domain::employee::CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Shell".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: Some(folder.display().to_string()) };
     let CommandResult::EmployeeCreated { conversation_id: conversation, .. } = alex.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!("no employee") };
     let (view, _output) = alex.open_terminal(conversation, 80, 24, false).await.unwrap();
     let attached = |list: Vec<aurelius_protocol::TerminalSummary>| list.into_iter().find(|t| t.terminal_id == view.terminal_id).map(|t| t.attached);
@@ -406,7 +406,7 @@ async fn link_login(client: &Client, pushes: &mut UnboundedReceiver<SessionPush>
 
 async fn employee(client: &Client, name: &str) -> (aurelius_domain::EmployeeId, aurelius_domain::ConversationId) {
     use aurelius_domain::employee::CreateEmployee;
-    let create = CreateEmployee { access_level: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     match client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result {
         CommandResult::EmployeeCreated { employee_id, conversation_id } => (employee_id, conversation_id),
         other => panic!("{other:?}"),

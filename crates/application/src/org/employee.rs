@@ -150,10 +150,17 @@ impl CommandService {
         hash: String,
         cmd: &employee::CreateEmployee,
     ) -> Result<Committed, AppError> {
-        let (name, role, instructions) = employee::validate_fields(&cmd.name, &cmd.role, cmd.instructions.as_deref()).map_err(domain_error)?;
-        let title = employee::validate_title(cmd.title.as_deref()).map_err(domain_error)?;
-        let description = employee::validate_description(cmd.description.as_deref()).map_err(domain_error)?;
-        let access_level = cmd.access_level.unwrap_or_default().validate().map_err(domain_error)?;
+        // A start profile (C6) fills in what this command leaves out; what it says itself wins.
+        let profile = match cmd.start_profile.as_deref() {
+            Some(key) => Some(aurelius_storage::employee_profiles::find(key).ok_or_else(|| domain_error(DomainError::OutOfRange { field: "start_profile".into(), detail: format!("{key} is not a start profile") }))?),
+            None => None,
+        };
+        let instructions = cmd.instructions.as_deref().or(profile.map(|p| p.instructions));
+        let (name, role, instructions) = employee::validate_fields(&cmd.name, &cmd.role, instructions).map_err(domain_error)?;
+        let title = employee::validate_title(cmd.title.as_deref().or(profile.and_then(|p| p.title))).map_err(domain_error)?;
+        let description = employee::validate_description(cmd.description.as_deref().or(profile.map(|p| p.description))).map_err(domain_error)?;
+        let access_level = cmd.access_level.or(profile.map(|p| p.access)).unwrap_or_default().validate().map_err(domain_error)?;
+        let tool_policy = cmd.tool_policy.clone().or(profile.map(|p| p.policy())).unwrap_or_default().validate().map_err(domain_error)?;
         let workspace = match cmd.folder.as_deref().filter(|p| !p.trim().is_empty()) {
             Some(p) => Some(self.chosen_folder(p)?),
             None => None,
@@ -169,6 +176,10 @@ impl CommandService {
             };
             employees::set_description(tx, new.employee_id, description.as_deref())?;
             employees::set_access_level(tx, new.employee_id, access_level)?;
+            employees::set_tool_policy(tx, new.employee_id, &tool_policy)?;
+            if let Some(profile) = profile {
+                employees::set_start_profile(tx, new.employee_id, profile.key)?;
+            }
             Ok(Ok((CommandResult::EmployeeCreated { employee_id: new.employee_id, conversation_id: new.conversation_id }, vec![notice])))
         })
     }
@@ -192,8 +203,10 @@ impl CommandService {
         let new_description = cmd.description.as_deref().map(|d| employee::validate_description(Some(d))).transpose().map_err(domain_error)?;
         // `None` leaves the level as it is.
         let access_level = cmd.access_level.map(|l| l.validate()).transpose().map_err(domain_error)?;
+        // `None` leaves the tools as they are.
+        let tool_policy = cmd.tool_policy.clone().map(|p| p.validate()).transpose().map_err(domain_error)?;
         let payload = blobs_store
-            .put_json(&serde_json::json!({ "employee_id": cmd.employee_id, "name": name, "role": role, "title": new_title, "sequential_tasks": cmd.sequential_tasks, "description": new_description, "access_level": access_level }))
+            .put_json(&serde_json::json!({ "employee_id": cmd.employee_id, "name": name, "role": role, "title": new_title, "sequential_tasks": cmd.sequential_tasks, "description": new_description, "access_level": access_level, "tool_policy": tool_policy }))
             .map_err(storage_error)?;
         let employee_id = cmd.employee_id;
         let sequential = cmd.sequential_tasks;
@@ -226,6 +239,9 @@ impl CommandService {
             if let Some(level) = access_level {
                 // The sessions start over by themselves: the level is in their key.
                 employees::set_access_level(tx, employee_id, level)?;
+            }
+            if let Some(policy) = &tool_policy {
+                employees::set_tool_policy(tx, employee_id, policy)?;
             }
             // Changed instructions are a new version, and the employee's sessions start over with them.
             let (_, changed) = aurelius_storage::instruction_versions::record(tx, employee_id, aurelius_storage::instruction_versions::Source::Edited)?;

@@ -41,7 +41,7 @@ async fn a_board_member_talks_with_an_employee_and_hears_of_a_ticket_in_review_o
     let alex = connect(dir.path()).await;
     let robin = connect_as(dir.path(), "robin").await;
     let CommandResult::ProjectCreated { project_id, .. } = alex.execute(envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }), None)).await.unwrap().result else { panic!() };
-    let create = CreateEmployee { access_level: None, description: None, name: "Ada".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Ada".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id: main } = alex.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let chat = open(&alex, employee_id).await;
     assert_eq!(open(&alex, employee_id).await, chat, "it lasts");

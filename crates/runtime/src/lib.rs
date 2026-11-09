@@ -122,7 +122,9 @@ pub enum ToolProfile {
     /// except in Auto.
     /// `access` is the employee's level (C3): which built-in tools the run gets.
     /// Below `Inherit` it has only that list, see [`ToolProfile::confined`].
-    Work { folders: Vec<std::path::PathBuf>, permission_mode: String, approval_bridge: ApprovalBridge, #[serde(default)] browser: bool, #[serde(default)] browser_session: Option<String>, #[serde(default)] playwright: Option<serde_json::Value>, #[serde(default)] mcp_servers: std::collections::BTreeMap<String, serde_json::Value>, #[serde(default)] plugins: Vec<std::path::PathBuf>, #[serde(default)] artifacts: bool, #[serde(default)] access: aurelius_domain::employee::AccessLevel },
+    /// `tool_policy` is the employee's own list on top of that (C2): it can only
+    /// narrow the level, and says which tools always ask first.
+    Work { folders: Vec<std::path::PathBuf>, permission_mode: String, approval_bridge: ApprovalBridge, #[serde(default)] browser: bool, #[serde(default)] browser_session: Option<String>, #[serde(default)] playwright: Option<serde_json::Value>, #[serde(default)] mcp_servers: std::collections::BTreeMap<String, serde_json::Value>, #[serde(default)] plugins: Vec<std::path::PathBuf>, #[serde(default)] artifacts: bool, #[serde(default)] access: aurelius_domain::employee::AccessLevel, #[serde(default)] tool_policy: aurelius_domain::employee_tools::ToolPolicy },
     /// A short decision with only the given tools of the bridge (`tools`: their
     /// full names, allowed without asking): no files, commands, web or other MCP
     /// servers, at most `max_turns` turns (the dispatcher of a ticket).

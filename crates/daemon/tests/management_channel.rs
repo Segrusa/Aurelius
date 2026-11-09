@@ -43,7 +43,7 @@ async fn company(owner: &Client) -> Company {
         panic!()
     };
     let hire = |name: &str, role: &str, title: Option<&str>, boss: Option<EmployeeId>| {
-        Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: name.into(), role: role.into(), title: title.map(str::to_owned), reports_to: boss, instructions: None, folder: None })
+        Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: role.into(), title: title.map(str::to_owned), reports_to: boss, instructions: None, folder: None })
     };
     let mut made = Vec::new();
     let mut boss = None;

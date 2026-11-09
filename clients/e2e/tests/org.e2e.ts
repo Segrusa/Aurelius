@@ -88,6 +88,30 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByRole("link", { name: "Org chart" }).click();
     await expect(page.getByRole("link", { name: /Pixel/ })).toBeVisible();
 
+    // A start profile fills in the dialog; what the daemon stored comes back on the page.
+    await go(page, "Employees");
+    await page.getByRole("button", { name: "Add employee" }).click();
+    await page.getByRole("combobox", { name: "Start from" }).click();
+    await page.getByRole("option", { name: "QA", exact: true }).click();
+    await expect(page.getByPlaceholder("Name, for example Alex")).toHaveValue("Quinn");
+    await expect(page.getByLabel("Instructions")).toHaveValue(/You are QA/);
+    await page.getByRole("button", { name: /Tools: / }).click();
+    await expect(page.getByRole("checkbox", { name: "Edit files", exact: true })).not.toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Run commands", exact: true })).toBeChecked();
+    await expect(page.getByRole("checkbox", { name: "Move tickets asks first" })).toBeChecked();
+    await page.getByRole("checkbox", { name: "Run commands asks first" }).click();
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Quinn", exact: true })).toBeVisible();
+    await expect(page.getByText("9 on, 2 ask first")).toBeVisible();
+
+    // The profile says it was hired, and its name is not offered twice.
+    await go(page, "Employees");
+    await page.getByRole("button", { name: "Add employee" }).click();
+    await page.getByRole("combobox", { name: "Start from" }).click();
+    await page.getByRole("option", { name: "QA · hired as Quinn" }).click();
+    await expect(page.getByPlaceholder("Name, for example Alex")).toHaveValue("");
+    await page.getByRole("button", { name: "Cancel" }).click();
+
     // A chat of one's own: the server takes the opening and the message, and the sidebar lists it.
     await go(page, "Employees");
     await page.getByRole("row", { name: /Orion/ }).getByRole("button", { name: "Chat", exact: true }).click();
@@ -161,7 +185,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
 
     await page.getByRole("tab", { name: "Audit log" }).click();
     await expect(page.getByText("The audit log is read-only")).toBeVisible();
-    await expect(page.getByText("GitHub token").first()).toBeVisible();
+    await expect(page.getByText("GitHub token").locator("visible=true").first()).toBeVisible();
     await page.getByRole("tab", { name: "Items" }).click();
 
     // The key: a wrong password stays out, the right one shows it once.

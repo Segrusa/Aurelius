@@ -140,6 +140,10 @@ abstract final class Methods {
   static const String employeeSetFolder = 'employee.set_folder';
   static const String employeeSetReportsTo = 'employee.set_reports_to';
   static const String employeeSetStatus = 'employee.set_status';
+  /// The catalogue of start profiles (feature `employee_profiles`).
+  static const String employeeStartProfiles = 'employee.start_profiles';
+  /// The tools that can be switched per employee (feature `employee_tools`).
+  static const String employeeToolOptions = 'employee.tool_options';
   static const String employeeUpdate = 'employee.update';
   /// Replay events after `after_seq`, then stream live events (and load/power pushes).
   static const String eventSubscribe = 'event.subscribe';
@@ -760,6 +764,16 @@ Map<String, dynamic> employeeScratchpad({required String employeeId}) => <String
   'params': <String, dynamic>{
     'employee_id': employeeId,
   },
+};
+
+/// The catalogue of start profiles (feature `employee_profiles`).
+Map<String, dynamic> employeeStartProfiles() => <String, dynamic>{
+  'method': Methods.employeeStartProfiles,
+};
+
+/// The tools that can be switched per employee (feature `employee_tools`).
+Map<String, dynamic> employeeToolOptions() => <String, dynamic>{
+  'method': Methods.employeeToolOptions,
 };
 
 /// Replay events after `after_seq`, then stream live events (and load/power pushes).

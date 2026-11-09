@@ -50,8 +50,8 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | 5 | Mailbox, worker, samenvoegen, parkeren, hybride sessies (R1-R3, R6) | gebouwd |
 | 6 | R4 hop op elk bericht, R5 vastgehouden handoff, `hand_off` (B7) | gebouwd |
 | 7 | R7, C7, U3, U7 | gebouwd |
-| 8 | C2 tools en MCP per employee | open |
-| 9 | C6 startprofielen | open |
+| 8 | C2 tools en MCP per employee | gebouwd |
+| 9 | C6 startprofielen | gebouwd |
 | 10 | C9 externe actoren, C10 Telegram | vervallen (besluit gebruiker) |
 | 11 | R8 activity log, U6 | open |
 | 12 | U8 Living Office | vervallen (besluit gebruiker) |

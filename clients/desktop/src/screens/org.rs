@@ -429,6 +429,7 @@ pub(crate) mod tests {
             reports_to,
             description: None,
             access_level: Default::default(),
+            tool_policy: Default::default(),
             instructions: None,
             status: LifecycleStatus::Active,
             version: 1,

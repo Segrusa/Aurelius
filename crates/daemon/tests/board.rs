@@ -106,7 +106,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 }
 
 async fn employee(client: &Client, name: &str) -> EmployeeId {
-    let create = CreateEmployee { access_level: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let created = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap();
     let CommandResult::EmployeeCreated { employee_id, .. } = created.result else { panic!("{:?}", created.result) };
     employee_id
@@ -371,7 +371,7 @@ async fn cancel_ends_the_delegations_of_failed_and_earlier_main_tasks() {
     let daemon = common::start_with(dir.path(), held.clone()).await;
     let client = common::connect_as(dir.path(), "grace").await;
     let builder = employee(&client, "Builder").await;
-    let helper = CreateEmployee { access_level: None, description: None, name: "Helper".into(), role: "Engineer".into(), title: None, reports_to: Some(builder), instructions: None, folder: None };
+    let helper = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Helper".into(), role: "Engineer".into(), title: None, reports_to: Some(builder), instructions: None, folder: None };
     client.execute(aurelius_client::envelope(Command::CreateEmployee(helper), None)).await.unwrap();
     let atlas = project(&client, "Atlas").await;
 

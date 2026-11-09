@@ -59,6 +59,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ScheduledMessageList
         | Method::ThreadWaiting { .. }
         | Method::EmployeeScratchpad { .. }
+        | Method::EmployeeToolOptions
+        | Method::EmployeeStartProfiles
         | Method::GroupChatGet { .. }
         | Method::ChannelList
         | Method::ChannelSearch { .. }
@@ -292,7 +294,8 @@ fn command_needs(command: &Command) -> Needs {
         Command::CreateProject(p) if p.folder.is_some() => Needs::Owner,
         Command::CreateEmployee(m) if m.folder.is_some() => Needs::Owner,
         // The level may widen what an employee's runs can do: like allowing the browser.
-        Command::UpdateEmployee(u) if u.access_level.is_some() => Needs::Cap(Approve),
+        // So may its tool list; a new employee's can only narrow what it would get anyway.
+        Command::UpdateEmployee(u) if u.access_level.is_some() || u.tool_policy.is_some() => Needs::Cap(Approve),
         Command::CreateProject(_)
         | Command::RenameProject(_)
         | Command::SetProjectDescription(_)
@@ -810,9 +813,17 @@ mod tests {
     #[test]
     fn changing_an_access_level_takes_the_right_to_approve() {
         use aurelius_domain::employee::{AccessLevel, UpdateEmployee};
-        let update = |access_level| exec(Command::UpdateEmployee(UpdateEmployee { access_level, description: None, employee_id: aurelius_domain::EmployeeId::new(), name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None }));
+        let update = |access_level| exec(Command::UpdateEmployee(UpdateEmployee { access_level, tool_policy: None, description: None, employee_id: aurelius_domain::EmployeeId::new(), name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None }));
         assert_eq!(required(&update(Some(AccessLevel::Inherit))), cap(Capability::Approve));
         assert_ne!(required(&update(None)), cap(Capability::Approve), "an ordinary edit leaves it alone");
+    }
+
+    #[test]
+    fn changing_a_tool_list_takes_the_right_to_approve() {
+        use aurelius_domain::employee::UpdateEmployee;
+        let update = |tool_policy| exec(Command::UpdateEmployee(UpdateEmployee { access_level: None, tool_policy, description: None, employee_id: aurelius_domain::EmployeeId::new(), name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None }));
+        assert_eq!(required(&update(Some(Default::default()))), cap(Capability::Approve), "an empty policy widens it to the whole level");
+        assert_ne!(required(&update(None)), cap(Capability::Approve));
     }
 
     #[test]

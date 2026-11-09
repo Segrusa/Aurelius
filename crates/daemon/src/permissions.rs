@@ -6,7 +6,8 @@
 //! with feedback, or rejected in the inbox. Tools of the user's browser
 //! always come here, also in auto mode. Screenshots (the bridge's own screen
 //! tools) are allowed at once when the employee's Screen is on, else asked.
-//! Aurelius' own memory and task tools are never asked, in any mode.
+//! Aurelius' own memory and task tools are never asked, in any mode, unless
+//! the employee's tool policy says otherwise (C2).
 //! The plan of a ticket's main task is no inbox approval: it waits for the
 //! board (`plan_review`) and Claude is told to stop.
 //! An MCP tool the user answered with 'Always allow' (`mcp_always_allow`) is
@@ -17,6 +18,10 @@
 //! session moves to that mode. Auto is decided here on every call from the
 //! user's current mode (no allow rules in Claude Code), so a switch back to
 //! Ask or Accept edits holds at once, also mid-answer.
+//! The employee's tool policy (C2) comes before all of that: a tool it has off
+//! is denied, and one it wants asked first goes to the inbox in every mode. No
+//! mode, switch, 'Always allow' or auto-allow lets those through, and it holds
+//! at once, also for a run already going.
 
 use crate::Shared;
 use aurelius_application::run::approvals::{PLAN_TOOL, QUESTION_TOOL, RuntimePermission, SCREEN_TOOLS};
@@ -76,7 +81,9 @@ pub async fn ask(shared: &Arc<Shared>, run_id: RunId, call_id: Option<String>, t
         }
     }
     // A trial of a task (variants) runs unattended in its own worktree: nobody is
-    // asked; what stays inside goes, anything outside is refused.
+    // asked; what stays inside goes, anything outside is refused. That also holds
+    // for what the employee's tool list wants asked first: nobody can answer here,
+    // and the trial works in a copy.
     let s = shared.clone();
     let probe = tokio::task::spawn_blocking(move || s.service.probe_worktree(run_id)).await.map_err(|e| ProtocolError::new(ErrorCode::Internal, e.to_string()))??;
     if let Some(worktree) = probe {
@@ -85,12 +92,20 @@ pub async fn ask(shared: &Arc<Shared>, run_id: RunId, call_id: Option<String>, t
             aurelius_domain::variants::ProbeVerdict::Deny(why) => deny(why),
         });
     }
+    let policy = {
+        let s = shared.clone();
+        tokio::task::spawn_blocking(move || s.service.run_tool_policy(run_id)).await.map_err(|e| ProtocolError::new(ErrorCode::Internal, e.to_string()))??
+    };
+    if !policy.allows(&tool) {
+        return Ok(deny("This employee does not have this tool. Hand it to a colleague who does.".into()));
+    }
+    let asks_first = policy.needs_approval(&tool);
     // Allowed by rule, but Claude Code's plan mode still asks for MCP tools.
-    if aurelius_runtime::claude_code::MEMORY_TOOLS.contains(&tool.as_str()) {
+    if !asks_first && aurelius_runtime::claude_code::MEMORY_TOOLS.contains(&tool.as_str()) {
         return Ok(BridgeOutcome::Permission { allow: true, message: None, updated_input: None, updated_permissions: None });
     }
     // Screenshots the user allowed for this employee need no question.
-    if SCREEN_TOOLS.contains(&tool.as_str()) {
+    if !asks_first && SCREEN_TOOLS.contains(&tool.as_str()) {
         let s = shared.clone();
         let allowed = tokio::task::spawn_blocking(move || s.service.run_screen_allowed(run_id))
             .await
@@ -100,7 +115,7 @@ pub async fn ask(shared: &Arc<Shared>, run_id: RunId, call_id: Option<String>, t
         }
     }
     // The safe read-only tools (server setting, on by default) pass in every mode but Plan.
-    if aurelius_protocol::auto_allow_tool(&tool) && mode_now(shared, run_id).await? != AgentMode::Plan {
+    if !asks_first && aurelius_protocol::auto_allow_tool(&tool) && mode_now(shared, run_id).await? != AgentMode::Plan {
         let store = shared.store().clone();
         let on = tokio::task::spawn_blocking(move || store.read(aurelius_storage::auto_allow::enabled))
             .await
@@ -123,8 +138,9 @@ pub async fn ask(shared: &Arc<Shared>, run_id: RunId, call_id: Option<String>, t
     }
     // Files, commands and the web follow a mode the user switched to during this answer.
     // The browser follows the mode too: turning it on for the employee is the consent, Auto then does not ask again.
-    let work = !question && !plan && !SCREEN_TOOLS.contains(&tool.as_str());
-    let eligible = always_allow_eligible(&tool);
+    // What the employee wants asked first is no work a mode may wave through.
+    let work = !question && !plan && !asks_first && !SCREEN_TOOLS.contains(&tool.as_str());
+    let eligible = !asks_first && always_allow_eligible(&tool);
     if work {
         let running = shared.run_modes.lock().ok().and_then(|m| m.get(&run_id).copied());
         let s = shared.clone();

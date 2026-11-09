@@ -214,6 +214,8 @@ impl CommandService {
             serde_json::json!(["Looks at your screen; it can show anything that is open. Allowing it counts for the rest of this answer. Turn Screen on for this employee to stop asking."])
         } else if effect == Effect::ExternalWrite && aurelius_runtime::claude_code::ARTIFACT_TOOLS.contains(&tool) {
             serde_json::json!([artifact_reason(tool, input), "Acts on your claude.ai account. Aurelius asks in Ask and Accept edits mode; Auto lets it through, Plan mode blocks it."])
+        } else if self.run_tool_policy(run_id)?.needs_approval(tool) {
+            serde_json::json!(["This employee's tool settings ask first for this, in every mode."])
         } else {
             serde_json::json!(["The employee's mode asks before this action."])
         };
@@ -436,6 +438,11 @@ impl CommandService {
     }
 
     /// Whether the user lets the employee behind this run take screenshots without asking.
+    /// Which tools the employee of this run has and which ask first (C2), as it is now.
+    pub fn run_tool_policy(&self, run_id: RunId) -> Result<aurelius_domain::employee_tools::ToolPolicy, AppError> {
+        self.store.read(|c| aurelius_storage::employees::tool_policy_of_run(c, run_id)).map_err(storage_error)
+    }
+
     pub fn run_screen_allowed(&self, run_id: RunId) -> Result<bool, AppError> {
         self.store.read(|c| conv::screen_for_run(c, run_id)).map_err(storage_error)
     }

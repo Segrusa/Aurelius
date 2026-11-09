@@ -387,6 +387,11 @@ pub mod feature {
     /// `schedule_message` on the bridge shows to board members: `scheduled_message.list`,
     /// `scheduled_message.cancel`, and who waits for a thread (`thread.waiting`).
     pub const SCHEDULED_MESSAGES: &str = "scheduled_messages";
+    /// An employee has a tool list, what asks first and its own MCP servers
+    /// (`EmployeeSummary::tool_policy`, `employee.tool_options`, C2).
+    pub const EMPLOYEE_TOOLS: &str = "employee_tools";
+    /// `employee.create` takes a start profile (`employee.start_profiles`, C6).
+    pub const EMPLOYEE_PROFILES: &str = "employee_profiles";
     /// An employee's scratchpad can be read (`employee.scratchpad`, `RunBrief::employee_id`).
     pub const EMPLOYEE_SCRATCHPAD: &str = "employee_scratchpad";
 }
@@ -437,6 +442,8 @@ pub const FEATURES: &[&str] = &[
     feature::EMPLOYEE_CHATS,
     feature::SCHEDULED_MESSAGES,
     feature::EMPLOYEE_SCRATCHPAD,
+    feature::EMPLOYEE_TOOLS,
+    feature::EMPLOYEE_PROFILES,
 ];
 
 /// Daemon → client.
@@ -539,6 +546,10 @@ pub enum ResponseBody {
     ScheduledMessages(aurelius_domain::views::ScheduledMessagesSnapshot),
     ThreadWaiting(aurelius_domain::views::ThreadWaitingSnapshot),
     EmployeeScratchpad(aurelius_domain::views::ScratchpadView),
+    /// `employee.tool_options`.
+    EmployeeToolOptions(aurelius_domain::employee_tools::ToolOptions),
+    /// `employee.start_profiles`.
+    EmployeeStartProfiles(aurelius_domain::employee_tools::StartProfiles),
     /// `thread.read`.
     Thread(aurelius_domain::views::ThreadSnapshot),
     /// `ticket.followers`.

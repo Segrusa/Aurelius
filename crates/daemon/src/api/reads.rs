@@ -67,6 +67,12 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::ScheduledMessageList => scheduled_messages(shared, reader).await,
         Method::ThreadWaiting { ticket_id, conversation_id } => thread_waiting(shared, reader, ticket_id, conversation_id).await,
         Method::EmployeeScratchpad { employee_id } => employee_scratchpad(shared, employee_id).await,
+        Method::EmployeeToolOptions => Ok(ResponseBody::EmployeeToolOptions(employee_tool_options())),
+        Method::EmployeeStartProfiles => {
+            let store = shared.store().clone();
+            let profiles = storage_task(move || store.read(aurelius_storage::employee_profiles::list)).await?;
+            Ok(ResponseBody::EmployeeStartProfiles(aurelius_domain::employee_tools::StartProfiles { profiles }))
+        }
         Method::GroupChatGet { channel } => {
             let store = shared.store().clone();
             let found = storage_task(move || {
@@ -450,6 +456,24 @@ async fn thread_waiting(shared: &Arc<Shared>, reader: Option<aurelius_domain::Us
         return Err(ProtocolError::new(ErrorCode::NotFound, "this thread does not exist"));
     };
     Ok(ResponseBody::ThreadWaiting(aurelius_domain::views::ThreadWaitingSnapshot { as_of_seq, waiters, scheduled }))
+}
+
+/// The switchable tools, with the access levels that have them (C2).
+fn employee_tool_options() -> aurelius_domain::employee_tools::ToolOptions {
+    use aurelius_domain::employee::AccessLevel;
+    use aurelius_domain::employee_tools::{BRIDGE_TOOL_PREFIX, SWITCHABLE_TOOLS, ToolOption, ToolOptions};
+    let levels = [AccessLevel::Inherit, AccessLevel::ReadEdit, AccessLevel::ReadOnly];
+    let tools = SWITCHABLE_TOOLS
+        .iter()
+        .map(|t| ToolOption {
+            name: t.name.to_owned(),
+            label: t.label.to_owned(),
+            group: t.group.to_owned(),
+            // The bridge's tools stay at every level.
+            levels: levels.into_iter().filter(|l| t.name.starts_with(BRIDGE_TOOL_PREFIX) || aurelius_runtime::claude_code::tools_for(*l).contains(&t.name)).collect(),
+        })
+        .collect();
+    ToolOptions { tools }
 }
 
 async fn employee_scratchpad(shared: &Arc<Shared>, employee: aurelius_domain::EmployeeId) -> Result<ResponseBody, ProtocolError> {

@@ -15,7 +15,7 @@ use std::path::Path;
 use std::time::Duration;
 
 async fn hire(client: &Client, name: &str) -> (EmployeeId, ConversationId) {
-    let create = CreateEmployee { access_level: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     (employee_id, conversation_id)
 }

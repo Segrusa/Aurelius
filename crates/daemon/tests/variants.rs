@@ -81,7 +81,7 @@ fn repo(root: &Path) -> PathBuf {
 async fn setup(client: &Client, folder: Option<&Path>, name: &str) -> (ProjectId, EmployeeId) {
     let create = CreateProject { name: "Atlas".into(), description: None, folder: folder.map(|f| f.display().to_string()) };
     let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(Command::CreateProject(create), None)).await.unwrap().result else { panic!() };
-    let employee = CreateEmployee { access_level: None, description: None, name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let employee = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(employee), None)).await.unwrap().result else { panic!() };
     (project_id, employee_id)
 }

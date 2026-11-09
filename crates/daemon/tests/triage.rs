@@ -95,7 +95,7 @@ async fn board(choices: Vec<Option<&'static str>>) -> Board {
 }
 
 async fn employee(client: &Client, name: &str, role: &str) -> EmployeeId {
-    let create = CreateEmployee { access_level: None, description: None, name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     employee_id
 }

@@ -59,7 +59,7 @@ async fn setup(client: &Client) -> (EmployeeId, ProjectId, PathBuf) {
     let folder = PathBuf::from(client.projects().await.unwrap().projects.into_iter().find(|p| p.id == project_id).unwrap().folder.expect("project folder"));
     let CommandResult::EmployeeCreated { employee_id, .. } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: "Alex".into(), role: "Builder".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Builder".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -79,7 +79,7 @@ async fn a_real_dispatcher_assigns_the_ticket() {
     let client = connect_as(dir.path(), "grace").await;
     let (dispatcher, project, _) = setup(&client).await;
     let CommandResult::EmployeeCreated { employee_id: designer, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: "Dana".into(), role: "UI/UX Designer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Dana".into(), role: "UI/UX Designer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result
@@ -87,7 +87,7 @@ async fn a_real_dispatcher_assigns_the_ticket() {
         panic!()
     };
     let CommandResult::EmployeeCreated { .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: "Sam".into(), role: "Database Engineer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Sam".into(), role: "Database Engineer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result

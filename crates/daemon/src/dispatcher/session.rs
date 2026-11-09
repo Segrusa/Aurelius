@@ -48,14 +48,19 @@ impl Choice {
 /// The version of the platform rules is part of it: a resumed session keeps its
 /// system text for up to a day, and never gets other rules (guidelines B6). The
 /// access level is too: a resumed session must not remember tools it no longer has.
+/// So is an employee's own tool list (C2), only when it has one: an employee
+/// without a list keeps the sessions it has. What asks first is not in it, a
+/// resumed session just gets asked.
 pub(super) fn session_key(plan: &ChatRunPlan, profile: &ToolProfile) -> SessionKey {
     let model = plan.config.model.clone().unwrap_or_default();
     match profile {
-        ToolProfile::Work { folders, browser, playwright, plugins, artifacts, access, .. } => SessionKey {
-            model,
-            folder: folders.first().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(),
-            profile: serde_json::json!({ "folders": folders, "browser": browser, "playwright": playwright.is_some(), "plugins": plugins, "artifacts": artifacts, "platform_rules": aurelius_application::run::plan::PLATFORM_RULES_VERSION, "access": access.as_str() }).to_string(),
-        },
+        ToolProfile::Work { folders, browser, playwright, plugins, artifacts, access, tool_policy, .. } => {
+            let mut key = serde_json::json!({ "folders": folders, "browser": browser, "playwright": playwright.is_some(), "plugins": plugins, "artifacts": artifacts, "platform_rules": aurelius_application::run::plan::PLATFORM_RULES_VERSION, "access": access.as_str() });
+            if let Some(tools) = &tool_policy.tools {
+                key["tools"] = serde_json::json!(tools);
+            }
+            SessionKey { model, folder: folders.first().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(), profile: key.to_string() }
+        }
         ToolProfile::TextOnly => SessionKey { model, folder: String::new(), profile: "text".into() },
         ToolProfile::Triage { .. } => SessionKey { model, folder: String::new(), profile: "triage".into() },
     }

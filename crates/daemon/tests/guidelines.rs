@@ -117,7 +117,7 @@ async fn claude_code(client: &Client, root: &Path) {
 }
 
 async fn hire(client: &Client, name: &str) -> (EmployeeId, ConversationId) {
-    let create = CreateEmployee { access_level: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     (employee_id, conversation_id)
 }

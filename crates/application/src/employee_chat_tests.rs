@@ -46,9 +46,9 @@ fn setup() -> Setup {
     let (grace, robin) = (user(&service, "grace"), user(&service, "robin"));
     let run = |command| service.execute(&ctx(Some(grace)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command }).unwrap().receipt.result;
     run(Command::CreateProject(CreateProject { name: "Orbit".into(), description: None, folder: None }));
-    let create = CreateEmployee { access_level: None, description: None, name: "Atlas".into(), role: "Lead".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Atlas".into(), role: "Lead".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id: atlas, conversation_id: main } = run(Command::CreateEmployee(create)) else { panic!() };
-    run(Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: "Bo".into(), role: "Dev".into(), title: None, reports_to: Some(atlas), instructions: None, folder: None }));
+    run(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Bo".into(), role: "Dev".into(), title: None, reports_to: Some(atlas), instructions: None, folder: None }));
     Setup { _dir: dir, service, grace, robin, atlas, main }
 }
 

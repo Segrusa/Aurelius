@@ -5,7 +5,15 @@ import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/Segme
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { expectBody } from "@aurelius/client";
-import type { AccessLevel, DefaultsView, EmployeeSummary, RunSettings, Setting2 } from "@aurelius/protocol";
+import type {
+  AccessLevel,
+  DefaultsView,
+  EmployeeSummary,
+  RunSettings,
+  Setting2,
+  StartProfile,
+  ToolPolicy,
+} from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -32,6 +40,8 @@ import {
   reportsCandidates,
   usableConnections,
 } from "./employee-logic";
+import { EmployeeTools } from "./employee-tools";
+import { isDefaultPolicy, nameAfterProfile, profileOption, samePolicy } from "./employee-tools-logic";
 import { DialogSelector, FormDialog, failureOf, Hint, Problem, shortDay } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
 import { modelName, useSetting } from "./settings-kit";
@@ -49,6 +59,7 @@ const asSetting = (v: string): Setting2 => (v === "inherit" ? { mode: "inherit" 
 
 // Selector takes no empty value: "nobody" and "inherit" need a word of their own.
 const NOBODY = "nobody";
+const BLANK = "blank";
 
 const styles = stylex.create({
   two: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 },
@@ -98,6 +109,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const connections = usableConnections(list.data?.connections ?? []);
   const inherited = inheritedRun(list.data);
   const hasAccess = features.includes("employee_access");
+  const hasTools = features.includes("employee_tools");
   const employees = useEmployees();
   const [name, setName] = useState(employee?.name ?? "");
   const [role, setRole] = useState(employee?.role ?? "");
@@ -109,9 +121,30 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const [mode, setMode] = useState<AgentMode>(employee?.agent_mode ?? "ask");
   const [sequential, setSequential] = useState(employee?.sequential_tasks ?? false);
   const [access, setAccess] = useState<AccessLevel>(accessOf(employee));
+  const [policy, setPolicy] = useState<ToolPolicy>(employee?.tool_policy ?? {});
+  const [profile, setProfile] = useState<StartProfile | null>(null);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const profiles = useKeyed(
+    ["employees", "start_profiles"],
+    async () => expectBody(await connection.call("employee.start_profiles"), "employee_start_profiles").value.profiles,
+    employee === null && features.includes("employee_profiles"),
+  );
+  // Everything comes from the profile; only a name that was typed stays.
+  const chooseProfile = (key: string) => {
+    const next = (profiles.data ?? []).find((p) => p.key === key) ?? null;
+    const taken = (employees.data ?? []).map((e) => e.name);
+    setName(nameAfterProfile(name, profile?.name ?? null, next?.name ?? null, taken));
+    setProfile(next);
+    setRole(next?.role ?? "");
+    setTitle(next?.title ?? "");
+    setDescription(next?.description ?? "");
+    setInstructions(next?.instructions ?? "");
+    setAccess(next?.access_level ?? "inherit");
+    setPolicy(next?.tool_policy ?? {});
+  };
 
   const defaults = useKeyed(
     ["settings", "connections", "defaults", employee?.id],
@@ -167,6 +200,17 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
             ...(reportsTo ? { reports_to: reportsTo } : {}),
             ...(folder.trim() ? { folder: folder.trim() } : {}),
             ...(access !== "inherit" ? { access_level: access } : {}),
+            ...(!isDefaultPolicy(policy) ? { tool_policy: policy } : {}),
+            // With a profile, what was cleared here must not come back from the catalogue.
+            ...(profile
+              ? {
+                  start_profile: profile.key,
+                  title: title.trim(),
+                  description: description.trim(),
+                  access_level: access,
+                  tool_policy: policy,
+                }
+              : {}),
           },
           { retry: false },
         );
@@ -226,6 +270,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
           sequential_tasks: sequential,
           // Only a change: it takes more rights than an ordinary edit on a phone.
           ...(access !== accessOf(employee) ? { access_level: access } : {}),
+          ...(!samePolicy(policy, employee.tool_policy ?? {}) ? { tool_policy: policy } : {}),
         },
         { retry: false, expectedVersion: employee.version },
       );
@@ -337,6 +382,18 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
       }
     >
       {employee ? <Hint>Changes apply to new runs; a running run keeps its configuration.</Hint> : null}
+      {!employee && (profiles.data ?? []).length > 0 ? (
+        <DialogSelector
+          label="Start from"
+          value={profile?.key ?? BLANK}
+          onChange={chooseProfile}
+          description={profile?.summary ?? "A profile fills in the fields below; change whatever you like."}
+          options={[
+            { value: BLANK, label: "Blank" },
+            ...(profiles.data ?? []).map((p) => ({ value: p.key, label: profileOption(p) })),
+          ]}
+        />
+      ) : null}
       <div {...stylex.props(styles.two)}>
         <TextInput hasAutoFocus label="Name" placeholder="Name, for example Alex" value={name} onChange={setName} />
         <TextInput
@@ -372,6 +429,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
       {employee ? null : (
         <>
           {accessField}
+          {hasTools ? <EmployeeTools policy={policy} access={access} onChange={setPolicy} /> : null}
           <div {...stylex.props(styles.folder)}>
             <span {...stylex.props(styles.grow)}>
               <TextInput
@@ -435,6 +493,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
             ) : null}
           </div>
           {accessField}
+          {hasTools ? <EmployeeTools policy={policy} access={access} onChange={setPolicy} /> : null}
           <div>
             <Button
               size="sm"

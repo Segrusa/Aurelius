@@ -284,14 +284,15 @@ pub async fn remove(shared: &Arc<Shared>, name: String, user: Option<aurelius_do
     list(shared, user).await
 }
 
-/// The full configs of the enabled servers that still exist, read now.
+/// The full configs of the enabled servers that still exist, read now, of
+/// those the ones this employee may use (C2).
 /// Empty when none is enabled (the run is then as before).
-pub fn configs_for_run(shared: &Shared) -> BTreeMap<String, Value> {
+pub fn configs_for_run(shared: &Shared, policy: &aurelius_domain::employee_tools::ToolPolicy) -> BTreeMap<String, Value> {
     let enabled = shared.store().read(|c| Ok(enabled_names(c).unwrap_or_default())).unwrap_or_default();
     if enabled.is_empty() {
         return BTreeMap::new();
     }
-    discover().into_iter().filter(|f| enabled.contains(&f.name)).map(|f| (f.name, f.config)).collect()
+    discover().into_iter().filter(|f| enabled.contains(&f.name) && policy.allows_server(&f.name)).map(|f| (f.name, f.config)).collect()
 }
 
 /// Whether `tool` (`mcp__<server>__<tool>`) belongs to an enabled server.

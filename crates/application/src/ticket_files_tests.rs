@@ -45,7 +45,7 @@ fn setup() -> Setup {
         .unwrap();
     let made = service.execute(&ctx(Some(user)), envelope(Command::CreateProject(CreateProject { name: "Orbit".into(), description: None, folder: None }))).unwrap().receipt.result;
     let CommandResult::ProjectCreated { project_id, .. } = made else { panic!("{made:?}") };
-    let create = CreateEmployee { access_level: None, description: None, name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
     let made = service.execute(&ctx(Some(user)), envelope(Command::CreateEmployee(create))).unwrap().receipt.result;
     let CommandResult::EmployeeCreated { employee_id: ann, .. } = made else { panic!("{made:?}") };
     let folder = dir.path().join("work");

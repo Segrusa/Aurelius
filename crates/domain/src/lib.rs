@@ -15,6 +15,7 @@ pub mod company;
 pub mod connection;
 pub mod conversation;
 pub mod employee;
+pub mod employee_tools;
 pub mod error;
 pub mod events;
 pub mod files;

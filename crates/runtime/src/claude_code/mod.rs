@@ -159,6 +159,11 @@ pub fn tools_for(access: aurelius_domain::employee::AccessLevel) -> &'static [&'
     }
 }
 
+/// The built-in tools a run has: its level's, without what the employee's own list leaves out (C2).
+pub fn work_tools(access: aurelius_domain::employee::AccessLevel, policy: &aurelius_domain::employee_tools::ToolPolicy) -> Vec<&'static str> {
+    tools_for(access).iter().copied().filter(|t| policy.allows(t)).collect()
+}
+
 /// Tools that always go to the user instead of being allowed by rule.
 pub const ALWAYS_ASKED_TOOLS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
 /// The MCP server Claude Code starts for `--chrome`, and the prefix of its tools.
@@ -191,7 +196,11 @@ pub const APPROVAL_TOOL: &str = "mcp__aurelius__approve";
 /// the bridge itself checks the employee's Screen permission and otherwise
 /// asks the user in the inbox (so it holds in every mode, Auto too).
 pub const SCREEN_TOOLS: &[&str] = &["mcp__aurelius__screenshot", "mcp__aurelius__list_windows"];
-/// An employee's own memory through the bridge: allowed by rule, never asked.
+/// The bridge's tools that are allowed by rule and not asked (the name is older than
+/// the list): the employee's own memory and scratchpad, reading its work and its
+/// actions in the company. An employee's tool policy (C2) can switch off the ones
+/// in `SWITCHABLE_TOOLS` or make them ask first; they then leave `--allowedTools`
+/// and `permissions::ask` puts them in the inbox like any other tool.
 pub const MEMORY_TOOLS: &[&str] = &["mcp__aurelius__remember", "mcp__aurelius__recall", "mcp__aurelius__delegate_task", "mcp__aurelius__message_task", "mcp__aurelius__hand_over_task", "mcp__aurelius__add_idea", "mcp__aurelius__list_tasks", "mcp__aurelius__read_task", "mcp__aurelius__list_conversations", "mcp__aurelius__read_conversation", "mcp__aurelius__propose_colleague", "mcp__aurelius__propose_instructions", "mcp__aurelius__propose_guideline", "mcp__aurelius__list_guidelines", "mcp__aurelius__read_guideline", "mcp__aurelius__suggest_replies", "mcp__aurelius__set_mode", "mcp__aurelius__read_group_chat", "mcp__aurelius__post_to_group_chat", "mcp__aurelius__read_discussion", "mcp__aurelius__post_to_discussion", "mcp__aurelius__vault_list", "mcp__aurelius__vault_read", "mcp__aurelius__list_tickets", "mcp__aurelius__read_ticket", "mcp__aurelius__create_ticket", "mcp__aurelius__update_ticket", "mcp__aurelius__move_ticket", "mcp__aurelius__post_to_ticket", "mcp__aurelius__hand_off", "mcp__aurelius__tell_responsible", "mcp__aurelius__schedule_message", "mcp__aurelius__scratchpad"];
 /// Claude Code's subagents (`--tools Agent` lists as `Task`, CLI 2.1.287):
 /// they inherit the run's tools and ask the same way.
@@ -265,8 +274,8 @@ pub fn profile_arguments(profile: &ToolProfile, model: Option<&str>, system_file
                 "--permission-prompts", "none", "--max-turns", &max_turns.to_string(),
             ]);
         }
-        ToolProfile::Work { folders, permission_mode, approval_bridge, browser, browser_session, playwright, mcp_servers, plugins, artifacts, access } => {
-            let listed = tools_for(*access);
+        ToolProfile::Work { folders, permission_mode, approval_bridge, browser, browser_session, playwright, mcp_servers, plugins, artifacts, access, tool_policy } => {
+            let listed = work_tools(*access, tool_policy);
             let mut tools = listed.join(",");
             tools.push(',');
             tools.push_str(TOOL_SEARCH_TOOL);
@@ -301,7 +310,11 @@ pub fn profile_arguments(profile: &ToolProfile, model: Option<&str>, system_file
                 "--permission-mode", mode, "--permission-prompts", "host", "--permission-prompt-tool", APPROVAL_TOOL,
             ]);
             // Starting a subagent is never asked: what it does is asked as usual.
-            let mut allowed: Vec<&str> = SCREEN_TOOLS.iter().chain(MEMORY_TOOLS).copied().chain(listed.contains(&SUBAGENT_TOOL).then_some(SUBAGENT_TOOL)).chain([TOOL_SEARCH_TOOL]).collect();
+            // What the employee's list has off or asks first is no rule of ours: off it is not
+            // there, and asking first needs Claude Code to come to the bridge.
+            let own = MEMORY_TOOLS.iter().copied().filter(|t| tool_policy.allows(t) && !tool_policy.needs_approval(t));
+            let subagent = (listed.contains(&SUBAGENT_TOOL) && !tool_policy.needs_approval(SUBAGENT_TOOL)).then_some(SUBAGENT_TOOL);
+            let mut allowed: Vec<&str> = SCREEN_TOOLS.iter().copied().chain(own).chain(subagent).chain([TOOL_SEARCH_TOOL]).collect();
             // A skill only loads instructions; what it then does is asked as usual.
             if !plugins.is_empty() {
                 allowed.push(SKILL_TOOL);
@@ -441,19 +454,32 @@ pub const ENV_DUMP_RULES: &[&str] = &[
 /// rules against printing the environment (E17).
 #[cfg(test)]
 fn deny_settings(login: &ClaudeLogin, vault: bool) -> String {
-    deny_settings_with_plans(login, vault, None)
+    deny_settings_with_plans(login, vault, None, &[])
+}
+
+/// The `ask` rules of a run: the built-in tools its employee wants asked first (C2).
+/// Without a rule Claude Code decides some of them itself (reads in the folder,
+/// edits in Accept edits) and never reaches the bridge.
+fn ask_rules(profile: &ToolProfile) -> Vec<String> {
+    match profile {
+        ToolProfile::Work { tool_policy, .. } => WORK_TOOLS.iter().filter(|t| tool_policy.needs_approval(t)).map(|t| t.to_string()).collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// As `deny_settings`, with `plansDirectory`: plan mode writes its plan file
 /// there instead of in `~/.claude/plans`, which the deny rules above keep shut.
 /// The folder is the run's own, so runs do not read each other's plans; the
 /// deny rules on `~/.claude` stay as they are (AUR-PLAN-FILE-001).
-fn deny_settings_with_plans(login: &ClaudeLogin, vault: bool, plans: Option<&std::path::Path>) -> String {
+fn deny_settings_with_plans(login: &ClaudeLogin, vault: bool, plans: Option<&std::path::Path>, ask: &[String]) -> String {
     let mut deny = deny_rules(login);
     if vault {
         deny.extend(ENV_DUMP_RULES.iter().map(|r| r.to_string()));
     }
     let mut settings = serde_json::json!({ "permissions": { "deny": deny } });
+    if !ask.is_empty() {
+        settings["permissions"]["ask"] = serde_json::json!(ask);
+    }
     if let Some(plans) = plans {
         settings["plansDirectory"] = serde_json::Value::String(plans.to_string_lossy().into_owned());
     }
@@ -817,7 +843,7 @@ impl AgentRuntime for ClaudeCodeRuntime {
             // Plan mode saves its plan in a folder of this run, not in ~/.claude/plans (denied).
             let plans = self.run_root.join(request.run_id.to_string()).join("plans");
             tokio::fs::create_dir_all(&plans).await.map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
-            args.push(deny_settings_with_plans(login, matches!(request.profile, ToolProfile::Work { .. }) && !self.vault.is_empty(), Some(&plans)));
+            args.push(deny_settings_with_plans(login, matches!(request.profile, ToolProfile::Work { .. }) && !self.vault.is_empty(), Some(&plans), &ask_rules(&request.profile)));
             if let ToolProfile::Work { folders, .. } = &request.profile {
                 if holds_logins(folders, login) {
                     tracing::warn!(run = %request.run_id, "a work folder of this run holds the Claude login folders; only Claude Code's best effort keeps its searches out of them");
@@ -1150,6 +1176,8 @@ mod vault_delivery_tests {
         for tool in ["Read", "Glob", "Grep"] {
             assert!(rules.contains(&format!("{tool}({secrets})")), "{tool}: {rules:?}");
         }
+        let asks: serde_json::Value = serde_json::from_str(&deny_settings_with_plans(&own, false, None, &["Read".to_owned()])).unwrap();
+        assert_eq!(asks["permissions"]["ask"], serde_json::json!(["Read"]), "reads in the folder only ask with a rule");
         let with: serde_json::Value = serde_json::from_str(&deny_settings(&own, true)).unwrap();
         let deny: Vec<&str> = with["permissions"]["deny"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
         for rule in ["Bash(env)", "Bash(env:*)", "Bash(printenv:*)", "Bash(set)", "Bash(export -p)", "Bash(declare -x)", "Bash(cat /proc/*/environ)"] {
@@ -1188,7 +1216,7 @@ mod vault_delivery_tests {
         let login = ClaudeLogin::of(&dir, aurelius_domain::UserId::new()).unwrap();
         let runtime = ClaudeCodeRuntime { executable: script, run_root: dir.join("runs"), model: None, login: Some(login), vault: vault(&[("GITHUB_TOKEN", FAKE)]) };
         let bridge = ApprovalBridge { program: "/bin/true".into(), args: vec![] };
-        let work = ToolProfile::Work { access: Default::default(), folders: vec![dir.clone()], permission_mode: "default".into(), approval_bridge: bridge.clone(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let work = ToolProfile::Work { access: Default::default(), tool_policy: Default::default(), folders: vec![dir.clone()], permission_mode: "default".into(), approval_bridge: bridge.clone(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
         let triage = ToolProfile::Triage { approval_bridge: bridge, tools: vec![], max_turns: 1 };
         for profile in [ToolProfile::TextOnly, triage, work] {
             let request = RunRequest {
@@ -1262,7 +1290,7 @@ mod mode_switch_tests {
         let bridge = crate::ApprovalBridge { program: "ctl".into(), args: vec![] };
         let mut servers = std::collections::BTreeMap::new();
         servers.insert("notes".to_string(), serde_json::json!({ "type": "stdio", "command": "node" }));
-        ToolProfile::Work { access, folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: servers, plugins: vec!["C:/plugin".into()], artifacts: true }
+        ToolProfile::Work { access, tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: servers, plugins: vec!["C:/plugin".into()], artifacts: true }
     }
 
     fn listed_tools(args: &[String]) -> String {
@@ -1301,7 +1329,7 @@ mod mode_switch_tests {
         let bridge = crate::ApprovalBridge { program: "ctl".into(), args: vec!["mcp-permissions".into()] };
         let mut servers = std::collections::BTreeMap::new();
         servers.insert("notes".to_string(), serde_json::json!({ "type": "http", "url": "https://x", "headers": { "Authorization": "Bearer SECRET" } }));
-        let p = ToolProfile::Work { access: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: servers, plugins: vec![], artifacts: false };
+        let p = ToolProfile::Work { access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: servers, plugins: vec![], artifacts: false };
         let mut args = profile_arguments(&p, Some("claude-opus-5-5"), None, None);
         apply_session(&mut args, SessionUse::Continue, "0192f1a2-3b4c-7d5e-8f60-718293a4b5c6");
         let image = crate::ImagePart { name: "a.png".into(), media_type: "image/png".into(), data: vec![0; 10] };
@@ -1320,7 +1348,7 @@ Look"));
     #[test]
     fn work_reads_stream_json_so_a_mode_switch_can_go_in() {
         let bridge = ApprovalBridge { program: "x".into(), args: vec![] };
-        let work = ToolProfile::Work { access: Default::default(), folders: vec!["C:/p".into()], permission_mode: "plan".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let work = ToolProfile::Work { access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "plan".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
         let input = |p: &ToolProfile| {
             let args = profile_arguments(p, None, None, None);
             args[args.iter().position(|a| a == "--input-format").unwrap() + 1].clone()
@@ -1369,7 +1397,7 @@ Look"));
     fn only_a_claude_in_chrome_run_pins_the_session() {
         let employee = "0199c3a2-0000-7000-8000-00000000000a";
         let work = |browser, playwright: Option<serde_json::Value>| ToolProfile::Work {
-            access: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: ApprovalBridge { program: "x".into(), args: vec![] },
+            access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: ApprovalBridge { program: "x".into(), args: vec![] },
             browser, browser_session: Some(employee.into()), playwright, mcp_servers: Default::default(), plugins: vec![], artifacts: false,
         };
         assert!(pins_session(&work(true, None)));
@@ -1383,7 +1411,7 @@ Look"));
         let employee = "0199c3a2-0000-7000-8000-00000000000a";
         let run = "0199c3a2-0000-7000-8000-000000000001";
         let work = |browser, browser_session: Option<&str>| ToolProfile::Work {
-            access: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: ApprovalBridge { program: "x".into(), args: vec![] },
+            access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: ApprovalBridge { program: "x".into(), args: vec![] },
             browser, browser_session: browser_session.map(Into::into), playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false,
         };
         let profiles = [ToolProfile::TextOnly, work(false, None), work(false, Some(employee)), work(true, None), work(true, Some(employee)), work(true, Some("not-a-uuid"))];

@@ -38,7 +38,7 @@ fn setup() -> Setup {
     let user = UserId::new();
     service.store().write(move |tx| aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &user.to_string(), username: "grace", created_by_user: None, now_ms: 1 }, PHC)).unwrap();
     let CommandResult::ProjectCreated { project_id, .. } = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }) }).unwrap().receipt.result else { panic!() };
-    let create = CreateEmployee { access_level: None, description: None, name: "Alex".into(), role: "Backend".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Backend".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id, .. } = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateEmployee(create) }).unwrap().receipt.result else { panic!() };
     use_real_mailbox(employee_id);
     Setup { _dir: dir, service, user, project: project_id, alex: employee_id, chat: conversation_id }

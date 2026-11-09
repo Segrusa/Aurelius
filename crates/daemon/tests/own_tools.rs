@@ -110,3 +110,57 @@ async fn own_tools_work_in_plan_mode_and_work_tools_do_not() {
 
     stop(dir.path(), daemon).await;
 }
+
+/// C2: what an employee has off, or wants asked first, comes before every mode.
+#[tokio::test(flavor = "multi_thread")]
+async fn off_is_denied_and_asks_first_goes_to_the_inbox_even_in_auto() {
+    use aurelius_domain::employee::{CreateEmployee, SendEmployeeMessage};
+    use aurelius_domain::employee_tools::ToolPolicy;
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_with_delay(dir.path(), 100).await;
+    let client = connect(dir.path()).await;
+    let policy = ToolPolicy { tools: Some(vec!["Read".into(), "mcp__aurelius__create_ticket".into()]), approval_tools: vec!["Read".into(), "mcp__aurelius__create_ticket".into()], mcp_servers: None };
+    let hire = CreateEmployee { access_level: None, tool_policy: Some(policy), start_profile: None, description: None, name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(hire), None)).await.unwrap().result else { panic!("not hired") };
+    client.execute(envelope(Command::SetAgentMode(SetAgentMode { conversation_id, mode: AgentMode::Auto }), None)).await.unwrap();
+    let tell = SendEmployeeMessage { confirm_secret: false, employee_id, text: "houd me wakker".into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false };
+    let CommandResult::EmployeeMessageSent { run_id: run, .. } = client.execute(envelope(Command::SendEmployeeMessage(tell), None)).await.unwrap().result else { panic!("not sent") };
+    for _ in 0..200 {
+        let status: Vec<String> = { let conn = db(dir.path()); let mut q = conn.prepare("SELECT status FROM runs WHERE id = ?1").unwrap(); q.query_map([run.to_string()], |r| r.get(0)).unwrap().map(Result::unwrap).collect() };
+        if status.first().is_some_and(|s| matches!(s.as_str(), "starting" | "running" | "waiting")) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let ask = |tool: &str| {
+        let (root, tool) = (dir.path().to_path_buf(), tool.to_owned());
+        tokio::spawn(async move { BridgeClient::connect(&root).await.unwrap().permission_ask(run, Some(format!("{tool}-1")), tool, serde_json::json!({})).await })
+    };
+    for tool in ["Bash", "mcp__aurelius__move_ticket"] {
+        let answer = tokio::time::timeout(Duration::from_secs(5), ask(tool)).await.unwrap().unwrap().unwrap();
+        assert!(!answer.allow, "{tool} is off");
+    }
+    let answer = tokio::time::timeout(Duration::from_secs(5), ask("mcp__aurelius__remember")).await.unwrap().unwrap().unwrap();
+    assert!(answer.allow, "what cannot be switched is not asked");
+    assert!(client.approvals().await.unwrap().approvals.iter().all(|a| a.status != ApprovalStatus::Pending), "nothing asked so far");
+
+    // Auto would let Read through, and own tools never ask: these do.
+    for (tool, shown) in [("Read", "claude.Read"), ("mcp__aurelius__create_ticket", "claude.mcp__aurelius__create_ticket")] {
+        let asking = ask(tool);
+        let mut approval = None;
+        for _ in 0..200 {
+            approval = client.approvals().await.unwrap().approvals.into_iter().find(|a| a.status == ApprovalStatus::Pending && a.tool == shown);
+            if approval.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let approval = approval.unwrap_or_else(|| panic!("{tool} was not asked"));
+        let approve = DecideApproval { approval_id: approval.id, action_digest: approval.action_digest.clone(), approve: true, always_allow: false };
+        client.execute(envelope(Command::DecideApproval(approve), None)).await.unwrap();
+        let answer = tokio::time::timeout(Duration::from_secs(10), asking).await.unwrap().unwrap().unwrap();
+        assert!(answer.allow, "{tool} goes ahead once approved");
+    }
+    stop(dir.path(), daemon).await;
+}

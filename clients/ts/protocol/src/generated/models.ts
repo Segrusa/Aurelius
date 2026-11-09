@@ -1405,9 +1405,17 @@ export interface CreateEmployee {
   reports_to?: string | null;
   role: string;
   /**
+   * A key of `employee.start_profiles` (C6). What this command leaves out comes from there.
+   */
+  start_profile?: string | null;
+  /**
    * The position on the org chart ("Head of engineering"); free text, at most 80 characters.
    */
   title?: string | null;
+  /**
+   * Which tools and MCP servers it has and which ask first (C2); none: all of its level.
+   */
+  tool_policy?: ToolPolicy | null;
 }
 
 export interface CreateProject {
@@ -1793,6 +1801,10 @@ export interface EmployeeSummary {
   sequential_tasks: boolean;
   status: LifecycleStatus;
   title?: string | null;
+  /**
+   * Its tools, MCP servers and what asks first (C2); left out when it has all of its level.
+   */
+  tool_policy?: ToolPolicy;
   version: number;
   /**
    * Derived presence: a run of this employee is active (never stored).
@@ -3756,6 +3768,14 @@ export type Method =
    */
   | ({ method: "employee.scratchpad"; params: { employee_id: string } })
   /**
+   * The catalogue of start profiles (feature `employee_profiles`).
+   */
+  | ({ method: "employee.start_profiles" })
+  /**
+   * The tools that can be switched per employee (feature `employee_tools`).
+   */
+  | ({ method: "employee.tool_options" })
+  /**
    * Replay events after `after_seq`, then stream live events (and load/power pushes).
    */
   | ({ method: "event.subscribe"; params: { after_seq: number } })
@@ -4816,6 +4836,14 @@ export type ResponseBody =
   | ({ type: "employee_instruction_versions"; value: EmployeeInstructionVersionsSnapshot })
   | ({ type: "employee_plugins"; value: EmployeePlugins })
   | ({ type: "employee_scratchpad"; value: ScratchpadView })
+  /**
+   * `employee.start_profiles`.
+   */
+  | ({ type: "employee_start_profiles"; value: StartProfiles })
+  /**
+   * `employee.tool_options`.
+   */
+  | ({ type: "employee_tool_options"; value: ToolOptions })
   | ({ type: "employees"; value: EmployeesSnapshot })
   /**
    * A file kept with a message.
@@ -5707,6 +5735,42 @@ export interface StartIdea {
 }
 
 /**
+ * One entry of the catalogue in the repo (`employee.start_profiles`, C6).
+ */
+export interface StartProfile {
+  access_level?: AccessLevel;
+  description: string;
+  /**
+   * The employees (not archived) that started from this profile.
+   */
+  hired?: string[];
+  instructions: string;
+  /**
+   * Stable key for `employee.create` (`engineer`, `chief_of_staff`, ...).
+   */
+  key: string;
+  label: string;
+  /**
+   * A suggested name; another employee may already have it.
+   */
+  name: string;
+  role: string;
+  /**
+   * One sentence for the picker.
+   */
+  summary: string;
+  title?: string | null;
+  tool_policy?: ToolPolicy;
+}
+
+/**
+ * `employee.start_profiles` (feature `employee_profiles`).
+ */
+export interface StartProfiles {
+  profiles: StartProfile[];
+}
+
+/**
  * A new, empty project conversation. It is named after its first message.
  */
 export interface StartProjectConversation {
@@ -6559,6 +6623,45 @@ export interface TokenUsage {
   runs: number;
 }
 
+/**
+ * One line of `employee.tool_options`.
+ */
+export interface ToolOption {
+  group: string;
+  label: string;
+  /**
+   * The access levels that have this tool at all.
+   */
+  levels: AccessLevel[];
+  name: string;
+}
+
+/**
+ * `employee.tool_options` (feature `employee_tools`).
+ */
+export interface ToolOptions {
+  tools: ToolOption[];
+}
+
+/**
+ * `EmployeeConfig::tool_policy` (C2).
+ */
+export interface ToolPolicy {
+  /**
+   * The tools that always go to a board member first, in every mode:
+   * a tool of [`SWITCHABLE_TOOLS`], or a whole MCP server as `mcp__<server>__*`.
+   */
+  approval_tools?: string[];
+  /**
+   * The MCP servers it may use, of those enabled server-wide. None: all of them.
+   */
+  mcp_servers?: string[] | null;
+  /**
+   * The switchable tools it has. None: all that its level gives.
+   */
+  tools?: string[] | null;
+}
+
 export interface TraceImage {
   bytes: number;
   media_type: string;
@@ -6650,6 +6753,11 @@ export interface UpdateEmployee {
    * `None` leaves the title as it is; an empty text clears it.
    */
   title?: string | null;
+  /**
+   * Which tools and MCP servers it has and which ask first (C2). `None` leaves it
+   * as it is; an empty policy is all of its level.
+   */
+  tool_policy?: ToolPolicy | null;
 }
 
 export interface UpdateIdea {

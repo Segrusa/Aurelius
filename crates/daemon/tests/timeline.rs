@@ -21,7 +21,7 @@ async fn setup(client: &Client, name: &str, employee: &str) -> (ProjectId, Emplo
         panic!()
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, description: None, name: employee.into(), role: "Productpartner".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: employee.into(), role: "Productpartner".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result

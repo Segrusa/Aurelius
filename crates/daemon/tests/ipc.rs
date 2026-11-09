@@ -286,7 +286,7 @@ async fn a_host_write_replays_from_its_receipt_and_hides_the_api_key_secret() {
     let client = connect(&root).await;
 
     let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(create("Atlas"), None)).await.unwrap().result else { panic!() };
-    let create_employee = CreateEmployee { access_level: None, description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create_employee = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create_employee), None)).await.unwrap().result else { panic!() };
     let function = client.create_agent_function(function_for(project_id, employee_id)).await.unwrap();
 

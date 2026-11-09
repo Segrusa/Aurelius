@@ -1,4 +1,4 @@
-//! `aurelius-bridge --data-dir <dir> --run <run_id> [--project | --triage]`: the MCP server
+//! `aurelius-bridge --data-dir <dir> --run <run_id> [--project | --triage] [--without <tool,tool>]`: the MCP server
 //! Claude Code starts for one run (the daemon passes it as the run's MCP config
 //! and as `--permission-prompt-tool mcp__aurelius__approve`). A minimal MCP
 //! server over stdio. Every question goes to the running Aurelius service
@@ -26,6 +26,9 @@
 //! never asks for these; the bridge asks the service itself, which allows them
 //! at once when the employee's Screen is on and otherwise puts the question in
 //! the inbox. Once allowed, the rest of this run (one answer) may look.
+//!
+//! `--without` names the tools the employee's own list switches off (C2): they are
+//! neither offered nor served.
 
 use aurelius_client::ClientError;
 use aurelius_client::bridge::{BridgeClient, IdeaKind, EmployeeMemoryOp, EmployeeTaskOp, MEMORY_SCOPE_RULE, PermissionAnswer, RunId};
@@ -47,6 +50,8 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
     let discussion = args.iter().any(|a| a == "--discussion");
     // A ticket's test task: report_test_result.
     let testing = args.iter().any(|a| a == "--testing");
+    // What this employee's tool list switches off.
+    let without: Vec<String> = arg("--without").map(|list| list.split(',').map(str::to_owned).collect()).unwrap_or_default();
     let mut client: Option<BridgeClient> = None;
     let mut screen_granted = false;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
@@ -61,11 +66,15 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
                 "serverInfo": { "name": "aurelius", "version": env!("CARGO_PKG_VERSION") },
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing) } })),
+            "tools/list" => {
+                let mut tools = if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing) };
+                switch_off(&mut tools, &without);
+                Ok(json!({ "tools": tools }))
+            }
             "tools/call" => {
                 let name = msg["params"]["name"].as_str().unwrap_or("").to_owned();
                 let args = msg["params"]["arguments"].clone();
-                let call = if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing }, &mut screen_granted, &name, args).await };
+                let call = if without.contains(&name) { None } else if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing }, &mut screen_granted, &name, args).await };
                 match call {
                     Some(result) => Ok(result),
                     None => Err(json!({ "code": -32601, "message": "Method not found" })),
@@ -81,6 +90,11 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
         out.flush().await?;
     }
     Ok(())
+}
+
+/// Leave out what the employee's tool list switches off.
+fn switch_off(tools: &mut Vec<Value>, without: &[String]) {
+    tools.retain(|t| !without.iter().any(|w| t["name"] == w.as_str()));
 }
 
 /// The optional tools a run offers (its flags).
@@ -811,6 +825,14 @@ mod tests {
         for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat", "vault_list", "vault_read"] {
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
         }
+    }
+
+    #[test]
+    fn a_tool_the_employee_has_off_is_not_offered() {
+        let mut tools = tool_definitions(false, false, false, false);
+        switch_off(&mut tools, &["create_ticket".to_owned()]);
+        let names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(!names.contains(&"create_ticket") && names.contains(&"move_ticket") && names.contains(&"approve"));
     }
 
     /// SEC0 E10/E12: the employee's tool, not the project assistant's or the dispatcher's, and no links to choose.
