@@ -309,11 +309,11 @@ fn channel_archived_is_its_own_error_code() {
 
 #[test]
 fn discussion_audience_keeps_its_wire_form_and_its_feature_is_offered() {
-    let general = serde_json::json!({ "method": "discussion.audience" });
+    let general = serde_json::json!({ "method": "discussion.audience", "params": {} });
     assert_eq!(serde_json::to_value(Method::DiscussionAudience { channel: None }).unwrap(), general);
     assert_eq!(serde_json::from_value::<Method>(general).unwrap(), Method::DiscussionAudience { channel: None });
     let id = aurelius_domain::ConversationId::new();
-    let named = serde_json::json!({ "method": "discussion.audience", "channel": id });
+    let named = serde_json::json!({ "method": "discussion.audience", "params": { "channel": id } });
     assert_eq!(serde_json::from_value::<Method>(named).unwrap(), Method::DiscussionAudience { channel: Some(id) });
     assert!(crate::FEATURES.contains(&crate::feature::EVERYONE_MENTION));
     let body = crate::rpc::ResponseBody::DiscussionAudience(Default::default());
