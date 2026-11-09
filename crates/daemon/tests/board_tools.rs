@@ -60,10 +60,12 @@ async fn management_makes_and_starts_a_ticket_and_a_plain_agent_cannot() {
     let create = |title: &str| EmployeeTaskOp::CreateTicket { project: Some("Orbit".into()), title: title.into(), description: Some("Why.".into()), priority: Some("high".into()), labels: vec!["api".into()] };
 
     // A plain agent is refused, and nothing is written.
-    let (events, tickets) = (count(dir.path(), "SELECT COUNT(*) FROM events"), count(dir.path(), "SELECT COUNT(*) FROM tickets"));
+    // Only the ticket's own events count: the two runs of this test go on writing theirs.
+    let of_tickets = "SELECT COUNT(*) FROM events WHERE aggregate_type = 'ticket'";
+    let (events, tickets) = (count(dir.path(), of_tickets), count(dir.path(), "SELECT COUNT(*) FROM tickets"));
     let (ok, text) = bridge.employee_act(ann_run, create("By Ann")).await.unwrap();
     assert!(!ok && text.contains("Only management creates tickets"), "{text}");
-    assert_eq!((count(dir.path(), "SELECT COUNT(*) FROM events"), count(dir.path(), "SELECT COUNT(*) FROM tickets")), (events, tickets));
+    assert_eq!((count(dir.path(), of_tickets), count(dir.path(), "SELECT COUNT(*) FROM tickets")), (events, tickets));
 
     // The head of the chart makes one: Backlog, no task, no run, no job.
     let (runs, tasks, jobs) = (count(dir.path(), "SELECT COUNT(*) FROM runs"), count(dir.path(), "SELECT COUNT(*) FROM tasks"), count(dir.path(), "SELECT COUNT(*) FROM jobs WHERE kind LIKE 'ticket.%'"));
