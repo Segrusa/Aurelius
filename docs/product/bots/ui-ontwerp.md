@@ -15,7 +15,7 @@
 - **Employee-dialoog (bewerken):** `Selector` *Provider* en *Model*, `SegmentedControl` *Effort* en *Access*. Inherit is de standaard en toont wat dat oplevert (*Inherit · Sonnet 4.5*). Een andere provider beperkt de modellenlijst; een model dat die provider niet heeft gaat terug naar Inherit.
 - **Employee-dialoog (nieuw):** alleen *Access*. Provider, model en effort kies je daarna via Edit.
 - **Employee-pagina:** tweede `MetadataList` met Provider, Model, Effort en Access; wijzigen gaat via Edit.
-- **Toegangsniveaus:** *Inherit* (alle werktools), *Read only* (`Read`, `Glob`, `Grep`), *Read and edit* (daarbij `Edit`, `Write`). Onder Inherit hebben runs geen MCP-servers van de gebruiker, plugins of artifacts; browser en scherm houden hun eigen schakelaar, de bridge blijft zodat ze kunnen overdragen.
+- **Toegangsniveaus:** *Inherit* (alle werktools), *Read only* (`Read`, `Glob`, `Grep`), *Read and edit* (daarbij `Edit`, `Write`). Onder Inherit hebben runs geen MCP-servers van de gebruiker of artifacts; browser en scherm houden hun eigen schakelaar, de bridge blijft zodat ze kunnen overdragen.
 
 ## Stap 4: run card, interrupt card en odometer (gebouwd)
 
@@ -42,11 +42,11 @@ De **employee-pagina** heeft drie tabs onder de naam: Inbox (de wachtrij, wat er
 |---|---|---|---|
 | 6 | Handoff | geen nieuw scherm: een gewoon bericht van de employee ("Flux handed over to Bo" met de boodschap eronder) | Een vastgehouden handoff is een grijze `limit`-regel met `action` `handoff_held` en de tekst "Handoff held: …"; de client toont de tekst. Besluit B7 |
 | 7 | Waiting indicator | `Text` onder de thread-titel | Gevoed uit inbox-items |
-| 7 | Scheduled | `Table` | `Heartbeats` blijft in `HIDDEN_FEATURES`; `areasOf` voor `recurring_task` en `heartbeat` |
+| 7 | Scheduled | `Table` | `areasOf` voor `recurring_task`; heartbeats zijn verwijderd |
 | 8 | Tools per employee | `Table` met `Switch` en approval-`Checkbox` | |
 | 9 | Startprofielen | `Selector` bovenaan de dialoog | Kiezen vult de velden in; bewerken blijft kunnen |
 | 11 | Employee-pagina | `TabList` Inbox, Memory, Settings; `StatusDot` in de lijst | Status uit `activity_state` |
-| 12 | Living Office | lazy route, three.js | Eigen StyleX; geen externe modellen |
+| 12 | ~~Living Office~~ | vervallen | |
 
 ## Keuzes
 

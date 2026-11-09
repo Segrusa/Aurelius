@@ -52,9 +52,9 @@ import {
   kindsFor,
   LINUX_KEY_NOTE,
   MASK,
+  MCP_SEES_SECRETS,
   mergeAudit,
   NOT_SECRET,
-  PLUGINS_SEE_SECRETS,
   SHOW_MS,
   SHOW_TIP,
   scopes,
@@ -810,7 +810,7 @@ export function VaultBody({ projectId, scopeName }: { projectId: string | null; 
             <div {...stylex.props(styles.notes)}>
               <Banner
                 status="warning"
-                title={PLUGINS_SEE_SECRETS}
+                title={MCP_SEES_SECRETS}
                 {...(platform.kind === "electron" ? { description: LINUX_KEY_NOTE } : {})}
               />
             </div>

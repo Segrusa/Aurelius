@@ -1,7 +1,7 @@
 //! Writes: every method that changes something. They all pass the same
 //! pipeline: the idempotency key from the envelope, a receipt, an audit event
 //! and the right the method requires. Domain commands run in `application`;
-//! host writes (MCP, plugins, load, backups, …) run in the daemon, which
+//! host writes (MCP, load, backups, …) run in the daemon, which
 //! records their receipt and audit event through the same application call.
 
 use crate::remote::{PushConfig, RemoteStatus, PairingCode};

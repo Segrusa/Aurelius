@@ -1,5 +1,5 @@
 # Rebuild and restart the DEV app whenever you save a source file (Ctrl+C stops).
-# Real hot reload of Rust/GPUI code isn't possible; this is the next best thing.
+# Real hot reload of Rust code isn't possible; this is the next best thing.
 # Only desktop code changed: just the window restarts (the background service
 # and its running work stay). Anything else changed: service and app restart.
 param([int]$QuietMs = 700)

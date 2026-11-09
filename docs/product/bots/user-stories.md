@@ -66,11 +66,11 @@
 | BOT-21 | S | 7 | `schedule_message` (R7), scratchpad (C7), waiting indicator (U3), Scheduled-pagina (U7) |
 | BOT-22 | S | 8 | Toollijst, approval-vinkjes en MCP per employee (C2) |
 | BOT-23 | S | 9 | Startprofielen bij een nieuwe employee (C6, P6) |
-| BOT-24 | S | 10 | App key als actor met `@handle` (C9) |
-| BOT-25 | C | 10 | Telegram als extern kanaal (C10) |
+| BOT-24 | S | 10 | ~~App key als actor met `@handle` (C9)~~ vervallen |
+| BOT-25 | C | 10 | ~~Telegram als extern kanaal (C10)~~ vervallen |
 | BOT-26 | S | 11 | Activity log met pagina (R8) |
 | BOT-27 | S | 11 | Employee-pagina met Inbox, Memory, status-dot (U6) |
-| BOT-28 | C | 12 | Living Office (U8) |
+| BOT-28 | C | 12 | ~~Living Office (U8)~~ vervallen |
 | BOT-29 | M | 5-11 | Notificaties alleen volgens P-82: niet voor run gestart of gestopt, delegaties of berichten zonder mention |
 | BOT-30 | M | 5-6 | Bewerken of verwijderen wekt niemand en telt geen hop |
 | BOT-32 | M | 13 | Eén blijvend gesprek per board member per employee (Chat op de Employees-lijst en de pagina van de employee); via de mailbox, op de login van dat board member; alleen dat board member leest en schrijft; oudere gesprekken blijven alleen-lezen |

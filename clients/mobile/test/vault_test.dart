@@ -175,7 +175,7 @@ void main() {
       expect(kindChoices(VaultKind.secret), [VaultKind.secret]);
     });
 
-    test('E21: the texts for R2 (plugins and MCP servers) and R3 (the key on Linux)', () {
+    test('E21: the texts for R2 (MCP servers) and R3 (the key on Linux)', () {
       expect(vaultMcpNotice, 'MCP servers of an employee see the secrets of its runs.');
       expect(vaultKeyNotice, "On Linux, any process of the daemon's user, also an agent through Bash, can read the key.", reason: 'QA2 m7: the same text as the desktop');
     });

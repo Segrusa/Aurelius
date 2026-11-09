@@ -7,7 +7,7 @@
 mod common;
 use common::*;
 
-use aurelius_client::{Client, ClientError, envelope};
+use aurelius_client::{ClientError, envelope};
 use aurelius_domain::server::SetServerName;
 use aurelius_domain::{Command, CommandResult, ErrorCode, EventKind};
 use std::time::Duration;

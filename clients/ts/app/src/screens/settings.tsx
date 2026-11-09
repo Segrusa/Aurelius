@@ -155,7 +155,7 @@ interface Section {
   wide?: boolean;
 }
 
-// Plugins and App keys are in the design's list, but hidden.ts leads: they stay out.
+// hidden.ts leads: what it names stays out.
 const ALL_GROUPS: { label: string; sections: Section[] }[] = [
   {
     label: "You",

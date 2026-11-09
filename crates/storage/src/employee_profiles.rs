@@ -192,7 +192,7 @@ mod tests {
         store
             .write(|tx| {
                 let global: String = tx.query_row("SELECT id FROM scopes WHERE kind = 'global'", [], |r| r.get(0))?;
-                let mut insert = |id: &str, name: &str, status: &str, config: &str| -> Result<(), crate::StorageError> {
+                let insert = |id: &str, name: &str, status: &str, config: &str| -> Result<(), crate::StorageError> {
                     tx.execute("INSERT INTO scopes(id, kind, parent_id, owner_id) VALUES (?1, 'employee', ?2, ?1)", [id, global.as_str()])?;
                     tx.execute(
                         "INSERT INTO employees(id, scope_id, name, role, config_json, status, version, created_at_ms, updated_at_ms) VALUES (?1, ?1, ?2, 'r', ?3, ?4, 1, 1, 1)",

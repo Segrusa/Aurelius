@@ -1,6 +1,6 @@
 # Feature set: employees als aparte bots, naar het model van OpenBot (vastgesteld 2026-11-08)
 
-Status: vastgesteld op 8 november 2026 door Sébastien. De beslissingen staan in §6, de uitwerking in [bots/](bots/README.md). De kolom "Voorstel" hieronder is dus wat we bouwen.
+Status: vastgesteld op 8 november 2026 door Sébastien. De beslissingen staan in §6, de uitwerking in [bots/](bots/README.md). De kolom "Voorstel" hieronder is dus wat we bouwen, op dit na: **C9, C10 en U8 zijn op 9 november vervallen** en worden niet gebouwd. Ook bestaan heartbeats, app keys, webhooks, plugins en `aurelius-mcp`, die hieronder als bestaand staan genoemd, sinds 9 november niet meer: zie [Verwijderde functies](bots/README.md#verwijderde-functies).
 
 ## Context
 
@@ -40,7 +40,7 @@ conversations en jobs.
 | R4 | **Hop-teller overal** | `Message.hop`: 0 voor een mens, max(triggers)+1 voor een bot; bij de limiet een systeembericht per thread tot een mens weer spreekt | De limieten gelden al voor Team chat en ticket-discussies, maar de hop staat alleen op wat een run in een discussie post | Hop op elk bericht in ticket-discussie, Team chat en delegatie |
 | R5 | **Vastgehouden handoff** | Heeft de zender nog ongelezen items in de thread, dan wordt zijn @mention niet afgeleverd maar bewaard; het platform bezorgt hem ongewijzigd zodra de zender bij is. Voorkwam twee reviews van één PR | Bestaat niet | Overnemen in de router; systeembericht "handoff vastgehouden" in de discussie |
 | R6 | **Thread is de enige waarheid** | Een bot onthoudt niets van een thread tussen runs; elke run wordt opnieuw opgebouwd uit de berichten (24k tokens of 80 berichten, nieuwste eerst). Checkpoint van de run wordt na afloop verwijderd | Claude Code-sessie wordt hervat met `--resume` per conversation | Hybride: `--resume` binnen een ticket, herbouw bij een nieuwe thread; herbouw altijd beschikbaar als terugval na een crash |
-| R7 | **Zelf-planning in de thread** | Tool `schedule_message(delay, content, to)`: een bot stuurt zichzelf of een collega later een bericht ("check de CI over 10 min"). De thread telt als actief zolang er iets gepland staat | Heartbeat (30 s tick, opt-in, quiet hours, tokenbudget) en recurring tasks | `schedule_message` toevoegen aan de bridge; heartbeat blijft voor "kijk rond zonder aanleiding" |
+| R7 | **Zelf-planning in de thread** | Tool `schedule_message(delay, content, to)`: een bot stuurt zichzelf of een collega later een bericht ("check de CI over 10 min"). De thread telt als actief zolang er iets gepland staat | Heartbeat (30 s tick, opt-in, quiet hours, tokenbudget) en recurring tasks | `schedule_message` toevoegen aan de bridge (heartbeats zijn op 9 november verwijderd) |
 | R8 | **Activity log** | Elke bezorging, wachtrijstap en run-stap als rij zonder foreign keys, doorzoekbaar per thread, bot of run | Logging, geen doorzoekbaar log in de UI; per ticket is er wel een Activity-tab | Tabel `activity_log` plus een pagina |
 
 ## 3. Samenwerking: de promptregels
@@ -83,8 +83,8 @@ prompt, volledig in de UI (§6).
 | C6 | **Startprofielen** | Catalogus van opt-in bots: chief_of_staff, engineer, reviewer, qa, frontend_designer, elk met instructiebestand, toollijst en icoon | Geen catalogus; `fresh_start.rs` kopieert bestaande employees en maakt Orion niet aan | Catalogus van employee-profielen in de repo, kiesbaar bij "Nieuwe employee" |
 | C7 | **Scratchpad per bot** | Eén tekst per bot, altijd in de prompt, bijgewerkt via de `scratchpad`-tool; in de UI zichtbaar via een notitie-icoon op de run card | Bestaat niet | Tabel `employee_scratchpads` plus tool in de bridge |
 | C8 | **Todo-lijst per thread** | `todo_write` per bot per thread; na samenvatting van een lange run wordt de lijst opnieuw in de samenvatting gezet | Claude Code heeft eigen todo's binnen een sessie | Alleen nodig als we R6 (herbouw) kiezen |
-| C9 | **Externe actoren** | Een extern systeem is een actor met `webhook_url`; krijgt elk bericht in zijn threads als POST met HMAC-SHA256 (`X-OpenBot-Signature`) en retries, of pollt de REST API en bevestigt items | Gesigneerde webhooks met outbox, app keys, `aurelius-mcp`, agent functions | App key wordt een actor: kan deelnemen aan een ticket-discussie en wordt gemend met `@handle` |
-| C10 | **Chatkanalen** | Telegram ingebouwd (bot token, webhook); Slack en Discord op de roadmap | Geen; mobile en web via de gateway | Telegram als eerste extern kanaal, als externe actor (C9) |
+| C9 | **Externe actoren** | Een extern systeem is een actor met `webhook_url`; krijgt elk bericht in zijn threads als POST met HMAC-SHA256 (`X-OpenBot-Signature`) en retries, of pollt de REST API en bevestigt items | Gesigneerde webhooks met outbox, app keys, `aurelius-mcp`, agent functions | **Vervallen (9 nov).** Was: app key wordt een actor die kan deelnemen aan een ticket-discussie en gemend wordt met `@handle` |
+| C10 | **Chatkanalen** | Telegram ingebouwd (bot token, webhook); Slack en Discord op de roadmap | Geen; mobile en web via de gateway | **Vervallen (9 nov).** Was: Telegram als eerste extern kanaal, als externe actor (C9) |
 | C11 | **Usage en kosten** | Per run tokens in/uit, cache, reasoning, kosten en model calls; opgeteld per thread | Usage per run bestaat grotendeels (analyse-linear §4.7) | Odometer per ticket en per board member in de UI (zie §5) |
 
 ## 5. UI
@@ -97,8 +97,8 @@ prompt, volledig in de UI (§6).
 | U4 | **Thread odometer** | Calls, tokens in, tokens uit, kosten per thread in de kop | Geen | Per ticket, plus per board member in een overzicht |
 | U5 | **Inbox** | Twee secties: "Waiting for you" (vragen, direct beantwoordbaar) en "Unread messages" gegroepeerd per thread met Mark read en Mark all read | Persoonlijke Inbox met één-klik-antwoorden (#29); "Needs you" bestaat al | Groeperen per ticket kan client-side; "Wacht op jou" bovenaan |
 | U6 | **Bot-pagina** | Tabs Inbox, Memory, Settings; in de sidebar elke bot met een actief/idle-dot; Composer met `@`-autocomplete die het roster met beschrijving toont | Employees-scherm en employee-pagina (`manager.rs`) | Tab Inbox (wachtrij van de employee) en Memory toevoegen; status-dot in de lijst |
-| U7 | **Scheduled** | Pagina met alle geplande berichten en hun uitkomst | Recurring tasks in de task-UI | Eén pagina voor recurring tasks, heartbeats en `schedule_message` |
-| U8 | **Living Office** | 3D-kantoor met een "Openling" per rol en statusbubbels: idle, waiting, thinking, working, coding, testing, blocked, human_review, reporting, completed, resting, sleeping. Bij hen nog demo-data | Geen | Later; het statusmodel (U8) is wel nu al bruikbaar voor de status-dot van U6 |
+| U7 | **Scheduled** | Pagina met alle geplande berichten en hun uitkomst | Recurring tasks in de task-UI | Eén pagina voor recurring tasks en `schedule_message` |
+| U8 | **Living Office** | 3D-kantoor met een "Openling" per rol en statusbubbels: idle, waiting, thinking, working, coding, testing, blocked, human_review, reporting, completed, resting, sleeping. Bij hen nog demo-data | Geen | **Vervallen (9 nov).** Het statusmodel is wel gebruikt voor de status-dot van U6 |
 
 ## 6. Beslissingen (8 november 2026)
 
@@ -128,9 +128,9 @@ Grootte is een eerste inschatting (S/M/L); de uitwerking staat in [bots/impactan
 | 7 | `schedule_message`, scratchpad, waiting indicator, Scheduled-pagina (R7, C7, U3, U7) | M |
 | 8 | Tools en MCP per employee met approval-vinkje (C2) | M |
 | 9 | Startprofielen (C6) | S |
-| 10 | Externe actoren en Telegram (C9, C10) | L |
+| 10 | ~~Externe actoren en Telegram (C9, C10)~~ vervallen | L |
 | 11 | Activity log (R8), bot-pagina met Inbox en Memory (U6) | M |
-| 12 | Living Office (U8) | L |
+| 12 | ~~Living Office (U8)~~ vervallen | L |
 
 ## Bronnen
 

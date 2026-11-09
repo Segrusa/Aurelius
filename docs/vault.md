@@ -74,7 +74,7 @@ Every secret value (current, previous versions, deleted items) is replaced
 by `«secret:NAME»` in a run's events (the answer, tool input and output,
 traces), in everything a run sends through Aurelius' tools (messages, the
 discussion, tasks, ideas, memory, approvals, push), in the daemon's log
-(panics too), and in webhooks. A board member who pastes a secret's value in
+(panics too). A board member who pastes a secret's value in
 a chat, a discussion, a ticket, a task or a project note is warned with the
 item's name; a project note with one is refused.
 
