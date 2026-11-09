@@ -78,3 +78,23 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | Git-weergave | `git.get_diff` en `git.get_status`, met de git-chip in de mobiele chat. |
 
 Er is geen tabel gedropt en geen migratie aangepast: de ongebruikte lege tabellen en kolommen (zoals `created_by_app_key_id`) blijven staan, en `PROTOCOL_MAJOR` blijft 5. Oude events van verwijderde soorten worden bij het lezen overgeslagen.
+
+### Verborgen in de React-client
+
+*2026-11-09 · besluit van Sébastien.* Deze functies staan niet meer in menu's, tabs, knoppen, sneltoetsen en het commandopalet van de React-client. De code, de server en de data blijven bestaan; de Flutter-app is niet aangepast. Elke regel in `HIDDEN_FEATURES` in `clients/ts/app/src/hidden.ts` is één verborgen functie: verwijder je die regel, dan komt de functie terug.
+
+| Regel in `hidden.ts` | Wat de gebruiker niet meer ziet |
+|---|---|
+| `TasksInSidebar` | Tasks in de zijbalk. De pagina, `Ctrl+7` en de koppelingen vanuit tickets blijven, en lopende runs staan er nog gewoon in. |
+| `ScheduledInSidebar` | Scheduled in de zijbalk. De pagina blijft, met een koppeling vanaf de tab Inbox van een employee. |
+| `ActivityInSidebar` | Activity log in de zijbalk. Het staat nu onder Settings, groep Advanced, met dezelfde filters; oude `/activity`-koppelingen sturen door. |
+| `Trace` | Settings → Trace. |
+| `RecurringTasks` | Terugkerende taken: Settings → Recurring schedules, "New recurring task…" in het projectmenu en dat deel van Scheduled. Bestaande schema's blijven op de server draaien. |
+| `Vault` | De vault: de tab bij Knowledge en bij een project, het palet en de sneltoets. |
+| `EmployeeTools` | Tools en "Asks first" per employee in de dialoog en op de employee-pagina. Een opgeslagen beleid blijft staan. |
+| `Ideas` | Ideeën: de tab bij Knowledge en bij een project, het blok op het projectoverzicht, het palet en de sneltoets. |
+| `MemoryProposals` | De tab Proposals onder Memory. Extractie loopt door. |
+| `SequentialTasks` | "Run tasks one at a time" in de employee-dialoog. De opgeslagen waarde blijft staan. |
+| `RunScratchpad` | Het scratchpad op de run-kaart; in de tab Memory van de employee blijft het. |
+
+Daarnaast bestaat het idee als tool voor employees niet meer: `add_idea` is weg uit de bridge en de prompts. Bestaande ideeën blijven in de database. Tickets: elke employee mag `create_ticket` gebruiken in zijn eigen chat met een board member; daarbuiten blijft dat aan management voorbehouden.

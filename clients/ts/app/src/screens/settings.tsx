@@ -5,9 +5,12 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { useLinkState } from "../connection";
+import { type Feature, shown } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { Icon } from "../ui/icons";
+import { ActivitySection } from "./activity";
+import type { ActivityFilters } from "./activity-logic";
 import {
   BackupsSection,
   ConnectionsSection,
@@ -126,6 +129,7 @@ const styles = stylex.create({
   arrow: { color: "var(--color-text-disabled)" },
   title: { margin: 0, fontSize: 13, fontWeight: 500 },
   scroller: { minHeight: 0, flex: 1, overflowY: "auto" },
+  wide: { maxWidth: 1180 },
   page: {
     display: "flex",
     width: "100%",
@@ -145,11 +149,14 @@ const styles = stylex.create({
 interface Section {
   key: string;
   label: string;
-  body: () => ReactNode;
+  body: (filters: ActivityFilters) => ReactNode;
+  feature?: Feature;
+  /** A table that needs the room. */
+  wide?: boolean;
 }
 
 // Plugins and App keys are in the design's list, but hidden.ts leads: they stay out.
-const GROUPS: { label: string; sections: Section[] }[] = [
+const ALL_GROUPS: { label: string; sections: Section[] }[] = [
   {
     label: "You",
     sections: [
@@ -170,13 +177,16 @@ const GROUPS: { label: string; sections: Section[] }[] = [
     sections: [
       { key: "connections", label: "Connections", body: () => <ConnectionsSection /> },
       { key: "mcp", label: "MCP & tools", body: () => <McpSection /> },
-      { key: "schedules", label: "Recurring schedules", body: () => <SchedulesSection /> },
+      { key: "schedules", label: "Recurring schedules", body: () => <SchedulesSection />, feature: "RecurringTasks" },
       { key: "backups", label: "Backups", body: () => <BackupsSection /> },
       { key: "load", label: "Load limits", body: () => <LoadSection /> },
-      { key: "trace", label: "Trace", body: () => <TraceSection /> },
+      { key: "trace", label: "Trace", body: () => <TraceSection />, feature: "Trace" },
+      { key: "activity", label: "Activity log", body: (filters) => <ActivitySection filters={filters} />, wide: true },
     ],
   },
 ];
+
+const GROUPS = ALL_GROUPS.map((group) => ({ ...group, sections: shown(group.sections) }));
 
 export function SettingsSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
@@ -219,7 +229,7 @@ export function SettingsSidebar() {
   );
 }
 
-export function SettingsScreen({ section }: { section: string }) {
+export function SettingsScreen({ section, filters }: { section: string; filters: ActivityFilters }) {
   const navigate = useNavigate();
   useKeyContext("Settings");
   const { storage } = usePlatform();
@@ -255,8 +265,8 @@ export function SettingsScreen({ section }: { section: string }) {
         </div>
       </LayoutHeader>
       <div {...stylex.props(styles.scroller)}>
-        <div key={section} {...stylex.props(styles.page)}>
-          {found ? found.body() : <p {...stylex.props(styles.missing)}>This section does not exist.</p>}
+        <div key={section} {...stylex.props(styles.page, found?.wide && styles.wide)}>
+          {found ? found.body(filters) : <p {...stylex.props(styles.missing)}>This section does not exist.</p>}
         </div>
       </div>
     </>

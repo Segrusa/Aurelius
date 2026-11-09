@@ -150,7 +150,7 @@ test("the board, the ticket panel and My tickets against a real daemon", async (
     await page.getByRole("button", { name: /Second ticket, renamed/ }).click();
     await expect(page.getByRole("complementary", { name: /Second ticket, renamed/ })).toBeVisible();
 
-    await nav(page, "Tasks");
+    await page.keyboard.press("Control+7");
     await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   } finally {
     seed?.dispose();
@@ -525,7 +525,7 @@ test.describe("states a test daemon cannot produce", () => {
   test("Tasks and a run: approve inline, stop, and the properties", async ({ page }) => {
     const { writes } = await scriptServer(page, script);
     await page.goto(site.origin);
-    await nav(page, "Tasks");
+    await page.goto(`${site.origin}/tasks`);
     const list = page.getByRole("region", { name: "Task list" });
     await expect(list.getByText("Task k3")).toBeVisible();
     await expect(list.getByText("A sub task")).toHaveCount(0);
@@ -705,7 +705,7 @@ test("shots", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "My tickets" })).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(out, "my.png") });
-  await nav(page, "Tasks");
+  await page.goto(`${site.origin}/tasks`);
   await expect(page.getByText("Write the regression test").first()).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(out, "tasks.png") });

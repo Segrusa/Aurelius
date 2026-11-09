@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { _electron, expect, type Page, test } from "@playwright/test";
+import { hidden } from "../../ts/app/src/hidden";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
 import { message, messages, scriptServer } from "./fake-server";
 
@@ -96,15 +97,17 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByRole("option", { name: "QA", exact: true }).click();
     await expect(page.getByPlaceholder("Name, for example Alex")).toHaveValue("Quinn");
     await expect(page.getByLabel("Instructions")).toHaveValue(/You are QA/);
-    await page.getByRole("button", { name: /Tools: / }).click();
-    await expect(page.getByRole("checkbox", { name: "Edit files", exact: true })).not.toBeChecked();
-    await expect(page.getByRole("checkbox", { name: "Run commands", exact: true })).toBeChecked();
-    await expect(page.getByRole("checkbox", { name: "Move tickets asks first" })).toBeChecked();
-    await page.getByRole("checkbox", { name: "Run commands asks first" }).click();
+    if (!hidden("EmployeeTools")) {
+      await page.getByRole("button", { name: /Tools: / }).click();
+      await expect(page.getByRole("checkbox", { name: "Edit files", exact: true })).not.toBeChecked();
+      await expect(page.getByRole("checkbox", { name: "Run commands", exact: true })).toBeChecked();
+      await expect(page.getByRole("checkbox", { name: "Move tickets asks first" })).toBeChecked();
+      await page.getByRole("checkbox", { name: "Run commands asks first" }).click();
+    }
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Quinn", exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Settings" }).click();
-    await expect(page.getByText("9 on, 2 ask first")).toBeVisible();
+    if (!hidden("EmployeeTools")) await expect(page.getByText("9 on, 2 ask first")).toBeVisible();
 
     // The profile says it was hired, and its name is not offered twice.
     await go(page, "Employees");
@@ -148,14 +151,16 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByText("v2")).toBeVisible();
 
     // An idea: made, then dropped.
-    await page.getByRole("link", { name: "Ideas" }).click();
-    await page.getByRole("button", { name: "New idea" }).click();
-    await page.getByPlaceholder(/The idea, for example/).fill("Dark mode");
-    await page.getByRole("button", { name: "Add idea" }).click();
-    const idea = page.getByRole("region", { name: "Ideas" }).getByText("Dark mode");
-    await expect(idea).toBeVisible();
-    await page.getByRole("button", { name: "Drop", exact: true }).click();
-    await expect(idea).toBeHidden();
+    if (!hidden("Ideas")) {
+      await page.getByRole("link", { name: "Ideas" }).click();
+      await page.getByRole("button", { name: "New idea" }).click();
+      await page.getByPlaceholder(/The idea, for example/).fill("Dark mode");
+      await page.getByRole("button", { name: "Add idea" }).click();
+      const idea = page.getByRole("region", { name: "Ideas" }).getByText("Dark mode");
+      await expect(idea).toBeVisible();
+      await page.getByRole("button", { name: "Drop", exact: true }).click();
+      await expect(idea).toBeHidden();
+    }
 
     // A memory, in the context of the project.
     await page.getByRole("link", { name: "Memory" }).click();
@@ -166,40 +171,42 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByText("Publishing needs a review first").first()).toBeVisible();
 
     // A vault secret: never in the page until asked, hidden again on Hide, and it copies.
-    await page.getByRole("link", { name: "Vault" }).click();
-    await page.getByRole("button", { name: "New item" }).first().click();
-    await page.getByRole("button", { name: "Secret" }).click();
-    await page.getByPlaceholder("GitHub token").fill("GitHub token");
-    await page.getByRole("dialog").locator('input[type="password"]').fill(SECRET);
-    await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
-    await expect(page.getByRole("button", { name: "Show GitHub token" })).toBeVisible();
-    expect(await page.content()).not.toContain(SECRET);
-    await page.getByRole("button", { name: "Show GitHub token" }).click();
-    await expect(page.getByText(SECRET)).toBeVisible();
-    await page.getByRole("button", { name: "Hide GitHub token" }).click();
-    await expect(page.getByText(SECRET)).toBeHidden();
-    expect(await page.content()).not.toContain(SECRET);
+    if (!hidden("Vault")) {
+      await page.getByRole("link", { name: "Vault" }).click();
+      await page.getByRole("button", { name: "New item" }).first().click();
+      await page.getByRole("button", { name: "Secret" }).click();
+      await page.getByPlaceholder("GitHub token").fill("GitHub token");
+      await page.getByRole("dialog").locator('input[type="password"]').fill(SECRET);
+      await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+      await expect(page.getByRole("button", { name: "Show GitHub token" })).toBeVisible();
+      expect(await page.content()).not.toContain(SECRET);
+      await page.getByRole("button", { name: "Show GitHub token" }).click();
+      await expect(page.getByText(SECRET)).toBeVisible();
+      await page.getByRole("button", { name: "Hide GitHub token" }).click();
+      await expect(page.getByText(SECRET)).toBeHidden();
+      expect(await page.content()).not.toContain(SECRET);
 
-    await page.getByRole("button", { name: "Copy GitHub token" }).click();
-    await expect(toast(page, "Copied. Clears in 60 s.")).toBeVisible();
-    expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(SECRET);
-    expect(await page.content()).not.toContain(SECRET);
+      await page.getByRole("button", { name: "Copy GitHub token" }).click();
+      await expect(toast(page, "Copied. Clears in 60 s.")).toBeVisible();
+      expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(SECRET);
+      expect(await page.content()).not.toContain(SECRET);
 
-    await page.getByRole("tab", { name: "Audit log" }).click();
-    await expect(page.getByText("The audit log is read-only")).toBeVisible();
-    await expect(page.getByText("GitHub token").locator("visible=true").first()).toBeVisible();
-    await page.getByRole("tab", { name: "Items" }).click();
+      await page.getByRole("tab", { name: "Audit log" }).click();
+      await expect(page.getByText("The audit log is read-only")).toBeVisible();
+      await expect(page.getByText("GitHub token").locator("visible=true").first()).toBeVisible();
+      await page.getByRole("tab", { name: "Items" }).click();
 
-    // The key: a wrong password stays out, the right one shows it once.
-    await page.getByRole("button", { name: "Export key…" }).click();
-    await page.getByPlaceholder("Your password").fill("not-the-password");
-    await page.getByRole("dialog").getByRole("button", { name: "Export key", exact: true }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
-    await page.getByPlaceholder("Your password").fill(PASSWORD);
-    await page.getByRole("dialog").getByRole("button", { name: "Export key", exact: true }).click();
-    await expect(page.getByLabel("The vault key, shown once")).toBeVisible();
-    await page.getByRole("button", { name: "Done" }).click();
-    await expect(page.getByLabel("The vault key, shown once")).toBeHidden();
+      // The key: a wrong password stays out, the right one shows it once.
+      await page.getByRole("button", { name: "Export key…" }).click();
+      await page.getByPlaceholder("Your password").fill("not-the-password");
+      await page.getByRole("dialog").getByRole("button", { name: "Export key", exact: true }).click();
+      await expect(page.getByRole("alert")).toBeVisible();
+      await page.getByPlaceholder("Your password").fill(PASSWORD);
+      await page.getByRole("dialog").getByRole("button", { name: "Export key", exact: true }).click();
+      await expect(page.getByLabel("The vault key, shown once")).toBeVisible();
+      await page.getByRole("button", { name: "Done" }).click();
+      await expect(page.getByLabel("The vault key, shown once")).toBeHidden();
+    }
     // The Scheduled page over the real daemon: what an employee planned (no real run here,
     // so a row in the store), then taken back through the real write.
     const store = new DatabaseSync(join(daemon.data, "data", "aurelius.sqlite"));
@@ -210,16 +217,18 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
       )
       .run(Date.now() + 3_600_000, Date.now());
     store.close();
-    await go(page, "Scheduled");
+    // The Scheduled page is reached from an employee's Inbox tab.
+    await go(page, "Employees");
+    await page.getByRole("link", { name: /Quinn/ }).first().click();
+    await page.getByRole("tab", { name: "Inbox" }).click();
+    await page.getByRole("link", { name: "Scheduled messages" }).click();
     const waiting = page.getByRole("region", { name: "Scheduled messages" });
     await expect(waiting.getByText("Check the deploy again.")).toBeVisible();
     await waiting.getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("button", { name: "Take back" }).click();
     await expect(page.getByRole("region", { name: "What came of them" }).getByText("Taken back")).toBeVisible();
     await expect(waiting.getByText("No messages are scheduled.")).toBeVisible();
-    await expect(
-      page.getByRole("region", { name: "Recurring tasks" }).getByText("No recurring tasks yet."),
-    ).toBeVisible();
+    await expect(page.getByRole("region", { name: "Recurring tasks" })).toHaveCount(hidden("RecurringTasks") ? 0 : 1);
   } finally {
     await app.close().catch(() => undefined);
     await daemon.stop();
@@ -460,6 +469,7 @@ test.describe("scripted organisation", () => {
   });
 
   test("a shown secret hides when the window loses focus and when leaving the page", async ({ page }) => {
+    test.skip(hidden("Vault"), "hidden in hidden.ts");
     const { stop } = await scripted(page, { reads: vaultReads(SECRET) }, "/knowledge/vault");
     const show = page.getByRole("button", { name: "Show GitHub token" });
     await show.click();
@@ -477,6 +487,7 @@ test.describe("scripted organisation", () => {
   });
 
   test("a secret disappears after its 30 seconds", async ({ page }) => {
+    test.skip(hidden("Vault"), "hidden in hidden.ts");
     await page.clock.install();
     const { stop } = await scripted(page, { reads: vaultReads(SECRET) }, "/knowledge/vault");
     await page.getByRole("button", { name: "Show GitHub token" }).click();
@@ -491,6 +502,7 @@ test.describe("scripted organisation", () => {
     page,
     context,
   }) => {
+    test.skip(hidden("Vault"), "hidden in hidden.ts");
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const { writes, stop } = await scripted(
       page,
@@ -650,7 +662,7 @@ test.describe("scripted organisation", () => {
     await expect(
       page.getByRole("region", { name: "What came of them" }).getByText("Not delivered: Pixel is paused."),
     ).toBeVisible();
-    await expect(page.getByRole("region", { name: "Recurring tasks" }).getByText("Daily at 09:00")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Recurring tasks" })).toHaveCount(hidden("RecurringTasks") ? 0 : 1);
 
     await waiting.getByRole("button", { name: "Cancel" }).click();
     await page.getByRole("button", { name: "Take back" }).click();
@@ -759,6 +771,7 @@ test.describe("scripted organisation", () => {
       "/activity",
     );
     await expect(page.getByRole("heading", { name: "Activity log" })).toBeVisible();
+    await expect(page).toHaveURL(/\/settings\/activity/);
     const row = page.getByRole("row", { name: /Delivered/ });
     await expect(row).toContainText("message from board");
 

@@ -55,6 +55,12 @@ describe("what a chord means", () => {
     expect(actionsFor("down", base)).toEqual(["SelectNext"]);
   });
 
+  it("no longer knows the keys of a hidden feature", () => {
+    expect(actionsFor("secondary-shift-v", base)).toEqual([]);
+    expect(actionsFor("secondary-0", base)).toEqual([]);
+    expect(actionsFor("secondary-7", base)).toEqual(["GoTasks"]);
+  });
+
   it("leaves typing alone, except what has a modifier", () => {
     const typing = { ...base, typing: true };
     expect(actionsFor("j", typing)).toEqual([]);

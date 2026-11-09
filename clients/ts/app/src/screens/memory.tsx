@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useConnection } from "../connection";
 import { useEmployees, useMemory, useMemoryContext, useProjects } from "../data";
+import { hidden } from "../hidden";
 import { useAction } from "../keys/provider";
 import { toast } from "../ui/toast";
 import { consolidationScopes, memoryHistory, memoryKind, memoryProposals, thousands } from "./knowledge-logic";
@@ -154,8 +155,9 @@ const styles = stylex.create({
   },
 });
 
-const NOTE =
-  "Employees propose memories during runs. Proposals wait here until you accept or reject them; accepted ones go into every run in this project.";
+const NOTE = hidden("MemoryProposals")
+  ? "What you remember here is used in the runs of this project."
+  : "Employees propose memories during runs. Proposals wait here until you accept or reject them; accepted ones go into every run in this project.";
 
 export function Entry({
   m,
@@ -294,7 +296,7 @@ export function MemoryBody({
   const [who, setWho] = useState<string | null | undefined>(undefined);
   const contextEmployee = who === undefined ? (staff[0]?.id ?? null) : who;
   const context = useMemoryContext(project, contextEmployee);
-  const [tab, setTab] = useState<MemoryTab>("proposals");
+  const [tab, setTab] = useState<MemoryTab>(hidden("MemoryProposals") ? "context" : "proposals");
   const [text, setText] = useState("");
   const [kind, setKind] = useState<"project_knowledge" | "decision">("project_knowledge");
   const [revising, setRevising] = useState<MemoryView | null>(null);
@@ -361,10 +363,14 @@ export function MemoryBody({
   };
   useAction("SelectNext", () => step(1));
   useAction("SelectPrev", () => step(-1));
-  useAction("AcceptMemory", () => {
-    if (current?.status === "proposed") void decide(current, true);
-    else toast("Select a proposal to accept (filter 2 shows only proposals).");
-  });
+  useAction(
+    "AcceptMemory",
+    () => {
+      if (current?.status === "proposed") void decide(current, true);
+      else toast("Select a proposal to accept (filter 2 shows only proposals).");
+    },
+    !hidden("MemoryProposals"),
+  );
   useAction("RemoveMemory", () => {
     if (current?.status === "proposed") void decide(current, false);
     else if (current?.status === "active") setForgetting(current);
@@ -379,7 +385,7 @@ export function MemoryBody({
     if (current) void pin(current);
   });
   useAction("Filter1", () => setTab("context"));
-  useAction("Filter2", () => setTab("proposals"));
+  useAction("Filter2", () => setTab("proposals"), !hidden("MemoryProposals"));
   useAction("Filter3", () => setTab("history"));
   const ctx = context.data;
   const place = (p: string) => (ctx?.items ?? []).filter((i) => i.placement === p);
@@ -387,7 +393,7 @@ export function MemoryBody({
   const over = (ctx?.always_tokens ?? 0) > budget;
   const tabs: { key: MemoryTab; label: string; n?: number }[] = [
     { key: "context", label: "In context" },
-    { key: "proposals", label: "Proposals", n: proposals.length },
+    ...(hidden("MemoryProposals") ? [] : [{ key: "proposals" as const, label: "Proposals", n: proposals.length }]),
     { key: "history", label: "History", n: history.length },
   ];
   return (
@@ -481,7 +487,9 @@ export function MemoryBody({
                   {context.error ? <Problem>{context.error.message}</Problem> : null}
                   {ctx && ctx.items.length === 0 ? (
                     <p {...stylex.props(styles.empty)}>
-                      No memory yet for this employee. Use Remember, or accept proposals.
+                      {hidden("MemoryProposals")
+                        ? "No memory yet for this employee. Use Remember."
+                        : "No memory yet for this employee. Use Remember, or accept proposals."}
                     </p>
                   ) : null}
                   {ctx ? (

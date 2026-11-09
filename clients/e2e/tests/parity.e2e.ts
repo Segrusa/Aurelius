@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Connection, expectBody } from "@aurelius/client";
 import { _electron, expect, type Locator, test } from "@playwright/test";
 import { daemonEndpoint, openPipe } from "../../electron/src/main/pipe";
+import { hidden } from "../../ts/app/src/hidden";
 import { REPO, TestDaemon, until } from "./daemon";
 
 const PASSWORD = "a-long-enough-password";
@@ -175,19 +176,21 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Ava" })).toBeVisible();
 
     // An idea takes files too.
-    await page.getByRole("navigation").getByRole("link", { name: "Knowledge" }).first().click();
-    await page.getByRole("link", { name: "Ideas" }).first().click();
-    await page.getByRole("button", { name: "New idea" }).click();
-    const ideaTitle = page.getByPlaceholder(/The idea, for example/);
-    await ideaTitle.fill("With a file");
-    await pasteImage(ideaTitle);
-    await expect(page.getByRole("button", { name: "Remove pasted.png" })).toBeVisible();
-    await page.getByRole("button", { name: "Add idea" }).click();
-    await page.getByRole("region", { name: "Ideas" }).getByText("With a file").click();
-    await expect(page.getByRole("button", { name: /View pasted/ })).toBeVisible();
+    if (!hidden("Ideas")) {
+      await page.getByRole("navigation").getByRole("link", { name: "Knowledge" }).first().click();
+      await page.getByRole("link", { name: "Ideas" }).first().click();
+      await page.getByRole("button", { name: "New idea" }).click();
+      const ideaTitle = page.getByPlaceholder(/The idea, for example/);
+      await ideaTitle.fill("With a file");
+      await pasteImage(ideaTitle);
+      await expect(page.getByRole("button", { name: "Remove pasted.png" })).toBeVisible();
+      await page.getByRole("button", { name: "Add idea" }).click();
+      await page.getByRole("region", { name: "Ideas" }).getByText("With a file").click();
+      await expect(page.getByRole("button", { name: /View pasted/ })).toBeVisible();
+    }
 
     // A task's conversation can go.
-    await page.getByRole("navigation").getByRole("link", { name: "Tasks" }).first().click();
+    await page.keyboard.press("Control+7");
     const list = page.getByRole("region", { name: "Task list" });
     await list
       .getByRole("button", { name: /Compare hosting/ })

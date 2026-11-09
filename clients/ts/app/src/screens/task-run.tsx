@@ -12,6 +12,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAllTasks, useApprovals, useEmployees, useMessages, useProjects, useRunGuidelines } from "../data";
+import { hidden } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { AttachedImages, useImagePaste } from "../ui/attach";
 import { Markdown } from "../ui/markdown";
@@ -692,7 +693,7 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
             <Row name="Mode">{task.run.mode ?? messages.data?.agent_mode ?? "Default"}</Row>
             {task.schedule_id ? (
               <Row name="From schedule">
-                <Link href="/settings/schedules">Recurring task</Link>
+                {hidden("RecurringTasks") ? "Recurring task" : <Link href="/settings/schedules">Recurring task</Link>}
               </Row>
             ) : null}
             <Row name="Created">

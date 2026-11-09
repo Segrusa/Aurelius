@@ -15,9 +15,9 @@ import {
   useResolvedMode,
 } from "./appearance";
 import { ConnectionProvider } from "./connection";
+import { hidden } from "./hidden";
 import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
-import { ActivityScreen } from "./screens/activity";
 import { activityFilters } from "./screens/activity-logic";
 import { BoardScreen } from "./screens/board";
 import { ChatScreen } from "./screens/chat";
@@ -33,7 +33,7 @@ import { InboxScreen } from "./screens/inbox";
 import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { MyTicketsScreen } from "./screens/my-tickets";
-import { ProjectPage, ProjectsScreen } from "./screens/projects";
+import { ProjectPage, ProjectsScreen, projectTabShown } from "./screens/projects";
 import { ScheduledScreen } from "./screens/scheduled";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
@@ -142,8 +142,8 @@ const knowledge = createRoute({
     const { tab } = knowledge.useParams();
     const { project: start } = knowledge.useSearch();
     if (tab === "memory") return <MemoryBody key={start ?? ""} projectId={null} start={start ?? null} />;
-    if (tab === "ideas") return <IdeasBody projectId={null} />;
-    if (tab === "vault") return <VaultScreen />;
+    if (tab === "ideas" && !hidden("Ideas")) return <IdeasBody projectId={null} />;
+    if (tab === "vault" && !hidden("Vault")) return <VaultScreen />;
     return <GuidelinesScreen />;
   },
 });
@@ -164,7 +164,7 @@ const project = createRoute({
   getParentRoute: () => root,
   path: "/projects/$id",
   validateSearch: (search: Record<string, unknown>): { tab?: (typeof PROJECT_TABS)[number] } =>
-    PROJECT_TABS.includes(search.tab as (typeof PROJECT_TABS)[number])
+    PROJECT_TABS.includes(search.tab as (typeof PROJECT_TABS)[number]) && projectTabShown(search.tab as string)
       ? { tab: search.tab as (typeof PROJECT_TABS)[number] }
       : {},
   component: function ProjectRoute() {
@@ -175,12 +175,13 @@ const project = createRoute({
 
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
 const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
+// The log lives in Settings now; an old link keeps what it narrowed on.
 const activity = createRoute({
   getParentRoute: () => root,
   path: "/activity",
   validateSearch: activityFilters,
-  component: function ActivityRoute() {
-    return <ActivityScreen filters={activity.useSearch()} />;
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: "/settings/$section", params: { section: "activity" }, search });
   },
 });
 const settingsIndex = createRoute({
@@ -193,8 +194,9 @@ const settingsIndex = createRoute({
 const settings = createRoute({
   getParentRoute: () => root,
   path: "/settings/$section",
+  validateSearch: activityFilters,
   component: function SettingsRoute() {
-    return <SettingsScreen section={settings.useParams().section} />;
+    return <SettingsScreen section={settings.useParams().section} filters={settings.useSearch()} />;
   },
 });
 

@@ -106,10 +106,9 @@ test.describe("against a real daemon", () => {
       "Remote access",
       "Connections",
       "MCP & tools",
-      "Recurring schedules",
       "Backups",
       "Load limits",
-      "Trace",
+      "Activity log",
     ]) {
       await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name, exact: true }).click();
       await expect(page.getByRole("heading", { level: 1, name, exact: true })).toBeVisible();

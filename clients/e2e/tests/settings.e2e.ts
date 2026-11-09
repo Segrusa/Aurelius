@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
+import { hidden } from "../../ts/app/src/hidden";
 import { REPO, TestDaemon } from "./daemon";
 
 const PASSWORD = "a-long-enough-password";
@@ -13,10 +14,9 @@ const SECTIONS = [
   "Remote access",
   "Connections",
   "MCP & tools",
-  "Recurring schedules",
   "Backups",
   "Load limits",
-  "Trace",
+  "Activity log",
 ];
 
 async function open(page: Page, name: string) {
@@ -87,12 +87,15 @@ test("every section works against a real daemon, and what is changed stays chang
     await main(page).getByRole("button", { name: "Save" }).click();
     await expect(main(page).getByRole("button", { name: "Save" })).toBeHidden();
 
-    await open(page, "Trace");
-    const trace = main(page).getByRole("switch", { name: "Trace mode" });
-    const traced = await trace.isChecked();
-    await trace.click();
-    if (traced) await main(page).getByRole("button", { name: "Turn off and delete" }).click();
-    await expect(trace).toBeChecked({ checked: !traced });
+    let traced = false;
+    if (!hidden("Trace")) {
+      await open(page, "Trace");
+      const trace = main(page).getByRole("switch", { name: "Trace mode" });
+      traced = await trace.isChecked();
+      await trace.click();
+      if (traced) await main(page).getByRole("button", { name: "Turn off and delete" }).click();
+      await expect(trace).toBeChecked({ checked: !traced });
+    }
 
     await open(page, "Load limits");
     const runs = main(page).getByLabel("Max runs at once");
@@ -131,8 +134,10 @@ test("every section works against a real daemon, and what is changed stays chang
     });
     await open(page, "Load limits");
     await expect(main(page).getByLabel("Max runs at once")).toHaveValue(limit);
-    await open(page, "Trace");
-    await expect(main(page).getByRole("switch", { name: "Trace mode" })).toBeChecked({ checked: !traced });
+    if (!hidden("Trace")) {
+      await open(page, "Trace");
+      await expect(main(page).getByRole("switch", { name: "Trace mode" })).toBeChecked({ checked: !traced });
+    }
     await open(page, "Servers & PC");
     await expect(main(page).getByLabel("Server name")).toHaveValue("Testbak");
 

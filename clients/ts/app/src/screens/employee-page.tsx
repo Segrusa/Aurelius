@@ -13,6 +13,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAllTasks, useEffectiveSets, useEmployees } from "../data";
+import { hidden } from "../hidden";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
@@ -423,7 +424,9 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
                       {features.includes("employee_access") ? (
                         <MetadataListItem label="Access">{accessLabel(accessOf(e))}</MetadataListItem>
                       ) : null}
-                      {features.includes("employee_tools") && policyLine(e.tool_policy ?? {}) ? (
+                      {features.includes("employee_tools") &&
+                      !hidden("EmployeeTools") &&
+                      policyLine(e.tool_policy ?? {}) ? (
                         <MetadataListItem label="Tools">{policyLine(e.tool_policy ?? {})}</MetadataListItem>
                       ) : null}
                     </MetadataList>

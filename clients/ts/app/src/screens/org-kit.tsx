@@ -13,6 +13,7 @@ import { Text } from "@astryxdesign/core/Text";
 import * as stylex from "@stylexjs/stylex";
 import { useRouterState } from "@tanstack/react-router";
 import { type ComponentProps, type KeyboardEvent, type ReactNode, useContext } from "react";
+import { type Feature, shown } from "../hidden";
 import { KeysContext } from "../keys/provider";
 import { useDelayed } from "../ui/use-delayed";
 
@@ -113,12 +114,12 @@ export function Loading({ rows = 3 }: { rows?: number }) {
 
 const noNavigation = () => {};
 
-const KNOWLEDGE = [
+const KNOWLEDGE: { key: string; label: string; feature?: Feature }[] = shown([
   { key: "guidelines", label: "Guidelines" },
   { key: "memory", label: "Memory" },
-  { key: "ideas", label: "Ideas" },
-  { key: "vault", label: "Vault" },
-] as const;
+  { key: "ideas", label: "Ideas", feature: "Ideas" },
+  { key: "vault", label: "Vault", feature: "Vault" },
+]);
 
 export function KnowledgeTabs() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });

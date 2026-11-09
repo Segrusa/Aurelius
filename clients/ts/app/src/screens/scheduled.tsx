@@ -11,6 +11,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useKeyed } from "../data";
+import { hidden } from "../hidden";
 import { toast } from "../ui/toast";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, Problem } from "./org-kit";
 import { outcomeText, scheduledLine, splitScheduled, waiterLine } from "./scheduled-logic";
@@ -234,7 +235,7 @@ export function ScheduledScreen() {
           ) : (
             <Hint>This server does not have scheduled messages yet.</Hint>
           )}
-          <RecurringTasks />
+          {hidden("RecurringTasks") ? null : <RecurringTasks />}
         </div>
       </div>
     </Page>

@@ -21,6 +21,7 @@ import {
   useSubscription,
   useTickets,
 } from "../data";
+import { type Feature, shown } from "../hidden";
 import { useAction, useFallbackAction, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
 import {
@@ -118,11 +119,11 @@ const NAV_MAIN: { to: string; label: string; icon: NavIcon }[] = [
   { to: "/inbox", label: "Inbox", icon: "inbox" },
   { to: "/my-tickets", label: "My tickets", icon: "mine" },
 ];
-const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon }[] = [
+const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature }[] = [
   { to: "/board", label: "Board", icon: "board" },
-  { to: "/tasks", label: "Tasks", icon: "tasks" },
-  { to: "/scheduled", label: "Scheduled", icon: "clock" },
-  { to: "/activity", label: "Activity log", icon: "note" },
+  { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
+  { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
+  { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
   { to: "/chat", label: "Team chat", icon: "chat" },
   { to: "/employees", label: "Employees", icon: "team" },
   { to: "/knowledge", label: "Knowledge", icon: "know" },
@@ -465,7 +466,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
         />
       ))}
       <SideNavSection title="Workspace">
-        {NAV_WORKSPACE.map((n) => (
+        {shown(NAV_WORKSPACE).map((n) => (
           <NavRow
             key={n.to}
             to={n.to}

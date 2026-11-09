@@ -22,6 +22,7 @@ import {
   useOpenTasks,
   useProjects,
 } from "../data";
+import { type Feature, hidden, shown } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
@@ -471,7 +472,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
           : []),
         { key: "edit", label: "Edit…" },
         ...(platform.openFolder && project.folder ? [{ key: "folder", label: "Open folder" }] : []),
-        { key: "schedule", label: "New recurring task…" },
+        ...(hidden("RecurringTasks") ? [] : [{ key: "schedule", label: "New recurring task…" }]),
         { key: "export", label: "Export (Markdown + JSON)" },
         { key: "memory", label: "Memory" },
         { key: "pause", label: project.status === "paused" ? "Resume project" : "Pause project" },
@@ -725,13 +726,16 @@ export function ProjectsScreen() {
 }
 
 type ProjectTab = "overview" | "board" | "tasks" | "ideas" | "vault";
-const TABS: { key: ProjectTab; label: string }[] = [
+const TABS: { key: ProjectTab; label: string; feature?: Feature }[] = shown([
   { key: "overview", label: "Overview" },
   { key: "board", label: "Board" },
   { key: "tasks", label: "Tasks" },
-  { key: "ideas", label: "Ideas" },
-  { key: "vault", label: "Vault" },
-];
+  { key: "ideas", label: "Ideas", feature: "Ideas" },
+  { key: "vault", label: "Vault", feature: "Vault" },
+]);
+
+/** A hidden tab in a URL opens the overview. */
+export const projectTabShown = (tab: string): boolean => TABS.some((t) => t.key === tab);
 
 function Panel({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -846,25 +850,27 @@ function Overview({ project }: { project: ProjectSummary }) {
           />
         </div>
       </Panel>
-      <Panel
-        title={`IDEAS · ${openIdeas.length} OPEN`}
-        right={
-          <span {...stylex.props(styles.dim)}>
-            FROM YOU · {split.yours.length} · FROM EMPLOYEES · {split.employees.length}
-          </span>
-        }
-      >
-        {ideas.isPending ? <Loading rows={2} /> : null}
-        {ideas.data && openIdeas.length === 0 ? (
-          <p {...stylex.props(styles.note)}>No open ideas. Note one in the Ideas tab with Ctrl+N.</p>
-        ) : null}
-        {openIdeas.slice(0, 5).map((i) => (
-          <Link key={i.id} to="/projects/$id" params={{ id: project.id }} search={{ tab: "ideas" }} {...row}>
-            <span {...stylex.props(styles.rowText)}>{i.title}</span>
-            <span {...stylex.props(styles.rowDim)}>{i.author}</span>
-          </Link>
-        ))}
-      </Panel>
+      {hidden("Ideas") ? null : (
+        <Panel
+          title={`IDEAS · ${openIdeas.length} OPEN`}
+          right={
+            <span {...stylex.props(styles.dim)}>
+              FROM YOU · {split.yours.length} · FROM EMPLOYEES · {split.employees.length}
+            </span>
+          }
+        >
+          {ideas.isPending ? <Loading rows={2} /> : null}
+          {ideas.data && openIdeas.length === 0 ? (
+            <p {...stylex.props(styles.note)}>No open ideas. Note one in the Ideas tab with Ctrl+N.</p>
+          ) : null}
+          {openIdeas.slice(0, 5).map((i) => (
+            <Link key={i.id} to="/projects/$id" params={{ id: project.id }} search={{ tab: "ideas" }} {...row}>
+              <span {...stylex.props(styles.rowText)}>{i.title}</span>
+              <span {...stylex.props(styles.rowDim)}>{i.author}</span>
+            </Link>
+          ))}
+        </Panel>
+      )}
       <Panel
         title={`GUIDELINES FOR EVERYONE IN ${project.name.toUpperCase()}`}
         right={

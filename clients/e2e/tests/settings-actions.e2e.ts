@@ -2,6 +2,7 @@
 // and the screens around a run: the writes are checked against a script.
 
 import { expect, type Page, test } from "@playwright/test";
+import { hidden } from "../../ts/app/src/hidden";
 import { serveStatic, WEB_DIST } from "./daemon";
 import { notification, scriptServer } from "./fake-server";
 
@@ -188,6 +189,7 @@ test.describe("settings actions", () => {
   });
 
   test("a recurring task checks its time before it is sent", async ({ page }) => {
+    test.skip(hidden("RecurringTasks"), "hidden in hidden.ts");
     const { writes, stop } = await scripted(
       page,
       {
@@ -246,6 +248,7 @@ test.describe("settings actions", () => {
 
 test.describe("around the work", () => {
   test("a recurring task opens to what it does", async ({ page }) => {
+    test.skip(hidden("RecurringTasks"), "hidden in hidden.ts");
     const schedule = {
       id: "s1",
       title: "Weekly report",
@@ -273,6 +276,7 @@ test.describe("around the work", () => {
   });
 
   test("memory answers to the keys of the selected entry", async ({ page }) => {
+    test.skip(hidden("MemoryProposals"), "hidden in hidden.ts");
     const memory = (id: string, status: string, content: string) => ({
       id,
       status,

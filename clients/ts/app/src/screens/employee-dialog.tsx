@@ -20,6 +20,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useKeyed } from "../data";
+import { hidden } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
@@ -109,7 +110,8 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const connections = usableConnections(list.data?.connections ?? []);
   const inherited = inheritedRun(list.data);
   const hasAccess = features.includes("employee_access");
-  const hasTools = features.includes("employee_tools");
+  // Hidden, its block is gone but the policy stays in the state: save only sends a change.
+  const hasTools = features.includes("employee_tools") && !hidden("EmployeeTools");
   const employees = useEmployees();
   const [name, setName] = useState(employee?.name ?? "");
   const [role, setRole] = useState(employee?.role ?? "");
@@ -290,7 +292,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
     }
   };
   useAction("ConfirmPrimary", () => void save());
-  useAction("ToggleManagerSequential", () => setSequential(!sequential));
+  useAction("ToggleManagerSequential", () => setSequential(!sequential), !hidden("SequentialTasks"));
   useAction("CycleReportsTo", () => setReportsTo(cycle(["", ...candidates.map((c) => c.id)], reportsTo)));
   useAction("CycleTaskEffort", () =>
     setPicks({
@@ -499,7 +501,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
               size="sm"
               variant="ghost"
               aria-expanded={more}
-              label={`${more ? "Less ▴" : "More ▾"} Advanced: Subagents, run one at a time${sequential ? " (on)" : ""}${hasVersions ? ", instruction versions" : ""}`}
+              label={`${more ? "Less ▴" : "More ▾"} Advanced: Subagents${hidden("SequentialTasks") ? "" : `, run one at a time${sequential ? " (on)" : ""}`}${hasVersions ? ", instruction versions" : ""}`}
               onClick={() => setMore(!more)}
             />
           </div>
@@ -522,12 +524,14 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
                   }))}
                 />
               </div>
-              <CheckboxInput
-                label="Run tasks one at a time"
-                description="Tasks wait in line and start one after the other."
-                value={sequential}
-                onChange={(checked) => setSequential(checked)}
-              />
+              {hidden("SequentialTasks") ? null : (
+                <CheckboxInput
+                  label="Run tasks one at a time"
+                  description="Tasks wait in line and start one after the other."
+                  value={sequential}
+                  onChange={(checked) => setSequential(checked)}
+                />
+              )}
               {hasVersions ? (
                 <div {...stylex.props(styles.versions)}>
                   <Hint>Earlier instructions</Hint>

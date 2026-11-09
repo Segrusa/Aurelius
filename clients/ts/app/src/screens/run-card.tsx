@@ -12,6 +12,7 @@ import * as stylex from "@stylexjs/stylex";
 import { type ComponentType, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useKeyed } from "../data";
+import { hidden } from "../hidden";
 import { toast } from "../ui/toast";
 import { Loading, Problem } from "./org-kit";
 import { odometerEmpty, odometerItems, odometerLine, runLine, runState } from "./run-card-logic";
@@ -103,7 +104,7 @@ export function RunCard({ m, Output }: { m: MessageView; Output: CallOutput }) {
           </div>
         ) : null}
       </Collapsible>
-      {brief.employee_id && features.includes("employee_scratchpad") ? (
+      {brief.employee_id && features.includes("employee_scratchpad") && !hidden("RunScratchpad") ? (
         <ScratchpadButton employeeId={brief.employee_id} />
       ) : null}
       {state.running ? <Button size="sm" label="Cancel" onClick={() => void stop()} /> : null}

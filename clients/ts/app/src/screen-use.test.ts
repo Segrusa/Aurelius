@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hidden } from "./hidden";
+import { hidden, shown } from "./hidden";
 import { noteScreen, parseScreenUse, type ScreenUse, screenKey, screenUseJson } from "./screen-use";
 
 describe("the screen counter", () => {
@@ -38,5 +38,27 @@ describe("the screen counter", () => {
 describe("hidden features", () => {
   it("are the desktop's", () => {
     expect(hidden("ChatAttachments")).toBe(true);
+  });
+
+  it("are the simplification's", () => {
+    for (const feature of [
+      "TasksInSidebar",
+      "ScheduledInSidebar",
+      "ActivityInSidebar",
+      "Trace",
+      "RecurringTasks",
+      "Vault",
+      "EmployeeTools",
+      "Ideas",
+      "MemoryProposals",
+      "SequentialTasks",
+      "RunScratchpad",
+    ] as const) {
+      expect(hidden(feature)).toBe(true);
+    }
+  });
+
+  it("leave only what is shown of a list", () => {
+    expect(shown([{ key: "a" }, { key: "b", feature: "Vault" as const }]).map((i) => i.key)).toEqual(["a"]);
   });
 });
