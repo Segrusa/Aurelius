@@ -1373,6 +1373,59 @@ pub struct TraceSetting {
     pub keep_days: u32,
 }
 
+/// Where an employee's effective model or effort comes from (`employee.run_overview`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunValueSource {
+    /// Chosen for this employee.
+    Employee,
+    /// The company-wide default.
+    Company,
+    /// The default model of the connection.
+    Connection,
+    /// Nothing is chosen: the runtime decides (the model's own effort).
+    Runtime,
+}
+
+/// What a new run of one employee uses, as the run itself would resolve it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeRunView {
+    pub employee_id: EmployeeId,
+    pub name: String,
+    pub status: LifecycleStatus,
+    /// The display name of the connection, if there is one.
+    pub connection: Option<String>,
+    pub model: Option<String>,
+    pub model_source: RunValueSource,
+    /// The effort passed to the run; none: the run gets no effort and the model's own applies.
+    pub effort: Option<String>,
+    pub effort_source: RunValueSource,
+    /// The model's own effort when none is passed, where that is known.
+    pub model_default_effort: Option<String>,
+    /// The levels this employee's model can use; empty: it has no effort setting.
+    pub supported_efforts: Vec<String>,
+    /// A chosen effort the model cannot use, so runs leave it out.
+    pub unsupported_effort: Option<String>,
+    /// What is stored for the employee itself: a change sends it back with only the effort changed.
+    pub own: crate::connection::RunDefaults,
+    /// The model chosen in the employee's chat; it goes before the rest in its chats.
+    pub chat_model: Option<String>,
+    /// The effort chosen in the employee's chat; it goes before the rest in its chats.
+    pub chat_effort: Option<String>,
+}
+
+/// `employee.run_overview` (feature `employee_run_overview`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeRunsView {
+    pub employees: Vec<EmployeeRunView>,
+    /// The stored company-wide default for employee runs.
+    pub company: crate::connection::RunDefaults,
+    pub company_model: Option<String>,
+    /// The levels the company's default model can use.
+    pub company_supported_efforts: Vec<String>,
+    pub company_model_default_effort: Option<String>,
+}
+
 /// `run.get_trace`: what one run sent to the runtime and what each of its model calls cost
 /// (feature `run_trace`). Kept only while trace mode is on, for the latest runs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

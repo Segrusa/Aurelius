@@ -365,6 +365,9 @@ pub mod feature {
     pub const EMPLOYEE_TOOLS: &str = "employee_tools";
     /// `employee.create` takes a start profile (`employee.start_profiles`, C6).
     pub const EMPLOYEE_PROFILES: &str = "employee_profiles";
+    /// The model and effort of every employee can be read (`employee.run_overview`),
+    /// and `connection.set_defaults` refuses an effort the model lacks.
+    pub const EMPLOYEE_RUN_OVERVIEW: &str = "employee_run_overview";
     /// The activity log can be read (`activity_log.list`, R8).
     pub const ACTIVITY_LOG: &str = "activity_log";
     /// An employee's mailbox can be read (`employee.queue`, U6).
@@ -422,6 +425,7 @@ pub const FEATURES: &[&str] = &[
     feature::EMPLOYEE_SCRATCHPAD,
     feature::EMPLOYEE_TOOLS,
     feature::EMPLOYEE_PROFILES,
+    feature::EMPLOYEE_RUN_OVERVIEW,
     feature::ACTIVITY_LOG,
     feature::EMPLOYEE_QUEUE,
     feature::WORKSPACE_FILTERS,
@@ -534,6 +538,7 @@ pub enum ResponseBody {
     EmployeeToolOptions(aurelius_domain::employee_tools::ToolOptions),
     /// `employee.start_profiles`.
     EmployeeStartProfiles(aurelius_domain::employee_tools::StartProfiles),
+    EmployeeRuns(aurelius_domain::views::EmployeeRunsView),
     /// `discussion.audience`.
     DiscussionAudience(aurelius_domain::views::DiscussionAudience),
     /// `thread.read`.

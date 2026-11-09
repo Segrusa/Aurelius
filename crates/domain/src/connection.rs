@@ -131,6 +131,85 @@ pub struct RunDefaults {
 /// Effort levels Claude Code accepts (`--effort`).
 pub const EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 
+/// Claude models that take no effort at all. From Claude Code's own model catalogue.
+const MODELS_WITHOUT_EFFORT: [&str; 10] = [
+    "claude-3-5-haiku",
+    "claude-3-5-sonnet",
+    "claude-3-7-sonnet",
+    "claude-haiku-4-5",
+    "claude-mythos-5",
+    "claude-opus-4-0",
+    "claude-opus-4-1",
+    "claude-opus-4-5",
+    "claude-sonnet-4-0",
+    "claude-sonnet-4-5",
+];
+
+/// Claude models that stop at `max` without `xhigh`.
+const MODELS_WITHOUT_XHIGH: [&str; 2] = ["claude-opus-4-6", "claude-sonnet-4-6"];
+
+/// The effort Claude Code uses for a model when none is passed, where its catalogue names one.
+const MODEL_DEFAULT_EFFORT: [(&str, &str); 10] = [
+    ("claude-fable-5", "high"),
+    ("claude-fable-5-1", "high"),
+    ("claude-haiku-5-5", "medium"),
+    ("claude-mythos-5-1", "high"),
+    ("claude-opus-4-7", "xhigh"),
+    ("claude-opus-4-8", "high"),
+    ("claude-opus-5", "high"),
+    ("claude-opus-5-5", "medium"),
+    ("claude-sonnet-5", "high"),
+    ("claude-sonnet-5-5", "medium"),
+];
+
+/// A model id without what does not change its capabilities: `[1m]` and a release date.
+fn model_family(model: &str) -> &str {
+    let model = model.split('[').next().unwrap_or(model);
+    match model.rsplit_once('-') {
+        Some((head, date)) if date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()) => head,
+        _ => model,
+    }
+}
+
+/// The effort levels a run on this provider and model can use. Only Claude Code
+/// takes an effort (and the test runtime, which imitates it); an unknown or
+/// unset model (an alias, a new release) offers every level, since Claude Code
+/// decides then and refusing would block a model this table does not know yet.
+pub fn supported_efforts(provider: Option<ProviderKind>, model: Option<&str>) -> Vec<&'static str> {
+    if matches!(provider, Some(ProviderKind::AnthropicApi | ProviderKind::OpenaiApi)) {
+        return Vec::new();
+    }
+    let family = model.map(model_family).unwrap_or_default();
+    if MODELS_WITHOUT_EFFORT.contains(&family) {
+        return Vec::new();
+    }
+    let no_xhigh = MODELS_WITHOUT_XHIGH.contains(&family);
+    EFFORT_LEVELS.into_iter().filter(|level| !(no_xhigh && *level == "xhigh")).collect()
+}
+
+/// The effort a model runs at when Aurelius passes none, if that is known.
+pub fn model_default_effort(provider: Option<ProviderKind>, model: Option<&str>) -> Option<&'static str> {
+    if !matches!(provider, None | Some(ProviderKind::ClaudeCode)) || supported_efforts(provider, model).is_empty() {
+        return None;
+    }
+    let family = model_family(model?);
+    MODEL_DEFAULT_EFFORT.iter().find(|(id, _)| *id == family).map(|(_, effort)| *effort)
+}
+
+/// Why `effort` cannot be chosen for this model, in words for the board member.
+/// None: it can.
+pub fn effort_refusal(effort: &str, provider: Option<ProviderKind>, model: Option<&str>) -> Option<String> {
+    if !EFFORT_LEVELS.contains(&effort) {
+        return Some(format!("Effort must be one of {}.", EFFORT_LEVELS.join(", ")));
+    }
+    let supported = supported_efforts(provider, model);
+    if supported.contains(&effort) {
+        return None;
+    }
+    let name = model.unwrap_or("This connection");
+    Some(if supported.is_empty() { format!("{name} has no effort setting.") } else { format!("{name} supports {}, not {effort}.", supported.join(", ")) })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SetRunDefaults {
     pub scope: ConfigScope,
@@ -200,6 +279,35 @@ mod tests {
         let r = resolve_field(&layers);
         assert_eq!(r.value, None);
         assert_eq!(r.origin.unwrap().label, "employee");
+    }
+
+    #[test]
+    fn a_model_only_offers_the_effort_levels_claude_code_has_for_it() {
+        let cc = Some(ProviderKind::ClaudeCode);
+        assert!(supported_efforts(cc, Some("claude-haiku-4-5-20251001")).is_empty());
+        assert_eq!(supported_efforts(cc, Some("claude-opus-4-6[1m]")), ["low", "medium", "high", "max"]);
+        assert_eq!(supported_efforts(cc, Some("claude-opus-5-5")), EFFORT_LEVELS);
+        assert_eq!(supported_efforts(cc, Some("opus")), EFFORT_LEVELS, "an alias is Claude Code's to resolve");
+        assert_eq!(supported_efforts(cc, None), EFFORT_LEVELS);
+        assert!(supported_efforts(Some(ProviderKind::AnthropicApi), Some("claude-opus-5-5")).is_empty());
+    }
+
+    #[test]
+    fn a_refusal_says_what_the_model_does_support() {
+        let cc = Some(ProviderKind::ClaudeCode);
+        assert_eq!(effort_refusal("high", cc, Some("claude-opus-5-5")), None);
+        assert_eq!(effort_refusal("xhigh", cc, Some("claude-sonnet-4-6")).as_deref(), Some("claude-sonnet-4-6 supports low, medium, high, max, not xhigh."));
+        assert_eq!(effort_refusal("low", cc, Some("claude-haiku-4-5")).as_deref(), Some("claude-haiku-4-5 has no effort setting."));
+        assert!(effort_refusal("ludicrous", cc, None).is_some());
+    }
+
+    #[test]
+    fn the_model_default_is_known_only_where_the_catalogue_names_one() {
+        let cc = Some(ProviderKind::ClaudeCode);
+        assert_eq!(model_default_effort(cc, Some("claude-opus-4-7")), Some("xhigh"));
+        assert_eq!(model_default_effort(cc, Some("claude-mythos-5")), None, "no effort at all");
+        assert_eq!(model_default_effort(cc, Some("opus")), None);
+        assert_eq!(model_default_effort(Some(ProviderKind::OpenaiApi), Some("claude-opus-5-5")), None);
     }
 
     #[test]

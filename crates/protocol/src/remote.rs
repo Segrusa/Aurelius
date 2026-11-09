@@ -63,6 +63,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ActivityLogList { .. }
         | Method::EmployeeToolOptions
         | Method::EmployeeStartProfiles
+        | Method::EmployeeRunOverview
         | Method::GroupChatGet { .. }
         | Method::ChannelList
         | Method::ChannelSearch { .. }

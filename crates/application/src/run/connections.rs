@@ -6,11 +6,13 @@ use crate::run::events::{Ev, emit};
 use crate::{CommandContext, CommandService, Committed, Followup, domain_error, storage_error};
 use aurelius_domain::{
     ActorKind, ProviderId, ConversationId, DomainError,
-    connection::{self, ProviderKind, Purpose, resolve_field},
+    connection::{self, ConfigScope, Origin, ProviderKind, Purpose, Resolved, RunDefaults, resolve_field},
     employee::Setting,
 };
+use aurelius_domain::views::{EmployeeRunView, EmployeeRunsView, RunValueSource};
 use aurelius_domain::{AppError, CommandEnvelope, CommandResult};
 use aurelius_storage::{StorageError, Tx, connections as store_conn};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 /// Immutable per-run configuration with the origin of every value.
@@ -61,20 +63,108 @@ fn changed(tx: &Tx<'_>, id: ProviderId, event_type: &'static str, metadata: serd
     .1)
 }
 
+/// The effort the layers choose, and what of it a run can use.
+struct PickedEffort {
+    resolved: Resolved<String>,
+    /// What the run passes; a level the model lacks is left out, as Claude Code would not honour it.
+    usable: Option<String>,
+}
+
+/// What a set of layers comes to. One function for a run and for the overview,
+/// so that what Settings shows is what a run uses.
+struct Picked {
+    conn: Resolved<ProviderId>,
+    row: Option<store_conn::ProviderRow>,
+    model: Resolved<String>,
+    model_value: Option<String>,
+    effort: PickedEffort,
+}
+
+fn pick(conn: &Connection, layers: &[(Origin, RunDefaults)]) -> Result<Picked, StorageError> {
+    let (connections, models) = store_conn::split_layers(layers);
+    let chosen = resolve_field(&connections);
+    let row = match chosen.value {
+        Some(id) => store_conn::load(conn, id)?.filter(|r| r.status != "disconnected"),
+        None => None,
+    };
+    let model = resolve_field(&models);
+    let model_value = model.value.clone().or_else(|| row.as_ref().and_then(|r| r.default_model()));
+    let efforts: Vec<_> = layers.iter().map(|(o, s)| (o.clone(), s.effort.clone())).collect();
+    let resolved = resolve_field(&efforts);
+    let provider = row.as_ref().map(|r| r.provider);
+    let usable = resolved.value.clone().filter(|e| connection::supported_efforts(provider, model_value.as_deref()).contains(&e.as_str()));
+    Ok(Picked { conn: chosen, row, model, model_value, effort: PickedEffort { resolved, usable } })
+}
+
+/// Where a resolved value came from, for the overview; `fallback` when no layer set one.
+fn source_of<T>(resolved: &Resolved<T>, fallback: RunValueSource) -> RunValueSource {
+    match (&resolved.value, resolved.origin.as_ref().map(|o| o.scope)) {
+        (Some(_), Some(ConfigScope::Employee(_))) => RunValueSource::Employee,
+        (Some(_), Some(_)) => RunValueSource::Company,
+        _ => fallback,
+    }
+}
+
+/// What a new run of each employee uses: its own choice, else the company's,
+/// else the connection's and the model's. A project, a task or a chat can still
+/// choose differently for itself; the chat's choice is included per employee.
+pub fn employee_runs(conn: &Connection) -> Result<EmployeeRunsView, StorageError> {
+    let mut employees = Vec::new();
+    for employee in aurelius_storage::employees::list_employees(conn, &|_| None)? {
+        let layers = store_conn::employee_layers(conn, employee.id, &employee.name, Purpose::Employee)?;
+        let picked = pick(conn, &layers)?;
+        let provider = picked.row.as_ref().map(|r| r.provider);
+        let model = picked.model_value.as_deref();
+        let model_source = source_of(&picked.model, if picked.row.is_some() { RunValueSource::Connection } else { RunValueSource::Runtime });
+        let chat = aurelius_storage::conversations::conversation_run(conn, employee.conversation_id)?;
+        let chat_model = chat.model.filter(|m| !m.is_empty());
+        let chat_supported = connection::supported_efforts(provider, chat_model.as_deref().or(model));
+        employees.push(EmployeeRunView {
+            employee_id: employee.id,
+            name: employee.name.clone(),
+            status: employee.status,
+            connection: picked.row.as_ref().map(|r| r.display_name.clone()),
+            model: picked.model_value.clone(),
+            model_source,
+            effort_source: match &picked.effort.usable {
+                Some(_) => source_of(&picked.effort.resolved, RunValueSource::Runtime),
+                None => RunValueSource::Runtime,
+            },
+            unsupported_effort: picked.effort.resolved.value.clone().filter(|_| picked.effort.usable.is_none()),
+            effort: picked.effort.usable.clone(),
+            model_default_effort: connection::model_default_effort(provider, model).map(str::to_owned),
+            supported_efforts: connection::supported_efforts(provider, model).into_iter().map(str::to_owned).collect(),
+            own: store_conn::defaults_at(conn, ConfigScope::Employee(employee.id), Purpose::Employee)?.unwrap_or_default(),
+            chat_effort: chat.effort.filter(|e| chat_supported.contains(&e.as_str())),
+            chat_model,
+        });
+    }
+    let company = store_conn::defaults_at(conn, ConfigScope::Global, Purpose::Employee)?.unwrap_or_default();
+    let (provider, company_model) = scope_model(conn, &company, None)?;
+    Ok(EmployeeRunsView {
+        employees,
+        company_supported_efforts: connection::supported_efforts(provider, company_model.as_deref()).into_iter().map(str::to_owned).collect(),
+        company_model_default_effort: connection::model_default_effort(provider, company_model.as_deref()).map(str::to_owned),
+        company,
+        company_model,
+    })
+}
+
+/// The provider and model of `settings`, with what they inherit from `below`.
+fn scope_model(conn: &Connection, settings: &RunDefaults, below: Option<&RunDefaults>) -> Result<(Option<ProviderKind>, Option<String>), StorageError> {
+    let origin = Origin { scope: ConfigScope::Global, label: String::new() };
+    let mut layers = vec![(origin.clone(), settings.clone())];
+    layers.extend(below.map(|b| (origin, b.clone())));
+    let picked = pick(conn, &layers)?;
+    Ok((picked.row.as_ref().map(|r| r.provider), picked.model_value))
+}
+
 /// Resolve connection and model for a new run in `conversation` (employee → project → global).
 /// Explicit `Disabled` stays disabled; there is never a silent fallback to another provider.
 pub fn resolve(tx: &Tx<'_>, conversation: ConversationId, purpose: Purpose) -> Result<ResolvedRunConfig, StorageError> {
     let layers = store_conn::layers_for(tx, conversation, purpose)?;
-    let (connections, models) = store_conn::split_layers(&layers);
-    let conn = resolve_field(&connections);
-    let row = match conn.value {
-        Some(id) => store_conn::load(tx, id)?.filter(|r| r.status != "disconnected"),
-        None => None,
-    };
-    let model = resolve_field(&models);
-    let efforts: Vec<_> = layers.iter().map(|(o, s)| (o.clone(), s.effort.clone())).collect();
-    let effort = resolve_field(&efforts).value.filter(|e| connection::EFFORT_LEVELS.contains(&e.as_str()));
-    let model_value = model.value.clone().or_else(|| row.as_ref().and_then(|r| r.default_model()));
+    let Picked { conn, row, model, model_value, effort: chosen, .. } = pick(tx, &layers)?;
+    let effort = chosen.usable;
     let model_origin = match (&model.origin, &model.value) {
         (Some(o), Some(_)) => Some(o.label.clone()),
         _ => row.as_ref().map(|r| format!("default of connection {}", r.display_name)),
@@ -102,6 +192,23 @@ pub fn resolve(tx: &Tx<'_>, conversation: ConversationId, purpose: Purpose) -> R
         model_origin,
         login_user: None,
     })
+}
+
+/// Why the effort of this change cannot be stored. Only a newly chosen effort
+/// is judged: changing the model must not fail on the effort it already had.
+fn refused_effort(conn: &Connection, cmd: &connection::SetRunDefaults) -> Result<Option<String>, StorageError> {
+    let Setting::Value(effort) = &cmd.settings.effort else { return Ok(None) };
+    let stored = store_conn::defaults_at(conn, cmd.scope, cmd.purpose)?.unwrap_or_default();
+    if stored.effort == cmd.settings.effort {
+        return Ok(None);
+    }
+    if cmd.purpose != Purpose::Employee {
+        // Subagents and memory have their own models; only the level can be judged here.
+        return Ok(connection::effort_refusal(effort, None, None));
+    }
+    let company = store_conn::defaults_at(conn, ConfigScope::Global, cmd.purpose)?;
+    let (provider, model) = scope_model(conn, &cmd.settings, company.as_ref().filter(|_| cmd.scope != ConfigScope::Global))?;
+    Ok(connection::effort_refusal(effort, provider, model.as_deref()))
 }
 
 impl CommandService {
@@ -178,6 +285,7 @@ impl CommandService {
     }
 
     pub(crate) fn set_run_defaults(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &connection::SetRunDefaults) -> Result<Committed, AppError> {
+        crate::ticket::require_board_member(ctx)?;
         let cmd = cmd.clone();
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
@@ -185,6 +293,9 @@ impl CommandService {
             let Some(scope) = store_conn::scope_id(tx, cmd.scope)? else {
                 return Ok(Err(domain_error(DomainError::OutOfRange { field: "scope".into(), detail: "unknown scope".into() })));
             };
+            if let Some(detail) = refused_effort(tx, &cmd)? {
+                return Ok(Err(domain_error(DomainError::OutOfRange { field: "effort".into(), detail })));
+            }
             if let Setting::Value(id) = cmd.settings.connection {
                 if store_conn::load(tx, id)?.filter(|r| r.status != "disconnected").is_none() {
                     return Ok(Err(domain_error(DomainError::ProviderNotFound(id))));

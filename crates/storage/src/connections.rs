@@ -166,6 +166,40 @@ pub fn list_defaults(conn: &Connection) -> Result<Vec<DefaultsView>, StorageErro
     Ok(out)
 }
 
+fn stored_defaults(conn: &Connection, scope_kind: &str, owner: Option<&str>, purpose: Purpose) -> Result<Option<RunDefaults>, StorageError> {
+    let config: Option<String> = conn
+        .query_row(
+            "SELECT o.config_json FROM config_overrides o JOIN scopes s ON s.id = o.scope_id
+             WHERE s.kind = ?1 AND (?2 IS NULL OR s.owner_id = ?2) AND o.purpose = ?3",
+            params![scope_kind, owner, purpose.as_str()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(config.and_then(|c| serde_json::from_str(&c).ok()))
+}
+
+/// What is stored at exactly this scope, if anything.
+pub fn defaults_at(conn: &Connection, scope: ConfigScope, purpose: Purpose) -> Result<Option<RunDefaults>, StorageError> {
+    match scope {
+        ConfigScope::Global => stored_defaults(conn, "global", None, purpose),
+        ConfigScope::Project(p) => stored_defaults(conn, "project", Some(&p.to_string()), purpose),
+        ConfigScope::Employee(e) => stored_defaults(conn, "employee", Some(&e.to_string()), purpose),
+    }
+}
+
+/// An employee's own layers, most specific first: the employee, then the company.
+/// No conversation, task or project: what a new run of it starts from.
+pub fn employee_layers(conn: &Connection, employee: aurelius_domain::EmployeeId, name: &str, purpose: Purpose) -> Result<Vec<(Origin, RunDefaults)>, StorageError> {
+    let mut layers = Vec::new();
+    if let Some(s) = defaults_at(conn, ConfigScope::Employee(employee), purpose)? {
+        layers.push((Origin { scope: ConfigScope::Employee(employee), label: format!("employee {name}") }, s));
+    }
+    if let Some(s) = defaults_at(conn, ConfigScope::Global, purpose)? {
+        layers.push((Origin { scope: ConfigScope::Global, label: "global default".to_owned() }, s));
+    }
+    Ok(layers)
+}
+
 /// Layers for a conversation, most specific first: employee, project, global.
 /// Subagents get only their own scoped defaults, not what was chosen for the conversation.
 pub fn layers_for(conn: &Connection, conversation: ConversationId, purpose: Purpose) -> Result<Vec<(Origin, RunDefaults)>, StorageError> {
@@ -178,17 +212,6 @@ pub fn layers_for(conn: &Connection, conversation: ConversationId, purpose: Purp
         )
         .optional()?
         .unwrap_or((None, None, None, None));
-    let lookup = |scope_kind: &str, owner: Option<&str>, purpose: Purpose| -> Result<Option<RunDefaults>, StorageError> {
-        let config: Option<String> = conn
-            .query_row(
-                "SELECT o.config_json FROM config_overrides o JOIN scopes s ON s.id = o.scope_id
-                 WHERE s.kind = ?1 AND (?2 IS NULL OR s.owner_id = ?2) AND o.purpose = ?3",
-                params![scope_kind, owner, purpose.as_str()],
-                |r| r.get(0),
-            )
-            .optional()?;
-        Ok(config.and_then(|c| serde_json::from_str(&c).ok()))
-    };
     let mut layers = Vec::new();
     // What was chosen for this conversation itself comes first, then its task's.
     let chosen = purpose != Purpose::Subagent;
@@ -227,18 +250,18 @@ pub fn layers_for(conn: &Connection, conversation: ConversationId, purpose: Purp
     }
     let mut scoped = |purpose: Purpose, what: &str| -> Result<(), StorageError> {
         if let (Some(m), Some(name)) = (employee.as_deref(), employee_name.as_deref()) {
-            if let Some(s) = lookup("employee", Some(m), purpose)? {
+            if let Some(s) = stored_defaults(conn, "employee", Some(m), purpose)? {
                 let id = aurelius_domain::EmployeeId::parse(m).map_err(|e| StorageError::Rejected(e.to_string()))?;
                 layers.push((Origin { scope: ConfigScope::Employee(id), label: format!("{what}employee {name}") }, s));
             }
         }
         if let (Some(p), Some(name)) = (project.as_deref(), project_name.as_deref()) {
-            if let Some(s) = lookup("project", Some(p), purpose)? {
+            if let Some(s) = stored_defaults(conn, "project", Some(p), purpose)? {
                 let id = aurelius_domain::ProjectId::parse(p).map_err(|e| StorageError::Rejected(e.to_string()))?;
                 layers.push((Origin { scope: ConfigScope::Project(id), label: format!("{what}project {name}") }, s));
             }
         }
-        if let Some(s) = lookup("global", None, purpose)? {
+        if let Some(s) = stored_defaults(conn, "global", None, purpose)? {
             let label = if what.is_empty() { "global default".to_owned() } else { format!("{what}global default") };
             layers.push((Origin { scope: ConfigScope::Global, label }, s));
         }
