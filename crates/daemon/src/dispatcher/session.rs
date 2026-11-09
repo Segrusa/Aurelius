@@ -50,14 +50,22 @@ impl Choice {
 /// access level is too: a resumed session must not remember tools it no longer has.
 /// So is an employee's own tool list (C2), only when it has one: an employee
 /// without a list keeps the sessions it has. What asks first is not in it, a
-/// resumed session just gets asked.
+/// resumed session just gets asked. The design links and the Artifact tool are in it
+/// when there are any: their block is part of the system text a session keeps, and a run
+/// without links keeps the sessions it has.
 pub(super) fn session_key(plan: &ChatRunPlan, profile: &ToolProfile) -> SessionKey {
     let model = plan.config.model.clone().unwrap_or_default();
     match profile {
-        ToolProfile::Work { folders, browser, playwright, access, tool_policy, .. } => {
+        ToolProfile::Work { folders, browser, playwright, access, tool_policy, artifact, .. } => {
             let mut key = serde_json::json!({ "folders": folders, "browser": browser, "playwright": playwright.is_some(), "platform_rules": aurelius_application::run::plan::PLATFORM_RULES_VERSION, "access": access.as_str() });
             if let Some(tools) = &tool_policy.tools {
                 key["tools"] = serde_json::json!(tools);
+            }
+            if !plan.design.is_empty() {
+                key["design"] = serde_json::json!(plan.design);
+            }
+            if *artifact {
+                key["artifact"] = serde_json::json!(true);
             }
             SessionKey { model, folder: folders.first().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(), profile: key.to_string() }
         }

@@ -58,6 +58,51 @@ fn tools_sentence(access: aurelius_domain::employee::AccessLevel, policy: &aurel
     })
 }
 
+/// The Claude Design links of a run: the workspace's styleguide and this ticket's design.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct DesignLinks {
+    pub styleguide: Option<String>,
+    pub design: Option<String>,
+}
+
+impl DesignLinks {
+    pub fn is_empty(&self) -> bool {
+        self.styleguide.is_none() && self.design.is_none()
+    }
+}
+
+/// Whether a run with design links is offered Claude Code's Artifact tool: on a Claude
+/// login (the tool works on the subscription; an API-key connection or another provider
+/// has none), at work, and not read-only (a level this build does not know is the narrowest).
+fn artifact_tool_offered(config: &crate::run::connections::ResolvedRunConfig, access: aurelius_domain::employee::AccessLevel, at_work: bool) -> bool {
+    use aurelius_domain::employee::AccessLevel;
+    config.provider == Some(aurelius_domain::connection::ProviderKind::ClaudeCode)
+        && config.login_user.is_some()
+        && at_work
+        && !matches!(access, AccessLevel::ReadOnly | AccessLevel::Unknown)
+}
+
+/// The block about Claude Design at the end of a run's system text. Links only, never what the
+/// artifact holds: the session key has the links, so another link starts another session (B6)
+/// and the block stays small enough for every run. One sentence when the tool cannot be offered.
+fn design_block(links: &DesignLinks, offered: bool) -> Option<String> {
+    if links.is_empty() {
+        return None;
+    }
+    if !offered {
+        return Some("This work has a Claude Design styleguide or design, but it cannot be opened in this run: ask the board member for what you need from it.".to_owned());
+    }
+    let mut block = String::from("## Claude Design");
+    if let Some(url) = &links.styleguide {
+        block.push_str(&format!("\nThis workspace's styleguide: {url}\nRead `project/README.md` of this artifact with the Artifact tool (action read, url, path) before designing or building UI, and use its tokens."));
+    }
+    if let Some(url) = &links.design {
+        block.push_str(&format!("\nThis ticket's design: {url}\nRead it with the Artifact tool before you build it."));
+    }
+    block.push_str("\nA link opens only if the artifact is shared with the board member whose login this run uses; if it does not open, say so and ask them.");
+    Some(block)
+}
+
 /// Everything the daemon needs to execute a claimed chat run.
 #[derive(Debug, Clone)]
 pub struct ChatRunPlan {
@@ -108,6 +153,10 @@ pub struct ChatRunPlan {
     /// The guidelines in its system text (B3): kept as the run's snapshot when it
     /// starts (B6), with the board members' notice of what the block left out or redacted.
     pub guidelines: crate::run::guidelines::RunSet,
+    /// The Claude Design links of the run's project and ticket; part of the session key.
+    pub design: DesignLinks,
+    /// The run is offered Claude Code's Artifact tool for those links.
+    pub artifact_tool: bool,
 }
 
 /// The answer may end with ready-made replies (chats with the user).
@@ -580,6 +629,20 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     tail.push(note.to_string());
                 }
                 let testing = testing == crate::task::testing::TestingRole::Tester;
+                // Claude Design: the workspace's styleguide and the ticket's design (a quick answer has no tools).
+                let design = if quick {
+                    DesignLinks::default()
+                } else {
+                    let ticket = crate::conversation::discussion::run_discussion(conn, run_id)?;
+                    let ticket = ticket.as_ref().and_then(|d| d.ticket()).map(|t| (t.id, t.project));
+                    let project = ticket.map(|(_, p)| p).or(project_conv).or(employee_row.and_then(|(_, p)| p)).or(channel_project.as_ref().map(|(p, _)| *p));
+                    DesignLinks {
+                        styleguide: project.map(|p| aurelius_storage::company::project_styleguide(conn, p)).transpose()?.flatten(),
+                        design: ticket.map(|(t, _)| aurelius_storage::tickets::design_url(conn, t)).transpose()?.flatten(),
+                    }
+                };
+                let artifact_tool = !design.is_empty() && artifact_tool_offered(&config, access, work.is_some());
+                tail.extend(design_block(&design, artifact_tool));
 
                 // Context Builder: permitted scopes first, then retrieval.
                 let ordinals: Vec<u32> = history
@@ -714,7 +777,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 // Its answer in the group shows the mode it started in.
                 let group = conv::group_run(conn, run_id)?.map(|g| conv::GroupRun { mode: Some(mode), ..g });
                 let guidelines = guidelines.run;
-                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, tool_policy, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), management_mode, session, group, discussion, testing, guidelines }))
+                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, tool_policy, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), management_mode, session, group, discussion, testing, guidelines, design, artifact_tool }))
             })
             .map_err(storage_error)
     }
@@ -742,6 +805,54 @@ mod tests {
         assert_eq!(trigger_mark(4, 100, Some((5, 200))), "", "that answer had it");
         assert_eq!(trigger_mark(6, 300, Some((5, 200))), NEW_MARK, "after the answer ended");
         assert_eq!(trigger_mark(6, 150, Some((5, 200))), NEW_BEFORE_LAST_REPLY_MARK, "while it went");
+    }
+
+    #[test]
+    fn the_artifact_tool_goes_with_a_claude_login_and_a_level_that_may_act() {
+        use aurelius_domain::connection::ProviderKind::*;
+        use aurelius_domain::employee::AccessLevel::*;
+        let config = |provider, login: bool| crate::run::connections::ResolvedRunConfig {
+            purpose: aurelius_domain::connection::Purpose::Employee,
+            connection_id: None,
+            provider: Some(provider),
+            model: None,
+            connection_origin: None,
+            model_origin: None,
+            persona_name: None,
+            persona_prompt: None,
+            effort: None,
+            subagent_model: None,
+            login_user: login.then(aurelius_domain::UserId::new),
+        };
+        for level in [Inherit, ReadEdit] {
+            assert!(artifact_tool_offered(&config(ClaudeCode, true), level, true), "{level:?}");
+            assert!(!artifact_tool_offered(&config(ClaudeCode, true), level, false), "{level:?}: no tools without work");
+        }
+        for level in [ReadOnly, Unknown] {
+            assert!(!artifact_tool_offered(&config(ClaudeCode, true), level, true), "{level:?}");
+        }
+        for provider in [AnthropicApi, OpenaiApi, Fake] {
+            assert!(!artifact_tool_offered(&config(provider, true), Inherit, true), "{provider:?}");
+        }
+        assert!(!artifact_tool_offered(&config(ClaudeCode, false), Inherit, true), "no login");
+    }
+
+    #[test]
+    fn the_design_block_gives_links_when_it_can_and_one_sentence_when_it_cannot() {
+        let guide = "https://claude.ai/artifact/guide";
+        let ticket = "https://claude.ai/code/artifact/8f14e45f-ceea-467f-a22a-2b7a2c55e3b1";
+        assert_eq!(design_block(&DesignLinks::default(), true), None, "no links, no block");
+        assert_eq!(design_block(&DesignLinks::default(), false), None);
+        let both = DesignLinks { styleguide: Some(guide.into()), design: Some(ticket.into()) };
+        let block = design_block(&both, true).unwrap();
+        assert!(block.contains(guide) && block.contains("project/README.md") && block.contains("before designing or building UI"));
+        assert!(block.contains(ticket) && block.contains("This ticket's design"));
+        assert!(aurelius_storage::memory::token_estimate(&block) <= 150, "the block goes in every run with a link");
+        let guide_only = design_block(&DesignLinks { styleguide: Some(guide.into()), design: None }, true).unwrap();
+        assert!(guide_only.contains(guide) && !guide_only.contains("This ticket's design"));
+        let refused = design_block(&both, false).unwrap();
+        assert!(refused.contains("cannot be opened in this run") && refused.contains("ask the board member"));
+        assert!(!refused.contains("claude.ai"), "no links it cannot open");
     }
 
     #[test]

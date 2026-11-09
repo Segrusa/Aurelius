@@ -210,6 +210,13 @@ pub const SUBAGENT_TOOL: &str = "Task";
 /// definition when it needs one; without it every definition is sent upfront on
 /// every request (CLI 2.1.301). It only reads, so it is allowed by rule.
 pub const TOOL_SEARCH_TOOL: &str = "ToolSearch";
+/// Claude Code's tool for claude.ai artifacts (the Design System and Design types of
+/// Claude Design). Works on the run's Claude login; only with a design link, see `ToolProfile::Work`.
+pub const ARTIFACT_TOOL: &str = "Artifact";
+/// What `--tools Artifact` brings along (CLI 2.1.318): the comment threads and the database
+/// of an artifact, which write. Off (`--disallowedTools`), so the run has only the tool it
+/// is offered and the init line lists nothing outside the profile.
+pub const ARTIFACT_SIBLINGS_OFF: &str = "ArtifactComments,ArtifactData";
 
 pub fn arguments(model: Option<&str>, system_file: Option<&Path>, effort: Option<&str>) -> Vec<String> {
     profile_arguments(&ToolProfile::TextOnly, model, system_file, effort)
@@ -242,11 +249,15 @@ pub fn profile_arguments(profile: &ToolProfile, model: Option<&str>, system_file
                 "--permission-prompts", "none", "--max-turns", &max_turns.to_string(),
             ]);
         }
-        ToolProfile::Work { folders, permission_mode, approval_bridge, browser, browser_session, playwright, mcp_servers, access, tool_policy } => {
+        ToolProfile::Work { folders, permission_mode, approval_bridge, browser, browser_session, playwright, mcp_servers, access, tool_policy, artifact } => {
             let listed = work_tools(*access, tool_policy);
             let mut tools = listed.join(",");
             tools.push(',');
             tools.push_str(TOOL_SEARCH_TOOL);
+            if *artifact {
+                tools.push(',');
+                tools.push_str(ARTIFACT_TOOL);
+            }
             // The user's own servers first, so a server called "aurelius" can never replace the bridge.
             let mut servers: serde_json::Map<String, serde_json::Value> = mcp_servers.iter().filter(|(n, _)| !is_reserved_server(n)).map(|(n, c)| (n.clone(), c.clone())).collect();
             servers.insert("aurelius".into(), serde_json::json!({
@@ -272,7 +283,8 @@ pub fn profile_arguments(profile: &ToolProfile, model: Option<&str>, system_file
             // there, and asking first needs Claude Code to come to the bridge.
             let own = MEMORY_TOOLS.iter().copied().filter(|t| tool_policy.allows(t) && !tool_policy.needs_approval(t));
             let subagent = (listed.contains(&SUBAGENT_TOOL) && !tool_policy.needs_approval(SUBAGENT_TOOL)).then_some(SUBAGENT_TOOL);
-            let allowed: Vec<&str> = SCREEN_TOOLS.iter().copied().chain(own).chain(subagent).chain([TOOL_SEARCH_TOOL]).collect();
+            let artifact_rule = artifact.then_some(ARTIFACT_TOOL);
+            let allowed: Vec<&str> = SCREEN_TOOLS.iter().copied().chain(own).chain(subagent).chain([TOOL_SEARCH_TOOL]).chain(artifact_rule).collect();
             if *browser && playwright.is_none() {
                 args.push("--chrome".into());
                 // Claude in Chrome's tab group belongs to the session id: a fixed one
@@ -295,6 +307,9 @@ pub fn profile_arguments(profile: &ToolProfile, model: Option<&str>, system_file
                 }
             }
             push(&mut args, &["--allowedTools", &allowed.join(",")]);
+            if *artifact {
+                push(&mut args, &["--disallowedTools", ARTIFACT_SIBLINGS_OFF]);
+            }
             // Stdin stays open during the run: a mode switch goes in as a control request.
             if let Some(i) = args.iter().position(|a| a == "--input-format") {
                 args[i + 1] = "stream-json".into();
@@ -1163,7 +1178,7 @@ mod vault_delivery_tests {
         let login = ClaudeLogin::of(&dir, aurelius_domain::UserId::new()).unwrap();
         let runtime = ClaudeCodeRuntime { executable: script, run_root: dir.join("runs"), model: None, login: Some(login), vault: vault(&[("GITHUB_TOKEN", FAKE)]) };
         let bridge = ApprovalBridge { program: "/bin/true".into(), args: vec![] };
-        let work = ToolProfile::Work { access: Default::default(), tool_policy: Default::default(), folders: vec![dir.clone()], permission_mode: "default".into(), approval_bridge: bridge.clone(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
+        let work = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec![dir.clone()], permission_mode: "default".into(), approval_bridge: bridge.clone(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
         let triage = ToolProfile::Triage { approval_bridge: bridge, tools: vec![], max_turns: 1 };
         for profile in [ToolProfile::TextOnly, triage, work] {
             let request = RunRequest {
@@ -1237,7 +1252,7 @@ mod mode_switch_tests {
         let bridge = crate::ApprovalBridge { program: "ctl".into(), args: vec![] };
         let mut servers = std::collections::BTreeMap::new();
         servers.insert("notes".to_string(), serde_json::json!({ "type": "stdio", "command": "node" }));
-        ToolProfile::Work { access, tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: servers }
+        ToolProfile::Work { artifact: false, access, tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: servers }
     }
 
     fn listed_tools(args: &[String]) -> String {
@@ -1246,6 +1261,40 @@ mod mode_switch_tests {
 
     fn allowed_rules(args: &[String]) -> String {
         args[args.iter().position(|a| a == "--allowedTools").unwrap() + 1].clone()
+    }
+
+    fn with_artifact(mut profile: ToolProfile) -> ToolProfile {
+        if let ToolProfile::Work { artifact, .. } = &mut profile {
+            *artifact = true;
+        }
+        profile
+    }
+
+    #[test]
+    fn a_design_link_offers_the_artifact_tool_and_nothing_else_changes() {
+        use aurelius_domain::employee::AccessLevel::*;
+        for level in [Inherit, ReadEdit] {
+            let without = profile_arguments(&work_at(level), None, None, None);
+            assert!(!listed_tools(&without).contains("Artifact") && !allowed_rules(&without).contains("Artifact"), "no link, nothing new");
+            let with = profile_arguments(&with_artifact(work_at(level)), None, None, None);
+            assert_eq!(listed_tools(&with), format!("{},Artifact", listed_tools(&without)));
+            assert_eq!(allowed_rules(&with), format!("{},Artifact", allowed_rules(&without)));
+            assert_eq!(with[with.iter().position(|a| a == "--disallowedTools").unwrap() + 1], "ArtifactComments,ArtifactData", "only the tool it is offered");
+            assert!(!without.iter().any(|a| a == "--disallowedTools"));
+        }
+        // An employee's own list does not block it: it comes with the link.
+        let listed = ToolProfile::Work { artifact: true, access: Inherit, tool_policy: aurelius_domain::employee_tools::ToolPolicy { tools: Some(vec!["Read".into()]), ..Default::default() }, folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: crate::ApprovalBridge { program: "ctl".into(), args: vec![] }, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
+        let args = profile_arguments(&listed, None, None, None);
+        assert!(listed_tools(&args).ends_with(",Artifact") && allowed_rules(&args).ends_with(",Artifact"));
+        assert_eq!(ask_rules(&listed), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_artifact_tool_passes_the_init_line_only_when_offered() {
+        use crate::claude_code::parse::StreamState;
+        let init = r#"{"type":"system","subtype":"init","tools":["Artifact"],"mcp_servers":[{"name":"aurelius","status":"connected"}],"plugins":[]}"#;
+        assert!(StreamState::for_profile(&work_at(aurelius_domain::employee::AccessLevel::Inherit)).feed(init).is_err());
+        assert!(StreamState::for_profile(&with_artifact(work_at(aurelius_domain::employee::AccessLevel::Inherit))).feed(init).is_ok());
     }
 
     #[test]
@@ -1276,7 +1325,7 @@ mod mode_switch_tests {
         let bridge = crate::ApprovalBridge { program: "ctl".into(), args: vec!["mcp-permissions".into()] };
         let mut servers = std::collections::BTreeMap::new();
         servers.insert("notes".to_string(), serde_json::json!({ "type": "http", "url": "https://x", "headers": { "Authorization": "Bearer SECRET" } }));
-        let p = ToolProfile::Work { access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: servers };
+        let p = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: servers };
         let mut args = profile_arguments(&p, Some("claude-opus-5-5"), None, None);
         apply_session(&mut args, SessionUse::Continue, "0192f1a2-3b4c-7d5e-8f60-718293a4b5c6");
         let image = crate::ImagePart { name: "a.png".into(), media_type: "image/png".into(), data: vec![0; 10] };
@@ -1295,7 +1344,7 @@ Look"));
     #[test]
     fn work_reads_stream_json_so_a_mode_switch_can_go_in() {
         let bridge = ApprovalBridge { program: "x".into(), args: vec![] };
-        let work = ToolProfile::Work { access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "plan".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
+        let work = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "plan".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
         let input = |p: &ToolProfile| {
             let args = profile_arguments(p, None, None, None);
             args[args.iter().position(|a| a == "--input-format").unwrap() + 1].clone()
@@ -1343,7 +1392,7 @@ Look"));
     #[test]
     fn only_a_claude_in_chrome_run_pins_the_session() {
         let employee = "0199c3a2-0000-7000-8000-00000000000a";
-        let work = |browser, playwright: Option<serde_json::Value>| ToolProfile::Work {
+        let work = |browser, playwright: Option<serde_json::Value>| ToolProfile::Work { artifact: false,
             access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: ApprovalBridge { program: "x".into(), args: vec![] },
             browser, browser_session: Some(employee.into()), playwright, mcp_servers: Default::default(),
         };
@@ -1357,7 +1406,7 @@ Look"));
     fn no_command_line_has_two_session_ids() {
         let employee = "0199c3a2-0000-7000-8000-00000000000a";
         let run = "0199c3a2-0000-7000-8000-000000000001";
-        let work = |browser, browser_session: Option<&str>| ToolProfile::Work {
+        let work = |browser, browser_session: Option<&str>| ToolProfile::Work { artifact: false,
             access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: ApprovalBridge { program: "x".into(), args: vec![] },
             browser, browser_session: browser_session.map(Into::into), playwright: None, mcp_servers: Default::default(),
         };

@@ -37,6 +37,8 @@ struct Seen {
     /// The system text it was given.
     system: String,
     access: aurelius_domain::employee::AccessLevel,
+    /// The run was offered the Artifact tool.
+    artifact: bool,
 }
 
 /// A runtime that keeps sessions like Claude Code does (in memory), answers like
@@ -79,6 +81,7 @@ impl AgentRuntime for Sessions {
                     ToolProfile::Work { access, .. } => *access,
                     _ => Default::default(),
                 },
+                artifact: matches!(request.profile, ToolProfile::Work { artifact: true, .. }),
             });
         }
         if request.session == SessionUse::Continue && !self.kept.lock().unwrap().contains(&id) {
@@ -340,6 +343,54 @@ async fn a_tool_list_of_its_own_starts_a_new_session_and_the_prompt_says_what_is
     assert_eq!(seen[2].session, SessionUse::Keep, "a new session: {seen:?}");
     assert!(seen[2].system.contains("Of the file, command and web tools you only have Read."), "{:?}", seen[2].system);
     assert!(seen[1].system.contains("run commands and search the web"), "without a list the sentence of the level: {:?}", seen[1].system);
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_styleguide_link_starts_a_new_session_that_has_the_artifact_tool() {
+    use aurelius_domain::company::UpdateProject;
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = Sessions::default();
+    let daemon = start_with(dir.path(), Arc::new(runtime.clone())).await;
+    let client = connect_as(dir.path(), "grace").await;
+    claude_code(&client, dir.path()).await;
+    let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }), None)).await.unwrap().result else { panic!() };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
+    let cmd = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: "Login page".into(), goal: "Fix the login page".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
+    let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
+    let mut task = None;
+    for _ in 0..400 {
+        task = client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.id == task_id && t.status == TaskStatus::Succeeded);
+        if task.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let conversation = task.expect("the task succeeded").conversation_id.expect("the task's conversation");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let say = |text: &'static str| {
+        let client = &client;
+        async move {
+            let send = SendEmployeeMessage { confirm_secret: false, employee_id, text: text.into(), conversation_id: conversation, images: Vec::new(), files: Vec::new(), interrupt: false };
+            let CommandResult::EmployeeMessageSent { message_id, .. } = client.execute(envelope(Command::SendEmployeeMessage(send), None)).await.unwrap().result else { panic!() };
+            answered(client, conversation, message_id, MessageStatus::Complete).await;
+        }
+    };
+    say("Second question").await;
+    assert_eq!(runtime.seen().last().unwrap().session, SessionUse::Continue, "no link: the session goes on");
+    assert!(!runtime.seen().last().unwrap().system.contains("project/README.md"));
+
+    let link = "https://claude.ai/artifact/abc";
+    client.ticket_command(Command::UpdateProject(UpdateProject { styleguide_url: Some(link.into()), project_id, dispatcher: None }), None).await.unwrap();
+    say("Third question").await;
+    let last = runtime.seen().last().unwrap().clone();
+    assert_eq!(last.session, SessionUse::Keep, "a new session for the link: {last:?}");
+    assert!(last.artifact && last.system.contains(link) && last.system.contains("project/README.md"), "{last:?}");
+    assert!(last.text.contains("Second question"), "the whole conversation: {last:?}");
+
+    say("Fourth question").await;
+    assert_eq!(runtime.seen().last().unwrap().session, SessionUse::Continue, "the same link: the session goes on");
     stop(dir.path(), daemon).await;
 }
 

@@ -118,7 +118,11 @@ pub enum ToolProfile {
     /// Below `Inherit` it has only that list, see [`ToolProfile::confined`].
     /// `tool_policy` is the employee's own list on top of that (C2): it can only
     /// narrow the level, and says which tools always ask first.
-    Work { folders: Vec<std::path::PathBuf>, permission_mode: String, approval_bridge: ApprovalBridge, #[serde(default)] browser: bool, #[serde(default)] browser_session: Option<String>, #[serde(default)] playwright: Option<serde_json::Value>, #[serde(default)] mcp_servers: std::collections::BTreeMap<String, serde_json::Value>, #[serde(default)] access: aurelius_domain::employee::AccessLevel, #[serde(default)] tool_policy: aurelius_domain::employee_tools::ToolPolicy },
+    /// `artifact` offers Claude Code's `Artifact` tool: the run's project has a
+    /// styleguide link or its ticket a design link, it runs on a Claude login and
+    /// its level is not ReadOnly. Tied to the link, so an employee's list does not
+    /// block it, and allowed by rule like a read tool.
+    Work { folders: Vec<std::path::PathBuf>, permission_mode: String, approval_bridge: ApprovalBridge, #[serde(default)] browser: bool, #[serde(default)] browser_session: Option<String>, #[serde(default)] playwright: Option<serde_json::Value>, #[serde(default)] mcp_servers: std::collections::BTreeMap<String, serde_json::Value>, #[serde(default)] access: aurelius_domain::employee::AccessLevel, #[serde(default)] tool_policy: aurelius_domain::employee_tools::ToolPolicy, #[serde(default)] artifact: bool },
     /// A short decision with only the given tools of the bridge (`tools`: their
     /// full names, allowed without asking): no files, commands, web or other MCP
     /// servers, at most `max_turns` turns (the dispatcher of a ticket).

@@ -38,6 +38,7 @@ pub(super) fn tool_profile(shared: &Arc<Shared>, plan: &ChatRunPlan) -> ToolProf
                 mcp_servers: crate::mcp_servers::configs_for_run(shared, &plan.tool_policy),
                 access: plan.access,
                 tool_policy: plan.tool_policy.clone(),
+                artifact: plan.artifact_tool,
             }
             .confined()
         }
