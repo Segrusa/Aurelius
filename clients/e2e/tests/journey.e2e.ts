@@ -81,7 +81,8 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("add a project", async () => {
-      await act(() => nav("Projects").click());
+      await act(() => nav("Knowledge").click());
+      await act(() => p.getByRole("link", { name: "Projects", exact: true }).click());
       await act(() => p.getByRole("button", { name: "New project" }).first().click());
       const dialog = p.getByRole("dialog");
       await act(() => dialog.getByLabel("Name").fill("Atlas"));

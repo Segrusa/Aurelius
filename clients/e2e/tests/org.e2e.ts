@@ -42,6 +42,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
     // A project, opened on creation.
+    await page.getByRole("link", { name: "Knowledge", exact: true }).click();
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     await page.getByRole("button", { name: "New project" }).first().click();
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");

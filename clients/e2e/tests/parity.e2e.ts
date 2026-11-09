@@ -127,13 +127,13 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page.getByRole("button", { name: /^Move .* right$/ }).first()).toBeVisible();
     await page.keyboard.press("Escape");
 
-    // My tickets: the project filter.
+    // One project at a time: the workspace, on My tickets as everywhere.
     await page.getByRole("navigation").getByRole("link", { name: "My tickets" }).first().click();
-    const projectFilter = page.getByRole("button", { name: "Project", exact: true });
-    await expect(projectFilter).toContainText("All projects");
-    await projectFilter.click();
+    await page.getByRole("button", { name: "Workspace: All projects" }).click();
     await page.getByRole("menuitem", { name: "Northwind API" }).click();
-    await expect(projectFilter).toContainText("Northwind API");
+    await page.getByRole("button", { name: "Workspace: Northwind API" }).click();
+    await page.getByRole("menuitem", { name: "All projects" }).click();
+    await expect(page.getByRole("button", { name: "Workspace: All projects" })).toBeVisible();
 
     // Create and start with nobody to do it yet: says what happened.
     await page.keyboard.press("Control+t");

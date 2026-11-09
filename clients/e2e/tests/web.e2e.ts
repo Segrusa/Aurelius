@@ -69,7 +69,9 @@ test.describe("against a real daemon", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await expect(page).toHaveURL(/\/inbox$/);
-    await expect(page.getByText("Northwind API")).toBeVisible();
+    await page.getByRole("button", { name: "Workspace: All projects" }).click();
+    await expect(page.getByRole("menuitem", { name: "Northwind API" })).toBeVisible();
+    await page.keyboard.press("Escape");
     await expect(page.getByRole("heading", { name: "Nothing waits for you." })).toBeVisible();
 
     // No credential for a script, and none in the address.
@@ -87,14 +89,19 @@ test.describe("against a real daemon", () => {
 
     // A change elsewhere reaches this page by an event.
     await owner.write("project.create", { name: "Seen live" });
-    await expect(page.getByText("Seen live")).toBeVisible();
+    const projectInSwitcher = async () => {
+      await page.getByRole("button", { name: "Workspace: All projects" }).click();
+      await expect(page.getByRole("menuitem", { name: "Seen live" })).toBeVisible();
+      await page.keyboard.press("Escape");
+    };
+    await projectInSwitcher();
 
     // The server goes away and comes back.
     await daemon.stop();
     await expect(page.locator('p[role="status"]')).toHaveText("Reconnecting…");
     await daemon.start();
     await expect(page.locator('p[role="status"]')).toBeHidden({ timeout: 30_000 });
-    await expect(page.getByText("Seen live")).toBeVisible();
+    await projectInSwitcher();
 
     // Settings in a browser: no section fails, and none allows other devices from here.
     await page.getByRole("link", { name: "Settings" }).click();

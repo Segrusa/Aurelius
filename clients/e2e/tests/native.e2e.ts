@@ -110,7 +110,9 @@ test("pairs with a server elsewhere, works there, comes back and forgets it", as
 
     // The app starts over on that server.
     await signIn(page);
-    await expect(page.getByText("Northwind API")).toBeVisible();
+    await page.getByRole("button", { name: "Workspace: All projects" }).click();
+    await expect(page.getByRole("menuitem", { name: "Northwind API" })).toBeVisible();
+    await page.keyboard.press("Escape");
     await expect(
       page.evaluate(() =>
         (window as unknown as { aurelius: { info(): Promise<{ target: unknown }> } }).aurelius
@@ -125,7 +127,9 @@ test("pairs with a server elsewhere, works there, comes back and forgets it", as
 
     // Followed the events over the WebSocket: what the server makes shows up here.
     await owner.write("project.create", { name: "Made on the server" });
-    await expect(page.getByText("Made on the server")).toBeVisible();
+    await page.getByRole("button", { name: "Workspace: All projects" }).click();
+    await expect(page.getByRole("menuitem", { name: "Made on the server" })).toBeVisible();
+    await page.keyboard.press("Escape");
 
     // A file from this computer reaches the server through its inbox.
     await app.evaluate(({ dialog }, file) => {
