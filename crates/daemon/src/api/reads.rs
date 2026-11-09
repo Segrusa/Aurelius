@@ -102,6 +102,11 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::ChannelList => channels(shared, reader, false, None).await,
         Method::ChannelSearch { query } => channels(shared, reader, false, Some(query)).await,
         Method::ThreadRead { message_id } => thread(shared, reader, message_id).await,
+        Method::DiscussionAudience { channel } => {
+            let store = shared.store().clone();
+            let found = storage_task(move || store.read(|c| aurelius_application::conversation::discussion::discussion_audience(c, channel, reader))).await?;
+            found.map(ResponseBody::DiscussionAudience).ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "this channel does not exist"))
+        }
         Method::CompanyGet => company(shared).await,
         Method::BoardGet { project_id } => board(shared, project_id).await,
         Method::UserList => {
