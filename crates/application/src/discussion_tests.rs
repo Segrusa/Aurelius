@@ -657,6 +657,10 @@ fn a_run_that_works_on_after_its_post_in_the_discussion_still_answers_there() {
     // Another post is not more work: the run's last word is still in the discussion.
     tool_later("mcp__aurelius__post_to_discussion", "call-1");
     assert!(s.service.store().read(move |c| aurelius_storage::discussions::run_said_last_in(c, d, run)).unwrap());
+    // Nor are reply buttons: ticket #35 asked its question twice because of them.
+    tool_later("mcp__aurelius__suggest_replies", "call-3");
+    tool_later("TodoWrite", "call-4");
+    assert!(s.service.store().read(move |c| aurelius_storage::discussions::run_said_last_in(c, d, run)).unwrap());
     tool_later("Read", "call-2");
     end_run(&s, run, "Here is the real answer.");
     let said = messages(&s, d).into_iter().last().unwrap().text;

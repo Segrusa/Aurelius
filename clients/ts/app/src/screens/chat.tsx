@@ -61,7 +61,6 @@ import {
   NewLine,
 } from "./chat-message";
 import { Held } from "./dialogs";
-import { ChannelOdometer } from "./run-card";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
@@ -1120,7 +1119,6 @@ function Channel({
                     : `Project channel · you and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`
                   : `You and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`}
           </span>
-          <ChannelOdometer conversationId={openId} />
           {c?.ticket_id ? (
             <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.openTicket)}>
               Open ticket ↗

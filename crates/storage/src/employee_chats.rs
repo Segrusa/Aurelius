@@ -65,22 +65,29 @@ pub fn hidden_from(conn: &Connection, conversation: ConversationId, user: Option
     Ok(owner.flatten().is_some_and(|owner| user.is_none_or(|u| u.to_string() != owner)))
 }
 
-/// The chats of `user` that have something in them, the latest first.
-pub fn list(conn: &Connection, user: UserId) -> Result<Vec<EmployeeChatView>, StorageError> {
+/// How much of the latest message a list of chats shows.
+const PREVIEW_CHARS: usize = 120;
+
+/// The chats of `user` that have something in them, the latest first; `read` gives the text of a blob.
+pub fn list(conn: &Connection, user: UserId, read: impl Fn(&str) -> Option<String>) -> Result<Vec<EmployeeChatView>, StorageError> {
     let mut stmt = conn.prepare(
         "SELECT c.id, e.id, e.name,
                 (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.status = 'complete' AND m.ordinal > COALESCE(r.read_through, 0)
                    AND (m.role = 'assistant' OR json_extract(m.meta_json, '$.kind') = ?2)),
-                (SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = c.id AND (m.role <> 'tool' OR json_extract(m.meta_json, '$.kind') = ?2)) AS last
+                (SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = c.id AND (m.role <> 'tool' OR json_extract(m.meta_json, '$.kind') = ?2)) AS last,
+                (SELECT b.storage_key FROM messages m JOIN blobs b ON b.id = m.content_blob_id
+                  WHERE m.conversation_id = c.id AND m.deleted_at_ms IS NULL AND (m.role <> 'tool' OR json_extract(m.meta_json, '$.kind') = ?2)
+                  ORDER BY m.ordinal DESC LIMIT 1)
          FROM conversations c JOIN employees e ON e.id = c.employee_id
          LEFT JOIN discussion_reads r ON r.conversation_id = c.id AND r.user_id = ?1
          WHERE c.board_member_id = ?1 AND e.status <> 'archived' AND last IS NOT NULL
          ORDER BY last DESC, c.id",
     )?;
-    let rows = stmt.query_map([user.to_string(), TICKET_NOTE_KIND.to_owned()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?)))?;
+    let rows = stmt.query_map([user.to_string(), TICKET_NOTE_KIND.to_owned()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?, r.get::<_, Option<String>>(5)?)))?;
     rows.map(|row| {
-        let (conversation, employee, employee_name, unread, last_activity_ms) = row?;
-        Ok(EmployeeChatView { conversation_id: ConversationId::parse(&conversation).map_err(bad)?, employee_id: EmployeeId::parse(&employee).map_err(bad)?, employee_name, unread: unread as u32, last_activity_ms })
+        let (conversation, employee, employee_name, unread, last_activity_ms, key) = row?;
+        let preview = key.and_then(|k| read(&k)).map(|text| aurelius_domain::group_chat::shortened(&text.split_whitespace().collect::<Vec<_>>().join(" "), PREVIEW_CHARS)).filter(|t| !t.is_empty());
+        Ok(EmployeeChatView { conversation_id: ConversationId::parse(&conversation).map_err(bad)?, employee_id: EmployeeId::parse(&employee).map_err(bad)?, employee_name, unread: unread as u32, last_activity_ms, preview })
     })
     .collect()
 }

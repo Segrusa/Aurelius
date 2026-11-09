@@ -1,7 +1,14 @@
 // What the Inbox lists and in which group. The rules of the Rust client's screens/updates.rs,
 // screens/approval.rs and ui.rs::is_waiting; pure, so they are tested without a screen.
 
-import type { ApprovalView, GuidelineProposalView, NotificationView, ProposalView, TaskView } from "@aurelius/protocol";
+import type {
+  ApprovalView,
+  GuidelineProposalView,
+  MessageView,
+  NotificationView,
+  ProposalView,
+  TaskView,
+} from "@aurelius/protocol";
 
 export type InboxTone = "amber" | "violet" | "blue" | "green" | "muted" | "red";
 export type InboxGlyph = "warn" | "ask" | "half" | "dot";
@@ -136,7 +143,7 @@ export function waitingLabel(reason: string | null | undefined): string | null {
   if (!reason) return null;
   const known: Record<string, string> = {
     plan_review: "plan to review",
-    input: "stopped, waits for you",
+    input: "waits for your answer",
     login: "waits for a Claude login",
     dependencies: "waits for other tasks",
     quota: "waits for its usage limit",
@@ -156,6 +163,11 @@ export function notificationPlace(n: NotificationView): string {
   if (subject === null) return "Update";
   if (subject.startsWith("#") || n.ticket_id != null) return subject;
   return `# ${subject}`;
+}
+
+/** The post in a discussion that still waits for the board member: the latest one. */
+export function openQuestion(messages: MessageView[]): MessageView | null {
+  return [...messages].reverse().find((m) => m.awaiting_user && !m.deleted_at_ms) ?? null;
 }
 
 export function ticketPlace(t: TaskView): string {
@@ -250,8 +262,11 @@ export function buildInbox(input: {
     };
   };
 
+  // "X mentioned you" on a ticket that already waits for your answer is the same question: one row.
+  const asked = new Set(input.tasks.filter((t) => t.waiting_reason === "input" && t.ticket_id).map((t) => t.ticket_id));
+  const sameQuestion = (n: NotificationView) => n.reason === "mention" && asked.has(n.ticket_id ?? null);
   const review = input.notifications.filter((n) => REVIEW_REASONS.has(n.reason ?? "")).map(toRow);
-  const updates = input.notifications.filter((n) => !REVIEW_REASONS.has(n.reason ?? "")).map(toRow);
+  const updates = input.notifications.filter((n) => !REVIEW_REASONS.has(n.reason ?? "") && !sameQuestion(n)).map(toRow);
 
   const groups: InboxGroup[] = [
     { key: "decide", label: "Needs decision", tone: "amber", rows: decide },

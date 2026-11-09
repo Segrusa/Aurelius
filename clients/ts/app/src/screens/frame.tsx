@@ -36,6 +36,7 @@ import { Logo, NAV_ICONS, type NavIcon, NewIcon, SearchIcon } from "../ui/icons"
 import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
+import { ChatDock } from "./chat-dock";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { recentChats } from "./employee-logic";
@@ -554,6 +555,7 @@ export function Frame({ children }: { children: ReactNode }) {
       <NewTicketDialog />
       <GiveWorkDialog />
       <ToastBridge />
+      {windowProject === null ? <ChatDock /> : null}
     </>
   );
 }

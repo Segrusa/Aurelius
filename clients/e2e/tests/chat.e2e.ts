@@ -136,7 +136,8 @@ test.describe("scripted", () => {
       frame("First block.\n\nSecond block.", [
         { call_id: "c1", tool: "Bash", input: { command: "cargo test" }, offset: 0, ok: null },
       ]);
-      await expect(page.getByText("Running a command", { exact: true }).first()).toBeVisible();
+      // A chat says that someone is writing, not what they are doing.
+      await expect(page.getByText("Running a command", { exact: true })).toHaveCount(0);
       expect(await page.evaluate(() => (window as unknown as { kept: Element }).kept.isConnected)).toBe(true);
 
       // The saved message takes over: once, without its stream beside it.
@@ -215,7 +216,7 @@ test.describe("scripted", () => {
     }
   });
 
-  test("a channel: run card, an approval of a woken run and its odometer", async ({ page }) => {
+  test("a channel is a chat: no run details, only an approval of a woken run", async ({ page }) => {
     const { stop } = await open(page, {
       features: [...FEATURES, "run_cards"],
       channels: [general],
@@ -258,8 +259,8 @@ test.describe("scripted", () => {
     });
     try {
       await expect(page.getByText("All done here.")).toBeVisible();
-      await expect(page.locator("[data-run-card]").getByText("3 tool calls · 2.5k tokens")).toBeVisible();
-      await expect(page.getByText("2 calls · 2k tokens in · 500 tokens out · $0.05 cost")).toBeVisible();
+      await expect(page.getByText(/tool calls/)).toHaveCount(0);
+      await expect(page.getByText(/tokens in/)).toHaveCount(0);
       await expect(page.getByText("Bo wants to run a command")).toBeVisible();
       await expect(page.getByText("Cy wants to run a command")).toHaveCount(0);
     } finally {

@@ -5508,6 +5508,7 @@ final class EmployeeChatView {
     required this.employeeId,
     required this.employeeName,
     required this.lastActivityMs,
+    this.preview,
     required this.unread,
   });
 
@@ -5515,6 +5516,8 @@ final class EmployeeChatView {
   final String employeeId;
   final String employeeName;
   final int lastActivityMs;
+  /// The start of the latest message, for a list of chats.
+  final String? preview;
   /// What the employee wrote since the board member last read it.
   final int unread;
 
@@ -5523,6 +5526,7 @@ final class EmployeeChatView {
     employeeId: (json['employee_id'] as String),
     employeeName: (json['employee_name'] as String),
     lastActivityMs: (json['last_activity_ms'] as num).toInt(),
+    preview: (json['preview'] == null ? null : (json['preview'] as String)),
     unread: (json['unread'] as num).toInt(),
   );
 
@@ -5531,6 +5535,7 @@ final class EmployeeChatView {
     'employee_id': employeeId,
     'employee_name': employeeName,
     'last_activity_ms': lastActivityMs,
+    if (preview != null) 'preview': preview,
     'unread': unread,
   };
 }

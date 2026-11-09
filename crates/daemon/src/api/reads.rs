@@ -355,7 +355,7 @@ async fn employee_chats(shared: &Arc<Shared>, reader: Option<aurelius_domain::Us
     let (as_of_seq, chats) = storage_task(move || {
         store.read(|c| {
             let chats = match reader {
-                Some(user) => aurelius_storage::employee_chats::list(c, user)?,
+                Some(user) => aurelius_storage::employee_chats::list(c, user, |key| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok()))?,
                 None => Vec::new(),
             };
             Ok((queries::last_seq(c)?, chats))

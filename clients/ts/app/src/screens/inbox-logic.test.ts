@@ -1,4 +1,4 @@
-import type { ApprovalView, NotificationView, TaskView } from "@aurelius/protocol";
+import type { ApprovalView, MessageView, NotificationView, TaskView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
   age,
@@ -11,6 +11,7 @@ import {
   newNotes,
   notificationHeading,
   notificationPlace,
+  openQuestion,
   waitingLabel,
 } from "./inbox-logic";
 
@@ -162,5 +163,43 @@ describe("newNotes", () => {
   it("names new rows and rows with a new event, never read ones", () => {
     const after = [note("a", 1), note("b", 2), note("c", 5), note("d", 3, true)];
     expect(newNotes([note("a", 1), note("c", 4)], after).map((n) => n.id)).toEqual(["b", "c"]);
+  });
+});
+
+describe("one question, one row", () => {
+  const empty = { approvals: [], proposals: [], guidelineProposals: [] };
+  const waiting = {
+    id: "w",
+    title: "T",
+    status: "waiting",
+    waiting_reason: "input",
+    ticket_id: "t1",
+    updated_at_ms: 1,
+  } as TaskView;
+  const mention = (ticket: string) =>
+    ({
+      id: `n-${ticket}`,
+      reason: "mention",
+      ticket_id: ticket,
+      title: "Pixel mentioned you",
+      subject: "",
+      created_at_ms: 1,
+    }) as NotificationView;
+
+  it("leaves out a mention on a ticket that already waits for an answer", () => {
+    const groups = buildInbox({ ...empty, tasks: [waiting], notifications: [mention("t1"), mention("t2")] });
+    expect(groups.map((g) => [g.key, g.rows.length])).toEqual([
+      ["decide", 1],
+      ["updates", 1],
+    ]);
+    expect(groups[1]?.rows[0]?.id).toBe("notification:n-t2");
+  });
+
+  it("finds the latest post that still waits", () => {
+    const post = (id: string, awaiting: boolean, deleted?: number) =>
+      ({ id, awaiting_user: awaiting, deleted_at_ms: deleted }) as MessageView;
+    expect(openQuestion([post("a", true), post("b", true), post("c", false)])?.id).toBe("b");
+    expect(openQuestion([post("a", true, 5)])).toBeNull();
+    expect(openQuestion([])).toBeNull();
   });
 });

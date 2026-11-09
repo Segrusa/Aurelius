@@ -51,6 +51,7 @@ const styles = stylex.create({
   feedBox: { minHeight: 0, flexGrow: 1, flexBasis: 0 },
   feed: { height: "100%", scrollbarGutter: "stable both-edges" },
   feedColumn: { marginInline: "auto", width: "100%", maxWidth: 820, paddingInline: 24 },
+  feedCompact: { paddingInline: 12 },
   topGap: { paddingTop: 8 },
   approvalGap: { paddingTop: 12 },
   edge: { height: 14 },
@@ -83,26 +84,34 @@ type Row =
   | { kind: "live"; id: string }
   | { kind: "approval"; id: string };
 
-/** Opens the acting board member's chat with an employee, made the first time. */
-export function useOpenChat(): (employeeId: string) => void {
+/** The acting board member's chat with an employee, made the first time; `go` gets where it is. */
+export function useChatOpener(go: (conversationId: string) => void): (employeeId: string) => void {
   const connection = useConnection();
-  const navigate = useNavigate();
   return (employeeId) => {
     connection
       .write("employee.open_chat", { employee_id: employeeId })
       .then((receipt) => {
         const made = receipt.result;
-        if (made.kind === "command" && made.value.type === "employee_chat_opened") {
-          void navigate({ to: "/talk/$conversationId", params: { conversationId: made.value.conversation_id } });
-        }
+        if (made.kind === "command" && made.value.type === "employee_chat_opened") go(made.value.conversation_id);
       })
       .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
   };
 }
 
-/** A board member's lasting chat with one employee: only the two of them read it. */
+/** Opens that chat on its own screen. */
+export function useOpenChat(): (employeeId: string) => void {
+  const navigate = useNavigate();
+  return useChatOpener((conversationId) => void navigate({ to: "/talk/$conversationId", params: { conversationId } }));
+}
+
+/** A board member's lasting chat with one employee, on its own screen. */
 export function EmployeeChatScreen({ conversationId }: { conversationId: string }) {
   useKeyContext("TeamChat");
+  return <EmployeeChat conversationId={conversationId} />;
+}
+
+/** The chat itself: only the two of them read it. `compact`: in the popout, which has its own head. */
+export function EmployeeChat({ conversationId, compact = false }: { conversationId: string; compact?: boolean }) {
   const { user, features } = useLinkState();
   const connection = useConnection();
   const client = useQueryClient();
@@ -196,14 +205,16 @@ export function EmployeeChatScreen({ conversationId }: { conversationId: string 
 
   return (
     <section aria-label={`Chat with ${name}`} {...stylex.props(styles.screen)}>
-      <header data-titlebar {...stylex.props(styles.top)}>
-        <Heading level={1} xstyle={styles.title}>
-          {name}
-        </Heading>
-        <span {...stylex.props(styles.subtitle)}>
-          {live.length > 0 ? `${name} answering` : employee ? (employee.title ?? employee.role) : ""}
-        </span>
-      </header>
+      {compact ? null : (
+        <header data-titlebar {...stylex.props(styles.top)}>
+          <Heading level={1} xstyle={styles.title}>
+            {name}
+          </Heading>
+          <span {...stylex.props(styles.subtitle)}>
+            {live.length > 0 ? `${name} answering` : employee ? (employee.title ?? employee.role) : ""}
+          </span>
+        </header>
+      )}
       <ThreadWaiting conversationId={conversationId} />
       <ChatProvider value={ctx}>
         <FeedIdsProvider value={{ conversationId }}>
@@ -243,7 +254,7 @@ export function EmployeeChatScreen({ conversationId }: { conversationId: string 
                 computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
                 components={FEED_PARTS}
                 itemContent={(_, row) => (
-                  <div {...stylex.props(styles.feedColumn)}>
+                  <div {...stylex.props(styles.feedColumn, compact && styles.feedCompact)}>
                     {row.kind === "message" ? (
                       <>
                         {row.day ? <DayLine ms={row.m.created_at_ms} /> : null}

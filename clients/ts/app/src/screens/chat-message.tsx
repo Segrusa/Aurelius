@@ -4,24 +4,37 @@ import { ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { LayoutFooter } from "@astryxdesign/core/Layout";
+import { Popover } from "@astryxdesign/core/Popover";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { expectBody } from "@aurelius/client";
 import type { ActivityView, ApprovalView, ContextView, MessageVersionView, MessageView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { createContext, memo, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import {
+  type ComponentPropsWithRef,
+  createContext,
+  memo,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useRunGuidelines } from "../data";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { DialogHead } from "../ui/dialog-head";
+import { Icon } from "../ui/icons";
 import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { TypingDots } from "../ui/typing";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard, ReplyCard } from "./approval-card";
 import type { LiveStore } from "./chat-live";
@@ -33,7 +46,6 @@ import {
   canChange,
   canMakeTicket,
   clock,
-  currentStep,
   dayLabel,
   fold,
   isSystemLine,
@@ -43,38 +55,32 @@ import {
   mentionsMe,
   planTitle,
   prefill,
+  QUICK_REACTIONS,
   REACTIONS,
   reactionOn,
   reactionTip,
   rowActions,
-  runLabel,
   saveOf,
-  segments,
   splitBlocks,
   systemText,
   threadLabel,
   threadLine,
   ticketFrom,
-  todos,
   webSearchSummary,
 } from "./chat-logic";
 import { messageLink } from "./links-logic";
 import { overlays } from "./overlays-store";
-import { RunCard } from "./run-card";
+import { RunNote } from "./run-card";
 import { waitsOnReply } from "./run-card-logic";
-import {
-  FileChips,
-  KeptFiles,
-  MarkdownChips,
-  type RetryTarget,
-  ScreenshotLink,
-  TraceLink,
-  useRetryAnswer,
-} from "./run-tools";
+import { FileChips, KeptFiles, MarkdownChips, type RetryTarget, ScreenshotLink, useRetryAnswer } from "./run-tools";
 import { stepLine } from "./tasks-logic";
 
 const OUTPUT_LINES = 400;
-const TODO_FOLD = 8;
+
+const barIn = stylex.keyframes({
+  from: { opacity: 0, transform: "translateY(4px) scale(0.98)" },
+  to: { opacity: 1, transform: "none" },
+});
 
 const styles = stylex.create({
   meta: { fontSize: 12, color: "var(--precision-text3)" },
@@ -270,23 +276,84 @@ const styles = stylex.create({
   // In the rows' group-hover: hidden until the row is hovered or holds focus, and open while its menu is.
   rowBar: {
     position: "absolute",
-    top: -12,
+    top: -18,
     right: 8,
+    zIndex: 2,
     display: {
       default: "none",
       [stylex.when.ancestor(":hover")]: "flex",
       [stylex.when.ancestor(":focus-within")]: "flex",
       ":has([aria-expanded='true'])": "flex",
     },
-    gap: 1,
-    borderRadius: 7,
+    alignItems: "center",
+    gap: 2,
+    height: 36,
+    borderRadius: 12,
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--color-border)",
-    backgroundColor: "var(--color-background-surface)",
-    padding: 2,
-    boxShadow: "var(--precision-card-shadow)",
+    backgroundColor: "var(--color-background-popover)",
+    paddingInline: 4,
+    boxShadow: "var(--shadow-med)",
+    animationName: barIn,
+    animationDuration: "130ms",
+    animationTimingFunction: "cubic-bezier(0.2, 0.8, 0.2, 1)",
   },
+  barButton: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    borderWidth: 0,
+    padding: 0,
+    cursor: "pointer",
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    transitionProperty: "background-color, color, transform",
+    transitionDuration: "100ms",
+    transform: { default: "none", ":active": "scale(0.92)" },
+  },
+  barEmoji: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    borderWidth: 0,
+    padding: 0,
+    cursor: "pointer",
+    fontSize: 15,
+    lineHeight: 1,
+    color: "var(--color-text-primary)",
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    transitionProperty: "background-color, transform",
+    transitionDuration: "120ms",
+    transform: { default: "none", ":hover": "scale(1.16)", ":active": "scale(0.94)" },
+  },
+  barLine: { width: 1, height: 16, marginInline: 3, backgroundColor: "var(--color-border)" },
+  picker: { display: "grid", gridTemplateColumns: "repeat(4, 34px)", gap: 2 },
+  pickerEmoji: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    borderWidth: 0,
+    padding: 0,
+    cursor: "pointer",
+    fontSize: 18,
+    lineHeight: 1,
+    color: "var(--color-text-primary)",
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    transitionProperty: "background-color, transform",
+    transitionDuration: "120ms",
+    transform: { default: "none", ":hover": "scale(1.12)" },
+  },
+  pickerEmojiOn: { backgroundColor: "var(--color-accent-muted)" },
   threadLink: {
     display: "flex",
     height: 28,
@@ -328,7 +395,6 @@ const styles = stylex.create({
     color: "var(--color-text-accent)",
     textDecoration: "none",
   },
-  answerLinks: { display: "flex", gap: 12 },
   liveRow: { display: "flex", gap: 12, paddingTop: 8 },
   liveName: { display: "flex", alignItems: "baseline", gap: 8 },
   footer: { display: "flex", justifyContent: "flex-end", gap: 8 },
@@ -459,52 +525,6 @@ export function ActivityOutput({ step, messageId }: { step: ActivityView; messag
   );
 }
 
-function StepRun({ steps, messageId }: { steps: ActivityView[]; messageId: string }) {
-  const [open, setOpen] = useState(false);
-  const last = steps.at(-1) as ActivityView;
-  const failed = steps.some((s) => s.ok === false);
-  return (
-    <div {...stylex.props(styles.stepRun)}>
-      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} {...stylex.props(styles.stepToggle)}>
-        <span aria-hidden="true">{open ? "⌄" : "›"}</span>
-        <span {...stylex.props(styles.stepLabel, failed && styles.error)}>{runLabel(steps)}</span>
-        {open ? null : <span {...stylex.props(styles.stepLine)}>{stepLine(last)}</span>}
-      </button>
-      {open ? steps.map((s) => <ActivityOutput key={s.call_id} step={s} messageId={messageId} />) : null}
-    </div>
-  );
-}
-
-function Checklist({ activity }: { activity: ActivityView[] }) {
-  const [all, setAll] = useState(false);
-  const list = todos(activity);
-  if (!list) return null;
-  const done = list.filter((t) => t.state === "done").length;
-  const folded = list.length > TODO_FOLD && !all;
-  const shown = folded ? list.filter((t) => t.state === "doing").slice(0, 1) : list;
-  return (
-    <div {...stylex.props(styles.checklist)}>
-      {shown.map((t) => (
-        <div
-          key={t.text}
-          {...stylex.props(
-            styles.todo,
-            t.state === "done" ? styles.todoDone : t.state === "doing" ? styles.todoDoing : styles.todoOpen,
-          )}
-        >
-          <span aria-hidden="true">{t.state === "done" ? "✓" : t.state === "doing" ? "▸" : "○"}</span>
-          <span {...stylex.props(styles.minZero)}>{t.text}</span>
-        </div>
-      ))}
-      {list.length > TODO_FOLD ? (
-        <button type="button" onClick={() => setAll(!all)} {...linkish}>
-          {folded ? `${done} of ${list.length} done · show all` : "Show less"}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 /** Long text folds; what was seen while it streamed stays open. */
 function Prose({ text, seenLive }: { text: string; seenLive: boolean }) {
   const { people, me } = useChat();
@@ -537,41 +557,17 @@ function LiveText({ text }: { text: string }) {
   );
 }
 
-function statusLine(activity: ActivityView[], text: string, waiting: boolean): string {
+function statusLine(text: string, waiting: boolean): string {
   if (waiting) return "Waiting for your approval";
-  const step = currentStep(activity);
-  if (step) return step;
   return text ? "Writing…" : "Thinking…";
 }
 
-function AnswerBody({
-  m,
-  text,
-  activity,
-  live,
-}: {
-  m: MessageView;
-  text: string;
-  activity: ActivityView[];
-  live: boolean;
-}) {
+/** What was said; what the employee did to get there is not part of a chat. */
+function AnswerBody({ m, text, live }: { m: MessageView; text: string; live: boolean }) {
   const { store } = useChat();
-  const parts = useMemo(() => segments(text, activity), [text, activity]);
   return (
     <div {...stylex.props(styles.answer)}>
-      <Checklist activity={activity} />
-      {parts.map((part, i) =>
-        part.kind === "steps" ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: parts only ever grow at the end.
-          <StepRun key={i} steps={part.steps} messageId={m.id} />
-        ) : live ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: parts only ever grow at the end.
-          <LiveText key={i} text={part.text} />
-        ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: parts only ever grow at the end.
-          <Prose key={i} text={part.text} seenLive={store.seen.has(m.id)} />
-        ),
-      )}
+      {live ? <LiveText text={text} /> : <Prose text={text} seenLive={store.seen.has(m.id)} />}
     </div>
   );
 }
@@ -596,18 +592,6 @@ function StopButton({ run }: { run: string }) {
 
 /** Worked out once: most rows have a few of these. */
 const linkish = stylex.props(styles.textButton, styles.linkMuted);
-
-function ContextLink({ run }: { run: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} {...linkish}>
-        ≡ Context
-      </button>
-      {open ? <ContextDialog run={run} onClose={() => setOpen(false)} /> : null}
-    </>
-  );
-}
 
 /** What an answer was given: its full list, with why each part did or didn't go in. */
 export function ContextDialog({ run, onClose }: { run: string; onClose: () => void }) {
@@ -735,14 +719,13 @@ function LiveAnswer({ m, waiting }: { m: MessageView; waiting: boolean }) {
   const { store } = useChat();
   const update = useLive(store, m.id);
   const text = update?.text ?? m.text;
-  const activity = update?.activity ?? m.activity;
   return (
     <>
-      <AnswerBody m={m} text={text} activity={activity} live />
+      <AnswerBody m={m} text={text} live />
       <div {...stylex.props(styles.liveStatus)}>
+        <TypingDots />
+        {statusLine(text, waiting)}
         {m.run_id ? <StopButton run={m.run_id} /> : null}
-
-        {update?.progress?.compacting ? "Context comprimeren…" : statusLine(activity, text, waiting)}
       </div>
     </>
   );
@@ -764,7 +747,7 @@ function Header({
   return (
     <div {...stylex.props(styles.header)}>
       <Text weight="semibold">{name}</Text>
-      <Meta>{human ? "· board member" : `— ${kind}`}</Meta>
+      {human ? null : <Meta>{kind}</Meta>}
       <Meta>{clock(at, offset())}</Meta>
       {children}
     </div>
@@ -773,7 +756,6 @@ function Header({
 
 function SystemRow({ m }: { m: MessageView }) {
   const { ticketNumber } = useChat();
-  const card = m.run ? <RunCard m={m} Output={ActivityOutput} /> : null;
   const line = m.system;
   if (!line) return <div {...stylex.props(styles.systemBare)}>{m.text}</div>;
   const text = systemText(line, m.text, ticketNumber);
@@ -804,7 +786,6 @@ function SystemRow({ m }: { m: MessageView }) {
           Reason:{reason}
         </Text>
       ) : null}
-      {card}
     </section>
   );
 }
@@ -1025,56 +1006,137 @@ function RowBar({
   const { caps, openThread, features, place } = useChat();
   const actions = rowActions(m, caps);
   const react = useReact(m);
+  const [copied, setCopied] = useState(false);
   const editable = canChange(m, features.includes("message_edits"));
   const makeTicket = features.includes("ticket_discussion") && canMakeTicket(m);
   const { hostId } = useLinkState();
   const linkable = hostId !== null && features.includes("message_locate") && actions.react && !m.deleted_at_ms;
   const more = [
-    { key: "copy", label: "Copy" },
-    ...(linkable ? [{ key: "link", label: "Copy link" }] : []),
-    ...(makeTicket ? [{ key: "ticket", label: "Create ticket…" }] : []),
+    ...(linkable ? [{ key: "link", label: "Copy link", icon: <Icon name="link" size={14} /> }] : []),
+    ...(makeTicket ? [{ key: "ticket", label: "Create ticket…", icon: <Icon name="ticket" size={14} /> }] : []),
     ...(editable
       ? [
-          { key: "edit", label: "Edit" },
-          { key: "delete", label: "Delete" },
+          { key: "edit", label: "Edit", icon: <Icon name="edit" size={14} /> },
+          { key: "delete", label: "Delete", danger: true, dividerBefore: true, icon: <Icon name="trash" size={14} /> },
         ]
       : []),
   ];
   const pick = (key: string) => {
-    if (key === "copy") void platform.copy(m.text).catch(() => toast("This did not copy."));
     if (key === "link") void platform.copy(messageLink(hostId ?? "", m.id)).then(() => toast("Link copied."));
     if (key === "edit") onEdit();
     if (key === "delete") onDelete();
     if (key === "ticket")
       overlays.open("ticket", { ...prefill(m.text, name, place, clock(m.created_at_ms, offset())), fromMessage: m.id });
   };
-  const glyph = (text: string) => <span aria-hidden="true">{text}</span>;
   return (
-    <div {...stylex.props(styles.rowBar)}>
+    <div data-row-bar {...stylex.props(styles.rowBar)}>
       {actions.react ? (
-        <Menu
-          label="React"
-          options={REACTIONS.map((e) => ({ key: e, label: reactionOn(m.reactions ?? [], e) ? e : `${e}  Take back` }))}
-          onPick={react}
-          trigger={<IconButton size="sm" variant="ghost" label="React" icon={glyph("☺+")} />}
-        />
+        <>
+          {QUICK_REACTIONS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              aria-label={`React with ${emoji}`}
+              aria-pressed={!reactionOn(m.reactions ?? [], emoji)}
+              onClick={() => react(emoji)}
+              {...stylex.props(styles.barEmoji)}
+            >
+              {emoji}
+            </button>
+          ))}
+          <ReactionPicker m={m} onPick={react} />
+          <span aria-hidden="true" {...stylex.props(styles.barLine)} />
+        </>
       ) : null}
       {actions.reply ? (
-        <IconButton
-          size="sm"
-          variant="ghost"
-          label="Reply in thread"
-          icon={glyph("↳")}
-          onClick={() => openThread(m.id)}
+        <BarButton label="Reply in thread" onClick={() => openThread(m.id)}>
+          <Icon name="reply" size={16} />
+        </BarButton>
+      ) : null}
+      <BarButton
+        label={copied ? "Copied" : "Copy"}
+        onClick={() => {
+          void platform.copy(m.text).then(
+            () => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1400);
+            },
+            () => toast("This did not copy."),
+          );
+        }}
+      >
+        <Icon name={copied ? "check" : "copy"} size={16} />
+      </BarButton>
+      {more.length > 0 ? (
+        <Menu
+          label="More actions"
+          options={more}
+          onPick={pick}
+          trigger={
+            <BarButton label="More actions">
+              <Icon name="more" size={16} weight={2.4} />
+            </BarButton>
+          }
         />
       ) : null}
-      <Menu
-        label="More actions"
-        options={more}
-        onPick={pick}
-        trigger={<IconButton size="sm" variant="ghost" label="More actions" icon={glyph("⋯")} />}
-      />
     </div>
+  );
+}
+
+/** A square button of the message bar; the ref and props a menu hands its trigger pass through. */
+function BarButton({
+  label,
+  children,
+  ...rest
+}: { label: string; children: ReactNode } & ComponentPropsWithRef<"button">) {
+  return (
+    <Tooltip content={label} delay={300} hasHoverIndication={false}>
+      <button type="button" aria-label={label} {...rest} {...stylex.props(styles.barButton)}>
+        {children}
+      </button>
+    </Tooltip>
+  );
+}
+
+function ReactionPicker({ m, onPick }: { m: MessageView; onPick: (emoji: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover
+      isOpen={open}
+      onOpenChange={setOpen}
+      placement="above"
+      alignment="end"
+      padding={1}
+      label="Add a reaction"
+      content={
+        <div {...stylex.props(styles.picker)}>
+          {REACTIONS.map((emoji) => {
+            const on = !reactionOn(m.reactions ?? [], emoji);
+            return (
+              <button
+                key={emoji}
+                type="button"
+                aria-label={on ? `Take back ${emoji}` : `React with ${emoji}`}
+                aria-pressed={on}
+                onClick={() => {
+                  setOpen(false);
+                  onPick(emoji);
+                }}
+                {...stylex.props(styles.pickerEmoji, on && styles.pickerEmojiOn)}
+              >
+                {emoji}
+              </button>
+            );
+          })}
+        </div>
+      }
+    >
+      {(trigger) => (
+        <BarButton label="Add a reaction" {...trigger} ref={trigger.ref}>
+          <Icon name="smile" size={16} />
+        </BarButton>
+      )}
+    </Popover>
   );
 }
 
@@ -1138,19 +1200,13 @@ export const MessageRow = memo(function MessageRow({
     <LiveAnswer m={m} waiting={[...approvals.values()].some((a) => a.run_id === m.run_id)} />
   ) : (
     <>
-      <AnswerBody m={m} text={m.text} activity={m.activity} live={false} />
+      <AnswerBody m={m} text={m.text} live={false} />
       <MarkdownChips
         text={m.text}
         scope={conversationId ? { kind: "conversation", conversation_id: conversationId } : null}
       />
       <FileChips files={m.uploads} />
       <KeptFiles files={m.files ?? []} />
-      {m.id === lastAnswer && m.status === "complete" && m.run_id ? (
-        <span {...stylex.props(styles.answerLinks)}>
-          <ContextLink run={m.run_id} />
-          <TraceLink run={m.run_id} />
-        </span>
-      ) : null}
       {m.status === "interrupted" ? <Meta>Stopped; text up to that point is kept.</Meta> : null}
       {m.status === "failed" ? (
         <span {...stylex.props(styles.metaError)}>Failed; this doesn't count as an answer.</span>
@@ -1209,7 +1265,7 @@ export const MessageRow = memo(function MessageRow({
         )}
         {body}
         {m.queued ? <Queued m={m} /> : null}
-        {m.run ? <RunCard m={m} Output={ActivityOutput} /> : null}
+        <RunNote m={m} />
         {!caps.readOnly && waitsOnReply(m, [...approvals.values()]) ? (
           <ReplyCard
             who={who.name}
@@ -1289,7 +1345,7 @@ export function LiveRow({ id, name, kind }: { id: string; name: string; kind: st
       <div data-message-body {...stylex.props(styles.body)}>
         <div {...stylex.props(styles.liveName)}>
           <Text weight="semibold">{name}</Text>
-          <Meta>— {kind}</Meta>
+          <Meta>{kind}</Meta>
         </div>
         <LiveAnswer m={stub} waiting={false} />
       </div>

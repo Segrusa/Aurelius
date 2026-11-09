@@ -387,7 +387,7 @@ test.describe("states a test daemon cannot produce", () => {
       .toMatchObject({ text: "Stop and do this instead." });
   });
 
-  test("a discussion: run card, interrupt card and odometer", async ({ page }) => {
+  test("a discussion: at work, interrupt card and odometer", async ({ page }) => {
     const used = (input: number) => ({
       runs: 1,
       input_tokens: input,
@@ -465,12 +465,11 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(panel.getByText("$0.12", { exact: true })).toBeVisible();
 
     await panel.getByRole("tab", { name: /Discussion/ }).click();
-    const card = panel.locator("[data-run-card]").first();
-    await expect(card.getByText("Running", { exact: true })).toBeVisible();
-    await expect(card.getByText(/2 tool calls · 1 failed · 9\.2k tokens/)).toBeVisible();
-    await card.getByRole("button", { name: /Running/ }).click();
-    await expect(card.getByText("cargo test")).toBeVisible();
-    await card.getByRole("button", { name: "Cancel" }).click();
+    // A discussion is a chat: that someone is at work, and how to stop it, but not what they ran.
+    const note = panel.locator("[data-run-note]").first();
+    await expect(note.getByText("Working", { exact: true })).toBeVisible();
+    await expect(panel.getByText(/tool calls/)).toHaveCount(0);
+    await note.getByRole("button", { name: "Stop" }).click();
     await expect.poll(() => writes.find((w) => w.method === "run.stop")?.params).toMatchObject({ run_id: "r1" });
 
     await expect(panel.getByRole("radio", { name: "Green" })).toBeVisible();

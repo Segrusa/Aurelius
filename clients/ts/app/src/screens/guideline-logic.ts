@@ -20,7 +20,7 @@ export const TITLE_LIMIT = 120;
 const WARN_PERCENT = 80;
 export const SIDE_MIN_W = 1100;
 
-export const NOT_LINKED = "— not linked";
+export const NOT_LINKED = "Not linked";
 export const ABOUT = "Rules every linked run gets, on top of its instructions.";
 export const EMPTY_ABOUT =
   "Guidelines are working rules (how to write Rust, how to use worktrees) that you link to employees or projects. They come on top of an employee's instructions in every run.";

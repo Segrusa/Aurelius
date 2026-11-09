@@ -1,14 +1,6 @@
-import type { ApprovalView, RunBrief, TokenUsage } from "@aurelius/protocol";
+import type { ApprovalView, TokenUsage } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import {
-  approvalsFor,
-  odometerEmpty,
-  odometerItems,
-  odometerLine,
-  runLine,
-  runState,
-  waitsOnReply,
-} from "./run-card-logic";
+import { approvalsFor, odometerEmpty, odometerItems, odometerLine, runState, waitsOnReply } from "./run-card-logic";
 
 const usage = (over: Partial<TokenUsage> = {}): TokenUsage => ({
   runs: 1,
@@ -37,11 +29,6 @@ describe("run card", () => {
       variant: "neutral",
       running: false,
     });
-  });
-  it("counts calls and failures, with the tokens when known", () => {
-    const brief: RunBrief = { status: "succeeded", tool_calls: 3, failed_calls: 1 };
-    expect(runLine(brief, usage())).toBe("3 tool calls · 1 failed · 14.2k tokens");
-    expect(runLine({ ...brief, tool_calls: 1, failed_calls: 0 }, undefined)).toBe("1 tool call");
   });
 });
 

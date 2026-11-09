@@ -19,12 +19,25 @@ const NAV_PATHS = {
   back: "M9.5 3.5 5 8l4.5 4.5",
   clock: "M3 3.5h10v10H3zM3 6.5h10M5.5 2v3M10.5 2v3",
   note: "M4 2.5h8v11H4zM6 5.5h4M6 8h4M6 10.5h2.5",
+  smile:
+    "M13.5 7.6V8A5.5 5.5 0 1 1 8 2.5h.4M5.7 9.5s.8 1.3 2.3 1.3 2.3-1.3 2.3-1.3M6 6.5h.01M10 6.5h.01M12 1.8v3.4M10.3 3.5h3.4",
+  reply: "M6.2 3.8 2.5 7.5l3.7 3.7M2.5 7.5h6.7a4.3 4.3 0 0 1 4.3 4.3v.9",
+  copy: "M6.5 5.5h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1zM3.5 10.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1",
+  check: "M3 8.6 6.4 12 13 4.5",
+  more: "M3.5 8h.01M8 8h.01M12.5 8h.01",
+  expand: "M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9",
+  chevronDown: "M3.5 6 8 10.5 12.5 6",
+  link: "M6.7 9.3a2.8 2.8 0 0 0 4 0l2-2a2.8 2.8 0 0 0-4-4l-.8.8M9.3 6.7a2.8 2.8 0 0 0-4 0l-2 2a2.8 2.8 0 0 0 4 4l.8-.8",
+  ticket: "M2.5 4.5h11v2.2a1.3 1.3 0 0 0 0 2.6v2.2h-11V9.3a1.3 1.3 0 0 0 0-2.6zM9.5 4.5v7",
+  edit: "M10.6 3.1a1.5 1.5 0 0 1 2.1 2.1L5.4 12.6l-2.9.8.8-2.9zM9.5 4.2l2.1 2.1",
+  trash:
+    "M2.5 4.5h11M6.2 4.5V3a.5.5 0 0 1 .5-.5h2.6a.5.5 0 0 1 .5.5v1.5M4 4.5l.6 8.1a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-8.1",
   know: "M8 4.5C6.5 3.5 4.5 3.3 2.5 3.5v9c2-.2 4 0 5.5 1 1.5-1 3.5-1.2 5.5-1v-9c-2-.2-4 0-5.5 1zM8 4.5v9",
 } as const;
 
 export type NavIcon = keyof typeof NAV_PATHS;
 
-export function Icon({ name, size = 15 }: { name: NavIcon; size?: number }) {
+export function Icon({ name, size = 15, weight = 1.5 }: { name: NavIcon; size?: number; weight?: number }) {
   return (
     <svg
       width={size}
@@ -32,7 +45,7 @@ export function Icon({ name, size = 15 }: { name: NavIcon; size?: number }) {
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth={weight}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

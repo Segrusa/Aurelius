@@ -2,12 +2,12 @@
 
 import type { ScheduledMessageView, ThreadWaiter } from "@aurelius/protocol";
 
-/** Who waits to pick up a thread, and why, on one line ("Flux — waiting to pick up this thread (behind 2 items)"). */
+/** Who waits to pick up a thread, and why, on one line ("Flux is waiting to pick up this thread (behind 2 items)"). */
 export function waiterLine(w: ThreadWaiter): string {
-  if (w.reason === "question") return `${w.employee_name} — waiting for an answer on this thread`;
-  if (w.reason === "limit") return `${w.employee_name} — waiting for a usage limit to pick up this thread`;
+  if (w.reason === "question") return `${w.employee_name} is waiting for an answer on this thread`;
+  if (w.reason === "limit") return `${w.employee_name} is waiting for a usage limit to pick up this thread`;
   const behind = w.behind > 0 ? ` (behind ${w.behind} ${w.behind === 1 ? "item" : "items"})` : "";
-  return `${w.employee_name} — waiting to pick up this thread${behind}`;
+  return `${w.employee_name} is waiting to pick up this thread${behind}`;
 }
 
 /** What is scheduled in a thread: "Ann has a reminder for 14:30" or "Ann → Bo at 14:30". */

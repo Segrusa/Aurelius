@@ -414,7 +414,7 @@ fn tell_responsible_is_an_unread_line_with_a_link_and_starts_nothing() {
     assert_eq!(column(&s, ticket), ColumnKind::Doing, "the ticket stays where it is");
     assert!(!aurelius_storage::timeline::notifies("message.assistant_committed", &serde_json::json!({ "kind": TICKET_NOTE_KIND })), "no notification (P-82)");
 
-    let list = s.service.store().read(|c| chats::list(c, s.grace)).unwrap();
+    let list = s.service.store().read(|c| chats::list(c, s.grace, |_| None)).unwrap();
     assert_eq!(list.len(), 1);
     assert_eq!((list[0].employee_id, list[0].unread), (s.atlas, 1));
     let notes = of_kind(&s, list[0].conversation_id, TICKET_NOTE_KIND);
