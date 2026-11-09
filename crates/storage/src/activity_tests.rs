@@ -97,18 +97,36 @@ fn claim_due_job_skips_a_chat_run_of_a_paused_employee_until_it_is_resumed() {
     assert_eq!(claimed.map(|j| j.id), Some(job));
 }
 
-#[test]
-fn a_parked_task_job_of_a_paused_employee_is_not_claimed_again() {
-    let (_dir, store) = setup();
-    let task = uuid::Uuid::now_v7().to_string();
-    let id = task.clone();
+fn task_job(store: &Store, parked: bool) -> String {
+    let id = uuid::Uuid::now_v7().to_string();
+    let task = id.clone();
     store.write(move |tx| {
+        let id = task;
         tx.execute("INSERT INTO tasks(id, title, brief_blob_id, status, waiting_reason, version, created_at_ms, updated_at_ms, employee_id) VALUES (?1, 'Work', NULL, 'waiting', 'paused', 1, 1, 1, ?2)", [&id, &EMPLOYEE.to_owned()])?;
         let source = source_event(tx, RunId::new())?;
         events::insert_job(tx, &id, "task.run", source, &format!("task:{id}"), &serde_json::json!({}))?;
-        tx.execute("UPDATE jobs SET last_error_code = 'paused' WHERE id = ?1", [&id])?;
+        if parked {
+            tx.execute("UPDATE jobs SET last_error_code = 'paused' WHERE id = ?1", [&id])?;
+        }
         Ok(())
     }).unwrap();
+    id
+}
+
+#[test]
+fn a_task_job_of_a_paused_employee_is_claimed_once_so_it_can_be_parked() {
+    let (_dir, store) = setup();
+    let job = task_job(&store, false);
+    pause(&store);
+    let now = now_ms() + 1;
+    let claimed = store.write(move |tx| queries::claim_due_job(tx, "t", now, 1_000, 4)).unwrap();
+    assert_eq!(claimed.map(|j| j.id), Some(job), "run_task sets it to waiting; it starts no work");
+}
+
+#[test]
+fn a_parked_task_job_of_a_paused_employee_is_not_claimed_again() {
+    let (_dir, store) = setup();
+    task_job(&store, true);
     pause(&store);
     let now = now_ms() + 1;
     assert!(store.write(move |tx| queries::claim_due_job(tx, "t", now, 1_000, 4)).unwrap().is_none());

@@ -124,7 +124,7 @@ pub fn running_runs(conn: &Connection) -> Result<u32, StorageError> {
 /// is still claimed once: `tasks::run_task` starts no work, it only sets the task
 /// to waiting and parks the job, so the card shows why it does not move.
 const PAUSED_JOB: &str = "((j.kind = 'run.chat' AND EXISTS(SELECT 1 FROM employees p WHERE p.status = 'paused' AND p.id = json_extract(j.payload_json, '$.employee_id')))
-    OR (j.kind = 'task.run' AND j.last_error_code = 'paused' AND EXISTS(SELECT 1 FROM tasks t JOIN employees p ON p.id = t.employee_id WHERE t.id = j.id AND p.status = 'paused')))";
+    OR (j.kind = 'task.run' AND j.last_error_code IS 'paused' AND EXISTS(SELECT 1 FROM tasks t JOIN employees p ON p.id = t.employee_id WHERE t.id = j.id AND p.status = 'paused')))";
 
 /// Whether any work is going or waiting: a run job that is ready or leased,
 /// a run that is created, starting or running, or a task that is queued or
