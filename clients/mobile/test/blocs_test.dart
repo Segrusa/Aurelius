@@ -10,7 +10,6 @@ import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/chat/chat_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/pairing/pairing_bloc.dart';
-import 'package:aurelius_mobile/features/updates/updates_bloc.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -709,101 +708,6 @@ void main() {
       );
 
     });
-  });
-
-  group('UpdatesBloc', () {
-    UpdateStatus status(String current, {String? staged, bool available = true}) =>
-        UpdateStatus(current: current, enabled: true, latest: '0.3.1', available: available, staged: staged, checkedAtMs: 1);
-
-    blocTest<UpdatesBloc, UpdatesState>(
-      'installing from the phone waits for the restart, then reports the new version',
-      build: () {
-        final online = StreamController<void>.broadcast();
-        var current = status('0.3.0');
-        when(() => repo.online).thenAnswer((_) => online.stream);
-        when(() => repo.updateStatus(check: any(named: 'check'))).thenAnswer((_) async => current);
-        when(() => repo.prepareUpdate()).thenAnswer((_) async => status('0.3.0', staged: '0.3.1'));
-        when(() => repo.applyUpdate()).thenAnswer((_) async {
-          // The server stops right after answering; the answer is lost here.
-          current = status('0.3.1', available: false);
-          Future<void>.delayed(const Duration(milliseconds: 50), () => online.add(null));
-          throw const DisconnectedException();
-        });
-        return UpdatesBloc(repo);
-      },
-      act: (bloc) async {
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-        bloc.add(const UpdateInstallRequested());
-      },
-      wait: const Duration(milliseconds: 200),
-      verify: (bloc) {
-        expect(bloc.state.phase, UpdatePhase.idle);
-        expect(bloc.state.status?.current, '0.3.1');
-        expect(bloc.state.notice, 'The server now runs Aurelius 0.3.1.');
-      },
-    );
-
-    blocTest<UpdatesBloc, UpdatesState>(
-      'nothing to install says so and installs nothing',
-      build: () {
-        when(() => repo.updateStatus(check: any(named: 'check'))).thenAnswer((_) async => status('0.3.0', available: false));
-        when(() => repo.prepareUpdate()).thenAnswer((_) async => status('0.3.0', available: false));
-        return UpdatesBloc(repo);
-      },
-      act: (bloc) => bloc.add(const UpdateInstallRequested()),
-      wait: const Duration(milliseconds: 100),
-      verify: (bloc) {
-        expect(bloc.state.phase, UpdatePhase.idle);
-        expect(bloc.state.notice, 'No newer version available.');
-        verifyNever(() => repo.applyUpdate());
-      },
-    );
-
-    blocTest<UpdatesBloc, UpdatesState>(
-      'restarting the server waits until it is back, then says so',
-      build: () {
-        final online = StreamController<void>.broadcast();
-        final link = StreamController<LinkState>.broadcast();
-        when(() => repo.online).thenAnswer((_) => online.stream);
-        when(() => repo.link).thenAnswer((_) => link.stream);
-        when(() => repo.linkState).thenReturn(const LinkState(status: LinkStatus.online));
-        when(() => repo.updateStatus(check: any(named: 'check'))).thenAnswer((_) async => status('0.3.0'));
-        when(() => repo.restartServer()).thenAnswer((_) async {
-          // The server answers, closes the connection and comes back.
-          Future<void>.delayed(const Duration(milliseconds: 10), () => link.add(const LinkState(status: LinkStatus.connecting)));
-          Future<void>.delayed(const Duration(milliseconds: 60), () => online.add(null));
-        });
-        return UpdatesBloc(repo);
-      },
-      act: (bloc) async {
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-        bloc.add(const ServerRestartRequested());
-      },
-      wait: const Duration(milliseconds: 200),
-      expect: () => containsAllInOrder([
-        isA<UpdatesState>().having((s) => s.phase, 'phase', UpdatePhase.stopping),
-        isA<UpdatesState>().having((s) => s.phase, 'phase', UpdatePhase.rebooting),
-        isA<UpdatesState>().having((s) => s.notice, 'notice', 'The server restarted.'),
-      ]),
-      verify: (bloc) => expect(bloc.state.phase, UpdatePhase.idle),
-    );
-
-    blocTest<UpdatesBloc, UpdatesState>(
-      'a server that never answers and stays connected did not restart',
-      build: () {
-        when(() => repo.link).thenAnswer((_) => const Stream.empty());
-        when(() => repo.linkState).thenReturn(const LinkState(status: LinkStatus.online));
-        when(() => repo.updateStatus(check: any(named: 'check'))).thenAnswer((_) async => status('0.3.0'));
-        when(() => repo.restartServer()).thenThrow(const DisconnectedException('The PC did not answer in time.'));
-        return UpdatesBloc(repo, dropTimeout: const Duration(milliseconds: 50));
-      },
-      act: (bloc) => bloc.add(const ServerRestartRequested()),
-      wait: const Duration(milliseconds: 200),
-      verify: (bloc) {
-        expect(bloc.state.phase, UpdatePhase.idle);
-        expect(bloc.state.notice, 'The server did not restart.');
-      },
-    );
   });
 
   group('PairingBloc', () {

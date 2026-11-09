@@ -4,24 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../app/mobile_core.dart';
 import '../../core/push/push_service.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
-import '../../core/widgets/widgets.dart' show InfoIcon;
 import '../../data/aurelius_repository.dart';
-import '../../data/run_config.dart';
-import '../../data/views.dart';
 import '../connection/connection_bloc.dart';
-import '../chat/chat_view.dart' show showModelSheet;
 import '../hosts/hosts_bloc.dart';
-import '../load/load_widgets.dart';
-import '../power/power_widgets.dart';
-import '../runtime/runtime_bloc.dart';
 import '../server_name/server_name_bloc.dart';
 import '../server_name/server_name_section.dart';
-import 'auto_allow_section.dart';
-import 'mcp_section.dart';
 
 /// The app's version as pubspec.yaml has it ("0.8.3+2"), read from the copy
 /// bundled as an asset; "unknown" when it cannot be read.
@@ -34,17 +24,9 @@ Future<String> appVersion() async {
   }
 }
 
-/// "Opus 5.5 · High", or null before the runtime is known.
-String? _modelValue(RunChoice? choice) {
-  final model = choice?.model;
-  if (model == null) return null;
-  return [ModelCatalog.friendly(model), if (choice!.effort != null) ModelCatalog.effortLabel(choice.effort)].join(' · ');
-}
-
 /// Settings, in the style of iOS Settings: the PC this phone talks to, then
-/// what is used while operating (models, notifications, updates, usage,
-/// paired PCs). The PC's own settings are under "Advanced", mostly
-/// read-only: they are changed on the desktop.
+/// what is used while operating (notifications, board, board members, paired
+/// PCs). The PC's own settings are changed on the desktop.
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -115,24 +97,6 @@ class SettingsPage extends StatelessWidget {
         ),
         // Lazy: a server without the feature is never asked its name (SN-02 AC4).
         BlocProvider(create: (_) => ServerNameBloc(repository)..add(const ServerNameRefreshed()), child: ServerNameSection(link: link)),
-        if (shownInMobileCore('runtime')) ...[
-        const GroupHeader('Models', caps: true),
-        BlocBuilder<RuntimeBloc, RuntimeState>(
-          builder: (context, runtime) => InsetGroup(
-            dividerIndent: 60,
-            children: [
-              GroupRow(
-                key: ValueKey('settings-model-${Purpose.employee.wire}'),
-                leading: const IconTile(CupertinoIcons.person_2_fill),
-                title: 'Employees',
-                value: _modelValue(runtime.choice(Purpose.employee)),
-                chevron: true,
-                onTap: () => showModelSheet(context, Purpose.employee),
-              ),
-            ],
-          ),
-        ),
-        ],
         const SizedBox(height: 20),
         InsetGroup(
           dividerIndent: 60,
@@ -157,8 +121,6 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             GroupRow(key: const ValueKey('settings-board'), leading: const IconTile(CupertinoIcons.square_split_2x1), title: 'Board', subtitle: 'Columns and dispatcher', chevron: true, onTap: () => context.push('/settings/board')),
-            if (shownInMobileCore('updates')) GroupRow(leading: const IconTile(CupertinoIcons.arrow_down_to_line), title: 'Updates', chevron: true, onTap: () => context.push('/updates')),
-            if (shownInMobileCore('usage')) GroupRow(leading: const IconTile(CupertinoIcons.chart_bar_alt_fill), title: 'Usage', chevron: true, onTap: () => context.push('/usage')),
             GroupRow(
               key: const ValueKey('settings-board-members'),
               leading: const IconTile(CupertinoIcons.person_crop_circle_fill),
@@ -167,24 +129,13 @@ class SettingsPage extends StatelessWidget {
               chevron: true,
               onTap: () => context.push('/settings/board-members'),
             ),
-            GroupRow(key: const ValueKey('settings-screen-use'), leading: const IconTile(CupertinoIcons.chart_bar), title: 'Screen use', subtitle: 'This device only', chevron: true, onTap: () => context.push('/settings/screen-use')),
             GroupRow(leading: const IconTile(CupertinoIcons.device_laptop), title: 'Paired PCs', value: '$paired', chevron: true, onTap: () => context.push('/hosts')),
           ],
         ),
-        if (shownInMobileCore('power')) PowerSection(link: link, serverName: host.name),
         const SizedBox(height: 20),
         InsetGroup(
           dividerIndent: 60,
           children: [
-            if (shownInMobileCore('advanced'))
-            GroupRow(
-              key: const ValueKey('settings-advanced'),
-              leading: const IconTile(CupertinoIcons.slider_horizontal_3),
-              title: 'Advanced',
-              trailing: const InfoIcon('Load, MCP & tools, recurring tasks.', label: 'Advanced'),
-              chevron: true,
-              onTap: () => context.push('/settings/advanced'),
-            ),
             GroupRow(
               leading: const IconTile(CupertinoIcons.info),
               title: 'About Aurelius',
@@ -204,42 +155,6 @@ class SettingsPage extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 32),
-      ],
-    );
-  }
-}
-
-/// Settings → Advanced: what the PC itself is set up with, mostly to look at
-/// (it is changed on the desktop): the load limits, MCP servers and tools and
-/// the recurring tasks.
-class AdvancedPage extends StatelessWidget {
-  const AdvancedPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final link = context.watch<ConnectionBloc>().state;
-    return LargeTitleScaffold(
-      title: 'Advanced',
-      children: [
-        const SizedBox(height: 20),
-        InsetGroup(
-          dividerIndent: 60,
-          children: [
-            if (shownInMobileCore('recurring'))
-            GroupRow(
-              key: const ValueKey('advanced-recurring'),
-              leading: const IconTile(CupertinoIcons.repeat),
-              title: 'Recurring tasks',
-              chevron: true,
-              onTap: () => context.push('/settings/recurring'),
-            ),
-          ],
-        ),
-        if (shownInMobileCore('load')) LoadLimitsSection(link: link),
-        const McpSection(),
-        const McpAlwaysAllowSection(),
-        const AutoAllowSection(),
         const SizedBox(height: 32),
       ],
     );

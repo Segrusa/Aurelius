@@ -174,10 +174,6 @@ class AureliusRepository {
 
   Future<List<ProjectSummary>> projects() async => (await _ask<ResponseBodyProjects>(projectList())).value.projects;
 
-  /// A project's conversations, most recent first.
-  Future<List<ProjectConversationSummary>> projectConversations(String projectId) async =>
-      (await _ask<ResponseBodyProjectConversations>(projectConversationList(projectId: projectId))).value.conversations;
-
   Future<MessagesSnapshot> messages(String conversationId) async =>
       (await _ask<ResponseBodyMessages>(conversationGet(conversationId: conversationId))).value;
 
@@ -265,9 +261,6 @@ class AureliusRepository {
 
   Future<UsageSnapshot> usage() async => (await _ask<ResponseBodyUsage>(usageGet())).value;
 
-  /// One day's usage per hour; `dayStartMs` as in [UsageSnapshot.byDay].
-  Future<UsageHours> usageHours(int dayStartMs) async => (await _ask<ResponseBodyUsageHours>(usageGetHours(dayStartMs: dayStartMs))).value;
-
   Future<SubscriptionUsage> subscription({bool refresh = false}) async => (await _ask<ResponseBodySubscription>(subscriptionGet(refresh: refresh))).value;
 
   Future<ContextView> context(String runId) async => (await _ask<ResponseBodyContext>(runGetContext(runId: runId))).value;
@@ -275,15 +268,8 @@ class AureliusRepository {
   /// A screenshot the agent took (JPEG), by the id in its tool output.
   Future<Uint8List> screenshot(String id) async => base64Decode((await _ask<ResponseBodyScreenshot>(screenshotGet(id: id))).jpegBase64);
 
-  /// The ideas of every project; each keeps its own [IdeaView.projectId].
-  Future<List<IdeaView>> allIdeas() async => (await _ask<ResponseBodyAllIdeas>(ideaListAll())).value.ideas;
-
   /// A project's ideas.
   Future<List<IdeaView>> ideas(String projectId) async => (await _ask<ResponseBodyIdeas>(ideaList(projectId: projectId))).value.ideas;
-
-  /// A project's recurring tasks, oldest first.
-  Future<List<TaskScheduleView>> taskSchedules({String? projectId}) async =>
-      (await _ask<ResponseBodyTaskSchedules>(recurringTaskList(projectId: projectId))).value.schedules;
 
   /// A file kept with a message.
   Future<Uint8List> file(String id) async => base64Decode((await _ask<ResponseBodyFile>(fileGet(id: id))).dataBase64);
@@ -307,9 +293,6 @@ class AureliusRepository {
   Future<Uint8List> uploadThumbnail(String id, int maxSide) async =>
       base64Decode((await _ask<ResponseBodyUpload>(uploadGet(id: id, maxSide: maxSide))).value.dataBase64);
 
-  /// The Markdown files in a scope's work folder.
-  Future<MarkdownFileList> markdownFiles(FileScope scope) async => (await _ask<ResponseBodyMarkdownFiles>(markdownList(scope: scope))).value;
-
   /// One Markdown file, by path relative to the work folder or absolute inside it.
   Future<MarkdownFileContent> markdownFile(FileScope scope, String path) async =>
       (await _ask<ResponseBodyMarkdownFile>(markdownGet(path: path, scope: scope))).value;
@@ -318,43 +301,12 @@ class AureliusRepository {
   Future<List<AgentView>> subagents(String conversationId) async =>
       (await _ask<ResponseBodySubagents>(subagentList(conversationId: conversationId))).value;
 
-  /// The server's update state; `check` asks GitHub for the latest release now.
-  Future<UpdateStatus> updateStatus({bool check = false}) async => (await _ask<ResponseBodyUpdate>(updateGet(check: check))).value;
-
-  /// Download and verify the latest release on the server (can take minutes).
-  Future<UpdateStatus> prepareUpdate() async => ((await _host(updatePrepare(), const Duration(minutes: 10))) as HostResultUpdate).value;
-
-  /// Install the prepared release; the server restarts right after answering.
-  Future<UpdateStatus> applyUpdate() async => ((await _host(updateApply(), const Duration(minutes: 2))) as HostResultUpdate).value;
-
   /// The server has the vault (feature `vault`, Fase 4).
   bool get vaultEnabled => linkState.has('vault');
 
   /// A scope's vault: [projectId] null is the company's; a project's comes
   /// with the company's items apart. Never a secret's value.
   Future<VaultList> vault({String? projectId}) async => (await _ask<ResponseBodyVault>(vaultList(projectId: projectId))).value;
-
-  /// One item's value (`vault.reveal`, audited as show or copy). The answer is
-  /// never kept, logged or printed: callers hold it only while it is shown.
-  Future<String> revealVaultValue(String itemId, RevealPurpose purpose) async =>
-      (await _ask<ResponseBodyVaultValue>(vaultReveal(itemId: itemId, purpose: purpose))).value.value;
-
-  /// The vault's audit log, newest first: the company's, [projectId]'s, every
-  /// scope's ([all]) or one item's.
-  Future<VaultAuditPage> vaultAuditLog({String? projectId, bool all = false, String? itemId, int? before, int limit = 50}) async =>
-      (await _ask<ResponseBodyVaultAudit>(vaultAudit(all: all ? true : null, before: before, itemId: itemId, limit: limit, projectId: projectId))).value;
-
-  /// A new item; never retried, so the value leaves this phone's outbox at once.
-  Future<VaultItemView> createVaultItem(VaultCreateParams params) async => ((await _host(vaultCreate(params))) as HostResultVaultItem).value;
-
-  /// Change an item that is still at [version] (`version_conflict` otherwise).
-  Future<VaultItemView> updateVaultItem(VaultUpdateParams params, {required int version}) async {
-    final receipt = await connection.write(vaultUpdate(params), expectedVersion: version, retry: false);
-    return ((receipt.result as WriteResultHost).value as HostResultVaultItem).value;
-  }
-
-  /// "Delete": runs and employees no longer get it; its history stays.
-  Future<VaultItemView> archiveVaultItem(String itemId) async => ((await _host(vaultArchive(itemId: itemId))) as HostResultVaultItem).value;
 
   /// An item was created, changed or archived (here or on another client).
   Stream<Event> get vaultChanges => events.where((e) => e.kind.wire.startsWith('vault.'));
@@ -370,28 +322,9 @@ class AureliusRepository {
   Future<GuidelineDetail> guideline(String guidelineId, {int? version}) async =>
       (await _ask<ResponseBodyGuideline>(guidelineGet(guidelineId: guidelineId, version: version))).value;
 
-  /// Every version of a guideline, newest first.
-  Future<List<GuidelineVersionView>> guidelineVersionList(String guidelineId) async =>
-      (await _ask<ResponseBodyGuidelineVersions>(guidelineVersions(guidelineId: guidelineId))).value.versions;
-
-  /// What a run of [employeeId] in [projectId] would get now (B3 order, B4 total).
-  Future<EffectiveGuidelines> effectiveGuidelines({String? employeeId, String? projectId}) async =>
-      (await _ask<ResponseBodyEffectiveGuidelines>(guidelineEffective(employeeId: employeeId, projectId: projectId))).value;
-
   /// Proposals of `propose_guideline` (B5): pending first.
   Future<List<GuidelineProposalView>> guidelineProposalList({ProposalStatus? status}) async =>
       (await _ask<ResponseBodyGuidelineProposals>(guidelineProposals(status: status))).value.proposals;
-
-  /// Who a change of a guideline reaches from their next run (B6).
-  Future<GuidelineAffected> guidelineReach(String guidelineId) async =>
-      (await _ask<ResponseBodyGuidelineAffected>(guidelineAffected(guidelineId: guidelineId))).value;
-
-  /// The templates of the starter set (B7).
-  Future<List<StarterTemplate>> starterTemplates() async => (await _ask<ResponseBodyStarterSet>(guidelineStarterSet())).value.templates;
-
-  /// The guideline versions [runId] had in its system text (B6).
-  Future<List<RunGuideline>> runGuidelineList(String runId) async =>
-      (await _ask<ResponseBodyRunGuidelines>(runGuidelines(runId: runId))).value.guidelines;
 
   /// A guideline or one of its proposals changed (here or on another client).
   Stream<Event> get guidelineChanges => events.where((e) => e.kind.wire.startsWith('guideline.'));
@@ -399,37 +332,9 @@ class AureliusRepository {
   /// The user's Claude Code MCP servers and which are on for every chat, conversation, employee and task.
   Future<McpServers> mcpServers() async => (await _ask<ResponseBodyMcpServers>(mcpList())).value;
 
-  /// Replace the enabled servers (Approve right); applies from the next run.
-  Future<McpServers> setMcpServers(List<String> enabled) async => ((await _host(mcpSet(enabled: enabled))) as HostResultMcpServers).value;
-
   /// MCP login and logout changed (`mcp.login_finished`, `mcp.auth_changed`).
   Stream<Event> get mcpAuthChanges => events.where((e) => e.kind == EventKind.mcpLoginFinished || e.kind == EventKind.mcpAuthChanged);
 
-  /// Start an OAuth login for an http/sse server (Approve right); open its `authorizationUrl`.
-  Future<McpLogin> startMcpLogin(String name) async =>
-      ((await _host(mcpLoginStart(name: name), const Duration(minutes: 1))) as HostResultMcpLogin).value;
-
-  /// Finish a login with the address the phone's browser ended on (`…/callback?code=…&state=…`).
-  Future<McpLogin> completeMcpLogin(String loginId, String redirectUrl) async =>
-      ((await _host(mcpLoginComplete(loginId: loginId, redirectUrl: redirectUrl), const Duration(minutes: 1))) as HostResultMcpLogin).value;
-
-  /// Where a login stands (pending, succeeded, failed, expired).
-  Future<McpLogin> mcpLogin(String loginId) async => (await _ask<ResponseBodyMcpLogin>(mcpLoginGet(loginId: loginId))).value;
-
-  /// Forget the server's tokens (Approve right); answers like [mcpServers].
-  Future<McpServers> logoutMcp(String name) async => ((await _host(mcpLogout(name: name))) as HostResultMcpServers).value;
-
-  /// The MCP tools answered with 'Always allow' (`mcp__<server>__<tool>`).
-  Future<List<String>> mcpAlwaysAllowed() async => (await _ask<ResponseBodyMcpAlwaysAllow>(mcpAlwaysAllowList())).value.tools;
-
-
-  /// Whether the safe read-only tools pass without a question (feature `auto_allow`).
-  Future<AutoAllowSetting> autoAllowSetting([Duration? timeout]) async =>
-      (await _ask<ResponseBodyAutoAllowSetting>(autoAllowGetSetting(), timeout)).value;
-
-  /// Turn auto-allow of the safe tools on or off (Approve right); applies from the next run.
-  Future<AutoAllowSetting> setAutoAllowEnabled(bool enabled) async =>
-      ((await _host(autoAllowSetEnabled(enabled: enabled))) as HostResultAutoAllowSetting).value;
 
   /// The versions of an employee's instructions, newest first (feature `instruction_proposals`).
   Future<EmployeeInstructionVersionsSnapshot> instructionVersions(String employeeId) async =>
@@ -440,16 +345,6 @@ class AureliusRepository {
 
   /// Whether a shutdown of the server's PC is pending.
   Future<PowerState> power() async => (await _ask<ResponseBodyPower>(powerGet())).value;
-
-  /// Shut the server's PC down now or once all work is done (Owner right).
-  Future<PowerState> shutdownPc(ShutdownWhen when) async => ((await _host(powerShutdown(when: when))) as HostResultPower).value;
-
-  /// Withdraw a pending shutdown (Owner right).
-  Future<PowerState> cancelShutdown() async => ((await _host(powerCancel())) as HostResultPower).value;
-
-  /// Restart the server's background service. It answers, then closes the
-  /// connection, so a [DisconnectedException] is expected.
-  Future<void> restartServer() => _host(serverRestart(), const Duration(seconds: 15));
 
   /// Send a write built by the generated method functions (see `Commands`).
   /// `retry: false` for decisions that must never be replayed later (approvals, plans).
@@ -475,7 +370,7 @@ class AureliusRepository {
   Future<void> unregisterPush() async => connection.api.unregisterPush(host, await connection.sessionToken());
 }
 
-/// What needs the signed-in board member, shared by the company and CarPlay.
+/// What needs the signed-in board member, used by the company.
 extension NeedsMeReads on AureliusRepository {
   /// [othersMainTasks] of [tasks]. Reads the board only when a main task waits
   /// on a server with a Responsible; a failed read leaves them counted as before.

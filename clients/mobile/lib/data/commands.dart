@@ -17,8 +17,6 @@ abstract final class Commands {
   static Map<String, dynamic> sendQueuedNow(String conversationId, String messageId) =>
       conversationSendQueuedNow(SendQueuedNow(conversationId: conversationId, messageId: messageId));
 
-  static Map<String, dynamic> deleteConversation(String conversationId) => conversationDelete(DeleteConversation(conversationId: conversationId));
-
   static Map<String, dynamic> setAgentMode(String conversationId, AgentMode mode) =>
       conversationSetAgentMode(SetAgentMode(conversationId: conversationId, mode: mode));
 
@@ -75,15 +73,6 @@ abstract final class Commands {
   static Map<String, dynamic> deleteMessage(String messageId) => messageDelete(DeleteMessage(messageId: messageId));
 
   static Map<String, dynamic> react(String messageId, String emoji, {required bool on}) => messageReact(ReactToMessage(emoji: emoji, messageId: messageId, on: on));
-
-  /// A new conversation of the project. Auto, browser and screen need the Approve right.
-  static Map<String, dynamic> startProjectConversation(String projectId, {AgentMode? mode, bool browserAllowed = false, bool screenAllowed = false}) =>
-      projectConversationStart(StartProjectConversation(
-        agentMode: mode,
-        browserAllowed: browserAllowed ? true : null,
-        projectId: projectId,
-        screenAllowed: screenAllowed ? true : null,
-      ));
 
   /// A message in a project conversation; without [conversationId] it starts
   /// a new one with the mode, browser and screen given here.
@@ -218,13 +207,6 @@ abstract final class Commands {
         title: title,
       ));
 
-  static Map<String, dynamic> deleteTaskSchedule(String scheduleId) => recurringTaskDelete(DeleteTaskSchedule(scheduleId: scheduleId));
-
-  static Map<String, dynamic> setTaskSchedulePaused(String scheduleId, bool paused) =>
-      recurringTaskSetPaused(SetTaskSchedulePaused(paused: paused, scheduleId: scheduleId));
-
-  static Map<String, dynamic> runTaskScheduleNow(String scheduleId) => recurringTaskRunNow(RunTaskScheduleNow(scheduleId: scheduleId));
-
   /// [files]: upload paths of attached files (feature `idea_attachments`).
   static Map<String, dynamic> addIdea(String projectId, String title, String? note, {IdeaKind? kind, List<String> files = const []}) =>
       ideaAdd(AddIdea(files: files, kind: kind, note: note, projectId: projectId, title: title));
@@ -232,10 +214,6 @@ abstract final class Commands {
   /// [addFiles]: upload paths; [removeFiles]: `path`s of the idea's own attachments.
   static Map<String, dynamic> updateIdea(String ideaId, String title, String? note, {IdeaKind? kind, List<String> addFiles = const [], List<String> removeFiles = const []}) =>
       ideaUpdate(UpdateIdea(addFiles: addFiles, ideaId: ideaId, kind: kind, note: note, removeFiles: removeFiles, title: title));
-
-  static Map<String, dynamic> deleteIdea(String ideaId) => ideaDelete(DeleteIdea(ideaId: ideaId));
-
-  static Map<String, dynamic> setIdeaStatus(String ideaId, IdeaStatus status) => ideaSetStatus(SetIdeaStatus(ideaId: ideaId, status: status));
 
   static Map<String, dynamic> cancelTask(String taskId) => taskCancel(CancelTask(taskId: taskId));
 
@@ -273,11 +251,4 @@ abstract final class Commands {
         },
       ));
 
-  static Map<String, dynamic> decideMemory(String memoryId, bool accept) => memoryDecide(DecideMemory(accept: accept, memoryId: memoryId));
-
-  static Map<String, dynamic> reviseMemory(String memoryId, String content) => memoryRevise(ReviseMemory(content: content, memoryId: memoryId));
-
-  static Map<String, dynamic> forgetMemory(String memoryId) => memoryForget(ForgetMemory(memoryId: memoryId));
-
-  static Map<String, dynamic> pinMemory(String memoryId, bool pinned) => memoryPin(PinMemory(memoryId: memoryId, pinned: pinned));
 }

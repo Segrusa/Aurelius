@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
-import '../guidelines/target_guidelines_page.dart';
-import '../../app/mobile_core.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/dialogs.dart';
 import '../../core/widgets/ios.dart';
@@ -14,9 +12,6 @@ import '../../data/aurelius_repository.dart';
 import '../../data/commands.dart';
 import '../../data/views.dart';
 import '../connection/connection_banner.dart';
-import '../connection/connection_bloc.dart';
-import '../ideas/ideas_bloc.dart';
-import '../ideas/ideas_tab.dart';
 import '../board/board_bloc.dart';
 import '../board/board_page.dart';
 import '../board/dispatcher_row.dart';
@@ -27,7 +22,7 @@ import 'project_edit.dart';
 import 'task_status_mark.dart';
 import 'tasks_tab.dart';
 
-/// A project with tabs Overview, Board, Tasks and Ideas. Employees are company-wide;
+/// A project with tabs Overview, Board and Tasks. Employees are company-wide;
 /// the overview shows who works here (employees with open tasks in it).
 class ProjectPage extends StatelessWidget {
   const ProjectPage({super.key, required this.projectId, this.initialTab});
@@ -35,16 +30,13 @@ class ProjectPage extends StatelessWidget {
   final String projectId;
   final String? initialTab;
 
-  static const tabs = ['overview', 'board', 'tasks', 'ideas'];
+  static const tabs = ['overview', 'board', 'tasks'];
 
   @override
   Widget build(BuildContext context) {
-    // Ideas live here, not in their tab, so the + in the app bar can add to
-    // them and the overview can show them; they load when first read.
     return MultiBlocProvider(
       providers: [
         BlocProvider(create: (context) => ProjectBloc(context.read<AureliusRepository>(), projectId)),
-        BlocProvider(create: (context) => IdeasBloc(context.read<AureliusRepository>(), projectId)),
         // This project's tickets only; read once the Board tab first shows.
         BlocProvider(create: (context) {
           final company = context.read<CompanyBloc>();
@@ -85,7 +77,6 @@ class ProjectPage extends StatelessWidget {
                               _Overview(state: state),
                               const BoardShownWatcher(child: BoardPage(inProject: true)),
                               const TasksTab(),
-                              const IdeasTab(),
                             ],
                           ),
                   ),
@@ -103,7 +94,7 @@ class ProjectPage extends StatelessWidget {
 class _ProjectTabs extends StatelessWidget {
   const _ProjectTabs();
 
-  static const labels = ['Overview', 'Board', 'Tasks', 'Ideas'];
+  static const labels = ['Overview', 'Board', 'Tasks'];
 
   @override
   Widget build(BuildContext context) {
@@ -129,7 +120,6 @@ typedef ProjectAdd = ({String tooltip, Future<void> Function(BuildContext) add})
 
 ProjectAdd? projectAdd(int tab) => switch (ProjectPage.tabs[tab]) {
       'board' || 'tasks' => (tooltip: 'New ticket', add: (context) => context.push('/board/new?project=${context.read<ProjectBloc>().projectId}')),
-      'ideas' => (tooltip: 'New idea', add: addIdea),
       _ => null,
     };
 
@@ -252,22 +242,6 @@ class _Overview extends StatelessWidget {
               ),
             GroupHeader('Board', action: 'See All', onAction: () => tab('board')),
             ProjectDispatcherRow(project: project),
-            if (shownInMobileCore('vault') && context.select<ConnectionBloc, bool>((b) => b.state.has('vault'))) ...[
-              const SizedBox(height: 12),
-              InsetGroup(children: [
-                GroupRow(
-                  key: const ValueKey('project-vault'),
-                  leading: const IconTile(CupertinoIcons.lock_fill),
-                  title: 'Vault',
-                  chevron: true,
-                  onTap: () => context.push('/vault?project=${project.id}'),
-                ),
-              ]),
-            ],
-            if (context.select<ConnectionBloc, bool>((b) => b.state.has('guidelines'))) ...[
-              const SizedBox(height: 12),
-              InsetGroup(children: [GuidelinesRow(key: ValueKey('project-guidelines-${project.id}'), target: GuidelineTargetProject(id: project.id))]),
-            ],
             if (waiting.isNotEmpty) ...[
               const GroupHeader('Needs Your Attention'),
               InsetGroup(
@@ -323,24 +297,6 @@ class _Overview extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-            BlocBuilder<IdeasBloc, IdeasState>(
-              builder: (context, ideas) {
-                final open = ideas.ideas.where((i) => i.status == IdeaStatus.open).toList();
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    GroupHeader(open.isEmpty ? 'Ideas' : 'Ideas · ${open.length} open', action: 'See All', onAction: () => tab('ideas')),
-                    InsetGroup(
-                      children: [
-                        if (open.isEmpty) _Muted(ideas.loading ? 'Loading…' : 'No open ideas'),
-                        for (final i in open.take(5))
-                          GroupRow(onTap: () => tab('ideas'), chevron: false, title: i.title, titleLines: 2, subtitle: '${i.author} · ${Fmt.clock(i.createdAtMs)}'),
-                      ],
-                    ),
-                  ],
-                );
-              },
             ),
             SizedBox(height: listBottom(context)),
           ]),

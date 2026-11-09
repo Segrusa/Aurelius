@@ -2,7 +2,6 @@ import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/data/tickets.dart';
 import 'package:aurelius_mobile/data/views.dart';
-import 'package:aurelius_mobile/features/carplay/carplay_selection.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_sections.dart';
@@ -12,7 +11,7 @@ import 'package:mocktail/mocktail.dart';
 import 'support/builders.dart';
 import 'support/tickets.dart';
 
-// Freeze §5: Dashboard, Waiting tasks and CarPlay count a ticket's main task only
+// Freeze §5: Dashboard, Waiting tasks count a ticket's main task only
 // when it needs me; tasks without a ticket and approvals stay as they are.
 
 const _bo = UserView(id: 'u-2', username: 'bo', createdAtMs: 0);
@@ -62,11 +61,6 @@ void main() {
       final s = InboxSections.of(InboxState(approvals: [approvalOf('a1')]), state);
       expect(s.approvals, hasLength(1));
       expect(s.needsYou, 5);
-    });
-
-    test('CarPlay as well', () {
-      expect(needsYouTasks(tasks, others: const {'t-others'}).map((t) => t.id), isNot(contains('t-others')));
-      expect(needsYouTasks(tasks), hasLength(5), reason: 'as before without a Responsible');
     });
   });
 

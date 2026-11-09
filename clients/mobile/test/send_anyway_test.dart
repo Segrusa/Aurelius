@@ -9,7 +9,6 @@ import 'package:aurelius_mobile/features/board/new_ticket_page.dart';
 import 'package:aurelius_mobile/features/board/ticket_actions.dart';
 import 'package:aurelius_mobile/features/chat/chat_bloc.dart';
 import 'package:aurelius_mobile/features/chat/secret_check.dart';
-import 'package:aurelius_mobile/features/ideas/ideas_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -273,41 +272,6 @@ void main() {
       noticeShown: () => expect(find.text(secretCheckNoSendAnyway), findsOneWidget),
     );
     expect(find.text('Deploy with $fakeSecret'), findsOneWidget, reason: 'the form keeps what was typed');
-  });
-
-  group('ideas (idea.add, idea.update)', () {
-    for (final (name, command) in [
-      ('idea.add', Commands.addIdea('p1', 'Rotate $fakeSecret', null)),
-      ('idea.update', Commands.updateIdea('i1', 'Rotate', 'Old one: $fakeSecret')),
-    ]) {
-      testWidgets('$name: dialog, Send anyway with confirm_secret, refused again a notice without a loop', (tester) async {
-        final repo = boardRepository();
-        when(() => repo.linkState).thenReturn(offlineLink);
-        when(() => repo.companyChanges).thenAnswer((_) => const Stream.empty());
-        refuseAll(repo);
-        // Made in the tree and unmounted at the end: a bloc closed in a tear-down hangs testWidgets.
-        late IdeasBloc bloc;
-        await tester.pumpWidget(BlocProvider(
-          create: (_) => bloc = IdeasBloc(repo, 'p1'),
-          child: MaterialApp(
-            theme: aureliusTheme(),
-            home: Scaffold(
-              body: Builder(builder: (context) => TextButton(onPressed: () => context.read<IdeasBloc>().add(IdeasCommandSent(command, done: 'Saved.', ask: sendAnywayDialog(context))), child: const Text('go'))),
-            ),
-          ),
-        ));
-        await tester.tap(find.text('go'));
-        await tester.pumpAndSettle();
-        await threeChecks(
-          tester,
-          repo,
-          name,
-          settle: () => tester.pumpAndSettle(),
-          noticeShown: () => expect(bloc.state.notice, secretCheckNoSendAnyway),
-        );
-        await tester.pumpWidget(const SizedBox());
-      });
-    }
   });
 
   group('the Inbox (approval.answer, approval.decide_plan)', () {

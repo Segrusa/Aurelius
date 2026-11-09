@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:aurelius_mobile/app/mobile_core.dart';
 import 'package:aurelius_mobile/core/hosts/host_store.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/net/protocol.dart';
@@ -11,8 +10,6 @@ import 'package:aurelius_mobile/core/push/push_service.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/hosts/hosts_bloc.dart';
 import 'package:aurelius_mobile/features/more/settings_page.dart';
-import 'package:aurelius_mobile/features/power/power_bloc.dart';
-import 'package:aurelius_mobile/features/power/power_widgets.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:aurelius_mobile/features/server_name/server_name_bloc.dart';
@@ -28,7 +25,6 @@ class MockRepository extends Mock implements AureliusRepository {}
 
 class MockRuntimeBloc extends MockBloc<RuntimeEvent, RuntimeState> implements RuntimeBloc {}
 
-class MockPowerBloc extends MockBloc<PowerEvent, PowerBlocState> implements PowerBloc {}
 
 const _owner = ['read', 'chat', 'task_control', 'approve', 'owner'];
 const _me = UserView(createdAtMs: 0, id: 'u-1', username: 'owner');
@@ -184,7 +180,7 @@ void main() {
   });
 
   group('Settings follows server.renamed live (SN-02 AC1)', () {
-    testWidgets('the title, the server name row and the Power section show the new name', (tester) async {
+    testWidgets('the title, and the server name row show the new name', (tester) async {
       tester.view.physicalSize = const Size(1170, 2532);
       tester.view.devicePixelRatio = 3;
       addTearDown(tester.view.reset);
@@ -203,11 +199,6 @@ void main() {
       final repository = AureliusRepository(connection);
       final runtime = MockRuntimeBloc();
       when(() => runtime.state).thenReturn(const RuntimeState());
-      final power = MockPowerBloc();
-      when(() => power.state).thenReturn(const PowerBlocState());
-      // The menus hide Power (ticket #19); the name it has to carry is what this looks at.
-      mobileCoreHidden = kHiddenInMobileCore.difference({'power'});
-      addTearDown(() => mobileCoreHidden = kHiddenInMobileCore);
       await tester.pumpWidget(
         MultiRepositoryProvider(
           providers: [
@@ -219,7 +210,6 @@ void main() {
               BlocProvider(create: (_) => ConnectionBloc(repository)),
               BlocProvider(create: (_) => HostsBloc(store)..add(const HostsStarted())),
               BlocProvider<RuntimeBloc>.value(value: runtime),
-              BlocProvider<PowerBloc>.value(value: power),
             ],
             child: MaterialApp(theme: aureliusTheme(), home: const SettingsPage()),
           ),
@@ -243,9 +233,6 @@ void main() {
       expect(find.text('Default: my-pc'), findsOneWidget);
       expect(find.byKey(const ValueKey('server-name-edit')), findsOneWidget);
       expect((await tester.runAsync(store.hosts))!.single.name, 'Thuis-PC');
-
-      // The Power section's confirms name the server it gets (power_test checks the text).
-      expect(tester.widget<PowerSection>(find.byType(PowerSection)).serverName, 'Thuis-PC');
 
       await tester.runAsync(connection.dispose);
     });

@@ -7,7 +7,6 @@ import 'core/links/os_links.dart';
 import 'core/net/gateway_api.dart';
 import 'core/push/push_service.dart';
 import 'core/widgets/ios.dart';
-import 'features/carplay/carplay_main.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,7 +15,3 @@ void main() {
   startOsLinks();
   runApp(AppearanceScope(child: AureliusApp(store: DeviceHostStore(), api: GatewayApi(), push: PushService())));
 }
-
-/// CarPlay's own headless engine starts here (ios/Runner/CarPlaySceneDelegate.swift).
-@pragma('vm:entry-point')
-void carPlayMain() => runCarPlay();

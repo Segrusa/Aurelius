@@ -97,7 +97,7 @@ final class SecureScreen {
     center.addObserver(forName: UIScene.willDeactivateNotification, object: nil, queue: .main) { [weak self] note in
       self?.cover(note.object as? UIWindowScene)
     }
-    // The phone's window scene only (CarPlay has its own scene).
+    // The phone's window scene only.
     center.addObserver(forName: UIScene.didActivateNotification, object: nil, queue: .main) { [weak self] note in
       if note.object is UIWindowScene { self?.uncover() }
     }

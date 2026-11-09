@@ -1,4 +1,3 @@
-import '../../data/guidelines.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
 import '../project/task_status_mark.dart';
@@ -16,7 +15,6 @@ class InboxSections {
   const InboxSections({
     required this.approvals,
     required this.proposals,
-    this.guidelineProposals = const [],
     required this.waitingTasks,
     required this.runningTasks,
     required this.answers,
@@ -36,7 +34,6 @@ class InboxSections {
       updates: rows.where((n) => !n.waitsForMe).toList(),
       approvals: inbox.approvals,
       proposals: inbox.proposals,
-      guidelineProposals: inbox.guidelineProposals,
       // A main task whose decision is someone else's is not yours to wait on (freeze §5).
       waitingTasks: open.where((t) => taskMark(t) == TaskMark.needsYou && !asked.contains(t.id) && !company.othersTasks.contains(t.id)).toList(),
       // Everything else that has not ended: working, queued, in line or
@@ -55,8 +52,6 @@ class InboxSections {
   final List<ApprovalView> approvals;
   final List<ProposalView> proposals;
 
-  /// Guideline proposals (B5), each a card with its diff.
-  final List<GuidelineProposalItem> guidelineProposals;
 
   /// Tasks waiting for the user's input or decision without a pending approval.
   final List<TaskView> waitingTasks;
@@ -73,7 +68,7 @@ class InboxSections {
   /// The other rows of the personal Inbox: Updates.
   final List<NotificationView> updates;
 
-  int get needsYou => rowsNeedingYou.length + approvals.length + proposals.length + guidelineProposals.length + waitingTasks.length;
+  int get needsYou => rowsNeedingYou.length + approvals.length + proposals.length + waitingTasks.length;
   int get running => runningTasks.length + answers.length;
   int get done => results.length;
   bool get isEmpty => needsYou == 0 && updates.isEmpty && running == 0 && done == 0;

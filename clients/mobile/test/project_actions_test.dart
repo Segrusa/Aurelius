@@ -93,8 +93,8 @@ void main() {
 
     // Overview adds nothing: only the menu.
     expect(inAppBar(find.byIcon(CupertinoIcons.add)), findsNothing);
-    // Four tabs; employees are company-wide.
-    expect(ProjectPage.tabs, ['overview', 'board', 'tasks', 'ideas']);
+    // Three tabs; employees are company-wide.
+    expect(ProjectPage.tabs, ['overview', 'board', 'tasks']);
     expect(find.text('Conversations'), findsNothing);
     expect(find.text('Recurring'), findsNothing);
     expect(find.text('Notes'), findsNothing);
@@ -103,7 +103,7 @@ void main() {
     expect(find.text('Managers'), findsNothing);
     expect(find.text('Employees'), findsNothing);
 
-    for (final (tab, tooltip) in [('board', 'New ticket'), ('tasks', 'New ticket'), ('ideas', 'New idea')]) {
+    for (final (tab, tooltip) in [('board', 'New ticket'), ('tasks', 'New ticket')]) {
       await show(tester, tab);
       expect(inAppBar(find.byKey(ValueKey('project-add-$tab'))), findsOneWidget, reason: tab);
       // The only add button of the tab is the one up there.
@@ -146,23 +146,6 @@ void main() {
     expect(find.byKey(const ValueKey('works-here-jean')), findsNothing, reason: 'Jean has only ended work here');
     // Let the company's debounced refresh finish before the tree goes.
     await tester.pump(const Duration(seconds: 1));
-  });
-
-  testWidgets('the + on Ideas notes an idea as before', (tester) async {
-    await pump(tester);
-    await show(tester, 'ideas');
-    await tester.tap(find.byKey(const ValueKey('project-add-ideas')));
-    await tester.pumpAndSettle();
-    expect(find.text('New idea'), findsOneWidget);
-    await tester.enterText(find.byType(TextField).first, 'Dark mode');
-    await tester.pump();
-    await tester.tap(find.text('Add'));
-    await tester.pumpAndSettle();
-    final command = writesOf(repo).single;
-    expect(command['method'], 'idea.add');
-    expect(paramsOf(command)['project_id'], 'p');
-    expect(paramsOf(command)['title'], 'Dark mode');
-    expect(tester.takeException(), isNull);
   });
 
   testWidgets('the project menu opens as a glass menu', (tester) async {

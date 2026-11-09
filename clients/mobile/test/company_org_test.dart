@@ -1,4 +1,3 @@
-import 'package:aurelius_mobile/app/mobile_core.dart';
 import 'package:aurelius_mobile/app/shell.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
@@ -172,7 +171,6 @@ void main() {
         ),
         GoRoute(path: '/company', builder: (_, _) => Scaffold(appBar: AppBar(), body: const Text('company page'))),
         GoRoute(path: '/projects', builder: (_, _) => Scaffold(appBar: AppBar(), body: const Text('projects page'))),
-        GoRoute(path: '/ideas', builder: (_, _) => Scaffold(appBar: AppBar(), body: const Text('ideas page'))),
         GoRoute(path: '/settings', builder: (_, _) => const Scaffold(body: Text('settings page'))),
         GoRoute(path: '/project/:pid/task/:tid', builder: (_, s) => Scaffold(body: Text('task ${s.pathParameters['tid']}'))),
       ]);
@@ -192,7 +190,7 @@ void main() {
       ],
     );
 
-    testWidgets('More lists only Employees and Settings in the mobile core; the hidden entries are one constant away (ticket #19)', (tester) async {
+    testWidgets('More lists only Employees and Settings', (tester) async {
       await show(tester, state, const MorePage());
       expect(find.byType(GroupRow), findsNWidgets(2), reason: 'Employees and Settings');
       for (final key in ['projects', 'tasks', 'ideas', 'company', 'vault', 'guidelines']) {
@@ -202,34 +200,6 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('more-employees')));
       await tester.pumpAndSettle();
       expect(find.text('company page'), findsOneWidget, reason: 'the list of employees, where a chat starts');
-    });
-
-    testWidgets('More lists Projects, Tasks, Ideas, Company, Employees and Settings when nothing is hidden', (tester) async {
-      mobileCoreHidden = const {};
-      addTearDown(() => mobileCoreHidden = kHiddenInMobileCore);
-      await show(tester, state, const MorePage());
-      expect(find.byType(GroupRow), findsNWidgets(6));
-      expect(find.byKey(const ValueKey('more-tasks')), findsOneWidget, reason: 'tasks without a ticket stay reachable (B7)');
-      expect(find.text('Activity'), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('more-projects')));
-      await tester.pumpAndSettle();
-      expect(find.text('projects page'), findsOneWidget);
-      await tester.pageBack();
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('more-ideas')));
-      await tester.pumpAndSettle();
-      expect(find.text('ideas page'), findsOneWidget);
-      await tester.pageBack();
-      await tester.pumpAndSettle();
-      expect(find.text('${state.activeEmployees.length} employees'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('more-company')));
-      await tester.pumpAndSettle();
-      expect(find.text('company page'), findsOneWidget);
-      await tester.pageBack();
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('more-settings')));
-      await tester.pumpAndSettle();
-      expect(find.text('settings page'), findsOneWidget);
     });
 
     testWidgets('Tasks: every project, by state, with lead and project, filtered by employee', (tester) async {

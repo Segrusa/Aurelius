@@ -45,33 +45,14 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan the pairing code shown by Aurelius on your PC, or take a photo to attach.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>In CarPlay, say what Aurelius should pass on to a manager.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Attach photos to a chat with Aurelius on your PC.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>In CarPlay, what you say becomes a message to a manager. Recognition runs on this iPhone when it can.</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 		<key>UISceneConfigurations</key>
 		<dict>
-			<key>CPTemplateApplicationSceneSessionRoleApplication</key>
-			<array>
-				<dict>
-					<key>UISceneClassName</key>
-					<string>CPTemplateApplicationScene</string>
-					<key>UISceneConfigurationName</key>
-					<string>carplay</string>
-					<key>UISceneDelegateClassName</key>
-					<string>$(PRODUCT_MODULE_NAME).CarPlaySceneDelegate</string>
-				</dict>
-			</array>
 			<key>UIWindowSceneSessionRoleApplication</key>
 			<array>
 				<dict>

@@ -4,14 +4,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/theme/tokens.dart';
-import '../core/usage/screen_usage.dart';
 import '../core/widgets/ios.dart';
 import '../features/connection/connection_banner.dart';
 import '../features/connection/connection_bloc.dart';
-import 'mobile_core.dart';
 import '../features/dashboard/give_work.dart';
 import '../features/inbox/inbox_bloc.dart';
-import '../features/power/power_widgets.dart';
 import '../features/team/channels_bloc.dart';
 
 /// The route pattern of each tab, in the order of [shellTabs]; what the screen counter counts a tab by.
@@ -44,12 +41,9 @@ const teamTab = 0;
 /// with the connection banner on top. Hardware keyboards (iPad, Android with a
 /// keyboard): ⌘/Ctrl+1…4 switch tabs, ⌘/Ctrl+N gives work (a new task).
 class HomeShell extends StatefulWidget {
-  const HomeShell({super.key, required this.shell, this.usage});
+  const HomeShell({super.key, required this.shell});
 
   final StatefulNavigationShell shell;
-
-  /// Told when a tab is selected (null in tests that do not count).
-  final ScreenUsage? usage;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -57,19 +51,6 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   StatefulNavigationShell get shell => widget.shell;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.usage?.openTab(shellTabPatterns[shell.currentIndex]);
-  }
-
-  @override
-  void didUpdateWidget(HomeShell old) {
-    super.didUpdateWidget(old);
-    // A switch of tab, not a rebuild: only a changed index counts.
-    if (old.shell.currentIndex != shell.currentIndex) widget.usage?.openTab(shellTabPatterns[shell.currentIndex]);
-  }
 
   void _go(int index) => shell.goBranch(index, initialLocation: index == shell.currentIndex);
 
@@ -93,7 +74,7 @@ class _HomeShellState extends State<HomeShell> {
         autofocus: true,
         child: TabScaffold(
           background: Tokens.bg,
-          banners: [const ConnectionBanner(), if (shownInMobileCore('power')) const PowerBanner()],
+          banners: [const ConnectionBanner()],
           bannerVisible: bannerVisible,
           tabBar: GlassTabBar(
             current: shell.currentIndex,
