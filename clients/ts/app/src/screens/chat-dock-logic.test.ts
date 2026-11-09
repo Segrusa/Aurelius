@@ -1,6 +1,6 @@
 import type { ChannelView, EmployeeChatView, EmployeeSummary } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { chatAge, dockAway, dockChats, dockTickets, launcherAway, parseDock } from "./chat-dock-logic";
+import { chatAge, dockAway, dockChannels, dockChats, dockTickets, launcherAway, parseDock } from "./chat-dock-logic";
 
 const chat = (name: string, unread = 0) =>
   ({
@@ -84,5 +84,17 @@ describe("the chat popout", () => {
     });
     expect(parseDock("{bad")).toEqual({ open: false, conversation: null, ticket: null });
     expect(parseDock(null)).toEqual({ open: false, conversation: null, ticket: null });
+  });
+});
+
+describe("the channels in the popout", () => {
+  const channel = (name: string, kind: string) =>
+    ({ conversation_id: `c-${name}`, name, kind, archived: false, unread: 0, mentions: 0 }) as unknown as ChannelView;
+  const all = [channel("General", "general"), channel("Apollo", "project"), channel("#1-fix", "ticket")];
+  it("lists general and the projects, not the tickets", () => {
+    expect(dockChannels(all, "").map((c) => c.name)).toEqual(["General", "Apollo"]);
+  });
+  it("narrows by the search", () => {
+    expect(dockChannels(all, "apo").map((c) => c.name)).toEqual(["Apollo"]);
   });
 });

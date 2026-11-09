@@ -427,6 +427,8 @@ export interface ChatContext {
   channel: string | null;
   /** Where a retried question goes; none: the channel. */
   retryTarget?: RetryTarget;
+  /** The employee of a one-to-one chat: the author of answers that carry no name. */
+  speaker?: string | null;
   /** The message a link led to, marked for a moment. */
   flash: string | null;
 }
@@ -1173,7 +1175,8 @@ export const MessageRow = memo(function MessageRow({
   grouped: boolean;
   inThread?: boolean;
 }) {
-  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId, channel, retryTarget } = useChat();
+  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId, channel, retryTarget, speaker } =
+    useChat();
   const made = useMemo(() => ticketFrom(messages, m.id), [messages, m.id]);
   const { flash } = useChat();
   const connection = useConnection();
@@ -1189,7 +1192,7 @@ export const MessageRow = memo(function MessageRow({
     retryTarget ?? { channel, threadParent: m.thread_parent ?? null },
   );
   if (m.system || isSystemLine(m, true)) return <SystemRow m={m} />;
-  const who = authorOf(m, roleOf);
+  const who = authorOf(m, roleOf, speaker);
   const body = m.deleted_at_ms ? (
     <span {...stylex.props(styles.text3)}>⊘ This message was deleted.</span>
   ) : editing ? (
