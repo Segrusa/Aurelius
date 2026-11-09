@@ -274,7 +274,7 @@ pub fn wire_samples() -> String {
     let write: WriteMethod = serde_json::from_value(json!({ "method": WRITE_SAMPLE })).expect("a sample the server can read");
     let mut write = serde_json::to_value(Request::write(8, key, write)).expect("a request is JSON");
     write["expected_version"] = json!(3);
-    let samples = json!({
+    let mut samples = json!({
         "request_read": Request::read(7, Method::UserWhoami),
         "request_write": write,
         "response_error": ServerMessage::Response { request_id: 7, outcome: Outcome::Error(AppError::new(ErrorCode::Forbidden, "Not here.")) },
@@ -285,6 +285,9 @@ pub fn wire_samples() -> String {
         "stream_append": message(json!({ "type": "stream_append", "run_id": ID, "conversation_id": ID, "message_id": ID, "offset": 5, "text": " there" })),
         "signed_out": message(json!({ "type": "signed_out", "reason": "revoked" })),
     });
+    // The daemon turns on serde_json's `preserve_order`, and in a workspace build that holds for
+    // this crate too: without sorting, the file depends on what else cargo is building.
+    samples.sort_all_objects();
     let mut out = serde_json::to_string_pretty(&samples).expect("samples are JSON");
     out.push('\n');
     out
@@ -356,6 +359,22 @@ mod tests {
         assert!(ts.contains("  \"x.set\": \"command\",\n"));
         assert!(ts.contains("  \"x.get\": undefined;\n"));
         assert!(ts.contains("  \"x.set\": M.Create;\n"));
+    }
+
+    #[test]
+    fn the_wire_samples_are_sorted_whatever_cargo_builds_alongside() {
+        fn assert_sorted(value: &serde_json::Value) {
+            match value {
+                serde_json::Value::Object(map) => {
+                    let keys: Vec<_> = map.keys().collect();
+                    assert!(keys.is_sorted(), "{keys:?}");
+                    map.values().for_each(assert_sorted);
+                }
+                serde_json::Value::Array(items) => items.iter().for_each(assert_sorted),
+                _ => {}
+            }
+        }
+        assert_sorted(&serde_json::from_str(&wire_samples()).unwrap());
     }
 
     #[test]
