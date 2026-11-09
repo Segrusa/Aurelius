@@ -3,7 +3,7 @@
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { REPO, serveStatic, WEB_DIST } from "./daemon";
-import { channel, message, messages, notification, scriptServer, task, ticket } from "./fake-server";
+import { boardOf, channel, message, messages, notification, scriptServer, task, ticket } from "./fake-server";
 
 const SHOTS = process.env.AURELIUS_POPOUT_SHOTS ? join(REPO, "clients/e2e/test-results/shots") : null;
 const shot = async (page: Page, name: string) => {
@@ -110,6 +110,60 @@ test("the popout lists the chats, opens one, sends and keeps out of the way", as
     await expect(page).toHaveURL(/\/talk\/c1/);
     await expect(page.getByRole("region", { name: "Chat popout" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /Open chat/ })).toHaveCount(0);
+  } finally {
+    await site.close();
+  }
+});
+
+test("a ticket reads as a chat: in its panel and in the popout", async ({ page }) => {
+  const site = await serveStatic(WEB_DIST);
+  try {
+    const open = ticket("t1", 35, "doing", { title: "Trim the texts", conversation_id: "d1", owner_name: "Pixel" });
+    const talk = messages("d1", [
+      message("q", "assistant", "Which group may I remove first?", { update: "group", author: "Pixel" }),
+    ]);
+    const { writes } = await scriptServer(page, {
+      employees: [pixel],
+      features: ["employee_chats", "ticket_channels", "ticket_discussion", "chat_threads", "chat_reactions"],
+      tickets: [open],
+      board: boardOf([open]),
+      channels: [
+        channel("d1", "#35-trim", {
+          kind: "ticket",
+          ticket_id: "t1",
+          ticket_number: 35,
+          ticket_column: "doing",
+          unread: 1,
+          mentions: 1,
+        }),
+      ],
+      details: { t1: { ticket: open, root_task: null, tasks: [], as_of_seq: 1 } },
+      feeds: { d1: talk },
+      conversations: { d1: talk },
+      reads: { "employee.chats": chats },
+    });
+    await page.goto(`${site.origin}/board?ticket=t1`);
+    const panel = page.getByRole("complementary", { name: /Trim the texts/ });
+    await panel.getByRole("tab", { name: /Discussion/ }).click();
+    await panel.getByText("Which group may I remove first?").hover();
+    await expect(panel.locator("[data-row-bar]")).toBeVisible();
+    await shot(page, "ticket-panel");
+    await panel.getByRole("textbox", { name: /^Message/ }).fill("The first one");
+    await page.keyboard.press("Enter");
+    await expect
+      .poll(() => writes.find((w) => w.method === "group_chat.send")?.params)
+      .toMatchObject({ channel: "d1", text: "The first one" });
+
+    await page.goto(`${site.origin}/inbox`);
+    await page.getByRole("button", { name: /Open chat/ }).click();
+    const popout = page.getByRole("region", { name: "Chat popout" });
+    await expect(popout.getByText("Tickets", { exact: true })).toBeVisible();
+    await expect(popout.getByText("Doing · Pixel")).toBeVisible();
+    await shot(page, "popout-tickets");
+    await popout.getByRole("button", { name: /#35 Trim the texts/ }).click();
+    await expect(popout.getByText("Which group may I remove first?")).toBeVisible();
+    await expect(popout.getByRole("textbox", { name: /^Message/ })).toBeVisible();
+    await shot(page, "popout-ticket");
   } finally {
     await site.close();
   }

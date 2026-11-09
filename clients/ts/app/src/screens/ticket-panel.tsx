@@ -12,13 +12,11 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { expectBody } from "@aurelius/client";
 import type { AgentMode, TicketPriority, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
-import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
   useAllTasks,
-  useApprovals,
   useBoard,
   useCompany,
   useEmployees,
@@ -38,7 +36,6 @@ import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
-import { ApprovalCard, ReplyCard } from "./approval-card";
 import {
   activityDetail,
   activityText,
@@ -48,7 +45,6 @@ import {
   dropEffect,
   editable,
   feedbackLabel,
-  foldUpdates,
   latestPlan,
   loginWait,
   ownerChoosable,
@@ -60,13 +56,12 @@ import {
   takeOverOffered,
   testingNote,
 } from "./board-logic";
-import { canChange, completeMention, mentionSuggestions } from "./chat-logic";
+import { TicketChat } from "./chat";
 import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
-import { messageLink, ticketLink } from "./links-logic";
+import { ticketLink } from "./links-logic";
 import { FormDialog, Loading, Problem } from "./org-kit";
-import { RunNote, TicketOdometer } from "./run-card";
-import { approvalsFor, waitsOnReply } from "./run-card-logic";
+import { TicketOdometer } from "./run-card";
 import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
@@ -147,106 +142,8 @@ const styles = stylex.create({
   followers: { display: "inline-flex", alignItems: "center", gap: 4 },
   spaced: { marginTop: 8 },
   summaryLine: { marginTop: 8, display: "flex", alignItems: "center", gap: 8 },
-  discussion: {
-    display: "flex",
-    minHeight: 0,
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: "0%",
-    flexDirection: "column",
-    gap: 16,
-    overflowY: "auto",
-    paddingInline: 22,
-    paddingBlock: 16,
-  },
   // A card clips its content, so in this column it would be squeezed instead of scrolled.
-  interrupt: { flexShrink: 0 },
-  message: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    borderRadius: 6,
-    transitionProperty: "background-color",
-    transitionDuration: "150ms",
-  },
-  lit: { backgroundColor: "var(--color-overlay-hover)" },
-  earlier: {
-    cursor: "pointer",
-    alignSelf: "flex-start",
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    padding: 0,
-    fontSize: 12,
-    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
-  },
-  messageHead: { display: "flex", alignItems: "baseline", gap: 8 },
   // Negative margin: the button may not make a one-line message head taller than its text.
-  messageActions: { marginInlineStart: "auto", marginBlock: -4 },
-  messageEdit: {
-    resize: "vertical",
-    borderRadius: 6,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border-emphasized)",
-    backgroundColor: "var(--precision-sunk)",
-    padding: 8,
-    fontSize: 13,
-    color: "var(--color-text-primary)",
-  },
-  reply: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    borderTopWidth: 1,
-    borderTopStyle: "solid",
-    borderTopColor: "var(--precision-line2)",
-    paddingInline: 16,
-    paddingTop: 12,
-    paddingBottom: 14,
-  },
-  mentions: {
-    display: "flex",
-    flexDirection: "column",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border)",
-    backgroundColor: "var(--color-background-surface)",
-    paddingBlock: 4,
-  },
-  mention: {
-    cursor: "pointer",
-    borderWidth: 0,
-    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
-    paddingInline: 12,
-    paddingBlock: 4,
-    textAlign: "left",
-    color: "var(--color-text-primary)",
-  },
-  replyBox: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border-emphasized)",
-    backgroundColor: "var(--precision-sunk)",
-    paddingBlock: 6,
-    paddingInlineEnd: 6,
-    paddingInlineStart: 12,
-  },
-  replyInput: {
-    minWidth: 0,
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: "0%",
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    color: "var(--color-text-primary)",
-    outline: "none",
-    "::placeholder": { color: "var(--precision-text3)" },
-  },
   activity: { margin: 0, display: "flex", listStyleType: "none", flexDirection: "column", gap: 12, padding: 0 },
   activityItem: { display: "flex", flexDirection: "column", gap: 2 },
   pending: { display: "flex", flexDirection: "column", gap: 12, padding: 20 },
@@ -1006,224 +903,6 @@ function StatusBox({
   }
 }
 
-function Discussion({
-  t,
-  conversationId,
-  flash,
-}: {
-  t: TicketView;
-  flash: string | undefined;
-  conversationId: string | null | undefined;
-}) {
-  const connection = useConnection();
-  const messages = useMessages(conversationId);
-  const approvals = useApprovals();
-  const pending = approvalsFor(approvals.data ?? [], { conversationId, ticketId: t.id });
-  const [text, setText] = useState("");
-  const { busy, held, error, send, sendAnyway } = useSend(() => setText(""));
-  const post = () => {
-    if (text.trim() === "" || busy) return;
-    send(async (confirmSecret) => {
-      await connection.write("ticket.post", { ticket_id: t.id, text: text.trim(), confirm_secret: confirmSecret });
-      return "";
-    });
-  };
-  const { features, hostId } = useLinkState();
-  const platform = usePlatform();
-  const client = useQueryClient();
-  const employees = useEmployees();
-  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
-  const [closedOn, setClosedOn] = useState<string | null>(null);
-  const area = useRef<HTMLInputElement>(null);
-  const [lit, setLit] = useState<string | null>(null);
-  const loaded = messages.data !== undefined;
-  // Followed a link to one message: to it, and it lights up for a moment.
-  useEffect(() => {
-    if (!flash || !loaded) return;
-    document.querySelector(`[data-message="${flash}"]`)?.scrollIntoView({ block: "center" });
-    setLit(flash);
-    const timer = setTimeout(() => setLit(null), 2000);
-    return () => clearTimeout(timer);
-  }, [flash, loaded]);
-  const people = (employees.data ?? [])
-    .filter((e) => e.status === "active")
-    .map((e) => ({ name: e.name, kind: "employee", employee: true }));
-  const suggestions = closedOn === text ? null : mentionSuggestions(text, people);
-  const change = (run: () => Promise<unknown>) =>
-    run()
-      .then(() => client.invalidateQueries({ queryKey: ["messages", conversationId] }))
-      .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
-  const all = (messages.data?.messages ?? []).filter((m) => !m.deleted_at_ms && !m.thread_parent);
-  const [unfolded, setUnfolded] = useState(Boolean(flash));
-  const { shown: list, earlier } = foldUpdates(all, unfolded);
-  return (
-    <>
-      <div {...stylex.props(styles.discussion)}>
-        {messages.isPending && conversationId ? <Loading /> : null}
-        {list.length === 0 && !messages.isPending ? <EmptyState isCompact title="Nothing said yet." /> : null}
-        {list.map((m) => (
-          <div key={m.id} data-message={m.id} {...stylex.props(styles.message, lit === m.id && styles.lit)}>
-            {earlier.get(m.id) ? (
-              <button type="button" onClick={() => setUnfolded(true)} {...stylex.props(styles.earlier)}>
-                {earlier.get(m.id) === 1 ? "1 earlier update" : `${earlier.get(m.id)} earlier updates`}
-              </button>
-            ) : null}
-            <div {...stylex.props(styles.messageHead)}>
-              <span {...stylex.props(styles.medium)}>
-                {m.author_user?.username ?? m.author ?? (m.role === "user" ? "You" : "Aurelius")}
-              </span>
-              <span {...stylex.props(styles.thirdSmall)}>{time(m.created_at_ms)}</span>
-              {m.system ? null : (
-                <Menu
-                  label="Message actions"
-                  options={[
-                    { key: "copy", label: "Copy" },
-                    ...(hostId && features.includes("message_locate") ? [{ key: "link", label: "Copy link" }] : []),
-                    ...(canChange(m, features.includes("message_edits"))
-                      ? [
-                          { key: "edit", label: "Edit" },
-                          { key: "delete", label: "Delete", danger: true },
-                        ]
-                      : []),
-                  ]}
-                  onPick={(key) => {
-                    if (key === "copy") void platform.copy(m.text);
-                    if (key === "link")
-                      void platform.copy(messageLink(hostId ?? "", m.id)).then(() => toast("Link copied."));
-                    if (key === "edit") setEditing({ id: m.id, text: m.text });
-                    if (key === "delete") setDeleting(m.id);
-                  }}
-                  trigger={
-                    <IconButton
-                      variant="ghost"
-                      size="sm"
-                      label="Message actions"
-                      icon={<Icon icon="moreHorizontal" />}
-                      xstyle={styles.messageActions}
-                    />
-                  }
-                />
-              )}
-            </div>
-            {editing?.id === m.id ? (
-              <div {...stylex.props(styles.stack)}>
-                <textarea
-                  aria-label="Edit message"
-                  rows={3}
-                  value={editing.text}
-                  onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
-                  {...stylex.props(styles.messageEdit)}
-                />
-                <div {...stylex.props(styles.buttons)}>
-                  <Button
-                    label="Save"
-                    variant="primary"
-                    isDisabled={editing.text.trim() === ""}
-                    onClick={() => {
-                      const { text: next } = editing;
-                      setEditing(null);
-                      void change(() =>
-                        connection.write("message.edit", { message_id: m.id, text: next }, { retry: false }),
-                      );
-                    }}
-                  />
-                  <Button label="Cancel" onClick={() => setEditing(null)} />
-                </div>
-              </div>
-            ) : m.system ? (
-              <span {...stylex.props(styles.secondary)}>{m.text}</span>
-            ) : (
-              <Markdown text={m.text} />
-            )}
-            <RunNote m={m} />
-            {t.column !== "done" && waitsOnReply(m, pending) ? (
-              <ReplyCard
-                who={m.author ?? "An employee"}
-                onSend={(reply) =>
-                  connection.write(
-                    "ticket.post",
-                    { ticket_id: t.id, text: reply, confirm_secret: false },
-                    { retry: false },
-                  )
-                }
-              />
-            ) : null}
-          </div>
-        ))}
-        {pending.map((a) => (
-          <div key={a.id} {...stylex.props(styles.interrupt)}>
-            <ApprovalCard approval={a} />
-          </div>
-        ))}
-      </div>
-      {t.column === "done" ? null : (
-        <div {...stylex.props(styles.reply)}>
-          {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
-          {error ? <Problem>{error}</Problem> : null}
-          {suggestions && suggestions.found.length > 0 ? (
-            <div role="listbox" aria-label="Mention" {...stylex.props(styles.mentions)}>
-              {suggestions.found.map((p) => (
-                <button
-                  key={p.name}
-                  type="button"
-                  role="option"
-                  aria-selected={false}
-                  onClick={() => {
-                    setText(completeMention(text, suggestions.at, p.name));
-                    setClosedOn(null);
-                    area.current?.focus();
-                  }}
-                  {...stylex.props(styles.mention)}
-                >
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <div {...stylex.props(styles.replyBox)}>
-            <input
-              ref={area}
-              aria-label="Reply in discussion"
-              placeholder="Reply in discussion · @ to mention"
-              {...stylex.props(styles.replyInput)}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape" && suggestions) {
-                  e.stopPropagation();
-                  setClosedOn(text);
-                } else if (e.key === "Enter") {
-                  e.preventDefault();
-                  const first = suggestions?.found[0];
-                  if (suggestions && first) setText(completeMention(text, suggestions.at, first.name));
-                  else post();
-                }
-              }}
-            />
-            <Button label="Send" isDisabled={busy || text.trim() === ""} onClick={post} />
-          </div>
-        </div>
-      )}
-      {deleting ? (
-        <ConfirmDialog
-          open
-          danger
-          title="Delete this message?"
-          body="It reads as deleted for everyone; earlier versions stay with the board."
-          confirm="Delete"
-          onClose={() => setDeleting(null)}
-          onConfirm={() => {
-            const id = deleting;
-            setDeleting(null);
-            void change(() => connection.write("message.delete", { message_id: id }, { retry: false }));
-          }}
-        />
-      ) : null}
-    </>
-  );
-}
-
 function Activity({ id }: { id: string }) {
   const activity = useTicketActivity(id);
   if (activity.isPending) return <Loading />;
@@ -1539,7 +1218,14 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
           </div>
           <div id="ticket-section" role="tabpanel" aria-label="Ticket section" {...stylex.props(styles.tabPanel)}>
             {tab === "discussion" ? (
-              <Discussion t={t} conversationId={t.conversation_id} flash={message} />
+              t.conversation_id ? (
+                <TicketChat
+                  key={t.conversation_id}
+                  conversationId={t.conversation_id}
+                  ticketId={t.id}
+                  {...(message ? { message } : {})}
+                />
+              ) : null
             ) : (
               <div {...stylex.props(styles.section)}>
                 {tab === "activity" ? (

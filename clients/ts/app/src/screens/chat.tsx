@@ -24,6 +24,7 @@ import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
 import { useWorkspace } from "../workspace";
 import { ApprovalCard } from "./approval-card";
+import { foldUpdates } from "./board-logic";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import {
   bareName,
@@ -284,7 +285,8 @@ const styles = stylex.create({
     color: "var(--precision-text3)",
   },
   threadComposer: { paddingTop: 8 },
-  channel: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0 },
+  channel: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
+  threadFull: { width: "100%", flexShrink: 1, borderLeftWidth: 0 },
   channelMain: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column" },
   top: {
     display: "flex",
@@ -346,6 +348,18 @@ const styles = stylex.create({
   problem: { padding: 24 },
   feed: { height: "100%", scrollbarGutter: "stable both-edges" },
   feedColumn: { marginInline: "auto", width: "100%", maxWidth: 820, paddingInline: 24 },
+  feedNarrow: { paddingInline: 12 },
+  earlier: {
+    display: "block",
+    borderWidth: 0,
+    padding: 0,
+    paddingTop: 8,
+    cursor: "pointer",
+    fontSize: 12,
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+    backgroundColor: "transparent",
+  },
+  hiddenMain: { display: "none" },
   topGap: { paddingTop: 8 },
   approvalGap: { paddingTop: 12 },
   readOnlyRow: {
@@ -380,6 +394,7 @@ const styles = stylex.create({
 
 /** Worked out once: every visible row uses these. */
 const FEED_COLUMN = stylex.props(styles.feedColumn);
+const FEED_NARROW = stylex.props(styles.feedColumn, styles.feedNarrow);
 const TOP_GAP = stylex.props(styles.topGap);
 
 const FEED_PARTS = {
@@ -797,7 +812,9 @@ function ThreadPanel({
   people,
   archived,
   onClose,
+  full = false,
 }: {
+  full?: boolean;
   root: string;
   channelName: string;
   readOnly: boolean;
@@ -824,7 +841,7 @@ function ThreadPanel({
   const closed = readOnly || thread.data?.read_only === true;
   const loading = useDelayed(thread.isPending);
   return (
-    <aside aria-label="Thread" {...stylex.props(styles.thread)}>
+    <aside aria-label="Thread" {...stylex.props(styles.thread, full && styles.threadFull)}>
       <div {...stylex.props(styles.threadTop)}>
         <Heading level={2} xstyle={styles.threadTitle}>
           Thread · #{channelName}
@@ -881,33 +898,74 @@ function ThreadPanel({
 }
 
 type Row =
-  | { kind: "message"; m: MessageView; day: boolean; isNew: boolean; grouped: boolean }
+  | { kind: "message"; m: MessageView; day: boolean; isNew: boolean; grouped: boolean; earlier: number }
   | { kind: "live"; id: string; run: string }
   | { kind: "approval"; id: string };
 
-function Channel({
-  channel,
-  c,
-  thread,
-  onThread,
-  general,
-  message = null,
-}: {
+interface ChannelProps {
   channel: string | null;
   c: ChannelView | null;
   thread: string | null;
   onThread: (id: string | null) => void;
   general: boolean;
   message?: string | null;
-}) {
+  /** Inside a ticket's panel or the popout: no head of its own, narrow, and a thread takes the whole width. */
+  embedded?: boolean;
+  /** The ticket, when `c` may not be known yet. */
+  ticketId?: string | null;
+}
+
+function Channel(props: ChannelProps) {
   useKeyContext("TeamChat");
+  return <ChannelBody {...props} />;
+}
+
+/** A ticket's discussion, as a chat: in the ticket's panel and in the popout. */
+export function TicketChat({
+  conversationId,
+  ticketId,
+  message = null,
+}: {
+  conversationId: string;
+  ticketId: string;
+  message?: string | null;
+}) {
+  const channels = useChannels();
+  const c = channels.data?.find((x) => x.conversation_id === conversationId) ?? null;
+  const [thread, setThread] = useState<string | null>(null);
+  return (
+    <ChannelBody
+      channel={conversationId}
+      c={c}
+      ticketId={ticketId}
+      thread={thread}
+      onThread={setThread}
+      general={false}
+      message={message}
+      embedded
+    />
+  );
+}
+
+function ChannelBody({
+  channel,
+  c,
+  thread,
+  onThread,
+  general,
+  message = null,
+  embedded = false,
+  ticketId = null,
+}: ChannelProps) {
   const { user, features, status } = useLinkState();
   const connection = useConnection();
   const client = useQueryClient();
   const feed = useChannelFeed(channel);
   const approvals = useApprovals();
   const employees = useEmployees();
-  const ticket = useTicket(c?.ticket_id ?? null);
+  const ticket = useTicket(ticketId ?? c?.ticket_id ?? null);
+  const t = ticket.data?.ticket;
+  const isTicket = ticketId !== null || c?.kind === "ticket";
   const { people: staff, archived, first } = usePeople();
   const people = useMemo(
     () => [
@@ -922,7 +980,14 @@ function Channel({
   const store = useLiveStore(feed.data?.conversation_id);
   const live = useLiveAll(store);
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
-  const list2 = useMemo(() => list.filter((m) => !m.thread_parent), [list]);
+  const talk = useMemo(() => list.filter((m) => !m.thread_parent), [list]);
+  // On a ticket a row of "moved to Doing" lines folds, so what people said stays in view.
+  const [unfolded, setUnfolded] = useState(message !== null);
+  const folded = useMemo(
+    () => (isTicket ? foldUpdates(talk, unfolded) : { shown: talk, earlier: new Map<string, number>() }),
+    [isTicket, talk, unfolded],
+  );
+  const list2 = folded.shown;
   const handle = useRef<VirtuosoHandle>(null);
   // The message a link led to: into view, and marked for a moment.
   const [flash, setFlash] = useState<string | null>(null);
@@ -966,8 +1031,8 @@ function Channel({
   }, [list, store]);
 
   const pending = useMemo(
-    () => approvalsFor(approvals.data ?? [], { conversationId: openId, ticketId: c?.ticket_id }),
-    [approvals.data, openId, c?.ticket_id],
+    () => approvalsFor(approvals.data ?? [], { conversationId: openId, ticketId: ticketId ?? c?.ticket_id }),
+    [approvals.data, openId, ticketId, c?.ticket_id],
   );
   const approvalMap = useMemo(() => new Map(pending.map((a) => [a.id, a])), [pending]);
   const onCard = useMemo(() => new Set(list.flatMap((m) => m.approval_id ?? [])), [list]);
@@ -977,7 +1042,14 @@ function Channel({
     const dayOf = (ms: number) => localDay(ms, offset());
     const out: Row[] = list2.map((m, i) => {
       const b = before(list2, i, newAt, dayOf);
-      return { kind: "message", m, day: b.day, isNew: b.new, grouped: b.grouped };
+      return {
+        kind: "message",
+        m,
+        day: b.day,
+        isNew: b.new,
+        grouped: b.grouped,
+        earlier: folded.earlier.get(m.id) ?? 0,
+      };
     });
     for (const u of live) {
       if (!inList.has(u.message_id) && streamTo(u.thread_parent, null) === "channel")
@@ -985,7 +1057,7 @@ function Channel({
     }
     for (const a of pending) if (!onCard.has(a.id)) out.push({ kind: "approval", id: a.id });
     return out;
-  }, [list2, newAt, live, inList, pending, onCard]);
+  }, [list2, folded.earlier, newAt, live, inList, pending, onCard]);
 
   const readOnly = (c?.archived ?? false) || feed.data?.read_only === true;
   const caps = useMemo<Caps>(
@@ -993,7 +1065,7 @@ function Channel({
     [features, readOnly],
   );
   const employeesData = employees.data;
-  const name = c ? bareName(c) : "general";
+  const name = c ? bareName(c) : t ? String(t.number) : "general";
   const lastAnswerId = useMemo(
     () => [...list2].reverse().find((m) => !m.update && m.role === "assistant")?.id ?? null,
     [list2],
@@ -1006,7 +1078,7 @@ function Channel({
       people: names,
       me: user?.username ?? null,
       place: `#${name}`,
-      ticketNumber: c?.ticket_number ?? null,
+      ticketNumber: c?.ticket_number ?? t?.number ?? null,
       roleOf: (who) => {
         const e = employeesData?.find((x) => x.name === who);
         return e ? (e.title ?? e.role) : null;
@@ -1029,6 +1101,7 @@ function Channel({
       user,
       name,
       c?.ticket_number,
+      t?.number,
       employeesData,
       approvalMap,
       onThread,
@@ -1042,12 +1115,16 @@ function Channel({
     [...list2].reverse().find((m) => m.status === "partial" && m.run_id)?.run_id ?? live.at(-1)?.run_id ?? null;
   const retryAnswer = useRetryAnswer(feed.data?.conversation_id, list2, { channel });
   const [contextOf, setContextOf] = useState<string | null>(null);
-  useAction("ShowContext", () => {
-    const run = [...list2].reverse().find((m) => m.role === "assistant" && m.run_id)?.run_id;
-    if (run) setContextOf(run);
-    else toast("Open a conversation with an answer to see the context it used.");
-  });
-  useAction("RetryAnswer", retryAnswer);
+  useAction(
+    "ShowContext",
+    () => {
+      const run = [...list2].reverse().find((m) => m.role === "assistant" && m.run_id)?.run_id;
+      if (run) setContextOf(run);
+      else toast("Open a conversation with an answer to see the context it used.");
+    },
+    !embedded,
+  );
+  useAction("RetryAnswer", retryAnswer, !embedded);
   useAction(
     "StopGeneration",
     () => {
@@ -1057,7 +1134,7 @@ function Channel({
           .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
       else toast("No answer is running here.");
     },
-    true,
+    !embedded,
   );
 
   const lastAnswer = [...list2].reverse().find((m) => !m.update);
@@ -1068,9 +1145,7 @@ function Channel({
     !pending.some((a) => a.run_id === lastAnswer.run_id)
       ? quickReplies(lastAnswer.activity)
       : null;
-  const t = ticket.data?.ticket;
   const owner = t && t.column !== "done" ? (t.owner_name ?? null) : null;
-  const isTicket = c?.kind === "ticket";
   const placeholder =
     isTicket && owner
       ? `Message ${owner} (owner)… · @ to mention`
@@ -1087,44 +1162,46 @@ function Channel({
 
   return (
     <section aria-label={`#${name}`} {...stylex.props(styles.channel)}>
-      <div {...stylex.props(styles.channelMain)}>
-        <header data-titlebar {...stylex.props(styles.top)}>
-          <Heading level={1} xstyle={styles.title}>
-            <span {...stylex.props(styles.hash)}>#</span> {name}
-          </Heading>
-          {t ? (
-            <span {...stylex.props(styles.column)}>
-              <ColumnGlyph kind={t.column} />
-              {t.column.replace("_", " ")}
+      <div {...stylex.props(styles.channelMain, embedded && thread !== null && styles.hiddenMain)}>
+        {embedded ? null : (
+          <header data-titlebar {...stylex.props(styles.top)}>
+            <Heading level={1} xstyle={styles.title}>
+              <span {...stylex.props(styles.hash)}>#</span> {name}
+            </Heading>
+            {t ? (
+              <span {...stylex.props(styles.column)}>
+                <ColumnGlyph kind={t.column} />
+                {t.column.replace("_", " ")}
+              </span>
+            ) : null}
+            <span {...stylex.props(styles.subtitle)}>
+              {answering.length > 0
+                ? `${answering.join(", ")} answering`
+                : t
+                  ? [
+                      t.title,
+                      t.owner_name ? `${t.owner_name} owner` : null,
+                      t.responsible_user_id === user?.id
+                        ? "You responsible"
+                        : t.responsible_username
+                          ? `${t.responsible_username} responsible`
+                          : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : c?.kind === "project"
+                    ? c.archived
+                      ? "Archived project · read-only"
+                      : `Project channel · you and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`
+                    : `You and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`}
             </span>
-          ) : null}
-          <span {...stylex.props(styles.subtitle)}>
-            {answering.length > 0
-              ? `${answering.join(", ")} answering`
-              : t
-                ? [
-                    t.title,
-                    t.owner_name ? `${t.owner_name} owner` : null,
-                    t.responsible_user_id === user?.id
-                      ? "You responsible"
-                      : t.responsible_username
-                        ? `${t.responsible_username} responsible`
-                        : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")
-                : c?.kind === "project"
-                  ? c.archived
-                    ? "Archived project · read-only"
-                    : `Project channel · you and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`
-                  : `You and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`}
-          </span>
-          {c?.ticket_id ? (
-            <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.openTicket)}>
-              Open ticket ↗
-            </Link>
-          ) : null}
-        </header>
+            {c?.ticket_id ? (
+              <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.openTicket)}>
+                Open ticket ↗
+              </Link>
+            ) : null}
+          </header>
+        )}
         <ThreadWaiting conversationId={openId} />
         {contextOf ? <ContextDialog run={contextOf} onClose={() => setContextOf(null)} /> : null}
         <ChatProvider value={ctx}>
@@ -1177,9 +1254,14 @@ function Channel({
                   computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
                   components={FEED_PARTS}
                   itemContent={(_, row) => (
-                    <div {...FEED_COLUMN}>
+                    <div {...(embedded ? FEED_NARROW : FEED_COLUMN)}>
                       {row.kind === "message" ? (
                         <>
+                          {row.earlier > 0 ? (
+                            <button type="button" onClick={() => setUnfolded(true)} {...stylex.props(styles.earlier)}>
+                              {row.earlier === 1 ? "1 earlier update" : `${row.earlier} earlier updates`}
+                            </button>
+                          ) : null}
                           {row.day ? <DayLine ms={row.m.created_at_ms} /> : null}
                           {row.isNew ? <NewLine /> : null}
                           <div {...(row.grouped ? null : TOP_GAP)}>
@@ -1213,7 +1295,7 @@ function Channel({
                 <span {...stylex.props(styles.readOnlyText)}>
                   {c ? readOnlyBar(c, c.ticket_column === "done") : "This channel is read-only."}
                 </span>
-                {c?.ticket_id ? (
+                {c?.ticket_id && !embedded ? (
                   <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.readOnlyLink)}>
                     Open ticket
                   </Link>
@@ -1228,7 +1310,7 @@ function Channel({
               threadParent={null}
               waiting={!running && list2.at(-1)?.role === "user"}
               placeholder={placeholder}
-              hint={hint}
+              hint={embedded ? null : hint}
               activeRun={running}
               people={people}
               archived={archived}
@@ -1254,6 +1336,7 @@ function Channel({
             people={people}
             archived={archived}
             onClose={() => onThread(null)}
+            full={embedded}
           />
         </ChatProvider>
       ) : null}
