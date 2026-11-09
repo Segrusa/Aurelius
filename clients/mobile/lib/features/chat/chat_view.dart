@@ -1454,7 +1454,7 @@ class _LiveProgressState extends State<_LiveProgress> {
       child: Padding(
         padding: const EdgeInsets.only(left: 8),
         child: Text(
-          [if (p.compacting == true) compactingLabel else if (step != null) step, Fmt.progress(p.startedAtMs, p.outputTokens)].where((t) => t.isNotEmpty).join(' · '),
+          [if (p.compacting == true) compactingLabel else ?step, Fmt.progress(p.startedAtMs, p.outputTokens)].where((t) => t.isNotEmpty).join(' · '),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(color: Tokens.muted, fontSize: 12.5),

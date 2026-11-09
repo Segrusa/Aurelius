@@ -35,15 +35,17 @@ class UpdatesPage extends StatelessWidget {
           listenWhen: (a, b) => b.notice != null && a.notice != b.notice,
           listener: (context, state) => toast(context, state.notice!),
           builder: (context, state) {
-            if (state.loading)
+            if (state.loading) {
               return const Center(child: CupertinoActivityIndicator());
+            }
             final status = state.status;
-            if (status == null)
+            if (status == null) {
               return ErrorRetry(
                 state.error ?? 'No update information.',
                 onRetry: () =>
                     context.read<UpdatesBloc>().add(const UpdatesRequested()),
               );
+            }
             final bloc = context.read<UpdatesBloc>();
             final notes = (status.notes ?? '').trim();
             return RefreshIndicator.adaptive(
