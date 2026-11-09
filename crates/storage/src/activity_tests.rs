@@ -102,7 +102,11 @@ fn task_job(store: &Store, parked: bool) -> String {
     let task = id.clone();
     store.write(move |tx| {
         let id = task;
-        tx.execute("INSERT INTO tasks(id, title, brief_blob_id, status, waiting_reason, version, created_at_ms, updated_at_ms, employee_id) VALUES (?1, 'Work', NULL, 'waiting', 'paused', 1, 1, 1, ?2)", [&id, &EMPLOYEE.to_owned()])?;
+        tx.execute("INSERT OR IGNORE INTO blobs(id, storage_key, sha256, byte_length, media_type, created_at_ms) VALUES ('b', 'k', 's', 0, 'text/plain', 1)", [])?;
+        let global: String = tx.query_row("SELECT id FROM scopes WHERE kind = 'global'", [], |r| r.get(0))?;
+        tx.execute("INSERT OR IGNORE INTO scopes(id, kind, parent_id, owner_id) VALUES ('ps', 'project', ?1, 'p')", [&global])?;
+        tx.execute("INSERT OR IGNORE INTO projects(id, scope_id, name, status, version, created_at_ms, updated_at_ms) VALUES ('p', 'ps', 'Alpha', 'active', 1, 1, 1)", [])?;
+        tx.execute("INSERT INTO tasks(id, project_id, title, brief_blob_id, status, waiting_reason, version, created_at_ms, updated_at_ms, employee_id) VALUES (?1, 'p', 'Work', 'b', 'waiting', 'paused', 1, 1, 1, ?2)", [&id, &EMPLOYEE.to_owned()])?;
         let source = source_event(tx, RunId::new())?;
         events::insert_job(tx, &id, "task.run", source, &format!("task:{id}"), &serde_json::json!({}))?;
         if parked {
