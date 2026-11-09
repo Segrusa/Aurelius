@@ -38,7 +38,8 @@ pub async fn start_with(root: &Path, runtime: Arc<dyn AgentRuntime>) -> Daemon {
     handle
 }
 
-/// Start a daemon without a runtime override, so runs use the provider's real CLI (`#[ignore]`d live tests).
+/// Start a daemon without a runtime override: runs use the connection they resolve to, so the
+/// real CLI in the `#[ignore]`d live tests, and no runtime at all when there is no connection.
 pub async fn start_real(root: &Path) -> Daemon {
     let (tx, rx) = oneshot::channel();
     let handle = tokio::spawn(aurelius_daemon::run(root.to_path_buf(), Some(tx)));

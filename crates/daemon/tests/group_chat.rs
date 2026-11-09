@@ -306,7 +306,8 @@ async fn a_failed_answer_says_so_and_a_stopped_queued_one_too() {
 }
 
 /// The group shows the mode an employee answers in: the mode its run started in
-/// streams along with the answer and stays with it once it is copied there.
+/// streams along with the answer and stays with it once it is copied there. The
+/// employees of the Team chat always work in Auto, whatever their own chat is set to.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_group_answer_shows_the_mode_it_was_given_in() {
     use aurelius_domain::autonomy::{AgentMode, SetAgentMode};
@@ -326,21 +327,21 @@ async fn a_group_answer_shows_the_mode_it_was_given_in() {
 
     send(&client, "Wat is het plan?").await;
     let answer = answers_of(&client, "Atlas", 1).await.remove(0);
-    assert_eq!(answer.mode, Some(AgentMode::Plan), "the answer says it was given in Plan");
+    assert_eq!(answer.mode, Some(AgentMode::Auto), "the answer says it was given in Auto, not its own chat's Plan");
     let mut in_group = 0;
     while let Ok(delta) = streams.try_recv() {
         if delta.conversation_id == group_id && delta.message_id == answer.id {
             in_group += 1;
-            assert_eq!(delta.mode, Some(AgentMode::Plan), "it streams with its mode");
+            assert_eq!(delta.mode, Some(AgentMode::Auto), "it streams with its mode");
         } else {
             assert_eq!(delta.mode, None, "only the group's copy carries the mode");
         }
     }
     assert!(in_group > 0, "the answer streamed in the group chat");
 
-    // Another employee in its own (default) mode.
+    // Another employee, whose own chat is in the default mode.
     send(&client, "@Ann, jij ook?").await;
-    assert_eq!(answers_of(&client, "Ann", 1).await[0].mode, Some(AgentMode::Ask));
+    assert_eq!(answers_of(&client, "Ann", 1).await[0].mode, Some(AgentMode::Auto));
     // The user's own messages carry no mode.
     assert!(client.group_chat().await.unwrap().messages.iter().filter(|m| m.role == MessageRole::User).all(|m| m.mode.is_none()));
 

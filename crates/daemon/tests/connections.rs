@@ -114,7 +114,9 @@ async fn builtin_connection_and_inheritance_with_origin() {
 #[tokio::test(flavor = "multi_thread")]
 async fn api_connection_needs_a_key_and_disabled_means_no_fallback() {
     let dir = tempfile::tempdir().unwrap();
-    let daemon = start(dir.path()).await;
+    // Without the runtime override: an override answers whatever the connection says, and
+    // whether a run without a connection fails is what this test is here for.
+    let daemon = common::start_real(dir.path()).await;
     let client = connect(dir.path()).await;
 
     let CommandResult::ProviderAdded { connection_id } = exec(
