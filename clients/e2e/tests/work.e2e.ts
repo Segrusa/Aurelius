@@ -112,7 +112,7 @@ test("the board, the ticket panel and My tickets against a real daemon", async (
 
     // The discussion, and what the activity says of it.
     await panel.getByRole("tab", { name: /Discussion/ }).click();
-    await panel.getByLabel("Reply in discussion").fill("Does this need a migration?");
+    await panel.getByRole("textbox", { name: /^Message/ }).fill("Does this need a migration?");
     await page.keyboard.press("Enter");
     await expect(panel.getByText("Does this need a migration?")).toBeVisible();
     await panel.getByRole("tab", { name: "Activity" }).click();
@@ -410,6 +410,23 @@ test.describe("states a test daemon cannot produce", () => {
     const { writes } = await scriptServer(page, {
       ...script,
       features: ["ticket_discussion", "run_cards"],
+      feeds: {
+        d3: messages("d3", [
+          message("m1", "assistant", "Started on it.", {
+            update: "group",
+            author: "Flux",
+            run_id: "r1",
+            run: { status: "running", tool_calls: 2, failed_calls: 1 },
+          }),
+          message("m2", "assistant", "Shall I migrate it?", {
+            update: "group",
+            author: "Bo",
+            run_id: "r2",
+            awaiting_user: true,
+            run: { status: "succeeded", tool_calls: 0, failed_calls: 0 },
+          }),
+        ]),
+      },
       board: boardOf([discussed]),
       tickets: [discussed],
       details: { t3: { ticket: discussed, root_task: k3, tasks: [k3], as_of_seq: 1 } },
@@ -476,8 +493,8 @@ test.describe("states a test daemon cannot produce", () => {
     await panel.getByLabel("Your answer to Bo").fill("Yes, please");
     await panel.getByRole("button", { name: "Send answer" }).first().click();
     await expect
-      .poll(() => writes.find((w) => w.method === "ticket.post")?.params)
-      .toMatchObject({ ticket_id: "t3", text: "Yes, please" });
+      .poll(() => writes.find((w) => w.method === "group_chat.send")?.params)
+      .toMatchObject({ channel: "d3", text: "Yes, please" });
 
     await panel.getByRole("radio", { name: "Green" }).check();
     await panel.getByRole("button", { name: "Send answer" }).last().click();

@@ -7,12 +7,24 @@ import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { useLinkState } from "../connection";
-import { useEmployeeChats, useEmployees } from "../data";
+import { useChannels, useEmployeeChats, useEmployees, useTickets } from "../data";
 import { usePlatform } from "../platform";
 import { Icon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
-import { chatAge, type DockState, dockAway, dockChats, launcherAway, parseDock } from "./chat-dock-logic";
+import { useWorkspace } from "../workspace";
+import { TicketChat } from "./chat";
+import {
+  chatAge,
+  type DockState,
+  type DockTicket,
+  dockAway,
+  dockChats,
+  dockTickets,
+  launcherAway,
+  parseDock,
+} from "./chat-dock-logic";
 import { EmployeeChat, useChatOpener } from "./employee-chat";
+import { narrow } from "./workspace-logic";
 
 const DOCK_KEY = "aurelius.chat-dock";
 
@@ -172,7 +184,44 @@ function ChatLine({
   );
 }
 
-function ChatList({ onPick, onCollapse }: { onPick: (conversation: string) => void; onCollapse: () => void }) {
+function useDockTickets(search: string): DockTicket[] {
+  const channels = useChannels();
+  const tickets = useTickets();
+  const workspace = useWorkspace().id;
+  return useMemo(
+    () => dockTickets(narrow(channels.data ?? [], workspace), tickets.data ?? [], search),
+    [channels.data, tickets.data, workspace, search],
+  );
+}
+
+const TICKET_MARK = "#55595F";
+
+function TicketLine({ ticket, now, onOpen }: { ticket: DockTicket; now: number; onOpen: () => void }) {
+  const fresh = ticket.unread > 0;
+  return (
+    <button type="button" onClick={onOpen} {...stylex.props(styles.row)}>
+      <Mark letter="#" color={TICKET_MARK} size={38} radius={12} />
+      <span {...stylex.props(styles.rowText)}>
+        <span {...stylex.props(styles.rowTop)}>
+          <span {...stylex.props(styles.rowName, fresh && styles.rowNameNew)}>{ticket.title}</span>
+          {ticket.lastMs ? <span {...stylex.props(styles.rowAge)}>{chatAge(ticket.lastMs, now)}</span> : null}
+        </span>
+        <span {...stylex.props(styles.rowLine, fresh && styles.rowLineNew)}>{ticket.line}</span>
+      </span>
+      {fresh ? <span title={`${ticket.unread} unread`} {...stylex.props(styles.dot)} /> : null}
+    </button>
+  );
+}
+
+function ChatList({
+  onPick,
+  onPickTicket,
+  onCollapse,
+}: {
+  onPick: (conversation: string) => void;
+  onPickTicket: (ticket: DockTicket) => void;
+  onCollapse: () => void;
+}) {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const chats = useEmployeeChats();
@@ -182,6 +231,7 @@ function ChatList({ onPick, onCollapse }: { onPick: (conversation: string) => vo
     () => dockChats(chats.data ?? [], employees.data ?? [], search),
     [chats.data, employees.data, search],
   );
+  const tickets = useDockTickets(search);
   const now = Date.now();
   const byId = (id: string) => employees.data?.find((e) => e.id === id);
   return (
@@ -228,6 +278,10 @@ function ChatList({ onPick, onCollapse }: { onPick: (conversation: string) => vo
             onOpen={() => onPick(c.conversation_id)}
           />
         ))}
+        {tickets.length > 0 ? <p {...stylex.props(styles.label)}>Tickets</p> : null}
+        {tickets.map((t) => (
+          <TicketLine key={t.conversation} ticket={t} now={now} onOpen={() => onPickTicket(t)} />
+        ))}
         {list.others.length > 0 ? <p {...stylex.props(styles.label)}>Start a chat</p> : null}
         {list.others.map((e) => (
           <button key={e.id} type="button" onClick={() => open(e.id)} {...stylex.props(styles.row)}>
@@ -238,7 +292,7 @@ function ChatList({ onPick, onCollapse }: { onPick: (conversation: string) => vo
             </span>
           </button>
         ))}
-        {list.chats.length === 0 && list.others.length === 0 ? (
+        {list.chats.length === 0 && list.others.length === 0 && tickets.length === 0 ? (
           <p {...stylex.props(styles.nothing)}>Nobody by that name.</p>
         ) : null}
       </div>
@@ -304,16 +358,76 @@ function OneChat({
   );
 }
 
+function OneTicket({
+  conversation,
+  ticketId,
+  onBack,
+  onCollapse,
+}: {
+  conversation: string;
+  ticketId: string;
+  onBack: () => void;
+  onCollapse: () => void;
+}) {
+  const navigate = useNavigate();
+  const ticket = useDockTickets("").find((t) => t.ticketId === ticketId);
+  return (
+    <>
+      <div {...stylex.props(styles.head)}>
+        <IconButton
+          label="All chats"
+          tooltip="All chats"
+          variant="ghost"
+          size="sm"
+          icon={<Icon name="back" size={15} />}
+          onClick={onBack}
+        />
+        <Mark letter="#" color={TICKET_MARK} size={30} radius={10} />
+        <div {...stylex.props(styles.who)}>
+          <span {...stylex.props(styles.whoName)}>{ticket?.title ?? "Ticket"}</span>
+          <span {...stylex.props(styles.whoRole)}>{ticket?.line ?? ""}</span>
+        </div>
+        <IconButton
+          label="Open full screen"
+          tooltip="Open full screen"
+          variant="ghost"
+          size="sm"
+          icon={<Icon name="expand" size={15} />}
+          onClick={() => {
+            onCollapse();
+            void navigate({ to: "/chat", search: { channel: conversation } });
+          }}
+        />
+        <IconButton
+          label="Collapse chat"
+          tooltip="Collapse"
+          variant="ghost"
+          size="sm"
+          icon={<Icon name="chevronDown" size={15} />}
+          onClick={onCollapse}
+        />
+      </div>
+      <div {...stylex.props(styles.chat)}>
+        <TicketChat key={conversation} conversationId={conversation} ticketId={ticketId} />
+      </div>
+    </>
+  );
+}
+
 export function ChatDock() {
   const { features } = useLinkState();
   const { storage } = usePlatform();
   const location = useRouterState({ select: (s) => s.location });
   const [state, setState] = useState<DockState>(() => parseDock(storage.get(DOCK_KEY)));
   const chats = useEmployeeChats();
+  const tickets = useDockTickets("");
   useEffect(() => {
     storage.set(DOCK_KEY, JSON.stringify(state));
   }, [state, storage]);
-  const unread = useMemo(() => (chats.data ?? []).reduce((sum, c) => sum + c.unread, 0), [chats.data]);
+  const unread = useMemo(
+    () => (chats.data ?? []).reduce((sum, c) => sum + c.unread, 0) + tickets.reduce((sum, t) => sum + t.mentions, 0),
+    [chats.data, tickets],
+  );
   if (!features.includes("employee_chats") || dockAway(location.pathname)) return null;
   const collapse = () => setState((s) => ({ ...s, open: false }));
   if (!state.open) {
@@ -337,14 +451,25 @@ export function ChatDock() {
   };
   return (
     <section aria-label="Chat popout" onKeyDown={onKeyDown} {...stylex.props(styles.panel)}>
-      {state.conversation ? (
+      {state.conversation && state.ticket ? (
+        <OneTicket
+          conversation={state.conversation}
+          ticketId={state.ticket}
+          onBack={() => setState((s) => ({ ...s, conversation: null, ticket: null }))}
+          onCollapse={collapse}
+        />
+      ) : state.conversation ? (
         <OneChat
           conversation={state.conversation}
-          onBack={() => setState((s) => ({ ...s, conversation: null }))}
+          onBack={() => setState((s) => ({ ...s, conversation: null, ticket: null }))}
           onCollapse={collapse}
         />
       ) : (
-        <ChatList onPick={(conversation) => setState((s) => ({ ...s, conversation }))} onCollapse={collapse} />
+        <ChatList
+          onPick={(conversation) => setState((s) => ({ ...s, conversation, ticket: null }))}
+          onPickTicket={(t) => setState((s) => ({ ...s, conversation: t.conversation, ticket: t.ticketId }))}
+          onCollapse={collapse}
+        />
       )}
     </section>
   );

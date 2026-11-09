@@ -1,6 +1,6 @@
-import type { EmployeeChatView, EmployeeSummary } from "@aurelius/protocol";
+import type { ChannelView, EmployeeChatView, EmployeeSummary } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { chatAge, dockAway, dockChats, launcherAway, parseDock } from "./chat-dock-logic";
+import { chatAge, dockAway, dockChats, dockTickets, launcherAway, parseDock } from "./chat-dock-logic";
 
 const chat = (name: string, unread = 0) =>
   ({
@@ -42,6 +42,32 @@ describe("the chat popout", () => {
     });
   });
 
+  it("lists open tickets with their title, column and owner, and finds any by search", () => {
+    const channel = (n: number, over: Partial<ChannelView> = {}) =>
+      ({
+        conversation_id: `d${n}`,
+        kind: "ticket",
+        archived: false,
+        name: `#${n}-slug`,
+        ticket_id: `t${n}`,
+        ticket_number: n,
+        ticket_column: "plan_review",
+        unread: 0,
+        mentions: 0,
+        last_activity_ms: n,
+        ...over,
+      }) as ChannelView;
+    const list = dockTickets(
+      [channel(1), channel(2, { archived: true }), { ...channel(3), kind: "project" }],
+      [{ id: "t1", title: "Trim the texts", owner_name: "Pixel" }],
+      "",
+    );
+    expect(list.map((t) => [t.title, t.line])).toEqual([["#1 Trim the texts", "Plan review · Pixel"]]);
+    const many = Array.from({ length: 20 }, (_, i) => channel(i + 1));
+    expect(dockTickets(many, [], "")).toHaveLength(12);
+    expect(dockTickets(many, [], "#17 ").map((t) => t.ticketId)).toEqual(["t17"]);
+  });
+
   it("says how old a chat is", () => {
     expect(chatAge(0, 30_000)).toBe("now");
     expect(chatAge(0, 5 * 60_000)).toBe("5m");
@@ -51,8 +77,12 @@ describe("the chat popout", () => {
   });
 
   it("reads back what it stored, and survives anything else", () => {
-    expect(parseDock(JSON.stringify({ open: true, conversation: "c1" }))).toEqual({ open: true, conversation: "c1" });
-    expect(parseDock("{bad")).toEqual({ open: false, conversation: null });
-    expect(parseDock(null)).toEqual({ open: false, conversation: null });
+    expect(parseDock(JSON.stringify({ open: true, conversation: "c1", ticket: "t1" }))).toEqual({
+      open: true,
+      conversation: "c1",
+      ticket: "t1",
+    });
+    expect(parseDock("{bad")).toEqual({ open: false, conversation: null, ticket: null });
+    expect(parseDock(null)).toEqual({ open: false, conversation: null, ticket: null });
   });
 });

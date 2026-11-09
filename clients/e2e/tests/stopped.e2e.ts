@@ -89,7 +89,11 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
     await p.getByRole("button", { name: "Try again" }).click();
     await expect(p.getByText("Open a chat with a question first.")).toHaveCount(0);
     await expect(p.getByText("This did not work.")).toHaveCount(0);
-    await p.getByRole("button", { name: /Open run/ }).click();
+    await p.getByRole("button", { name: /Open ticket/ }).click();
+    await p
+      .getByRole("link", { name: /Open run/ })
+      .first()
+      .click();
     await expect(p.getByText("Please try again.")).toBeVisible();
     await expect(p.getByText("Assignment", { exact: true })).toBeVisible();
 

@@ -1059,11 +1059,7 @@ impl CommandService {
             .read(|c| of_ticket(c, ticket))
             .map_err(storage_error)?
             .ok_or_else(|| AppError::new(ErrorCode::NotFound, format!("Ticket {ticket} has no discussion.")))?;
-        let committed = self.send_in(ctx, envelope, hash, (discussion, cmd.thread_parent), text, &cmd.images, &cmd.files, move |d, s| CommandResult::TicketMessagePosted { ticket_id: ticket, conversation_id: d.id, message_id: s.0, to: s.1.to, run_ids: s.1.run_ids })?;
-        // Whoever answers on the ticket has no need for a line in the Inbox that they were asked there.
-        let user = ctx.user_id.map(|u| u.to_string());
-        self.store.write(move |tx| aurelius_storage::timeline::clear_ticket_mentions_for(tx, &ticket.to_string(), user.as_deref())).map_err(storage_error)?;
-        Ok(committed)
+        self.send_in(ctx, envelope, hash, (discussion, cmd.thread_parent), text, &cmd.images, &cmd.files, move |d, s| CommandResult::TicketMessagePosted { ticket_id: ticket, conversation_id: d.id, message_id: s.0, to: s.1.to, run_ids: s.1.run_ids })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1131,6 +1127,10 @@ impl CommandService {
                 && let Err(err) = thread_root(tx, &d, parent)?
             {
                 return Ok(Err(err));
+            }
+            // Whoever answers on a ticket, from wherever, needs no line in the Inbox that they were asked there.
+            if let Place::Ticket(t) = &d.place {
+                aurelius_storage::timeline::clear_ticket_mentions_for(tx, &t.id.to_string(), user.map(|u| u.to_string()).as_deref())?;
             }
             let correlation = command_id.to_string();
             blobs::register(tx, &text_blob)?;
