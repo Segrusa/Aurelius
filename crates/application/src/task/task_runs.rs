@@ -209,13 +209,13 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
         }
     }
     // A ticket's plan (Plan mode) waits for the board before anything is reported.
-    if let Some(review) = crate::task::plan_review::on_finished(tx, run)? {
+    let closing = closing_text(answer, &aurelius_storage::conversations::tool_offsets_of_run(tx, run)?);
+    if let Some(review) = crate::task::plan_review::on_finished(tx, st, run, closing)? {
         notices.extend(review);
         return Ok(notices);
     }
     // A ticket's board member reads the closing text; the working notes stay in the task's conversation.
     if crate::task::ticket_line::is_root(tx, task)? {
-        let closing = closing_text(answer, &aurelius_storage::conversations::tool_offsets_of_run(tx, run)?);
         if row.status == TaskStatus::Review
             && let Some(answered) = crate::task::ticket_line::answered_in_review(tx, st, task, run, closing)?
         {

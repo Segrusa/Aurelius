@@ -8,7 +8,8 @@
 //!    conversation and Claude gets a deny that tells it to stop (`hand_in`).
 //! 3. The run ends; in Plan mode the main task then waits (`plan_review`) and
 //!    the card goes to Plan review (`on_finished`), before any report. An
-//!    answer in Plan mode without `ExitPlanMode` is the plan as well.
+//!    answer in Plan mode without a handed-in plan is the plan as well, and is
+//!    posted as such so the reviewer never decides on an empty card.
 //! 4. Approve: the conversation goes to Auto or Accept edits and the same
 //!    session carries the plan out. Revise: Plan mode stays, the feedback goes
 //!    in and a new plan follows. Reject is `ticket.cancel`.
@@ -31,6 +32,12 @@ use serde_json::json;
 /// What Claude is told after it handed in the plan of a ticket.
 pub const HANDED_IN: &str = "Your plan is handed in for review by the board. Stop now; you will be resumed when it is decided.";
 
+/// What Claude is told when `ExitPlanMode` carries no text (its plan file could not be saved).
+pub const NO_PLAN_TEXT: &str = "No plan text reached the board: your plan file was not saved. Do not call ExitPlanMode again. Write your complete plan as your reply now; when your reply ends it is handed in for review.";
+
+/// The reviewer's card when a run in Plan mode left no words at all.
+const NOTHING_HANDED_IN: &str = "(The employee handed in no plan text. Ask for changes to get one.)";
+
 /// The task of a run when it is the main task of a ticket and the run works in Plan mode.
 fn planning_root(tx: &Tx<'_>, run: RunId) -> Result<Option<TaskId>, StorageError> {
     let task: Option<String> = tx.query_row("SELECT task_id FROM runs WHERE id = ?1 AND conversation_id IS NOT NULL", [run.to_string()], |r| r.get(0)).ok().flatten();
@@ -43,12 +50,15 @@ fn planning_root(tx: &Tx<'_>, run: RunId) -> Result<Option<TaskId>, StorageError
 
 /// `ExitPlanMode` of a run: for the main task of a ticket in Plan mode, the
 /// plan goes in the conversation and the answer for Claude is the deny text
-/// (`HANDED_IN`); none for any other run (the inbox decides, as before).
+/// (`HANDED_IN`, or `NO_PLAN_TEXT` when there is nothing to post); none for any
+/// other run (the inbox decides, as before).
 pub(crate) fn hand_in(tx: &Tx<'_>, st: &Store, run: RunId, input: &serde_json::Value) -> Result<Option<(String, Vec<EventNotice>)>, StorageError> {
     if planning_root(tx, run)?.is_none() {
         return Ok(None);
     }
-    let plan = input.get("plan").and_then(|p| p.as_str()).map(str::trim).filter(|p| !p.is_empty()).unwrap_or("(No plan text was given.)");
+    let Some(plan) = input.get("plan").and_then(|p| p.as_str()).map(str::trim).filter(|p| !p.is_empty()) else {
+        return Ok(Some((NO_PLAN_TEXT.to_string(), vec![])));
+    };
     let notices = thread::post_ticket_plan(tx, st, run, plan)?.into_iter().collect();
     // The run's last words go under the plan, as after a decision in the inbox.
     conv::move_run_message_to_end(tx, run)?;
@@ -57,12 +67,18 @@ pub(crate) fn hand_in(tx: &Tx<'_>, st: &Store, run: RunId, input: &serde_json::V
 
 /// A run of a ticket's main task ended in Plan mode (completed, nothing left to
 /// wait for): the task waits for a board member and the card goes to Plan
-/// review. None when this run is no such run (the report follows as usual).
-pub(crate) fn on_finished(tx: &Tx<'_>, run: RunId) -> Result<Option<Vec<EventNotice>>, StorageError> {
+/// review. `closing` is the end of its answer: the plan when none was handed in.
+/// None when this run is no such run (the report follows as usual).
+pub(crate) fn on_finished(tx: &Tx<'_>, st: &Store, run: RunId, closing: &str) -> Result<Option<Vec<EventNotice>>, StorageError> {
     let Some(task) = planning_root(tx, run)? else { return Ok(None) };
     let Some(row) = task_store::load_task(tx, task)? else { return Ok(None) };
     let Some((ticket, project, _)) = crate::task::ticket_line::root_of(tx, task)? else { return Ok(None) };
-    let mut notices = crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some(WAITING_PLAN_REVIEW))?.into_vec();
+    let mut notices: Vec<EventNotice> = Vec::new();
+    if !conv::run_handed_in_plan(tx, run)? {
+        let plan = Some(closing.trim()).filter(|c| !c.is_empty()).unwrap_or(NOTHING_HANDED_IN);
+        notices.extend(thread::post_ticket_plan(tx, st, run, plan)?);
+    }
+    notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some(WAITING_PLAN_REVIEW))?.into_vec());
     notices.push(task_event(tx, task, row.project_id, "task.waiting", json!({ "reason": WAITING_PLAN_REVIEW }))?);
     let by = row.employee_id.map(|employee_id| Actor::Employee { employee_id });
     notices.push(crate::task::ticket_line::ticket_event(tx, ticket, project, EventKind::TicketPlanReview, by, json!({ "task_id": task, "run_id": run }))?);

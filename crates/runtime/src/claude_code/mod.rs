@@ -432,11 +432,29 @@ fn ask_rules(profile: &ToolProfile) -> Vec<String> {
     }
 }
 
+/// Makes the plan folder in `workdir`, kept out of git like the uploads next to it.
+async fn prepare_plans_dir(workdir: &Path) -> bool {
+    let dir = workdir.join(PLANS_DIR);
+    let made = match tokio::fs::create_dir_all(&dir).await {
+        Ok(()) => tokio::fs::write(dir.join(".gitignore"), "*\n").await,
+        Err(e) => Err(e),
+    };
+    if let Err(e) = &made {
+        tracing::warn!(error = %e, "could not prepare the plan folder of this run");
+    }
+    made.is_ok()
+}
+
+/// Where plan mode keeps its plan files, relative to the run's work folder.
+/// Claude Code ignores a `plansDirectory` outside the folder it runs in.
+pub const PLANS_DIR: &str = ".aurelius/plans";
+
 /// As `deny_settings`, with `plansDirectory`: plan mode writes its plan file
-/// there instead of in `~/.claude/plans`, which the deny rules above keep shut.
-/// The folder is the run's own, so runs do not read each other's plans; the
-/// deny rules on `~/.claude` stay as they are (AUR-PLAN-FILE-001).
-fn deny_settings_with_plans(login: &ClaudeLogin, vault: bool, plans: Option<&std::path::Path>, ask: &[String]) -> String {
+/// there instead of in the login's `plans` folder, which the deny rules keep
+/// shut. Without a saved file `ExitPlanMode` carries no plan at all. The path
+/// is relative because Claude Code only accepts one inside its work folder;
+/// the deny rules on `~/.claude` stay as they are (AUR-PLAN-FILE-001).
+fn deny_settings_with_plans(login: &ClaudeLogin, vault: bool, plans: Option<&str>, ask: &[String]) -> String {
     let mut deny = deny_rules(login);
     if vault {
         deny.extend(ENV_DUMP_RULES.iter().map(|r| r.to_string()));
@@ -446,7 +464,7 @@ fn deny_settings_with_plans(login: &ClaudeLogin, vault: bool, plans: Option<&std
         settings["permissions"]["ask"] = serde_json::json!(ask);
     }
     if let Some(plans) = plans {
-        settings["plansDirectory"] = serde_json::Value::String(plans.to_string_lossy().into_owned());
+        settings["plansDirectory"] = serde_json::Value::String(plans.to_owned());
     }
     settings.to_string()
 }
@@ -805,10 +823,9 @@ impl AgentRuntime for ClaudeCodeRuntime {
         // Its file tools stay out of the other logins, the database and ~/.claude (D5).
         if let Some(login) = &self.login {
             args.push("--settings".into());
-            // Plan mode saves its plan in a folder of this run, not in ~/.claude/plans (denied).
-            let plans = self.run_root.join(request.run_id.to_string()).join("plans");
-            tokio::fs::create_dir_all(&plans).await.map_err(|e| RuntimeError::Unavailable(e.to_string()))?;
-            args.push(deny_settings_with_plans(login, matches!(request.profile, ToolProfile::Work { .. }) && !self.vault.is_empty(), Some(&plans), &ask_rules(&request.profile)));
+            // A folder that cannot be made (read-only project) must not stop the run: the plan then comes as its answer.
+            let plans = prepare_plans_dir(&workdir).await.then_some(PLANS_DIR);
+            args.push(deny_settings_with_plans(login, matches!(request.profile, ToolProfile::Work { .. }) && !self.vault.is_empty(), plans, &ask_rules(&request.profile)));
             if let ToolProfile::Work { folders, .. } = &request.profile {
                 if holds_logins(folders, login) {
                     tracing::warn!(run = %request.run_id, "a work folder of this run holds the Claude login folders; only Claude Code's best effort keeps its searches out of them");
@@ -1125,6 +1142,25 @@ mod vault_delivery_tests {
 
     /// E8: the secrets folder is closed to every file tool and to searches; E17
     /// the environment dumps are denied as settings once a run has values.
+    /// Claude Code ignores an absolute folder outside its work folder (ticket #47).
+    #[test]
+    fn the_plan_folder_is_given_relative_to_the_work_folder() {
+        let data = std::env::temp_dir().join(format!("aurelius-plans-{}", aurelius_domain::UserId::new()));
+        std::fs::create_dir_all(&data).unwrap();
+        let own = ClaudeLogin::of(&data, aurelius_domain::UserId::new()).unwrap();
+        let settings: serde_json::Value = serde_json::from_str(&deny_settings_with_plans(&own, false, Some(PLANS_DIR), &[])).unwrap();
+        assert_eq!(settings["plansDirectory"], ".aurelius/plans");
+        std::fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_plan_folder_is_made_and_kept_out_of_git() {
+        let dir = std::env::temp_dir().join(format!("aurelius-plans-{}", aurelius_domain::UserId::new()));
+        assert!(prepare_plans_dir(&dir).await);
+        assert_eq!(std::fs::read_to_string(dir.join(PLANS_DIR).join(".gitignore")).unwrap(), "*\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn the_secrets_folder_and_the_environment_dumps_are_denied() {
         let data = std::env::temp_dir().join(format!("aurelius-deny-secrets-{}", aurelius_domain::UserId::new()));
