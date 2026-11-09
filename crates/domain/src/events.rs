@@ -117,6 +117,8 @@ event_kinds! {
     // A run in the conversation of a finished task was queued, started or ended: its
     // `TaskView::live_run` may have changed (the status did not). The aggregate is the task.
     TaskRunChanged => "task.run_changed",
+    // The owner of a ticket's main task reported its work ready (`report_ready`); the run's end moves the ticket.
+    TaskReportReady => "task.report_ready",
     MemoryRemembered => "memory.remembered",
     MemoryProposed => "memory.proposed",
     MemorySuperseded => "memory.superseded",

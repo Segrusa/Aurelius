@@ -150,6 +150,9 @@ pub struct ChatRunPlan {
     pub discussion: bool,
     /// The run is a ticket's test task: it gets `report_test_result` (ticket #5).
     pub testing: bool,
+    /// The run is the owner's run of a ticket's main task: it gets `report_ready`, the only way
+    /// the ticket goes to Review (ticket #46).
+    pub report: bool,
     /// The guidelines in its system text (B3): kept as the run's snapshot when it
     /// starts (B6), with the board members' notice of what the block left out or redacted.
     pub guidelines: crate::run::guidelines::RunSet,
@@ -172,6 +175,9 @@ pub const BOARD_GUIDANCE: &str = "The board has tools: list_tickets and read_tic
 
 /// What a run under a ticket is told about where board members read: the discussion, not the task chat.
 pub const DISCUSSION_FIRST_GUIDANCE: &str = "The board member responsible for this ticket does not read this task chat; they read the ticket's discussion. Everything that needs them goes there with post_to_discussion: a question, a plan or proposal, a choice between options, an explanation of what you did or found, a blocker, and the report that the work is ready. Open such a post with @username of the responsible board member so they are told. Write it so it can be read on its own: say what you need from them and, for a choice, give the options with your recommendation. Their answer arrives here as an update; do not wait for it inside a long run, finish what you can and say what is open. Keep working notes and tool output in this chat.";
+
+/// When the owner of a ticket uses `report_ready` and when not (ticket #46).
+pub const REPORT_GUIDANCE: &str = "You own the main task of this ticket. The ticket goes to Review only when you call report_ready with your report, and only when your run ends. Call it once, when the work is finished and you need nothing from the board member to call it done: the report says what you did, what you checked and what is still open. Do not call it when you still need something from the board member (a decision, approval, access, an answer), when you ask a question, or when you stop halfway: post what you need in the discussion with post_to_discussion, mention the responsible board member, and end your answer without report_ready. The ticket then stays in Doing, the board member sees that you wait, and their reply wakes you. A question mark or a closing sentence does not report anything; only report_ready does. While a handoff, a delegated task or another run is open on the ticket it stays in Doing even after report_ready.";
 
 /// The note for a ticket's run: the general rule, and who to mention.
 fn discussion_first_note(responsible_username: Option<&str>) -> String {
@@ -629,6 +635,14 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     tail.push(note.to_string());
                 }
                 let testing = testing == crate::task::testing::TestingRole::Tester;
+                // The owner's run of a ticket's main task reports with report_ready (a quick answer has no tools).
+                let report = !quick && !testing && match own_task {
+                    Some(task) => crate::task::ticket_line::is_root(conn, task)?,
+                    None => false,
+                };
+                if report {
+                    tail.push(REPORT_GUIDANCE.to_string());
+                }
                 // Claude Design: the workspace's styleguide and the ticket's design (a quick answer has no tools).
                 let design = if quick {
                     DesignLinks::default()
@@ -777,7 +791,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 // Its answer in the group shows the mode it started in.
                 let group = conv::group_run(conn, run_id)?.map(|g| conv::GroupRun { mode: Some(mode), ..g });
                 let guidelines = guidelines.run;
-                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, tool_policy, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), management_mode, session, group, discussion, testing, guidelines, design, artifact_tool }))
+                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, tool_policy, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), management_mode, session, group, discussion, testing, report, guidelines, design, artifact_tool }))
             })
             .map_err(storage_error)
     }
@@ -861,6 +875,13 @@ mod tests {
             assert!(PLAN_MODE_GUIDANCE.contains(tool), "{tool} is named as allowed in plan mode");
         }
         assert!(PLAN_MODE_GUIDANCE.contains("files, commands and external actions are refused"));
+    }
+
+    #[test]
+    fn the_report_guidance_says_when_report_ready_is_used_and_when_it_is_not() {
+        for needed in ["report_ready", "only when your run ends", "need nothing from the board member", "Do not call it when you still need", "post_to_discussion", "A question mark or a closing sentence does not report anything", "handoff"] {
+            assert!(REPORT_GUIDANCE.contains(needed), "{needed}");
+        }
     }
 
     #[test]

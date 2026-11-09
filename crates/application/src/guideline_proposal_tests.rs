@@ -431,6 +431,7 @@ fn every_action() -> Vec<EmployeeAction> {
         EmployeeAction::PostToDiscussion { message: "m".into() },
         EmployeeAction::AssignTicket { employee: "Ann".into(), reason: "r".into() },
         EmployeeAction::ReportTestResult { passed: true, summary: "s".into() },
+        EmployeeAction::ReportReady { report: "r".into() },
         EmployeeAction::ListTickets { project: None, column: None, query: None, limit: None },
         EmployeeAction::ReadTicket { ticket: "#1".into(), last: None },
         EmployeeAction::CreateTicket { project: None, title: "t".into(), description: None, priority: None, labels: vec![] },
@@ -458,6 +459,7 @@ fn every_action() -> Vec<EmployeeAction> {
             | EmployeeAction::PostToDiscussion { .. }
             | EmployeeAction::AssignTicket { .. }
             | EmployeeAction::ReportTestResult { .. }
+            | EmployeeAction::ReportReady { .. }
             | EmployeeAction::ListTickets { .. }
             | EmployeeAction::ReadTicket { .. }
             | EmployeeAction::CreateTicket { .. }

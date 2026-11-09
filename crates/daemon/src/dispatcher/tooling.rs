@@ -25,6 +25,8 @@ pub(super) fn tool_profile(shared: &Arc<Shared>, plan: &ChatRunPlan) -> ToolProf
                     let bridge = if plan.discussion { with_flag(bridge, "--discussion") } else { bridge };
                     // A ticket's test task gives its verdict (the daemon checks every call).
                     let bridge = if plan.testing { with_flag(bridge, "--testing") } else { bridge };
+                    // The owner's run of a ticket's main task reports its work with report_ready.
+                    let bridge = if plan.report { with_flag(bridge, "--report") } else { bridge };
                     // What this employee's list switches off is not offered at all (C2).
                     let off = plan.tool_policy.bridge_tools_off();
                     if off.is_empty() { bridge } else { with_flag(with_flag(bridge, "--without"), &off.join(",")) }

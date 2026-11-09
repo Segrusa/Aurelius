@@ -111,6 +111,8 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         EmployeeTaskOp::PostToTicket { ticket, message } => EmployeeAction::PostToTicket { ticket, message },
         // Checked in the application (`testing::verdict`): only the open test task of a ticket in Testing.
         EmployeeTaskOp::ReportTestResult { passed, summary } => EmployeeAction::ReportTestResult { passed, summary },
+        // Checked in the application (`task_runs::report_ready`): only a live run of a ticket's main task.
+        EmployeeTaskOp::ReportReady { report } => EmployeeAction::ReportReady { report },
         // B5: never in the trial filter's reading list above, so a trial is refused there (SEC0 E10).
         EmployeeTaskOp::ProposeGuideline { guideline, title, text, reason, evidence } => {
             // Only a run with tools has the bridge; a text-only run never proposes (E10).

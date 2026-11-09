@@ -16,7 +16,8 @@
 //! decides who may use each); `read_group_chat`
 //! and `post_to_group_chat` (a channel of the company's group chat); `read_discussion` and
 //! `post_to_discussion` with `--discussion` (a run under a ticket); `report_test_result`
-//! with `--testing` (a ticket's test task in the Testing column). `--project` (the
+//! with `--testing` (a ticket's test task in the Testing column); `report_ready` with `--report`
+//! (the owner's run of a ticket's main task). `--project` (the
 //! assistant of a project conversation) leaves out `hand_over_task`, `propose_guideline`,
 //! `list_guidelines` and `read_guideline`.
 //! `--triage` (the dispatcher of a ticket choosing its owner) has only
@@ -50,6 +51,8 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
     let discussion = args.iter().any(|a| a == "--discussion");
     // A ticket's test task: report_test_result.
     let testing = args.iter().any(|a| a == "--testing");
+    // The owner's run of a ticket's main task: report_ready.
+    let report = args.iter().any(|a| a == "--report");
     // What this employee's tool list switches off.
     let without: Vec<String> = arg("--without").map(|list| list.split(',').map(str::to_owned).collect()).unwrap_or_default();
     let mut client: Option<BridgeClient> = None;
@@ -67,14 +70,14 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
             })),
             "ping" => Ok(json!({})),
             "tools/list" => {
-                let mut tools = if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing) };
+                let mut tools = if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing, report) };
                 switch_off(&mut tools, &without);
                 Ok(json!({ "tools": tools }))
             }
             "tools/call" => {
                 let name = msg["params"]["name"].as_str().unwrap_or("").to_owned();
                 let args = msg["params"]["arguments"].clone();
-                let call = if without.contains(&name) { None } else if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing }, &mut screen_granted, &name, args).await };
+                let call = if without.contains(&name) { None } else if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing, report }, &mut screen_granted, &name, args).await };
                 match call {
                     Some(result) => Ok(result),
                     None => Err(json!({ "code": -32601, "message": "Method not found" })),
@@ -104,6 +107,7 @@ struct Offered {
     set_mode: bool,
     discussion: bool,
     testing: bool,
+    report: bool,
 }
 
 /// The verdict tool of a ticket's test task (`--testing`).
@@ -122,8 +126,23 @@ fn testing_tool_definition() -> Value {
     })
 }
 
+/// The tool that reports a ticket's work ready for Review (`--report`).
+fn report_tool_definition() -> Value {
+    json!({
+        "name": "report_ready",
+        "description": "Report that the work of this ticket is done and ready for the board member's review. This is the only way the ticket goes to Review; ending your answer does not. Use it once, when the work is finished and you need nothing from the board member to call it done. Do NOT use it when you still need an answer, a decision, approval or access, or when you stop halfway: say what you need in post_to_discussion and end your answer; the ticket then stays in Doing and the board member's reply wakes you. The ticket goes to Review when your run ends and no handoff, delegated task or other run is open on it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "report": { "type": "string", "description": "The report the board member reads: what you did, what you checked (tests run, with the result), and what is still open or a risk." }
+            },
+            "required": ["report"]
+        }
+    })
+}
+
 /// Every tool this run offers.
-fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bool) -> Vec<Value> {
+fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bool, report: bool) -> Vec<Value> {
     let mut tools = vec![json!({
         "name": "approve",
         "description": "Asks the Aurelius user to allow or deny one action. Only Claude Code calls this.",
@@ -147,6 +166,9 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     tools.extend(board_tool_definitions());
     if discussion {
         tools.extend(discussion_tool_definitions());
+    }
+    if report {
+        tools.push(report_tool_definition());
     }
     if testing {
         tools.push(testing_tool_definition());
@@ -236,7 +258,7 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
 /// Run one tool; `None` when the tool is unknown.
 #[allow(clippy::too_many_arguments)]
 async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId, offered: Offered, screen_granted: &mut bool, name: &str, args: Value) -> Option<Value> {
-    let Offered { project, set_mode, discussion, testing } = offered;
+    let Offered { project, set_mode, discussion, testing, report } = offered;
     let text = |k: &str| args[k].as_str().unwrap_or("").to_owned();
     let optional = |k: &str| args[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
     let op = match name {
@@ -309,6 +331,7 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         },
         "list_guidelines" if !project => EmployeeTaskOp::ListGuidelines {},
         "read_guideline" if !project => EmployeeTaskOp::ReadGuideline { guideline: text("guideline") },
+        "report_ready" if report => EmployeeTaskOp::ReportReady { report: text("report") },
         // A missing `passed` is no verdict: never read as green or red.
         "report_test_result" if testing => match args["passed"].as_bool() {
             Some(passed) => EmployeeTaskOp::ReportTestResult { passed, summary: text("summary") },
@@ -896,8 +919,18 @@ mod tests {
     }
 
     #[test]
+    fn report_ready_is_offered_only_to_the_owners_run_of_a_ticket() {
+        let has = |report| tool_definitions(false, false, true, false, report).iter().any(|t| t["name"] == "report_ready");
+        assert!(has(true) && !has(false));
+        assert!(!triage_tool_definitions().iter().any(|t| t["name"] == "report_ready"));
+        let tool = report_tool_definition();
+        let text = tool["description"].as_str().unwrap();
+        assert!(text.contains("only way") && text.contains("Do NOT"));
+    }
+
+    #[test]
     fn report_test_result_is_offered_only_to_a_tickets_test_task() {
-        let find = |testing| tool_definitions(false, false, true, testing).into_iter().find(|t| t["name"] == "report_test_result");
+        let find = |testing| tool_definitions(false, false, true, testing, false).into_iter().find(|t| t["name"] == "report_test_result");
         assert!(find(false).is_none(), "no other run gives a verdict");
         assert!(!triage_tool_definitions().iter().any(|t| t["name"] == "report_test_result"));
         let tool = find(true).expect("the test task gives its verdict");
@@ -908,7 +941,7 @@ mod tests {
     #[test]
     fn every_run_offers_the_six_board_tools() {
         for (project, discussion, testing) in [(false, false, false), (true, false, false), (false, true, true)] {
-            let names: Vec<String> = tool_definitions(project, false, discussion, testing).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+            let names: Vec<String> = tool_definitions(project, false, discussion, testing, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
             for tool in BOARD_TOOLS {
                 assert!(names.contains(&tool.to_owned()), "{tool}");
             }
