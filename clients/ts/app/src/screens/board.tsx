@@ -601,9 +601,9 @@ export function BoardScreen({
       ),
     [board.data, testing, tester],
   );
-  // The panel takes room from the board: the opened card stays in view.
+  // The panel takes room from the board: the opened card stays in view, also on a link straight to a ticket.
   useEffect(() => {
-    if (!ticket) return;
+    if (!ticket || !board.isSuccess) return;
     const frame = requestAnimationFrame(() => {
       const card = document.querySelector<HTMLElement>(`[data-card="${ticket}"]`);
       const row = card?.closest<HTMLElement>("[data-board-columns]");
@@ -623,7 +623,7 @@ export function BoardScreen({
       card.scrollIntoView({ inline: "nearest", block: "nearest" });
     });
     return () => cancelAnimationFrame(frame);
-  }, [ticket]);
+  }, [ticket, board.isSuccess]);
   const filter = useMemo(
     () => ({ owner, responsible, query, needsOnly, needs: need.mine }),
     [owner, responsible, query, needsOnly, need],

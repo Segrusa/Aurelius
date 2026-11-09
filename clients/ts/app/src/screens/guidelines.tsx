@@ -104,9 +104,9 @@ const styles = stylex.create({
   scroll: { minHeight: 0, flex: 1, overflow: "auto" },
   table: { minWidth: 760 },
   headCell: { fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
-  sizeColumn: { width: 60, textAlign: "end" },
-  versionColumn: { width: 70 },
-  updatedColumn: { width: 150 },
+  sizeColumn: { width: 60, minWidth: 60, maxWidth: 60, textAlign: "end" },
+  versionColumn: { width: 70, minWidth: 70, maxWidth: 70 },
+  updatedColumn: { width: 150, minWidth: 150, maxWidth: 150 },
   sort: {
     cursor: "pointer",
     borderWidth: 0,

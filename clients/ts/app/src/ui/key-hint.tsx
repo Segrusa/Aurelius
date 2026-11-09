@@ -26,7 +26,11 @@ export function keysOf(shown: string): string {
 }
 
 const kbdStyles = stylex.create({
-  onAccent: { "--color-text-secondary": "#fff", "--precision-kbd": "rgb(255 255 255 / 0.18)" },
+  onAccent: {
+    "--color-text-primary": "#fff",
+    "--color-text-secondary": "#fff",
+    "--precision-kbd": "rgb(255 255 255 / 0.18)",
+  },
 });
 
 export function KeyHint({ children, onAccent = false }: { children: string; onAccent?: boolean }) {
