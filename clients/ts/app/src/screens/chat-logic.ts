@@ -128,12 +128,22 @@ export function typingMention(text: string): { at: number; word: string } | null
   return /\s/.test(word) ? null : { at, word };
 }
 
-export function mentionSuggestions(text: string, people: Mentionable[]): { at: number; found: Mentionable[] } | null {
+/** `@Everyone` wakes the whole discussion (feature `everyone_mention`); it is not a person. */
+export const EVERYONE = "Everyone";
+export const EVERYONE_KIND = "wakes everyone here";
+const isEveryone = (name: string) => name.toLowerCase() === EVERYONE.toLowerCase();
+
+export function mentionSuggestions(
+  text: string,
+  people: Mentionable[],
+  everyone = false,
+): { at: number; found: Mentionable[] } | null {
   const typing = typingMention(text);
   if (!typing) return null;
   const word = typing.word.toLowerCase();
-  if (people.some((p) => p.name.toLowerCase() === word)) return null;
-  const found = people.filter((p) => p.name.toLowerCase().startsWith(word));
+  const all = everyone ? [{ name: EVERYONE, kind: EVERYONE_KIND, employee: false }, ...people] : people;
+  if (all.some((p) => p.name.toLowerCase() === word)) return null;
+  const found = all.filter((p) => p.name.toLowerCase().startsWith(word));
   return found.length > 0 ? { at: typing.at, found } : null;
 }
 
@@ -156,9 +166,23 @@ export function mentions(text: string): string[] {
   return found;
 }
 
-export function unknownMentions(text: string, people: Mentionable[], archived: string[]): string[] {
+/** Whether the text mentions `@Everyone` (any case, whole word, same edges as any `@name`). */
+export const mentionsEveryone = (text: string) => mentions(text).some(isEveryone);
+
+export function unknownMentions(text: string, people: Mentionable[], archived: string[], everyone = false): string[] {
   const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-  return mentions(text).filter((n) => archived.some((a) => same(a, n)) || !people.some((p) => same(p.name, n)));
+  return mentions(text)
+    .filter((n) => !(everyone && isEveryone(n)))
+    .filter((n) => archived.some((a) => same(a, n)) || !people.some((p) => same(p.name, n)));
+}
+
+/** The line under the composer for `@Everyone`: whom the message wakes and tells. */
+export function audienceLine(a: { employees: number; paused: number; board_members: number }): string {
+  const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  const woken = a.employees === 0 ? "Wakes no employees" : `Wakes ${plural(a.employees, "employee")}`;
+  const paused = a.paused > 0 ? ` (${a.paused} paused)` : "";
+  const board = a.board_members > 0 ? ` and tells ${plural(a.board_members, "board member")}` : "";
+  return `${woken}${paused}${board}`;
 }
 
 export function unknownWarning(names: string[]): string | null {
