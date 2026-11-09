@@ -3,7 +3,7 @@
 import { Popover } from "@astryxdesign/core/Popover";
 import type { ActivityBusy, ActivityOverview, ActivityWaiting, TicketActivity } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
-import { forwardRef, type ButtonHTMLAttributes, useState } from "react";
+import { type ButtonHTMLAttributes, forwardRef, useState } from "react";
 import { useActivityOverview } from "../data";
 import { activityCounts, ticketActivityLine, waitLabel, workLabel } from "./activity-bar-logic";
 import { Eyebrow } from "./org-kit";
@@ -52,6 +52,9 @@ const styles = stylex.create({
   ticketRunning: { color: "var(--color-text-accent)" },
 });
 
+const rowKey = (row: ActivityBusy | ActivityWaiting): string =>
+  `${row.employee_id ?? "assistant"}|${row.since_ms}|${row.work.label ?? ""}|${"waits_for" in row ? row.waits_for : "busy"}`;
+
 function BusyRow({ row }: { row: ActivityBusy }) {
   return (
     <div {...stylex.props(styles.row)}>
@@ -83,15 +86,15 @@ function Details({ overview }: { overview: ActivityOverview }) {
       <section {...stylex.props(styles.section)}>
         <Eyebrow>BUSY</Eyebrow>
         {overview.busy.length === 0 ? <p {...stylex.props(styles.empty)}>Nobody is working right now.</p> : null}
-        {overview.busy.map((row, i) => (
-          <BusyRow key={`${row.employee_id ?? "assistant"}-${i}`} row={row} />
+        {overview.busy.map((row) => (
+          <BusyRow key={rowKey(row)} row={row} />
         ))}
       </section>
       <section {...stylex.props(styles.section)}>
         <Eyebrow>IN LINE</Eyebrow>
         {overview.waiting.length === 0 ? <p {...stylex.props(styles.empty)}>Nothing is waiting.</p> : null}
-        {overview.waiting.map((row, i) => (
-          <WaitingRow key={`${row.employee_id ?? "assistant"}-${i}`} row={row} />
+        {overview.waiting.map((row) => (
+          <WaitingRow key={rowKey(row)} row={row} />
         ))}
       </section>
     </div>

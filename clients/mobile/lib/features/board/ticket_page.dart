@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../activity/activity_chip.dart';
 
 import '../../core/net/connection.dart' show LinkState;
 import '../../core/theme/tokens.dart';
@@ -222,6 +223,7 @@ class _TicketViewState extends State<_TicketView> {
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
               child: Text(ticket.title, key: const ValueKey('ticket-title'), style: Tokens.title(size: 24)),
             ),
+            TicketActivityLine(ticketId: ticket.id, padding: const EdgeInsets.fromLTRB(20, 0, 20, 4)),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
               child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
