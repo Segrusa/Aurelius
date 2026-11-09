@@ -9,7 +9,7 @@
 //! * The redactor: every secret value the server stores (current and previous
 //!   versions, archived items too) is in it (E16). A new value goes in
 //!   **before** its transaction commits, so no run can get a value it lacks.
-//! * Delivery: only a work run, never a variant's trial (E15); the items of
+//! * Delivery: only a work run (E15); the items of
 //!   the company and the run's project, names checked again (E7); one audit row
 //!   `deliver` per item and run; without a key nothing at all.
 
@@ -720,7 +720,6 @@ struct RunPlace {
     project: Option<String>,
     employee: Option<String>,
     task: Option<String>,
-    conversation: String,
     ticket: Option<String>,
 }
 
@@ -740,19 +739,19 @@ fn run_place(conn: &Connection, run: &str) -> Result<Option<RunPlace>, StorageEr
                  UNION ALL
                  SELECT t.id, t.parent_task_id, t.ticket_id, chain.depth + 1 FROM tasks t JOIN chain ON t.id = chain.parent WHERE chain.depth < 64
              )
-             SELECT project_id, employee_id, task_id, conversation_id,
+             SELECT project_id, employee_id, task_id,
                     COALESCE((SELECT ticket FROM chain WHERE ticket IS NOT NULL ORDER BY depth LIMIT 1),
                              (SELECT k.id FROM tickets k WHERE k.conversation_id = place.conversation_id))
              FROM place",
             [run],
-            |r| Ok(RunPlace { project: r.get(0)?, employee: r.get(1)?, task: r.get(2)?, conversation: r.get(3)?, ticket: r.get(4)? }),
+            |r| Ok(RunPlace { project: r.get(0)?, employee: r.get(1)?, task: r.get(2)?, ticket: r.get(3)? }),
         )
         .optional()?)
 }
 
 /// The vault of a work run (E7, E15, E16): the items of the company and its
-/// project, with a name a run may get, that open with the key. A trial of a
-/// task's variants and a run without a key get nothing. One `deliver` audit
+/// project, with a name a run may get, that open with the key. A run without
+/// a key gets nothing. One `deliver` audit
 /// row per item.
 pub fn deliver(shared: &Shared, run: aurelius_domain::RunId) -> Option<Delivery> {
     let keys = match shared.vault.keys() {
@@ -766,10 +765,6 @@ pub fn deliver(shared: &Shared, run: aurelius_domain::RunId) -> Option<Delivery>
     let run_text = run.to_string();
     let found = shared.store().read(|conn| {
         let Some(place) = run_place(conn, &run_text)? else { return Ok(None) };
-        let trial: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM task_variants WHERE conversation_id = ?1 OR run_id = ?2)", rusqlite::params![place.conversation, run_text], |r| r.get(0))?;
-        if trial {
-            return Ok(None);
-        }
         Ok(Some((store::effective(conn, place.project.as_deref())?, place)))
     });
     let (items, place) = match found {

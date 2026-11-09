@@ -39,10 +39,8 @@ pub(super) async fn execute(
 
 /// Who makes a write: the board member always from the session, never from the request (MU3-08).
 pub(super) fn context(shared: &Arc<Shared>, peer: &Peer, request_id: u64) -> CommandContext {
-    let app = peer.app.as_ref().map(|a| aurelius_application::AppActor { key_id: a.key_id, name: a.name.clone() });
-    // Never a board member for an app, even if one stuck to the session (S5-1).
-    let user_id = peer.user.filter(|_| app.is_none());
-    CommandContext { principal_id: shared.principal_id, client_id: peer.client_id, origin: peer.origin, request_id, app, user_id }
+    let user_id = peer.user;
+    CommandContext { principal_id: shared.principal_id, client_id: peer.client_id, origin: peer.origin, request_id, user_id }
 }
 
 /// The paths of the files a command attaches (text attachments are checked
@@ -217,21 +215,6 @@ async fn stop_runs(shared: &Arc<Shared>, result: &CommandResult, interrupt: bool
             canceller.cancel();
         }
     }
-    // A cancelled task's trials stop with it: their worktrees go once their runs ended.
-    if let CommandResult::TaskCancelled { task_id } = result {
-        let (s, task) = (shared.clone(), *task_id);
-        tokio::spawn(async move {
-            for _ in 0..20 {
-                let store = s.store().clone();
-                let live = tokio::task::spawn_blocking(move || store.read(|c| aurelius_storage::variants::live_probe_runs(c, task))).await.ok().and_then(Result::ok).unwrap_or_default();
-                if live.is_empty() {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            }
-            crate::variants::remove_unneeded(&s, task).await;
-        });
-    }
     // A run stopped while it waited for a usage limit never resumes: its kept session goes.
     let stopped = conversation.is_some()
         || ticket_cancelled
@@ -243,9 +226,6 @@ async fn stop_runs(shared: &Arc<Shared>, result: &CommandResult, interrupt: bool
 
 async fn host_write(shared: &Arc<Shared>, ctx: CommandContext, key: CommandId, expected_version: Option<u64>, write: HostWrite) -> Result<Receipt, ProtocolError> {
     let method = write.name();
-    // Note writes announce themselves with `note.*` events; their audit record is
-    // not broadcast, so an autosave every second does not make clients refresh everything.
-    let quiet = method.starts_with("note.");
     let hash = request_hash_of(&(expected_version, &write));
 
     let (s, h) = (shared.clone(), hash.clone());
@@ -254,33 +234,12 @@ async fn host_write(shared: &Arc<Shared>, ctx: CommandContext, key: CommandId, e
         return Ok(Receipt { idempotency_key: key, committed_seq, replayed: true, result: WriteResult::Host(result) });
     }
 
-    let user = ctx.user_id.filter(|_| ctx.app.is_none());
-    let reconfigured = match &write {
-        aurelius_protocol::HostWrite::ApiKeySetFunctions { key_id, .. } => Some(*key_id),
-        _ => None,
-    };
-    let result = host::perform(shared, write, user).await?;
-    // An app key's tasks run on its maker's Claude login (B5).
-    if let (HostResult::AppKeyCreated(created), Some(user)) = (&result, user) {
-        let (s, id) = (shared.clone(), created.key.id);
-        app_task(move || s.service.set_app_key_login(id, user)).await?;
-    }
-    // So do an API key's calls: its maker's, or the board member who last set its functions (B5).
-    let api_key = match &result {
-        HostResult::ApiKeyCreated(created) => Some(created.key.id),
-        _ => reconfigured,
-    };
-    if let (Some(id), Some(user)) = (api_key, user) {
-        let s = shared.clone();
-        app_task(move || s.service.set_api_key_login(id, user)).await?;
-    }
+    let result = host::perform(shared, write, ctx.user_id).await?;
     let stored = serde_json::to_value(result.redacted()).map_err(internal)?;
     let s = shared.clone();
     let (committed_seq, notice) = app_task(move || s.service.record_host_write(&ctx, key, hash, &method, &stored)).await?;
-    if !quiet {
-        shared.publish([notice]);
-    }
-    // The answer shows what the receipt hides (a new API key's secret, the pairing code).
+    shared.publish([notice]);
+    // The answer shows what the receipt hides (the pairing code).
     Ok(Receipt { idempotency_key: key, committed_seq, replayed: false, result: WriteResult::Host(result) })
 }
 

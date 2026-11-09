@@ -1,4 +1,4 @@
-//! `aurelius-bridge --data-dir <dir> --run <run_id> [--project | --triage]`: the MCP server
+//! `aurelius-bridge --data-dir <dir> --run <run_id> [--project | --triage] [--without <tool,tool>]`: the MCP server
 //! Claude Code starts for one run (the daemon passes it as the run's MCP config
 //! and as `--permission-prompt-tool mcp__aurelius__approve`). A minimal MCP
 //! server over stdio. Every question goes to the running Aurelius service
@@ -10,7 +10,7 @@
 //! employee's own memory, always on); `list_tasks`, `read_task`,
 //! `list_conversations`, `read_conversation`; `set_mode` (only for management in a task whose
 //! mode is theirs to choose, `--set-mode`); `delegate_task`, `message_task`,
-//! `hand_over_task`, `add_idea`, `propose_colleague`, `propose_instructions` and `propose_guideline`;
+//! `hand_over_task`, `hand_off`, `propose_colleague`, `propose_instructions` and `propose_guideline`;
 //! `list_guidelines` and `read_guideline` (reading the guidelines, information only); `list_tickets`,
 //! `read_ticket`, `create_ticket`, `update_ticket`, `move_ticket` and `post_to_ticket` (the board; the daemon
 //! decides who may use each); `read_group_chat`
@@ -26,9 +26,12 @@
 //! never asks for these; the bridge asks the service itself, which allows them
 //! at once when the employee's Screen is on and otherwise puts the question in
 //! the inbox. Once allowed, the rest of this run (one answer) may look.
+//!
+//! `--without` names the tools the employee's own list switches off (C2): they are
+//! neither offered nor served.
 
 use aurelius_client::ClientError;
-use aurelius_client::bridge::{BridgeClient, IdeaKind, EmployeeMemoryOp, EmployeeTaskOp, PermissionAnswer, RunId};
+use aurelius_client::bridge::{BridgeClient, EmployeeMemoryOp, EmployeeTaskOp, MEMORY_SCOPE_RULE, PermissionAnswer, RunId};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -47,6 +50,8 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
     let discussion = args.iter().any(|a| a == "--discussion");
     // A ticket's test task: report_test_result.
     let testing = args.iter().any(|a| a == "--testing");
+    // What this employee's tool list switches off.
+    let without: Vec<String> = arg("--without").map(|list| list.split(',').map(str::to_owned).collect()).unwrap_or_default();
     let mut client: Option<BridgeClient> = None;
     let mut screen_granted = false;
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
@@ -61,11 +66,15 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
                 "serverInfo": { "name": "aurelius", "version": env!("CARGO_PKG_VERSION") },
             })),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing) } })),
+            "tools/list" => {
+                let mut tools = if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing) };
+                switch_off(&mut tools, &without);
+                Ok(json!({ "tools": tools }))
+            }
             "tools/call" => {
                 let name = msg["params"]["name"].as_str().unwrap_or("").to_owned();
                 let args = msg["params"]["arguments"].clone();
-                let call = if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing }, &mut screen_granted, &name, args).await };
+                let call = if without.contains(&name) { None } else if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing }, &mut screen_granted, &name, args).await };
                 match call {
                     Some(result) => Ok(result),
                     None => Err(json!({ "code": -32601, "message": "Method not found" })),
@@ -81,6 +90,11 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
         out.flush().await?;
     }
     Ok(())
+}
+
+/// Leave out what the employee's tool list switches off.
+fn switch_off(tools: &mut Vec<Value>, without: &[String]) {
+    tools.retain(|t| !without.iter().any(|w| t["name"] == w.as_str()));
 }
 
 /// The optional tools a run offers (its flags).
@@ -127,7 +141,7 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     tools.extend(memory_tool_definitions());
     tools.push(suggest_replies_definition());
     tools.extend(project_tool_definitions());
-    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || t["name"] != "hand_over_task"));
+    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off" | "tell_responsible" | "schedule_message" | "scratchpad"))));
     tools.extend(group_chat_tool_definitions());
     tools.extend(vault_tool_definitions());
     tools.extend(board_tool_definitions());
@@ -137,20 +151,6 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     if testing {
         tools.push(testing_tool_definition());
     }
-    tools.push(json!({
-        "name": "add_idea",
-        "description": "Note an idea for a project that is worth doing later but is not part of the current work (an improvement, a follow-up, a risk to look at). The user sees it in the project's ideas and decides if and when it becomes a task.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "title": { "type": "string" },
-                "note": { "type": "string", "description": "Why, and what it would take." },
-                "kind": { "type": "string", "enum": ["feature", "bug"], "description": "bug for something broken or behaving wrongly; feature for new or improved behaviour (default feature)." },
-                "project": { "type": "string", "description": "The project (its name) the idea is for: needed in your chat with the user (outside projects); in a task or project conversation it is that project." }
-            },
-            "required": ["title"]
-        }
-    }));
     if set_mode {
         tools.push(json!({
             "name": "set_mode",
@@ -265,7 +265,6 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "read_task" => EmployeeTaskOp::ReadTask { task: text("task") },
         "list_conversations" => EmployeeTaskOp::ListConversations { query: text("query") },
         "read_conversation" => EmployeeTaskOp::ReadConversation { conversation: text("conversation") },
-        "add_idea" => EmployeeTaskOp::AddIdea { title: text("title"), note: text("note"), kind: args["kind"].as_str().and_then(IdeaKind::parse).unwrap_or_default(), project: optional("project") },
         "message_task" => EmployeeTaskOp::MessageTask { task: text("task"), message: text("message"), interrupt: args["interrupt"].as_bool().unwrap_or(true) },
         "delegate_task" => {
             let criteria = args["criteria"].as_array().map(|a| a.iter().filter_map(|c| c.as_str().map(str::to_owned)).collect()).unwrap_or_default();
@@ -283,6 +282,10 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "vault_list" => EmployeeTaskOp::VaultList { project: optional("project") },
         "vault_read" => EmployeeTaskOp::VaultRead { item: text("item"), project: optional("project") },
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
+        "hand_off" if !project => EmployeeTaskOp::HandOff { to: text("to"), message: text("message") },
+        "tell_responsible" if !project => EmployeeTaskOp::TellResponsible { message: text("message") },
+        "schedule_message" if !project => EmployeeTaskOp::ScheduleMessage { delay: text("delay"), content: text("content"), to: optional("to") },
+        "scratchpad" if !project => EmployeeTaskOp::Scratchpad { content: text("content") },
         "propose_colleague" => EmployeeTaskOp::ProposeColleague {
             name: text("name"),
             role: text("role"),
@@ -327,7 +330,7 @@ fn board_op(name: &str, args: &Value) -> Option<EmployeeTaskOp> {
         "list_tickets" => EmployeeTaskOp::ListTickets { project: optional("project"), column: optional("column"), query: optional("query"), limit: number("limit") },
         "read_ticket" => EmployeeTaskOp::ReadTicket { ticket: text("ticket"), last: number("last") },
         "create_ticket" => EmployeeTaskOp::CreateTicket { project: optional("project"), title: text("title"), description: optional("description"), priority: optional("priority"), labels: list("labels").unwrap_or_default() },
-        "update_ticket" => EmployeeTaskOp::UpdateTicket { ticket: text("ticket"), title: optional("title"), description: args["description"].as_str().map(str::to_owned), priority: optional("priority"), labels: list("labels") },
+        "update_ticket" => EmployeeTaskOp::UpdateTicket { ticket: text("ticket"), title: optional("title"), description: args["description"].as_str().map(str::to_owned), priority: optional("priority"), labels: list("labels"), design_url: args["design_url"].as_str().map(str::to_owned) },
         "move_ticket" => EmployeeTaskOp::MoveTicket { ticket: text("ticket"), column: text("column") },
         "post_to_ticket" => EmployeeTaskOp::PostToTicket { ticket: text("ticket"), message: text("message") },
         _ => return None,
@@ -370,7 +373,7 @@ fn board_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "create_ticket",
-            "description": "Management only: make a ticket in Backlog. It starts nothing: no run, no owner; a manager starts it with move_ticket (todo) or a board member decides. Colleagues who are not management note ideas with add_idea instead.",
+            "description": "Make a ticket in Backlog: for management, and for anyone in a board member's lasting chat with them. It starts nothing: no run, no owner; a manager starts it with move_ticket (todo) or a board member decides. Elsewhere, colleagues who are not management ask a manager to make it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -385,10 +388,10 @@ fn board_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "update_ticket",
-            "description": "Change a ticket's title, description, priority or labels. Management on any open ticket; everyone else only on a ticket they work on. Only what you give changes; a ticket in Done never changes.",
+            "description": "Change a ticket's title, description, priority, labels or design link. Management on any open ticket; everyone else only on a ticket they work on. Only what you give changes; a ticket in Done never changes.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "ticket": ticket, "title": { "type": "string" }, "description": { "type": "string", "description": "The whole new description." }, "priority": priority, "labels": labels },
+                "properties": { "ticket": ticket, "title": { "type": "string" }, "description": { "type": "string", "description": "The whole new description." }, "priority": priority, "labels": labels, "design_url": { "type": "string", "description": "A Claude Design artifact you made for this ticket: https://claude.ai/artifact/<id> or https://claude.ai/code/artifact/<uuid>. Empty clears it." } },
                 "required": ["ticket"]
             }
         }),
@@ -515,7 +518,7 @@ fn memory_tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "remember",
-            "description": "Store something you want to know later, active at once: a decision you took (and why), project knowledge you learned, or an episode worth remembering. Keep it to one short, self-contained statement. Never store secrets.",
+            "description": format!("Store something you want to know later, active at once: a decision you took (and why), project knowledge you learned, or an episode worth remembering. Keep it to one short, self-contained statement. Never store secrets. {MEMORY_SCOPE_RULE}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -588,13 +591,13 @@ fn task_tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "delegate_task",
-            "description": "Give work to an employee of the company: a part of your task (it stays in your task's project), or, outside a task, something from this conversation. Work always belongs to a ticket: in a task or a ticket's discussion it is that ticket, elsewhere name it with ticket. They work on it as a task in a conversation of their own and their result comes back here. Use it for work that clearly suits them better; do the rest yourself.",
+            "description": "Give work to an employee of the company: a part of your task (it stays in your task's project), or, outside a task, something from this conversation. Work always belongs to a ticket: in a task or a ticket's discussion it is that ticket, elsewhere name it with ticket. They work on it as a task in a conversation of their own and their result comes back here. Use it for work that clearly suits them better; do the rest yourself. They do not see this conversation: the goal and criteria must stand on their own, with the paths or PR number and branch involved and what to report back. Never write \"see above\".",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "employee": { "type": "string", "description": "The colleague's name." },
                     "title": { "type": "string" },
-                    "goal": { "type": "string", "description": "What they must deliver." },
+                    "goal": { "type": "string", "description": "What they must deliver, self-contained: paths or PR number and branch, and what to report back." },
                     "criteria": { "type": "array", "items": { "type": "string" } },
                     "ticket": { "type": "string", "description": "The ticket this work belongs to (#12 or its id; list_tickets shows them): required outside a ticket's task or discussion, ignored inside one. The task gets the ticket's project." }
                 },
@@ -623,6 +626,49 @@ fn task_tool_definitions() -> Vec<Value> {
                 "required": ["employee", "reason"]
             }
         }),
+        json!({
+            "name": "hand_off",
+            "description": "Hand the work in this thread (a ticket's discussion or a channel of the Team chat) to a colleague who should act next. It wakes them in the same thread and shows there as \"You handed over to Them\" with your message. This is the only way to wake a colleague: a name with @ in what you write only refers to them. Do it when someone else really has to act; a reply without a handoff ends the conversation, which is right when the work is done. They do not see your conversation: the message must stand on its own, with the goal, the paths or PR number and branch involved, the acceptance criteria and what to report back. Limited to a few in a row and per run; if you still have unread messages in the thread, it is delivered unchanged once you have read them. To give a colleague a task of its own, use delegate_task.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "to": { "type": "string", "description": "The colleague's name." },
+                    "message": { "type": "string", "description": "What they must do, self-contained. Never write \"see above\"." }
+                },
+                "required": ["to", "message"]
+            }
+        }),
+        json!({
+            "name": "schedule_message",
+            "description": "Send yourself or a colleague a message later, in the thread you work in now: \"check the CI again in 10 minutes\", \"Bo, look at the deploy tomorrow\". It wakes them then with this message, in a ticket's discussion or channel (visible there), or for yourself in your own chat. It uses the login of this run. For what comes back regularly a recurring task is meant. Limited per run and per thread; the Scheduled page shows what waits and what came of it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "delay": { "type": "string", "description": "When: a number with a unit, 90s, 10m, 2h, 1d or 1h30m. At least a minute, at most 30 days." },
+                    "content": { "type": "string", "description": "The message, self-contained: whoever reads it then does not see this run." },
+                    "to": { "type": "string", "description": "A colleague's name. Leave out for yourself. In your own chat only yourself." }
+                },
+                "required": ["delay", "content"]
+            }
+        }),
+        json!({
+            "name": "scratchpad",
+            "description": "Your scratchpad: one note of your own, always in your prompt in every thread. Replace it with this text (empty clears it). Keep it short and current: what you need everywhere, like your focus or what you are waiting for. Facts of one ticket belong in its discussion, lasting facts in remember.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "content": { "type": "string", "description": "The complete new text." } },
+                "required": ["content"]
+            }
+        }),
+        json!({
+            "name": "tell_responsible",
+            "description": "On a ticket: send its responsible board member a short message in their private chat with you, when something is for them personally and not for the ticket's discussion. It shows there with a link to this ticket and marked unread. It starts no run, wakes nobody and completes nothing; a question that needs an answer on the ticket belongs in post_to_discussion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "message": { "type": "string", "description": "What they should read, on its own." } },
+                "required": ["message"]
+            }
+        }),
     ]
 }
 
@@ -643,7 +689,7 @@ fn group_chat_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "post_to_group_chat",
-            "description": "Post a short message in a channel of the company's group chat under your name, when the group needs to know something (e.g. a task is done and needs a reviewer). Name a colleague with @Name to wake them: they answer in the same channel. Only the colleagues you name are woken, never yourself, and only a few times in a row after one message of a board member. An answer to a group chat message is posted there by itself; do not post it again.",
+            "description": "Post a short message in a channel of the company's group chat under your name, when the group needs to know something. It wakes nobody: a @Name only refers to a colleague, and @username of a board member notifies them. To have a colleague act, use hand_off. An answer to a group chat message is posted there by itself; do not post it again.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "message": { "type": "string", "description": "A few sentences at most." }, "channel": channel },
@@ -687,7 +733,7 @@ fn discussion_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "post_to_discussion",
-            "description": "Post a short message in the discussion of your ticket under your name: to answer or ask a board member, or to bring in a colleague with @Name (they answer there). The same limits as the group chat apply; a mention past them wakes nobody. A discussion of a ticket on Done can only be read.",
+            "description": "Post a short message in the discussion of your ticket under your name: to answer or ask a board member, with @username so they are told. It wakes nobody: a @Name only refers to a colleague. To have a colleague act, use hand_off. A discussion of a ticket on Done can only be read.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "message": { "type": "string", "description": "A few sentences at most." } },
@@ -759,12 +805,40 @@ mod tests {
         let names = |project| tool_definitions(project, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
         assert!(names(false).contains(&"hand_over_task".to_owned()));
         assert!(!names(true).contains(&"hand_over_task".to_owned()));
-        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "add_idea", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat", "vault_list", "vault_read"] {
+        assert!(names(false).contains(&"hand_off".to_owned()));
+        assert!(!names(true).contains(&"hand_off".to_owned()), "the project assistant is in no thread");
+        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat", "vault_list", "vault_read"] {
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
         }
     }
 
+    #[test]
+    fn employees_are_offered_no_tool_that_makes_ideas() {
+        for project in [false, true] {
+            assert!(!tool_definitions(project, false, false, false).iter().any(|t| t["name"] == "add_idea"));
+        }
+    }
+
+    #[test]
+    fn a_tool_the_employee_has_off_is_not_offered() {
+        let mut tools = tool_definitions(false, false, false, false);
+        switch_off(&mut tools, &["create_ticket".to_owned()]);
+        let names: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert!(!names.contains(&"create_ticket") && names.contains(&"move_ticket") && names.contains(&"approve"));
+    }
+
     /// SEC0 E10/E12: the employee's tool, not the project assistant's or the dispatcher's, and no links to choose.
+    #[test]
+    fn tell_responsible_is_an_employees_tool_not_the_project_assistants() {
+        let names = |project| tool_definitions(project, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        assert!(names(false).contains(&"tell_responsible".to_owned()));
+        assert!(!names(true).contains(&"tell_responsible".to_owned()));
+        for tool in ["schedule_message", "scratchpad"] {
+            assert!(names(false).contains(&tool.to_owned()), "{tool}");
+            assert!(!names(true).contains(&tool.to_owned()), "{tool}: the project assistant is nobody");
+        }
+    }
+
     #[test]
     fn propose_guideline_is_an_employees_tool_without_links() {
         let find = |project| tool_definitions(project, false, false, false).into_iter().find(|t| t["name"] == "propose_guideline");
@@ -856,7 +930,7 @@ mod tests {
         );
         assert_eq!(
             op("update_ticket", json!({ "ticket": "12", "title": "New", "labels": [] })),
-            Some(EmployeeTaskOp::UpdateTicket { ticket: "12".into(), title: Some("New".into()), description: None, priority: None, labels: Some(vec![]) })
+            Some(EmployeeTaskOp::UpdateTicket { ticket: "12".into(), title: Some("New".into()), description: None, priority: None, labels: Some(vec![]), design_url: None })
         );
         assert_eq!(op("move_ticket", json!({ "ticket": "#12", "column": "todo" })), Some(EmployeeTaskOp::MoveTicket { ticket: "#12".into(), column: "todo".into() }));
         assert_eq!(op("post_to_ticket", json!({ "ticket": "#12", "message": "hi" })), Some(EmployeeTaskOp::PostToTicket { ticket: "#12".into(), message: "hi".into() }));

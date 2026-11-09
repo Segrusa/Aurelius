@@ -246,7 +246,7 @@ async fn a_sign_in_ends_with_cancel_with_its_connection_and_on_a_second_one() {
     let pid = {
         use aurelius_protocol::{Call, HelloParams, HostWrite, Method, PROTOCOL_MAJOR, Request, ServerMessage, WriteMethod};
         let mut stream = aurelius_host::ipc::connect(&aurelius_host::endpoint(dir.path())).await.unwrap();
-        let hello = HelloParams { client_name: "test".into(), client_version: "0".into(), app_key: None, accepts: vec![], session_token: Some(token) };
+        let hello = HelloParams { client_name: "test".into(), client_version: "0".into(), accepts: vec![], session_token: Some(token) };
         let requests = [
             Request { protocol: PROTOCOL_MAJOR, request_id: 1, idempotency_key: None, expected_version: None, call: Call::Read(Method::SessionHello(hello)) },
             Request { protocol: PROTOCOL_MAJOR, request_id: 2, idempotency_key: Some(aurelius_domain::CommandId::new()), expected_version: None, call: Call::Write(WriteMethod::Host(HostWrite::ClaudeLoginLink)) },
@@ -278,9 +278,9 @@ async fn a_sign_in_ends_with_cancel_with_its_connection_and_on_a_second_one() {
 }
 
 /// R4 m-2: another board member signing in on the same connection is a switch,
-/// as a logout: the earlier one's sign-in to Claude and terminals end there.
+/// as a logout: the earlier one's sign-in to Claude ends there.
 #[tokio::test(flavor = "multi_thread")]
-async fn signing_in_as_another_board_member_ends_the_earlier_ones_sign_in_and_terminals() {
+async fn signing_in_as_another_board_member_ends_the_earlier_ones_sign_in() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_real(dir.path()).await;
     drop(connect_as(dir.path(), "robin").await);
@@ -289,13 +289,6 @@ async fn signing_in_as_another_board_member_ends_the_earlier_ones_sign_in_and_te
     let program = fake_claude(dir.path());
     let bin = program.parent().unwrap().to_path_buf();
     claude_code(&alex, &program).await;
-    let folder = dir.path().join("shell-folder");
-    std::fs::create_dir_all(&folder).unwrap();
-    let create = aurelius_domain::employee::CreateEmployee { name: "Shell".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: Some(folder.display().to_string()) };
-    let CommandResult::EmployeeCreated { conversation_id: conversation, .. } = alex.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!("no employee") };
-    let (view, _output) = alex.open_terminal(conversation, 80, 24, false).await.unwrap();
-    let attached = |list: Vec<aurelius_protocol::TerminalSummary>| list.into_iter().find(|t| t.terminal_id == view.terminal_id).map(|t| t.attached);
-    assert_eq!(attached(alex.list_terminals(conversation).await.unwrap()), Some(1));
     let link = alex.claude_login_link().await.unwrap();
     prompt(&mut pushes).await;
     let pid = last_pid(&bin);
@@ -305,7 +298,6 @@ async fn signing_in_as_another_board_member_ends_the_earlier_ones_sign_in_and_te
     let ended = prompt(&mut pushes).await;
     assert!(ended.link_id == link && ended.error.is_some(), "{ended:?}");
     gone(pid, "another board member").await;
-    assert_eq!(attached(alex.list_terminals(conversation).await.unwrap()), Some(0));
 
     // Signing in again as the same board member is no switch: a sign-in of it stays.
     let again = alex.claude_login_link().await.unwrap();
@@ -375,27 +367,6 @@ async fn what_claude_leaves_behind_ends_with_its_group_also_when_it_exits_by_its
     stop(dir.path(), daemon).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn an_api_keys_calls_run_on_the_board_member_who_made_or_last_set_it() {
-    // F3 point 9 (B5): the session's board member, never an app; a key without one waits with 'login'.
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = start_real(dir.path()).await;
-    let alex = connect_as(dir.path(), "alex").await;
-    let robin = connect_as(dir.path(), "robin").await;
-    let login_of = |key: aurelius_domain::ApiKeyId| -> Option<String> {
-        db(dir.path()).query_row("SELECT login_user FROM api_keys WHERE id = ?1", [key.to_string()], |r| r.get(0)).unwrap()
-    };
-    let created = alex.create_api_key("ci".into(), vec![]).await.unwrap();
-    let alex_id = alex.user_whoami().await.unwrap().user.unwrap().id;
-    assert_eq!(login_of(created.key.id), Some(alex_id.to_string()));
-    // Another board member who sets its functions takes it on (as a key from before, without one, does then).
-    robin.set_api_key_functions(created.key.id, vec![]).await.unwrap();
-    let robin_id = robin.user_whoami().await.unwrap().user.unwrap().id;
-    assert_eq!(login_of(created.key.id), Some(robin_id.to_string()));
-    drop((alex, robin));
-    stop(dir.path(), daemon).await;
-}
-
 /// Connect `client`'s own login with a code the stand-in accepts.
 async fn link_login(client: &Client, pushes: &mut UnboundedReceiver<SessionPush>) {
     let link = client.claude_login_link().await.unwrap();
@@ -406,7 +377,7 @@ async fn link_login(client: &Client, pushes: &mut UnboundedReceiver<SessionPush>
 
 async fn employee(client: &Client, name: &str) -> (aurelius_domain::EmployeeId, aurelius_domain::ConversationId) {
     use aurelius_domain::employee::CreateEmployee;
-    let create = CreateEmployee { name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     match client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result {
         CommandResult::EmployeeCreated { employee_id, conversation_id } => (employee_id, conversation_id),
         other => panic!("{other:?}"),

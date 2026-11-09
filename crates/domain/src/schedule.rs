@@ -191,7 +191,6 @@ pub fn validate_template(project_id: ProjectId, employee_id: EmployeeId, title: 
         title: title.into(),
         goal: goal.into(),
         acceptance_criteria: criteria.to_vec(),
-        depends_on: vec![],
         run: run.clone(),
         files: vec![],
     };

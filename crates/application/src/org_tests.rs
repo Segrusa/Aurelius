@@ -18,7 +18,7 @@ use aurelius_storage::{Store, employees, tasks as store};
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 fn ctx() -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: None }
 }
 
 fn setup() -> (tempfile::TempDir, CommandService) {
@@ -45,7 +45,7 @@ fn project(s: &CommandService) -> ProjectId {
 /// Employees are company-wide; the project only says where the test works.
 fn try_hire(s: &CommandService, _project: ProjectId, name: &str, title: Option<&str>, boss: Option<EmployeeId>) -> Result<(EmployeeId, ConversationId), AppError> {
     let create = CreateEmployee {
-        name: name.into(),
+        access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(),
         role: "Dev".into(),
         title: title.map(Into::into),
         reports_to: boss,
@@ -63,8 +63,24 @@ fn hire(s: &CommandService, project: ProjectId, name: &str, title: Option<&str>,
 }
 
 fn retitle(s: &CommandService, employee: EmployeeId, name: &str, title: &str) {
-    let update = UpdateEmployee { employee_id: employee, name: name.into(), role: "Dev".into(), title: Some(title.into()), instructions: Some(format!("Focus of {name}.")), sequential_tasks: None };
+    let update = UpdateEmployee { access_level: None, tool_policy: None, description: None, employee_id: employee, name: name.into(), role: "Dev".into(), title: Some(title.into()), instructions: Some(format!("Focus of {name}.")), sequential_tasks: None };
     run(s, Command::UpdateEmployee(update)).unwrap();
+}
+
+#[test]
+fn an_access_level_is_kept_until_an_update_names_another_and_never_an_unknown_one() {
+    use aurelius_domain::employee::AccessLevel;
+    let (_dir, s) = setup();
+    let (ann, _) = hire(&s, ProjectId::new(), "Ann", None, None);
+    let level = |s: &CommandService| s.store().read(|c| aurelius_storage::employees::list_employees(c, &|_| None)).unwrap()[0].access_level;
+    assert_eq!(level(&s), AccessLevel::Inherit, "the default");
+    let update = |access_level| UpdateEmployee { access_level, tool_policy: None, description: None, employee_id: ann, name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None };
+    run(&s, Command::UpdateEmployee(update(Some(AccessLevel::ReadOnly)))).unwrap();
+    assert_eq!(level(&s), AccessLevel::ReadOnly);
+    run(&s, Command::UpdateEmployee(update(None))).unwrap();
+    assert_eq!(level(&s), AccessLevel::ReadOnly, "an update without it leaves it");
+    assert!(run(&s, Command::UpdateEmployee(update(Some(AccessLevel::Unknown)))).is_err());
+    assert_eq!(level(&s), AccessLevel::ReadOnly);
 }
 
 fn set_boss(s: &CommandService, employee: EmployeeId, boss: Option<EmployeeId>) -> Result<Committed, AppError> {
@@ -96,7 +112,7 @@ fn chat_run(s: &CommandService, conversation: ConversationId) -> RunId {
 
 /// A task of `employee` that is running, with a run in its conversation.
 fn task_run(s: &CommandService, project: ProjectId, employee: EmployeeId, title: &str) -> (TaskId, RunId) {
-    let create = CreateTask { confirm_secret: false, project_id: project, employee_id: Some(employee), title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: project, employee_id: Some(employee), title: title.into(), goal: "Do it".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = run(s, Command::CreateTask(create)).unwrap().receipt.result else { panic!() };
     (task_id, start_task(s, task_id, employee))
 }
@@ -234,7 +250,7 @@ fn reports_to_refuses_loops_strangers_and_archived_bosses() {
     // Names are unique in the company (any case), also when renaming.
     let taken = try_hire(&s, other, " ann ", None, None).err().unwrap();
     assert!(taken.message.contains("already exists"), "{}", taken.message);
-    let rename = UpdateEmployee { employee_id: x, name: "Bob".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None };
+    let rename = UpdateEmployee { access_level: None, tool_policy: None, description: None, employee_id: x, name: "Bob".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None };
     assert!(run(&s, Command::UpdateEmployee(rename)).is_err());
 
     let (c, _) = hire(&s, p, "Cy", None, None);
@@ -369,7 +385,7 @@ fn delegation_goes_to_direct_reports_only_while_the_chart_is_followed() {
     // The system text offers only the direct lines as targets, the rest marked.
     let jean = system_of(&s, chat_run(&s, t.jean.1));
     assert!(jean.contains("delegate_task only works for Simon"), "{jean}");
-    assert!(jean.contains("Not directly reachable (go via your boss or your report):") && jean.contains("- Dean"), "{jean}");
+    assert!(jean.contains("Not directly reachable (go via your boss or your report):") && jean.contains("- @Dean"), "{jean}");
     let (ok, text) = delegate(&s, chat_run(&s, t.simon.1), "Jean");
     assert!(!ok && text.contains("Dean, Max"), "{text}");
 
@@ -752,7 +768,7 @@ fn a_stale_proposal_conflicts_and_an_old_version_can_be_restored() {
     let run_id = chat_run(&s, t.simon.1);
     assert!(propose_instructions(&s, run_id, None, "Simon works test-first.", &["Migration"]).0);
     // Meanwhile the user changes Simon's instructions themselves.
-    let update = UpdateEmployee { employee_id: t.simon.0, name: "Simon".into(), role: "Dev".into(), title: None, instructions: Some("Simon writes docs first.".into()), sequential_tasks: None };
+    let update = UpdateEmployee { access_level: None, tool_policy: None, description: None, employee_id: t.simon.0, name: "Simon".into(), role: "Dev".into(), title: None, instructions: Some("Simon writes docs first.".into()), sequential_tasks: None };
     run(&s, Command::UpdateEmployee(update.clone())).unwrap();
     run(&s, Command::UpdateEmployee(update)).unwrap();
     assert_eq!(s.employee_instruction_versions(t.simon.0).unwrap().current_version, 2, "the same text again is no new version");
@@ -797,7 +813,7 @@ fn mode_of_run(s: &CommandService, run: RunId) -> AgentMode {
 }
 
 fn task_with_mode(s: &CommandService, project: ProjectId, employee: EmployeeId, mode: Option<AgentMode>) -> RunId {
-    let create = CreateTask { confirm_secret: false, project_id: project, employee_id: Some(employee), title: "T".into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: aurelius_domain::task::RunSettings { mode, ..Default::default() }, files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: project, employee_id: Some(employee), title: "T".into(), goal: "Do it".into(), acceptance_criteria: vec![], run: aurelius_domain::task::RunSettings { mode, ..Default::default() }, files: vec![] };
     let CommandResult::TaskCreated { task_id } = run(s, Command::CreateTask(create)).unwrap().receipt.result else { panic!() };
     let run_id = start_task(s, task_id, employee);
     s.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [run_id.to_string()])?)).unwrap();

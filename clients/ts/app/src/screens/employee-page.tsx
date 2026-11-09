@@ -1,24 +1,136 @@
+import { Button } from "@astryxdesign/core/Button";
+import { Heading } from "@astryxdesign/core/Heading";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Layout, LayoutContent, LayoutPanel } from "@astryxdesign/core/Layout";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { expectBody } from "@aurelius/client";
 import type { EmployeeSummary, TaskView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAllTasks, useEffectiveSets, useEmployees } from "../data";
+import { hidden } from "../hidden";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { Button, initial, Mark, markColor } from "../ui/kit";
-import { Menu } from "../ui/overlay";
+import { initial, Mark, markColor } from "../ui/marks";
+import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useOpenChat } from "./employee-chat";
 import { EmployeeDialog } from "./employee-dialog";
-import { type AgentMode, canPin, MODE_LABELS, nextMode, position, threadGroup, togglePin } from "./employee-logic";
-import { employeeState, pinKey, usePins } from "./employees";
-import { Confirm, EYEBROW, failureOf, PageHead, SMALL, shortDay } from "./org-kit";
+import { EmployeeInboxTab, EmployeeMemoryTab } from "./employee-inbox";
+import {
+  type AgentMode,
+  accessLabel,
+  accessOf,
+  asChoice,
+  canPin,
+  choiceLine,
+  type EmployeeTab,
+  effortName,
+  employeeState,
+  employeeTabs,
+  inheritedRun,
+  MODE_LABELS,
+  nextMode,
+  position,
+  threadGroup,
+  togglePin,
+} from "./employee-logic";
+import { policyLine } from "./employee-tools-logic";
+import { pinKey, usePins } from "./employees";
+import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, shortDay } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { useFolderChooser } from "./run-tools";
+import { modelName, useSetting } from "./settings-kit";
 import { taskStateLine } from "./tasks-logic";
 
-const CHIP =
-  "inline-flex h-6 cursor-pointer items-center gap-[6px] rounded-[6px] border border-line bg-transparent px-2 text-[12px] text-text2 hover:text-text";
+const styles = stylex.create({
+  taskCard: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: { default: "var(--color-background-surface)", ":hover": "var(--color-overlay-hover)" },
+    paddingInline: 12,
+    paddingBlock: 10,
+    color: "var(--color-text-primary)",
+    textDecoration: "none",
+  },
+  truncate: { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  strong: { fontWeight: 500 },
+  small: { fontSize: 12, color: "var(--precision-text3)" },
+  crumb: {
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+    textDecoration: "none",
+  },
+  separator: { color: "var(--precision-text3)" },
+  note: { margin: 0, padding: 24, color: "var(--color-text-secondary)" },
+  headLink: {
+    fontSize: 12,
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+    textDecoration: "none",
+  },
+  main: { display: "flex", minWidth: 0, flexDirection: "column", gap: 16 },
+  identity: { display: "flex", alignItems: "center", gap: 14 },
+  identityText: { minWidth: 0 },
+  name: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: "-0.01em" },
+  position: { margin: 0, color: "var(--color-text-secondary)" },
+  status: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 },
+  on: { color: "var(--color-text-accent)" },
+  section: { display: "flex", flexDirection: "column", gap: 8 },
+  instructions: {
+    display: "-webkit-box",
+    margin: 0,
+    overflow: "hidden",
+    lineHeight: 1.6,
+    whiteSpace: "pre-wrap",
+    color: "var(--color-text-secondary)",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 12,
+  },
+  guidelinesTitle: { margin: 0, fontWeight: 500, color: "var(--color-text-secondary)" },
+  tabPanel: {
+    display: "flex",
+    minWidth: 0,
+    flexDirection: "column",
+    gap: 16,
+    // A Table bleeds over its container's padding, and here that would be over the tabs.
+    "--container-padding-block-start": "0px",
+    "--container-padding-block-end": "0px",
+    "--container-padding-inline-start": "0px",
+    "--container-padding-inline-end": "0px",
+  },
+  panel: { display: "flex", minWidth: 0, flexDirection: "column", gap: 12 },
+  panelTitle: { display: "flex", margin: 0, fontWeight: 500 },
+  counts: { marginInlineStart: "auto", fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
+  guidelines: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    marginBlockStart: 8,
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+    paddingBlockStart: 12,
+  },
+  guidelineLink: {
+    overflow: "hidden",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+    textDecoration: "none",
+  },
+  manage: { fontSize: 12, color: "var(--color-text-accent)", textDecoration: "none" },
+  sunk: { backgroundColor: "var(--precision-sunk)" },
+});
 
 type Ask = "browser" | "screen" | "archive" | null;
 
@@ -27,13 +139,9 @@ const isOngoing = (t: TaskView) => !["succeeded", "failed", "cancelled"].include
 function TaskCard({ task }: { task: TaskView }) {
   const line = taskStateLine(task);
   return (
-    <Link
-      to="/tasks/$taskId"
-      params={{ taskId: task.id }}
-      className="flex flex-col gap-[3px] rounded-[8px] border border-line bg-panel px-3 py-[10px] text-text no-underline hover:bg-sel"
-    >
-      <span className="truncate font-medium">{task.title}</span>
-      <span className="truncate text-[12px] text-text3">
+    <Link to="/tasks/$taskId" params={{ taskId: task.id }} {...stylex.props(styles.taskCard)}>
+      <span {...stylex.props(styles.truncate, styles.strong)}>{task.title}</span>
+      <span {...stylex.props(styles.truncate, styles.small)}>
         {task.ticket_number ? `#${task.ticket_number} · ` : ""}
         <span style={{ color: line.color }}>{line.text}</span> · {shortDay(task.updated_at_ms)}
       </span>
@@ -64,14 +172,21 @@ function EmployeeKeys({
   return null;
 }
 
-export function EmployeePage({ id }: { id: string }) {
+const PANEL = "employee-panel";
+
+export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTab }) {
   const connection = useConnection();
   const client = useQueryClient();
   const navigate = useNavigate();
   const platform = usePlatform();
   const folders = useFolderChooser();
-  const { hostName } = useLinkState();
+  const { hostName, features } = useLinkState();
   const employees = useEmployees();
+  const openChat = useOpenChat();
+  const connections = useSetting(
+    "connections",
+    async () => expectBody(await connection.call("connection.list"), "connections").value,
+  );
   const tasks = useAllTasks();
   const employee = employees.data?.find((e) => e.id === id && e.status !== "archived") ?? null;
   const [editing, setEditing] = useState(false);
@@ -90,6 +205,10 @@ export function EmployeePage({ id }: { id: string }) {
   );
   const now = Date.now();
   const byGroup = (g: string) => mine.filter((t) => threadGroup(isOngoing(t), false, t.updated_at_ms, now) === g);
+  const tabs = employeeTabs(features.includes("employee_queue"));
+  const tab = tabs.find((t) => t.key === wanted)?.key ?? tabs[0]?.key ?? "settings";
+  const pickTab = (key: string) =>
+    void navigate({ to: "/employees/$id", params: { id }, search: { tab: key as EmployeeTab }, replace: true });
   const refresh = () => client.invalidateQueries({ queryKey: ["employees"] });
   const act = async (run: () => Promise<unknown>, done?: string) => {
     try {
@@ -105,23 +224,33 @@ export function EmployeePage({ id }: { id: string }) {
 
   if (employees.data && !employee) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <Page>
         <PageHead
           title={
-            <Link to="/employees" className="text-text2 no-underline">
+            <Link to="/employees" {...stylex.props(styles.crumb)}>
               Employees
             </Link>
           }
         />
-        <p className="m-0 p-6 text-text2">This employee no longer exists (archived?). Esc goes back.</p>
-      </div>
+        <p {...stylex.props(styles.note)}>This employee no longer exists (archived?). Esc goes back.</p>
+      </Page>
     );
   }
-  if (!employee) return <p className="m-0 p-6 text-text3">Loading…</p>;
+  if (!employee) return <Loading />;
   const e: EmployeeSummary = employee;
   const state = employeeState(e);
   const boss = employees.data?.find((b) => b.id === e.reports_to);
   const pinned = pins.includes(e.id);
+  const own =
+    e.settings ??
+    connections.data?.defaults?.find(
+      (d) => d.purpose === "employee" && d.scope.kind === "employee" && d.scope.id === e.id,
+    )?.settings ??
+    {};
+  const inherited = inheritedRun(connections.data);
+  const providerChoice = asChoice(own.connection);
+  const providerName =
+    connections.data?.connections?.find((c) => c.id === providerChoice)?.display_name ?? "A removed connection";
   const setMode = () => {
     if (!e.conversation_id) return;
     const mode: AgentMode = nextMode(e.agent_mode);
@@ -185,150 +314,201 @@ export function EmployeePage({ id }: { id: string }) {
   const past = byGroup("past");
   const earlier = byGroup("earlier");
   const active = byGroup("active");
-  const chipOn = (on: boolean) => (on ? "!text-acc-text" : "");
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <PageHead
-        title={
-          <>
-            <Link to="/employees" className="text-text2 no-underline hover:text-text">
-              Employees
+    <Page>
+      <Layout
+        header={
+          <PageHead
+            title={
+              <>
+                <Link to="/employees" {...stylex.props(styles.crumb)}>
+                  Employees
+                </Link>
+                <span {...stylex.props(styles.separator)}>›</span>
+                <span {...stylex.props(styles.truncate)}>{e.name}</span>
+              </>
+            }
+          >
+            <Link to="/chat" {...stylex.props(styles.headLink)}>
+              Talk in Team chat
             </Link>
-            <span className="text-text3">›</span>
-            <span className="truncate">{e.name}</span>
-          </>
+            {features.includes("employee_chats") && e.status === "active" ? (
+              <Button size="sm" label="Chat" onClick={() => openChat(e.id)} />
+            ) : null}
+            <Button size="sm" label="Edit" onClick={() => setEditing(true)} />
+            <Menu
+              label={`More for ${e.name}`}
+              options={menu}
+              onPick={pick}
+              trigger={<IconButton size="sm" label={`More for ${e.name}`} icon="⋯" />}
+            />
+            <Button size="sm" variant="primary" label="Give work" onClick={give} />
+          </PageHead>
         }
-      >
-        <Link to="/chat" className="text-[12px] text-text2 no-underline hover:text-text">
-          Talk in Team chat
-        </Link>
-        <Button className={SMALL} onClick={() => setEditing(true)}>
-          Edit
-        </Button>
-        <Menu
-          label={`More for ${e.name}`}
-          options={menu}
-          onPick={pick}
-          trigger={
-            <button
-              type="button"
-              aria-label={`More for ${e.name}`}
-              className="h-7 cursor-pointer rounded-[6px] border border-btn-line bg-btn px-2 text-text2"
-            >
-              ⋯
-            </button>
-          }
-        />
-        <Button kind="primary" className={SMALL} onClick={give}>
-          Give work
-        </Button>
-      </PageHead>
-      <div className="flex min-h-0 flex-1 flex-wrap overflow-y-auto">
-        <div className="flex min-w-0 flex-[999_1_480px] flex-col gap-4 px-8 pt-[22px] pb-8">
-          <div className="flex items-center gap-[14px]">
-            <Mark letter={initial(e.name)} color={markColor(e.id)} size={44} radius={11} />
-            <div className="min-w-0">
-              <h1 className="m-0 truncate text-[20px] font-semibold tracking-[-0.01em]">{e.name}</h1>
-              <p className="m-0 truncate text-text2">
-                {position(e)}
-                {boss ? ` · reports to ${boss.name}` : ""}
-              </p>
+        content={
+          <LayoutContent padding={8}>
+            <div {...stylex.props(styles.main)}>
+              <div {...stylex.props(styles.identity)}>
+                <Mark letter={initial(e.name)} color={markColor(e.id)} size={44} radius={11} />
+                <div {...stylex.props(styles.identityText)}>
+                  <Heading level={1} maxLines={1} xstyle={styles.name}>
+                    {e.name}
+                  </Heading>
+                  <p {...stylex.props(styles.position, styles.truncate)}>
+                    {position(e)}
+                    {boss ? ` · reports to ${boss.name}` : ""}
+                  </p>
+                  <span {...stylex.props(styles.status)} style={{ color: state.color }}>
+                    <StatusDot variant={state.variant} isPulsing={state.isPulsing} label={state.label} />
+                    {state.label}
+                  </span>
+                </div>
+              </div>
+              <TabList role="tablist" aria-label={`About ${e.name}`} hasDivider value={tab} onChange={pickTab}>
+                {tabs.map((t) => (
+                  <Tab key={t.key} value={t.key} label={t.label} panelId={PANEL} />
+                ))}
+              </TabList>
+              <div id={PANEL} role="tabpanel" {...stylex.props(styles.tabPanel)}>
+                {tab === "inbox" ? (
+                  <EmployeeInboxTab employeeId={e.id} name={e.name} logs={features.includes("activity_log")} />
+                ) : null}
+                {tab === "memory" ? <EmployeeMemoryTab employeeId={e.id} name={e.name} /> : null}
+                {tab === "settings" ? (
+                  <>
+                    <MetadataList orientation="horizontal" label={{ position: "start" }}>
+                      <MetadataListItem label="Mode">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          label={`Mode: ${MODE_LABELS[e.agent_mode]}`}
+                          tooltip="Its mode for new work"
+                          onClick={setMode}
+                        >
+                          {MODE_LABELS[e.agent_mode]}
+                        </Button>
+                      </MetadataListItem>
+                      <MetadataListItem label="Browser">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          label={`Browser ${e.browser_allowed ? "on" : "off"}`}
+                          onClick={browser}
+                          xstyle={e.browser_allowed ? styles.on : undefined}
+                        >
+                          {e.browser_allowed ? "On" : "Off"}
+                        </Button>
+                      </MetadataListItem>
+                      <MetadataListItem label="Screen">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          label={`Screen: ${e.screen_allowed ? "allowed" : "asks"}`}
+                          onClick={screen}
+                          xstyle={e.screen_allowed ? styles.on : undefined}
+                        >
+                          {e.screen_allowed ? "Allowed" : "Asks"}
+                        </Button>
+                      </MetadataListItem>
+                    </MetadataList>
+                    <MetadataList orientation="horizontal" label={{ position: "start" }}>
+                      <MetadataListItem label="Provider">
+                        {providerChoice === "inherit" ? choiceLine("inherit", inherited.provider) : providerName}
+                      </MetadataListItem>
+                      <MetadataListItem label="Model">
+                        {choiceLine(asChoice(own.model), inherited.model && modelName(inherited.model), modelName)}
+                      </MetadataListItem>
+                      <MetadataListItem label="Effort">
+                        {choiceLine(asChoice(own.effort), inherited.effort && effortName(inherited.effort), effortName)}
+                      </MetadataListItem>
+                      {features.includes("employee_access") ? (
+                        <MetadataListItem label="Access">{accessLabel(accessOf(e))}</MetadataListItem>
+                      ) : null}
+                      {features.includes("employee_tools") &&
+                      !hidden("EmployeeTools") &&
+                      policyLine(e.tool_policy ?? {}) ? (
+                        <MetadataListItem label="Tools">{policyLine(e.tool_policy ?? {})}</MetadataListItem>
+                      ) : null}
+                    </MetadataList>
+                    {e.description ? (
+                      <section {...stylex.props(styles.section)}>
+                        <Eyebrow>DESCRIPTION</Eyebrow>
+                        <p {...stylex.props(styles.instructions)}>{e.description}</p>
+                      </section>
+                    ) : null}
+                    {e.instructions ? (
+                      <section {...stylex.props(styles.section)}>
+                        <Eyebrow>INSTRUCTIONS</Eyebrow>
+                        <p {...stylex.props(styles.instructions)}>{e.instructions}</p>
+                      </section>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
             </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`inline-flex h-6 items-center gap-[6px] rounded-[6px] border border-line px-2 text-[12px] ${state.color}`}
-            >
-              <span className={`size-[6px] rounded-full ${state.dot}`} />
-              {state.label}
-            </span>
-            <button type="button" title="Its mode for new work" className={CHIP} onClick={setMode}>
-              Mode: {MODE_LABELS[e.agent_mode]}
-            </button>
-            <button type="button" className={`${CHIP} ${chipOn(e.browser_allowed)}`} onClick={browser}>
-              Browser {e.browser_allowed ? "on" : "off"}
-            </button>
-            <button type="button" className={`${CHIP} ${chipOn(e.screen_allowed)}`} onClick={screen}>
-              Screen: {e.screen_allowed ? "allowed" : "asks"}
-            </button>
-          </div>
-          {e.instructions ? (
-            <section className="flex flex-col gap-2">
-              <p className={EYEBROW}>INSTRUCTIONS</p>
-              <p className="m-0 line-clamp-[12] leading-[1.6] whitespace-pre-wrap text-text2">{e.instructions}</p>
-            </section>
-          ) : null}
-          {mine.length === 0 ? (
-            <div className="flex flex-col gap-1 text-text2">
-              <p className="m-0 font-medium">{e.name} has no tasks yet.</p>
-              <p className="m-0 text-[12px] text-text3">
-                Tasks you give {e.name} show on the right, each with its conversation. Talk with {e.name} in the Team
-                chat.
+          </LayoutContent>
+        }
+        end={
+          <LayoutPanel
+            hasDivider
+            role="complementary"
+            label="Tasks"
+            width={380}
+            padding={4}
+            {...stylex.props(styles.sunk)}
+          >
+            <div {...stylex.props(styles.panel)}>
+              <p {...stylex.props(styles.panelTitle)}>
+                Tasks{" "}
+                <span {...stylex.props(styles.counts)}>
+                  {active.length} active · {mine.length}
+                </span>
               </p>
+              {tasks.data && mine.length === 0 ? (
+                <Hint>Tasks you give this employee show here, from every project.</Hint>
+              ) : null}
+              {tasks.data && mine.length > 0 && active.length === 0 ? <Hint>Nothing active</Hint> : null}
+              {active.map((t) => (
+                <TaskCard key={t.id} task={t} />
+              ))}
+              {past.length > 0 ? <Eyebrow>Past</Eyebrow> : null}
+              {past.map((t) => (
+                <TaskCard key={t.id} task={t} />
+              ))}
+              {earlier.length > 0 ? (
+                <div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-expanded={showEarlier}
+                    label={`${showEarlier ? "▾" : "▸"} Earlier · ${earlier.length}`}
+                    onClick={() => setShowEarlier(!showEarlier)}
+                  />
+                </div>
+              ) : null}
+              {showEarlier ? earlier.map((t) => <TaskCard key={t.id} task={t} />) : null}
+              <div {...stylex.props(styles.guidelines)}>
+                <p title="What its runs get on top of its instructions" {...stylex.props(styles.guidelinesTitle)}>
+                  Guidelines{set ? ` · ${set.guidelines.length} · ${set.total_chars} / ${set.limit_chars}` : ""}
+                </p>
+                {set?.guidelines.map((g) => (
+                  <Link
+                    key={g.id}
+                    to="/knowledge/guidelines/$id"
+                    params={{ id: g.id }}
+                    {...stylex.props(styles.guidelineLink)}
+                  >
+                    {g.title}
+                  </Link>
+                ))}
+                <Link to="/knowledge/$tab" params={{ tab: "guidelines" }} {...stylex.props(styles.manage)}>
+                  Manage links →
+                </Link>
+              </div>
             </div>
-          ) : null}
-          <Link to="/chat" className="text-acc-text no-underline">
-            Talk with {e.name} in Team chat →
-          </Link>
-        </div>
-        <aside
-          aria-label="Tasks"
-          className="flex min-w-0 flex-[1_1_320px] flex-col gap-3 border-l border-line bg-sunk p-[18px]"
-        >
-          <p className="m-0 flex font-medium">
-            Tasks{" "}
-            <span className="ml-auto text-[12px] font-normal text-text3">
-              {active.length} active · {mine.length}
-            </span>
-          </p>
-          {tasks.data && mine.length === 0 ? (
-            <p className="m-0 text-[12px] text-text3">Tasks you give this employee show here, from every project.</p>
-          ) : null}
-          {tasks.data && mine.length > 0 && active.length === 0 ? (
-            <p className="m-0 text-[12px] text-text3">Nothing active</p>
-          ) : null}
-          {active.map((t) => (
-            <TaskCard key={t.id} task={t} />
-          ))}
-          {past.length > 0 ? <p className={EYEBROW}>Past</p> : null}
-          {past.map((t) => (
-            <TaskCard key={t.id} task={t} />
-          ))}
-          {earlier.length > 0 ? (
-            <button
-              type="button"
-              aria-expanded={showEarlier}
-              onClick={() => setShowEarlier(!showEarlier)}
-              className="cursor-pointer self-start border-0 bg-transparent p-0 text-[12px] text-text3 hover:text-text"
-            >
-              {showEarlier ? "▾" : "▸"} Earlier · {earlier.length}
-            </button>
-          ) : null}
-          {showEarlier ? earlier.map((t) => <TaskCard key={t.id} task={t} />) : null}
-          <div className="mt-2 flex flex-col gap-1 border-t border-line2 pt-3">
-            <p title="What its runs get on top of its instructions" className="m-0 font-medium">
-              Guidelines{set ? ` · ${set.guidelines.length} · ${set.total_chars} / ${set.limit_chars}` : ""}
-            </p>
-            {set?.guidelines.map((g) => (
-              <Link
-                key={g.id}
-                to="/knowledge/guidelines/$id"
-                params={{ id: g.id }}
-                className="truncate text-[12px] text-text2 no-underline hover:text-text"
-              >
-                {g.title}
-              </Link>
-            ))}
-            <Link
-              to="/knowledge/$tab"
-              params={{ tab: "guidelines" }}
-              className="text-[12px] text-acc-text no-underline"
-            >
-              Manage links →
-            </Link>
-          </div>
-        </aside>
-      </div>
+          </LayoutPanel>
+        }
+      />
       {folders.dialog}
       <EmployeeKeys
         onPick={pick}
@@ -379,6 +559,6 @@ export function EmployeePage({ id }: { id: string }) {
           }}
         />
       ) : null}
-    </div>
+    </Page>
   );
 }

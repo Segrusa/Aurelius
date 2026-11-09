@@ -4,7 +4,6 @@ use crate::method::Method;
 use crate::remote::{Capability, Needs, required};
 use crate::rpc::{Call, Request};
 use crate::write::WriteMethod;
-use aurelius_domain::app_key::{AppAudience, AppScope};
 use aurelius_domain::autonomy::AgentMode;
 use aurelius_domain::company::{UpdateCompany, UpdateProject};
 use aurelius_domain::task::RunSettings;
@@ -34,7 +33,7 @@ fn writes() -> Vec<Command> {
     let t = TicketId::new();
     vec![
         Command::CreateTicket(create(None)),
-        Command::UpdateTicket(UpdateTicket { confirm_secret: false, ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }),
+        Command::UpdateTicket(UpdateTicket { design_url: None, confirm_secret: false, ticket_id: t, title: Some("x".into()), description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None }),
         Command::MoveTicket(MoveTicket { ticket_id: t, column_id: BoardColumnId::new(), before_ticket_id: None }),
         Command::StartTicket(StartTicket { ticket_id: t, employee_id: None }),
         Command::AssignTicket(AssignTicket { ticket_id: t, employee_id: Some(EmployeeId::new()), reason: None }),
@@ -46,7 +45,7 @@ fn writes() -> Vec<Command> {
         Command::ArchiveTicket(ArchiveTicket { ticket_id: t }),
         Command::UpdateBoardColumns(UpdateBoardColumns { columns: vec![BoardColumnEdit { column_id: BoardColumnId::new(), name: "Ideas".into() }] }),
         Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id: None }), tester: None }),
-        Command::UpdateProject(UpdateProject { project_id: ProjectId::new(), dispatcher: Some(SetDispatcher { employee_id: Some(EmployeeId::new()) }) }),
+        Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: ProjectId::new(), dispatcher: Some(SetDispatcher { employee_id: Some(EmployeeId::new()) }) }),
     ]
 }
 
@@ -93,25 +92,6 @@ fn devices_need_task_control_for_tickets_and_read_for_the_board() {
     }
     let auto = Call::Write(WriteMethod::Domain(Command::CreateTicket(create(Some(AgentMode::Auto)))));
     assert_eq!(required(&auto), Needs::Cap(Capability::Approve), "Auto needs what a task in Auto needs");
-}
-
-#[test]
-fn apps_read_the_board_but_never_accept_or_send_back() {
-    let all = [AppScope::Read, AppScope::Draft, AppScope::Run, AppScope::Approve];
-    for audience in [AppAudience::All, AppAudience::Management] {
-        assert!(crate::app::allowed_for(&all, audience, &Call::Read(Method::BoardGet { project_id: None })).is_ok());
-        assert!(crate::app::allowed_for(&all, audience, &Call::Read(Method::TicketList { project_id: None, column: None, query: None })).is_ok());
-        for command in writes() {
-            let gate = matches!(command, Command::AcceptTicket(_) | Command::SendBackTicket(_));
-            let result = crate::app::allowed_for(&all, audience, &Call::Write(WriteMethod::Domain(command)));
-            if gate {
-                assert_eq!(result.unwrap_err(), crate::app::REVIEW_GATE, "{audience:?}");
-            }
-        }
-    }
-    // Board settings are never an app's.
-    let columns = Call::Write(WriteMethod::Domain(writes().remove(11)));
-    assert!(crate::app::allowed(&all, &columns).is_err());
 }
 
 #[test]
@@ -206,6 +186,4 @@ fn files_added_to_a_ticket_ride_on_ticket_update_with_the_same_rights() {
     let Call::Write(WriteMethod::Domain(Command::UpdateTicket(update))) = &parsed.call else { panic!("ticket.update") };
     assert_eq!(update.add_files, Some(vec!["/inbox/shot.png".to_string()]));
     assert_eq!(required(&parsed.call), Needs::Cap(Capability::TaskControl));
-    let plain = Call::Write(WriteMethod::Domain(writes().remove(1)));
-    assert_eq!(crate::app::required(&parsed.call), crate::app::required(&plain), "apps get what they get for any ticket.update");
 }

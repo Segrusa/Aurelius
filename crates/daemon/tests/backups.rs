@@ -60,7 +60,7 @@ async fn backup_restore_paused_scrub_and_export() {
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -78,7 +78,6 @@ async fn backup_restore_paused_scrub_and_export() {
         title: "Onboarding".into(),
         goal: "Compare ideas".into(),
         acceptance_criteria: vec!["Cites a source".into()],
-        depends_on: vec![],
     };
     client.execute(envelope(Command::CreateTask(task), None)).await.unwrap();
     for _ in 0..400 {

@@ -3,12 +3,17 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { _electron, expect, type Page, test } from "@playwright/test";
+import { hidden } from "../../ts/app/src/hidden";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
-import { scriptServer } from "./fake-server";
+import { message, messages, scriptServer } from "./fake-server";
 
 const SECRET = "ghp_a-very-secret-value-for-the-test";
 const PASSWORD = "a-long-enough-password";
+
+const toast = (page: Page, text: string | RegExp) =>
+  page.getByRole("region", { name: "Notifications" }).getByText(text);
 
 const go = (page: Page, name: string) => page.getByRole("navigation").getByRole("link", { name }).first().click();
 
@@ -37,6 +42,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
     // A project, opened on creation.
+    await page.getByRole("link", { name: "Knowledge", exact: true }).click();
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     await page.getByRole("button", { name: "New project" }).first().click();
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");
@@ -53,23 +59,83 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByRole("heading", { name: "Orion", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await page.getByPlaceholder(/Optional, e.g./).fill("Head of things");
+    await page.getByLabel("Description").fill("Plans the work and reviews it.");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Head of things · Lead")).toBeVisible();
+    await page.getByRole("tab", { name: "Settings" }).click();
+    await expect(page.getByText("Plans the work and reviews it.")).toBeVisible();
+
+    // A provider, model and effort of its own, and a level of access.
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("combobox", { name: "Provider" }).click();
+    await page.getByRole("option", { name: /^Inherit/ }).click();
+    await page.getByRole("radio", { name: "High", exact: true }).click();
+    await page.getByRole("radio", { name: "Read only" }).click();
+    await expect(page.getByText(/No edits, commands, web/)).toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(page.getByText("Read only", { exact: true })).toBeVisible();
+    await expect(page.getByText("High", { exact: true })).toBeVisible();
 
     await go(page, "Employees");
     await page.getByRole("button", { name: "Add employee" }).click();
     await page.getByPlaceholder("Name, for example Alex").fill("Pixel");
     await page.getByPlaceholder(/Free-form role/).fill("Designer");
-    await page.getByLabel("Reports to").selectOption({ label: "Orion" });
-    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await page.getByRole("combobox", { name: "Reports to" }).click();
+    await page.getByRole("option", { name: "Orion" }).click();
+    // Ctrl+Enter on a closed selector still submits the dialog.
+    await page.getByRole("combobox", { name: "Reports to" }).focus();
+    await page.keyboard.press("Control+Enter");
     await expect(page.getByText("Designer · reports to Orion")).toBeVisible();
     await page.getByRole("link", { name: "Employees", exact: true }).first().click();
     await page.getByRole("link", { name: "Org chart" }).click();
     await expect(page.getByRole("link", { name: /Pixel/ })).toBeVisible();
 
+    // A start profile fills in the dialog; what the daemon stored comes back on the page.
+    await go(page, "Employees");
+    await page.getByRole("button", { name: "Add employee" }).click();
+    await page.getByRole("combobox", { name: "Start from" }).click();
+    await page.getByRole("option", { name: "QA", exact: true }).click();
+    await expect(page.getByPlaceholder("Name, for example Alex")).toHaveValue("Quinn");
+    await expect(page.getByLabel("Instructions")).toHaveValue(/You are QA/);
+    if (!hidden("EmployeeTools")) {
+      await page.getByRole("button", { name: /Tools: / }).click();
+      await expect(page.getByRole("checkbox", { name: "Edit files", exact: true })).not.toBeChecked();
+      await expect(page.getByRole("checkbox", { name: "Run commands", exact: true })).toBeChecked();
+      await expect(page.getByRole("checkbox", { name: "Move tickets asks first" })).toBeChecked();
+      await page.getByRole("checkbox", { name: "Run commands asks first" }).click();
+    }
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Quinn", exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "Settings" }).click();
+    if (!hidden("EmployeeTools")) await expect(page.getByText("9 on, 2 ask first")).toBeVisible();
+
+    // The profile says it was hired, and its name is not offered twice.
+    await go(page, "Employees");
+    await page.getByRole("button", { name: "Add employee" }).click();
+    await page.getByRole("combobox", { name: "Start from" }).click();
+    await page.getByRole("option", { name: "QA · hired as Quinn" }).click();
+    await expect(page.getByPlaceholder("Name, for example Alex")).toHaveValue("");
+    await page.getByRole("button", { name: "Cancel" }).click();
+
+    // A chat of one's own: the server takes the opening and the message, and the sidebar lists it.
+    await go(page, "Employees");
+    await page.getByRole("row", { name: /Orion/ }).getByRole("button", { name: "Chat", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Chat with Orion" })).toBeVisible();
+    await expect(page.getByText("Talk with Orion here.", { exact: true }).first()).toBeVisible();
+    await page.getByPlaceholder("Message Orion").fill("Hallo Orion");
+    await page.keyboard.press("Enter");
+    const talk = page.getByRole("region", { name: "Chat with Orion" });
+    await expect(talk.getByText("Hallo Orion", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("navigation").getByRole("link", { name: "Orion" }).last()).toHaveAttribute(
+      "href",
+      /\/talk\//,
+    );
+    await expect(page.locator('[role="alert"]:not([data-astryx-live-region])')).toHaveCount(0);
+
     // A guideline: made, linked, changed to a second version, then archived and restored.
     await go(page, "Knowledge");
-    await expect(page.getByText("No guidelines yet")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No guidelines yet" })).toBeVisible();
     await page.getByRole("button", { name: "New guideline" }).first().click();
     await page.getByLabel("Title *").fill("Rust");
     await page.getByRole("textbox", { name: "Text" }).fill("## Rules\n- Keep it small");
@@ -86,58 +152,84 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByText("v2")).toBeVisible();
 
     // An idea: made, then dropped.
-    await page.getByRole("link", { name: "Ideas" }).click();
-    await page.getByRole("button", { name: "New idea" }).click();
-    await page.getByPlaceholder(/The idea, for example/).fill("Dark mode");
-    await page.getByRole("button", { name: "Add idea" }).click();
-    const idea = page.getByRole("region", { name: "Ideas" }).getByText("Dark mode");
-    await expect(idea).toBeVisible();
-    await page.getByRole("button", { name: "Drop", exact: true }).click();
-    await expect(idea).toBeHidden();
+    if (!hidden("Ideas")) {
+      await page.getByRole("link", { name: "Ideas" }).click();
+      await page.getByRole("button", { name: "New idea" }).click();
+      await page.getByPlaceholder(/The idea, for example/).fill("Dark mode");
+      await page.getByRole("button", { name: "Add idea" }).click();
+      const idea = page.getByRole("region", { name: "Ideas" }).getByText("Dark mode");
+      await expect(idea).toBeVisible();
+      await page.getByRole("button", { name: "Drop", exact: true }).click();
+      await expect(idea).toBeHidden();
+    }
 
     // A memory, in the context of the project.
     await page.getByRole("link", { name: "Memory" }).click();
     await page.getByLabel("Remember for this project").fill("Publishing needs a review first");
     await page.getByRole("button", { name: "Remember", exact: true }).click();
-    await expect(page.getByText(/Saved to project memory/)).toBeVisible();
+    await expect(toast(page, /Saved to project memory/)).toBeVisible();
     await page.getByRole("tab", { name: "In context" }).click();
     await expect(page.getByText("Publishing needs a review first").first()).toBeVisible();
 
     // A vault secret: never in the page until asked, hidden again on Hide, and it copies.
-    await page.getByRole("link", { name: "Vault" }).click();
-    await page.getByRole("button", { name: "New item" }).first().click();
-    await page.getByRole("button", { name: "Secret" }).click();
-    await page.getByPlaceholder("GitHub token").fill("GitHub token");
-    await page.getByRole("dialog").locator('input[type="password"]').fill(SECRET);
-    await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
-    await expect(page.getByRole("button", { name: "Show GitHub token" })).toBeVisible();
-    expect(await page.content()).not.toContain(SECRET);
-    await page.getByRole("button", { name: "Show GitHub token" }).click();
-    await expect(page.getByText(SECRET)).toBeVisible();
-    await page.getByRole("button", { name: "Hide GitHub token" }).click();
-    await expect(page.getByText(SECRET)).toBeHidden();
-    expect(await page.content()).not.toContain(SECRET);
+    if (!hidden("Vault")) {
+      await page.getByRole("link", { name: "Vault" }).click();
+      await page.getByRole("button", { name: "New item" }).first().click();
+      await page.getByRole("button", { name: "Secret" }).click();
+      await page.getByPlaceholder("GitHub token").fill("GitHub token");
+      await page.getByRole("dialog").locator('input[type="password"]').fill(SECRET);
+      await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+      await expect(page.getByRole("button", { name: "Show GitHub token" })).toBeVisible();
+      expect(await page.content()).not.toContain(SECRET);
+      await page.getByRole("button", { name: "Show GitHub token" }).click();
+      await expect(page.getByText(SECRET)).toBeVisible();
+      await page.getByRole("button", { name: "Hide GitHub token" }).click();
+      await expect(page.getByText(SECRET)).toBeHidden();
+      expect(await page.content()).not.toContain(SECRET);
 
-    await page.getByRole("button", { name: "Copy GitHub token" }).click();
-    await expect(page.getByText("Copied. Clears in 60 s.")).toBeVisible();
-    expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(SECRET);
-    expect(await page.content()).not.toContain(SECRET);
+      await page.getByRole("button", { name: "Copy GitHub token" }).click();
+      await expect(toast(page, "Copied. Clears in 60 s.")).toBeVisible();
+      expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(SECRET);
+      expect(await page.content()).not.toContain(SECRET);
 
-    await page.getByRole("tab", { name: "Audit log" }).click();
-    await expect(page.getByText("The audit log is read-only")).toBeVisible();
-    await expect(page.getByText("GitHub token").first()).toBeVisible();
-    await page.getByRole("tab", { name: "Items" }).click();
+      await page.getByRole("tab", { name: "Audit log" }).click();
+      await expect(page.getByText("The audit log is read-only")).toBeVisible();
+      await expect(page.getByText("GitHub token").locator("visible=true").first()).toBeVisible();
+      await page.getByRole("tab", { name: "Items" }).click();
 
-    // The key: a wrong password stays out, the right one shows it once.
-    await page.getByRole("button", { name: "Export key…" }).click();
-    await page.getByPlaceholder("Your password").fill("not-the-password");
-    await page.getByRole("button", { name: "Export key" }).click();
-    await expect(page.getByRole("alert")).toBeVisible();
-    await page.getByPlaceholder("Your password").fill(PASSWORD);
-    await page.getByRole("button", { name: "Export key" }).click();
-    await expect(page.getByLabel("The vault key, shown once")).toBeVisible();
-    await page.getByRole("button", { name: "Done" }).click();
-    await expect(page.getByLabel("The vault key, shown once")).toBeHidden();
+      // The key: a wrong password stays out, the right one shows it once.
+      await page.getByRole("button", { name: "Export key…" }).click();
+      await page.getByPlaceholder("Your password").fill("not-the-password");
+      await page.getByRole("dialog").getByRole("button", { name: "Export key", exact: true }).click();
+      await expect(page.getByRole("alert")).toBeVisible();
+      await page.getByPlaceholder("Your password").fill(PASSWORD);
+      await page.getByRole("dialog").getByRole("button", { name: "Export key", exact: true }).click();
+      await expect(page.getByLabel("The vault key, shown once")).toBeVisible();
+      await page.getByRole("button", { name: "Done" }).click();
+      await expect(page.getByLabel("The vault key, shown once")).toBeHidden();
+    }
+    // The Scheduled page over the real daemon: what an employee planned (no real run here,
+    // so a row in the store), then taken back through the real write.
+    const store = new DatabaseSync(join(daemon.data, "data", "aurelius.sqlite"));
+    store
+      .prepare(
+        `INSERT INTO scheduled_messages(id, from_employee_id, to_employee_id, content, thread_key, place, planned_by_run, due_at_ms, created_at_ms)
+         SELECT '00000000-0000-7000-8000-00000000e701', id, id, 'Check the deploy again.', 'chat:x', 'its own chat', 'r1', ?, ? FROM employees LIMIT 1`,
+      )
+      .run(Date.now() + 3_600_000, Date.now());
+    store.close();
+    // The Scheduled page is reached from an employee's Inbox tab.
+    await go(page, "Employees");
+    await page.getByRole("link", { name: /Quinn/ }).first().click();
+    await page.getByRole("tab", { name: "Inbox" }).click();
+    await page.getByRole("link", { name: "Scheduled messages" }).click();
+    const waiting = page.getByRole("region", { name: "Scheduled messages" });
+    await expect(waiting.getByText("Check the deploy again.")).toBeVisible();
+    await waiting.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Take back" }).click();
+    await expect(page.getByRole("region", { name: "What came of them" }).getByText("Taken back")).toBeVisible();
+    await expect(waiting.getByText("No messages are scheduled.")).toBeVisible();
+    await expect(page.getByRole("region", { name: "Recurring tasks" })).toHaveCount(hidden("RecurringTasks") ? 0 : 1);
   } finally {
     await app.close().catch(() => undefined);
     await daemon.stop();
@@ -378,6 +470,7 @@ test.describe("scripted organisation", () => {
   });
 
   test("a shown secret hides when the window loses focus and when leaving the page", async ({ page }) => {
+    test.skip(hidden("Vault"), "hidden in hidden.ts");
     const { stop } = await scripted(page, { reads: vaultReads(SECRET) }, "/knowledge/vault");
     const show = page.getByRole("button", { name: "Show GitHub token" });
     await show.click();
@@ -395,6 +488,7 @@ test.describe("scripted organisation", () => {
   });
 
   test("a secret disappears after its 30 seconds", async ({ page }) => {
+    test.skip(hidden("Vault"), "hidden in hidden.ts");
     await page.clock.install();
     const { stop } = await scripted(page, { reads: vaultReads(SECRET) }, "/knowledge/vault");
     await page.getByRole("button", { name: "Show GitHub token" }).click();
@@ -409,6 +503,7 @@ test.describe("scripted organisation", () => {
     page,
     context,
   }) => {
+    test.skip(hidden("Vault"), "hidden in hidden.ts");
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const { writes, stop } = await scripted(
       page,
@@ -419,16 +514,300 @@ test.describe("scripted organisation", () => {
       "/knowledge/vault",
     );
     await page.getByRole("button", { name: "Copy GitHub token" }).click();
-    await expect(page.getByText(/A browser may keep it on the clipboard/)).toBeVisible();
-    await expect(page.getByText("Copied. Clears in 60 s.")).toBeHidden();
+    await expect(toast(page, /A browser may keep it on the clipboard/)).toBeVisible();
+    await expect(toast(page, "Copied. Clears in 60 s.")).toBeHidden();
 
     await page.getByRole("button", { name: "New item" }).first().click();
     await page.getByRole("button", { name: "Secret" }).click();
     await page.getByPlaceholder("GitHub token").fill("Other");
     await page.getByRole("dialog").locator('input[type="password"]').fill("another-secret-value");
     await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
-    await expect(page.getByRole("alert")).toContainText("Refused.");
+    await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Refused.");
     expect(writes.filter((w) => w.method === "vault.create")).toHaveLength(1);
+    await stop();
+  });
+
+  test("the sidebar shows the latest four chats, one unread, and a chat answers on chat.send", async ({ page }) => {
+    const chat = (id: string, name: string, unread: number) => ({
+      conversation_id: id,
+      employee_id: "e1",
+      employee_name: name,
+      unread,
+      last_activity_ms: 1,
+    });
+    const { writes, stop } = await scripted(
+      page,
+      {
+        features: ["employee_chats"],
+        conversations: {
+          c1: messages("c1", [
+            message("m1", "user", "Can you rename it?"),
+            message("m2", "assistant", "Made a ticket for it."),
+            message("m3", "assistant", "Which name?\n\nFrom ticket #7 Rename", {
+              update: "ticket_note",
+              author: "Orion",
+            }),
+          ]),
+        },
+        reads: {
+          "employee.chats": () => ({
+            type: "employee_chats",
+            value: {
+              as_of_seq: 1,
+              chats: [
+                chat("c1", "Orion", 0),
+                chat("c2", "Mira", 2),
+                chat("c3", "Bo", 0),
+                chat("c4", "Cy", 0),
+                chat("c5", "Fifth", 0),
+              ],
+            },
+          }),
+        },
+        results: {
+          "employee.open_chat": () => ({
+            kind: "command",
+            value: { type: "employee_chat_opened", conversation_id: "c1" },
+          }),
+        },
+      },
+      "/employees",
+    );
+    const nav = page.getByRole("navigation");
+    await expect(nav.getByRole("link", { name: "Mira" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Cy" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Fifth" })).toHaveCount(0);
+
+    await page.getByRole("row", { name: /Pixel/ }).getByRole("button", { name: "Chat", exact: true }).click();
+    await expect.poll(() => writes.filter((w) => w.method === "employee.open_chat").length).toBe(1);
+    expect(writes.find((w) => w.method === "employee.open_chat")?.params).toMatchObject({ employee_id: "e2" });
+    const talk = page.getByRole("region", { name: "Chat with Orion" });
+    await expect(talk.getByText("Made a ticket for it.")).toBeVisible();
+    await expect(talk.getByText("FROM A TICKET")).toBeVisible();
+    await expect(talk.getByText(/From ticket #7/)).toBeVisible();
+
+    await page.getByPlaceholder("Message Orion").fill("Call it Vega");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => writes.filter((w) => w.method === "chat.send").length).toBe(1);
+    expect(writes.find((w) => w.method === "chat.send")?.params).toMatchObject({
+      conversation_id: "c1",
+      text: "Call it Vega",
+    });
+    expect(writes.filter((w) => w.method === "group_chat.send")).toHaveLength(0);
+    await stop();
+  });
+
+  test("the Scheduled page lists what comes back and a chat shows who waits for it", async ({ page }) => {
+    const planned = {
+      from_employee: "e1",
+      from_name: "Orion",
+      to_employee: "e1",
+      to_name: "Orion",
+      created_at_ms: 1,
+      due_at_ms: Date.now() + 3_600_000,
+      place: "the discussion of ticket #21",
+      ticket_id: "t1",
+    };
+    const { writes, stop } = await scripted(
+      page,
+      {
+        features: ["scheduled_messages"],
+        reads: {
+          "scheduled_message.list": () => ({
+            type: "scheduled_messages",
+            value: {
+              as_of_seq: 1,
+              messages: [
+                { ...planned, id: "s1", text: "Check the CI of PR 12.", state: "scheduled" },
+                {
+                  ...planned,
+                  id: "s2",
+                  text: "Look at the deploy.",
+                  to_employee: "e2",
+                  to_name: "Pixel",
+                  state: "not_delivered",
+                  outcome: "Pixel is paused.",
+                },
+              ],
+            },
+          }),
+          "recurring_task.list": () => ({
+            type: "task_schedules",
+            value: {
+              as_of_seq: 1,
+              schedules: [
+                {
+                  id: "r1",
+                  title: "Weekly report",
+                  goal: "Report",
+                  criteria: [],
+                  employee_id: "e1",
+                  employee_name: "Orion",
+                  recurrence: { kind: "daily", at_minute: 540 },
+                  paused: false,
+                  run: {},
+                  attachments: [],
+                  created_at_ms: 1,
+                },
+              ],
+            },
+          }),
+        },
+      },
+      "/scheduled",
+    );
+    await expect(page.getByRole("heading", { name: "Scheduled" })).toBeVisible();
+    const waiting = page.getByRole("region", { name: "Scheduled messages" });
+    await expect(waiting.getByRole("row", { name: /Check the CI of PR 12/ })).toContainText("Orion");
+    await expect(waiting.getByRole("link", { name: "the discussion of ticket #21" })).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "What came of them" }).getByText("Not delivered: Pixel is paused."),
+    ).toBeVisible();
+    await expect(page.getByRole("region", { name: "Recurring tasks" })).toHaveCount(hidden("RecurringTasks") ? 0 : 1);
+
+    await waiting.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Take back" }).click();
+    await expect.poll(() => writes.filter((w) => w.method === "scheduled_message.cancel").length).toBe(1);
+    expect(writes.find((w) => w.method === "scheduled_message.cancel")?.params).toMatchObject({ message_id: "s1" });
+    await stop();
+  });
+
+  test("the employee page has its inbox, memory and settings, and the list says what it is doing", async ({ page }) => {
+    const { stop } = await scripted(
+      page,
+      {
+        features: ["employee_queue", "activity_log"],
+        employees: [
+          {
+            ...orion,
+            working: true,
+            activity_state: "waiting",
+            settings: { model: { mode: "value", value: "sonnet" } },
+          },
+          pixel,
+        ],
+        reads: {
+          "employee.queue": () => ({
+            type: "employee_queue",
+            value: {
+              as_of_seq: 1,
+              employee_id: "e1",
+              items: [
+                {
+                  id: "i1",
+                  kind: "task",
+                  source: "board",
+                  state: "claimed",
+                  thread_key: "ticket:t1",
+                  place: { label: "#21 Fix the login", ticket_id: "t1" },
+                  run_id: "r1",
+                  hop: 0,
+                  created_at_ms: 1,
+                  not_before_ms: 1,
+                },
+                {
+                  id: "i2",
+                  kind: "message",
+                  source: "employee",
+                  state: "queued",
+                  thread_key: "ticket:t2",
+                  place: { label: "#22 Write the docs", ticket_id: "t2" },
+                  hop: 1,
+                  created_at_ms: 2,
+                  not_before_ms: 2,
+                },
+              ],
+            },
+          }),
+          "memory.list": () => ({ type: "memory", value: { items: [] } }),
+        },
+      },
+      "/employees",
+    );
+    await expect(page.getByRole("row", { name: /Orion/ }).getByText("Waiting for you")).toBeVisible();
+    await expect(page.getByRole("row", { name: /Pixel/ }).getByText("Available")).toBeVisible();
+
+    await page.getByRole("link", { name: "Orion", exact: true }).click();
+    const tabs = page.getByRole("tablist", { name: "About Orion" });
+    await expect(tabs.getByRole("tab", { name: "Inbox" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("row", { name: /#21 Fix the login/ })).toContainText("Working on it");
+    await expect(page.getByRole("row", { name: /#22 Write the docs/ })).toContainText("Message from a colleague");
+    await expect(page.getByRole("row", { name: /#22 Write the docs/ })).toContainText("Next");
+
+    await tabs.getByRole("tab", { name: "Memory" }).click();
+    await expect(page.getByText("Orion has no memories of its own yet.", { exact: false })).toBeVisible();
+
+    await tabs.getByRole("tab", { name: "Settings" }).click();
+    await expect(page.getByText("sonnet", { exact: false }).first()).toBeVisible();
+    await expect(page).toHaveURL(/tab=settings/);
+    await stop();
+  });
+
+  test("the activity log narrows on what a row names", async ({ page }) => {
+    const asked: Record<string, unknown>[] = [];
+    const entry = {
+      seq: 2,
+      at_ms: 1_700_000_000_000,
+      category: "delivery",
+      step: "delivered",
+      detail: "message from board",
+      employee_id: "e1",
+      employee_name: "Orion",
+      thread_key: "ticket:t1",
+      place: { label: "#21 Fix the login", ticket_id: "t1" },
+      run_id: "019a52f0-1111-7000-8000-000000abcdef",
+      hop: 0,
+    };
+    const { stop } = await scripted(
+      page,
+      {
+        features: ["activity_log"],
+        reads: {
+          "activity_log.list": (request: Record<string, unknown>) => {
+            asked.push(request.params as Record<string, unknown>);
+            return { type: "activity_log", value: { as_of_seq: 1, entries: [entry], has_more: false } };
+          },
+        },
+      },
+      "/activity",
+    );
+    await expect(page.getByRole("heading", { name: "Activity log" })).toBeVisible();
+    await expect(page).toHaveURL(/\/settings\/activity/);
+    const row = page.getByRole("row", { name: /Delivered/ });
+    await expect(row).toContainText("message from board");
+
+    await row.getByRole("button", { name: "#21 Fix the login" }).click();
+    await expect.poll(() => asked.at(-1)).toMatchObject({ thread_key: "ticket:t1" });
+    await expect(page).toHaveURL(/thread=ticket/);
+
+    await page.getByRole("button", { name: "Show all" }).click();
+    await page.getByRole("textbox", { name: "Ticket, thread or run" }).fill("#21");
+    await expect.poll(() => asked.at(-1)).toMatchObject({ ticket_number: 21 });
+    await stop();
+  });
+
+  test("under a chat's title stands who waits to pick it up and what is scheduled", async ({ page }) => {
+    const { stop } = await scripted(
+      page,
+      {
+        features: ["scheduled_messages", "employee_chats"],
+        conversations: { c1: messages("c1", [message("m1", "assistant", "Noted.")]) },
+        reads: {
+          "thread.waiting": () => ({
+            type: "thread_waiting",
+            value: {
+              as_of_seq: 1,
+              waiters: [{ employee_id: "e1", employee_name: "Orion", behind: 2 }],
+              scheduled: [],
+            },
+          }),
+        },
+      },
+      "/talk/c1",
+    );
+    await expect(page.getByLabel("Who waits for this thread")).toHaveText(
+      "Orion — waiting to pick up this thread (behind 2 items)",
+    );
     await stop();
   });
 });

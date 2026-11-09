@@ -40,9 +40,7 @@ impl std::fmt::Debug for RemoteServer {
 /// HTTPS anywhere; plain HTTP only to this computer (dev, tests).
 pub fn check_url(url: &str) -> Result<reqwest::Url, ClientError> {
     let parsed = reqwest::Url::parse(url.trim()).map_err(|_| ClientError::Unreachable(format!("\"{url}\" is not a server address")))?;
-    // `host.docker.internal`: a container (aurelius-mcp's Docker image) on the server PC
-    // reaching the gateway's loopback port; the traffic stays on the PC.
-    let loopback = matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "[::1]" | "::1" | "host.docker.internal"));
+    let loopback = matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "[::1]" | "::1"));
     match parsed.scheme() {
         "https" => Ok(parsed),
         "http" if loopback => Ok(parsed),

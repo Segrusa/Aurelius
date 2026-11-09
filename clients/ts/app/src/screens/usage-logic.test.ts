@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { barHeight, bars, clampPercent, costText, limitTone, subscriptionFor, tokensShort } from "./usage-logic";
+import {
+  barHeight,
+  bars,
+  clampPercent,
+  costText,
+  limitTone,
+  subscriptionFor,
+  tokensShort,
+  userRowName,
+} from "./usage-logic";
+
+describe("userRowName", () => {
+  it("names the board member, one who left, and runs on no login", () => {
+    expect(userRowName({ login_user: "u", username: "grace" })).toBe("grace");
+    expect(userRowName({ login_user: "u" })).toBe("Former board member");
+    expect(userRowName({})).toBe("No Claude login");
+  });
+});
 
 describe("usage numbers", () => {
   it("shortens tokens", () => {
@@ -18,9 +35,9 @@ describe("usage numbers", () => {
   });
 
   it("colours a limit by how close it is", () => {
-    expect(limitTone(69)).toBe("bg-acc-text");
-    expect(limitTone(70)).toBe("bg-amber");
-    expect(limitTone(90)).toBe("bg-red");
+    expect(limitTone(69)).toBe("var(--color-text-accent)");
+    expect(limitTone(70)).toBe("var(--color-warning)");
+    expect(limitTone(90)).toBe("var(--color-error)");
     expect(clampPercent(120)).toBe(100);
   });
 

@@ -96,7 +96,8 @@ test("the Inbox with 5,000 rows, in a browser", async ({ page }) => {
         ) as HTMLElement;
         const start = performance.now();
         link.click();
-        while (document.querySelector("main h1")?.textContent !== name) await new Promise(requestAnimationFrame);
+        while (document.querySelector('[role="main"] h1')?.textContent !== name)
+          await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
         times.push(Math.round(performance.now() - start));
       }
@@ -132,7 +133,7 @@ test("the palette with 3,000 tickets, in a browser", async ({ page }) => {
     await page.evaluate(pressK);
     await expect(page.getByRole("option", { name: /#1 Ticket about subject 0/ })).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.locator("[cmdk-input]")).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Command palette" })).toHaveCount(0);
 
     const opens: number[] = [];
     for (let i = 0; i < 8; i++) {
@@ -141,24 +142,25 @@ test("the palette with 3,000 tickets, in a browser", async ({ page }) => {
         await page.evaluate(async () => {
           const start = performance.now();
           window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true }));
-          while (!document.querySelector("[cmdk-input]")) await new Promise((r) => requestAnimationFrame(r));
+          while (!document.querySelector('input[role="combobox"][aria-label="Command palette"]'))
+            await new Promise((r) => requestAnimationFrame(r));
           return performance.now() - start;
         }),
       );
       await page.keyboard.press("Escape");
-      await expect(page.locator("[cmdk-input]")).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Command palette" })).toHaveCount(0);
     }
     results.paletteOpen3000TicketsMs = { worst: Math.max(...opens), all: opens.map(Math.round) };
     expect(Math.max(...opens)).toBeLessThan(50);
 
     await page.evaluate(pressK);
     const typed = await page.evaluate(async () => {
-      const input = document.querySelector("[cmdk-input]") as HTMLInputElement;
+      const input = document.querySelector('input[role="combobox"][aria-label="Command palette"]') as HTMLInputElement;
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
       const start = performance.now();
       set?.call(input, "subject 2999");
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      while (!document.querySelector('[cmdk-item][data-value="ticket:t2999"]')) {
+      while (!document.querySelector('[role="option"][data-value="ticket:t2999"]')) {
         await new Promise((r) => requestAnimationFrame(r));
       }
       return performance.now() - start;
@@ -232,6 +234,8 @@ test("Electron's cold start until the Inbox is usable", async () => {
       await run.app.close();
     }
     results.electronColdStartMs = times;
+    // Headless on this machine it is about 470 ms; a heavy import in the first chunk would show here.
+    expect(Math.max(...times)).toBeLessThan(1000);
   } finally {
     await daemon.dispose();
     rmSync(profile, { recursive: true, force: true });

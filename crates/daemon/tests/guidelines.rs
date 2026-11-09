@@ -117,7 +117,7 @@ async fn claude_code(client: &Client, root: &Path) {
 }
 
 async fn hire(client: &Client, name: &str) -> (EmployeeId, ConversationId) {
-    let create = CreateEmployee { name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     (employee_id, conversation_id)
 }
@@ -186,33 +186,6 @@ fn sql(root: &Path, statement: &str, params: impl rusqlite::Params) {
     conn.execute(statement, params).unwrap();
 }
 
-fn reads(id: GuidelineId) -> Vec<Method> {
-    vec![
-        Method::GuidelineList { archived: false },
-        Method::GuidelineGet { guideline_id: id, version: None },
-        Method::GuidelineVersions { guideline_id: id },
-        Method::GuidelineEffective { employee_id: None, project_id: None },
-        Method::GuidelineProposals { status: None },
-        Method::GuidelineAffected { guideline_id: id },
-        Method::GuidelineStarterSet,
-        Method::RunGuidelines { run_id: RunId::new() },
-    ]
-}
-
-fn writes(id: GuidelineId, target: GuidelineTarget) -> Vec<Command> {
-    vec![
-        Command::CreateGuideline(CreateGuideline { title: "App".into(), text: "x".into(), links: vec![] }),
-        Command::UpdateGuideline(UpdateGuideline { guideline_id: id, title: None, text: Some("y".into()) }),
-        Command::ArchiveGuideline(ArchiveGuideline { guideline_id: id }),
-        Command::RestoreGuideline(RestoreGuideline { guideline_id: id }),
-        Command::RestoreGuidelineVersion(RestoreGuidelineVersion { guideline_id: id, version: 1 }),
-        Command::LinkGuideline(LinkGuideline { guideline_id: id, target }),
-        Command::UnlinkGuideline(UnlinkGuideline { guideline_id: id, target }),
-        Command::DecideGuidelineProposal(DecideGuidelineProposal { proposal_id: GuidelineProposalId::new(), approve: false, title: None, text: None, links: None, note: None }),
-        Command::AddStarterGuidelines(AddStarterGuidelines { keys: vec!["g1".into()] }),
-    ]
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn a_board_member_writes_and_reads_guidelines() {
     let dir = tempfile::tempdir().unwrap();
@@ -250,7 +223,7 @@ async fn a_board_member_writes_and_reads_guidelines() {
 
     // The starter set: its templates, then in the library.
     let ResponseBody::StarterSet(starter) = read(&client, Method::GuidelineStarterSet).await.unwrap() else { panic!() };
-    assert_eq!(starter.templates.len(), 8);
+    assert_eq!(starter.templates.len(), 7);
     assert!(starter.templates.iter().all(|t| !t.in_library && t.chars as usize == t.text.chars().count()));
     let added = write(&client, Command::AddStarterGuidelines(AddStarterGuidelines { keys: vec!["g1".into(), "p2".into()] }), None).await.unwrap();
     let CommandResult::StarterGuidelinesAdded { guideline_ids } = added else { panic!() };
@@ -264,32 +237,6 @@ async fn a_board_member_writes_and_reads_guidelines() {
     assert_eq!(archived.guidelines.iter().map(|g| g.id).collect::<Vec<_>>(), vec![id]);
     let ResponseBody::GuidelineProposals(proposals) = read(&client, Method::GuidelineProposals { status: None }).await.unwrap() else { panic!() };
     assert!(proposals.proposals.is_empty());
-    stop(dir.path(), daemon).await;
-}
-
-/// T10: an app with every scope reads nothing of the guidelines and changes nothing.
-#[tokio::test(flavor = "multi_thread")]
-async fn t10_apps_neither_read_nor_write_guidelines() {
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = start(dir.path()).await;
-    let alex = connect(dir.path()).await;
-    let (ann, _) = hire(&alex, "Ann").await;
-    let id = create(&alex, "Rust", "Use clippy.", vec![]).await;
-    let key = alex
-        .create_app_key(aurelius_domain::app_key::CreateAppKey { name: "assistant".into(), scopes: aurelius_domain::app_key::AppScope::ALL.to_vec(), limit_per_hour: None, limit_concurrent: None, audience: Default::default(), webhook_url: None })
-        .await
-        .unwrap();
-    let app = Client::connect_app(&aurelius_host::endpoint(dir.path()), &key.secret, "test app").await.unwrap();
-    for method in reads(id) {
-        let name = format!("{method:?}");
-        assert_eq!(read(&app, method).await.unwrap_err().code, ErrorCode::Forbidden, "{name}");
-    }
-    for command in writes(id, GuidelineTarget::Employee(ann)) {
-        let name = command.method();
-        assert_eq!(write(&app, command, None).await.unwrap_err().code, ErrorCode::Forbidden, "{name}");
-    }
-    let ResponseBody::Guideline(detail) = read(&alex, Method::GuidelineGet { guideline_id: id, version: None }).await.unwrap() else { panic!() };
-    assert_eq!((detail.guideline.version, detail.guideline.archived, detail.guideline.links.len()), (1, false, 0), "nothing changed");
     stop(dir.path(), daemon).await;
 }
 
@@ -509,17 +456,17 @@ async fn the_seed_runs_at_the_start_once() {
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let ResponseBody::Guidelines(list) = read(&client, Method::GuidelineList { archived: false }).await.unwrap() else { panic!() };
-    assert_eq!(list.guidelines.len(), 8);
+    assert_eq!(list.guidelines.len(), 7);
     let ResponseBody::EffectiveGuidelines(set) = read(&client, Method::GuidelineEffective { employee_id: Some(forge), project_id: Some(aurelius) }).await.unwrap() else { panic!() };
     assert!(set.guidelines.len() >= 3 && set.dropped.is_empty(), "Forge's and the project's: {:?}", set.guidelines.iter().map(|g| &g.title).collect::<Vec<_>>());
     let sources: i64 = db(dir.path()).query_row("SELECT COUNT(*) FROM guideline_versions WHERE source = 'seed' AND by_user IS NULL", [], |r| r.get(0)).unwrap();
-    assert_eq!(sources, 8);
+    assert_eq!(sources, 7);
     drop(client);
     stop(dir.path(), daemon).await;
 
     // Restarted: nothing more (the marker).
     let daemon = start(dir.path()).await;
     let count: i64 = db(dir.path()).query_row("SELECT COUNT(*) FROM guidelines", [], |r| r.get(0)).unwrap();
-    assert_eq!(count, 8);
+    assert_eq!(count, 7);
     stop(dir.path(), daemon).await;
 }

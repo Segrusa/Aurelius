@@ -39,7 +39,7 @@ async fn world(client: &Client, root: &Path) -> World {
         panic!()
     };
     let CommandResult::EmployeeCreated { employee_id, .. } =
-        exec(client, Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Onderzoeker".into(), title: None, reports_to: None, instructions: None, folder: None })).await
+        exec(client, Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Onderzoeker".into(), title: None, reports_to: None, instructions: None, folder: None })).await
     else {
         panic!()
     };
@@ -80,7 +80,6 @@ fn new_task(w: &World, title: &str, goal: &str) -> CreateTask {
         title: title.into(),
         goal: goal.into(),
         acceptance_criteria: vec![],
-        depends_on: vec![],
     }
 }
 

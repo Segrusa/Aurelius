@@ -117,21 +117,6 @@ class ProposalDecided extends InboxEvent {
   final String? instructions;
 }
 
-/// Load (again) a task's variants for its compare card (`task.variants`).
-class VariantsRequested extends InboxEvent {
-  const VariantsRequested(this.taskId);
-
-  final String taskId;
-}
-
-/// Take one of a task's variants; [variant] null takes the judge's pick.
-class VariantChosen extends InboxEvent {
-  const VariantChosen(this.taskId, {this.variant});
-
-  final String taskId;
-  final int? variant;
-}
-
 class InboxNoticeShown extends InboxEvent {
   const InboxNoticeShown();
 }
@@ -173,8 +158,6 @@ class InboxState extends Equatable {
     this.unread = 0,
     this.deciding = const {},
     this.planOutcomes = const {},
-    this.variants = const {},
-    this.variantsOn = false,
     this.personalOn = false,
     this.followOn = false,
     this.linksOn = false,
@@ -201,12 +184,6 @@ class InboxState extends Equatable {
 
   /// Plans decided here (or found handled elsewhere), by approval id.
   final Map<String, PlanOutcome> planOutcomes;
-
-  /// Loaded variant comparisons, by task id.
-  final Map<String, TaskVariantsView> variants;
-
-  /// The server has `task_variants`: tasks with variants ready show a compare card.
-  final bool variantsOn;
 
   /// The server has `personal_inbox`: rows per ticket or channel (A3).
   final bool personalOn;
@@ -258,8 +235,6 @@ class InboxState extends Equatable {
     int? unread,
     Set<String>? deciding,
     Map<String, PlanOutcome>? planOutcomes,
-    Map<String, TaskVariantsView>? variants,
-    bool? variantsOn,
     bool? personalOn,
     bool? followOn,
     bool? linksOn,
@@ -276,8 +251,6 @@ class InboxState extends Equatable {
         unread: unread ?? this.unread,
         deciding: deciding ?? this.deciding,
         planOutcomes: planOutcomes ?? this.planOutcomes,
-        variants: variants ?? this.variants,
-        variantsOn: variantsOn ?? this.variantsOn,
         personalOn: personalOn ?? this.personalOn,
         followOn: followOn ?? this.followOn,
         linksOn: linksOn ?? this.linksOn,
@@ -287,7 +260,7 @@ class InboxState extends Equatable {
       );
 
   @override
-  List<Object?> get props => [loading, approvals, proposals, guidelineProposals, notifications, unread, deciding, planOutcomes, variants, variantsOn, personalOn, followOn, linksOn, loadFailed, notice, notSent];
+  List<Object?> get props => [loading, approvals, proposals, guidelineProposals, notifications, unread, deciding, planOutcomes, personalOn, followOn, linksOn, loadFailed, notice, notSent];
 }
 
 extension NotificationAttention on NotificationView {
@@ -317,8 +290,6 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     on<NotificationDismissed>(_dismiss);
     on<NotificationsCleared>(_clearAll, transformer: droppable());
     on<ProposalDecided>(_decideProposal, transformer: concurrent());
-    on<VariantsRequested>(_loadVariants, transformer: concurrent());
-    on<VariantChosen>(_chooseVariant, transformer: concurrent());
     on<InboxNoticeShown>((e, emit) => emit(state.copyWith()));
     on<GuidelineProposalsRefreshed>(_refreshGuidelineProposals, transformer: debounceRestartable());
     on<GuidelineProposalDecided>(_decideGuidelineProposal, transformer: concurrent());
@@ -330,7 +301,6 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
       _repository.companyChanges.listen((e) {
         if (e.kind == EventKind.approvalAllowedAlways) add(ApprovalAllowedAlways(e.aggregateId));
         if (e.kind.wire.startsWith('guideline.')) add(const GuidelineProposalsRefreshed());
-        if (e.kind.wire.startsWith('task.variant')) add(VariantsRequested(e.aggregateId));
         add(const InboxRefreshed());
       }),
     ];
@@ -365,7 +335,6 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
         approvals: approvals.where((a) => a.isPending).toList(),
         // Proposed instructions only where the server has the feature.
         proposals: proposals.where((p) => p.isPending && (!p.isInstructions || link.has(Harness2.instructionProposals))).toList(),
-        variantsOn: link.has(Harness2.variants),
         personalOn: personal,
         followOn: link.has(ticketFollowFeature),
         linksOn: link.has(messageLocateFeature),
@@ -638,37 +607,6 @@ class InboxBloc extends Bloc<InboxEvent, InboxState> {
     }
     emit(state.copyWith(deciding: {...state.deciding}..remove(key), notice: notice));
     add(const GuidelineProposalsRefreshed());
-  }
-
-  Future<void> _loadVariants(VariantsRequested event, Emitter<InboxState> emit) async {
-    if (!_repository.linkState.has(Harness2.variants)) return;
-    try {
-      final view = await _repository.variantsOf(event.taskId);
-      emit(state.copyWith(variants: {...state.variants, event.taskId: view}));
-    } on DisconnectedException {
-      // Loaded again when the link is back.
-    } on ProtocolException {
-      // No variants (any more): forget what was loaded.
-      if (state.variants.containsKey(event.taskId)) emit(state.copyWith(variants: {...state.variants}..remove(event.taskId)));
-    }
-  }
-
-  Future<void> _chooseVariant(VariantChosen event, Emitter<InboxState> emit) async {
-    final key = 'variants:${event.taskId}';
-    emit(state.copyWith(deciding: {...state.deciding, key}));
-    String? notice;
-    try {
-      final receipt = await _repository.write(Commands.chooseVariant(event.taskId, variant: event.variant), retry: false);
-      final n = switch (receipt.command) { CommandResultTaskVariantChosen(:final variant) => variant, _ => event.variant };
-      notice = event.variant == null ? "The judge's pick${n == null ? '' : ', variant $n,'} is applied." : 'Variant $n is applied.';
-    } on NotSentException {
-      notice = 'Not sent. The PC was not reachable; nothing was chosen.';
-    } on ProtocolException catch (e) {
-      notice = e.code == ErrorCode.validation || e.code == ErrorCode.notFound ? 'These variants were already settled.' : e.message;
-    }
-    emit(state.copyWith(deciding: {...state.deciding}..remove(key), notice: notice));
-    add(VariantsRequested(event.taskId));
-    add(const InboxRefreshed());
   }
 
   Future<void> _taskOpened(TaskOpened event, Emitter<InboxState> emit) async {

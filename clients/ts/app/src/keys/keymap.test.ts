@@ -18,7 +18,7 @@ const base: KeyState = {
 
 describe("the table", () => {
   it("holds the desktop's shortcuts that do something here, none twice for one chord in one context", () => {
-    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(74);
+    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(73);
     const seen = new Set<string>();
     for (const s of SHORTCUTS) {
       for (const k of s.keys) {
@@ -53,6 +53,12 @@ describe("what a chord means", () => {
     expect(actionsFor("secondary-k", base)).toEqual(["OpenPalette"]);
     expect(actionsFor("j", base)).toEqual(["SelectNext"]);
     expect(actionsFor("down", base)).toEqual(["SelectNext"]);
+  });
+
+  it("no longer knows the keys of a hidden feature", () => {
+    expect(actionsFor("secondary-shift-v", base)).toEqual([]);
+    expect(actionsFor("secondary-0", base)).toEqual([]);
+    expect(actionsFor("secondary-7", base)).toEqual(["GoTasks"]);
   });
 
   it("leaves typing alone, except what has a modifier", () => {

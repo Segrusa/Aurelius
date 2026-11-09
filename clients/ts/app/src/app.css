@@ -1,0 +1,67 @@
+/* Astryx, the Precision theme, and the few global rules no component owns. */
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "./theme/precision/precision.css";
+
+@layer reset {
+  html {
+    background: light-dark(#f3f3f2, #08090a);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    overflow: hidden;
+    background: var(--color-background-body);
+    color: var(--color-text-primary);
+    font-size: 13px;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-track) transparent;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-text-accent);
+    outline-offset: 1px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: this must win over every component. */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: this must win over every component. */
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* An @name in a message: a marker class, since it sits inside text Markdown renders. */
+.mention {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--color-overlay-hover);
+  color: var(--color-text-accent);
+  font-weight: 500;
+}
+
+/* A shortcut next to its action shows only when Settings says so. Unlayered, so it beats the components. */
+[data-key] > kbd {
+  display: none;
+}
+
+[data-hints] [data-key] > kbd {
+  display: inline;
+}

@@ -71,6 +71,14 @@ pub const MIGRATIONS: &[Migration] = &[
     plain(30, include_str!("../../../migrations/0030_quick_answers.sql")),
     plain(31, include_str!("../../../migrations/0031_idea_ticket.sql")),
     Migration { version: 32, sql: include_str!("../../../migrations/0032_web_clients.sql"), rebuild: true, then: None },
+    plain(33, include_str!("../../../migrations/0033_employee_description.sql")),
+    plain(34, include_str!("../../../migrations/0034_employee_access_level.sql")),
+    plain(35, include_str!("../../../migrations/0035_usage_model_calls.sql")),
+    plain(36, include_str!("../../../migrations/0036_employee_inbox.sql")),
+    plain(37, include_str!("../../../migrations/0037_employee_chats.sql")),
+    plain(38, include_str!("../../../migrations/0038_scheduled_messages.sql")),
+    plain(39, include_str!("../../../migrations/0039_activity_log.sql")),
+    plain(40, include_str!("../../../migrations/0040_design_links.sql")),
 ];
 
 /// The last schema of protocol 2 (managers per project). The v0.6 import writes

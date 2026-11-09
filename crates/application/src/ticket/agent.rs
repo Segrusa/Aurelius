@@ -29,7 +29,7 @@ use super::{Base, Events, FieldChange, NewCard, insert_ticket, start_card, store
 use crate::conversation::{discussion, ticket_channel};
 use crate::task::{task_runs, ticket_line};
 use aurelius_domain::{
-    EmployeeId, EventNotice, ProjectId, RunId, TicketId, UserId,
+    ConversationId, EmployeeId, EventNotice, ProjectId, RunId, TicketId, UserId,
     autonomy::AgentMode,
     ticket::{self, Actor, ColumnKind, TicketPriority, TicketView},
 };
@@ -42,7 +42,7 @@ pub const LIST_LIMIT_DEFAULT: u32 = 25;
 pub const LIST_LIMIT_MAX: u32 = 50;
 
 /// Why only management creates tickets.
-pub const CREATE_MANAGERS_ONLY: &str = "Only management creates tickets (the head of the org chart or the dispatcher). Note it with add_idea for the project, or ask a manager to create it.";
+pub const CREATE_MANAGERS_ONLY: &str = "Only management creates tickets (the head of the org chart or the dispatcher); outside that, only in a board member's lasting chat with you. Ask a manager to create it.";
 /// Why a colleague cannot change a ticket it does not work on.
 pub const UPDATE_NOT_YOURS: &str = "You can only change a ticket you work on (you own it or have an open task in it); post in its discussion with post_to_ticket, or ask a manager.";
 /// Why only management moves a ticket.
@@ -68,7 +68,7 @@ pub const START_OTHER_LOGIN: &str = "This ticket runs on another board member's 
 /// Why an employee cannot rewrite a ticket's text while it is under review.
 pub const UPDATE_TEXT_LOCKED: &str = "The text of a ticket in Plan review, Testing or Review is under review and cannot be changed by an employee; post in its discussion with post_to_ticket instead.";
 /// Why a task is refused without a ticket.
-pub const DELEGATE_NEEDS_TICKET: &str = "Work always belongs to a ticket and this conversation has none: name it with ticket (#12; list_tickets shows the tickets). If none fits, management creates one with create_ticket, or ask a board member for one; then delegate again.";
+pub const DELEGATE_NEEDS_TICKET: &str = "Work always belongs to a ticket and this conversation has none: name it with ticket (#12; list_tickets shows the tickets). If none fits, management creates one with create_ticket (in a board member's lasting chat with you, you can too), or ask a board member for one; then delegate again.";
 /// Why a finished ticket takes no new task.
 pub const DELEGATE_TICKET_DONE: &str = "That ticket is Done and takes no new work; name an open ticket.";
 /// Why a run cannot put work on a ticket that runs on another board member's login.
@@ -259,7 +259,15 @@ fn parse_priority(text: Option<&str>) -> Result<TicketPriority, String> {
     }
 }
 
-/// `create_ticket`: a ticket in Backlog for management. The board member behind the run
+/// The board member's lasting chat `run` works in, when it is `employee`'s own.
+fn chat_of_run(conn: &Connection, run: RunId, employee: EmployeeId) -> Result<Option<ConversationId>, StorageError> {
+    let Some(conversation) = aurelius_storage::conversations::run_conversation(conn, run)? else { return Ok(None) };
+    let chat = aurelius_storage::employee_chats::of_conversation(conn, conversation)?;
+    Ok(chat.is_some_and(|c| c.employee == employee).then_some(conversation))
+}
+
+/// `create_ticket`: a ticket in Backlog for management, and for any employee in a board member's
+/// lasting chat with it (that chat hears when the ticket reaches Review). The board member behind the run
 /// (`login::of_run`) is its creator and Responsible; the same title made twice in one run is the
 /// same ticket. It starts nothing.
 pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
@@ -275,7 +283,8 @@ pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>
         (None, Some(p)) => p,
         (None, None) => return Ok((false, task_runs::need_project(tx, "a ticket")?, vec![])),
     };
-    if !is_manager(tx, me.employee, project)? {
+    let from_chat = chat_of_run(tx, run, me.employee)?;
+    if from_chat.is_none() && !is_manager(tx, me.employee, project)? {
         return refuse(CREATE_MANAGERS_ONLY);
     }
     let (title, description, labels) = match (ticket::valid_title(input.title), ticket::valid_description(input.description), ticket::valid_labels(input.labels)) {
@@ -323,7 +332,15 @@ pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>
     notices.extend(ticket_channel::opened_by(tx, id, user, by, false)?);
     notices.extend(agent_line(tx, id, by, "created this ticket")?);
     let project_name = crate::queries_project_name(tx, project).unwrap_or_default();
-    Ok((true, format!("Created ticket #{number} “{title}” in project {project_name}, in Backlog. It does not start by itself: a manager starts it (move_ticket to todo) or a board member."), notices))
+    // Made in a board member's chat: that chat hears when it reaches Review.
+    let link = match from_chat {
+        Some(chat) => {
+            aurelius_storage::employee_chats::link_ticket(tx, id, chat)?;
+            format!(" Link it in your reply as {}.", crate::conversation::employee_chat::ticket_link(st, id, number))
+        }
+        None => String::new(),
+    };
+    Ok((true, format!("Created ticket #{number} “{title}” in project {project_name}, in Backlog. It does not start by itself: a manager starts it (move_ticket to todo) or a board member.{link}"), notices))
 }
 
 fn settle_created(tx: &Tx<'_>, id: TicketId, e: Events) -> Result<Vec<EventNotice>, StorageError> {
@@ -338,10 +355,12 @@ pub(crate) struct UpdateInput<'a> {
     pub description: Option<&'a str>,
     pub priority: Option<&'a str>,
     pub labels: Option<&'a [String]>,
+    /// A Claude Design artifact link; empty clears it.
+    pub design_url: Option<&'a str>,
 }
 
-/// `update_ticket`: title, description, priority and labels of an open ticket the employee manages
-/// or works on. Owner, mode, files and deadline are not here.
+/// `update_ticket`: title, description, priority, labels and design link of an open ticket the
+/// employee manages or works on. Owner, mode, files and deadline are not here.
 pub(crate) fn update(tx: &Tx<'_>, st: &Store, run: RunId, input: UpdateInput<'_>) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     let Some(me) = caller(tx, run)? else { return refuse(EMPLOYEES_ONLY) };
     if let Some(why) = plan_mode_refusal(tx, run)? {
@@ -377,8 +396,12 @@ pub(crate) fn update(tx: &Tx<'_>, st: &Store, run: RunId, input: UpdateInput<'_>
         },
         None => None,
     };
-    if title.is_none() && description.is_none() && priority.is_none() && labels.is_none() {
-        return refuse("Give a field to change: title, description, priority or labels.");
+    let design_url = match input.design_url.map(|u| ticket::valid_artifact_url("design_url", u)).transpose() {
+        Ok(d) => d,
+        Err(e) => return refuse(e.to_string()),
+    };
+    if title.is_none() && description.is_none() && priority.is_none() && labels.is_none() && design_url.is_none() {
+        return refuse("Give a field to change: title, description, priority, labels or design_url.");
     }
     let blob = match description.as_ref().and_then(|d| d.as_deref()) {
         Some(text) => {
@@ -398,11 +421,12 @@ pub(crate) fn update(tx: &Tx<'_>, st: &Store, run: RunId, input: UpdateInput<'_>
         labels: labels.as_deref(),
         deadline: None,
         run: None,
+        design_url: design_url.as_ref().map(|d| d.as_deref()),
         files_added: Vec::new(),
     };
     super::write_fields(tx, st, &mut e, &state, &change)?;
     let by = Actor::Employee { employee_id: me.employee };
-    let given: Vec<&str> = [("title", title.is_some()), ("description", description.is_some()), ("priority", priority.is_some()), ("labels", labels.is_some())]
+    let given: Vec<&str> = [("title", title.is_some()), ("description", description.is_some()), ("priority", priority.is_some()), ("labels", labels.is_some()), ("design link", design_url.is_some())]
         .into_iter()
         .filter_map(|(name, given)| given.then_some(name))
         .collect();

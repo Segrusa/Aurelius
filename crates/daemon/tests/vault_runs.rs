@@ -86,7 +86,7 @@ async fn the_audit_of_a_tickets_runs_names_the_ticket() {
     let (daemon, client) = work_daemon(dir.path()).await;
     let mut employees = Vec::new();
     for name in ["Forge", "Bridge"] {
-        let create = CreateEmployee { name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+        let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
         let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
         employees.push(employee_id);
     }

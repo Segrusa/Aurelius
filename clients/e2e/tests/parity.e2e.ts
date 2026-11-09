@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { Connection, expectBody } from "@aurelius/client";
 import { _electron, expect, type Locator, test } from "@playwright/test";
 import { daemonEndpoint, openPipe } from "../../electron/src/main/pipe";
+import { hidden } from "../../ts/app/src/hidden";
 import { REPO, TestDaemon, until } from "./daemon";
 
 const PASSWORD = "a-long-enough-password";
@@ -46,11 +47,11 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
     // The app's own mark, not a letter.
-    await expect(page.getByRole("complementary").locator("svg rect.fill-acc").first()).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("img", { name: "Aurelius" })).toBeVisible();
 
     // A key that belongs to another screen goes there and does it.
     await page.keyboard.press("Control+k");
-    await page.locator("[cmdk-input]").fill("New project");
+    await page.getByRole("combobox", { name: "Command palette" }).fill("New project");
     await expect(page.getByRole("option", { name: /New project/ }).first()).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(/projects/);
@@ -126,13 +127,13 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page.getByRole("button", { name: /^Move .* right$/ }).first()).toBeVisible();
     await page.keyboard.press("Escape");
 
-    // My tickets: the project filter.
+    // One project at a time: the workspace, on My tickets as everywhere.
     await page.getByRole("navigation").getByRole("link", { name: "My tickets" }).first().click();
-    const projectFilter = page.getByRole("button", { name: "Project", exact: true });
-    await expect(projectFilter).toContainText("All projects");
-    await projectFilter.click();
+    await page.getByRole("button", { name: "Workspace: All projects" }).click();
     await page.getByRole("menuitem", { name: "Northwind API" }).click();
-    await expect(projectFilter).toContainText("Northwind API");
+    await page.getByRole("button", { name: "Workspace: Northwind API" }).click();
+    await page.getByRole("menuitem", { name: "All projects" }).click();
+    await expect(page.getByRole("button", { name: "Workspace: All projects" })).toBeVisible();
 
     // Create and start with nobody to do it yet: says what happened.
     await page.keyboard.press("Control+t");
@@ -172,22 +173,24 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.getByRole("link", { name: /Ava/ }).first().click();
     await page.getByRole("button", { name: "More for Ava" }).click();
     await page.getByRole("menuitem", { name: "Pin to the list" }).click();
-    await expect(page.getByRole("complementary").getByRole("link", { name: "Ava" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Ava" })).toBeVisible();
 
     // An idea takes files too.
-    await page.getByRole("navigation").getByRole("link", { name: "Knowledge" }).first().click();
-    await page.getByRole("link", { name: "Ideas" }).first().click();
-    await page.getByRole("button", { name: "New idea" }).click();
-    const ideaTitle = page.getByPlaceholder(/The idea, for example/);
-    await ideaTitle.fill("With a file");
-    await pasteImage(ideaTitle);
-    await expect(page.getByRole("button", { name: "Remove pasted.png" })).toBeVisible();
-    await page.getByRole("button", { name: "Add idea" }).click();
-    await page.getByRole("region", { name: "Ideas" }).getByText("With a file").click();
-    await expect(page.getByRole("button", { name: /View pasted/ })).toBeVisible();
+    if (!hidden("Ideas")) {
+      await page.getByRole("navigation").getByRole("link", { name: "Knowledge" }).first().click();
+      await page.getByRole("link", { name: "Ideas" }).first().click();
+      await page.getByRole("button", { name: "New idea" }).click();
+      const ideaTitle = page.getByPlaceholder(/The idea, for example/);
+      await ideaTitle.fill("With a file");
+      await pasteImage(ideaTitle);
+      await expect(page.getByRole("button", { name: "Remove pasted.png" })).toBeVisible();
+      await page.getByRole("button", { name: "Add idea" }).click();
+      await page.getByRole("region", { name: "Ideas" }).getByText("With a file").click();
+      await expect(page.getByRole("button", { name: /View pasted/ })).toBeVisible();
+    }
 
     // A task's conversation can go.
-    await page.getByRole("navigation").getByRole("link", { name: "Tasks" }).first().click();
+    await page.keyboard.press("Control+7");
     const list = page.getByRole("region", { name: "Task list" });
     await list
       .getByRole("button", { name: /Compare hosting/ })
@@ -211,6 +214,8 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page.locator("html")).toHaveAttribute("data-hints", "");
     await page.keyboard.press("h");
     await expect(page.getByRole("switch", { name: "Always show shortcut hints" })).not.toBeChecked();
+    // A switch is an input, but the keys of the page still work from it.
+    await page.getByRole("switch", { name: "Always show shortcut hints" }).focus();
     await page.keyboard.press("j");
     await expect(page.locator("[data-setting-row]:focus")).toHaveCount(1);
   } finally {

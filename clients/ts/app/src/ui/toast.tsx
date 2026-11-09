@@ -1,49 +1,31 @@
-import { useSyncExternalStore } from "react";
+// `toast()` from anywhere, shown by Astryx. A message before the frame has mounted waits for it.
 
-interface Toast {
-  id: number;
-  text: string;
-}
+import { useToast } from "@astryxdesign/core/Toast";
+import { useEffect } from "react";
 
-const LIFE_MS = 5000;
-const MAX = 3;
-let toasts: Toast[] = [];
-let nextId = 1;
-const listeners = new Set<() => void>();
-const changed = () => {
-  for (const listener of listeners) listener();
-};
+type Show = (text: string) => void;
+
+let show: Show | null = null;
+let waiting: string[] = [];
 
 /** A short message that leaves by itself. */
 export function toast(text: string): void {
-  const id = nextId++;
-  toasts = [...toasts, { id, text }].slice(-MAX);
-  changed();
-  setTimeout(() => {
-    toasts = toasts.filter((t) => t.id !== id);
-    changed();
-  }, LIFE_MS);
+  if (show) show(text);
+  else waiting.push(text);
 }
 
-export function Toasts() {
-  const shown = useSyncExternalStore(
-    (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    () => toasts,
-  );
-  return (
-    <section
-      aria-live="polite"
-      aria-label="Messages"
-      className="pointer-events-none fixed right-4 bottom-4 z-50 flex w-[320px] flex-col gap-2"
-    >
-      {shown.map((t) => (
-        <div key={t.id} className="enter rounded-[8px] border border-line bg-pop px-3 py-[10px] shadow-pop">
-          {t.text}
-        </div>
-      ))}
-    </section>
-  );
+export function ToastBridge() {
+  const showToast = useToast();
+  useEffect(() => {
+    show = (text) => {
+      showToast({ body: text, isAutoHide: true, autoHideDuration: 5000 });
+    };
+    const held = waiting;
+    waiting = [];
+    for (const text of held) show(text);
+    return () => {
+      show = null;
+    };
+  }, [showToast]);
+  return null;
 }

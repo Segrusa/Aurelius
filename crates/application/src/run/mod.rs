@@ -1,12 +1,11 @@
-//! Runs: providers and the configuration a run resolves, approvals, heartbeats, and the
+//! Runs: providers and the configuration a run resolves, approvals and the
 //! lifecycle of a chat run (queue, plan, start, checkpoints, finish).
 
 pub mod approvals;
-pub mod artifacts;
 pub mod connections;
 pub mod events;
 pub mod guidelines;
-pub mod heartbeat;
+pub mod inbox;
 pub mod lifecycle;
 pub mod login;
 pub mod login_wait;

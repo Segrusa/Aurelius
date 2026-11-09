@@ -282,10 +282,10 @@ fn blob(store: &Store, id: &str) {
 }
 
 #[test]
-fn the_org_chart_plugins_and_the_follow_setting_are_stored() {
+fn the_org_chart_and_the_follow_setting_are_stored() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
-    let (project, boss) = project_with_employee(&store, "Jean");
+    let (_project, boss) = project_with_employee(&store, "Jean");
     let report = EmployeeId::new();
     store
         .write(move |tx| employees::insert_employee(tx, report, "Simon", "Dev", None, Some(boss), None, &serde_json::json!({}), ConversationId::new()))
@@ -311,22 +311,6 @@ fn the_org_chart_plugins_and_the_follow_setting_are_stored() {
 
     store.write(move |tx| employees::set_reports_to(tx, report, None)).unwrap();
     assert!(entries(&store).contains(&(report, None)));
-
-    store.write(move |tx| employees::set_plugins(tx, boss, &["a@x".to_string(), "b@x".to_string()])).unwrap();
-    store.write(move |tx| employees::set_plugins(tx, report, &["b@x".to_string()])).unwrap();
-    assert_eq!(store.read(|c| employees::plugins_of(c, boss)).unwrap(), vec!["a@x".to_string(), "b@x".to_string()]);
-    let users = store.read(employees::plugin_users).unwrap();
-    assert_eq!(users.iter().filter(|(p, _)| p == "b@x").count(), 2);
-    store.write(move |tx| employees::set_plugins(tx, boss, &[])).unwrap();
-    assert!(store.read(|c| employees::plugins_of(c, boss)).unwrap().is_empty());
-
-    // A project's own list, for its project assistant and the runs in its tasks, apart from the employees'.
-    store.write(move |tx| employees::set_project_plugins(tx, project, &["c@x".to_string(), "a@x".to_string(), "c@x".to_string()])).unwrap();
-    assert_eq!(store.read(|c| employees::project_plugins_of(c, project)).unwrap(), vec!["c@x".to_string(), "a@x".to_string()]);
-    assert_eq!(store.read(employees::project_plugin_users).unwrap(), vec![("a@x".to_string(), project), ("c@x".to_string(), project)]);
-    assert!(store.read(|c| employees::plugins_of(c, boss)).unwrap().is_empty());
-    store.write(move |tx| employees::set_project_plugins(tx, project, &[])).unwrap();
-    assert!(store.read(|c| employees::project_plugins_of(c, project)).unwrap().is_empty());
 
     // "Follow the org chart" is a server setting, on unless turned off.
     assert!(store.read(employees::follow_org_chart).unwrap());
@@ -710,8 +694,13 @@ fn a_two_x_database_becomes_the_company() {
     let memory_scope: String = store.read(|c| Ok(c.query_row("SELECT scope_id FROM memory_items WHERE id = ?1", [&f.memory], |r| r.get(0))?)).unwrap();
     let simon_scope: String = store.read(|c| Ok(c.query_row("SELECT scope_id FROM employees WHERE id = ?1", [f.simon_a.to_string()], |r| r.get(0))?)).unwrap();
     assert_eq!(memory_scope, simon_scope);
-    let mut plugins = store.read(|c| employees::plugins_of(c, f.simon_a)).unwrap();
-    plugins.sort();
+    let plugins: Vec<String> = store
+        .read(|c| {
+            let mut stmt = c.prepare("SELECT plugin_id FROM employee_plugins WHERE employee_id = ?1 ORDER BY plugin_id")?;
+            let rows = stmt.query_map([f.simon_a.to_string()], |r| r.get(0))?;
+            Ok(rows.collect::<Result<_, _>>()?)
+        })
+        .unwrap();
     assert_eq!(plugins, vec!["x@m".to_string(), "y@m".to_string()]);
     let read = |key: &str| Some(key.to_string());
     let proposal = store.read(|c| proposals::list(c, &read)).unwrap().into_iter().find(|p| p.id.to_string() == f.proposal).unwrap();
@@ -1179,9 +1168,9 @@ fn migration_17_adds_one_group_chat_and_keeps_every_conversation_and_message() {
     assert_eq!(count(&store, "SELECT COUNT(*) FROM conversations WHERE kind = 'group' AND project_id IS NULL AND employee_id IS NULL"), 1);
     let group = store.read(conversations::group_conversation).unwrap().expect("the group chat exists");
     assert!(group.to_string().len() == 36);
-    // The employee still loads through its main chat, with its settings.
-    let loaded = store.write(move |tx| employees::load_employee(tx, employee)).unwrap().unwrap();
-    assert_eq!(loaded.conversation_id, chat);
+    // The employee keeps its main chat, with its settings (a full load needs schema 36).
+    let main: String = store.read(move |c| Ok(c.query_row("SELECT id FROM conversations WHERE employee_id = ?1 AND kind = 'employee' ORDER BY created_at_ms, id LIMIT 1", [employee.to_string()], |r| r.get(0))?)).unwrap();
+    assert_eq!(main, chat.to_string());
     assert_eq!(store.read(|c| conversations::agent_mode(c, chat)).unwrap(), aurelius_domain::autonomy::AgentMode::Auto);
     assert_eq!(count(&store, "SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
 

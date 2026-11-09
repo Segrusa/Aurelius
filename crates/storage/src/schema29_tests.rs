@@ -209,7 +209,7 @@ fn the_reads_show_an_upgraded_row_as_nothing_new() {
     let messages = store.read(|c| conversations::list_messages(c, ConversationId::parse(C1).unwrap(), &|k| Some(k.to_owned()))).unwrap();
     assert_eq!(messages.iter().map(|m| (m.text.as_str(), m.edited_at_ms, m.deleted_at_ms, m.editable)).collect::<Vec<_>>(), [("Hello", None, None, false), ("Bye", None, None, false)]);
 
-    let shown = store.read(|c| timeline::list_notifications_for(c, 50, Some(BEA))).unwrap();
+    let shown = store.read(|c| timeline::list_notifications_for(c, 50, Some(BEA), None)).unwrap();
     assert_eq!(shown.len(), 2);
     for n in shown {
         assert_eq!((n.ticket_id, n.ticket_number, n.conversation_id, n.message_id, n.reason, n.merged_count, n.needs_you), (None, None, None, None, None, 0, false), "{}", n.id);

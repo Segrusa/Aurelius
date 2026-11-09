@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:aurelius_mobile/app/mobile_core.dart';
 import 'package:aurelius_mobile/core/hosts/host_store.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/net/protocol.dart';
@@ -204,6 +205,9 @@ void main() {
       when(() => runtime.state).thenReturn(const RuntimeState());
       final power = MockPowerBloc();
       when(() => power.state).thenReturn(const PowerBlocState());
+      // The menus hide Power (ticket #19); the name it has to carry is what this looks at.
+      mobileCoreHidden = kHiddenInMobileCore.difference({'power'});
+      addTearDown(() => mobileCoreHidden = kHiddenInMobileCore);
       await tester.pumpWidget(
         MultiRepositoryProvider(
           providers: [

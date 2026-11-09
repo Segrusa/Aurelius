@@ -7,7 +7,6 @@ mod common;
 use common::*;
 
 use aurelius_client::{Client, ClientError};
-use aurelius_domain::app_key::{AppScope, CreateAppKey};
 use aurelius_domain::group_chat::SendGroupMessage;
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::ticket::{
@@ -522,35 +521,13 @@ async fn only_a_board_member_writes_or_reads_this_and_never_an_app() {
         ErrorCode::Unauthenticated
     );
 
-    let key = CreateAppKey {
-        name: "bot".into(),
-        scopes: vec![AppScope::Read, AppScope::Run],
-        limit_per_hour: None,
-        limit_concurrent: None,
-        audience: Default::default(),
-        webhook_url: None,
-    };
-    let secret = alex.create_app_key(key).await.unwrap().secret;
-    let app = Client::connect_app(&aurelius_host::endpoint(dir.path()), &secret, "test app")
-        .await
-        .expect("app session");
-    for command in [set_responsible(ticket_id, None), follow(ticket_id, true)] {
-        assert_eq!(
-            code(run(&app, command).await.unwrap_err()),
-            ErrorCode::Forbidden
-        );
-    }
-    assert_eq!(
-        code(app.ticket_followers(ticket_id).await.unwrap_err()),
-        ErrorCode::Forbidden
-    );
     assert_eq!(
         followers(&alex, ticket_id).await.len(),
         1,
         "nothing changed"
     );
 
-    drop((alex, anonymous, app));
+    drop((alex, anonymous));
     stop(dir.path(), daemon).await;
 }
 
@@ -735,7 +712,7 @@ async fn following_leaves_the_ticket_version_alone_so_an_older_client_gets_no_co
         (seen.version, seen.updated_at_ms)
     );
     // A client that never hears of the follow writes with the version it has; events go on from there.
-    let update = UpdateTicket {
+    let update = UpdateTicket { design_url: None,
         ticket_id,
         title: Some("Login v2".into()),
         description: None,
@@ -859,7 +836,7 @@ async fn post(client: &Client, ticket_id: TicketId, text: &str) {
 }
 
 fn describe(ticket_id: TicketId, text: &str) -> Command {
-    Command::UpdateTicket(UpdateTicket {
+    Command::UpdateTicket(UpdateTicket { design_url: None,
         ticket_id,
         title: None,
         description: Some(text.into()),
@@ -1086,7 +1063,6 @@ async fn raw(root: &Path, accepts: &[&str]) -> BoxStream {
         Method::SessionHello(HelloParams {
             client_name: "raw".into(),
             client_version: "0".into(),
-            app_key: None,
             accepts,
             session_token: Some(token),
         }),

@@ -1,4 +1,6 @@
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { expectBody } from "@aurelius/client";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useEffect, useState } from "react";
 import { type Appearance, useAppearance } from "../appearance";
@@ -6,7 +8,6 @@ import { useConnection, useLinkState } from "../connection";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { parseScreenUse, SCREEN_USE_KEY } from "../screen-use";
-import { Segments } from "../ui/kit";
 import { ClaudeLogin, passwordProblem } from "./settings-accounts";
 import {
   ConfirmButton,
@@ -14,6 +15,7 @@ import {
   HINTS_KEY,
   Keyed,
   Muted,
+  Part,
   Problem,
   Row,
   SmallButton,
@@ -24,6 +26,14 @@ import {
   when,
 } from "./settings-kit";
 import { screenUseRows } from "./settings-logic";
+
+const styles = stylex.create({
+  label: { fontWeight: 500 },
+  form: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  value: { fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--color-text-secondary)" },
+  status: { fontSize: 12, color: "var(--color-text-secondary)" },
+  notes: { whiteSpace: "pre-wrap" },
+});
 
 function ChangePassword() {
   const connection = useConnection();
@@ -44,9 +54,9 @@ function ChangePassword() {
     setDone(ok);
   };
   return (
-    <div className="flex flex-col gap-2 px-4 py-[14px]">
-      <div className="font-medium">Password</div>
-      <form className="flex flex-wrap items-center gap-2" onSubmit={(e) => void submit(e)}>
+    <Part>
+      <div {...stylex.props(styles.label)}>Password</div>
+      <form {...stylex.props(styles.form)} onSubmit={(e) => void submit(e)}>
         <TextInput
           label="Current password"
           placeholder="Current password"
@@ -81,7 +91,7 @@ function ChangePassword() {
       <Muted>{newPassword && problem ? problem : "At least 12 characters."}</Muted>
       {done ? <Muted>Your password is changed.</Muted> : null}
       <Problem error={error} />
-    </div>
+    </Part>
   );
 }
 
@@ -163,7 +173,7 @@ function ScreenUse() {
       {rows.length === 0 ? <Row title="Nothing counted yet." /> : null}
       {rows.map(([key, u]) => (
         <Row key={key} title={key} hint={`Last opened ${when(u.last_ms)}`}>
-          <span className="font-mono text-[12px] text-text2">{u.opens}×</span>
+          <span {...stylex.props(styles.value)}>{u.opens}×</span>
         </Row>
       ))}
       {rows.length > 0 ? (
@@ -211,7 +221,7 @@ function Background() {
         </Row>
       ) : null}
       <Row title="Closing" hint="Closing the window: background work continues.">
-        <span className="text-[12px] text-text2">Keeps running</span>
+        <span {...stylex.props(styles.status)}>Keeps running</span>
       </Row>
       <Problem error={problem} />
     </Group>
@@ -250,7 +260,7 @@ function AppUpdate() {
   return (
     <Group title="App update">
       <Row title="Latest" hint={app.checked_at_ms ? `Checked ${when(app.checked_at_ms)}` : undefined}>
-        <span className="font-mono text-[12px] text-text2">{app.latest ?? "Unknown"}</span>
+        <span {...stylex.props(styles.value)}>{app.latest ?? "Unknown"}</span>
         <Keyed action="SettingsCheckUpdate" chord="C">
           <SmallButton disabled={busy} onClick={() => void check()}>
             Check now
@@ -258,7 +268,7 @@ function AppUpdate() {
         </Keyed>
       </Row>
       <Row title="Status" hint={app.error ?? app.reason ?? undefined}>
-        <span className="text-[12px] text-text2">
+        <span {...stylex.props(styles.status)}>
           {!app.enabled ? "Updates are off" : app.available ? "An update is available" : "Up to date"}
         </span>
         {app.enabled && app.available ? (
@@ -272,7 +282,7 @@ function AppUpdate() {
           </Keyed>
         ) : null}
       </Row>
-      {app.notes ? <Row title="What's new" hint={<span className="whitespace-pre-wrap">{app.notes}</span>} /> : null}
+      {app.notes ? <Row title="What's new" hint={<span {...stylex.props(styles.notes)}>{app.notes}</span>} /> : null}
       <Problem error={error} />
     </Group>
   );
@@ -293,7 +303,16 @@ export function AppSection() {
     <>
       <Group>
         <Row title="Appearance" hint="Kept on this device.">
-          <Segments label="Appearance" value={appearance} options={APPEARANCES} onChange={choose} />
+          <SegmentedControl
+            label="Appearance"
+            size="sm"
+            value={appearance}
+            onChange={(next) => choose(next as Appearance)}
+          >
+            {APPEARANCES.map((a) => (
+              <SegmentedControlItem key={a.key} value={a.key} label={a.label} />
+            ))}
+          </SegmentedControl>
         </Row>
       </Group>
       <Group>
@@ -316,10 +335,10 @@ export function AppSection() {
       <AppUpdate />
       <Group title="Version">
         <Row title="This app" hint={platform.kind === "web" ? "In a browser" : "Desktop"}>
-          <span className="font-mono text-[12px] text-text2">{platform.version}</span>
+          <span {...stylex.props(styles.value)}>{platform.version}</span>
         </Row>
         <Row title="The server">
-          <span className="font-mono text-[12px] text-text2">{daemonVersion ?? "Unknown"}</span>
+          <span {...stylex.props(styles.value)}>{daemonVersion ?? "Unknown"}</span>
         </Row>
       </Group>
     </>

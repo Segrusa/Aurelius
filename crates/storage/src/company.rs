@@ -109,13 +109,23 @@ pub fn update_columns(tx: &Transaction<'_>, columns: &[(BoardColumnId, String)])
     Ok(())
 }
 
-/// A project's own dispatcher (`None`: the company's); returns the project's new version.
-pub fn set_project_dispatcher(tx: &Transaction<'_>, project: ProjectId, dispatcher: Option<EmployeeId>) -> Result<u64, StorageError> {
-    tx.execute(
-        "UPDATE projects SET dispatcher_employee_id = ?2, version = version + 1, updated_at_ms = ?3 WHERE id = ?1",
-        params![project.to_string(), dispatcher.map(|d| d.to_string()), now_ms()],
-    )?;
-    Ok(tx.query_row("SELECT version FROM projects WHERE id = ?1", [project.to_string()], |r| r.get::<_, i64>(0))? as u64)
+/// A project's settings that are given (`Some(None)` clears: the company's dispatcher again,
+/// no styleguide); returns the project's new version, one higher however many are given.
+pub fn update_project(tx: &Transaction<'_>, project: ProjectId, dispatcher: Option<Option<EmployeeId>>, styleguide: Option<Option<&str>>) -> Result<u64, StorageError> {
+    let id = project.to_string();
+    if let Some(dispatcher) = dispatcher {
+        tx.execute("UPDATE projects SET dispatcher_employee_id = ?2 WHERE id = ?1", params![id, dispatcher.map(|d| d.to_string())])?;
+    }
+    if let Some(styleguide) = styleguide {
+        tx.execute("UPDATE projects SET styleguide_url = ?2 WHERE id = ?1", params![id, styleguide])?;
+    }
+    tx.execute("UPDATE projects SET version = version + 1, updated_at_ms = ?2 WHERE id = ?1", params![id, now_ms()])?;
+    Ok(tx.query_row("SELECT version FROM projects WHERE id = ?1", [id], |r| r.get::<_, i64>(0))? as u64)
+}
+
+/// The workspace's styleguide link, if it has one.
+pub fn project_styleguide(conn: &Connection, project: ProjectId) -> Result<Option<String>, StorageError> {
+    Ok(conn.query_row("SELECT styleguide_url FROM projects WHERE id = ?1", [project.to_string()], |r| r.get(0)).optional()?.flatten())
 }
 
 pub fn project_dispatcher(conn: &Connection, project: ProjectId) -> Result<Option<EmployeeId>, StorageError> {

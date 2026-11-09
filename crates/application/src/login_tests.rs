@@ -25,7 +25,7 @@ struct Setup {
 }
 
 fn ctx(user: Option<UserId>) -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: user }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: user }
 }
 
 fn exec(s: &Setup, user: UserId, command: Command) -> CommandResult {
@@ -49,7 +49,7 @@ fn setup() -> Setup {
     run(Command::SetFollowOrgChart(aurelius_domain::employee::SetFollowOrgChart { follow: false }));
     let CommandResult::ProjectCreated { project_id, .. } = run(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })) else { panic!() };
     let hire = |name: &str| {
-        let create = CreateEmployee { name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
+        let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
         let CommandResult::EmployeeCreated { employee_id, conversation_id } = run(Command::CreateEmployee(create)) else { panic!() };
         (employee_id, conversation_id)
     };
@@ -180,7 +180,7 @@ fn a_ticket_and_its_delegations_at_every_depth_run_on_the_tickets_login() {
 #[test]
 fn a_task_without_a_ticket_runs_on_who_made_it_and_its_parts_too() {
     let s = setup();
-    let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(s.ada.0), title: "Report".into(), goal: "Write it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(s.ada.0), title: "Report".into(), goal: "Write it".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = exec(&s, s.robin, Command::CreateTask(create)) else { panic!() };
     let run = start_task(&s, task_id, s.ada.0);
     assert_eq!(login_of(&s, run), Some(s.robin));
@@ -274,20 +274,19 @@ fn runs_the_team_chat_wakes_use_the_login_of_hop_0_at_every_hop() {
         s.service
             .store()
             .read(move |c| {
-                let chat = aurelius_storage::employees::main_chat(c, employee)?.unwrap();
-                let id: String = c.query_row("SELECT id FROM runs WHERE conversation_id = ?1 ORDER BY rowid DESC LIMIT 1", [chat.to_string()], |r| r.get(0))?;
+                let id: String = c.query_row("SELECT r.id FROM runs r JOIN conversations c ON c.id = r.conversation_id WHERE c.employee_id = ?1 AND c.thread_key IS NOT NULL ORDER BY r.rowid DESC LIMIT 1", [employee.to_string()], |r| r.get(0))?;
                 Ok(RunId::parse(&id).unwrap())
             })
             .unwrap()
     };
     // Ada brings in Iris (hop 1), Iris brings in Otto (hop 2): still Robin's login, never the employee's chat's last one.
-    let post = |run: RunId, text: &str| {
-        let (ok, said, _) = s.service.employee_action(run, EmployeeAction::PostToGroupChat { message: text.into(), channel: None }).unwrap();
+    let hand = |run: RunId, to: &str| {
+        let (ok, said, _) = s.service.employee_action(run, EmployeeAction::HandOff { to: to.into(), message: "Please check the build and report back.".into() }).unwrap();
         assert!(ok, "{said}");
     };
-    post(hop0, "@Iris please check");
+    hand(hop0, "Iris");
     let hop1 = woken(s.iris.0);
-    post(hop1, "@Otto your turn");
+    hand(hop1, "Otto");
     let hop2 = woken(s.otto.0);
     for (run, hop) in [(hop1, 1), (hop2, 2)] {
         let group = s.service.store().read(|c| aurelius_storage::conversations::group_run(c, run)).unwrap().unwrap();
@@ -297,13 +296,9 @@ fn runs_the_team_chat_wakes_use_the_login_of_hop_0_at_every_hop() {
 }
 
 #[test]
-fn schedules_heartbeats_and_background_jobs_use_their_own_login_or_none() {
+fn schedules_and_background_jobs_use_their_own_login_or_none() {
     let s = setup();
-    // B5: a heartbeat turned on by Alex runs on Alex's login.
-    exec(&s, s.alex, Command::SetHeartbeat(aurelius_domain::employee::SetHeartbeat { employee_id: s.ada.0, every_minutes: 30, quiet_start_min: None, quiet_end_min: None, daily_token_budget: None }));
-    let login = s.service.store().read(|c| aurelius_storage::heartbeats::login_user(c, s.ada.0)).unwrap();
-    assert_eq!(login, Some(s.alex.to_string()));
-    // A run queued with an explicit login (a heartbeat's): that one; with none, none (never another's).
+    // A run queued with an explicit login: that one; with none, none (never another's).
     let queue = |meta: serde_json::Value| s.service.store().write(move |tx| Ok(crate::run::queue::queue_run(tx, &meta, "t", s.ada.1, MessageId::new())?.0)).unwrap();
     assert_eq!(login_of(&s, queue(serde_json::json!({ "login_user": s.alex }))), Some(s.alex));
     assert_eq!(login_of(&s, queue(serde_json::json!({ "login_user": null, "user_id": s.robin }))), None);
@@ -398,7 +393,7 @@ fn lines(s: &Setup, ticket: TicketId) -> Vec<String> {
 }
 
 fn inbox(s: &Setup, user: UserId) -> Vec<String> {
-    s.service.store().read(move |c| aurelius_storage::timeline::list_notifications_for(c, 50, Some(&user.to_string()))).unwrap().into_iter().map(|n| n.title).collect()
+    s.service.store().read(move |c| aurelius_storage::timeline::list_notifications_for(c, 50, Some(&user.to_string()), None)).unwrap().into_iter().map(|n| n.title).collect()
 }
 
 fn task_wait(s: &Setup, task: TaskId) -> (TaskStatus, Option<String>) {
@@ -438,7 +433,7 @@ fn a_ticket_without_its_creators_login_waits_tells_them_and_resumes_once_linked(
     assert_eq!(lines(&s, ticket).iter().filter(|l| *l == waiting).count(), 1, "{:?}", lines(&s, ticket));
     assert_eq!(inbox(&s, s.robin), ["Connect your Claude login"]);
     assert!(inbox(&s, s.alex).is_empty(), "another board member's Inbox stays empty");
-    assert!(s.service.store().read(|c| aurelius_storage::timeline::list_notifications_for(c, 50, None)).unwrap().is_empty(), "not for everyone");
+    assert!(s.service.store().read(|c| aurelius_storage::timeline::list_notifications_for(c, 50, None, None)).unwrap().is_empty(), "not for everyone");
     // R2 M2: its push goes to Robin's phone only, never to Alex's.
     let (robins_phone, alexs_phone) = (ClientId::new(), ClientId::new());
     let (robin, alex) = (s.robin, s.alex);
@@ -500,8 +495,8 @@ fn run_on_my_login_takes_the_ticket_over_for_its_waiting_runs_only_for_oneself()
     waits_for_login(&s, main);
     s.service.claude_login_linked(s.alex, Some("test@example.com".into()), None).unwrap();
 
-    // An app (no board member) cannot; Alex can, for Alex's own login only.
-    let app = CommandContext { app: Some(AppActor { key_id: aurelius_domain::AppKeyId::new(), name: "x".into() }), ..ctx(None) };
+    // No board member: refused; Alex can, for Alex's own login only.
+    let app = ctx(None);
     let refused = s.service.execute(&app, CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::UseMyLogin(ticket::UseMyLogin { ticket_id: ticket }) });
     assert_eq!(refused.err().map(|e| e.code), Some(ErrorCode::BoardMemberRequired));
     exec(&s, s.alex, Command::UseMyLogin(ticket::UseMyLogin { ticket_id: ticket }));

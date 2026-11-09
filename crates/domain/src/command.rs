@@ -56,6 +56,12 @@ pub enum CommandResult {
         employee_id: EmployeeId,
         conversation_id: ConversationId,
     },
+    ScheduledMessageCancelled {
+        message_id: crate::ScheduledMessageId,
+    },
+    EmployeeChatOpened {
+        conversation_id: ConversationId,
+    },
     EmployeeUpdated {
         employee_id: EmployeeId,
         version: u64,
@@ -103,11 +109,6 @@ pub enum CommandResult {
     },
     TaskCancelled {
         task_id: TaskId,
-    },
-    /// The variant whose diff is applied to the work folder; the task goes on with it.
-    TaskVariantChosen {
-        task_id: TaskId,
-        variant: u8,
     },
     TaskAssigned {
         task_id: TaskId,
@@ -179,28 +180,12 @@ pub enum CommandResult {
         project_id: ProjectId,
         folder: String,
     },
-    Shared {
-        share_id: crate::ShareId,
-        memory_id: Option<MemoryId>,
-    },
-    /// The lead employee's chat that now has the task's result as context.
-    TaskDiscussed {
-        conversation_id: ConversationId,
-        employee_id: EmployeeId,
-    },
-    ShareRevoked {
-        share_id: crate::ShareId,
-    },
     EmployeeFolderSet {
         employee_id: EmployeeId,
         folder: Option<String>,
     },
     ConversationDeleted {
         conversation_id: ConversationId,
-    },
-    HeartbeatSet {
-        employee_id: EmployeeId,
-        every_minutes: u32,
     },
     /// A new, empty project conversation.
     ProjectConversationStarted {

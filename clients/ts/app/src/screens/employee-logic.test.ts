@@ -1,15 +1,26 @@
-import type { AgentView, EmployeeSummary } from "@aurelius/protocol";
+import type { AgentView, ConnectionsSnapshot, ConnectionView, EmployeeSummary } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  accessLabel,
+  accessOf,
   canPin,
+  choiceLine,
   employeeGroups,
+  employeeState,
+  employeeTabs,
+  inheritedRun,
+  isEmployeeTab,
   matchesSearch,
+  modelAfterProvider,
+  modelsFor,
   orgTree,
   pinnedFirst,
   position,
+  recentChats,
   reportsCandidates,
   threadGroup,
   togglePin,
+  usableConnections,
   workOf,
 } from "./employee-logic";
 
@@ -119,5 +130,105 @@ describe("work", () => {
     expect(threadGroup(false, false, now - h, now)).toBe("past");
     expect(threadGroup(false, false, now - 30 * h, now)).toBe("earlier");
     expect(threadGroup(false, true, now - 30 * h, now)).toBe("past");
+  });
+});
+
+describe("what an employee runs on", () => {
+  const conn = (id: string, models: string[], over: Partial<ConnectionView> = {}) =>
+    ({ id, display_name: `Conn ${id}`, models, status: "ready", ...over }) as ConnectionView;
+  const all = [conn("a", ["opus", "sonnet"], { default_model: "sonnet" }), conn("b", ["gpt"])];
+
+  it("offers the models of the chosen connection, or all of them on Inherit", () => {
+    expect(modelsFor(all, "inherit")).toEqual(["opus", "sonnet", "gpt"]);
+    expect(modelsFor(all, "b")).toEqual(["gpt"]);
+  });
+
+  it("drops a model the new connection does not have", () => {
+    expect(modelAfterProvider(all, "b", "opus")).toBe("inherit");
+    expect(modelAfterProvider(all, "a", "opus")).toBe("opus");
+    expect(modelAfterProvider(all, "b", "inherit")).toBe("inherit");
+  });
+
+  it("never offers a disconnected connection", () => {
+    expect(usableConnections([...all, conn("c", [], { status: "disconnected" })]).map((c) => c.id)).toEqual(["a", "b"]);
+  });
+
+  it("says what Inherit comes to from the company's default", () => {
+    const company = (settings: object) =>
+      ({
+        connections: all,
+        defaults: [{ purpose: "employee", scope: { kind: "global" }, settings }],
+      }) as unknown as ConnectionsSnapshot;
+    expect(inheritedRun(undefined)).toEqual({ provider: null, model: null, effort: null });
+    expect(inheritedRun({ connections: all })).toEqual({ provider: null, model: null, effort: null });
+    expect(inheritedRun(company({ connection: { mode: "value", value: "a" } }))).toEqual({
+      provider: "Conn a",
+      model: "sonnet",
+      effort: null,
+    });
+    expect(
+      inheritedRun(
+        company({
+          connection: { mode: "value", value: "a" },
+          model: { mode: "value", value: "opus" },
+          effort: { mode: "value", value: "high" },
+        }),
+      ),
+    ).toEqual({ provider: "Conn a", model: "opus", effort: "high" });
+  });
+
+  it("reads a choice as its value, or as Inherit with what that comes to", () => {
+    expect(choiceLine("inherit", null)).toBe("Inherit");
+    expect(choiceLine("inherit", "Sonnet")).toBe("Inherit · Sonnet");
+    expect(choiceLine("opus", "Sonnet", (v) => v.toUpperCase())).toBe("OPUS");
+  });
+
+  it("treats an employee without a level as Inherit and names an unknown one", () => {
+    expect(accessOf(null)).toBe("inherit");
+    expect(accessOf(m("A"))).toBe("inherit");
+    expect(accessOf(m("A", null, { access_level: "read_only" }))).toBe("read_only");
+    expect(accessLabel("read_edit")).toBe("Read and edit");
+    expect(accessLabel("unknown")).toBe("Unknown");
+  });
+});
+
+describe("recentChats", () => {
+  it("keeps the order and shows at most four", () => {
+    expect(recentChats([1, 2, 3, 4, 5, 6])).toEqual([1, 2, 3, 4]);
+    expect(recentChats([2, 1])).toEqual([2, 1]);
+    expect(recentChats([])).toEqual([]);
+  });
+});
+
+describe("employeeState", () => {
+  const with_ = (over: Partial<EmployeeSummary>) =>
+    employeeState({ status: "active", working: false, ...over } as EmployeeSummary);
+
+  it("names what it is doing, and pulses only while a run goes", () => {
+    expect(with_({ activity_state: "working", working: true })).toMatchObject({ label: "Working", isPulsing: true });
+    expect(with_({ activity_state: "waiting" })).toMatchObject({ label: "Waiting for you", variant: "warning" });
+    expect(with_({ activity_state: "queued", working: true })).toMatchObject({ label: "Queued", isPulsing: false });
+    expect(with_({})).toMatchObject({ label: "Available", variant: "neutral" });
+  });
+
+  it("falls back on working for an older or a newer server", () => {
+    expect(with_({ working: true }).label).toBe("Working");
+    expect(with_({ activity_state: "unknown", working: false }).label).toBe("Available");
+  });
+
+  it("says paused first", () => {
+    expect(with_({ status: "paused", activity_state: "working", working: true }).label).toBe("Paused");
+  });
+});
+
+describe("the employee page's tabs", () => {
+  it("has an Inbox when the server has a mailbox to show", () => {
+    expect(employeeTabs(true).map((t) => t.label)).toEqual(["Inbox", "Memory", "Settings"]);
+    expect(employeeTabs(false).map((t) => t.label)).toEqual(["Memory", "Settings"]);
+  });
+
+  it("reads only a tab it knows from the URL", () => {
+    expect(isEmployeeTab("memory")).toBe(true);
+    expect(isEmployeeTab("tasks")).toBe(false);
   });
 });

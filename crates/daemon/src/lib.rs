@@ -12,15 +12,11 @@ mod runtimes;
 mod tasks;
 mod triage;
 mod memory;
-mod variants;
 mod updates;
-mod heartbeats;
 mod recurring_tasks;
-mod agent_functions;
 mod permissions;
 mod mcp_servers;
 mod mcp_oauth;
-mod webhooks;
 pub(crate) mod live;
 mod load;
 mod sessions;
@@ -99,8 +95,6 @@ pub struct Shared {
     /// installed service starts itself again, so a server without a window
     /// (or with only remote clients) returns on its own.
     pub restart: std::sync::atomic::AtomicBool,
-    /// Built-in terminals (shells in an employee's folder).
-    pub terminals: aurelius_host::terminal::Terminals,
     /// The pending shutdown of this PC (not kept over restarts).
     pub power: aurelius_host::power::Power,
     /// The vault's key (feature `vault`).
@@ -164,10 +158,6 @@ impl aurelius_host::Service for Shared {
 
     fn power(&self) -> &aurelius_host::power::Power {
         &self.power
-    }
-
-    fn terminals(&self) -> &aurelius_host::terminal::Terminals {
-        &self.terminals
     }
 
     fn resume_work(&self) {
@@ -278,6 +268,11 @@ async fn prune_notifications(shared: Arc<Shared>) {
             Ok(Ok(count)) => tracing::info!(count, "old notifications removed"),
             Ok(Err(err)) => tracing::warn!(error = %err, "could not remove old notifications"),
             Err(err) => tracing::warn!(error = %err, "could not remove old notifications"),
+        }
+        let store = shared.store().clone();
+        let pruned = tokio::task::spawn_blocking(move || store.write(|tx| aurelius_storage::activity_log::prune(tx, aurelius_storage::now_ms()))).await;
+        if !matches!(pruned, Ok(Ok(_))) {
+            tracing::warn!("could not remove old rows of the activity log");
         }
     }
 }
@@ -445,7 +440,6 @@ async fn run_inner(
         live: live::Live::default(),
         remote,
         restart: std::sync::atomic::AtomicBool::new(false),
-        terminals: aurelius_host::terminal::Terminals::default(),
         power: aurelius_host::power::Power::default(),
         vault,
     });
@@ -470,14 +464,10 @@ async fn run_inner(
         let _ = ready.send(());
     }
 
-    agent_functions::start(&shared);
     remote::start(&shared).await;
     updates::start(shared.clone());
     aurelius_host::backups::start(shared.clone());
-    heartbeats::start(shared.clone());
     recurring_tasks::start(shared.clone());
-    webhooks::start(shared.clone());
-    aurelius_host::terminal::start_sweeper(shared.clone());
     aurelius_host::power::start(shared.clone());
     if shared.admission.checks_active {
         load::start(shared.clone());
@@ -521,7 +511,6 @@ async fn run_inner(
     // Sign-ins to Claude end with the daemon (C13).
     shared.claude_links.cancel_all();
     shared.remote.shutdown().await;
-    shared.terminals.close_all();
     // Give the shutdown response a moment to flush, then close every connection.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     connections.shutdown().await;

@@ -44,7 +44,6 @@ import '../features/pairing/pairing_bloc.dart';
 import '../features/project/project_page.dart';
 import '../features/project/task_page.dart';
 import '../features/usage/context_page.dart';
-import '../features/plugins/plugins_page.dart';
 import '../features/updates/updates_page.dart';
 import '../features/usage/usage_page.dart';
 import '../features/vault/vault_page.dart';
@@ -203,7 +202,6 @@ class AppRouter {
         pageBuilder: (context, state) => routePage(state, ApprovalPage(approvalId: state.pathParameters['aid']!)),
       ),
       GoRoute(parentNavigatorKey: _root, path: '/usage', pageBuilder: (context, state) => routePage(state, const UsagePage())),
-      GoRoute(parentNavigatorKey: _root, path: '/plugins', pageBuilder: (context, state) => routePage(state, const PluginsPage())),
       GoRoute(parentNavigatorKey: _root, path: '/updates', pageBuilder: (context, state) => routePage(state, const UpdatesPage())),
       GoRoute(
         parentNavigatorKey: _root,

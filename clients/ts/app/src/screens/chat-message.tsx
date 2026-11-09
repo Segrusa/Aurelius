@@ -1,17 +1,28 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { ChatSystemMessage } from "@astryxdesign/core/Chat";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { LayoutFooter } from "@astryxdesign/core/Layout";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
+import { Text } from "@astryxdesign/core/Text";
+import { TextArea } from "@astryxdesign/core/TextArea";
 import { expectBody } from "@aurelius/client";
 import type { ActivityView, ApprovalView, ContextView, MessageVersionView, MessageView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { createContext, memo, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, memo, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useRunGuidelines } from "../data";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { Button, initial, Mark, markColor } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
-import { Dialog, Menu } from "../ui/overlay";
+import { initial, Mark, markColor } from "../ui/marks";
+import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
-import { ApprovalCard } from "./approval-card";
+import { useDelayed } from "../ui/use-delayed";
+import { ApprovalCard, ReplyCard } from "./approval-card";
 import type { LiveStore } from "./chat-live";
 import { useLive } from "./chat-live";
 import {
@@ -48,11 +59,288 @@ import {
 } from "./chat-logic";
 import { messageLink } from "./links-logic";
 import { overlays } from "./overlays-store";
-import { FileChips, KeptFiles, MarkdownChips, ScreenshotLink, TraceLink, useRetryAnswer } from "./run-tools";
+import { RunCard } from "./run-card";
+import { waitsOnReply } from "./run-card-logic";
+import {
+  FileChips,
+  KeptFiles,
+  MarkdownChips,
+  type RetryTarget,
+  ScreenshotLink,
+  TraceLink,
+  useRetryAnswer,
+} from "./run-tools";
 import { stepLine } from "./tasks-logic";
 
 const OUTPUT_LINES = 400;
 const TODO_FOLD = 8;
+
+const styles = stylex.create({
+  meta: { fontSize: 12, color: "var(--precision-text3)" },
+  metaWarn: { fontSize: 12, fontWeight: 500, color: "var(--color-text-warning)" },
+  metaError: { fontSize: 12, color: "var(--color-text-error)" },
+  text3: { color: "var(--precision-text3)" },
+  text2: { color: "var(--color-text-secondary)" },
+  error: { color: "var(--color-text-error)" },
+  warn: { color: "var(--color-text-warning)", fontWeight: 600 },
+  truncate: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  dayLine: { paddingBlockStart: 16, paddingBlockEnd: 4, fontSize: 12, fontWeight: 500 },
+  newLine: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    paddingBlock: 4,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--color-text-warning)",
+  },
+  newRule: { height: 1, flexGrow: 1, backgroundColor: "var(--color-border-warning)" },
+  output: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--precision-line2)",
+    paddingInline: 10,
+    paddingBlock: 8,
+  },
+  command: {
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    wordBreak: "break-all",
+    color: "var(--color-text-secondary)",
+  },
+  outputText: {
+    margin: 0,
+    maxHeight: 320,
+    overflow: "auto",
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    whiteSpace: "pre-wrap",
+    color: "var(--color-text-secondary)",
+  },
+  textButton: {
+    cursor: "pointer",
+    alignSelf: "flex-start",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    fontSize: 12,
+  },
+  linkAccent: { color: "var(--color-text-accent)" },
+  linkMuted: { color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" } },
+  linkPlain: { color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" } },
+  stepRun: {
+    overflow: "hidden",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+  },
+  stepToggle: {
+    display: "flex",
+    height: 32,
+    width: "100%",
+    cursor: "pointer",
+    alignItems: "center",
+    gap: 10,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    paddingInline: 10,
+    textAlign: "left",
+    fontSize: 12,
+    color: "var(--color-text-secondary)",
+  },
+  stepLabel: { flexShrink: 0, fontWeight: 500, color: "var(--color-text-primary)" },
+  stepLine: {
+    minWidth: 0,
+    flexGrow: 1,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontFamily: "var(--font-family-code)",
+    color: "var(--precision-text3)",
+  },
+  checklist: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingInline: 12,
+    paddingBlock: 8,
+  },
+  todo: { display: "flex", gap: 8 },
+  todoDone: { color: "var(--precision-text3)", textDecoration: "line-through" },
+  todoDoing: { fontWeight: 500 },
+  todoOpen: { color: "var(--color-text-secondary)" },
+  minZero: { minWidth: 0 },
+  answer: { display: "flex", flexDirection: "column", gap: 10 },
+  liveStatus: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--color-text-accent)" },
+  dialogBody: { display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", padding: 16 },
+  group: { display: "flex", flexDirection: "column", gap: 4 },
+  contextLine: { display: "flex", justifyContent: "space-between", gap: 12 },
+  codeMeta: {
+    flexShrink: 0,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  noShrink: { flexShrink: 0 },
+  version: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--precision-line2)",
+    paddingTop: 8,
+  },
+  header: { display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 8 },
+  system: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    paddingInline: 12,
+    paddingBlock: 8,
+    fontSize: 13,
+  },
+  systemNormal: {
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    color: "var(--color-text-secondary)",
+  },
+  systemFailed: { borderColor: "var(--color-text-error)", color: "var(--color-text-error)" },
+  systemBare: { paddingInline: 40, fontSize: 12, lineHeight: 1.5, color: "var(--precision-text3)" },
+  systemTop: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  grow: { minWidth: 0, flexGrow: 1, flexBasis: 0 },
+  accentLink: { fontSize: 12, color: "var(--color-text-accent)", textDecoration: "none" },
+  update: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    paddingInline: 14,
+    paddingBlock: 11,
+  },
+  updateUrgent: { borderColor: "var(--color-border-warning)", backgroundColor: "var(--color-warning-muted)" },
+  updateNormal: { borderColor: "var(--color-border)", backgroundColor: "var(--precision-sunk)" },
+  updateTop: { display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--precision-text3)" },
+  updateLabel: { fontWeight: 600, letterSpacing: "0.04em" },
+  updateAuthor: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexBasis: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "var(--color-text-secondary)",
+  },
+  plainButton: { cursor: "pointer", borderWidth: 0, backgroundColor: "transparent", padding: 0, fontSize: "inherit" },
+  queued: { display: "flex", alignItems: "center", gap: 12, fontSize: 12, color: "var(--precision-text3)" },
+  reactions: { display: "flex", flexWrap: "wrap", gap: 4 },
+  reaction: {
+    display: "inline-flex",
+    height: 22,
+    cursor: "pointer",
+    alignItems: "center",
+    gap: 4,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "transparent",
+    paddingInline: 7,
+    fontSize: 12,
+  },
+  reactionMine: { borderColor: "var(--color-text-accent)", backgroundColor: "var(--color-overlay-hover)" },
+  editBox: { display: "flex", flexDirection: "column", gap: 8 },
+  editActions: { display: "flex", gap: 8 },
+  // In the rows' group-hover: hidden until the row is hovered or holds focus, and open while its menu is.
+  rowBar: {
+    position: "absolute",
+    top: -12,
+    right: 8,
+    display: {
+      default: "none",
+      [stylex.when.ancestor(":hover")]: "flex",
+      [stylex.when.ancestor(":focus-within")]: "flex",
+      ":has([aria-expanded='true'])": "flex",
+    },
+    gap: 1,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--color-background-surface)",
+    padding: 2,
+    boxShadow: "var(--precision-card-shadow)",
+  },
+  threadLink: {
+    display: "flex",
+    height: 28,
+    cursor: "pointer",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 8,
+    borderRadius: 6,
+    borderWidth: 0,
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    paddingInline: 4,
+    fontSize: 12,
+    color: "var(--color-text-accent)",
+  },
+  marks: { display: "flex" },
+  markOverlap: { marginLeft: { default: -4, ":first-child": 0 } },
+  row: {
+    position: "relative",
+    display: "flex",
+    gap: 12,
+    borderRadius: 6,
+    backgroundColor: {
+      default: "transparent",
+      ":hover": "color-mix(in srgb, var(--color-overlay-hover) 45%, transparent)",
+    },
+  },
+  rowGrouped: { paddingTop: 2 },
+  rowFull: { paddingTop: 8 },
+  rowFlash: { backgroundColor: "var(--color-overlay-hover)" },
+  markColumn: { width: 28, flexShrink: 0 },
+  body: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column", gap: 4 },
+  ticketChip: {
+    borderRadius: 9,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    paddingInline: 6,
+    fontSize: 12,
+    color: "var(--color-text-accent)",
+    textDecoration: "none",
+  },
+  answerLinks: { display: "flex", gap: 12 },
+  liveRow: { display: "flex", gap: 12, paddingTop: 8 },
+  liveName: { display: "flex", alignItems: "baseline", gap: 8 },
+  footer: { display: "flex", justifyContent: "flex-end", gap: 8 },
+});
+
+/** The small, quiet line used all over a row. */
+function Meta({ children }: { children: ReactNode }) {
+  return (
+    <Text type="supporting" xstyle={styles.meta}>
+      {children}
+    </Text>
+  );
+}
 
 export interface ChatContext {
   store: LiveStore;
@@ -69,6 +357,8 @@ export interface ChatContext {
   lastAnswer: string | null;
   conversationId: string | null;
   channel: string | null;
+  /** Where a retried question goes; none: the channel. */
+  retryTarget?: RetryTarget;
   /** The message a link led to, marked for a moment. */
   flash: string | null;
 }
@@ -102,25 +392,23 @@ export function usePatchMessage() {
 
 export function DayLine({ ms }: { ms: number }) {
   return (
-    <div className="flex items-center gap-3 pt-4 pb-1 text-[12px] font-medium text-text3">
-      <span className="h-px flex-1 bg-line2" />
+    <ChatSystemMessage variant="divider" xstyle={styles.dayLine}>
       {dayLabel(localDay(ms, offset()), today())}
-      <span className="h-px flex-1 bg-line2" />
-    </div>
+    </ChatSystemMessage>
   );
 }
 
 export function NewLine() {
   return (
-    <div className="flex items-center gap-3 py-1 text-[12px] font-medium text-amber">
-      <span className="h-px flex-1 bg-amber-line" />
+    <div {...stylex.props(styles.newLine)}>
+      <span {...stylex.props(styles.newRule)} />
       New messages
-      <span className="h-px flex-1 bg-amber-line" />
+      <span {...stylex.props(styles.newRule)} />
     </div>
   );
 }
 
-function ActivityOutput({ step, messageId }: { step: ActivityView; messageId: string }) {
+export function ActivityOutput({ step, messageId }: { step: ActivityView; messageId: string }) {
   const connection = useConnection();
   const [full, setFull] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -143,14 +431,14 @@ function ActivityOutput({ step, messageId }: { step: ActivityView; messageId: st
     }
   };
   return (
-    <div className="flex flex-col gap-1 border-t border-line2 px-[10px] py-2">
-      <span className="text-[12px] text-text3">{step.tool}</span>
-      {code ? <code className="font-mono text-[12px] break-all text-text2">&gt; {code}</code> : null}
-      <ScreenshotLink tool={step.tool} output={step.output} className={linkish} />
+    <div {...stylex.props(styles.output)}>
+      <Meta>{step.tool}</Meta>
+      {code ? <code {...stylex.props(styles.command)}>&gt; {code}</code> : null}
+      <ScreenshotLink tool={step.tool} output={step.output} />
       {step.tool === "WebSearch" && raw !== output ? (
         <Markdown text={output} />
       ) : output ? (
-        <pre className="m-0 max-h-[320px] overflow-auto font-mono text-[12px] whitespace-pre-wrap text-text2">
+        <pre {...stylex.props(styles.outputText)}>
           {lines.slice(0, OUTPUT_LINES).join("\n")}
           {lines.length > OUTPUT_LINES ? `\n… ${lines.length - OUTPUT_LINES} more lines` : ""}
         </pre>
@@ -160,7 +448,7 @@ function ActivityOutput({ step, messageId }: { step: ActivityView; messageId: st
           type="button"
           disabled={busy}
           onClick={() => void load()}
-          className="cursor-pointer self-start border-0 bg-transparent p-0 text-[12px] text-acc-text"
+          {...stylex.props(styles.textButton, styles.linkAccent)}
         >
           {busy ? "Loading…" : "Show full output"}
         </button>
@@ -174,16 +462,11 @@ function StepRun({ steps, messageId }: { steps: ActivityView[]; messageId: strin
   const last = steps.at(-1) as ActivityView;
   const failed = steps.some((s) => s.ok === false);
   return (
-    <div className="overflow-hidden rounded-[6px] border border-line bg-sunk">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="flex h-8 w-full cursor-pointer items-center gap-[10px] border-0 bg-transparent px-[10px] text-left text-[12px] text-text2"
-      >
+    <div {...stylex.props(styles.stepRun)}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} {...stylex.props(styles.stepToggle)}>
         <span aria-hidden="true">{open ? "⌄" : "›"}</span>
-        <span className={`flex-none font-medium ${failed ? "text-red" : "text-text"}`}>{runLabel(steps)}</span>
-        {open ? null : <span className="min-w-0 flex-1 truncate font-mono text-text3">{stepLine(last)}</span>}
+        <span {...stylex.props(styles.stepLabel, failed && styles.error)}>{runLabel(steps)}</span>
+        {open ? null : <span {...stylex.props(styles.stepLine)}>{stepLine(last)}</span>}
       </button>
       {open ? steps.map((s) => <ActivityOutput key={s.call_id} step={s} messageId={messageId} />) : null}
     </div>
@@ -198,22 +481,21 @@ function Checklist({ activity }: { activity: ActivityView[] }) {
   const folded = list.length > TODO_FOLD && !all;
   const shown = folded ? list.filter((t) => t.state === "doing").slice(0, 1) : list;
   return (
-    <div className="flex flex-col gap-1 rounded-[6px] border border-line bg-sunk px-3 py-2">
+    <div {...stylex.props(styles.checklist)}>
       {shown.map((t) => (
         <div
           key={t.text}
-          className={`flex gap-2 ${t.state === "done" ? "text-text3 line-through" : t.state === "doing" ? "font-medium" : "text-text2"}`}
+          {...stylex.props(
+            styles.todo,
+            t.state === "done" ? styles.todoDone : t.state === "doing" ? styles.todoDoing : styles.todoOpen,
+          )}
         >
           <span aria-hidden="true">{t.state === "done" ? "✓" : t.state === "doing" ? "▸" : "○"}</span>
-          <span className="min-w-0">{t.text}</span>
+          <span {...stylex.props(styles.minZero)}>{t.text}</span>
         </div>
       ))}
       {list.length > TODO_FOLD ? (
-        <button
-          type="button"
-          onClick={() => setAll(!all)}
-          className="cursor-pointer self-start border-0 bg-transparent p-0 text-[12px] text-text3 hover:text-text"
-        >
+        <button type="button" onClick={() => setAll(!all)} {...linkish}>
           {folded ? `${done} of ${list.length} done · show all` : "Show less"}
         </button>
       ) : null}
@@ -222,7 +504,7 @@ function Checklist({ activity }: { activity: ActivityView[] }) {
 }
 
 /** Long text folds; what was seen while it streamed stays open. */
-function Text({ text, seenLive }: { text: string; seenLive: boolean }) {
+function Prose({ text, seenLive }: { text: string; seenLive: boolean }) {
   const { people, me } = useChat();
   const [open, setOpen] = useState(false);
   const folded = useMemo(() => (seenLive ? null : fold(text)), [text, seenLive]);
@@ -232,11 +514,7 @@ function Text({ text, seenLive }: { text: string; seenLive: boolean }) {
     <>
       <Markdown text={marked} />
       {folded ? (
-        <button
-          type="button"
-          onClick={() => setOpen(!open)}
-          className="cursor-pointer self-start border-0 bg-transparent p-0 text-[12px] text-text3 hover:text-text"
-        >
+        <button type="button" onClick={() => setOpen(!open)} {...linkish}>
           {open ? "▴ Show less" : `▾ Show more (${folded.hidden} lines)`}
         </button>
       ) : null}
@@ -251,7 +529,7 @@ function LiveText({ text }: { text: string }) {
     <>
       {blocks.map((block, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: blocks only ever grow at the end.
-        <Markdown key={i} text={block} live />
+        <Markdown key={i} text={block} live streaming={i === blocks.length - 1} />
       ))}
     </>
   );
@@ -278,7 +556,7 @@ function AnswerBody({
   const { store } = useChat();
   const parts = useMemo(() => segments(text, activity), [text, activity]);
   return (
-    <div className="flex flex-col gap-[10px]">
+    <div {...stylex.props(styles.answer)}>
       <Checklist activity={activity} />
       {parts.map((part, i) =>
         part.kind === "steps" ? (
@@ -289,7 +567,7 @@ function AnswerBody({
           <LiveText key={i} text={part.text} />
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: parts only ever grow at the end.
-          <Text key={i} text={part.text} seenLive={store.seen.has(m.id)} />
+          <Prose key={i} text={part.text} seenLive={store.seen.has(m.id)} />
         ),
       )}
     </div>
@@ -299,29 +577,29 @@ function AnswerBody({
 function StopButton({ run }: { run: string }) {
   const connection = useConnection();
   return (
-    <button
-      type="button"
-      aria-label="Stop"
-      title="Stop"
+    <IconButton
+      size="sm"
+      variant="ghost"
+      label="Stop"
+      tooltip="Stop"
+      icon={<span aria-hidden="true">■</span>}
       onClick={() =>
         connection
           .write("run.stop", { run_id: run }, { retry: false })
           .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."))
       }
-      className="grid size-5 cursor-pointer place-items-center rounded-[4px] border-0 bg-transparent text-text2 hover:bg-sel hover:text-text"
-    >
-      ■
-    </button>
+    />
   );
 }
 
-const linkish = "cursor-pointer self-start border-0 bg-transparent p-0 text-[12px] text-text3 hover:text-text";
+/** Worked out once: most rows have a few of these. */
+const linkish = stylex.props(styles.textButton, styles.linkMuted);
 
 function ContextLink({ run }: { run: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className={linkish}>
+      <button type="button" onClick={() => setOpen(true)} {...linkish}>
         ≡ Context
       </button>
       {open ? <ContextDialog run={run} onClose={() => setOpen(false)} /> : null}
@@ -343,37 +621,37 @@ export function ContextDialog({ run, onClose }: { run: string; onClose: () => vo
       .catch((e: unknown) => setProblem(e instanceof Error ? e.message : "This did not load."));
   }, [connection, run]);
   const sections = view ? [...new Set(view.items.map((i) => i.section))] : [];
+  const loading = useDelayed(!view && !problem);
+  const close = (open: boolean) => {
+    if (!open) onClose();
+  };
   return (
-    <Dialog open onClose={onClose} title="Context of this answer" width={720}>
-      <div className="flex max-h-[75vh] flex-col gap-3 overflow-y-auto p-4">
-        <p className="m-0 text-[15px] font-semibold">Context of this answer</p>
+    <Dialog isOpen onOpenChange={close} width={720} maxHeight="calc(100vh - 48px)" purpose="form" padding={0}>
+      <DialogHeader title="Context of this answer" onOpenChange={close} />
+      <div {...stylex.props(styles.dialogBody)}>
         {view ? (
-          <p className="m-0 text-[12px] text-text3">
+          <Text as="p" type="supporting" xstyle={styles.meta}>
             {view.runtime_managed
               ? "The runtime manages its own context."
               : `${view.used_tokens} of ${view.budget_tokens} tokens`}
             {view.scopes.length > 0 ? ` · ${view.scopes.join(", ")}` : ""}
-          </p>
+          </Text>
         ) : null}
-        {problem ? (
-          <p role="alert" className="m-0 text-red">
-            {problem}
-          </p>
-        ) : null}
-        {!view && !problem ? <p className="m-0 text-text3">Loading…</p> : null}
+        {problem ? <Banner status="error" role="alert" title={problem} /> : null}
+        {loading ? <Skeleton height={48} /> : null}
         {sections.map((section) => (
-          <section key={section} className="flex flex-col gap-1">
-            <p className="m-0 text-[12px] font-medium text-text3">{section}</p>
+          <section key={section} {...stylex.props(styles.group)}>
+            <Meta>{section}</Meta>
             {view?.items
               .filter((i) => i.section === section)
               .map((i) => (
-                <div key={i.id} className={`flex justify-between gap-3 ${i.included ? "" : "text-text3"}`}>
-                  <span className="min-w-0">
+                <div key={i.id} {...stylex.props(styles.contextLine, !i.included && styles.text3)}>
+                  <span {...stylex.props(styles.minZero)}>
                     {i.included ? "" : "Left out: "}
                     {i.label}
-                    {i.reason ? <span className="text-text3"> · {i.reason}</span> : null}
+                    {i.reason ? <span {...stylex.props(styles.text3)}> · {i.reason}</span> : null}
                   </span>
-                  <span className="flex-none font-mono text-[12px] text-text3">
+                  <span {...stylex.props(styles.codeMeta)}>
                     {i.tokens} tok{typeof i.score === "number" ? ` · ${i.score.toFixed(2)}` : ""}
                   </span>
                 </div>
@@ -381,21 +659,21 @@ export function ContextDialog({ run, onClose }: { run: string; onClose: () => vo
           </section>
         ))}
         {list.length > 0 ? (
-          <section className="flex flex-col gap-1">
-            <p className="m-0 text-[12px] font-medium text-text3">Guidelines</p>
+          <section {...stylex.props(styles.group)}>
+            <Meta>Guidelines</Meta>
             {list.map((g) => (
-              <div key={g.guideline_id} className="flex justify-between gap-3">
-                <span className="min-w-0 truncate">{g.title}</span>
-                <span className="flex-none text-[12px] text-text3">
-                  v{g.version} · {g.chars} chars
+              <div key={g.guideline_id} {...stylex.props(styles.contextLine)}>
+                <span {...stylex.props(styles.truncate)}>{g.title}</span>
+                <span {...stylex.props(styles.noShrink)}>
+                  <Meta>
+                    v{g.version} · {g.chars} chars
+                  </Meta>
                 </span>
               </div>
             ))}
           </section>
         ) : null}
-        <p className="m-0 text-[12px] text-text3">
-          Only permitted scopes are searched, before any text is loaded. Memory is data, not instructions.
-        </p>
+        <Meta>Only permitted scopes are searched, before any text is loaded. Memory is data, not instructions.</Meta>
       </div>
     </Dialog>
   );
@@ -415,17 +693,31 @@ function EditedLink({ id }: { id: string }) {
   };
   return (
     <>
-      <button type="button" onClick={() => void load()} className={linkish}>
+      <button type="button" onClick={() => void load()} {...linkish}>
         edited
       </button>
       {versions ? (
-        <Dialog open onClose={() => setVersions(null)} title="Earlier versions" width={560}>
-          <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto p-4">
-            <p className="m-0 text-[12px] font-semibold tracking-[0.04em] text-text3">EARLIER VERSIONS</p>
-            {versions.length === 0 ? <p className="m-0 text-text2">The earlier text is gone.</p> : null}
+        <Dialog
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setVersions(null);
+          }}
+          width={560}
+          maxHeight="calc(100vh - 48px)"
+          purpose="form"
+          padding={0}
+        >
+          <DialogHeader
+            title="Earlier versions"
+            onOpenChange={(open) => {
+              if (!open) setVersions(null);
+            }}
+          />
+          <div {...stylex.props(styles.dialogBody)}>
+            {versions.length === 0 ? <Text color="secondary">The earlier text is gone.</Text> : null}
             {versions.map((v) => (
-              <div key={v.replaced_at_ms} className="flex flex-col gap-1 border-t border-line2 pt-2">
-                <span className="text-[12px] text-text3">{clock(v.replaced_at_ms, offset())}</span>
+              <div key={v.replaced_at_ms} {...stylex.props(styles.version)}>
+                <Meta>{clock(v.replaced_at_ms, offset())}</Meta>
                 <Markdown text={v.text} />
               </div>
             ))}
@@ -445,7 +737,7 @@ function LiveAnswer({ m, waiting }: { m: MessageView; waiting: boolean }) {
   return (
     <>
       <AnswerBody m={m} text={text} activity={activity} live />
-      <div className="flex items-center gap-2 text-[12px] text-acc-text">
+      <div {...stylex.props(styles.liveStatus)}>
         {m.run_id ? <StopButton run={m.run_id} /> : null}
 
         {update?.progress?.compacting ? "Context comprimeren…" : statusLine(activity, text, waiting)}
@@ -468,10 +760,10 @@ function Header({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-baseline gap-2">
-      <span className="font-semibold">{name}</span>
-      <span className="text-[12px] text-text3">{human ? "· board member" : `— ${kind}`}</span>
-      <span className="text-[12px] text-text3">{clock(at, offset())}</span>
+    <div {...stylex.props(styles.header)}>
+      <Text weight="semibold">{name}</Text>
+      <Meta>{human ? "· board member" : `— ${kind}`}</Meta>
+      <Meta>{clock(at, offset())}</Meta>
       {children}
     </div>
   );
@@ -479,36 +771,38 @@ function Header({
 
 function SystemRow({ m }: { m: MessageView }) {
   const { ticketNumber } = useChat();
+  const card = m.run ? <RunCard m={m} Output={ActivityOutput} /> : null;
   const line = m.system;
-  if (!line) return <div className="px-10 text-[12px] leading-[1.5] text-text3">{m.text}</div>;
+  if (!line) return <div {...stylex.props(styles.systemBare)}>{m.text}</div>;
   const text = systemText(line, m.text, ticketNumber);
   const { mark, failed } = lineMark(line, text);
   const [first, reason] = text.split(" Reason:");
   return (
     <section
-      className={`flex flex-col gap-[2px] rounded-[8px] border px-3 py-2 text-[13px] ${failed ? "border-red text-red" : "border-line bg-sunk text-text2"}`}
+      {...stylex.props(styles.system, failed ? styles.systemFailed : styles.systemNormal)}
       aria-label={`System: ${text} at ${clock(m.created_at_ms, offset())}`}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="min-w-0 flex-1">
+      <div {...stylex.props(styles.systemTop)}>
+        <span {...stylex.props(styles.grow)}>
           {mark}
           {first}
         </span>
         {line.task_id ? (
-          <Link
-            to="/tasks/$taskId"
-            params={{ taskId: line.task_id }}
-            className="text-[12px] text-acc-text no-underline"
-          >
+          <Link to="/tasks/$taskId" params={{ taskId: line.task_id }} {...stylex.props(styles.accentLink)}>
             Open task →
           </Link>
         ) : line.ticket_id ? (
-          <Link to="/board" search={{ ticket: line.ticket_id }} className="text-[12px] text-acc-text no-underline">
+          <Link to="/board" search={{ ticket: line.ticket_id }} {...stylex.props(styles.accentLink)}>
             Open ticket →
           </Link>
         ) : null}
       </div>
-      {reason ? <span className="line-clamp-2 text-[12px] text-text3">Reason:{reason}</span> : null}
+      {reason ? (
+        <Text type="supporting" maxLines={2} hasTruncateTooltip={false} xstyle={styles.meta}>
+          Reason:{reason}
+        </Text>
+      ) : null}
+      {card}
     </section>
   );
 }
@@ -536,32 +830,34 @@ function UpdateCard({ m }: { m: MessageView }) {
         return ["MESSAGE FROM", false];
       case "mode_chosen":
         return ["MODE CHOSEN", false];
+      case "ticket_note":
+        return ["FROM A TICKET", false];
+      case "scheduled":
+        return ["SCHEDULED", false];
       default:
         return ["UPDATE", false];
     }
   })();
   return (
-    <div
-      className={`flex flex-col gap-[6px] rounded-[8px] border px-[14px] py-[11px] ${label[1] ? "border-amber-line bg-amber-soft" : "border-line bg-sunk"}`}
-    >
-      <div className="flex items-center gap-2 text-[11.5px] text-text3">
-        <span className="font-semibold tracking-[0.04em]">{label[0]}</span>
-        <span className="min-w-0 flex-1 truncate text-text2">{m.author ?? "Aurelius"}</span>
+    <div {...stylex.props(styles.update, label[1] ? styles.updateUrgent : styles.updateNormal)}>
+      <div {...stylex.props(styles.updateTop)}>
+        <span {...stylex.props(styles.updateLabel)}>{label[0]}</span>
+        <span {...stylex.props(styles.updateAuthor)}>{m.author ?? "Aurelius"}</span>
         {isPlan ? (
           <button
             type="button"
             aria-expanded={open}
             onClick={() => setChoice(!open)}
-            className="cursor-pointer border-0 bg-transparent p-0 text-text2 hover:text-text"
+            {...stylex.props(styles.plainButton, styles.linkPlain)}
           >
             {open ? "▾ Hide plan" : "▸ Show plan"}
           </button>
         ) : null}
       </div>
       {open ? (
-        <Text text={m.text} seenLive={false} />
+        <Prose text={m.text} seenLive={false} />
       ) : (
-        <span className="truncate text-text2">{planTitle(m.text)}</span>
+        <span {...stylex.props(styles.truncate, styles.text2)}>{planTitle(m.text)}</span>
       )}
       {pending ? <ApprovalCard approval={pending} /> : null}
     </div>
@@ -581,21 +877,21 @@ function Queued({ m }: { m: MessageView }) {
   };
   const { conversationId } = useFeedIds();
   return (
-    <div className="flex items-center gap-3 text-[12px] text-text3">
+    <div {...stylex.props(styles.queued)}>
       Waiting · sends after the current answer
       {conversationId ? (
         <>
           <button
             type="button"
             onClick={() => void act("conversation.delete_queued", conversationId)}
-            className="cursor-pointer border-0 bg-transparent p-0 text-text2 hover:text-text"
+            {...stylex.props(styles.plainButton, styles.linkPlain)}
           >
             Delete
           </button>
           <button
             type="button"
             onClick={() => void act("conversation.send_queued_now", conversationId)}
-            className="cursor-pointer border-0 bg-transparent p-0 text-acc-text"
+            {...stylex.props(styles.plainButton, styles.linkAccent)}
           >
             Send now
           </button>
@@ -614,7 +910,7 @@ function Reactions({ m, can }: { m: MessageView; can: boolean }) {
   const react = useReact(m);
   if (list.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-1">
+    <div {...stylex.props(styles.reactions)}>
       {list.map((r) => (
         <button
           key={r.emoji}
@@ -623,9 +919,9 @@ function Reactions({ m, can }: { m: MessageView; can: boolean }) {
           title={reactionTip(r)}
           disabled={!can}
           onClick={() => react(r.emoji)}
-          className={`inline-flex h-[22px] cursor-pointer items-center gap-1 rounded-[11px] border px-[7px] text-[12px] ${r.mine ? "border-acc-text bg-sel" : "border-line bg-transparent"}`}
+          {...stylex.props(styles.reaction, r.mine && styles.reactionMine)}
         >
-          {r.emoji} <span className="text-text2">{r.count}</span>
+          {r.emoji} <span {...stylex.props(styles.text2)}>{r.count}</span>
         </button>
       ))}
     </div>
@@ -666,27 +962,31 @@ function EditBox({ m, onDone }: { m: MessageView; onDone: () => void }) {
     }
   };
   return (
-    <div className="flex flex-col gap-2">
+    <div {...stylex.props(styles.editBox)}>
       {gone ? (
-        <div role="alert" className="flex items-center gap-2 text-[12px] text-red">
-          <span className="min-w-0 flex-1">{gone}</span>
-          <Button
-            onClick={() => {
-              void platform.copy(text).then(() => toast("Copied your text."));
-              onDone();
-            }}
-          >
-            Copy my text
-          </Button>
-        </div>
+        <Banner
+          status="error"
+          role="alert"
+          title={gone}
+          endContent={
+            <Button
+              label="Copy my text"
+              onClick={() => {
+                void platform.copy(text).then(() => toast("Copied your text."));
+                onDone();
+              }}
+            />
+          }
+        />
       ) : null}
-      <textarea
-        aria-label="Edit message"
+      <TextArea
+        label="Edit message"
+        isLabelHidden
         ref={(el) => el?.focus({ preventScroll: true })}
         rows={Math.min(10, text.split("\n").length + 1)}
-        className="w-full resize-y rounded-[6px] border border-btn-line bg-sunk p-2 text-text outline-none focus:border-acc-text"
+        width="100%"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={setText}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -699,12 +999,10 @@ function EditBox({ m, onDone }: { m: MessageView; onDone: () => void }) {
           }
         }}
       />
-      {save.kind === "off" ? <span className="text-[12px] text-text3">To remove it, delete the message.</span> : null}
-      <div className="flex gap-2">
-        <Button kind="primary" disabled={save.kind === "off"} onClick={() => void go()}>
-          Save
-        </Button>
-        <Button onClick={onDone}>Cancel</Button>
+      {save.kind === "off" ? <Meta>To remove it, delete the message.</Meta> : null}
+      <div {...stylex.props(styles.editActions)}>
+        <Button variant="primary" label="Save" isDisabled={save.kind === "off"} onClick={() => void go()} />
+        <Button label="Cancel" onClick={onDone} />
       </div>
     </div>
   );
@@ -748,36 +1046,31 @@ function RowBar({
     if (key === "ticket")
       overlays.open("ticket", { ...prefill(m.text, name, place, clock(m.created_at_ms, offset())), fromMessage: m.id });
   };
-  const tool =
-    "grid size-[26px] cursor-pointer place-items-center rounded-[5px] border-0 bg-transparent text-text2 hover:bg-sel hover:text-text";
+  const glyph = (text: string) => <span aria-hidden="true">{text}</span>;
   return (
-    <div className="absolute -top-3 right-2 hidden gap-[1px] rounded-[7px] border border-line bg-panel p-[2px] shadow-card group-focus-within/row:flex group-hover/row:flex has-data-[state=open]:flex">
+    <div {...stylex.props(styles.rowBar)}>
       {actions.react ? (
         <Menu
           label="React"
           options={REACTIONS.map((e) => ({ key: e, label: reactionOn(m.reactions ?? [], e) ? e : `${e}  Take back` }))}
           onPick={react}
-          trigger={
-            <button type="button" aria-label="React" className={tool}>
-              ☺+
-            </button>
-          }
+          trigger={<IconButton size="sm" variant="ghost" label="React" icon={glyph("☺+")} />}
         />
       ) : null}
       {actions.reply ? (
-        <button type="button" aria-label="Reply in thread" onClick={() => openThread(m.id)} className={tool}>
-          ↳
-        </button>
+        <IconButton
+          size="sm"
+          variant="ghost"
+          label="Reply in thread"
+          icon={glyph("↳")}
+          onClick={() => openThread(m.id)}
+        />
       ) : null}
       <Menu
         label="More actions"
         options={more}
         onPick={pick}
-        trigger={
-          <button type="button" aria-label="More actions" className={tool}>
-            ⋯
-          </button>
-        }
+        trigger={<IconButton size="sm" variant="ghost" label="More actions" icon={glyph("⋯")} />}
       />
     </div>
   );
@@ -792,17 +1085,17 @@ function ThreadLink({ m }: { m: MessageView }) {
       type="button"
       aria-label={threadLabel(m, offset(), today())}
       onClick={() => openThread(m.id)}
-      className="flex h-7 cursor-pointer items-center gap-2 self-start rounded-[6px] border-0 bg-transparent px-1 text-[12px] text-acc-text hover:bg-sel"
+      {...stylex.props(styles.threadLink)}
     >
-      <span className="flex">
+      <span {...stylex.props(styles.marks)}>
         {(m.thread_repliers ?? []).slice(0, 3).map((name) => (
-          <span key={name} className="-ml-1 first:ml-0">
+          <span key={name} {...stylex.props(styles.markOverlap)}>
             <Mark letter={initial(name)} color={markColor(name)} size={18} radius={5} />
           </span>
         ))}
       </span>
       {line}
-      {(m.thread_unread ?? 0) > 0 ? <span className="font-semibold text-amber">{m.thread_unread} new</span> : null}
+      {(m.thread_unread ?? 0) > 0 ? <span {...stylex.props(styles.warn)}>{m.thread_unread} new</span> : null}
     </button>
   );
 }
@@ -816,18 +1109,25 @@ export const MessageRow = memo(function MessageRow({
   grouped: boolean;
   inThread?: boolean;
 }) {
-  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId, channel } = useChat();
+  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId, channel, retryTarget } = useChat();
   const made = useMemo(() => ticketFrom(messages, m.id), [messages, m.id]);
   const { flash } = useChat();
   const connection = useConnection();
   const client = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const retry = useRetryAnswer(conversationId, messages, { channel, threadParent: m.thread_parent ?? null });
+  // A row's menus are only built once it is pointed at or focused: with 2,000 messages, scrolling mounts many rows.
+  const [touched, setTouched] = useState(false);
+  const touch = () => setTouched(true);
+  const retry = useRetryAnswer(
+    conversationId,
+    messages,
+    retryTarget ?? { channel, threadParent: m.thread_parent ?? null },
+  );
   if (m.system || isSystemLine(m, true)) return <SystemRow m={m} />;
   const who = authorOf(m, roleOf);
   const body = m.deleted_at_ms ? (
-    <span className="text-text3">⊘ This message was deleted.</span>
+    <span {...stylex.props(styles.text3)}>⊘ This message was deleted.</span>
   ) : editing ? (
     <EditBox m={m} onDone={() => setEditing(false)} />
   ) : m.update && m.update !== "group" ? (
@@ -844,19 +1144,17 @@ export const MessageRow = memo(function MessageRow({
       <FileChips files={m.uploads} />
       <KeptFiles files={m.files ?? []} />
       {m.id === lastAnswer && m.status === "complete" && m.run_id ? (
-        <span className="flex gap-3">
+        <span {...stylex.props(styles.answerLinks)}>
           <ContextLink run={m.run_id} />
-          <TraceLink run={m.run_id} className={linkish} />
+          <TraceLink run={m.run_id} />
         </span>
       ) : null}
-      {m.status === "interrupted" ? (
-        <span className="text-[12px] text-text3">Stopped; text up to that point is kept.</span>
-      ) : null}
+      {m.status === "interrupted" ? <Meta>Stopped; text up to that point is kept.</Meta> : null}
       {m.status === "failed" ? (
-        <span className="text-[12px] text-red">Failed; this doesn't count as an answer.</span>
+        <span {...stylex.props(styles.metaError)}>Failed; this doesn't count as an answer.</span>
       ) : null}
       {m.id === lastAnswer && (m.status === "failed" || m.status === "interrupted") ? (
-        <button type="button" onClick={retry} className={linkish}>
+        <button type="button" onClick={retry} {...linkish}>
           ↻ Retry answer
         </button>
       ) : null}
@@ -872,9 +1170,16 @@ export const MessageRow = memo(function MessageRow({
   };
   return (
     <div
-      className={`group/row relative flex gap-3 rounded-[6px] hover:bg-[color-mix(in_srgb,var(--sel)_45%,transparent)] ${grouped ? "pt-[2px]" : "pt-2"} ${flash === m.id ? "bg-sel" : ""}`}
+      onPointerEnter={touch}
+      onFocusCapture={touch}
+      {...stylex.props(
+        styles.row,
+        grouped ? styles.rowGrouped : styles.rowFull,
+        flash === m.id && styles.rowFlash,
+        stylex.defaultMarker(),
+      )}
     >
-      <div className="w-7 flex-none">
+      <div {...stylex.props(styles.markColumn)}>
         {grouped ? null : (
           <Mark
             letter={initial(who.name)}
@@ -884,55 +1189,72 @@ export const MessageRow = memo(function MessageRow({
           />
         )}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+      <div data-message-body {...stylex.props(styles.body)}>
         {grouped ? null : (
           <Header name={who.name} kind={who.kind} human={who.human} at={m.created_at_ms}>
-            {mentionsMe(m.text, me) && m.role !== "user" ? (
-              <span className="text-[12px] font-medium text-amber">@ you</span>
-            ) : null}
+            {mentionsMe(m.text, me) && m.role !== "user" ? <span {...stylex.props(styles.metaWarn)}>@ you</span> : null}
             {m.edited_at_ms && !m.deleted_at_ms ? <EditedLink id={m.id} /> : null}
             {made ? (
               made.ticket ? (
-                <Link
-                  to="/board"
-                  search={{ ticket: made.ticket }}
-                  className="rounded-[9px] border border-line px-[6px] text-[12px] text-acc-text no-underline"
-                >
+                <Link to="/board" search={{ ticket: made.ticket }} {...stylex.props(styles.ticketChip)}>
                   → {made.label}
                 </Link>
               ) : (
-                <span className="text-[12px] text-text3">→ {made.label}</span>
+                <Meta>→ {made.label}</Meta>
               )
             ) : null}
           </Header>
         )}
         {body}
         {m.queued ? <Queued m={m} /> : null}
+        {m.run ? <RunCard m={m} Output={ActivityOutput} /> : null}
+        {!caps.readOnly && waitsOnReply(m, [...approvals.values()]) ? (
+          <ReplyCard
+            who={who.name}
+            onSend={(text) =>
+              connection.write(
+                "group_chat.send",
+                { text, images: [], files: [], channel, thread_parent: m.thread_parent ?? null, confirm_secret: false },
+                { retry: false },
+              )
+            }
+          />
+        ) : null}
         <Reactions m={m} can={!caps.readOnly} />
         {inThread ? null : <ThreadLink m={m} />}
       </div>
-      {editing || m.deleted_at_ms || m.status === "partial" ? null : (
+      {!touched || editing || m.deleted_at_ms || m.status === "partial" ? null : (
         <RowBar m={m} name={who.name} onEdit={() => setEditing(true)} onDelete={() => setDeleting(true)} />
       )}
       {deleting ? (
-        <Dialog open onClose={() => setDeleting(false)} title="Delete this message?" width={440}>
-          <div className="flex flex-col gap-2 p-4">
-            <p className="m-0 text-[15px] font-semibold">Delete this message?</p>
-            <p className="m-0 text-text2">The channel keeps a line saying a message was deleted.</p>
+        <Dialog
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setDeleting(false);
+          }}
+          width={440}
+          maxHeight="calc(100vh - 48px)"
+          purpose="form"
+          padding={0}
+        >
+          <DialogHeader title="Delete this message?" />
+          <div {...stylex.props(styles.dialogBody)}>
+            <Text color="secondary">The channel keeps a line saying a message was deleted.</Text>
           </div>
-          <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-            <Button onClick={() => setDeleting(false)}>Cancel</Button>
-            <Button
-              data-autofocus
-              kind="danger"
-              onClick={() => {
-                setDeleting(false);
-                void remove();
-              }}
-            >
-              Delete
-            </Button>
-          </div>
+          <LayoutFooter hasDivider>
+            <div {...stylex.props(styles.footer)}>
+              <Button label="Cancel" onClick={() => setDeleting(false)} />
+              <Button
+                data-autofocus
+                variant="destructive"
+                label="Delete"
+                onClick={() => {
+                  setDeleting(false);
+                  void remove();
+                }}
+              />
+            </div>
+          </LayoutFooter>
         </Dialog>
       ) : null}
     </div>
@@ -958,14 +1280,14 @@ export function LiveRow({ id, name, kind }: { id: string; name: string; kind: st
     uploads: [],
   };
   return (
-    <div className="flex gap-3 pt-2">
-      <div className="w-7 flex-none">
+    <div {...stylex.props(styles.liveRow)}>
+      <div {...stylex.props(styles.markColumn)}>
         <Mark letter={initial(name)} color={markColor(name)} size={28} radius={7} />
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex items-baseline gap-2">
-          <span className="font-semibold">{name}</span>
-          <span className="text-[12px] text-text3">— {kind}</span>
+      <div data-message-body {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.liveName)}>
+          <Text weight="semibold">{name}</Text>
+          <Meta>— {kind}</Meta>
         </div>
         <LiveAnswer m={stub} waiting={false} />
       </div>

@@ -53,7 +53,7 @@ test.describe("scripted", () => {
       await expect(row).toContainText("@1");
       await bottom(page).fill("half a thought");
       await row.click();
-      await expect(page.getByText("Talk with your whole team here.")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Talk with your whole team here." })).toBeVisible();
       await expect(bottom(page)).toHaveValue("");
       await page.getByRole("button", { name: /general/ }).click();
       await expect(bottom(page)).toHaveValue("half a thought");
@@ -74,7 +74,7 @@ test.describe("scripted", () => {
       // A refusal puts the words back.
       await bottom(page).fill("nope");
       await bottom(page).press("Enter");
-      await expect(page.getByRole("alert")).toHaveText("Refused by the server.");
+      await expect(page.locator('[role="alert"]:not([data-astryx-live-region])')).toHaveText("Refused by the server.");
       await expect(bottom(page)).toHaveValue("nope");
 
       // A secret is held until it is confirmed.
@@ -128,7 +128,7 @@ test.describe("scripted", () => {
       frame("");
       await expect(page.getByText("Thinking…")).toBeVisible();
       await page.evaluate(() => {
-        (window as unknown as { kept: Element | null }).kept = document.querySelector(".prose-aurelius");
+        (window as unknown as { kept: Element | null }).kept = document.querySelector("[data-message-body]");
       });
       frame("First block.\n\nSecond");
       await expect(page.getByText("Second")).toBeVisible();
@@ -210,6 +210,58 @@ test.describe("scripted", () => {
       await expect
         .poll(() => writesOf(writes, "message.edit")[0]?.params)
         .toMatchObject({ text: "Better words", message_id: "m2" });
+    } finally {
+      await stop();
+    }
+  });
+
+  test("a channel: run card, an approval of a woken run and its odometer", async ({ page }) => {
+    const { stop } = await open(page, {
+      features: [...FEATURES, "run_cards"],
+      channels: [general],
+      approvals: [
+        approval("a9", { conversation_id: "main", discussion_id: "g", requester: "Bo" }),
+        approval("a8", { conversation_id: "elsewhere", requester: "Cy" }),
+      ],
+      feeds: {
+        general: feed("g", [
+          message("m1", "assistant", "All done here.", {
+            update: "group",
+            author: "Flux",
+            run_id: "r1",
+            run: { status: "succeeded", tool_calls: 3, failed_calls: 0 },
+            usage: {
+              input_tokens: 2000,
+              output_tokens: 500,
+              cached_tokens: 0,
+              cache_creation_tokens: 0,
+              estimate: false,
+            },
+          }),
+        ]),
+      },
+      reads: {
+        "usage.get_totals": () => {
+          const total = {
+            runs: 1,
+            input_tokens: 2000,
+            output_tokens: 500,
+            cached_tokens: 0,
+            cache_creation_tokens: 0,
+            cost_micro_usd: 50000,
+            estimate: false,
+            model_calls: 2,
+          };
+          return { type: "usage_totals", value: { own: total, subtasks: [], total } };
+        },
+      },
+    });
+    try {
+      await expect(page.getByText("All done here.")).toBeVisible();
+      await expect(page.locator("[data-run-card]").getByText("3 tool calls · 2.5k tokens")).toBeVisible();
+      await expect(page.getByText("2 calls · 2k tokens in · 500 tokens out · $0.05 cost")).toBeVisible();
+      await expect(page.getByText("Bo wants to run a command")).toBeVisible();
+      await expect(page.getByText("Cy wants to run a command")).toHaveCount(0);
     } finally {
       await stop();
     }

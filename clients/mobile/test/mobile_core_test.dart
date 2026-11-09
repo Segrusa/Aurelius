@@ -24,7 +24,7 @@ void main() {
   tearDown(() => router.dispose());
 
   test('the menus leave out the screens of the mobile core list and keep the core', () {
-    for (final id in ['plugins', 'artifacts', 'vault', 'usage', 'context', 'company', 'load', 'power', 'runtime', 'advanced', 'recurring', 'tasks', 'projects', 'ideas', 'updates']) {
+    for (final id in ['vault', 'usage', 'context', 'company', 'load', 'power', 'runtime', 'advanced', 'recurring', 'tasks', 'projects', 'ideas', 'updates']) {
       expect(shownInMobileCore(id), isFalse, reason: id);
     }
     for (final id in ['team', 'inbox', 'board', 'settings', 'hosts', 'account']) {
@@ -34,7 +34,7 @@ void main() {
 
   test('a screen that is hidden from the menus keeps its route, so a link or a push still opens it', () {
     final paths = _paths(router.config.configuration.routes);
-    expect(paths, containsAll(['/usage', '/plugins', '/vault', '/company', '/tasks', '/projects', '/ideas', '/updates', '/context/:runId', '/settings/advanced', '/settings/recurring']));
+    expect(paths, containsAll(['/usage', '/vault', '/company', '/tasks', '/projects', '/ideas', '/updates', '/context/:runId', '/settings/advanced', '/settings/recurring']));
     for (final link in ['/usage', '/vault?project=p', '/company?view=chart', '/context/r-1', '/settings/recurring', '/project/p/task/t']) {
       expect(router.config.configuration.findMatch(Uri.parse(link)).isError, isFalse, reason: link);
     }
@@ -45,14 +45,5 @@ void main() {
     expect(shownInMobileCore('vault'), isTrue);
     mobileCoreHidden = kHiddenInMobileCore;
     expect(shownInMobileCore('vault'), isFalse);
-  });
-
-  test('the unused features of ticket #19 are in the one list, and what stays is not', () {
-    for (final id in ['notes', 'artifacts', 'shares', 'variants', 'dependencies', 'heartbeats', 'api_keys', 'app_keys', 'plugins', 'chat_attach']) {
-      expect(shownInMobileCore(id), isFalse, reason: id);
-    }
-    for (final id in ['webhooks', 'functions', 'ticket_attachments']) {
-      expect(kHiddenInMobileCore.contains(id), isFalse, reason: id);
-    }
   });
 }

@@ -3,7 +3,7 @@ use aurelius_domain::project::{CreateProject, RenameProject, SetProjectDescripti
 use aurelius_storage::queries;
 
 fn ctx() -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: None }
 }
 
 fn create(name: &str) -> CommandEnvelope {
@@ -276,53 +276,6 @@ fn a_command_receipt_keeps_its_method() {
     service.execute(&ctx(), create("Atlas")).unwrap();
     let method: String = service.store().read(|c| Ok(c.query_row("SELECT method FROM command_receipts", [], |r| r.get(0))?)).unwrap();
     assert_eq!(method, "project.create");
-}
-
-#[test]
-fn notes_list_pinned_first_refuse_stale_saves_and_stay_out_of_archived_projects() {
-    let dir = tempfile::tempdir().unwrap();
-    let service = open(dir.path());
-    let project = match service.execute(&ctx(), create("Atlas")).unwrap().receipt.result {
-        CommandResult::ProjectCreated { project_id, .. } => project_id,
-        other => panic!("unexpected {other:?}"),
-    };
-
-    let (first, notices) = service.create_note(project, "# Groceries\n- [ ] milk".into()).unwrap();
-    assert_eq!((first.summary.title.as_str(), first.summary.preview.as_str(), first.summary.revision), ("Groceries", "- [ ] milk", 1));
-    assert_eq!(notices[0].kind, EventKind::NoteCreated);
-    assert_eq!(notices[0].project_id, Some(project));
-    std::thread::sleep(std::time::Duration::from_millis(5));
-    let (second, _) = service.create_note(project, "Ideas".into()).unwrap();
-    let ids = |q: Option<&str>| service.notes(project, q.map(Into::into)).unwrap().notes.into_iter().map(|n| n.id).collect::<Vec<_>>();
-    assert_eq!(ids(None), vec![second.summary.id, first.summary.id], "last edited first");
-
-    let (pinned, notices) = service.set_note_pinned(first.summary.id, true).unwrap();
-    assert!(pinned.summary.pinned && pinned.summary.revision == 1, "pinning keeps the revision");
-    assert_eq!(notices[0].kind, EventKind::NoteUpdated);
-    assert_eq!(ids(None), vec![first.summary.id, second.summary.id], "pinned first");
-    assert_eq!(ids(Some("MILK")), vec![first.summary.id], "search ignores case");
-
-    let (saved, notices) = service.update_note(first.summary.id, "# Groceries\n- [x] milk".into(), 1).unwrap();
-    assert_eq!((saved.summary.revision, notices.len()), (2, 1));
-    let (same, notices) = service.update_note(first.summary.id, "# Groceries\n- [x] milk".into(), 2).unwrap();
-    assert_eq!((same.summary.revision, notices.len()), (2, 0), "the same text is no new revision");
-    let stale = service.update_note(first.summary.id, "other device".into(), 1).unwrap_err();
-    assert_eq!(stale.code, ErrorCode::VersionConflict);
-    assert_eq!(service.note(first.summary.id).unwrap().body, "# Groceries\n- [x] milk");
-    assert_eq!(service.update_note(first.summary.id, "x".repeat(aurelius_storage::notes::MAX_BODY_BYTES + 1), 2).unwrap_err().code, ErrorCode::Validation);
-
-    let notices = service.delete_note(second.summary.id).unwrap();
-    assert_eq!(notices[0].kind, EventKind::NoteDeleted);
-    assert_eq!(service.note(second.summary.id).unwrap_err().code, ErrorCode::NotFound);
-
-    let archive = CommandEnvelope {
-        command_id: CommandId::new(),
-        expected_version: None,
-        command: Command::SetProjectStatus(aurelius_domain::employee::SetProjectStatus { project_id: project, status: aurelius_domain::employee::LifecycleStatus::Archived }),
-    };
-    service.execute(&ctx(), archive).unwrap();
-    assert_eq!(service.create_note(project, "late".into()).unwrap_err().code, ErrorCode::Validation);
-    assert_eq!(ids(None).len(), 1, "an archived project keeps its notes readable");
 }
 
 #[test]

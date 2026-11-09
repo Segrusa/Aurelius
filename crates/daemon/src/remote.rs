@@ -20,10 +20,6 @@ impl Dispatch for Sessions {
         tokio::spawn(api::run(shared, peer, requests, out));
     }
 
-    fn open_app(&self, key: aurelius_storage::app_keys::AppKeyRow, requests: mpsc::Receiver<Request>, out: mpsc::Sender<ServerMessage>) {
-        let Some(shared) = self.0.upgrade() else { return };
-        tokio::spawn(api::run(shared, Peer::remote_app(&key), requests, out));
-    }
 }
 
 /// After `Shared` exists: connect the gateway to sessions and events, and

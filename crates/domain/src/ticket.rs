@@ -24,6 +24,8 @@ pub const REASON_MAX: usize = 500;
 pub const ATTACHMENTS_MAX: usize = crate::conversation::UPLOADS_MAX;
 /// The last deadline taken: 9999-12-31 (ms since the epoch).
 pub const DEADLINE_MAX_MS: i64 = 253_402_300_799_999;
+/// Longest link to a Claude Design artifact (a project's styleguide, a ticket's design).
+pub const ARTIFACT_URL_MAX: usize = 300;
 
 /// What a column does. The seven kinds always exist, once each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
@@ -176,6 +178,10 @@ pub struct TicketView {
     /// having no active responsible, without a list of board members. Left out when false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub responsible_disabled: bool,
+    /// The ticket's design, a Claude Design artifact (feature `design_links`). A link only:
+    /// its runs read the artifact themselves. Left out when none and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_url: Option<String>,
 }
 
 /// Why a ticket cannot run yet (`TicketView::needs`).
@@ -352,6 +358,11 @@ pub struct UpdateTicket {
     /// unless it adds files: older servers refuse fields they do not know.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub add_files: Option<Vec<String>>,
+    /// The ticket's design: a Claude Design artifact link (`valid_artifact_url`,
+    /// feature `design_links`); an empty text clears it. Left out unless it changes,
+    /// so older servers, which refuse unknown fields here, keep working.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_url: Option<String>,
     /// A board member confirmed that the text may hold a vault secret's value
     /// (after `looks_like_secret`, B10): it is stored with the value redacted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -656,6 +667,24 @@ pub fn valid_description(text: Option<&str>) -> Result<Option<String>, DomainErr
     optional_text("description", text, DESCRIPTION_MAX)
 }
 
+/// A link to a Claude Design artifact (`https://claude.ai/artifact/<id>` or
+/// `https://claude.ai/code/artifact/<uuid>`, nothing behind the id), trimmed; an empty
+/// text clears it (`None`). The id's characters are narrow on purpose: the link goes
+/// into a run's prompt, and an employee can set a ticket's.
+pub fn valid_artifact_url(field: &str, url: &str) -> Result<Option<String>, DomainError> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Ok(None);
+    }
+    if url.chars().count() > ARTIFACT_URL_MAX {
+        return Err(DomainError::TooLong { field: field.into(), max: ARTIFACT_URL_MAX });
+    }
+    match url.strip_prefix("https://claude.ai/artifact/").or_else(|| url.strip_prefix("https://claude.ai/code/artifact/")) {
+        Some(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) => Ok(Some(url.to_owned())),
+        _ => Err(DomainError::ArtifactLink(format!("{field} must be a Claude artifact link: https://claude.ai/artifact/<id> or https://claude.ai/code/artifact/<uuid>"))),
+    }
+}
+
 pub fn valid_feedback(text: &str) -> Result<String, DomainError> {
     require_text("feedback", text, FEEDBACK_MAX)
 }
@@ -819,6 +848,30 @@ mod tests {
         for column in [ColumnKind::Todo, ColumnKind::Doing, ColumnKind::PlanReview, ColumnKind::Testing, ColumnKind::Review, ColumnKind::Done] {
             assert!(check_unassign(column).is_err(), "{column:?}");
         }
+    }
+
+    #[test]
+    fn only_a_claude_artifact_link_is_taken_and_empty_clears() {
+        assert_eq!(valid_artifact_url("design_url", "  "), Ok(None));
+        for good in ["https://claude.ai/artifact/9sfwWLbDbQerBZ3jmBSkXS", "https://claude.ai/code/artifact/8f14e45f-ceea-467f-a22a-2b7a2c55e3b1", " https://claude.ai/artifact/a_b-1 "] {
+            assert_eq!(valid_artifact_url("design_url", good), Ok(Some(good.trim().to_owned())), "{good}");
+        }
+        for bad in [
+            "http://claude.ai/artifact/abc",
+            "https://claude.ai/artifact/",
+            "https://claude.ai/artifact/abc/x",
+            "https://claude.ai/artifact/abc?share=1",
+            "https://claude.ai/artifact/abc def",
+            "https://claude.ai/chat/abc",
+            "https://claude.ai/code/artifact/",
+            "https://claude.ai.evil.com/artifact/abc",
+            "javascript:alert(1)",
+            "claude.ai/artifact/abc",
+        ] {
+            assert!(matches!(valid_artifact_url("design_url", bad), Err(DomainError::ArtifactLink(m)) if m.contains("https://claude.ai/artifact/<id>")), "{bad}");
+        }
+        let long = format!("https://claude.ai/artifact/{}", "a".repeat(ARTIFACT_URL_MAX));
+        assert_eq!(valid_artifact_url("design_url", &long), Err(DomainError::TooLong { field: "design_url".into(), max: ARTIFACT_URL_MAX }));
     }
 
     #[test]

@@ -43,7 +43,7 @@ impl AgentRuntime for Recording {
 }
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     match client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result {
         CommandResult::EmployeeCreated { employee_id, .. } => employee_id,
         other => panic!("{other:?}"),
@@ -51,7 +51,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str) -> Employe
 }
 
 async fn task(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str) -> TaskId {
-    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![] };
     match client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result {
         CommandResult::TaskCreated { task_id } => task_id,
         other => panic!("{other:?}"),
@@ -125,7 +125,7 @@ async fn the_project_assistant_sees_and_reads_the_projects_tasks() {
     assert!(system.contains("“Dark mode” · succeeded · Iris"), "{system}");
     assert!(system.contains("Result:"), "the result's gist is there: {system}");
     // The task's own conversation has its task as context, not the overview.
-    let iris_system = runtime.systems.lock().unwrap().iter().find(|s| s.starts_with("You are Iris")).cloned().unwrap();
+    let iris_system = runtime.systems.lock().unwrap().iter().find(|s| s.contains("You are Iris")).cloned().unwrap();
     assert!(!iris_system.contains("## Tasks in this project"), "{iris_system}");
 
     // From that run, the assistant can list and read the task.

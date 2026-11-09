@@ -1,7 +1,7 @@
-//! Views that only the wire knows: host state (load, power, MCP, plugins, updates, backups),
-//! files, terminals and git. The read models shared with storage live in `aurelius_domain::views`.
+//! Views that only the wire knows: host state (load, power, MCP, updates, backups),
+//! files. The read models shared with storage live in `aurelius_domain::views`.
 
-use aurelius_domain::{ConversationId, HostId, ProjectId, RunId, EmployeeId, MessageId, job::JobState};
+use aurelius_domain::{ConversationId, HostId, ProjectId, RunId, MessageId, job::JobState};
 pub use aurelius_domain::views::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -24,75 +24,6 @@ pub struct DirListing {
 pub struct DirEntryView {
     pub name: String,
     pub path: String,
-}
-
-/// `git.get_status`: where a conversation works, in Git terms.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct GitStatusView {
-    /// The checked-out branch; `None` when HEAD is detached (see `head`).
-    pub branch: Option<String>,
-    /// Short commit id of HEAD.
-    pub head: Option<String>,
-    /// Uncommitted change against HEAD (untracked files count as files).
-    pub files: u32,
-    pub insertions: u32,
-    pub deletions: u32,
-}
-
-/// `git.get_diff`: the uncommitted change against HEAD. `task.get_diff`
-/// uses it too: `status` is then the task's branch, `head` its tip, and the
-/// counts are against the task's base.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct GitDiffView {
-    pub status: GitStatusView,
-    /// Unified diff of tracked files (staged and unstaged), cut when large.
-    pub patch: String,
-    pub truncated: bool,
-    /// New files Git does not track yet (not in `patch`).
-    pub untracked: Vec<String>,
-}
-
-/// `terminal/open`: the shell this session is now attached to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TerminalView {
-    pub terminal_id: String,
-    pub conversation_id: ConversationId,
-    /// The folder the shell started in.
-    pub cwd: String,
-    /// The shell program, e.g. `pwsh.exe`.
-    pub shell: String,
-    /// It was already running (its scrollback follows as output).
-    pub reattached: bool,
-}
-
-/// One terminal of a conversation in `terminal.list`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TerminalSummary {
-    pub terminal_id: String,
-    pub conversation_id: ConversationId,
-    /// `Terminal 1`, `Terminal 2`, ...: the lowest number free in the conversation when it started.
-    pub title: String,
-    pub cwd: String,
-    pub shell: String,
-    pub created_at_ms: i64,
-    /// The shell still runs (an ended one stays listed until nobody shows it).
-    pub alive: bool,
-    /// Sessions that get its output now.
-    pub attached: u32,
-}
-
-/// Output of a terminal, only to the sessions attached to it; never stored.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TerminalOutput {
-    pub terminal_id: String,
-    pub data_base64: String,
-}
-
-/// The shell ended (exit code when known); the terminal is gone.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TerminalExit {
-    pub terminal_id: String,
-    pub code: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -396,13 +327,6 @@ pub enum BrowserBackend {
     Playwright,
 }
 
-/// `artifact.get_setting` and `artifact.set_enabled`: whether Claude Code runs
-/// get the artifact tools (publish pages on claude.ai). Off by default.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ArtifactSetting {
-    pub enabled: bool,
-}
-
 /// `management_mode.get_setting` and `management_mode.set_enabled` (feature
 /// `management_chooses_mode`): whether management (the CEO and their direct reports) chooses
 /// its own task mode, Auto or Plan, when the user picked none. On by default.
@@ -573,108 +497,6 @@ pub struct McpServers {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct McpAlwaysAllow {
     pub tools: Vec<String>,
-}
-
-/// What a plugin brings (names only).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PluginComponents {
-    pub skills: Vec<String>,
-    pub commands: Vec<String>,
-    pub agents: Vec<String>,
-    /// The plugin runs commands on the server's computer at session events.
-    pub hooks: bool,
-    /// MCP servers it declares; they are not loaded in Aurelius runs.
-    pub mcp_servers: Vec<String>,
-}
-
-/// Whether an entry is a full plugin or a standalone skill that Aurelius wrapped as one.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PluginKind {
-    #[default]
-    Plugin,
-    Skill,
-}
-
-/// An installed Claude Code plugin.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PluginInfo {
-    /// `name@marketplace`; the key for every plugin method.
-    pub id: String,
-    pub name: String,
-    pub marketplace: String,
-    pub version: String,
-    pub description: String,
-    pub components: PluginComponents,
-    /// Employees that have it enabled.
-    pub employees: Vec<EmployeeId>,
-    /// Projects that have it enabled (for their project assistant).
-    #[serde(default)]
-    pub projects: Vec<ProjectId>,
-    /// The install folder no longer exists.
-    pub missing: bool,
-    #[serde(default)]
-    pub kind: PluginKind,
-    /// The link a skill was added from; `None` for plugins.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-}
-
-/// `plugin.list`, `plugin.install`, `plugin.update`, `plugin.remove`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PluginsSnapshot {
-    pub plugins: Vec<PluginInfo>,
-}
-
-/// A plugin a marketplace offers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PluginOffer {
-    pub id: String,
-    pub name: String,
-    pub marketplace: String,
-    pub description: String,
-    /// Known when the marketplace carries the plugin's files; otherwise `None`.
-    pub components: Option<PluginComponents>,
-    pub installed: bool,
-    #[serde(default)]
-    pub kind: PluginKind,
-    /// The link a skill was added from; `None` for plugins.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-}
-
-/// `plugins/available`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PluginCatalog {
-    pub offers: Vec<PluginOffer>,
-}
-
-/// `plugins/preview`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PluginPreview {
-    /// The marketplace's name, as added.
-    pub marketplace: String,
-    pub offers: Vec<PluginOffer>,
-}
-
-/// `plugin.get_for_employee` and `plugin.set_for_employee`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct EmployeePlugins {
-    pub employee_id: EmployeeId,
-    /// The employee's own plugins. In a task its runs also load the plugins of
-    /// the task's project (`plugin.get_for_project`).
-    pub enabled: Vec<String>,
-    /// Enabled ids that are no longer installed; they are skipped in runs.
-    pub missing: Vec<String>,
-}
-
-/// `plugin.get_for_project` and `plugin.set_for_project`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ProjectPlugins {
-    pub project_id: ProjectId,
-    pub enabled: Vec<String>,
-    /// Enabled ids that are no longer installed; they are skipped in runs.
-    pub missing: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]

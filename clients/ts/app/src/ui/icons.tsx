@@ -1,5 +1,12 @@
 // The 16 px stroke icons of the design.
 
+import * as stylex from "@stylexjs/stylex";
+import type { ComponentType } from "react";
+
+const styles = stylex.create({
+  fixed: { flexShrink: 0 },
+});
+
 const NAV_PATHS = {
   inbox: "M2.5 9.5h3l1 2h3l1-2h3M4 3.5h8l1.5 6V13h-11V9.5z",
   mine: "M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11zM8 5.5V8l1.8 1.2",
@@ -10,6 +17,8 @@ const NAV_PATHS = {
   settings:
     "M8 5.6a2.4 2.4 0 1 0 0 4.8a2.4 2.4 0 1 0 0-4.8zM8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M3.6 12.4l1.2-1.2M11.2 4.8l1.2-1.2",
   back: "M9.5 3.5 5 8l4.5 4.5",
+  clock: "M3 3.5h10v10H3zM3 6.5h10M5.5 2v3M10.5 2v3",
+  note: "M4 2.5h8v11H4zM6 5.5h4M6 8h4M6 10.5h2.5",
   know: "M8 4.5C6.5 3.5 4.5 3.3 2.5 3.5v9c2-.2 4 0 5.5 1 1.5-1 3.5-1.2 5.5-1v-9c-2-.2-4 0-5.5 1zM8 4.5v9",
 } as const;
 
@@ -33,6 +42,10 @@ export function Icon({ name, size = 15 }: { name: NavIcon; size?: number }) {
   );
 }
 
+/** The same icons as components, for a slot that wants one (SideNavItem). */
+export const NAV_ICONS = {} as Record<NavIcon, ComponentType>;
+for (const name of Object.keys(NAV_PATHS) as NavIcon[]) NAV_ICONS[name] = () => <Icon name={name} />;
+
 const GLYPHS = {
   warn: "M7.25 4.6h1.5v4.2h-1.5zM8 10.2a.95.95 0 1 1 0 1.9a.95.95 0 1 1 0-1.9z",
   ask: "M8 10.4a.85.85 0 1 1 0 1.7a.85.85 0 1 1 0-1.7zM6 6.4a2 2 0 1 1 2.9 1.8c-.4.2-.5.4-.5.8v.6H7.6V9c0-.8.4-1.3 1-1.6a1 1 0 1 0-1.4-1z",
@@ -42,7 +55,7 @@ const GLYPHS = {
 
 export function StatusGlyph({ glyph, color }: { glyph: keyof typeof GLYPHS; color: string }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className="flex-none">
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" {...stylex.props(styles.fixed)}>
       <circle cx="8" cy="8" r="6.5" fill="none" stroke={color} strokeWidth="1.5" />
       <path d={GLYPHS[glyph]} fill={color} />
     </svg>
@@ -89,8 +102,15 @@ export function NewIcon() {
 /** The stone-cut "A" of the app icon (`scripts/make-icon.py`), on its green tile. */
 export function Logo({ size = 20 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 120 120" aria-hidden="true" className="flex-none">
-      <rect width="120" height="120" rx="28" className="fill-acc" />
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 120 120"
+      role="img"
+      aria-label="Aurelius"
+      {...stylex.props(styles.fixed)}
+    >
+      <rect width="120" height="120" rx="28" fill="var(--color-accent)" />
       <path
         transform="translate(60 60) scale(.72) translate(-60 -60)"
         fill="#fff"

@@ -5,4 +5,8 @@ packages:
   - clients/e2e
 allowBuilds:
   electron: true
+  '@astryxdesign/core': false
+  '@astryxdesign/cli': false
 minimumReleaseAgeStrict: true
+patchedDependencies:
+  '@astryxdesign/core@0.7.11': patches/@astryxdesign__core@0.7.11.patch

@@ -25,7 +25,7 @@ struct Setup {
 }
 
 fn ctx(user: Option<UserId>) -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: user }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: user }
 }
 
 fn exec(s: &Setup, command: Command) -> CommandResult {
@@ -33,7 +33,7 @@ fn exec(s: &Setup, command: Command) -> CommandResult {
 }
 
 fn hire(service: &CommandService, user: UserId, name: &str, boss: Option<EmployeeId>) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
     let made = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateEmployee(create) }).unwrap().receipt.result;
     let CommandResult::EmployeeCreated { employee_id, .. } = made else { panic!("{made:?}") };
     employee_id
@@ -90,7 +90,7 @@ fn create_action(title: &str) -> EmployeeAction {
 }
 
 fn update_action(ticket: &str, title: &str) -> EmployeeAction {
-    EmployeeAction::UpdateTicket { ticket: ticket.into(), title: Some(title.into()), description: None, priority: None, labels: None }
+    EmployeeAction::UpdateTicket { design_url: None, ticket: ticket.into(), title: Some(title.into()), description: None, priority: None, labels: None }
 }
 
 fn move_action(ticket: &str, column: &str) -> EmployeeAction {
@@ -213,7 +213,7 @@ fn the_dispatcher_is_a_manager_by_structure_and_a_plain_agent_is_not() {
     let before = counts(&s);
     let (ok, text) = act(&s, run_of(&s, s.ann, true), create_action("From an agent"));
     let after = counts(&s);
-    assert!(!ok && text.contains("Only management creates tickets") && text.contains("add_idea"), "{text}");
+    assert!(!ok && text.contains("Only management creates tickets") && text.contains("Ask a manager"), "{text}");
     // The run row of the test itself is the only difference.
     assert_eq!(before[..3], after[..3].to_vec()[..3], "no event, ticket or task");
     assert_eq!(before[4..], after[4..], "no job, message or blob");
@@ -292,7 +292,7 @@ fn update_changes_only_the_given_fields_and_names_the_employee() {
     let s = setup();
     let t = new_ticket(&s, "Old title", Some(s.ann));
     let run = run_of(&s, s.ann, true);
-    let (ok, text) = act(&s, run, EmployeeAction::UpdateTicket { ticket: format!("#{}", view(&s, t).number), title: Some("New title".into()), description: Some("More words.".into()), priority: Some("high".into()), labels: Some(vec!["api".into()]) });
+    let (ok, text) = act(&s, run, EmployeeAction::UpdateTicket { design_url: None, ticket: format!("#{}", view(&s, t).number), title: Some("New title".into()), description: Some("More words.".into()), priority: Some("high".into()), labels: Some(vec!["api".into()]) });
     assert!(ok, "the owner works on it: {text}");
     let v = view(&s, t);
     assert_eq!((v.title.as_str(), v.priority.as_str(), v.labels.clone()), ("New title", "high", vec!["api".to_string()]));
@@ -345,14 +345,34 @@ fn a_manager_updates_any_open_ticket_but_never_a_done_or_archived_one() {
 }
 
 #[test]
+fn update_ticket_links_a_design_and_refuses_what_is_no_artifact() {
+    let s = setup();
+    let t = new_ticket(&s, "Dashboard", Some(s.ann));
+    let run = run_of(&s, s.ann, true);
+    let link = "https://claude.ai/artifact/abc123";
+    let design = |url: &str| EmployeeAction::UpdateTicket { design_url: Some(url.into()), ticket: t.to_string(), title: None, description: None, priority: None, labels: None };
+    let (ok, text) = act(&s, run, design("https://example.com/not-claude"));
+    assert!(!ok && text.contains("Claude artifact link"), "{text}");
+    assert_eq!(view(&s, t).design_url, None, "nothing written");
+    let (ok, text) = act(&s, run, design(link));
+    assert!(ok, "{text}");
+    assert_eq!(view(&s, t).design_url.as_deref(), Some(link));
+    assert_eq!(events_of(&s, t, "ticket.updated").last().unwrap().2["changed"], serde_json::json!(["design"]));
+    assert!(discussion_text(&s, t).contains("Ann changed the design link"));
+    let (ok, _) = act(&s, run, design(""));
+    assert!(ok, "empty clears");
+    assert_eq!(view(&s, t).design_url, None);
+}
+
+#[test]
 fn an_update_with_nothing_to_change_or_a_bad_value_writes_nothing() {
     let s = setup();
     let t = new_ticket(&s, "Plain", None);
     let atlas = run_of(&s, s.atlas, true);
     let before = counts(&s);
-    let nothing = EmployeeAction::UpdateTicket { ticket: t.to_string(), title: None, description: None, priority: None, labels: None };
+    let nothing = EmployeeAction::UpdateTicket { design_url: None, ticket: t.to_string(), title: None, description: None, priority: None, labels: None };
     assert!(act(&s, atlas, nothing).1.contains("Give a field to change"));
-    let bad = EmployeeAction::UpdateTicket { ticket: t.to_string(), title: None, description: None, priority: Some("whenever".into()), labels: None };
+    let bad = EmployeeAction::UpdateTicket { design_url: None, ticket: t.to_string(), title: None, description: None, priority: Some("whenever".into()), labels: None };
     assert!(act(&s, atlas, bad).1.contains("No priority called whenever"));
     assert!(act(&s, atlas, update_action(&t.to_string(), "   ")).1.len() > 5);
     assert_eq!(before, counts(&s));
@@ -508,15 +528,15 @@ fn an_employee_posts_in_a_tickets_discussion_but_not_on_done() {
 }
 
 #[test]
-fn a_post_wakes_only_the_colleague_it_names_within_the_budget() {
+fn a_post_that_names_a_colleague_wakes_nobody() {
     let s = setup();
     let t = new_ticket(&s, "Wake", None);
     let ann = run_of(&s, s.ann, true);
     let in_chats = |s: &Setup| -> i64 { s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM runs", [], |r| r.get(0))?)).unwrap() };
     let before = in_chats(&s);
     let (ok, text) = act(&s, ann, EmployeeAction::PostToTicket { ticket: t.to_string(), message: "@Bo can you look?".into() });
-    assert!(ok && text.contains("Bo will answer there"), "{text}");
-    assert_eq!(in_chats(&s), before + 1, "one run for Bo, none for Ann herself");
+    assert!(ok && text.contains("wakes nobody") && text.contains("hand_off"), "{text}");
+    assert_eq!(in_chats(&s), before, "a name only refers to someone");
 }
 
 /// A run of `employee` on the login of another board member than the setup's.
@@ -665,7 +685,7 @@ fn an_employee_cannot_change_the_text_of_a_ticket_under_review_but_may_change_it
             "{}: {text}",
             kind.as_str()
         );
-        let describe = EmployeeAction::UpdateTicket {
+        let describe = EmployeeAction::UpdateTicket { design_url: None,
             ticket: t.to_string(),
             title: None,
             description: Some("new".into()),
@@ -679,7 +699,7 @@ fn an_employee_cannot_change_the_text_of_a_ticket_under_review_but_may_change_it
             "{} changed something",
             kind.as_str()
         );
-        let priority = EmployeeAction::UpdateTicket {
+        let priority = EmployeeAction::UpdateTicket { design_url: None,
             ticket: t.to_string(),
             title: None,
             description: None,

@@ -1,4 +1,4 @@
-//! Task and dependency projections.
+//! Task projections.
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::{
@@ -68,28 +68,6 @@ pub fn insert_ticket_task(
         ],
     )?;
     Ok(())
-}
-
-pub fn insert_dependency(tx: &Transaction<'_>, task: TaskId, requires: TaskId) -> Result<(), StorageError> {
-    tx.execute("INSERT INTO task_dependencies(task_id, requires_task_id) VALUES (?1, ?2)", params![task.to_string(), requires.to_string()])?;
-    Ok(())
-}
-
-pub fn dependency_edges(conn: &Connection) -> Result<Vec<(TaskId, TaskId)>, StorageError> {
-    let mut stmt = conn.prepare("SELECT task_id, requires_task_id FROM task_dependencies")?;
-    let rows = stmt.query_map([], |r| Ok((parse(TaskId::parse(&r.get::<_, String>(0)?))?, parse(TaskId::parse(&r.get::<_, String>(1)?))?)))?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
-/// (all dependencies succeeded, any dependency failed/cancelled)
-pub fn dependency_state(conn: &Connection, task: TaskId) -> Result<(bool, bool), StorageError> {
-    let (open, broken): (i64, i64) = conn.query_row(
-        "SELECT COALESCE(SUM(t.status <> 'succeeded'), 0), COALESCE(SUM(t.status IN ('failed','cancelled')), 0)
-         FROM task_dependencies d JOIN tasks t ON t.id = d.requires_task_id WHERE d.task_id = ?1",
-        [task.to_string()],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )?;
-    Ok((open == 0, broken > 0))
 }
 
 pub struct TaskRow {
@@ -223,18 +201,18 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
                 CASE WHEN t.status = 'waiting' AND t.waiting_reason = 'quota' THEN
                     (SELECT MAX(qj.not_before_ms) FROM jobs qj JOIN runs r ON r.id = qj.id
                      WHERE r.task_id = t.id AND qj.state = 'ready' AND qj.last_error_code = 'quota') END,
-                j.state, j.not_before_ms, t.created_by_app_key_id, ak.name,
+                j.state, j.not_before_ms,
                 CASE WHEN t.status IN ('succeeded','failed','cancelled','review') AND t.conversation_id IS NOT NULL THEN
                     (SELECT CASE
                         WHEN SUM(r.status IN ('starting','running','waiting','cancelling') OR (r.status = 'created' AND rj.state = 'leased')) > 0 THEN 'running'
-                        WHEN SUM(r.status = 'created') > 0 THEN 'queued' END
-                     FROM runs r LEFT JOIN jobs rj ON rj.id = r.id
+                        WHEN SUM(r.status = 'created') > 0 THEN 'queued'
+                        WHEN (SELECT COUNT(*) FROM employee_inbox i WHERE i.conversation_id = t.conversation_id AND i.state = 'queued') > 0 THEN 'queued' END
+                     FROM runs r LEFT JOIN jobs rj ON rj.id = r.id AND rj.kind = 'run.chat'
                      WHERE r.conversation_id = t.conversation_id AND r.status IN ('created','starting','running','waiting','cancelling')) END,
                 t.ticket_id, (SELECT k.number FROM tickets k WHERE k.id = t.ticket_id)
          FROM tasks t JOIN blobs gb ON gb.id = t.brief_blob_id LEFT JOIN blobs cb ON cb.id = t.acceptance_blob_id
          LEFT JOIN blobs rb ON rb.id = t.result_blob_id LEFT JOIN employees m ON m.id = t.employee_id
          LEFT JOIN jobs j ON j.id = t.id AND j.kind = 'task.run'
-         LEFT JOIN app_keys ak ON ak.id = t.created_by_app_key_id
          WHERE (?1 IS NULL OR t.project_id = ?1) AND (?2 IS NULL OR t.id = ?2) ORDER BY t.created_at_ms DESC LIMIT 500",
     )?;
     let rows = stmt.query_map([project.map(|p| p.to_string()), task.map(|t| t.to_string())], |r| {
@@ -260,16 +238,13 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
             r.get::<_, Option<i64>>(18)?,
             r.get::<_, Option<String>>(19)?,
             r.get::<_, Option<String>>(20)?,
-            r.get::<_, Option<String>>(21)?,
-            r.get::<_, Option<String>>(22)?,
-            r.get::<_, Option<i64>>(23)?,
+            r.get::<_, Option<i64>>(21)?,
         ))
     })?;
-    let edges = dependency_edges(conn)?;
     let now = now_ms();
     let mut out = Vec::new();
     for row in rows {
-        let (id, project_id, employee, employee_name, title, goal_key, criteria_key, status, waiting, created, updated, result_key, pending, parent, delegated_by, conversation, waiting_until, job_state, not_before, app_key, app_name, live_run, ticket, ticket_number) = row?;
+        let (id, project_id, employee, employee_name, title, goal_key, criteria_key, status, waiting, created, updated, result_key, pending, parent, delegated_by, conversation, waiting_until, job_state, not_before, live_run, ticket, ticket_number) = row?;
         let status = TaskStatus::parse(&status).unwrap_or(TaskStatus::Failed);
         let employee = employee.and_then(|m| EmployeeId::parse(&m).ok());
         let (waiting, starts_at_ms) = match status {
@@ -296,7 +271,6 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
             created_at_ms: created,
             updated_at_ms: updated,
             result: result_key.as_deref().and_then(read_blob),
-            depends_on: edges.iter().filter(|(t, _)| *t == id).map(|(_, r)| *r).collect(),
             pending_approvals: pending as u32,
             parent_task_id: parent.and_then(|p| TaskId::parse(&p).ok()),
             delegated_by,
@@ -311,10 +285,6 @@ fn task_views(conn: &Connection, project: Option<ProjectId>, task: Option<TaskId
                 })
                 .unwrap_or_default(),
             schedule_id: schedule_of(conn, id)?,
-            function_id: crate::agent_functions::function_of_task(conn, id)?,
-            created_by_app: app_name,
-            created_by_app_key_id: app_key.and_then(|k| aurelius_domain::AppKeyId::parse(&k).ok()),
-            variant_phase: crate::variants::phase(conn, id)?,
             live_run: match live_run.as_deref() {
                 Some("running") => Some(LiveRun::Running),
                 Some("queued") => Some(LiveRun::Queued),
@@ -346,10 +316,8 @@ pub(crate) fn start_wait(conn: &Connection, task: TaskId, employee: Option<Emplo
 
 /// Step runs of a task that are still going (to stop them when it is cancelled).
 pub fn active_runs(conn: &Connection, task: TaskId) -> Result<Vec<aurelius_domain::RunId>, StorageError> {
-    // The runs of its variants (their own conversations) stop with it too.
     let mut stmt = conn.prepare(
-        "SELECT id FROM runs WHERE status IN ('starting','running','waiting')
-           AND (task_id = ?1 OR conversation_id IN (SELECT conversation_id FROM task_variants WHERE task_id = ?1))",
+        "SELECT id FROM runs WHERE status IN ('starting','running','waiting') AND task_id = ?1",
     )?;
     let rows = stmt.query_map([task.to_string()], |r| r.get::<_, String>(0))?;
     Ok(rows.filter_map(|r| r.ok()).filter_map(|id| aurelius_domain::RunId::parse(&id).ok()).collect())

@@ -13,7 +13,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/vault.dart';
 import '../../data/views.dart';
-import '../artifacts/artifacts.dart' show launchExternal;
+import '../links/external_link.dart' show launchExternal;
 import 'reveal_bloc.dart';
 import 'vault_bloc.dart';
 import 'vault_page.dart';

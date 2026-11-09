@@ -1,4 +1,9 @@
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
+
+const styles = stylex.create({
+  image: { display: "block", maxWidth: "100%" },
+});
 
 let loaded: Promise<typeof import("mermaid").default> | null = null;
 
@@ -43,7 +48,7 @@ export function Mermaid({ source, fallback }: { source: string; fallback: React.
   return (
     <img
       alt="Mermaid diagram"
-      className="max-w-full"
+      {...stylex.props(styles.image)}
       src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`}
     />
   );

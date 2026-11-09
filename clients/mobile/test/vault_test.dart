@@ -175,8 +175,8 @@ void main() {
       expect(kindChoices(VaultKind.secret), [VaultKind.secret]);
     });
 
-    test('E21: the texts for R2 (plugins and MCP servers) and R3 (the key on Linux)', () {
-      expect(vaultPluginsNotice, 'Plugins and MCP servers of an employee see the secrets of its runs.');
+    test('E21: the texts for R2 (MCP servers) and R3 (the key on Linux)', () {
+      expect(vaultMcpNotice, 'MCP servers of an employee see the secrets of its runs.');
       expect(vaultKeyNotice, "On Linux, any process of the daemon's user, also an agent through Bash, can read the key.", reason: 'QA2 m7: the same text as the desktop');
     });
 
@@ -255,7 +255,7 @@ void main() {
       expect(find.text('GITHUB_TOKEN · Secret'), findsOneWidget);
       expect(find.text('STAGING_URL · URL'), findsOneWidget);
       expect(find.textContaining(fakeSecret), findsNothing);
-      expect(find.text(vaultPluginsNotice), findsOneWidget);
+      expect(find.text(vaultMcpNotice), findsOneWidget);
       expect(find.text(vaultKeyNotice), findsOneWidget);
       expect(find.text(vaultKeyExportNotice), findsOneWidget);
       expect(find.bySemanticsLabel(RegExp('GitHub token, secret, hidden')), findsOneWidget);

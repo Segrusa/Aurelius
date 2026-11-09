@@ -8,7 +8,7 @@ use aurelius_storage::queries;
 use crate::run::{ChatRunPlan, RunOutcome, lifecycle};
 
 fn ctx() -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: None }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: None }
 }
 
 fn send(service: &CommandService, conversation_id: aurelius_domain::ConversationId, text: &str) -> RunId {

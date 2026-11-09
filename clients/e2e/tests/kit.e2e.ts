@@ -10,7 +10,8 @@ import { scriptServer } from "./fake-server";
 
 const PASSWORD = "a-long-enough-password";
 
-const palette = (page: Page) => page.locator("[cmdk-input]");
+const palette = (page: Page) => page.getByRole("combobox", { name: "Command palette" });
+const toast = (page: Page, text: string) => page.getByRole("region", { name: "Notifications" }).getByText(text);
 
 test("keyboard, palette, New ticket and Give work against a real daemon", async () => {
   const daemon = new TestDaemon();
@@ -86,10 +87,6 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await expect(page.getByRole("option", { name: /Northwind API/ }).first()).toBeVisible();
     await palette(page).fill("j");
     await expect(page).toHaveURL(/inbox/);
-    await palette(page).fill("heartbeat");
-    await expect(page.getByText("Nothing found.")).toBeVisible();
-    await palette(page).fill("plugin");
-    await expect(page.getByText("Nothing found.")).toBeVisible();
     await palette(page).fill("");
     await page.keyboard.press("Control+,");
     await expect(page).toHaveURL(/inbox/);
@@ -126,10 +123,10 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await page.getByLabel("Labels").fill("backend, ui, backend");
     await page.getByLabel("Deadline").fill("next week");
     await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("Write the date as");
+    await expect(page.locator('[role="alert"]:not([data-astryx-live-region])')).toContainText("Write the date as");
     await page.getByLabel("Deadline").fill("2031-03-04 17:00");
     await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByText("Ticket created in Backlog.")).toBeVisible();
+    await expect(toast(page, "Ticket created in Backlog.")).toBeVisible();
     await expect(title).toHaveCount(0);
     const made = (await tickets()).find((t) => t.title === "Add rate limits");
     expect(made?.column).toBe("backlog");
@@ -144,10 +141,10 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await title.fill("Rotate the key");
     await page.getByLabel("Description").fill("The key is hunter2-very-secret-value");
     await page.keyboard.press("Control+Enter");
-    await expect(page.getByRole("alert")).toContainText("Deploy key");
+    await expect(page.locator('[role="alert"]:not([data-astryx-live-region])')).toContainText("Deploy key");
     expect((await tickets()).some((t) => t.title === "Rotate the key")).toBe(false);
     await page.getByRole("button", { name: "Send anyway" }).click();
-    await expect(page.getByText("Ticket created and started.")).toBeVisible();
+    await expect(toast(page, "Ticket created and started.")).toBeVisible();
     await until("started", async () =>
       (await tickets()).find((t) => t.title === "Rotate the key" && t.column !== "backlog"),
     );
@@ -159,7 +156,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await expect(page.getByRole("button", { name: "Ava" })).toHaveAttribute("aria-pressed", "true");
     await goal.fill(`${"Compare three hosting options ".repeat(3)}\nwith prices`);
     await page.keyboard.press("Control+Enter");
-    await expect(page.getByText("Created and started with Ava.")).toBeVisible();
+    await expect(toast(page, "Created and started with Ava.")).toBeVisible();
     const given = (await tickets()).find((t) => t.owner_name === "Ava");
     expect([...(given?.title ?? "")]).toHaveLength(61);
 
@@ -169,7 +166,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await page.getByRole("menuitem", { name: "Ben" }).click();
     await goal.fill("Fix the build");
     await page.getByRole("button", { name: /^Give work/ }).click();
-    await expect(page.getByText("Created and started with Ben.")).toBeVisible();
+    await expect(toast(page, "Created and started with Ben.")).toBeVisible();
     expect((await tickets()).find((t) => t.title === "Fix the build")?.owner_name).toBe("Ben");
     expect(await page.evaluate(() => localStorage.getItem("aurelius.last_given_to"))).toBeTruthy();
 
@@ -205,7 +202,7 @@ test("on the web a browser's own keys stay the browser's, and the action moves",
     await page.keyboard.press("Alt+t");
     await page.getByLabel("Title").fill("From the web");
     await page.keyboard.press("Control+Enter");
-    await expect(page.getByText("Ticket created and started.")).toBeVisible();
+    await expect(toast(page, "Ticket created and started.")).toBeVisible();
     const sent = writes.find((w) => w.method === "ticket.create") as { params: { title: string; start: boolean } };
     expect(sent.params.title).toBe("From the web");
     expect(sent.params.start).toBe(true);

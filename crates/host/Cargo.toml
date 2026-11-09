@@ -1,6 +1,6 @@
 [package]
 name = "aurelius-host"
-description = "OS integration: power, tray, chrome, terminal, plugins, backups, data paths, host identity, instance lock, user-only IPC and frame codec, secrets, start-up, signed updates and the release tool."
+description = "OS integration: power, tray, chrome, backups, data paths, host identity, instance lock, user-only IPC and frame codec, secrets, start-up, signed updates and the release tool."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,7 +13,6 @@ aurelius-storage.workspace = true
 aurelius-runtime.workspace = true
 tokio = { workspace = true, features = ["process"] }
 base64.workspace = true
-portable-pty = "0.9"
 uuid.workspace = true
 serde.workspace = true
 serde_json.workspace = true

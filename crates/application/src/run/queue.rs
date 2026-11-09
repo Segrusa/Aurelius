@@ -63,7 +63,7 @@ pub(crate) fn explain_failed_start(tx: &Tx<'_>, run_id: RunId, blob: &PreparedBl
 }
 
 /// `group`: the group chat woke this run (see `conv::GroupRun`); its answer is copied there.
-fn job_payload(run: RunId, conversation: ConversationId, message: MessageId, reply_to: MessageId, group: Option<conv::GroupRun>) -> serde_json::Value {
+pub(crate) fn job_payload(run: RunId, conversation: ConversationId, message: MessageId, reply_to: MessageId, group: Option<conv::GroupRun>) -> serde_json::Value {
     let mut payload = serde_json::json!({
         "run_id": run, "conversation_id": conversation,
         "assistant_message_id": message, "reply_to": reply_to,
@@ -95,6 +95,10 @@ pub(crate) fn queue_run_marked(
     reply_to: MessageId,
     group: Option<conv::GroupRun>,
 ) -> Result<(RunId, Vec<EventNotice>), StorageError> {
+    // Work with an employee goes through its mailbox (R1).
+    if let Some(queued) = crate::run::inbox::enqueue(tx, ctx_meta, correlation, conversation, reply_to, group)? {
+        return Ok(queued);
+    }
     let run_id = RunId::new();
     let message_id = MessageId::new();
     // Every conversation runs like an employee at work: the employee defaults apply.
@@ -159,8 +163,9 @@ pub(crate) fn request_stop(
     // Not claimed yet, or parked (for a usage limit) with its job back in the
     // queue: cancel the job directly; no process runs for it.
     // Claimed: the dispatcher sees 'cancelling' and interrupts.
-    let not_claimed = matches!(status, "created" | "waiting")
-        && tx.execute("UPDATE jobs SET state = 'cancelled' WHERE id = ?1 AND state = 'ready'", [run_id.to_string()])? == 1;
+    let unclaimed = status == "created" && crate::run::inbox::cancel_queued(tx, run_id)?;
+    let not_claimed = unclaimed || (matches!(status, "created" | "waiting")
+        && tx.execute("UPDATE jobs SET state = 'cancelled' WHERE id = ?1 AND state = 'ready'", [run_id.to_string()])? == 1);
     if not_claimed {
         if status == "waiting" {
             notices.extend(interrupt_parked_message(tx, run_id, correlation)?);

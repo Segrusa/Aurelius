@@ -221,7 +221,7 @@ async fn next(socket: &mut Socket) -> ServerMessage {
 }
 
 async fn hello(socket: &mut Socket) -> HelloResult {
-    let params = HelloParams { client_name: "phone".into(), client_version: "0".into(), app_key: None, accepts: Vec::new(), session_token: None };
+    let params = HelloParams { client_name: "phone".into(), client_version: "0".into(), accepts: Vec::new(), session_token: None };
     match call(socket, 1, Method::SessionHello(params)).await {
         Outcome::Ok(ResponseBody::Hello(h)) => {
             assert_eq!(h.protocol, PROTOCOL_MAJOR);
@@ -359,7 +359,7 @@ async fn paired_phone_uses_the_same_sessions_with_limits() {
     let atlas = projects.iter().find(|p| p.name == "Atlas").unwrap();
     let CommandResult::EmployeeCreated { employee_id, .. } = desktop
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -369,7 +369,7 @@ async fn paired_phone_uses_the_same_sessions_with_limits() {
         panic!()
     };
     // The message goes to the conversation of one of its tasks.
-    let task = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id: atlas.id, employee_id: Some(employee_id), title: "Read".into(), goal: "Read what comes".into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let task = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id: atlas.id, employee_id: Some(employee_id), title: "Read".into(), goal: "Read what comes".into(), acceptance_criteria: vec![] };
     desktop.execute(envelope(Command::CreateTask(task), None)).await.unwrap();
     let mut thread = None;
     for _ in 0..400 {
@@ -563,7 +563,7 @@ async fn phone_sets_an_employees_model_and_effort_but_not_its_connection() {
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = desktop
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Iris".into(), role: "Writer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await

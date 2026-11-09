@@ -10,7 +10,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex;
 
-pub use aurelius_domain::{RunId, idea::IdeaKind, memory::EmployeeMemoryOp};
+pub use aurelius_domain::{RunId, idea::IdeaKind, memory::{EmployeeMemoryOp, MEMORY_SCOPE_RULE}};
 pub use aurelius_protocol::EmployeeTaskOp;
 
 /// The user's decision on a tool Claude Code asked about.

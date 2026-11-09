@@ -1,4 +1,4 @@
-// The rules of New ticket and Give work, pure. Port of parse_deadline in clients/desktop/src/screens/board.rs.
+// The rules of New ticket and Give work, pure.
 
 const WRONG = "Write the date as 2026-11-03, optionally with a time: 2026-11-03 17:00.";
 

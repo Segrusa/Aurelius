@@ -1,13 +1,11 @@
 //! Pure domain model for Aurelius.
 //!
 //! No IO: serde and primitive types only. It validates commands, holds the
-//! rules (policy intersection, the org chart, heartbeat schedule) and the
+//! rules (policy intersection, the org chart) and the
 //! read models that storage returns and the protocol sends. Persistence,
 //! transport and UI live elsewhere.
 
 pub mod activity;
-pub mod agent_function;
-pub mod app_key;
 pub mod approval;
 pub mod autonomy;
 pub mod command;
@@ -15,6 +13,7 @@ pub mod company;
 pub mod connection;
 pub mod conversation;
 pub mod employee;
+pub mod employee_tools;
 pub mod error;
 pub mod events;
 pub mod files;
@@ -32,14 +31,11 @@ pub mod remote;
 pub mod schedule;
 pub mod scheduler;
 pub mod server;
-pub mod share;
 pub mod task;
 pub mod ticket;
 pub mod user;
-pub mod variants;
 pub mod vault;
 pub mod views;
-pub mod webhook;
 
 pub use command::{CommandEnvelope, CommandReceipt, CommandResult};
 pub use error::{AppError, ErrorCode};
@@ -105,8 +101,9 @@ pub enum Command {
     SetEmployeeFolder(employee::SetEmployeeFolder),
     SetEmployeeReportsTo(employee::SetEmployeeReportsTo),
     SetFollowOrgChart(employee::SetFollowOrgChart),
-    SetHeartbeat(employee::SetHeartbeat),
     SendEmployeeMessage(employee::SendEmployeeMessage),
+    OpenEmployeeChat(employee::OpenEmployeeChat),
+    CancelScheduledMessage(employee::CancelScheduledMessage),
     SendGroupMessage(group_chat::SendGroupMessage),
     DecideProposal(proposal::DecideProposal),
     RestoreEmployeeInstructions(proposal::RestoreEmployeeInstructions),
@@ -122,9 +119,7 @@ pub enum Command {
     SetRunDefaults(connection::SetRunDefaults),
     CreateTask(task::CreateTask),
     CancelTask(task::CancelTask),
-    ChooseTaskVariant(variants::ChooseTaskVariant),
     AssignTask(task::AssignTask),
-    DiscussTask(share::DiscussTask),
     AddIdea(idea::AddIdea),
     UpdateIdea(idea::UpdateIdea),
     SetIdeaStatus(idea::SetIdeaStatus),
@@ -136,8 +131,6 @@ pub enum Command {
     ForgetMemory(memory::ForgetMemory),
     PinMemory(memory::PinMemory),
     ConsolidateMemory(memory::ConsolidateMemory),
-    ShareMessage(share::ShareMessage),
-    RevokeShare(share::RevokeShare),
     CreateTaskSchedule(schedule::CreateTaskSchedule),
     UpdateTaskSchedule(schedule::UpdateTaskSchedule),
     DeleteTaskSchedule(schedule::DeleteTaskSchedule),
@@ -207,8 +200,9 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("set_employee_folder", "employee.set_folder"),
     ("set_employee_reports_to", "employee.set_reports_to"),
     ("set_follow_org_chart", "company.set_follow_org_chart"),
-    ("set_heartbeat", "heartbeat.set"),
     ("send_employee_message", "employee.send_message"),
+    ("open_employee_chat", "employee.open_chat"),
+    ("cancel_scheduled_message", "scheduled_message.cancel"),
     ("send_group_message", "group_chat.send"),
     ("decide_proposal", "proposal.decide"),
     (
@@ -224,9 +218,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("set_run_defaults", "connection.set_defaults"),
     ("create_task", "task.create"),
     ("cancel_task", "task.cancel"),
-    ("choose_task_variant", "task.choose_variant"),
     ("assign_task", "task.assign"),
-    ("discuss_task", "task.discuss"),
     ("add_idea", "idea.add"),
     ("update_idea", "idea.update"),
     ("set_idea_status", "idea.set_status"),
@@ -238,8 +230,6 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("forget_memory", "memory.forget"),
     ("pin_memory", "memory.pin"),
     ("consolidate_memory", "memory.consolidate"),
-    ("share_message", "share.create"),
-    ("revoke_share", "share.revoke"),
     ("create_task_schedule", "recurring_task.create"),
     ("update_task_schedule", "recurring_task.update"),
     ("delete_task_schedule", "recurring_task.delete"),
@@ -343,8 +333,6 @@ pub enum DomainError {
     File(String),
     #[error("task {0} does not exist")]
     TaskNotFound(TaskId),
-    #[error("this dependency would create a cycle")]
-    DependencyCycle,
     #[error("run {0} does not exist")]
     RunNotFound(RunId),
     #[error("project is archived and can no longer be changed")]
@@ -355,12 +343,6 @@ pub enum DomainError {
     IdeaNotFound(IdeaId),
     #[error("recurring task {0} does not exist")]
     TaskScheduleNotFound(TaskScheduleId),
-    #[error("agent function {0} does not exist")]
-    AgentFunctionNotFound(AgentFunctionId),
-    #[error("API key {0} does not exist")]
-    ApiKeyNotFound(ApiKeyId),
-    #[error("app key {0} does not exist")]
-    AppKeyNotFound(AppKeyId),
     #[error("{0}")]
     Memory(String),
     #[error("proposal {0} does not exist")]
@@ -397,6 +379,9 @@ pub enum DomainError {
     /// The server's name was refused (A-05); the text says why.
     #[error("{0}")]
     ServerName(String),
+    /// A styleguide or design link that is no Claude artifact; the text says what it must be.
+    #[error("{0}")]
+    ArtifactLink(String),
 }
 
 pub(crate) fn require_text(field: &str, value: &str, max: usize) -> Result<String, DomainError> {

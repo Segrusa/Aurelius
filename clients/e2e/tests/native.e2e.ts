@@ -110,7 +110,9 @@ test("pairs with a server elsewhere, works there, comes back and forgets it", as
 
     // The app starts over on that server.
     await signIn(page);
-    await expect(page.getByText("Northwind API")).toBeVisible();
+    await page.getByRole("button", { name: "Workspace: All projects" }).click();
+    await expect(page.getByRole("menuitem", { name: "Northwind API" })).toBeVisible();
+    await page.keyboard.press("Escape");
     await expect(
       page.evaluate(() =>
         (window as unknown as { aurelius: { info(): Promise<{ target: unknown }> } }).aurelius
@@ -125,7 +127,9 @@ test("pairs with a server elsewhere, works there, comes back and forgets it", as
 
     // Followed the events over the WebSocket: what the server makes shows up here.
     await owner.write("project.create", { name: "Made on the server" });
-    await expect(page.getByText("Made on the server")).toBeVisible();
+    await page.getByRole("button", { name: "Workspace: All projects" }).click();
+    await expect(page.getByRole("menuitem", { name: "Made on the server" })).toBeVisible();
+    await page.keyboard.press("Escape");
 
     // A file from this computer reaches the server through its inbox.
     await app.evaluate(({ dialog }, file) => {
@@ -185,9 +189,15 @@ test("a link from the operating system opens in the running app; a project gets 
     await expect(page.getByRole("complementary", { name: /From a link/ })).toBeVisible();
 
     await second("aurelius://nonsense");
-    await expect(page.getByText("This isn't a valid Aurelius link.")).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Notifications" }).getByText("This isn't a valid Aurelius link."),
+    ).toBeVisible();
     await second(`aurelius://0190aaaa-0000-7000-8000-000000000000/ticket/${ticket.id}`);
-    await expect(page.getByText("This link is for a server this device isn't paired with.")).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "Notifications" })
+        .getByText("This link is for a server this device isn't paired with."),
+    ).toBeVisible();
 
     // A window per project, not a second one; the page there has no sidebar.
     await page.goto("app://aurelius/projects");

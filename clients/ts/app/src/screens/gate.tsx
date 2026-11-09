@@ -1,35 +1,98 @@
 // What comes before the app: the connection's state, pairing a browser and the sign-in.
 
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { boardMemberStep } from "@aurelius/client";
+import * as stylex from "@stylexjs/stylex";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
 import { Logo } from "../ui/icons";
-import { Button } from "../ui/kit";
 import { ServerChoicesPanel } from "./servers";
+
+const enter = stylex.keyframes({
+  from: { opacity: 0, transform: "translateY(4px)" },
+});
+
+const styles = stylex.create({
+  page: {
+    display: "grid",
+    height: "100%",
+    placeItems: "center",
+    overflowY: "auto",
+    backgroundColor: "var(--color-background-body)",
+    padding: 16,
+    boxSizing: "border-box",
+  },
+  blank: { height: "100%", backgroundColor: "var(--color-background-body)" },
+  card: {
+    display: "flex",
+    width: "100%",
+    maxWidth: 360,
+    flexDirection: "column",
+    gap: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--color-background-surface)",
+    padding: 24,
+    boxSizing: "border-box",
+    boxShadow: "var(--precision-panel-shadow)",
+    animationName: enter,
+    animationDuration: "160ms",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+  },
+  wide: { maxWidth: 520 },
+  title: { fontSize: 16, fontWeight: 600 },
+  form: { display: "flex", flexDirection: "column", gap: 12 },
+  leave: {
+    position: "fixed",
+    right: 16,
+    bottom: 16,
+    display: "flex",
+    maxHeight: "80%",
+    width: 420,
+    maxWidth: "calc(100% - 32px)",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 8,
+    overflowY: "auto",
+  },
+  leavePanel: {
+    width: "100%",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--color-background-surface)",
+    padding: 12,
+    boxSizing: "border-box",
+  },
+});
 
 function Centered({ title, children, wide = false }: { title: string; children?: ReactNode; wide?: boolean }) {
   return (
-    <main className="grid h-full place-items-center overflow-y-auto bg-bg p-4">
-      <div
-        className={`enter flex w-full ${wide ? "max-w-[520px]" : "max-w-[360px]"} flex-col gap-4 rounded-[12px] border border-line bg-panel p-6 shadow-panel`}
-      >
+    <main {...stylex.props(styles.page)}>
+      <div {...stylex.props(styles.card, wide && styles.wide)}>
         <Logo size={28} />
-        <h1 className="m-0 text-[16px] font-semibold">{title}</h1>
+        <Heading level={1} xstyle={styles.title}>
+          {title}
+        </Heading>
         {children}
       </div>
     </main>
   );
 }
 
-const FIELD = "h-9 w-full rounded-[6px] border border-btn-line bg-sunk px-3 text-[13px] text-text";
-
-function Field({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+function Lead({ children }: { children: ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-[12px] font-medium text-text2">
-      {label}
-      <input className={FIELD} {...props} />
-    </label>
+    <Text as="p" color="secondary">
+      {children}
+    </Text>
   );
 }
 
@@ -59,31 +122,24 @@ function SignIn({ first }: { first: boolean }) {
 
   return (
     <Centered title={first ? "Create the first board member" : "Sign in"}>
-      {signedOut ? <p className="m-0 text-text2">You were signed out on this device.</p> : null}
-      <form className="flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
-        <Field
-          label="Name"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
-          required
-        />
-        <Field
+      {signedOut ? <Lead>You were signed out on this device.</Lead> : null}
+      <form {...stylex.props(styles.form)} onSubmit={(e) => void submit(e)}>
+        <TextInput label="Name" value={username} onChange={setUsername} autoComplete="username" />
+        <TextInput
           label="Password"
           type="password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={setPassword}
           autoComplete={first ? "new-password" : "current-password"}
-          required
         />
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
-        <Button kind="primary" type="submit" disabled={busy} className="justify-center">
-          {first ? "Create" : "Sign in"}
-        </Button>
+        {error ? <Banner status="error" role="alert" title={error} /> : null}
+        <Button
+          label={first ? "Create" : "Sign in"}
+          variant="primary"
+          type="submit"
+          width="100%"
+          isDisabled={busy || username.trim() === "" || password === ""}
+        />
       </form>
     </Centered>
   );
@@ -110,31 +166,29 @@ function ForcedPassword() {
 
   return (
     <Centered title="Choose a new password">
-      <form className="flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
-        <Field
+      <form {...stylex.props(styles.form)} onSubmit={(e) => void submit(e)}>
+        <TextInput
           label="Current password"
           type="password"
           value={oldPassword}
-          onChange={(e) => setOldPassword(e.target.value)}
+          onChange={setOldPassword}
           autoComplete="current-password"
-          required
         />
-        <Field
+        <TextInput
           label="New password"
           type="password"
           value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
+          onChange={setNewPassword}
           autoComplete="new-password"
-          required
         />
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
-        <Button kind="primary" type="submit" disabled={busy} className="justify-center">
-          Change password
-        </Button>
+        {error ? <Banner status="error" role="alert" title={error} /> : null}
+        <Button
+          label="Change password"
+          variant="primary"
+          type="submit"
+          width="100%"
+          isDisabled={busy || oldPassword === "" || newPassword === ""}
+        />
       </form>
     </Centered>
   );
@@ -160,37 +214,25 @@ function Pair({ onPaired }: { onPaired: () => void }) {
     }
   };
 
+  const waiting = state === "waiting";
   return (
     <Centered title="Pair this browser">
-      <p className="m-0 leading-[1.6] text-text2">
-        {state === "waiting"
+      <Lead>
+        {waiting
           ? "Allow this browser in Aurelius on the server."
           : "Show a pairing code in Aurelius on the server, under Settings, Remote access."}
-      </p>
-      <form className="flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
-        <Field
-          label="Code"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          autoComplete="off"
-          required
-          disabled={state === "waiting"}
+      </Lead>
+      <form {...stylex.props(styles.form)} onSubmit={(e) => void submit(e)}>
+        <TextInput label="Code" value={code} onChange={setCode} autoComplete="off" isDisabled={waiting} />
+        <TextInput label="Name of this browser" value={name} onChange={setName} isDisabled={waiting} />
+        {error ? <Banner status="error" role="alert" title={error} /> : null}
+        <Button
+          label="Pair"
+          variant="primary"
+          type="submit"
+          width="100%"
+          isDisabled={waiting || code === "" || name === ""}
         />
-        <Field
-          label="Name of this browser"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-          disabled={state === "waiting"}
-        />
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
-        <Button kind="primary" type="submit" disabled={state === "waiting"} className="justify-center">
-          Pair
-        </Button>
       </form>
     </Centered>
   );
@@ -201,13 +243,13 @@ function LeaveServer() {
   const { servers } = usePlatform();
   const [open, setOpen] = useState(false);
   return (
-    <div className="fixed right-4 bottom-4 flex max-h-[80%] w-[420px] max-w-[calc(100%-32px)] flex-col items-end gap-2 overflow-y-auto">
+    <div {...stylex.props(styles.leave)}>
       {open ? (
-        <div className="w-full rounded-[10px] border border-line bg-panel p-3">
+        <div {...stylex.props(styles.leavePanel)}>
           <ServerChoicesPanel />
         </div>
       ) : null}
-      {servers ? <Button onClick={() => setOpen(!open)}>Servers</Button> : null}
+      {servers ? <Button label="Servers" onClick={() => setOpen(!open)} /> : null}
     </div>
   );
 }
@@ -224,7 +266,7 @@ export function Gate({ children, onPaired }: { children: ReactNode; onPaired: ()
     if (platform.pair) return <Pair onPaired={onPaired} />;
     return (
       <Centered title="No access" wide={servers !== null}>
-        <p className="m-0 text-text2">{state.message}</p>
+        <Lead>{state.message}</Lead>
         {servers}
       </Centered>
     );
@@ -232,7 +274,7 @@ export function Gate({ children, onPaired }: { children: ReactNode; onPaired: ()
   if (state.status === "incompatible") {
     return (
       <Centered title={platform.target ? "This server can't be used" : "Different versions"} wide={servers !== null}>
-        <p className="m-0 text-text2">{state.message}</p>
+        <Lead>{state.message}</Lead>
         {servers}
       </Centered>
     );
@@ -240,13 +282,11 @@ export function Gate({ children, onPaired }: { children: ReactNode; onPaired: ()
   if (step === "unknown") {
     // Only before the first answer: the retries after it must not wipe what is being typed here.
     if (state.status !== "connecting") failedOnce.current = true;
-    if (!failedOnce.current) return <div className="h-full bg-bg" />;
+    if (!failedOnce.current) return <div {...stylex.props(styles.blank)} />;
     return (
       <Centered title="Not connected" wide={servers !== null}>
-        <p className="m-0 text-text2">{state.message}</p>
-        <Button onClick={() => connection.wake()} className="justify-center">
-          Try again
-        </Button>
+        <Lead>{state.message}</Lead>
+        <Button label="Try again" width="100%" onClick={() => connection.wake()} />
         {servers}
       </Centered>
     );

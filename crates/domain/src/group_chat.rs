@@ -16,18 +16,19 @@ pub const OWNER: &str = "Owner";
 pub const CONTEXT_MESSAGES: usize = 20;
 /// How long one earlier group message is in that context (characters).
 pub const CONTEXT_CHARS: usize = 600;
-/// Most hops of employees waking each other with `@Name` after one message of
-/// the user (RULE 08: no endless ping-pong). The user's message wakes hop 0; a
-/// post of an employee woken at hop `h` wakes at `h + 1`, refused past this.
+/// Most hops in a channel of the Team chat after one message of a board member
+/// (RULE 08: no endless ping-pong). A board member's message is hop 0; what an
+/// employee writes in a run woken at hop `h` is hop `h + 1`, a handoff past this is refused.
 pub const MAX_HOPS: u32 = 3;
+/// The same limit in a ticket's thread (assumption 1): a chain of handoffs on a
+/// ticket gets further than a question in a channel.
+pub const TICKET_MAX_HOPS: u32 = 8;
 /// Longest post of an employee in the group chat (characters).
 pub const POST_MAX: usize = 4_000;
-/// Most posts of one run that wake colleagues (RULE 08); later posts are shown but wake nobody.
+/// Most handoffs of one run (RULE 08).
 pub const WAKING_POSTS_PER_RUN: u32 = 2;
-/// Most posts of one employee that wake colleagues within `WAKE_WINDOW_MS`, over
-/// all its runs. The hop count restarts in a run the group chat did not wake (a
-/// task's, a heartbeat's), so this bounds a loop through `delegate_task` or
-/// `message_task` too (RULE 08).
+/// Most handoffs of one employee within `WAKE_WINDOW_MS`, over all its runs: a
+/// second bound next to the hop count (RULE 08).
 pub const WAKING_POSTS_PER_WINDOW: u32 = 4;
 pub const WAKE_WINDOW_MS: i64 = 60 * 60 * 1000;
 
@@ -35,6 +36,18 @@ pub const WAKE_WINDOW_MS: i64 = 60 * 60 * 1000;
 /// of the usage records (1 000 000 = 1 USD). A quick answer is an extra run next to
 /// the one an employee is busy with; at the cap none starts and the busy line stays.
 pub const QUICK_ANSWER_COST_PER_HOUR_MICRO: i64 = 1_000_000;
+
+/// The hop limit of a thread (`MAX_HOPS`, or `TICKET_MAX_HOPS` on a ticket).
+pub fn hop_limit(on_ticket: bool) -> u32 {
+    if on_ticket { TICKET_MAX_HOPS } else { MAX_HOPS }
+}
+
+/// The text ends on a question: its last non-empty line, without markdown marks, ends with "?".
+/// The one rule for a run that ended on a question (`MessageView::awaiting_user`).
+pub fn asks_question(text: &str) -> bool {
+    let last = text.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("");
+    last.trim_end_matches(|c: char| matches!(c, '*' | '_' | '`' | '"' | '\'' | ')' | '\u{201d}' | '\u{bb}' | ' ')).ends_with('?')
+}
 
 /// A message of the user in the group chat (`group_chat.send`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -218,6 +231,43 @@ pub fn mentions(text: &str, employees: &[(EmployeeId, String)]) -> Vec<EmployeeI
     out
 }
 
+/// One message of a discussion, as the scoped view looks at it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewLine<'a> {
+    /// The employee who wrote it (a name); none: a board member.
+    pub employee: Option<&'a str>,
+    /// The employee a handoff in this message was for (`hand_off`).
+    pub to: Option<EmployeeId>,
+    pub text: &'a str,
+}
+
+/// The scoped view (P3): which of `lines` the prompt of `me` shows, or `None` for
+/// all of them: for the thread's lead and for the only employee in the thread (nobody
+/// else wrote or was named). A non-lead sees what names it, what was handed over to it
+/// and what it wrote;
+/// `owner`: it owns the ticket, so a board member's message that names nobody is
+/// addressed to it too (B3). Only the prompt: the clients always show the whole thread.
+pub fn scoped_view(lines: &[ViewLine<'_>], me: (EmployeeId, &str), team: &[(EmployeeId, String)], lead: bool, owner: bool) -> Option<Vec<usize>> {
+    if lead {
+        return None;
+    }
+    let mine = |line: &ViewLine<'_>| line.employee.is_some_and(|name| name.to_lowercase() == me.1.to_lowercase());
+    let named: Vec<Vec<EmployeeId>> = lines.iter().map(|line| mentions(line.text, team)).collect();
+    let alone = lines.iter().zip(&named).all(|(line, named)| (line.employee.is_none() || mine(line)) && line.to.is_none_or(|to| to == me.0) && named.iter().all(|e| *e == me.0));
+    if alone {
+        return None;
+    }
+    Some(
+        lines
+            .iter()
+            .zip(&named)
+            .enumerate()
+            .filter(|(_, (line, named))| mine(line) || line.to == Some(me.0) || named.contains(&me.0) || (owner && line.employee.is_none() && named.is_empty()))
+            .map(|(index, _)| index)
+            .collect(),
+    )
+}
+
 /// A text at most `max` characters long, cut with "…".
 pub fn shortened(text: &str, max: usize) -> String {
     let text = text.trim();
@@ -241,6 +291,46 @@ mod tests {
         assert!(mentions("no one here, mail bo@bo.com, x-@Bo, x_@Bo, x+@Bo or @Bob", &team).is_empty());
         assert!(mentions("@ Ann", &team).is_empty());
         assert_eq!(mentions("(@Bo)", &team), vec![bo]);
+    }
+
+    fn line<'a>(employee: Option<&'a str>, text: &'a str) -> ViewLine<'a> {
+        ViewLine { employee, to: None, text }
+    }
+
+    #[test]
+    fn the_scoped_view_keeps_what_names_me_and_what_i_wrote() {
+        let (ann, bo) = (EmployeeId::new(), EmployeeId::new());
+        let team = vec![(ann, "Ann".to_owned()), (bo, "Bo".to_owned())];
+        let lines = [line(None, "@Bo can you look?"), line(Some("Bo"), "@Ann over to you"), line(Some("ann"), "On it."), line(None, "Thanks all"), line(Some("Bo"), "Looking.")];
+        assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, false, false), Some(vec![1, 2]));
+        // The owner also has what a board member wrote to nobody in particular (B3).
+        assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, false, true), Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn the_lead_and_the_only_employee_see_everything() {
+        let (ann, bo) = (EmployeeId::new(), EmployeeId::new());
+        let team = vec![(ann, "Ann".to_owned()), (bo, "Bo".to_owned())];
+        let lines = [line(None, "@Bo look"), line(Some("Bo"), "Done")];
+        assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, true, false), None, "the lead");
+        assert_eq!(scoped_view(&[line(None, "Hello"), line(Some("Ann"), "Hi @Ann")], (ann, "Ann"), &team, false, false), None, "alone");
+        assert_eq!(scoped_view(&[line(None, "ask @Bo")], (ann, "Ann"), &team, false, false), Some(vec![]), "someone else was named");
+    }
+
+    #[test]
+    fn what_was_handed_over_to_me_is_in_my_scoped_view() {
+        let (ann, bo, cy) = (EmployeeId::new(), EmployeeId::new(), EmployeeId::new());
+        let team = vec![(ann, "Ann".to_owned()), (bo, "Bo".to_owned()), (cy, "Cy".to_owned())];
+        let handed = ViewLine { employee: Some("Bo"), to: Some(ann), text: "Bo handed over to Ann" };
+        let lines = [handed, ViewLine { employee: Some("Bo"), to: Some(cy), text: "Bo handed over to Cy" }, line(Some("Cy"), "Done.")];
+        assert_eq!(scoped_view(&lines, (ann, "Ann"), &team, false, false), Some(vec![0]));
+        // Someone else's handoff means Ann is not alone in the thread.
+        assert_eq!(scoped_view(&[line(None, "Hi"), ViewLine { employee: None, to: Some(cy), text: "x" }], (ann, "Ann"), &team, false, false), Some(vec![]));
+    }
+
+    #[test]
+    fn a_ticket_thread_gets_further_than_a_channel() {
+        assert_eq!((hop_limit(false), hop_limit(true)), (3, 8));
     }
 
     #[test]

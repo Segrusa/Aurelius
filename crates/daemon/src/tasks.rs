@@ -110,8 +110,6 @@ pub async fn run_task(shared: Arc<Shared>, job: queries::JobRow) {
         close(&shared, task_id, epoch).await;
         return;
     };
-    // Worktrees of trials that are no longer needed go first, whatever the task does now.
-    crate::variants::remove_unneeded(&shared, task_id).await;
     if ctx.status.is_terminal() {
         close(&shared, task_id, epoch).await;
         return;
@@ -120,30 +118,11 @@ pub async fn run_task(shared: Arc<Shared>, job: queries::JobRow) {
         close(&shared, task_id, epoch).await;
         return;
     }
-    if ctx.dependency_failed {
-        transition(&shared, &ctx, epoch, TaskStatus::Failed, Some("dependency"), "task.failed").await;
-        close(&shared, task_id, epoch).await;
+    if ctx.employee_status == Some(aurelius_domain::employee::LifecycleStatus::Paused) {
+        transition(&shared, &ctx, epoch, TaskStatus::Waiting, Some("paused"), "task.waiting").await;
+        park(&shared, task_id, epoch, aurelius_storage::now_ms() + PARK_POLL_MS, "paused").await;
         return;
     }
-    if !ctx.dependencies_done || ctx.employee_status == Some(aurelius_domain::employee::LifecycleStatus::Paused) {
-        let reason = if !ctx.dependencies_done { "dependency" } else { "paused" };
-        transition(&shared, &ctx, epoch, TaskStatus::Waiting, Some(reason), "task.waiting").await;
-        park(&shared, task_id, epoch, aurelius_storage::now_ms() + PARK_POLL_MS, reason).await;
-        return;
-    }
-    // Tried in several ways first (variants): their steps come before the real work.
-    let ctx = match crate::variants::step(&shared, &ctx, epoch).await {
-        crate::variants::Next::Wait => {
-            close(&shared, task_id, epoch).await;
-            return;
-        }
-        crate::variants::Next::GoOn => ctx,
-        // The brief now says what came of them, and the task runs.
-        crate::variants::Next::After => {
-            let s = shared.clone();
-            blocking(move || s.service.task_context(task_id)).await.and_then(Result::ok).flatten().unwrap_or(ctx)
-        }
-    };
     // The employee takes it on: its conversation does the work from here.
     let (s, c) = (shared.clone(), ctx.clone());
     match blocking(move || s.service.start_task_conversation(&c, epoch)).await {

@@ -217,9 +217,6 @@ impl CommandService {
                     return Ok(Err(domain_error(DomainError::ProviderNotFound(c))));
                 }
             }
-            if let Err(refused) = crate::task::variants::check_new(tx, &run, row.project_id, Some(employee))? {
-                return Ok(Err(refused));
-            }
             blobs::register(tx, &goal_blob)?;
             blobs::register(tx, &criteria_blob)?;
             let task_id = TaskId::new();

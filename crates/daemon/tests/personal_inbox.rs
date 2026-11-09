@@ -44,7 +44,7 @@ impl AgentRuntime for FailMarked {
 }
 
 fn describe(ticket_id: TicketId, text: &str) -> UpdateTicket {
-    UpdateTicket { ticket_id, title: None, description: Some(text.into()), priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None, confirm_secret: false }
+    UpdateTicket { design_url: None, ticket_id, title: None, description: Some(text.into()), priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None, confirm_secret: false }
 }
 
 async fn user_id(client: &Client) -> UserId {
@@ -56,7 +56,7 @@ async fn run(client: &Client, command: Command) -> CommandResult {
 }
 
 async fn setup(client: &Client) -> (EmployeeId, ProjectId, ConversationId) {
-    let create = CreateEmployee { name: "Forge".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Forge".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = run(client, Command::CreateEmployee(create)).await else { panic!() };
     let CommandResult::ProjectCreated { project_id, .. } = run(client, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })).await else { panic!() };
     let channel = client.channels().await.unwrap().channels.into_iter().find(|c| c.project_id == Some(project_id)).expect("its channel").conversation_id;
@@ -403,7 +403,7 @@ async fn a_failed_main_task_goes_to_followers_instead_of_everyone_and_leaves_whe
 }
 
 async fn plain_task(client: &Client, project_id: ProjectId, owner: EmployeeId, goal: &str) -> aurelius_domain::TaskId {
-    let create = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(owner), title: "Plain".into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let create = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(owner), title: "Plain".into(), goal: goal.into(), acceptance_criteria: vec![] };
     let CommandResult::TaskCreated { task_id, .. } = run(client, Command::CreateTask(create)).await else { panic!() };
     task_id
 }
@@ -664,7 +664,7 @@ struct OldNotification {
     task_id: Option<aurelius_domain::TaskId>,
 }
 
-/// The tab of an older desktop client (`note_kind`, `clients/desktop/src/app.rs`).
+/// The tab of an older desktop client (`note_kind`).
 fn old_tab(n: &OldNotification) -> &'static str {
     match (n.severity, n.target_type.as_str()) {
         (OldSeverity::Action, _) => "needs_you",
@@ -695,7 +695,7 @@ async fn an_older_client_reads_every_new_row_with_its_own_enum_and_gets_no_new_e
     set_responsible(&alex, other, Some(bea_id)).await;
     post(&alex, other, "@bea look").await;
 
-    let ResponseBody::Notifications(snapshot) = old_client.call(Method::NotificationList).await.unwrap() else { panic!() };
+    let ResponseBody::Notifications(snapshot) = old_client.call(Method::NotificationList { project_id: None }).await.unwrap() else { panic!() };
     let wire = serde_json::to_value(&snapshot).unwrap();
     let rows: Vec<OldNotification> = serde_json::from_value(wire["notifications"].clone()).expect("the old enum reads every row");
     assert!(rows.len() >= 2, "{rows:#?}");

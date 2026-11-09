@@ -42,7 +42,7 @@ impl AgentRuntime for Recording {
 }
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str) -> EmployeeId {
-    match client.execute(envelope(Command::CreateEmployee(CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None)).await.unwrap().result {
+    match client.execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None)).await.unwrap().result {
         CommandResult::EmployeeCreated { employee_id, .. } => employee_id,
         other => panic!("{other:?}"),
     }
@@ -124,7 +124,7 @@ async fn a_project_conversation_is_made_listed_and_continued() {
     // The assistant is told who it is, and who it can give work to.
     let system = runtime.systems.lock().unwrap().iter().find(|s| s.contains("assistant of the project")).cloned().expect("the assistant answered");
     assert!(system.starts_with("You are the assistant of the project “Atlas”."), "{system}");
-    assert!(system.contains("- Alex (Developer)") && system.contains("delegate_task"), "{system}");
+    assert!(system.contains("- @Alex (Developer)") && system.contains("delegate_task"), "{system}");
     assert!(!system.starts_with("You are Alex"), "{system}");
 
     stop(dir.path(), daemon).await;

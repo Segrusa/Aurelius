@@ -5,7 +5,6 @@
 mod common;
 
 use aurelius_client::{Client, ClientError};
-use aurelius_domain::app_key::{AppScope, CreateAppKey};
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::ticket::{CreateTicket, TicketPriority};
 use aurelius_domain::{Command, CommandResult, ErrorCode, ProjectId, UserId};
@@ -337,69 +336,6 @@ async fn a_signed_in_device_makes_tickets_as_its_board_member() {
     assert!(device.user_logout().await.unwrap().user.is_none());
     assert_eq!(code(device.ticket_command(ticket(project, "Nobody"), None).await), ErrorCode::Unauthenticated);
     drop((maker, device));
-    common::stop(dir.path(), daemon).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn apps_may_list_board_members_but_never_create_or_become_one() {
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = common::start(dir.path()).await;
-    let owner = common::connect_anonymous(dir.path()).await;
-    let grace = created(owner.user_create("grace", PASSWORD).await.unwrap());
-    let project = project(&owner).await;
-    let key = owner
-        .create_app_key(CreateAppKey { name: "assistant".into(), scopes: AppScope::ALL.to_vec(), limit_per_hour: None, limit_concurrent: None, audience: Default::default(), webhook_url: None })
-        .await
-        .unwrap();
-    let app = Client::connect_app(&aurelius_host::endpoint(dir.path()), &key.secret, "test app").await.unwrap();
-    assert_eq!(app.user_list().await.unwrap().users.len(), 1);
-    assert_eq!(code(app.user_create("robot", PASSWORD).await), ErrorCode::Forbidden);
-    assert_eq!(code(app.user_login("grace", PASSWORD, "app").await), ErrorCode::Forbidden);
-    // A session token in an app's hello is ignored: apps have no board member.
-    assert!(app.resume("not-a-session").await.unwrap().user.is_none());
-    let _ = grace;
-    // So tickets are out of reach (board_member_required), and the review gate is refused outright.
-    assert_eq!(code(app.ticket_command(ticket(project, "From an app"), None).await), ErrorCode::BoardMemberRequired);
-    let accept = Command::AcceptTicket(aurelius_domain::ticket::AcceptTicket { confirm_secret: false, ticket_id: aurelius_domain::TicketId::new(), note: None });
-    assert_eq!(code(app.ticket_command(accept, None).await), ErrorCode::Forbidden);
-    drop((owner, app));
-    common::stop(dir.path(), daemon).await;
-}
-
-/// S5-1: a connection that names a board member and then says hello with an app
-/// key acts for the app only; the board member is gone, so tickets are refused.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_app_key_after_a_board_member_drops_the_board_member() {
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = common::start(dir.path()).await;
-    let owner = common::connect_anonymous(dir.path()).await;
-    let grace = created(owner.user_create("grace", PASSWORD).await.unwrap());
-    let project = project(&owner).await;
-    let key = owner
-        .create_app_key(CreateAppKey { name: "assistant".into(), scopes: AppScope::ALL.to_vec(), limit_per_hour: None, limit_concurrent: None, audience: Default::default(), webhook_url: None })
-        .await
-        .unwrap();
-    let mixed = common::connect_anonymous(dir.path()).await;
-    assert_eq!(mixed.user_login("grace", PASSWORD, "test").await.unwrap().user.id, grace);
-    let hello = aurelius_protocol::HelloParams {
-        client_name: "test app".into(),
-        client_version: "0".into(),
-        app_key: Some(key.secret.clone()),
-        accepts: vec![],
-        session_token: None,
-    };
-    let answer = mixed.call(aurelius_protocol::Method::SessionHello(hello)).await.unwrap();
-    let aurelius_protocol::ResponseBody::Hello(answer) = answer else { panic!("{answer:?}") };
-    assert!(answer.user.is_none(), "the app key drops the board member");
-    assert!(mixed.user_whoami().await.unwrap().user.is_none());
-    assert_eq!(code(mixed.ticket_command(ticket(project, "From an app"), None).await), ErrorCode::BoardMemberRequired);
-    // And a session in a later hello does not bring it back for the app.
-    assert!(mixed.resume("a-session-token").await.unwrap().user.is_none());
-    assert_eq!(code(mixed.ticket_command(ticket(project, "From an app"), None).await), ErrorCode::BoardMemberRequired);
-    let db = common::db(dir.path());
-    let tickets: i64 = db.query_row("SELECT COUNT(*) FROM tickets", [], |r| r.get(0)).unwrap();
-    assert_eq!(tickets, 0);
-    drop((owner, mixed));
     common::stop(dir.path(), daemon).await;
 }
 

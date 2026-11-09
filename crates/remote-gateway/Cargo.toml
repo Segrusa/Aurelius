@@ -13,9 +13,6 @@ aurelius-storage.workspace = true
 aurelius-host.workspace = true
 # The vault's redactor, as a push leaves.
 aurelius-runtime.workspace = true
-# `/v1/mcp`: the tools of aurelius-mcp on an in-process session of the app.
-aurelius-client.workspace = true
-aurelius-mcp.workspace = true
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "ws", "multipart", "query"] }
 tokio.workspace = true
 serde.workspace = true

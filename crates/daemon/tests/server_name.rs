@@ -7,7 +7,7 @@
 mod common;
 use common::*;
 
-use aurelius_client::{Client, ClientError, envelope};
+use aurelius_client::{ClientError, envelope};
 use aurelius_domain::server::SetServerName;
 use aurelius_domain::{Command, CommandResult, ErrorCode, EventKind};
 use std::time::Duration;
@@ -121,19 +121,10 @@ async fn a_refused_name_keeps_the_old_one_with_the_reason() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn apps_and_connections_without_a_session_cannot_rename_the_server() {
+async fn connections_without_a_session_cannot_rename_the_server() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let alex = connect(dir.path()).await;
-    let key = alex
-        .create_app_key(aurelius_domain::app_key::CreateAppKey { name: "assistant".into(), scopes: aurelius_domain::app_key::AppScope::ALL.to_vec(), limit_per_hour: None, limit_concurrent: None, audience: Default::default(), webhook_url: None })
-        .await
-        .unwrap();
-    let app = Client::connect_app(&aurelius_host::endpoint(dir.path()), &key.secret, "test app").await.unwrap();
-    assert_eq!(code(app.execute(envelope(rename("Gekaapt"), None)).await), ErrorCode::Forbidden);
-    assert!(matches!(app.server_name().await, Err(ClientError::Protocol(e)) if e.code == ErrorCode::Forbidden));
-    assert!(app.hello.capabilities.is_empty(), "an app has no device rights: the client hides the button");
-
     let anonymous = connect_anonymous(dir.path()).await;
     assert_eq!(code(anonymous.execute(envelope(rename("Gekaapt"), None)).await), ErrorCode::Unauthenticated);
     assert_eq!(alex.server_name().await.unwrap().version, 0, "nothing changed");

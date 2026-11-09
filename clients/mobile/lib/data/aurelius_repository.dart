@@ -48,11 +48,8 @@ class AureliusRepository {
   /// Chat changes (messages, conversations, presence).
   Stream<Event> get chatChanges => events.where((e) => e.isChat && !e.isNoise);
 
-  /// Anything a screen may show, without streaming bookkeeping (notes have [noteChanges]).
-  Stream<Event> get changes => events.where((e) => !e.isNoise && !e.isNote);
-
-  /// Notes created, saved, pinned or deleted (also by this phone).
-  Stream<Event> get noteChanges => events.where((e) => e.isNote);
+  /// Anything a screen may show, without streaming bookkeeping.
+  Stream<Event> get changes => events.where((e) => !e.isNoise);
 
   /// The machine's load as it changes.
   Stream<LoadSnapshot> get loadChanges => connection.loads;
@@ -61,14 +58,14 @@ class AureliusRepository {
   Stream<PowerState> get powerChanges => connection.powers;
 
   /// Company changes (projects, employees, tasks, approvals, memory, …).
-  Stream<Event> get companyChanges => events.where((e) => !e.isChat && !e.isNote && e.kind != EventKind.ticketFollowChanged);
+  Stream<Event> get companyChanges => events.where((e) => !e.isChat && e.kind != EventKind.ticketFollowChanged);
 
   Future<R> _ask<R extends ResponseBody>(Map<String, dynamic> request, [Duration? timeout]) async {
     final body = timeout == null ? await connection.call(request) : await connection.call(request, timeout);
     return body as R;
   }
 
-  /// A write the host answers with a [HostResult] (settings, plugins, power, …).
+  /// A write the host answers with a [HostResult] (settings, power, …).
   Future<HostResult> _host(Map<String, dynamic> request, [Duration? timeout]) async {
     final receipt = await connection.write(request, retry: false, timeout: timeout);
     return (receipt.result as WriteResultHost).value;
@@ -214,20 +211,6 @@ class AureliusRepository {
   /// Colleague and instruction proposals of the whole company, pending first.
   Future<List<ProposalView>> proposals() async => (await _ask<ResponseBodyProposals>(proposalList())).value.proposals;
 
-  /// A task's variants and the judge's comparison (feature `task_variants`).
-  Future<TaskVariantsView> variantsOf(String taskId) async => (await _ask<ResponseBodyTaskVariants>(taskVariants(taskId: taskId))).value;
-
-  /// Whether tasks may be tried in several ways; null when the server lacks
-  /// `task_variants` or cannot say (the picker stays hidden then).
-  Future<VariantsSetting?> variantsSetting() async {
-    if (!linkState.has('task_variants')) return null;
-    try {
-      return (await _ask<ResponseBodyVariantsSetting>(variantsGetSetting())).value;
-    } catch (_) {
-      return null;
-    }
-  }
-
   /// Whether management chooses its own task mode (feature `management_chooses_mode`
   /// and the setting on); false when the server lacks it or cannot say.
   Future<bool> managementChoosesMode() async {
@@ -262,8 +245,6 @@ class AureliusRepository {
   Future<List<MemoryView>> memory({String? projectId, String? employeeId}) async =>
       (await _ask<ResponseBodyMemory>(memoryList(projectId: projectId, employeeId: employeeId))).value.items;
 
-  Future<List<ShareView>> shares(String projectId) async => (await _ask<ResponseBodyShares>(shareList(projectId: projectId))).value;
-
   Future<ConnectionsSnapshot> connections() async => (await _ask<ResponseBodyConnections>(connectionList())).value;
 
   Future<NotificationsSnapshot> notifications() async => (await _ask<ResponseBodyNotifications>(notificationList())).value;
@@ -293,25 +274,6 @@ class AureliusRepository {
 
   /// A screenshot the agent took (JPEG), by the id in its tool output.
   Future<Uint8List> screenshot(String id) async => base64Decode((await _ask<ResponseBodyScreenshot>(screenshotGet(id: id))).jpegBase64);
-
-  /// A project's notes, pinned first, then the last edited; [query] searches their text.
-  Future<List<NoteSummary>> notes(String projectId, {String? query}) async =>
-      (await _ask<ResponseBodyNotes>(noteList(projectId: projectId, query: query))).value.notes;
-
-  Future<NoteView> note(String noteId) async => (await _ask<ResponseBodyNote>(noteGet(noteId: noteId))).value;
-
-  Future<NoteView> createNote(String projectId, {String body = ''}) async =>
-      ((await _host(noteCreate(projectId: projectId, body: body))) as HostResultNote).value;
-
-  /// Saves [body] if the note is still at [baseRevision]; a [ProtocolException]
-  /// with [ProtocolException.isConflict] means it was saved elsewhere.
-  Future<NoteView> updateNote(String noteId, String body, int baseRevision) async =>
-      ((await _host(noteUpdate(noteId: noteId, body: body, baseRevision: baseRevision))) as HostResultNote).value;
-
-  Future<NoteView> setNotePinned(String noteId, bool pinned) async =>
-      ((await _host(noteSetPinned(noteId: noteId, pinned: pinned))) as HostResultNote).value;
-
-  Future<void> deleteNote(String noteId) => _host(noteDelete(noteId: noteId));
 
   /// The ideas of every project; each keeps its own [IdeaView.projectId].
   Future<List<IdeaView>> allIdeas() async => (await _ask<ResponseBodyAllIdeas>(ideaListAll())).value.ideas;
@@ -352,17 +314,9 @@ class AureliusRepository {
   Future<MarkdownFileContent> markdownFile(FileScope scope, String path) async =>
       (await _ask<ResponseBodyMarkdownFile>(markdownGet(path: path, scope: scope))).value;
 
-  /// Branch and uncommitted change where a conversation works;
-  /// `null` when that folder is not in a Git repository.
-  Future<GitStatusView?> gitStatus(String conversationId) async =>
-      (await _ask<ResponseBodyGitStatus>(gitGetStatus(conversationId: conversationId))).value;
-
   /// The subagents running in one conversation's answers.
   Future<List<AgentView>> subagents(String conversationId) async =>
       (await _ask<ResponseBodySubagents>(subagentList(conversationId: conversationId))).value;
-
-  /// The uncommitted change itself, for the diff view.
-  Future<GitDiffView?> gitDiff(String conversationId) async => (await _ask<ResponseBodyGitDiff>(gitGetDiff(conversationId: conversationId))).value;
 
   /// The server's update state; `check` asks GitHub for the latest release now.
   Future<UpdateStatus> updateStatus({bool check = false}) async => (await _ask<ResponseBodyUpdate>(updateGet(check: check))).value;
@@ -372,16 +326,6 @@ class AureliusRepository {
 
   /// Install the prepared release; the server restarts right after answering.
   Future<UpdateStatus> applyUpdate() async => ((await _host(updateApply(), const Duration(minutes: 2))) as HostResultUpdate).value;
-
-  /// The keys of outside apps, newest first (feature `app_keys`). Never holds a secret.
-  Future<List<AppKeyView>> appKeys() async => (await _ask<ResponseBodyAppKeys>(appKeyList())).value;
-
-  /// Make a key. The answer holds the secrets (`amk_…`, and `whsec_…` with a webhook) once.
-  Future<AppKeyCreated> createAppKey(CreateAppKey params) async =>
-      ((await _host(appKeyCreate(params))) as HostResultAppKeyCreated).value;
-
-  /// Revoke a key at once, also for the app's open sessions.
-  Future<AppKeyView> revokeAppKey(String keyId) async => ((await _host(appKeyRevoke(keyId: keyId))) as HostResultAppKey).value;
 
   /// The server has the vault (feature `vault`, Fase 4).
   bool get vaultEnabled => linkState.has('vault');
@@ -478,50 +422,6 @@ class AureliusRepository {
   /// The MCP tools answered with 'Always allow' (`mcp__<server>__<tool>`).
   Future<List<String>> mcpAlwaysAllowed() async => (await _ask<ResponseBodyMcpAlwaysAllow>(mcpAlwaysAllowList())).value.tools;
 
-  /// Whether runs may publish Claude Code artifacts (pages on claude.ai).
-  Future<ArtifactSetting> artifactSetting([Duration? timeout]) async =>
-      (await _ask<ResponseBodyArtifactSetting>(artifactGetSetting(), timeout)).value;
-
-  /// Turn artifacts on or off (Approve right); applies from the next run.
-  Future<ArtifactSetting> setArtifactsEnabled(bool enabled) async =>
-      ((await _host(artifactSetEnabled(enabled: enabled))) as HostResultArtifactSetting).value;
-
-  /// The artifacts runs published, newest first; all given filters apply.
-  Future<List<ArtifactView>> artifacts({String? conversationId, String? taskId, String? projectId}) async =>
-      (await _ask<ResponseBodyArtifacts>(artifactList(conversationId: conversationId, taskId: taskId, projectId: projectId))).value.artifacts;
-
-  /// The file the server kept of one artifact version ([version] null: the
-  /// newest); `snapshot` is null when it kept none (published before servers kept them).
-  Future<ArtifactContent> artifactContent(String url, {int? version}) async =>
-      (await _ask<ResponseBodyArtifactContent>(artifactGetContent(url: url, version: version), const Duration(seconds: 20))).value;
-
-  Future<List<ArtifactView>>? _artifactIndex;
-  StreamSubscription<Event>? _artifactIndexWatch;
-
-  /// The artifact at [url] as the server lists it (its real title, whether its
-  /// file is kept), for cards in a conversation; null when unknown. Asked once
-  /// and again after each publish, or when [fresh].
-  Future<ArtifactView?> knownArtifact(String url, {bool fresh = false}) async {
-    _artifactIndexWatch ??= changes.where((e) => e.kind == EventKind.artifactPublished).listen((_) => _artifactIndex = null);
-    if (fresh) _artifactIndex = null;
-    final index = _artifactIndex ??= artifacts().timeout(const Duration(seconds: 10));
-    try {
-      return (await index).where((a) => a.url == url).firstOrNull;
-    } on Object {
-      if (identical(_artifactIndex, index)) _artifactIndex = null;
-      return null;
-    }
-  }
-
-  Future<bool>? _artifactsSupported;
-
-  /// Whether the server knows artifacts: `artifact.get_setting` answers.
-  /// Older gateways do not answer and only time out. A yes is kept; a no is
-  /// asked again next time (the server may have been updated).
-  Future<bool> artifactsSupported() => _artifactsSupported ??= artifactSetting(const Duration(seconds: 10)).then((_) => true, onError: (Object _) {
-        _artifactsSupported = null;
-        return false;
-      });
 
   /// Whether the safe read-only tools pass without a question (feature `auto_allow`).
   Future<AutoAllowSetting> autoAllowSetting([Duration? timeout]) async =>
@@ -531,44 +431,9 @@ class AureliusRepository {
   Future<AutoAllowSetting> setAutoAllowEnabled(bool enabled) async =>
       ((await _host(autoAllowSetEnabled(enabled: enabled))) as HostResultAutoAllowSetting).value;
 
-  /// Installed Claude Code plugins.
-  Future<PluginsSnapshot> pluginsList() async => (await _ask<ResponseBodyPlugins>(pluginList())).value;
-
-  /// Plugins of the marketplaces already added.
-  Future<PluginCatalog> pluginsAvailable() async => (await _ask<ResponseBodyPluginCatalog>(pluginListAvailable())).value;
-
-  /// Add the marketplace behind [source] and list its plugins (Approve right).
-  Future<PluginPreview> pluginsPreview(String source) async =>
-      ((await _host(pluginPreview(source: source), const Duration(minutes: 3))) as HostResultPluginPreview).value;
-
-  /// Install [ids] and enable them for [employees] (Approve right).
-  Future<PluginsSnapshot> pluginsInstall(List<String> ids, List<String> employees, {List<String> projects = const []}) async =>
-      ((await _host(pluginInstall(ids: ids, employees: employees, projects: projects), const Duration(minutes: 10))) as HostResultPlugins).value;
-
-  Future<PluginsSnapshot> pluginUpdateOne(String id) async =>
-      ((await _host(pluginUpdate(id: id), const Duration(minutes: 5))) as HostResultPlugins).value;
-
-  Future<PluginsSnapshot> pluginRemoveOne(String id) async =>
-      ((await _host(pluginRemove(id: id), const Duration(minutes: 2))) as HostResultPlugins).value;
-
-  Future<EmployeePlugins> employeePlugins(String employeeId) async =>
-      (await _ask<ResponseBodyEmployeePlugins>(pluginGetForEmployee(employeeId: employeeId))).value;
-
   /// The versions of an employee's instructions, newest first (feature `instruction_proposals`).
   Future<EmployeeInstructionVersionsSnapshot> instructionVersions(String employeeId) async =>
       (await _ask<ResponseBodyEmployeeInstructionVersions>(employeeInstructionVersions(employeeId: employeeId))).value;
-
-  /// Replace the plugins enabled for one employee; applies from its next run.
-  Future<EmployeePlugins> setEmployeePlugins(String employeeId, List<String> enabled) async =>
-      ((await _host(pluginSetForEmployee(enabled: enabled, employeeId: employeeId))) as HostResultEmployeePlugins).value;
-
-  /// The plugins a project's assistant loads (server feature `project_plugins`).
-  Future<ProjectPlugins> projectPlugins(String projectId) async =>
-      (await _ask<ResponseBodyProjectPlugins>(pluginGetForProject(projectId: projectId))).value;
-
-  /// Replace the plugins enabled for a project's assistant; applies from its next run.
-  Future<ProjectPlugins> setProjectPlugins(String projectId, List<String> enabled) async =>
-      ((await _host(pluginSetForProject(enabled: enabled, projectId: projectId))) as HostResultProjectPlugins).value;
 
   /// The machine's load and when new runs may start.
   Future<LoadSnapshot> load() async => (await _ask<ResponseBodyLoad>(loadGet())).value;
@@ -581,16 +446,6 @@ class AureliusRepository {
 
   /// Withdraw a pending shutdown (Owner right).
   Future<PowerState> cancelShutdown() async => ((await _host(powerCancel())) as HostResultPower).value;
-
-  /// Callable agent functions (Owner right): all of them, or one project's.
-  Future<AgentFunctionsSnapshot> agentFunctions({String? projectId}) async =>
-      (await _ask<ResponseBodyAgentFunctions>(agentFunctionList(projectId: projectId))).value;
-
-  /// Recent calls, newest first.
-  Future<List<FunctionCallView>> functionCalls({String? functionId, int limit = 50}) async =>
-      (await _ask<ResponseBodyFunctionCalls>(functionCallList(functionId: functionId, limit: limit))).value.calls;
-
-  Future<List<ApiKeyView>> apiKeys() async => (await _ask<ResponseBodyApiKeys>(apiKeyList())).value;
 
   /// Restart the server's background service. It answers, then closes the
   /// connection, so a [DisconnectedException] is expected.

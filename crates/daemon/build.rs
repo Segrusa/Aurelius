@@ -1,12 +1,12 @@
 //! Same app icon for the background service (Task Manager, Explorer).
 
 fn main() {
-    println!("cargo:rerun-if-changed=../../clients/desktop/assets/aurelius.ico");
-    println!("cargo:rerun-if-changed=../../clients/desktop/assets/aurelius-dev.ico");
+    println!("cargo:rerun-if-changed=../../clients/electron/assets/aurelius.ico");
+    println!("cargo:rerun-if-changed=../../clients/electron/assets/aurelius-dev.ico");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         // Dev builds (debug, scripts/dev.ps1) carry the icon with the amber
         // DEV strip, so the taskbar, Alt+Tab and the tray tell them apart.
-        let icon = if std::env::var("PROFILE").as_deref() == Ok("debug") { "../../clients/desktop/assets/aurelius-dev.ico" } else { "../../clients/desktop/assets/aurelius.ico" };
+        let icon = if std::env::var("PROFILE").as_deref() == Ok("debug") { "../../clients/electron/assets/aurelius-dev.ico" } else { "../../clients/electron/assets/aurelius.ico" };
         let mut res = winresource::WindowsResource::new();
         res.set_icon_with_id(icon, "1");
         let dev = std::env::var("PROFILE").as_deref() == Ok("debug");

@@ -1,12 +1,10 @@
 //! The vault's surface (feature `vault`, additive in protocol 5): names on the
 //! wire, no value in any Debug output or receipt, never for apps.
 
-use crate::app;
 use crate::method::{KeyExportParams, Method};
 use crate::remote::{self, Needs};
 use crate::rpc::{Call, FEATURES, PROTOCOL_MAJOR, Request, feature};
 use crate::write::{HostResult, HostWrite, VaultCreateParams, VaultUpdateParams, WriteMethod};
-use aurelius_domain::app_key::{AppAudience, AppScope};
 use aurelius_domain::remote::Capability;
 use aurelius_domain::vault::{RevealPurpose, UserRef, VaultItemView, VaultKind};
 use aurelius_domain::{CommandId, EventKind, ProjectId, UserId, VaultItemId};
@@ -103,17 +101,6 @@ fn a_receipt_keeps_no_vault_value() {
     let result = HostResult::VaultItem(item);
     assert!(serde_json::to_string(&result).unwrap().contains("FAKE"), "the answer shows a url");
     assert!(!serde_json::to_string(&result.redacted()).unwrap().contains("FAKE"));
-}
-
-#[test]
-fn apps_never_reach_the_vault() {
-    let calls = reads().into_iter().map(Call::Read).chain(writes().into_iter().map(|w| Call::Write(WriteMethod::Host(w))));
-    for call in calls {
-        assert_eq!(app::required(&call), Err(app::NOT_FOR_APPS), "{call:?}");
-        for audience in [AppAudience::All, AppAudience::Management] {
-            assert!(app::allowed_for(&AppScope::ALL, audience, &call).is_err(), "{call:?}");
-        }
-    }
 }
 
 #[test]

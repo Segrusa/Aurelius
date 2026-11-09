@@ -12,27 +12,11 @@ export type MethodGroup = "read" | "host" | "command";
 /** The wire name of every method, with its group. */
 export const METHODS = {
   "activity.get": "read",
-  "agent_function.create": "host",
-  "agent_function.delete": "host",
-  "agent_function.list": "read",
-  "agent_function.set_all_enabled": "host",
-  "agent_function.set_enabled": "host",
-  "agent_function.update": "host",
-  "api_key.create": "host",
-  "api_key.list": "read",
-  "api_key.revoke": "host",
-  "api_key.set_functions": "host",
-  "app_key.create": "host",
-  "app_key.list": "read",
-  "app_key.revoke": "host",
+  "activity_log.list": "read",
   "approval.answer": "command",
   "approval.decide": "command",
   "approval.decide_plan": "command",
   "approval.list": "read",
-  "artifact.get_content": "read",
-  "artifact.get_setting": "read",
-  "artifact.list": "read",
-  "artifact.set_enabled": "host",
   "attachment.add": "command",
   "attachment.remove": "command",
   "auto_allow.get_setting": "read",
@@ -74,22 +58,25 @@ export const METHODS = {
   "conversation.set_run": "command",
   "conversation.set_screen_allowed": "command",
   "employee.chat": "read",
+  "employee.chats": "read",
   "employee.create": "command",
   "employee.instruction_versions": "read",
   "employee.list": "read",
+  "employee.open_chat": "command",
+  "employee.queue": "read",
   "employee.restore_instructions": "command",
+  "employee.scratchpad": "read",
   "employee.send_message": "command",
   "employee.set_folder": "command",
   "employee.set_reports_to": "command",
   "employee.set_status": "command",
+  "employee.start_profiles": "read",
+  "employee.tool_options": "read",
   "employee.update": "command",
   "event.subscribe": "read",
   "file.get": "read",
   "fs.create_dir": "host",
   "fs.list_dir": "read",
-  "function_call.list": "read",
-  "git.get_diff": "read",
-  "git.get_status": "read",
   "group_chat.get": "read",
   "group_chat.send": "command",
   "guideline.add_starter_set": "command",
@@ -108,7 +95,6 @@ export const METHODS = {
   "guideline.unlink": "command",
   "guideline.update": "command",
   "guideline.versions": "read",
-  "heartbeat.set": "command",
   "idea.add": "command",
   "idea.delete": "command",
   "idea.list": "read",
@@ -146,27 +132,11 @@ export const METHODS = {
   "message.history": "read",
   "message.locate": "read",
   "message.react": "command",
-  "note.create": "host",
-  "note.delete": "host",
-  "note.get": "read",
-  "note.list": "read",
-  "note.set_pinned": "host",
-  "note.update": "host",
   "notification.dismiss": "host",
   "notification.dismiss_all": "host",
   "notification.list": "read",
   "notification.mark_all_read": "host",
   "notification.mark_read": "host",
-  "plugin.get_for_employee": "read",
-  "plugin.get_for_project": "read",
-  "plugin.install": "host",
-  "plugin.list": "read",
-  "plugin.list_available": "read",
-  "plugin.preview": "host",
-  "plugin.remove": "host",
-  "plugin.set_for_employee": "host",
-  "plugin.set_for_project": "host",
-  "plugin.update": "host",
   "power.cancel": "host",
   "power.get": "read",
   "power.shutdown": "host",
@@ -197,10 +167,13 @@ export const METHODS = {
   "remote.get_status": "read",
   "remote.revoke": "host",
   "remote.start_pairing": "host",
+  "run.get_activity": "read",
   "run.get_context": "read",
   "run.get_trace": "read",
   "run.guidelines": "read",
   "run.stop": "command",
+  "scheduled_message.cancel": "command",
+  "scheduled_message.list": "read",
   "screenshot.get": "read",
   "secret.set": "host",
   "server.get_health": "read",
@@ -210,25 +183,14 @@ export const METHODS = {
   "session.hello": "read",
   "session.list": "read",
   "session.revoke": "host",
-  "share.create": "command",
-  "share.list": "read",
-  "share.revoke": "command",
   "subagent.list": "read",
   "subscription.get": "read",
   "task.assign": "command",
   "task.cancel": "command",
-  "task.choose_variant": "command",
   "task.create": "command",
-  "task.discuss": "command",
   "task.list": "read",
-  "task.variants": "read",
-  "terminal.close": "read",
-  "terminal.detach": "read",
-  "terminal.input": "read",
-  "terminal.list": "read",
-  "terminal.open": "read",
-  "terminal.resize": "read",
   "thread.read": "read",
+  "thread.waiting": "read",
   "ticket.accept": "command",
   "ticket.approve_plan": "command",
   "ticket.archive": "command",
@@ -268,8 +230,6 @@ export const METHODS = {
   "user.logout": "read",
   "user.set_password": "host",
   "user.whoami": "read",
-  "variants.get_setting": "read",
-  "variants.set_enabled": "host",
   "vault.archive": "host",
   "vault.audit": "read",
   "vault.create": "host",
@@ -288,57 +248,21 @@ export interface MethodParams {
    * `conversation.get` and live updates shorten (feature `activity_preview`).
    */
   "activity.get": { call_id: string; message_id: string };
-  "agent_function.create": M.CreateAgentFunction;
-  "agent_function.delete": { function_id: string };
-  "agent_function.list": { project_id?: string | null };
   /**
-   * The kill switch: `enabled: false` makes every function refuse calls.
+   * The activity log, newest first (R8, feature `activity_log`): every delivery, queue
+   * step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+   * `project_id` (feature `workspace_filters`): only threads of that project's tickets,
+   * channels and tasks; a board member's private chat has no project.
    */
-  "agent_function.set_all_enabled": { enabled: boolean };
-  "agent_function.set_enabled": { enabled: boolean; function_id: string };
-  "agent_function.update": M.UpdateAgentFunction;
-  /**
-   * The secret is in the answer once; the receipt keeps none.
-   */
-  "api_key.create": { function_ids: string[]; name: string };
-  "api_key.list": undefined;
-  "api_key.revoke": { key_id: string };
-  "api_key.set_functions": { function_ids: string[]; key_id: string };
-  /**
-   * A key for an outside app (feature `app_keys`); answers `AppKeyCreated`
-   * with the secret, once: the receipt keeps none.
-   */
-  "app_key.create": M.CreateAppKey;
-  /**
-   * The keys of outside apps that use `aurelius-mcp`, newest first (feature `app_keys`).
-   */
-  "app_key.list": undefined;
-  /**
-   * Revoked at once, also for the app's open sessions; answers `AppKey`.
-   */
-  "app_key.revoke": { key_id: string };
+  "activity_log.list": { before_seq?: number | null; category?: string | null; employee_id?: string | null; limit?: number | null; project_id?: string | null; run_id?: string | null; thread_key?: string | null; ticket_number?: number | null };
   "approval.answer": M.AnswerQuestion;
   "approval.decide": M.DecideApproval;
   "approval.decide_plan": M.DecidePlan;
-  "approval.list": undefined;
   /**
-   * The file the server kept of one publish (`version`, else the newest kept),
-   * so a client can show the page without a claude.ai login. Not found for an
-   * unknown URL; `snapshot` is none for pages published before servers kept them.
+   * Pending approvals, then the latest decisions. `project_id` (feature
+   * `workspace_filters`): only those of runs in that project.
    */
-  "artifact.get_content": { url: string; version?: number | null };
-  /**
-   * Whether runs may publish Claude Code artifacts (pages on claude.ai).
-   */
-  "artifact.get_setting": undefined;
-  /**
-   * Artifacts runs published, newest first: every given filter applies, none lists all.
-   */
-  "artifact.list": { conversation_id?: string | null; project_id?: string | null; task_id?: string | null };
-  /**
-   * Turn Claude Code artifacts on or off for every run that starts afterwards.
-   */
-  "artifact.set_enabled": { enabled: boolean };
+  "approval.list": { project_id?: string | null };
   "attachment.add": M.AttachFile;
   "attachment.remove": M.RemoveAttachment;
   /**
@@ -455,6 +379,10 @@ export interface MethodParams {
    * its messages and settings, as `conversation.get` answers them.
    */
   "employee.chat": { employee_id: string };
+  /**
+   * The reader's lasting chats with employees, the latest first (feature `employee_chats`).
+   */
+  "employee.chats": undefined;
   "employee.create": M.CreateEmployee;
   /**
    * The versions of an employee's instructions, newest first (feature `instruction_proposals`).
@@ -464,11 +392,28 @@ export interface MethodParams {
    * The company's employees (not archived), oldest first.
    */
   "employee.list": undefined;
+  "employee.open_chat": M.OpenEmployeeChat;
+  /**
+   * What is in an employee's mailbox now (feature `employee_queue`).
+   */
+  "employee.queue": { employee_id: string };
   "employee.restore_instructions": M.RestoreEmployeeInstructions;
+  /**
+   * An employee's scratchpad (feature `employee_scratchpad`).
+   */
+  "employee.scratchpad": { employee_id: string };
   "employee.send_message": M.SendEmployeeMessage;
   "employee.set_folder": M.SetEmployeeFolder;
   "employee.set_reports_to": M.SetEmployeeReportsTo;
   "employee.set_status": M.SetEmployeeStatus;
+  /**
+   * The catalogue of start profiles (feature `employee_profiles`).
+   */
+  "employee.start_profiles": undefined;
+  /**
+   * The tools that can be switched per employee (feature `employee_tools`).
+   */
+  "employee.tool_options": undefined;
   "employee.update": M.UpdateEmployee;
   /**
    * Replay events after `after_seq`, then stream live events (and load/power pushes).
@@ -486,12 +431,6 @@ export interface MethodParams {
    * Folders on the server: none lists the starting points.
    */
   "fs.list_dir": { path?: string | null };
-  "function_call.list": { function_id?: string | null; limit?: number | null };
-  "git.get_diff": { conversation_id: string };
-  /**
-   * Branch and uncommitted change of the folder a conversation works in; none outside a Git repository.
-   */
-  "git.get_status": { conversation_id: string };
   /**
    * The company's group chat (Team chat): the user and every employee. Its
    * messages and settings, as `conversation.get` answers them; an employee's
@@ -576,7 +515,6 @@ export interface MethodParams {
    * Every version of a guideline, newest first, with its text and source.
    */
   "guideline.versions": { guideline_id: string };
-  "heartbeat.set": M.SetHeartbeat;
   "idea.add": M.AddIdea;
   "idea.delete": M.DeleteIdea;
   "idea.list": { project_id: string };
@@ -670,68 +608,20 @@ export interface MethodParams {
    */
   "message.locate": { message_id: string };
   "message.react": M.ReactToMessage;
-  /**
-   * A new note in a project; answers `Note`.
-   */
-  "note.create": { body?: string; project_id: string };
-  "note.delete": { note_id: string };
-  /**
-   * One note with its Markdown body.
-   */
-  "note.get": { note_id: string };
-  /**
-   * A project's notes (summaries), pinned first, then the last edited; `query` searches the text.
-   */
-  "note.list": { project_id: string; query?: string | null };
-  "note.set_pinned": { note_id: string; pinned: boolean };
-  /**
-   * Replace a note's body. Refused with `version_conflict` when the note is no
-   * longer at `base_revision` (saved elsewhere): load it again with `note.get`.
-   */
-  "note.update": { base_revision: number; body: string; note_id: string };
   "notification.dismiss": { id: string };
   "notification.dismiss_all": undefined;
-  "notification.list": undefined;
+  /**
+   * The notifications of the board member, newest first. `project_id` (feature
+   * `workspace_filters`): only those about that project's tickets, tasks or
+   * conversations; `unread` then counts only those too.
+   */
+  "notification.list": { project_id?: string | null };
   "notification.mark_all_read": undefined;
   /**
    * One row read, for this board member only (feature `personal_inbox`); answers
    * `Count`, 0 when there was nothing to read, so it can be repeated.
    */
   "notification.mark_read": { id: string };
-  /**
-   * The plugins one employee has enabled.
-   */
-  "plugin.get_for_employee": { employee_id: string };
-  /**
-   * The plugins a project has enabled (its project assistant loads them).
-   */
-  "plugin.get_for_project": { project_id: string };
-  /**
-   * Install plugins (`name@marketplace`) and enable them for the given employees and projects.
-   */
-  "plugin.install": { employees: string[]; ids: string[]; projects?: string[] };
-  /**
-   * Claude Code plugins installed on the server's computer, with the employees that use each.
-   */
-  "plugin.list": undefined;
-  /**
-   * Plugins offered by the marketplaces already added.
-   */
-  "plugin.list_available": undefined;
-  /**
-   * Adds the marketplace behind a link (GitHub URL, `owner/repo` or git URL).
-   */
-  "plugin.preview": { source: string };
-  "plugin.remove": { id: string };
-  /**
-   * Replace the plugins an employee has enabled; applies from its next run.
-   */
-  "plugin.set_for_employee": { employee_id: string; enabled: string[] };
-  /**
-   * Replace the plugins a project has enabled (for its project assistant); applies from its next run.
-   */
-  "plugin.set_for_project": { enabled: string[]; project_id: string };
-  "plugin.update": { id: string };
   "power.cancel": undefined;
   "power.get": undefined;
   "power.shutdown": { when: M.ShutdownWhen };
@@ -780,6 +670,10 @@ export interface MethodParams {
    */
   "remote.start_pairing": undefined;
   /**
+   * Every tool call of a run, for an opened run card (feature `run_cards`).
+   */
+  "run.get_activity": { run_id: string };
+  /**
    * The context manifest of one run (context inspector).
    */
   "run.get_context": { run_id: string };
@@ -794,6 +688,12 @@ export interface MethodParams {
    */
   "run.guidelines": { run_id: string };
   "run.stop": M.StopRun;
+  "scheduled_message.cancel": M.CancelScheduledMessage;
+  /**
+   * Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+   * `project_id` (feature `workspace_filters`): only those in a ticket or channel of that project.
+   */
+  "scheduled_message.list": { project_id?: string | null };
   /**
    * A screenshot the agent took (the id is in its screenshot tool's output).
    */
@@ -828,9 +728,6 @@ export interface MethodParams {
    * who revoked it. Answers `Done`. Not for apps.
    */
   "session.revoke": { session_id: string };
-  "share.create": M.ShareMessage;
-  "share.list": { project_id: string };
-  "share.revoke": M.RevokeShare;
   /**
    * The subagents running in the answers of one conversation.
    */
@@ -838,37 +735,11 @@ export interface MethodParams {
   "subscription.get": { refresh: boolean };
   "task.assign": M.AssignTask;
   "task.cancel": M.CancelTask;
-  "task.choose_variant": M.ChooseTaskVariant;
   "task.create": M.CreateTask;
-  "task.discuss": M.DiscussTask;
   /**
    * Tasks, newest first, company-wide; every given filter applies.
    */
   "task.list": { employee_id?: string | null; project_id?: string | null; state?: M.TaskListState | null };
-  /**
-   * A task's variants and the judge's comparison (feature `task_variants`).
-   */
-  "task.variants": { task_id: string };
-  "terminal.close": { terminal_id: string };
-  /**
-   * This session stops getting a terminal's output; the shell keeps running and
-   * keeps its scrollback (feature `terminal.multi`).
-   */
-  "terminal.detach": { terminal_id: string };
-  "terminal.input": { data_base64: string; terminal_id: string };
-  /**
-   * The terminals of a conversation, oldest first (feature `terminal.multi`).
-   */
-  "terminal.list": { conversation_id: string };
-  /**
-   * A shell in the folder a conversation works in. Attaches to the running terminal
-   * unless `fresh`; this session then gets its output as `ServerMessage::TerminalOutput`.
-   * With `terminal_id` it attaches to exactly that terminal (its scrollback follows);
-   * with `additional` it starts another terminal beside the running ones
-   * (feature `terminal.multi`; at most 4 per conversation, 8 per server).
-   */
-  "terminal.open": { additional?: boolean; cols: number; conversation_id: string; fresh: boolean; rows: number; terminal_id?: string | null };
-  "terminal.resize": { cols: number; rows: number; terminal_id: string };
   /**
    * One thread of a channel (feature `chat_threads`): `message_id` is the
    * message that starts it (a message of a channel or a ticket's discussion
@@ -878,6 +749,11 @@ export interface MethodParams {
    * does. A message without replies is a thread of none.
    */
   "thread.read": { message_id: string };
+  /**
+   * Who waits to pick up a thread and what is scheduled in it (U3, feature
+   * `scheduled_messages`): a ticket (`ticket_id`) or a channel or chat (`conversation_id`).
+   */
+  "thread.waiting": { conversation_id?: string | null; ticket_id?: string | null };
   /**
    * Review → Done. Only a board member; only when no linked task still works (B6).
    */
@@ -977,7 +853,7 @@ export interface MethodParams {
    * changes; the owner only through `ticket.assign`; mode and model only while
    * the main task does not run.
    */
-  "ticket.update": { add_files?: string[] | null; clear_deadline?: boolean; confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; labels?: string[] | null; priority?: M.TicketPriority | null; run?: M.TaskRun | null; ticket_id: string; title?: string | null };
+  "ticket.update": { add_files?: string[] | null; clear_deadline?: boolean; confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; design_url?: string | null; labels?: string[] | null; priority?: M.TicketPriority | null; run?: M.TaskRun | null; ticket_id: string; title?: string | null };
   /**
    * Run a ticket on the Claude login of the board member who asks (B4, D3-3):
    * `TicketView::login_user` becomes that board member, never anyone else. The
@@ -1021,7 +897,7 @@ export interface MethodParams {
    * What a conversation or a task used, with the tasks given away from it apart
    * (feature `run_usage`). Give one of the two; a task wins.
    */
-  "usage.get_totals": { conversation_id?: string | null; task_id?: string | null };
+  "usage.get_totals": { conversation_id?: string | null; task_id?: string | null; ticket_id?: string | null };
   /**
    * A new board member (OV-12: `invalid_username`, `weak_password` (also a
    * password of only spaces), `username_taken`; `too_many_attempts` after five
@@ -1077,14 +953,6 @@ export interface MethodParams {
    * Works without a session.
    */
   "user.whoami": undefined;
-  /**
-   * Whether tasks may be tried in several ways first (feature `task_variants`).
-   */
-  "variants.get_setting": undefined;
-  /**
-   * Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
-   */
-  "variants.set_enabled": { enabled: boolean };
   /**
    * Archive ("Delete") an item: runs and employees no longer get it; its audit
    * history stays. Answers `VaultItem`. Not for apps.

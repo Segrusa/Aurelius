@@ -1,15 +1,24 @@
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import type { TaskView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useConnection } from "../connection";
-import { useAllTasks, useEmployees, useMessages, useProjects } from "../data";
+import { useAllTasks, useEmployees, useMessages } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
-import { Button, initial, Kbd, Mark, markColor } from "../ui/kit";
+import { KeyHint } from "../ui/key-hint";
 import { Markdown } from "../ui/markdown";
-import { Menu } from "../ui/overlay";
+import { initial, Mark, markColor } from "../ui/marks";
+import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
+import { Loading, Page, PageHead, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { boardOnlyReason } from "./run-logic";
 import { useTaskCancel } from "./task-run";
@@ -25,6 +34,140 @@ import {
   treeOrder,
 } from "./tasks-logic";
 import { ago } from "./ticket-rows";
+
+const enter = stylex.keyframes({
+  from: { opacity: 0, transform: "translateY(4px)" },
+});
+
+const styles = stylex.create({
+  tabCount: { color: "var(--precision-text3)" },
+  pill: {
+    height: 24,
+    flexShrink: 0,
+    cursor: "pointer",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "var(--color-border-emphasized)",
+    backgroundColor: "transparent",
+    paddingInline: 9,
+    fontSize: 12,
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+  },
+  body: { display: "flex", minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%" },
+  list: {
+    display: "flex",
+    minWidth: 0,
+    flexGrow: 3,
+    flexShrink: 1,
+    flexBasis: "0%",
+    flexDirection: "column",
+    borderRightWidth: 1,
+    borderRightStyle: "solid",
+    borderRightColor: "var(--color-border)",
+  },
+  message: { padding: 18 },
+  scroller: { minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%", overflowY: "auto" },
+  track: { position: "relative" },
+  row: {
+    position: "absolute",
+    insetInline: 0,
+    top: 0,
+    boxSizing: "border-box",
+    height: 52,
+    borderRadius: 0,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--precision-line2)",
+  },
+  fold: {
+    display: "grid",
+    width: 20,
+    height: 20,
+    flexShrink: 0,
+    cursor: "pointer",
+    placeItems: "center",
+    borderRadius: 4,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+  },
+  foldGap: { width: 20, flexShrink: 0 },
+  start: { display: "flex", alignItems: "center", gap: 8 },
+  noMark: { width: 22, height: 22, flexShrink: 0 },
+  end: { display: "flex", alignItems: "center", gap: 12 },
+  state: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, whiteSpace: "nowrap" },
+  stateDot: { width: 7, height: 7, borderRadius: "50%" },
+  age: { width: 40, flexShrink: 0, textAlign: "right", fontSize: 12, color: "var(--precision-text3)" },
+  aside: {
+    display: "flex",
+    width: "clamp(320px, 36%, 520px)",
+    minWidth: 0,
+    flexShrink: 0,
+    flexDirection: "column",
+  },
+  preview: {
+    display: "flex",
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "0%",
+    flexDirection: "column",
+    gap: 16,
+    overflowY: "auto",
+    paddingInline: 22,
+    paddingBlock: 20,
+    animationName: enter,
+    animationDuration: "160ms",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+  },
+  previewHead: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--precision-text3)" },
+  mono: { fontFamily: "var(--font-family-code)" },
+  previewState: { marginInlineStart: "auto", display: "inline-flex", alignItems: "center", gap: 6 },
+  title: { margin: 0, fontSize: 18, lineHeight: 1.35, fontWeight: 600, letterSpacing: "-0.01em" },
+  employee: { display: "flex", alignItems: "center", gap: 8 },
+  last: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    padding: 12,
+  },
+  label: { fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
+  labelGap: { marginBottom: 6 },
+  step: {
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    color: "var(--color-text-secondary)",
+  },
+  lastText: {
+    margin: 0,
+    display: "-webkit-box",
+    overflow: "hidden",
+    fontSize: 13,
+    lineHeight: 1.6,
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 4,
+  },
+  goal: {
+    margin: 0,
+    fontSize: 13,
+    lineHeight: 1.6,
+    whiteSpace: "pre-wrap",
+    color: "var(--color-text-secondary)",
+  },
+  actions: { marginTop: "auto", display: "flex", gap: 8 },
+});
 
 const ROW_HEIGHT = 52;
 
@@ -75,42 +218,44 @@ function Preview({ task, onOpen }: { task: TaskView; onOpen: () => void }) {
   const last = [...(messages.data?.messages ?? [])].reverse().find((m) => m.role === "assistant");
   const step = last?.activity.at(-1);
   return (
-    <div key={task.id} className="enter flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[22px] py-5">
-      <div className="flex items-center gap-2 text-[12px] text-text3">
-        {task.ticket_number ? <span className="font-mono">#{task.ticket_number}</span> : null}
+    <div key={task.id} {...stylex.props(styles.preview)}>
+      <div {...stylex.props(styles.previewHead)}>
+        {task.ticket_number ? <span {...stylex.props(styles.mono)}>#{task.ticket_number}</span> : null}
         {task.delegated_by ? <span>· delegated</span> : null}
-        <span className="ml-auto inline-flex items-center gap-[6px]" style={{ color: state.color }}>
-          <span className="size-[7px] rounded-full" style={{ background: state.color }} />
+        <span {...stylex.props(styles.previewState)} style={{ color: state.color }}>
+          <span {...stylex.props(styles.stateDot)} style={{ background: state.color }} />
           {state.text}
         </span>
       </div>
-      <h2 className="m-0 text-[18px] leading-[1.35] font-semibold tracking-[-0.01em]">{task.title}</h2>
+      <Heading level={2} xstyle={styles.title}>
+        {task.title}
+      </Heading>
       {task.employee_name ? (
-        <div className="flex items-center gap-2">
+        <div {...stylex.props(styles.employee)}>
           <Mark letter={initial(task.employee_name)} color={markColor(task.employee_id ?? "")} size={20} radius={5} />
           {task.employee_name}
         </div>
       ) : null}
       {last ? (
-        <div className="flex flex-col gap-2 rounded-[8px] border border-line bg-sunk p-3">
-          <div className="text-[12px] font-medium text-text3">{isActive(task) ? "Now" : "Last"}</div>
-          {step ? <div className="truncate font-mono text-[12px] text-text2">{stepLine(step)}</div> : null}
-          {last.text ? <p className="m-0 line-clamp-4 text-[13px] leading-[1.6]">{last.text}</p> : null}
+        <div {...stylex.props(styles.last)}>
+          <div {...stylex.props(styles.label)}>{isActive(task) ? "Now" : "Last"}</div>
+          {step ? <div {...stylex.props(styles.step)}>{stepLine(step)}</div> : null}
+          {last.text ? <p {...stylex.props(styles.lastText)}>{last.text}</p> : null}
         </div>
       ) : null}
       <div>
-        <div className="mb-[6px] text-[12px] font-medium text-text3">Goal</div>
-        <p className="m-0 text-[13px] leading-[1.6] whitespace-pre-wrap text-text2">{task.goal}</p>
+        <div {...stylex.props(styles.label, styles.labelGap)}>Goal</div>
+        <p {...stylex.props(styles.goal)}>{task.goal}</p>
       </div>
       {task.result ? (
         <div>
-          <div className="mb-[6px] text-[12px] font-medium text-text3">Result</div>
+          <div {...stylex.props(styles.label, styles.labelGap)}>Result</div>
           <Markdown text={task.result} />
         </div>
       ) : null}
-      <div className="mt-auto flex gap-2">
-        <Button onClick={onOpen}>
-          Open conversation <Kbd>↵</Kbd>
+      <div {...stylex.props(styles.actions)}>
+        <Button label="Open conversation" onClick={onOpen}>
+          Open conversation <KeyHint>↵</KeyHint>
         </Button>
         {assign.allowed ? (
           <Menu
@@ -119,13 +264,11 @@ function Preview({ task, onOpen }: { task: TaskView; onOpen: () => void }) {
             onOpenChange={setGiving}
             options={assign.options}
             onPick={(id) => void assign.pick(id)}
-            trigger={<Button>Give to…</Button>}
+            trigger={<Button label="Give to…" />}
           />
         ) : null}
         {isActive(task) && boardOnlyReason(task) === null ? (
-          <Button kind="danger" onClick={() => void cancel(task)}>
-            Cancel task
-          </Button>
+          <Button variant="destructive" label="Cancel task" onClick={() => void cancel(task)} />
         ) : null}
       </div>
     </div>
@@ -137,11 +280,10 @@ export function TasksScreen({ projectId }: { projectId?: string } = {}) {
   const navigate = useNavigate();
   const tasks = useAllTasks();
   const employees = useEmployees();
-  const projects = useProjects();
   const [state, setState] = useState<TaskState>("open");
   const [employee, setEmployee] = useState<string | null>(null);
-  const [chosenProject, setProject] = useState<string | null>(null);
-  const project = projectId ?? chosenProject;
+  const workspace = useWorkspace();
+  const project = projectId ?? workspace.id;
   const [folds, setFolds] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
   const list = tasks.data ?? [];
@@ -175,73 +317,64 @@ export function TasksScreen({ projectId }: { projectId?: string } = {}) {
   useAction("Filter3", () => setState("ended"));
   useAction("Filter4", () => setState("all"));
 
-  const pill =
-    "h-6 flex-none cursor-pointer rounded-[12px] border border-dashed whitespace-nowrap border-btn-line bg-transparent px-[9px] text-[12px] font-medium text-text2 hover:text-text";
   const employeeName = employees.data?.find((e) => e.id === employee)?.name ?? "Anyone";
-  const projectName = projects.data?.find((p) => p.id === project)?.name ?? "Any project";
 
   return (
-    <>
-      <header className="flex h-11 flex-none items-center gap-[10px] border-b border-line pr-3 pl-[18px]">
-        <h1 className="m-0 text-[13px] font-medium">Tasks</h1>
-        <fieldset aria-label="State" className="m-0 ml-2 flex gap-1 border-0 p-0">
-          {TASK_STATES.map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={key === state}
-              onClick={() => setState(key)}
-              className={`h-6 cursor-pointer rounded-[5px] border px-[9px] text-[12px] font-medium ${key === state ? "border-btn-line bg-sel text-text" : "border-transparent bg-transparent text-text2 hover:text-text"}`}
+    <Page>
+      <PageHead
+        title="Tasks"
+        tabs={
+          <>
+            <ToggleButtonGroup
+              label="State"
+              type="single"
+              size="sm"
+              value={state}
+              onChange={(next) => {
+                if (next) setState(next as TaskState);
+              }}
             >
-              {label} <span className="text-text3">{list.filter((t) => admits(key, t)).length}</span>
-            </button>
-          ))}
-        </fieldset>
-        <Menu
-          label="Employee"
-          options={[
-            { key: "any", label: "Anyone" },
-            ...(employees.data ?? []).map((e) => ({ key: e.id, label: e.name })),
-          ]}
-          onPick={(id) => setEmployee(id === "any" ? null : id)}
-          trigger={
-            <button type="button" className={pill}>
-              {employeeName}
-            </button>
-          }
-        />
-        {projectId ? null : (
-          <Menu
-            label="Project"
-            options={[
-              { key: "any", label: "Any project" },
-              ...(projects.data ?? []).map((p) => ({ key: p.id, label: p.name })),
-            ]}
-            onPick={(id) => setProject(id === "any" ? null : id)}
-            trigger={
-              <button type="button" className={pill}>
-                {projectName}
-              </button>
-            }
-          />
-        )}
-        <div className="ml-auto">
-          <Button kind="primary" onClick={() => overlays.open("give")}>
-            Give work <Kbd onAccent>N</Kbd>
-          </Button>
-        </div>
-      </header>
-      <div className="flex min-h-0 flex-1">
-        <section aria-label="Task list" className="flex min-w-0 flex-[3] flex-col border-r border-line">
+              {TASK_STATES.map(({ key, label }) => (
+                <ToggleButton key={key} value={key} label={label}>
+                  {label} <span {...stylex.props(styles.tabCount)}>{list.filter((t) => admits(key, t)).length}</span>
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+            <Menu
+              label="Employee"
+              options={[
+                { key: "any", label: "Anyone" },
+                ...(employees.data ?? []).map((e) => ({ key: e.id, label: e.name })),
+              ]}
+              onPick={(id) => setEmployee(id === "any" ? null : id)}
+              trigger={
+                <button type="button" {...stylex.props(styles.pill)}>
+                  {employeeName}
+                </button>
+              }
+            />
+          </>
+        }
+      >
+        <Button variant="primary" label="Give work" onClick={() => overlays.open("give")}>
+          Give work <KeyHint onAccent>N</KeyHint>
+        </Button>
+      </PageHead>
+      <div {...stylex.props(styles.body)}>
+        <section aria-label="Task list" {...stylex.props(styles.list)}>
           {tasks.error ? (
-            <p role="alert" className="m-0 p-[18px] text-red">
-              {tasks.error.message}
-            </p>
-          ) : rows.length === 0 && !tasks.isPending ? (
-            <p className="m-0 p-[18px] text-text3">No tasks here.</p>
+            <div {...stylex.props(styles.message)}>
+              <Problem>{tasks.error.message}</Problem>
+            </div>
+          ) : tasks.isPending && rows.length === 0 ? (
+            <Loading rows={6} />
+          ) : rows.length === 0 ? (
+            <div {...stylex.props(styles.message)}>
+              <EmptyState isCompact title="No tasks here." />
+            </div>
           ) : null}
-          <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-            <div className="relative" style={{ height: virtual.getTotalSize() }}>
+          <div ref={scroller} {...stylex.props(styles.scroller)}>
+            <List density="compact" edge="flush" xstyle={styles.track} style={{ height: virtual.getTotalSize() }}>
               {virtual.getVirtualItems().map((item) => {
                 const row = rows[item.index];
                 if (!row) return null;
@@ -256,74 +389,63 @@ export function TasksScreen({ projectId }: { projectId?: string } = {}) {
                   .join(" · ");
                 const on = task.id === current?.task.id;
                 return (
-                  <div
+                  <ListItem
                     key={task.id}
-                    className={`absolute inset-x-0 flex items-center border-b border-line2 ${on ? "bg-sel shadow-[inset_2px_0_0_var(--acc-text)]" : ""}`}
-                    style={{
-                      height: ROW_HEIGHT,
-                      transform: `translateY(${item.start}px)`,
-                      paddingLeft: 14 + depth * 22,
-                    }}
-                  >
-                    {below > 0 ? (
-                      <button
-                        type="button"
-                        aria-label={open ? "Fold" : "Unfold"}
-                        aria-expanded={open}
-                        onClick={() => setFolds({ ...folds, [task.id]: !open })}
-                        className="grid size-5 flex-none cursor-pointer place-items-center rounded-[4px] border-0 bg-transparent text-text3 hover:text-text"
-                      >
-                        {open ? "⌄" : "›"}
-                      </button>
-                    ) : (
-                      <span className="w-5 flex-none" />
-                    )}
-                    <button
-                      type="button"
-                      aria-current={on ? "true" : undefined}
-                      onClick={() => setSelected(task.id)}
-                      onDoubleClick={() => openRun(task.id)}
-                      className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-3 border-0 bg-transparent pr-[18px] pl-1 text-left text-text"
-                    >
-                      {task.employee_name ? (
-                        <Mark
-                          letter={initial(task.employee_name)}
-                          color={markColor(task.employee_id ?? "")}
-                          size={22}
-                          radius={6}
-                        />
-                      ) : (
-                        <span className="size-[22px] flex-none" />
-                      )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{task.title}</span>
-                        <span className="mt-[2px] block truncate text-[12px] text-text3">
-                          {[task.employee_name, meta].filter(Boolean).join(" · ")}
+                    xstyle={styles.row}
+                    style={{ transform: `translateY(${item.start}px)`, paddingLeft: 14 + depth * 22 }}
+                    label={task.title}
+                    description={[task.employee_name, meta].filter(Boolean).join(" · ")}
+                    isSelected={on}
+                    onClick={() => setSelected(task.id)}
+                    onDoubleClick={() => openRun(task.id)}
+                    startContent={
+                      <span {...stylex.props(styles.start)}>
+                        {below > 0 ? (
+                          <button
+                            type="button"
+                            aria-label={open ? "Fold" : "Unfold"}
+                            aria-expanded={open}
+                            onClick={() => setFolds({ ...folds, [task.id]: !open })}
+                            {...stylex.props(styles.fold)}
+                          >
+                            {open ? "⌄" : "›"}
+                          </button>
+                        ) : (
+                          <span {...stylex.props(styles.foldGap)} />
+                        )}
+                        {task.employee_name ? (
+                          <Mark
+                            letter={initial(task.employee_name)}
+                            color={markColor(task.employee_id ?? "")}
+                            size={22}
+                            radius={6}
+                          />
+                        ) : (
+                          <span {...stylex.props(styles.noMark)} />
+                        )}
+                      </span>
+                    }
+                    endContent={
+                      <span {...stylex.props(styles.end)}>
+                        <span {...stylex.props(styles.state)} style={{ color: look.color }}>
+                          <span {...stylex.props(styles.stateDot)} style={{ background: look.color }} />
+                          {look.text}
                         </span>
+                        <span {...stylex.props(styles.age)}>{ago(task.updated_at_ms)}</span>
                       </span>
-                      <span
-                        className="inline-flex items-center gap-[6px] text-[12px] whitespace-nowrap"
-                        style={{ color: look.color }}
-                      >
-                        <span className="size-[7px] rounded-full" style={{ background: look.color }} />
-                        {look.text}
-                      </span>
-                      <span className="w-10 flex-none text-right text-[12px] text-text3">
-                        {ago(task.updated_at_ms)}
-                      </span>
-                    </button>
-                  </div>
+                    }
+                  />
                 );
               })}
-            </div>
+            </List>
           </div>
         </section>
-        <aside aria-label="Task preview" className="flex w-[clamp(320px,36%,520px)] min-w-0 flex-none flex-col">
+        <aside aria-label="Task preview" {...stylex.props(styles.aside)}>
           {current ? (
             <Preview key={current.task.id} task={current.task} onOpen={() => openRun(current.task.id)} />
           ) : null}
         </aside>
       </div>
-    </>
+    </Page>
   );
 }

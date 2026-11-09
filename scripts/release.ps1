@@ -2,7 +2,7 @@
 # test its part, commit, tag and push. The two are released separately, each
 # with its own version, tag, changelog and zip; they work together as long as
 # their protocol major matches.
-#   scripts/release.ps1 -Product server  -Version 0.6.1   tag server-v0.6.1  (aurelius-daemon + aurelius-ctl + aurelius-bridge + aurelius-mcp, and the aurelius-mcp Docker image)
+#   scripts/release.ps1 -Product server  -Version 0.6.1   tag server-v0.6.1  (aurelius-daemon + aurelius-ctl + aurelius-bridge)
 #   scripts/release.ps1 -Product desktop -Version 0.6.1   tag desktop-v0.6.1 (aurelius.exe)
 # GitHub Actions (.github/workflows/release-<product>.yml) then builds, signs
 # and publishes the release; installed apps offer it as an update.

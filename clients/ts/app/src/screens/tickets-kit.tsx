@@ -1,13 +1,14 @@
 // What the Board, My tickets and the ticket panel share: who needs what, the writes, and a card's marks.
 
+import { Link } from "@astryxdesign/core/Link";
 import { expectBody } from "@aurelius/client";
 import type { ColumnKind, TicketView, TimelineCard } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAllTasks, useCompany, useEmployees, useProjects } from "../data";
-import { initial, Mark, markColor } from "../ui/kit";
+import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
 import {
   deadlineText,
@@ -107,20 +108,43 @@ export function useTicketWrite() {
   );
 }
 
+const styles = stylex.create({
+  glyph: { flexShrink: 0 },
+  tag: {
+    display: "inline-flex",
+    height: 20,
+    flexShrink: 0,
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    paddingInline: 7,
+    fontSize: 11,
+    color: "var(--color-text-secondary)",
+  },
+  needsTag: { borderColor: "var(--color-border-warning)", color: "var(--color-text-warning)" },
+  dot: { width: 6, height: 6, borderRadius: "50%" },
+  needsDot: { backgroundColor: "var(--color-text-warning)" },
+  note: { fontSize: 12, color: "var(--color-text-warning)" },
+  noteLink: { fontWeight: 500 },
+});
+
 const COLUMN_LOOK: Record<ColumnKind, { color: string; glyph: string }> = {
-  backlog: { color: "var(--text3)", glyph: "" },
-  todo: { color: "var(--text2)", glyph: "" },
-  doing: { color: "var(--acc-text)", glyph: "M8 4.2a3.8 3.8 0 0 1 0 7.6z" },
-  plan_review: { color: "var(--violet)", glyph: "M8 4.2a3.8 3.8 0 0 1 3.8 3.8H8z" },
-  testing: { color: "var(--blue)", glyph: "M8 4.2a3.8 3.8 0 0 1 3.8 3.8A3.8 3.8 0 0 1 8 11.8z" },
-  review: { color: "var(--amber)", glyph: "M8 4.2a3.8 3.8 0 1 1-3.8 3.8H8z" },
-  done: { color: "var(--acc-text)", glyph: "M8 4.2a3.8 3.8 0 1 1 0 7.6a3.8 3.8 0 1 1 0-7.6z" },
+  backlog: { color: "var(--precision-text3)", glyph: "" },
+  todo: { color: "var(--color-text-secondary)", glyph: "" },
+  doing: { color: "var(--color-text-accent)", glyph: "M8 4.2a3.8 3.8 0 0 1 0 7.6z" },
+  plan_review: { color: "var(--precision-violet)", glyph: "M8 4.2a3.8 3.8 0 0 1 3.8 3.8H8z" },
+  testing: { color: "var(--color-text-info)", glyph: "M8 4.2a3.8 3.8 0 0 1 3.8 3.8A3.8 3.8 0 0 1 8 11.8z" },
+  review: { color: "var(--color-text-warning)", glyph: "M8 4.2a3.8 3.8 0 1 1-3.8 3.8H8z" },
+  done: { color: "var(--color-text-accent)", glyph: "M8 4.2a3.8 3.8 0 1 1 0 7.6a3.8 3.8 0 1 1 0-7.6z" },
 };
 
 export function ColumnGlyph({ kind }: { kind: ColumnKind }) {
   const { color, glyph } = COLUMN_LOOK[kind];
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" className="flex-none">
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true" {...stylex.props(styles.glyph)}>
       <circle cx="8" cy="8" r="6.3" fill="none" stroke={color} strokeWidth="1.6" />
       {glyph ? <path d={glyph} fill={color} /> : null}
     </svg>
@@ -129,8 +153,8 @@ export function ColumnGlyph({ kind }: { kind: ColumnKind }) {
 
 export function Tag({ color, children }: { color: string; children: string }) {
   return (
-    <span className="inline-flex h-5 flex-none items-center gap-[5px] rounded-[10px] border border-line px-[7px] text-[11px] text-text2">
-      <span className="size-[6px] rounded-full" style={{ background: color }} />
+    <span {...stylex.props(styles.tag)}>
+      <span {...stylex.props(styles.dot)} style={{ background: color }} />
       {children}
     </span>
   );
@@ -138,8 +162,8 @@ export function Tag({ color, children }: { color: string; children: string }) {
 
 export function NeedsTag({ needs, mine }: { needs: Needs; mine: boolean }) {
   return (
-    <span className="inline-flex h-5 flex-none items-center gap-[5px] rounded-[10px] border border-amber-line px-[7px] text-[11px] text-amber">
-      <span className="size-[6px] rounded-full bg-amber" />
+    <span {...stylex.props(styles.tag, styles.needsTag)}>
+      <span {...stylex.props(styles.dot, styles.needsDot)} />
       {needsLine(needs, mine)}
     </span>
   );
@@ -154,13 +178,19 @@ export function TicketTags({ t }: { t: TicketView }) {
       {t.priority !== "normal" ? <Tag color={priorityColor(t.priority)}>{priorityLabel(t.priority)}</Tag> : null}
       {deadline ? (
         <Tag
-          color={deadline.tone === "over" ? "var(--red)" : deadline.tone === "soon" ? "var(--amber)" : "var(--text3)"}
+          color={
+            deadline.tone === "over"
+              ? "var(--color-text-error)"
+              : deadline.tone === "soon"
+                ? "var(--color-text-warning)"
+                : "var(--precision-text3)"
+          }
         >
           {deadline.text}
         </Tag>
       ) : null}
       {t.labels.slice(0, 3).map((l) => (
-        <Tag key={l} color="var(--text3)">
+        <Tag key={l} color="var(--precision-text3)">
           {l}
         </Tag>
       ))}
@@ -197,13 +227,9 @@ export function useNoConnection(): boolean {
 /** Said in a dialog that starts work, and on the board. */
 export function NoConnectionNote() {
   return (
-    <span role="status" className="text-[12px] text-amber">
+    <span role="status" {...stylex.props(styles.note)}>
       No connection is set up, so nothing can start yet.{" "}
-      <Link
-        to="/settings/$section"
-        params={{ section: "connections" }}
-        className="font-medium text-acc-text no-underline"
-      >
+      <Link href="/settings/connections" xstyle={styles.noteLink}>
         Set one up
       </Link>
     </span>

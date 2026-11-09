@@ -1,4 +1,13 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Card } from "@astryxdesign/core/Card";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import type { ProjectSummary, TaskView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -13,23 +22,204 @@ import {
   useOpenTasks,
   useProjects,
 } from "../data";
+import { type Feature, hidden, shown } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { Button, initial, Mark, markColor } from "../ui/kit";
-import { Dialog, Menu } from "../ui/overlay";
+import { initial, Mark, markColor } from "../ui/marks";
+import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import { BoardScreen } from "./board";
+import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { canPin, pinnedFirst, togglePin } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
 import { IdeasBody } from "./ideas";
 import { splitIdeas } from "./knowledge-logic";
-import { AREA, Confirm, Empty, EYEBROW, FIELD, failureOf, PageHead, PILL, SMALL } from "./org-kit";
+import {
+  Confirm,
+  DialogSelector,
+  Empty,
+  Eyebrow,
+  FormDialog,
+  failureOf,
+  Hint,
+  KnowledgeTabs,
+  Loading,
+  Page,
+  PageHead,
+  Problem,
+} from "./org-kit";
 import { overlays } from "./overlays-store";
 import { useFolderChooser } from "./run-tools";
 import { ScheduleDialog } from "./settings-advanced";
+import { openWeb } from "./settings-kit";
 import { TasksScreen } from "./tasks";
 import { taskStateLine } from "./tasks-logic";
 import { VaultBody } from "./vault";
+
+// Selector takes no empty value, so "the company's default dispatcher" needs a word of its own.
+const COMPANY_DEFAULT = "company-default";
+
+const styles = stylex.create({
+  section: { display: "flex", flexDirection: "column", gap: 4 },
+  withAction: { display: "flex", alignItems: "flex-end", gap: 8 },
+  grow: { minWidth: 0, flex: 1 },
+  mono: { fontFamily: "var(--font-family-code)" },
+  buttons: { display: "flex", gap: 8 },
+  start: { alignSelf: "flex-start" },
+  label: { fontSize: 12, color: "var(--precision-text3)" },
+  folder: { fontFamily: "var(--font-family-code)", color: "var(--color-text-secondary)" },
+  tooLong: { fontSize: 12, color: "var(--color-text-error)" },
+  warning: { margin: 0, fontSize: 12, color: "var(--color-text-warning)" },
+  scroll: { minHeight: 0, flex: 1, overflow: "auto" },
+  table: { minWidth: 760 },
+  headCell: { fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
+  // A cell has max-width: 0 for truncating, which would close these columns.
+  peopleColumn: { width: 180, minWidth: 180, maxWidth: 180 },
+  waitingColumn: { width: 120, minWidth: 120, maxWidth: 120 },
+  activeColumn: { width: 110, minWidth: 110, maxWidth: 110 },
+  statusColumn: { width: 110, minWidth: 110, maxWidth: 110 },
+  moreColumn: { width: 64, minWidth: 64, maxWidth: 64 },
+  row: { height: 60 },
+  selected: { backgroundColor: "var(--color-overlay-hover)" },
+  selectedEdge: { boxShadow: "inset 2px 0 0 var(--color-text-accent)" },
+  projectCell: { display: "flex", minWidth: 0, alignItems: "center", gap: 12 },
+  minZero: { minWidth: 0 },
+  projectName: {
+    display: "block",
+    overflow: "hidden",
+    fontWeight: 600,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--color-text-primary)",
+    textDecoration: { default: "none", ":hover": "underline" },
+  },
+  line: {
+    display: "block",
+    overflow: "hidden",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--precision-text3)",
+  },
+  marks: { display: "flex" },
+  moreMarks: { marginInlineStart: 4, fontSize: 11, color: "var(--precision-text3)" },
+  small: { fontSize: 12, color: "var(--color-text-secondary)" },
+  actions: { display: "flex", alignItems: "center", gap: 4 },
+  pin: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+    opacity: { default: 0, ":focus-visible": 1, [stylex.when.ancestor(":hover")]: 1 },
+  },
+  pinned: { color: "var(--color-text-accent)", opacity: 1 },
+  overview: {
+    display: "grid",
+    minHeight: 0,
+    flex: 1,
+    gridAutoRows: "min-content",
+    gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+    gap: 16,
+    overflowY: "auto",
+    padding: 22,
+  },
+  wide: { gridColumn: "1 / -1" },
+  card: { display: "flex", minWidth: 0, flexDirection: "column", overflow: "hidden" },
+  cardHead: {
+    display: "flex",
+    height: 40,
+    flexShrink: 0,
+    alignItems: "center",
+    gap: 8,
+    borderBlockEndWidth: 1,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: "var(--precision-line2)",
+    paddingInline: 14,
+  },
+  cardTitle: { minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  cardRight: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: 8,
+    marginInlineStart: "auto",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+  },
+  cardBody: { display: "flex", flexDirection: "column" },
+  rowLink: {
+    display: "flex",
+    minHeight: 42,
+    alignItems: "center",
+    gap: 10,
+    borderBlockEndWidth: { default: 1, ":last-child": 0 },
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: "var(--precision-line2)",
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    paddingInline: 14,
+    color: "var(--color-text-primary)",
+    textDecoration: "none",
+  },
+  rowText: { minWidth: 0, flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  rowName: {
+    minWidth: 0,
+    flex: 1,
+    overflow: "hidden",
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  note: { margin: 0, padding: 14, color: "var(--precision-text3)" },
+  ticket: { marginInlineEnd: 8, fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--precision-text3)" },
+  rowSide: { flexShrink: 0, fontSize: 12 },
+  rowDim: { flexShrink: 0, fontSize: 12, color: "var(--precision-text3)" },
+  rowMono: { fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--precision-text3)" },
+  on: { color: "var(--color-text-accent)" },
+  dim: { color: "var(--precision-text3)" },
+  link: { color: "var(--color-text-accent)", textDecoration: "none" },
+  cardFoot: { padding: 10 },
+  added: {
+    margin: 0,
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+    padding: 14,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  missing: { margin: 0, padding: 24, color: "var(--color-text-secondary)" },
+  back: { color: "var(--color-text-secondary)", textDecoration: "none" },
+  chevron: {
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+    textDecoration: "none",
+  },
+  truncatedName: { overflow: "hidden", fontWeight: 600, whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  path: {
+    maxWidth: 260,
+    overflow: "hidden",
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--precision-text3)",
+  },
+  fill: { display: "flex", minHeight: 0, flex: 1 },
+  settingRow: {
+    display: "flex",
+    minHeight: 42,
+    alignItems: "center",
+    gap: 10,
+    borderBlockEndWidth: { default: 1, ":last-child": 0 },
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: "var(--precision-line2)",
+    paddingInline: 14,
+  },
+  settingName: { width: 90, flexShrink: 0, color: "var(--precision-text3)" },
+  settingValue: { minWidth: 0, flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+});
 
 const COUNT_WORDS = ["", "One", "Two", "Three"];
 const people = (n: number, working: number) =>
@@ -86,53 +276,42 @@ function NewProject({ onClose }: { onClose: () => void }) {
   };
   useAction("ConfirmPrimary", () => void save());
   return (
-    <Dialog open onClose={onClose} title="New project" width={520}>
-      <div className="flex flex-col gap-3 p-4">
-        <p className="m-0 text-[15px] font-semibold">New project</p>
-        <p className="m-0 text-[12px] text-text3">
-          A project works in a folder on the server. It needs no employee or repository. Choose… can also make a new
-          folder.
-        </p>
-        <label className="flex flex-col gap-1 text-[12px] text-text3">
-          Name
-          <input
-            data-autofocus
-            placeholder="Name, for example Atlas"
-            className={FIELD}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+    <FormDialog
+      title="New project"
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button variant="primary" label="Create project" isDisabled={busy} onClick={() => void save()} />
+        </>
+      }
+    >
+      <Hint>
+        A project works in a folder on the server. It needs no employee or repository. Choose… can also make a new
+        folder.
+      </Hint>
+      <TextInput hasAutoFocus label="Name" placeholder="Name, for example Atlas" value={name} onChange={setName} />
+      <TextInput
+        label="Description"
+        placeholder="Short description (optional)"
+        value={description}
+        onChange={setDescription}
+      />
+      <div {...stylex.props(styles.withAction)}>
+        <span {...stylex.props(styles.grow)}>
+          <TextInput
+            width="100%"
+            label="Project folder (required)"
+            value={folder}
+            onChange={setFolder}
+            controlXstyle={styles.mono}
           />
-        </label>
-        <label className="flex flex-col gap-1 text-[12px] text-text3">
-          Description
-          <input
-            placeholder="Short description (optional)"
-            className={FIELD}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-[12px] text-text3">
-          Project folder (required)
-          <span className="flex gap-2">
-            <input className={`${FIELD} font-mono`} value={folder} onChange={(e) => setFolder(e.target.value)} />
-            <Button onClick={() => folders.choose("Choose a project folder", setFolder)}>Choose…</Button>
-            {folders.dialog}
-          </span>
-        </label>
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
+        </span>
+        <Button label="Choose…" onClick={() => folders.choose("Choose a project folder", setFolder)} />
       </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="primary" disabled={busy} onClick={() => void save()}>
-          Create project
-        </Button>
-      </div>
-    </Dialog>
+      {folders.dialog}
+      {error ? <Problem>{error}</Problem> : null}
+    </FormDialog>
   );
 }
 
@@ -173,138 +352,122 @@ function ProjectSettings({ project, onClose }: { project: ProjectSummary; onClos
       ? `◆ ${chosen.name} is ${chosen.status}. Started tickets wait for you to choose an owner.`
       : null;
   return (
-    <Dialog open onClose={onClose} title={`Edit project · ${project.name}`} width={720} top>
-      <div className="flex max-h-[72vh] flex-col gap-4 overflow-y-auto p-[18px]">
-        <p className="m-0 text-[15px] font-semibold">Edit project · {project.name}</p>
-        <p className={EYEBROW}>GENERAL</p>
-        <label className="flex flex-col gap-1 text-[12px] text-text3">
-          Name
-          <span className="flex gap-2">
-            <input
-              data-autofocus
-              placeholder="Project name"
-              className={FIELD}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
+    <FormDialog
+      title={`Edit project · ${project.name}`}
+      width={720}
+      top
+      onClose={onClose}
+      footer={<Button label="Close" onClick={onClose} />}
+    >
+      <Eyebrow>GENERAL</Eyebrow>
+      <div {...stylex.props(styles.withAction)}>
+        <span {...stylex.props(styles.grow)}>
+          <TextInput
+            width="100%"
+            hasAutoFocus
+            label="Name"
+            placeholder="Project name"
+            value={name}
+            onChange={setName}
+          />
+        </span>
+        <Button
+          label="Save"
+          isDisabled={name.trim() === "" || name.trim() === project.name}
+          onClick={() =>
+            void run(() =>
+              connection.write(
+                "project.rename",
+                { project_id: project.id, name: name.trim() },
+                { retry: false, expectedVersion: project.version },
+              ),
+            )
+          }
+        />
+      </div>
+      {canDescribe ? (
+        <div {...stylex.props(styles.section)}>
+          <TextArea
+            label="Description"
+            rows={3}
+            placeholder="What this project is about"
+            value={description}
+            onChange={setDescription}
+          />
+          <span {...stylex.props(tooLong ? styles.tooLong : styles.label)}>
+            {tooLong ? `Too long: ${description.length} of at most 2000 characters.` : `${description.length} / 2000`}
+          </span>
+          <div>
             <Button
-              disabled={name.trim() === "" || name.trim() === project.name}
+              label="Save"
+              isDisabled={tooLong || description.trim() === (project.description ?? "")}
               onClick={() =>
                 void run(() =>
                   connection.write(
-                    "project.rename",
-                    { project_id: project.id, name: name.trim() },
+                    "project.set_description",
+                    { project_id: project.id, description: description.trim() },
                     { retry: false, expectedVersion: project.version },
                   ),
                 )
               }
-            >
-              Save
-            </Button>
-          </span>
-        </label>
-        <div className="flex flex-col gap-1 text-[12px] text-text3">
-          Description
-          {canDescribe ? (
-            <>
-              <textarea
-                rows={3}
-                aria-label="Description"
-                placeholder="What this project is about"
-                className={AREA}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-              <span className={tooLong ? "text-red" : ""}>
-                {tooLong
-                  ? `Too long: ${description.length} of at most 2000 characters.`
-                  : `${description.length} / 2000`}
-              </span>
-              <Button
-                className="self-start"
-                disabled={tooLong || description.trim() === (project.description ?? "")}
-                onClick={() =>
-                  void run(() =>
-                    connection.write(
-                      "project.set_description",
-                      { project_id: project.id, description: description.trim() },
-                      { retry: false, expectedVersion: project.version },
-                    ),
-                  )
-                }
-              >
-                Save
-              </Button>
-            </>
-          ) : (
-            <span>This server is too old to edit the description; update it to change it here.</span>
-          )}
+            />
+          </div>
         </div>
-        <div className="flex flex-col gap-1 text-[12px] text-text3">
-          Folder
-          <code className="font-mono text-text2">{project.folder ?? "No folder"}</code>
-          <span className="flex gap-2">
-            {platform.openFolder && project.folder ? (
-              <Button onClick={() => void platform.openFolder?.(project.folder as string)}>Open folder</Button>
-            ) : null}
-            <Button
-              onClick={() =>
-                folders.choose("Choose another folder", (path) => {
-                  void run(() =>
-                    connection.write("project.set_folder", { project_id: project.id, path }, { retry: false }),
-                  );
-                })
-              }
-            >
-              Choose another folder…
-            </Button>
-            {folders.dialog}
-          </span>
-        </div>
-        <p className={EYEBROW}>BOARD</p>
-        <label className="flex flex-col gap-1 text-[12px] text-text3">
-          Dispatcher
-          <select
-            className={FIELD}
-            value={dispatcher}
-            onChange={(e) => {
-              const id = e.target.value;
-              const who = employees.data?.find((x) => x.id === id)?.name;
-              void run(
-                () =>
-                  connection.write(
-                    "project.update",
-                    { project_id: project.id, dispatcher: { employee_id: id || null } },
-                    { retry: false },
-                  ),
-                id
-                  ? `${who} chooses the owners of this project's tickets.`
-                  : "This project uses the company's dispatcher again.",
-              );
-            }}
-          >
-            <option value="">Company default ({defaultName})</option>
-            {(employees.data ?? [])
+      ) : (
+        <Hint>This server is too old to edit the description; update it to change it here.</Hint>
+      )}
+      <div {...stylex.props(styles.section)}>
+        <span {...stylex.props(styles.label)}>Folder</span>
+        <code {...stylex.props(styles.folder)}>{project.folder ?? "No folder"}</code>
+        <span {...stylex.props(styles.buttons)}>
+          {platform.openFolder && project.folder ? (
+            <Button label="Open folder" onClick={() => void platform.openFolder?.(project.folder as string)} />
+          ) : null}
+          <Button
+            label="Choose another folder…"
+            onClick={() =>
+              folders.choose("Choose another folder", (path) => {
+                void run(() =>
+                  connection.write("project.set_folder", { project_id: project.id, path }, { retry: false }),
+                );
+              })
+            }
+          />
+        </span>
+        {folders.dialog}
+      </div>
+      <Eyebrow>BOARD</Eyebrow>
+      <div {...stylex.props(styles.section)}>
+        <DialogSelector
+          label="Dispatcher"
+          description="Chooses an owner when a ticket of this project starts without one."
+          value={dispatcher || COMPANY_DEFAULT}
+          options={[
+            { value: COMPANY_DEFAULT, label: `Company default (${defaultName})` },
+            ...(employees.data ?? [])
               .filter((e) => e.status === "active" || e.id === dispatcher)
-              .map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                </option>
-              ))}
-          </select>
-          <span>Chooses an owner when a ticket of this project starts without one.</span>
-          {warning ? <span className="text-amber">{warning}</span> : null}
-        </label>
-        {problem ? (
-          <p role="alert" className="m-0 text-red">
-            {problem}
-          </p>
-        ) : null}
+              .map((e) => ({ value: e.id, label: e.name })),
+          ]}
+          onChange={(picked) => {
+            const id = picked === COMPANY_DEFAULT ? "" : picked;
+            const who = employees.data?.find((x) => x.id === id)?.name;
+            void run(
+              () =>
+                connection.write(
+                  "project.update",
+                  { project_id: project.id, dispatcher: { employee_id: id || null } },
+                  { retry: false },
+                ),
+              id
+                ? `${who} chooses the owners of this project's tickets.`
+                : "This project uses the company's dispatcher again.",
+            );
+          }}
+        />
+        {warning ? <p {...stylex.props(styles.warning)}>{warning}</p> : null}
       </div>
-      <div className="flex justify-end border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Close</Button>
-      </div>
-    </Dialog>
+      {problem ? <Problem>{problem}</Problem> : null}
+    </FormDialog>
   );
 }
 
@@ -313,6 +476,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
   const client = useQueryClient();
   const platform = usePlatform();
   const navigate = useNavigate();
+  const workspace = useWorkspace();
   const [scheduling, setScheduling] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const refresh = () =>
@@ -321,12 +485,15 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
       .then(() => client.invalidateQueries({ queryKey: ["projects"] }));
   const options = project
     ? [
+        ...(workspace.available && !workspace.locked && workspace.id !== project.id
+          ? [{ key: "switch", label: "Switch to this workspace" }]
+          : []),
         ...(platform.openProjectWindow && !platform.windowProject
           ? [{ key: "window", label: "Open in new window" }]
           : []),
         { key: "edit", label: "Edit…" },
         ...(platform.openFolder && project.folder ? [{ key: "folder", label: "Open folder" }] : []),
-        { key: "schedule", label: "New recurring task…" },
+        ...(hidden("RecurringTasks") ? [] : [{ key: "schedule", label: "New recurring task…" }]),
         { key: "export", label: "Export (Markdown + JSON)" },
         { key: "memory", label: "Memory" },
         { key: "pause", label: project.status === "paused" ? "Resume project" : "Pause project" },
@@ -346,6 +513,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
   const pick = (key: string) => {
     if (!project) return;
     if (key === "edit") onEdit();
+    else if (key === "switch") workspace.choose(project.id);
     else if (key === "memory") onMemory();
     else if (key === "folder" && project.folder) void platform.openFolder?.(project.folder);
     else if (key === "pause")
@@ -390,7 +558,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
   return { options, pick, confirm: dialogs };
 }
 
-const GRID = "grid grid-cols-[minmax(240px,1.6fr)_180px_120px_110px_110px_36px] items-center gap-3 px-[18px]";
+const DIM = "var(--precision-text3)";
 
 function ProjectRow({
   project,
@@ -417,12 +585,12 @@ function ProjectRow({
   const need = waiting.approvals + waiting.decisions;
   const status =
     project.status === "paused"
-      ? { label: "Paused", color: "text-text3" }
+      ? { label: "Paused", color: DIM }
       : need > 0
-        ? { label: `Needs you · ${need}`, color: "text-amber" }
+        ? { label: `Needs you · ${need}`, color: "var(--color-text-warning)" }
         : active > 0
-          ? { label: "Working", color: "text-acc-text" }
-          : { label: "Quiet", color: "text-text3" };
+          ? { label: "Working", color: "var(--color-text-accent)" }
+          : { label: "Quiet", color: DIM };
   const wait =
     need === 0
       ? "Nothing waiting"
@@ -438,62 +606,60 @@ function ProjectRow({
     () => void navigate({ to: "/knowledge/$tab", params: { tab: "memory" }, search: { project: project.id } }),
   );
   return (
-    <div
-      className={`${GRID} group min-h-[60px] border-b border-line2 hover:bg-sel ${selected ? "bg-sel shadow-[inset_2px_0_0_var(--acc-text)]" : ""}`}
-    >
-      <span className="flex min-w-0 items-center gap-3">
-        <Mark letter={initial(project.name)} color={markColor(project.id)} size={28} radius={7} />
-        <span className="min-w-0">
-          <Link
-            to="/projects/$id"
-            params={{ id: project.id }}
-            className="block truncate font-semibold text-text no-underline hover:underline"
-          >
-            {project.name}
-          </Link>
-          <span className="block truncate text-[12px] text-text3">{project.description || "No description"}</span>
+    <TableRow {...stylex.props(stylex.defaultMarker(), styles.row, selected && styles.selected)}>
+      <TableCell xstyle={selected ? styles.selectedEdge : undefined}>
+        <span {...stylex.props(styles.projectCell)}>
+          <Mark letter={initial(project.name)} color={markColor(project.id)} size={28} radius={7} />
+          <span {...stylex.props(styles.minZero)}>
+            <Link to="/projects/$id" params={{ id: project.id }} {...stylex.props(styles.projectName)}>
+              {project.name}
+            </Link>
+            <span {...stylex.props(styles.line)}>{project.description || "No description"}</span>
+          </span>
         </span>
-      </span>
-      <span className="min-w-0">
-        <span className="flex">
+        {confirm}
+      </TableCell>
+      <TableCell>
+        <span {...stylex.props(styles.marks)}>
           {team.slice(0, 4).map((e) => (
             <Mark key={e.id} letter={initial(e.name)} color={markColor(e.id)} size={16} radius={4} />
           ))}
-          {team.length > 4 ? <span className="ml-1 text-[11px] text-text3">+{team.length - 4}</span> : null}
+          {team.length > 4 ? <span {...stylex.props(styles.moreMarks)}>+{team.length - 4}</span> : null}
         </span>
-        <span className="block truncate text-[12px] text-text3">{people(team.length, working)}</span>
-      </span>
-      <span className="text-[12px] text-text2">{wait}</span>
-      <span className="text-[12px] text-text2">{plural(active, "active task")}</span>
-      <span className={`text-[12px] ${status.color}`}>{status.label}</span>
-      <span className="flex items-center gap-1">
-        <button
-          type="button"
-          aria-label={`${pinned ? "Unpin" : "Pin"} ${project.name}`}
-          aria-pressed={pinned}
-          title={pinned ? "Unpin from the sidebar" : "Pin to the sidebar"}
-          onClick={onPin}
-          className={`cursor-pointer border-0 bg-transparent p-0 text-[12px] focus-visible:opacity-100 group-hover:opacity-100 ${pinned ? "text-acc-text" : "text-text3 opacity-0"}`}
-        >
-          {pinned ? "★" : "☆"}
-        </button>
-        <Menu
-          label={`More for ${project.name}`}
-          options={options}
-          onPick={pick}
-          trigger={
-            <button
-              type="button"
-              aria-label={`More for ${project.name}`}
-              className="cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text"
-            >
-              ⋯
-            </button>
-          }
-        />
-      </span>
-      {confirm}
-    </div>
+        <span {...stylex.props(styles.line)}>{people(team.length, working)}</span>
+      </TableCell>
+      <TableCell>
+        <span {...stylex.props(styles.small)}>{wait}</span>
+      </TableCell>
+      <TableCell>
+        <span {...stylex.props(styles.small)}>{plural(active, "active task")}</span>
+      </TableCell>
+      <TableCell>
+        <span {...stylex.props(styles.small)} style={{ color: status.color }}>
+          {status.label}
+        </span>
+      </TableCell>
+      <TableCell>
+        <span {...stylex.props(styles.actions)}>
+          <button
+            type="button"
+            aria-label={`${pinned ? "Unpin" : "Pin"} ${project.name}`}
+            aria-pressed={pinned}
+            title={pinned ? "Unpin from the top of the switcher" : "Pin to the top of the switcher"}
+            onClick={onPin}
+            {...stylex.props(styles.pin, pinned && styles.pinned)}
+          >
+            {pinned ? "★" : "☆"}
+          </button>
+          <Menu
+            label={`More for ${project.name}`}
+            options={options}
+            onPick={pick}
+            trigger={<IconButton size="sm" variant="ghost" label={`More for ${project.name}`} icon="⋯" />}
+          />
+        </span>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -530,79 +696,200 @@ export function ProjectsScreen() {
     if (p) void navigate({ to: "/projects/$id", params: { id: p.id } });
   });
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <PageHead title="Projects">
-        <Button kind="primary" className={SMALL} onClick={() => setAdding(true)}>
-          New project
-        </Button>
+    <Page>
+      <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
+        <Button size="sm" variant="primary" label="New project" onClick={() => setAdding(true)} />
       </PageHead>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div {...stylex.props(styles.scroll)}>
         {projects.data && list.length === 0 ? (
-          <Empty title="Begin with what is in your control.">
-            <p className="m-0 text-text2">Create a project to give an employee a mandate.</p>
-            <Button kind="primary" onClick={() => setAdding(true)}>
-              New project
-            </Button>
+          <Empty
+            title="Begin with what is in your control."
+            description="Create a project to give an employee a mandate."
+          >
+            <Button variant="primary" label="New project" onClick={() => setAdding(true)} />
           </Empty>
         ) : null}
         {list.length > 0 ? (
-          <div className="min-w-[760px]">
-            <div className={`${GRID} h-8 border-b border-line2 text-[12px] text-text3`}>
-              <span>Project</span>
-              <span>People</span>
-              <span>Waiting</span>
-              <span>Active</span>
-              <span>Status</span>
-              <span />
-            </div>
-            {list.map((p, i) => (
-              <ProjectRow
-                key={p.id}
-                project={p}
-                tasks={forProject(p.id)}
-                waiting={waitingOf(p.id)}
-                selected={i === selected}
-                pinned={pins.includes(p.id)}
-                onEdit={() => setEditing(p)}
-                onPin={() => {
-                  if (!canPin(pins, p.id)) return toast("Only 5 projects can be pinned. Unpin one first.");
-                  setPins(togglePin(pins, p.id));
-                }}
-              />
-            ))}
-          </div>
+          <Table density="compact" hasHover xstyle={styles.table}>
+            <TableHeader>
+              <TableRow isHeaderRow>
+                <TableHeaderCell xstyle={styles.headCell}>Project</TableHeaderCell>
+                <TableHeaderCell xstyle={[styles.headCell, styles.peopleColumn]}>People</TableHeaderCell>
+                <TableHeaderCell xstyle={[styles.headCell, styles.waitingColumn]}>Waiting</TableHeaderCell>
+                <TableHeaderCell xstyle={[styles.headCell, styles.activeColumn]}>Active</TableHeaderCell>
+                <TableHeaderCell xstyle={[styles.headCell, styles.statusColumn]}>Status</TableHeaderCell>
+                <TableHeaderCell xstyle={styles.moreColumn} />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.map((p, i) => (
+                <ProjectRow
+                  key={p.id}
+                  project={p}
+                  tasks={forProject(p.id)}
+                  waiting={waitingOf(p.id)}
+                  selected={i === selected}
+                  pinned={pins.includes(p.id)}
+                  onEdit={() => setEditing(p)}
+                  onPin={() => {
+                    if (!canPin(pins, p.id)) return toast("Only 5 projects can be pinned. Unpin one first.");
+                    setPins(togglePin(pins, p.id));
+                  }}
+                />
+              ))}
+            </TableBody>
+          </Table>
         ) : null}
       </div>
       {adding ? <NewProject onClose={() => setAdding(false)} /> : null}
       {editing ? <ProjectSettings project={editing} onClose={() => setEditing(null)} /> : null}
-    </div>
+    </Page>
   );
 }
 
 type ProjectTab = "overview" | "board" | "tasks" | "ideas" | "vault";
-const TABS: { key: ProjectTab; label: string }[] = [
+const TABS: { key: ProjectTab; label: string; feature?: Feature }[] = shown([
   { key: "overview", label: "Overview" },
   { key: "board", label: "Board" },
   { key: "tasks", label: "Tasks" },
-  { key: "ideas", label: "Ideas" },
-  { key: "vault", label: "Vault" },
-];
+  { key: "ideas", label: "Ideas", feature: "Ideas" },
+  { key: "vault", label: "Vault", feature: "Vault" },
+]);
 
-function Card({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+/** A hidden tab in a URL opens the overview. */
+export const projectTabShown = (tab: string): boolean => TABS.some((t) => t.key === tab);
+
+// With a sidebar these two are its screens, narrowed to the workspace. A project window has no
+// sidebar, so there they stay tabs.
+const SIDEBAR_SCREENS: ProjectTab[] = ["board", "tasks"];
+const tabsOf = (hasSidebar: boolean) => TABS.filter((t) => !hasSidebar || !SIDEBAR_SCREENS.includes(t.key));
+
+function Panel({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="flex min-w-0 flex-col overflow-hidden rounded-[10px] border border-line bg-panel">
-      <header className="flex h-10 flex-none items-center gap-2 border-b border-line2 px-[14px]">
-        <p className={`${EYEBROW} min-w-0 truncate`} title={title}>
-          {title}
-        </p>
-        <span className="ml-auto flex flex-none items-center gap-2 text-[12px] whitespace-nowrap">{right}</span>
+    <Card padding={0} xstyle={styles.card}>
+      <header {...stylex.props(styles.cardHead)}>
+        <span {...stylex.props(styles.cardTitle)}>
+          <Eyebrow title={title}>{title}</Eyebrow>
+        </span>
+        <span {...stylex.props(styles.cardRight)}>{right}</span>
       </header>
-      <div className="flex flex-col">{children}</div>
-    </section>
+      <div {...stylex.props(styles.cardBody)}>{children}</div>
+    </Card>
   );
 }
 
-function Overview({ project }: { project: ProjectSummary }) {
+function Setting({ name, children }: { name: string; children: React.ReactNode }) {
+  return (
+    <div {...stylex.props(styles.settingRow)}>
+      <span {...stylex.props(styles.settingName)}>{name}</span>
+      {children}
+    </div>
+  );
+}
+
+/** The workspace's styleguide: a link field; Open only for a saved link. */
+function StyleguideRow({ project }: { project: ProjectSummary }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const saved = project.styleguide_url ?? "";
+  const [draft, setDraft] = useState(saved);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => setDraft(saved), [saved]);
+  const dirty = draft.trim() !== saved;
+  const save = async () => {
+    const wrong = artifactProblem(draft);
+    setProblem(wrong);
+    if (wrong) return;
+    try {
+      await connection.write(
+        "project.update",
+        { project_id: project.id, styleguide_url: draft.trim() },
+        { retry: false },
+      );
+      await client.invalidateQueries({ queryKey: ["projects"] });
+    } catch (e) {
+      setProblem(failureOf(e));
+    }
+  };
+  return (
+    <>
+      <Setting name="Styleguide">
+        <span {...stylex.props(styles.settingValue)}>
+          <TextInput
+            label="Styleguide link"
+            isLabelHidden
+            size="sm"
+            width="100%"
+            placeholder={ARTIFACT_PLACEHOLDER}
+            value={draft}
+            onChange={setDraft}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && dirty) void save();
+            }}
+          />
+        </span>
+        {dirty ? <Button size="sm" variant="primary" label="Save" onClick={() => void save()} /> : null}
+        {saved && !dirty ? <Button size="sm" label="Open" onClick={() => openWeb(saved)} /> : null}
+      </Setting>
+      <Setting name="">
+        <span {...stylex.props(styles.dim)}>{problem ?? ARTIFACT_HINT}</span>
+      </Setting>
+    </>
+  );
+}
+
+function WorkspaceSettings({
+  project,
+  dispatcher,
+  onEdit,
+  pick,
+}: {
+  project: ProjectSummary;
+  dispatcher: string;
+  onEdit: () => void;
+  pick: (key: string) => void;
+}) {
+  const platform = usePlatform();
+  const { features } = useLinkState();
+  return (
+    <Panel title="WORKSPACE SETTINGS" right={<Button size="sm" label="Edit…" onClick={onEdit} />}>
+      {features.includes(DESIGN_FEATURE) ? <StyleguideRow project={project} /> : null}
+      <Setting name="Folder">
+        <code title={project.folder ?? undefined} {...stylex.props(styles.settingValue, styles.mono)}>
+          {project.folder ?? "No folder"}
+        </code>
+        {platform.openFolder && project.folder ? (
+          <Button size="sm" label="Open" onClick={() => pick("folder")} />
+        ) : null}
+      </Setting>
+      <Setting name="Dispatcher">
+        <span {...stylex.props(styles.settingValue)}>{dispatcher}</span>
+      </Setting>
+      <Setting name="Status">
+        <span {...stylex.props(styles.settingValue)}>{project.status === "paused" ? "Paused" : "Active"}</span>
+        <Button size="sm" label={project.status === "paused" ? "Resume" : "Pause"} onClick={() => pick("pause")} />
+      </Setting>
+      <Setting name="Export">
+        <span {...stylex.props(styles.settingValue, styles.dim)}>Markdown + JSON, into its folder</span>
+        <Button size="sm" label="Export" onClick={() => pick("export")} />
+      </Setting>
+      <Setting name="Archive">
+        <span {...stylex.props(styles.settingValue, styles.dim)}>Nothing is deleted; the history is kept</span>
+        <Button size="sm" variant="destructive" label="Archive…" onClick={() => pick("archive")} />
+      </Setting>
+    </Panel>
+  );
+}
+
+function Overview({
+  project,
+  onEdit,
+  pick,
+}: {
+  project: ProjectSummary;
+  onEdit: () => void;
+  pick: (key: string) => void;
+}) {
   const connection = useConnection();
   const client = useQueryClient();
   const employees = useEmployees();
@@ -624,137 +911,154 @@ function Overview({ project }: { project: ProjectSummary }) {
   const largestName = team.find((e) => e.id === largest?.employee_id)?.name;
   const added = linked.reduce((n, g) => n + g.chars, 0);
   const channel = channels.data?.find((c) => c.project_id === project.id && !c.ticket_id);
-  const row =
-    "flex min-h-[42px] items-center gap-[10px] border-b border-line2 px-[14px] text-text no-underline last:border-b-0 hover:bg-sel";
+  const row = stylex.props(styles.rowLink);
+  const { windowProject } = usePlatform();
+  const workspace = useWorkspace();
+  const dispatcher =
+    employees.data?.find((e) => e.id === project.dispatcher_employee_id)?.name ?? "The company's dispatcher";
   return (
-    <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-[repeat(auto-fit,minmax(340px,1fr))] gap-4 overflow-y-auto p-[22px]">
+    <div {...stylex.props(styles.overview)}>
       {project.status === "paused" ? (
-        <div className="col-span-full flex items-center gap-3 rounded-[8px] border border-amber-line bg-amber-soft px-3 py-[10px]">
-          <span className="flex-1">This project is paused. No new automatic work starts.</span>
-          <Button
-            className={SMALL}
-            onClick={() =>
-              void connection
-                .write("project.set_status", { project_id: project.id, status: "active" }, { retry: false })
-                .then(() => client.invalidateQueries({ queryKey: ["employees"] }))
-                .then(() => toast("Project resumed."))
+        <div {...stylex.props(styles.wide)}>
+          <Banner
+            status="warning"
+            title="This project is paused. No new automatic work starts."
+            endContent={
+              <Button
+                size="sm"
+                label="Resume"
+                onClick={() =>
+                  void connection
+                    .write("project.set_status", { project_id: project.id, status: "active" }, { retry: false })
+                    .then(() => client.invalidateQueries({ queryKey: ["employees"] }))
+                    .then(() => toast("Project resumed."))
+                }
+              />
             }
-          >
-            Resume
-          </Button>
+          />
         </div>
       ) : null}
-      <Card
+      <Panel
         title={`WHO WORKS HERE · ${team.length}`}
         right={
           channel ? (
-            <Link to="/chat" search={{ channel: channel.conversation_id }} className="text-acc-text no-underline">
+            <Link to="/chat" search={{ channel: channel.conversation_id }} {...stylex.props(styles.link)}>
               Open #{channel.name}
             </Link>
           ) : null
         }
       >
         {team.length === 0 ? (
-          <p className="m-0 p-[14px] text-text3">Nobody works here yet. Start a ticket to put someone to work.</p>
+          <p {...stylex.props(styles.note)}>Nobody works here yet. Start a ticket to put someone to work.</p>
         ) : null}
         {team.map((e) => (
-          <Link key={e.id} to="/employees/$id" params={{ id: e.id }} className={row}>
+          <Link key={e.id} to="/employees/$id" params={{ id: e.id }} {...row}>
             <Mark letter={initial(e.name)} color={markColor(e.id)} size={22} radius={6} />
-            <span className="min-w-0 flex-1 truncate font-medium">{e.name}</span>
-            <span className={`text-[12px] ${e.working ? "text-acc-text" : "text-text3"}`}>
+            <span {...stylex.props(styles.rowName)}>{e.name}</span>
+            <span {...stylex.props(styles.rowSide, e.working ? styles.on : styles.dim)}>
               {e.status === "paused" ? "Paused" : e.working ? "Working" : "Available"}
             </span>
           </Link>
         ))}
-      </Card>
-      <Card
+      </Panel>
+      <Panel
         title={`TASKS · ${open.length} OPEN`}
         right={
-          <Link
-            to="/projects/$id"
-            params={{ id: project.id }}
-            search={{ tab: "tasks" }}
-            className="text-acc-text no-underline"
-          >
-            All →
-          </Link>
+          windowProject === null ? (
+            <Link to="/tasks" onClick={() => workspace.choose(project.id)} {...stylex.props(styles.link)}>
+              All →
+            </Link>
+          ) : (
+            <Link
+              to="/projects/$id"
+              params={{ id: project.id }}
+              search={{ tab: "tasks" }}
+              {...stylex.props(styles.link)}
+            >
+              All →
+            </Link>
+          )
         }
       >
-        {open.length === 0 ? <p className="m-0 p-[14px] text-text3">No open tasks.</p> : null}
+        {open.length === 0 ? <p {...stylex.props(styles.note)}>No open tasks.</p> : null}
         {open.slice(0, 6).map((t) => {
           const line = taskStateLine(t);
           return (
-            <Link key={t.id} to="/tasks/$taskId" params={{ taskId: t.id }} className={row}>
-              <span className="min-w-0 flex-1 truncate">
-                {t.ticket_number ? (
-                  <span className="mr-2 font-mono text-[12px] text-text3">#{t.ticket_number}</span>
-                ) : null}
+            <Link key={t.id} to="/tasks/$taskId" params={{ taskId: t.id }} {...row}>
+              <span {...stylex.props(styles.rowText)}>
+                {t.ticket_number ? <span {...stylex.props(styles.ticket)}>#{t.ticket_number}</span> : null}
                 {t.title}
               </span>
-              <span className="flex-none text-[12px]" style={{ color: line.color }}>
+              <span {...stylex.props(styles.rowSide)} style={{ color: line.color }}>
                 {line.text}
               </span>
             </Link>
           );
         })}
-        <div className="p-[10px]">
+        <div {...stylex.props(styles.cardFoot)}>
           <Button
-            className={SMALL}
+            size="sm"
+            label="New ticket"
             onClick={() => overlays.open("ticket", { title: "", description: "", projectId: project.id })}
-          >
-            New ticket
-          </Button>
+          />
         </div>
-      </Card>
-      <Card
-        title={`IDEAS · ${openIdeas.length} OPEN`}
-        right={
-          <span className="text-text3">
-            FROM YOU · {split.yours.length} · FROM EMPLOYEES · {split.employees.length}
-          </span>
-        }
-      >
-        {ideas.isPending ? <p className="m-0 p-[14px] text-text3">Loading ideas…</p> : null}
-        {ideas.data && openIdeas.length === 0 ? (
-          <p className="m-0 p-[14px] text-text3">No open ideas. Note one in the Ideas tab with Ctrl+N.</p>
-        ) : null}
-        {openIdeas.slice(0, 5).map((i) => (
-          <Link key={i.id} to="/projects/$id" params={{ id: project.id }} search={{ tab: "ideas" }} className={row}>
-            <span className="min-w-0 flex-1 truncate">{i.title}</span>
-            <span className="flex-none text-[12px] text-text3">{i.author}</span>
-          </Link>
-        ))}
-      </Card>
-      <Card
+      </Panel>
+      {hidden("Ideas") ? null : (
+        <Panel
+          title={`IDEAS · ${openIdeas.length} OPEN`}
+          right={
+            <span {...stylex.props(styles.dim)}>
+              FROM YOU · {split.yours.length} · FROM EMPLOYEES · {split.employees.length}
+            </span>
+          }
+        >
+          {ideas.isPending ? <Loading rows={2} /> : null}
+          {ideas.data && openIdeas.length === 0 ? (
+            <p {...stylex.props(styles.note)}>No open ideas. Note one in the Ideas tab with Ctrl+N.</p>
+          ) : null}
+          {openIdeas.slice(0, 5).map((i) => (
+            <Link key={i.id} to="/projects/$id" params={{ id: project.id }} search={{ tab: "ideas" }} {...row}>
+              <span {...stylex.props(styles.rowText)}>{i.title}</span>
+              <span {...stylex.props(styles.rowDim)}>{i.author}</span>
+            </Link>
+          ))}
+        </Panel>
+      )}
+      <Panel
         title={`GUIDELINES FOR EVERYONE IN ${project.name.toUpperCase()}`}
         right={
-          <Link to="/knowledge/$tab" params={{ tab: "guidelines" }} className="text-acc-text no-underline">
+          <Link to="/knowledge/$tab" params={{ tab: "guidelines" }} {...stylex.props(styles.link)}>
             Manage links…
           </Link>
         }
       >
         {linked.length === 0 ? (
-          <p className="m-0 p-[14px] text-text3">None: runs here get only their employee's guidelines.</p>
+          <p {...stylex.props(styles.note)}>None: runs here get only their employee's guidelines.</p>
         ) : null}
         {linked.map((g) => (
-          <Link key={g.id} to="/knowledge/guidelines/$id" params={{ id: g.id }} className={row}>
-            <span className="min-w-0 flex-1 truncate">{g.title}</span>
-            <span className="font-mono text-[12px] text-text3">{g.chars}</span>
+          <Link key={g.id} to="/knowledge/guidelines/$id" params={{ id: g.id }} {...row}>
+            <span {...stylex.props(styles.rowText)}>{g.title}</span>
+            <span {...stylex.props(styles.rowMono)}>{g.chars}</span>
           </Link>
         ))}
         {linked.length > 0 ? (
-          <p className="m-0 border-t border-line2 p-[14px] text-[12px] text-text3">
+          <p {...stylex.props(styles.added)}>
             Added to each run here: {added} characters
             {largest && largestName ? ` · largest block: ${largestName} ${largest.total_chars}` : ""}
           </p>
         ) : null}
-      </Card>
+      </Panel>
+      <WorkspaceSettings project={project} dispatcher={dispatcher} onEdit={onEdit} pick={pick} />
     </div>
   );
 }
 
-export function ProjectPage({ id, tab }: { id: string; tab: ProjectTab }) {
+export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab }) {
   const navigate = useNavigate();
+  const { windowProject } = usePlatform();
+  const workspace = useWorkspace();
+  const tabs = tabsOf(windowProject === null);
+  const tab = tabs.some((t) => t.key === asked) ? asked : "overview";
   const projects = useProjects();
   const project = projects.data?.find((p) => p.id === id) ?? null;
   const [editing, setEditing] = useState(false);
@@ -769,8 +1073,8 @@ export function ProjectPage({ id, tab }: { id: string; tab: ProjectTab }) {
       }),
   );
   const go = (delta: number) => {
-    const at = TABS.findIndex((t) => t.key === tab);
-    const next = TABS[(at + delta + TABS.length) % TABS.length];
+    const at = tabs.findIndex((t) => t.key === tab);
+    const next = tabs[(at + delta + tabs.length) % tabs.length];
     if (next) void navigate({ to: "/projects/$id", params: { id }, search: { tab: next.key } });
   };
   useAction("NextTab", () => go(1));
@@ -789,81 +1093,74 @@ export function ProjectPage({ id, tab }: { id: string; tab: ProjectTab }) {
   }, [projects.data, project, navigate]);
   if (!project) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <Page>
         <PageHead
           title={
-            <Link to="/projects" className="text-text2 no-underline">
+            <Link to="/projects" {...stylex.props(styles.back)}>
               Back to projects
             </Link>
           }
         />
-        {projects.data ? <p className="m-0 p-6 text-text2">This project no longer exists.</p> : null}
-      </div>
+        {projects.data ? <p {...stylex.props(styles.missing)}>This project no longer exists.</p> : null}
+      </Page>
     );
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <Page>
       <PageHead
         title={
           <>
-            <Link to="/projects" aria-label="Back to projects" className="text-text3 no-underline hover:text-text">
+            <Link to="/projects" aria-label="Back to projects" {...stylex.props(styles.chevron)}>
               ‹
             </Link>
             <Mark letter={initial(project.name)} color={markColor(project.id)} size={16} radius={4} />
-            <span className="truncate font-semibold">{project.name}</span>
+            <span {...stylex.props(styles.truncatedName)}>{project.name}</span>
           </>
         }
-        tabs={
-          <nav aria-label="Project" className="flex gap-px rounded-[6px] border border-line2 bg-sunk p-[2px]">
-            {TABS.map((t) => (
-              <Link
-                key={t.key}
-                to="/projects/$id"
-                params={{ id }}
-                search={{ tab: t.key }}
-                aria-current={tab === t.key ? "page" : undefined}
-                className={`${PILL} ${tab === t.key ? "bg-sel !text-text" : ""}`}
-              >
-                {t.label}
-              </Link>
-            ))}
-          </nav>
-        }
+        {...(tabs.length > 1
+          ? {
+              tabs: (
+                <TabList aria-label="Project" size="sm" value={tab} onChange={() => {}}>
+                  {tabs.map((t) => (
+                    <Tab key={t.key} value={t.key} label={t.label} href={`/projects/${id}?tab=${t.key}`} />
+                  ))}
+                </TabList>
+              ),
+            }
+          : {})}
       >
         {project.folder ? (
-          <code title={project.folder} className="max-w-[260px] truncate font-mono text-[12px] text-text3">
+          <code title={project.folder} {...stylex.props(styles.path)}>
             {project.folder}
           </code>
         ) : null}
-        <Button className={SMALL} onClick={() => setEditing(true)}>
-          Edit project
-        </Button>
+        {workspace.available && !workspace.locked && workspace.id !== project.id ? (
+          <Button
+            size="sm"
+            variant="primary"
+            label="Switch to this workspace"
+            onClick={() => workspace.choose(project.id)}
+          />
+        ) : null}
+        <Button size="sm" label="Edit project" onClick={() => setEditing(true)} />
         <Menu
           label={`More for ${project.name}`}
           options={options}
           onPick={pick}
-          trigger={
-            <button
-              type="button"
-              aria-label={`More for ${project.name}`}
-              className="h-7 cursor-pointer rounded-[6px] border border-btn-line bg-btn px-2 text-text2"
-            >
-              ⋯
-            </button>
-          }
+          trigger={<IconButton size="sm" label={`More for ${project.name}`} icon="⋯" />}
         />
       </PageHead>
-      {tab === "overview" ? <Overview project={project} /> : null}
+      {tab === "overview" ? <Overview project={project} onEdit={() => setEditing(true)} pick={pick} /> : null}
       {tab === "board" ? <BoardScreen ticket={undefined} projectId={project.id} /> : null}
       {tab === "tasks" ? <TasksScreen projectId={project.id} /> : null}
       {tab === "ideas" ? <IdeasBody projectId={project.id} chrome={false} /> : null}
       {tab === "vault" ? (
-        <div className="flex min-h-0 flex-1">
+        <div {...stylex.props(styles.fill)}>
           <VaultBody projectId={project.id} scopeName={project.name} />
         </div>
       ) : null}
       {editing ? <ProjectSettings project={project} onClose={() => setEditing(false)} /> : null}
       {confirm}
-    </div>
+    </Page>
   );
 }

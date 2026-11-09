@@ -5,6 +5,7 @@ import { ACTIVITY_LIMIT } from "./screens/board-logic";
 import { expectBody } from "@aurelius/client";
 import type {
   ApprovalView,
+  EmployeeChatView,
   EmployeeSummary,
   EventKind,
   GuidelineProposalView,
@@ -38,14 +39,15 @@ export type Area =
   | "ideas"
   | "usage"
   | "memory"
-  | "vault";
+  | "vault"
+  | "scheduled";
 
 /** The areas an event may have changed. An event of a newer server changes nothing here. */
 export function areasOf(kind: EventKind | string): Area[] {
   const family = kind.split(".")[0];
   switch (family) {
     case "approval":
-      return ["approvals", "tasks", "notifications"];
+      return ["approvals", "tasks", "notifications", "employees"];
     case "notification":
       return ["notifications"];
     case "proposal":
@@ -56,7 +58,7 @@ export function areasOf(kind: EventKind | string): Area[] {
       return ["projects"];
     case "task":
     case "run":
-      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas", "usage"];
+      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas", "usage", "scheduled"];
     case "conversation":
     case "message":
     case "chat":
@@ -75,13 +77,12 @@ export function areasOf(kind: EventKind | string): Area[] {
     case "idea":
       return ["ideas"];
     case "memory":
-    case "share":
       return ["memory"];
     case "vault":
       return ["vault"];
     case "recurring_task":
     case "schedule":
-      return ["settings"];
+      return ["settings", "scheduled"];
     default:
       return [];
   }
@@ -125,19 +126,24 @@ function useRead<T>(area: Area, read: () => Promise<T>, staleTime = 30_000, want
   });
 }
 
-export function useApprovals() {
+/** `project` narrows on the server (feature `workspace_filters`), the only place that knows. */
+export function useApprovals(project: string | null = null) {
   const connection = useConnection();
-  return useRead<ApprovalView[]>(
-    "approvals",
-    async () => expectBody(await connection.call("approval.list"), "approvals").value.approvals,
+  return useKeyed<ApprovalView[]>(
+    ["approvals", project],
+    async () =>
+      expectBody(await connection.call("approval.list", project ? { project_id: project } : {}), "approvals").value
+        .approvals,
   );
 }
 
-export function useNotifications() {
+export function useNotifications(project: string | null = null) {
   const connection = useConnection();
-  return useRead<NotificationView[]>(
-    "notifications",
-    async () => expectBody(await connection.call("notification.list"), "notifications").value.notifications,
+  return useKeyed<NotificationView[]>(
+    ["notifications", project],
+    async () =>
+      expectBody(await connection.call("notification.list", project ? { project_id: project } : {}), "notifications")
+        .value.notifications,
   );
 }
 
@@ -320,6 +326,17 @@ export function useChannels() {
 }
 
 /** A channel's messages; reading marks it read on the server. `channel` null: general. */
+/** The signed-in board member's chats with employees, the latest first. */
+export function useEmployeeChats() {
+  const connection = useConnection();
+  const { features } = useLinkState();
+  return useKeyed<EmployeeChatView[]>(
+    ["messages", "employee_chats"],
+    async () => expectBody(await connection.call("employee.chats"), "employee_chats").value.chats,
+    features.includes("employee_chats"),
+  );
+}
+
 export function useChannelFeed(channel: string | null) {
   const connection = useConnection();
   return useKeyed(

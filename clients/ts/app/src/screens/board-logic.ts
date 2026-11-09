@@ -1,4 +1,4 @@
-// The Board's rules, pure. Port of clients/desktop/src/screens/board.rs (ui-ontwerp §3, §5, §6): a
+// The Board's rules, pure. (ui-ontwerp §3, §5, §6): a
 // drag, "Move to…" and the buttons follow one table. The server decides again; this keeps the client honest.
 
 import type {
@@ -150,7 +150,12 @@ export function priorityLabel(p: TicketPriority): string {
 }
 
 export function priorityColor(p: TicketPriority): string {
-  return { urgent: "var(--red)", high: "var(--amber)", normal: "var(--text2)", low: "var(--text2)" }[p];
+  return {
+    urgent: "var(--color-text-error)",
+    high: "var(--color-text-warning)",
+    normal: "var(--color-text-secondary)",
+    low: "var(--color-text-secondary)",
+  }[p];
 }
 
 export function emptyText(kind: ColumnKind): string {
@@ -505,4 +510,16 @@ export function suggestedReplies(report: string | null): SuggestedReply[] {
   }
   replies.push({ label: "Explain what you did", text: "Explain in a few lines what you changed and why." });
   return replies;
+}
+
+/** A span on the board's scrolling row, in pixels from its start. */
+export type BoardSpan = { start: number; end: number };
+
+/** Where the row scrolls to show a card. `stops` are the scroll positions that start the row at a column, so a move
+ * never leaves a column cut in half at the edge; a card that is already in view moves nothing. */
+export function scrollToShow(card: BoardSpan, stops: number[], scroll: number, width: number): number {
+  if (card.start >= scroll && card.end <= scroll + width) return scroll;
+  const fitting = stops.filter((stop) => stop <= card.start && stop + width >= card.end);
+  if (fitting.length === 0) return card.start;
+  return card.end > scroll + width ? (fitting[0] as number) : (fitting[fitting.length - 1] as number);
 }

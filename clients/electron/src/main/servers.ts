@@ -30,7 +30,7 @@ export interface PairingPayload {
 }
 
 const PAIRING_TEXT_PREFIX = "aurelius-pair:";
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "host.docker.internal"]);
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 const file = (root: string) => join(root, "client", "servers.json");
 

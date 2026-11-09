@@ -11,18 +11,19 @@ Deze guidelines komen één keer via een eenmalige, idempotente seedstap bij de 
 - Groottes zijn gemeten in tekens van de markdown-tekst (wat B4 telt). Tokens ≈ tekens / 3,5.
 
 ## Overzicht
+*G3 (Desktop app, gpui-kit) is uit de startset gehaald: de GPUI-client bestaat niet meer. Bestaande installaties houden hun rij.*
+
 | # | Titel | Niveau | Gekoppeld aan | Tekens |
 |---|---|---|---|---|
 | G1 | Rust style | employee | Forge, Bridge, Nexus, Schema, Sentinel, Trace, Titan | 1.477 |
 | G2 | Flutter and Dart (mobile app) | employee | Bridge, Flux | 790 |
-| G3 | Desktop app (gpui-kit) | employee | Flux, Bridge | 743 |
 | G4 | Worktrees, builds and cleanup | employee | Forge, Flux, Bridge, Nexus, Schema, Sentinel, Pulse, Orbit, Trace, Titan | 1.188 |
 | G5 | Tests and evidence | employee | Forge, Flux, Bridge, Nexus, Schema, Sentinel, Pulse | 849 |
 | G6 | Code review | employee | Trace, Sentinel, Pulse, Titan | 977 |
 | P1 | Aurelius: layers and boundaries | project | project Aurelius | 1.114 |
 | P2 | Aurelius: protocol and migrations | project | project Aurelius | 1.344 |
 
-**Som per run**: zie de tabel onderaan. De grootste set (Bridge in het project Aurelius) is 7.505 tekens, of ≈ 2.100 tokens. Dat is minder dan de helft van de 16.000 van D-GL-03, zodat er ruimte blijft voor projectregels van andere repo's en voor voorstellen van het team.
+**Som per run**: zie de tabel onderaan. De grootste set (Sentinel in het project Aurelius) is 6.949 tekens, of ≈ 2.000 tokens. Dat is minder dan de helft van de 16.000 van D-GL-03, zodat er ruimte blijft voor projectregels van andere repo's en voor voorstellen van het team.
 
 ---
 
@@ -54,17 +55,6 @@ Deze guidelines komen één keer via een eenmalige, idempotente seedstap bij de 
 - A failure is never an endless "Loading…": show what failed and a Try again.
 - UI text is English and uses the same words as the desktop app.
 - `flutter analyze` reports no more issues than on the base branch, and `flutter test` is green. Flutter is in `~/development/flutter/bin` (not on PATH).
-~~~
-
-## G3 — Desktop app (gpui-kit)
-*Gekoppeld aan: Flux, Bridge. Bron: `clients/desktop/Cargo.toml` (`gpui-kit = "=0.7.0"`), `src/screens/`, QA2 T1 en de QA3-tooling-les.*
-
-~~~markdown
-- The desktop app is Rust with gpui-kit (pinned, `=0.7.0`) in `clients/desktop` (crate `aurelius-desktop`), one file per screen in `src/screens/`.
-- Follow the patterns of the existing screens for state, actions and dialogs; do not introduce a second UI style.
-- Debug builds can panic with "hover style already set" on cards with an action icon (known, on main). To test past it, build with `--config 'profile.dev.package."*".debug-assertions=false'`; do not fix it inside an unrelated task.
-- When testing by hand, never click outside a gpui dialog to redraw it (that cancels the dialog); move the cursor instead.
-- Run `cargo test -p aurelius-desktop` once at the end, and update the integration tests when you change a text they look for.
 ~~~
 
 ## G4 — Worktrees, builds and cleanup
@@ -147,11 +137,11 @@ Migrations
 | Employee | Employee-guidelines | Tekens | + P1 + P2 (in project Aurelius) |
 |---|---|---|---|
 | Forge | G1, G4, G5 | 3.514 | 5.972 |
-| Flux | G2, G3, G4, G5 | 3.570 | 6.028 |
-| Bridge | G1, G2, G3, G4, G5 | 5.047 | **7.505** (grootste) |
+| Flux | G2, G4, G5 | 2.827 | 5.285 |
+| Bridge | G1, G2, G4, G5 | 4.304 | 6.762 |
 | Nexus | G1, G4, G5 | 3.514 | 5.972 |
 | Schema | G1, G4, G5 | 3.514 | 5.972 |
-| Sentinel | G1, G4, G5, G6 | 4.491 | 6.949 |
+| Sentinel | G1, G4, G5, G6 | 4.491 | **6.949** (grootste) |
 | Pulse | G4, G5, G6 | 3.014 | 5.472 |
 | Orbit | G4 | 1.188 | 3.646 |
 | Trace | G1, G4, G6 | 3.642 | 6.100 |

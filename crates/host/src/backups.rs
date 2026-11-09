@@ -254,7 +254,6 @@ mod tests {
         store: Arc<Store>,
         root: PathBuf,
         power: crate::power::Power,
-        terminals: crate::terminal::Terminals,
         shutdown: tokio::sync::watch::Sender<bool>,
         restarted: AtomicBool,
     }
@@ -274,9 +273,6 @@ mod tests {
         }
         fn power(&self) -> &crate::power::Power {
             &self.power
-        }
-        fn terminals(&self) -> &crate::terminal::Terminals {
-            &self.terminals
         }
         fn resume_work(&self) {}
         fn stop_for_restart(&self) {
@@ -311,7 +307,6 @@ mod tests {
             store,
             root: root.clone(),
             power: Default::default(),
-            terminals: Default::default(),
             shutdown: tokio::sync::watch::channel(false).0,
             restarted: AtomicBool::new(false),
         });

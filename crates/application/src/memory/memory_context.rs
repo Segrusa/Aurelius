@@ -102,7 +102,7 @@ fn system_tokens(conn: &Connection, employee: EmployeeId, project: Option<Projec
     let Some((name, role, key)) = row else { return Ok(0) };
     let instructions = key.as_deref().and_then(read_blob).unwrap_or_default();
     let guidance = if project.is_some() { crate::conversation::overview::TOOLS_GUIDANCE } else { crate::run::plan::CHAT_TOOLS_GUIDANCE };
-    let mut text = format!("You are {name}, {role}. {instructions}\n\n{}\n\n{guidance}", crate::run::plan::AUTONOMY_GUIDANCE);
+    let mut text = format!("{}\n\nYou are {name}, {role}. {instructions}\n\n{}\n\n{guidance}", crate::run::plan::PLATFORM_RULES, crate::run::plan::AUTONOMY_GUIDANCE);
     let colleagues = crate::task::tasks::colleagues(conn, read_blob)?;
     let others: Vec<&crate::task::tasks::Colleague> = colleagues.iter().filter(|c| c.id != employee).collect();
     text.push_str(&format!("\n{}", crate::task::tasks::colleague_lines(&others)));

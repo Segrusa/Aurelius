@@ -19,7 +19,7 @@ struct Setup {
 }
 
 fn ctx(user: Option<UserId>) -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: user }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: user }
 }
 
 fn run(s: &Setup, command: Command) -> Result<CommandResult, AppError> {
@@ -177,10 +177,6 @@ fn t12_every_write_needs_a_board_member() {
     for command in writes {
         let method = command.method();
         let err = run_as(&s, None, command.clone(), None).unwrap_err();
-        assert_eq!(err.code, ErrorCode::BoardMemberRequired, "{method}");
-        // An app never acts as a board member, even with one on its session (the daemon sets none).
-        let app = CommandContext { app: Some(AppActor { key_id: aurelius_domain::AppKeyId::new(), name: "mcp".into() }), ..ctx(None) };
-        let Err(err) = s.service.execute(&app, CommandEnvelope { command_id: CommandId::new(), expected_version: None, command }) else { panic!("{method}") };
         assert_eq!(err.code, ErrorCode::BoardMemberRequired, "{method}");
     }
     assert_eq!(guideline_events(&s), before, "nothing was written");

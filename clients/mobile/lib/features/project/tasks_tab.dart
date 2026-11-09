@@ -86,8 +86,6 @@ class TaskRow extends StatelessWidget {
         children: [
           TaskStatusMark(task),
           if (detail.isNotEmpty) Flexible(child: Text(' · $detail', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Tokens.muted, fontSize: 12.5))),
-          if (task.createdByApp case final app?)
-            Flexible(child: Text(' · via $app', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Tokens.accentText, fontSize: 12.5))),
         ],
       ),
       trailing: Text(Fmt.ago(task.updatedAtMs), style: Tokens.monoSmall()),

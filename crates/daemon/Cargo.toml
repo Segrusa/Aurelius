@@ -21,7 +21,6 @@ aurelius-storage.workspace = true
 aurelius-application.workspace = true
 aurelius-host.workspace = true
 aurelius-runtime.workspace = true
-aurelius-tools.workspace = true
 aurelius-remote-gateway.workspace = true
 tokio = { workspace = true, features = ["process"] }
 serde.workspace = true
@@ -68,7 +67,6 @@ base64.workspace = true
 rusqlite.workspace = true
 async-trait = "0.1"
 aurelius-client.workspace = true
-aurelius-mcp.workspace = true
 tempfile.workspace = true
 schemars.workspace = true
 

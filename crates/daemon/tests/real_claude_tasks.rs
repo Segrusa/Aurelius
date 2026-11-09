@@ -68,7 +68,7 @@ async fn project(client: &Client) -> ProjectId {
 async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str, mode: AgentMode) -> EmployeeId {
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -82,7 +82,7 @@ async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str
 }
 
 async fn task(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str, goal: &str) -> TaskId {
-    let cmd = CreateTask { confirm_secret: false, files: vec![], project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default() };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], run: Default::default() };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     task_id
 }
@@ -300,27 +300,3 @@ async fn a_question_while_working_is_decided_in_the_task_conversation() {
     stop(dir.path(), daemon).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs the real Claude Code CLI"]
-async fn a_employee_notes_an_idea_for_later() {
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = start_real(dir.path()).await;
-    let client = connect(dir.path()).await;
-    claude(&client).await;
-    let project = project(&client).await;
-    let alex = employee(&client, project, "Alex", "Developer", AgentMode::Auto).await;
-    task(&client, project, alex, "Dark mode", "We might want a dark mode later, but not now. Note it as an idea for the project with your add_idea tool, then reply OK.").await;
-    let mut ideas = Vec::new();
-    for _ in 0..1200 {
-        ideas = client.ideas(project).await.unwrap().ideas;
-        if !ideas.is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    println!("IDEAS: {ideas:?}");
-    let idea = ideas.first().expect("Alex noted an idea");
-    assert_eq!(idea.author, "Alex");
-    assert!(idea.title.to_lowercase().contains("dark"), "{idea:?}");
-    stop(dir.path(), daemon).await;
-}

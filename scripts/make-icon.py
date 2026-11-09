@@ -1,11 +1,11 @@
 """Render the Aurelius app icon: a dark green rounded square with the white
-"A" from the in-app logo (clients/desktop/src/ui.rs `logo`). No dependencies:
+"A" from the in-app logo. No dependencies:
 supersampled rasterizer, PNG via zlib, ICO and ICNS with PNG entries.
 
-    python scripts/make-icon.py   →  clients/desktop/assets/aurelius.ico (+ aurelius-512.png)
-                                     clients/desktop/assets/aurelius-dev.ico (dev builds:
+    python scripts/make-icon.py   →  clients/electron/assets/aurelius.ico (+ aurelius-512.png)
+                                     clients/electron/assets/aurelius-dev.ico (dev builds:
                                      amber "DEV" strip, so the taskbar tells them apart)
-                                     clients/desktop/assets/aurelius.icns, aurelius-dev.icns
+                                     clients/electron/assets/aurelius.icns, aurelius-dev.icns
                                      (macOS app bundle, scripts/install-mac.sh: transparent
                                      margin as on Apple's icon grid)
                                      clients/mobile/ios/.../AppIcon.appiconset (full-bleed,
@@ -136,7 +136,7 @@ def icns(render_size):
 
 if __name__ == "__main__":
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    out = os.path.join(root, "clients", "desktop", "assets")
+    out = os.path.join(root, "clients", "electron", "assets")
     os.makedirs(out, exist_ok=True)
     sizes = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
     images = [(s, render(s)) for s in sizes]

@@ -32,9 +32,6 @@ pub fn incompatible_message(client: u16) -> String {
     }
 }
 
-/// `feature::TERMINAL_MULTI` under its earlier name.
-pub const FEATURE_TERMINAL_MULTI: &str = feature::TERMINAL_MULTI;
-
 /// Client → daemon.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Request {
@@ -162,10 +159,6 @@ pub struct HelloResult {
     /// what is missing, since an unknown method is not a clean error. Older servers leave it out.
     #[serde(default)]
     pub features: Vec<String>,
-    /// The app this session acts for when it authenticated with an app key
-    /// (`HelloParams::app_key`, or the key on the gateway); feature `app_keys`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub app: Option<aurelius_domain::app_key::AppSession>,
     /// The server has at least one board member; false: the onboarding
     /// ("Create the first board member") is all a client shows.
     #[serde(default)]
@@ -188,24 +181,9 @@ pub mod feature {
     /// Uploaded files carry an id (`MessageFileView::id`) and `upload.get` fetches
     /// them, whole or as a thumbnail.
     pub const UPLOAD_FETCH: &str = "upload_fetch";
-    /// `note.*` methods and `note.created/updated/deleted` events.
-    pub const NOTES: &str = "notes";
-    /// Plugins per project (`plugin.get_for_project`, `plugin.set_for_project`,
-    /// `PluginInfo::projects`), loaded by the project assistant.
-    pub const PROJECT_PLUGINS: &str = "project_plugins";
-    /// A project's plugins apply to every employee run in the project's tasks as
-    /// well, on top of the employee's own list.
-    pub const PROJECT_PLUGINS_EMPLOYEES: &str = "project_plugins_employees";
-    /// `terminal.detach`, `terminal.list` and `terminal.open` with `terminal_id` /
-    /// `additional` (several terminals per conversation).
-    pub const TERMINAL_MULTI: &str = "terminal.multi";
     /// `project.set_description` (`set_project_description`): change or clear a
     /// project's description after creation.
     pub const PROJECT_DESCRIPTION: &str = "project_description";
-    /// Keys for outside apps (`aurelius-mcp`): `app_key.list`, `app_key.create`,
-    /// `app_key.revoke`, `HelloParams::app_key` / `HelloResult::app`, the scopes
-    /// of `crate::app`, the gateway's `/v1/mcp`, and `TaskView::created_by_app`.
-    pub const APP_KEYS: &str = "app_keys";
     /// Ideas have files: `IdeaView::attachments` (fetched with `upload.get`),
     /// `AddIdea::files`, `UpdateIdea::add_files` / `remove_files`, and
     /// `idea.delete`. Starting an idea gives the task copies of them.
@@ -223,10 +201,6 @@ pub mod feature {
     /// applies, evidence S1..S8, times confirmed, tasks) on episodic memories,
     /// event `memory.reinforced`, and failed tasks are extracted too.
     pub const TASK_LESSONS: &str = "task_lessons";
-    /// Task variants (Harness² C): `TaskRun::variants`, `TaskView::variant_phase`,
-    /// `task.variants`, `task.choose_variant`, `variants.get_setting` /
-    /// `variants.set_enabled` and the `task.variant*` events.
-    pub const TASK_VARIANTS: &str = "task_variants";
     /// Instruction proposals (Harness² B): `ProposalView::kind` / `target_employee_id` /
     /// `base_version` / `current_instructions` / `current_version` / `evidence`,
     /// `DecideProposal::instructions`, `employee.restore_instructions`,
@@ -241,14 +215,6 @@ pub mod feature {
     /// one whole, and a client that sends `HelloParams::accepts`
     /// `activity_changes` gets only new or changed calls in live updates.
     pub const ACTIVITY_PREVIEW: &str = "activity_preview";
-    /// The management channel for outside apps: `AppAudience` (`CreateAppKey::audience`,
-    /// `AppKeyView::audience`, `AppSession::audience`) and the MCP tools `ask_management`,
-    /// `list_open_questions` and `answer_question`. The server enforces the audience.
-    pub const MANAGEMENT_CHANNEL: &str = "management_channel";
-    /// Webhooks per app key: `CreateAppKey::webhook_url`, `AppKeyView::webhook_url`,
-    /// `AppKeyCreated::webhook_secret` (shown once) and the signed events
-    /// `manager.replied`, `question.for_you`, `task.finished`, `task.waiting`.
-    pub const WEBHOOKS: &str = "webhooks";
     /// Quick replies: an answer can end with a `suggest_replies` tool use
     /// (`ActivityView::tool` `mcp__aurelius__suggest_replies`, input `question` and
     /// `options`); clients show the options as buttons that send one as the user's
@@ -373,27 +339,53 @@ pub mod feature {
     /// short, text-only run of its own, besides the busy line. No new method, field
     /// or event: the answer is an ordinary employee message in the discussion.
     pub const QUICK_ANSWERS: &str = "quick_answers";
+    /// An employee has an access level (`EmployeeSummary::access_level`, and the
+    /// field on `employee.create` and `employee.update`) that limits its runs' tools.
+    pub const EMPLOYEE_ACCESS: &str = "employee_access";
+    /// Run cards and interrupt cards in a discussion, and the odometer (protocol 5,
+    /// additive): `MessageView::run` and `awaiting_user`, `ApprovalView::ticket_id` and
+    /// `discussion_id`, `run.get_activity`, `usage.get_totals` with `ticket_id`,
+    /// `TokenUsage::model_calls`, `UsageSnapshot::by_user`.
+    pub const RUN_CARDS: &str = "run_cards";
+    /// A board member's lasting chat with an employee: `employee.open_chat`, `employee.chats`
+    /// and `chat.send` to such a chat.
+    pub const EMPLOYEE_CHATS: &str = "employee_chats";
+    /// `schedule_message` on the bridge shows to board members: `scheduled_message.list`,
+    /// `scheduled_message.cancel`, and who waits for a thread (`thread.waiting`).
+    pub const SCHEDULED_MESSAGES: &str = "scheduled_messages";
+    /// An employee has a tool list, what asks first and its own MCP servers
+    /// (`EmployeeSummary::tool_policy`, `employee.tool_options`, C2).
+    pub const EMPLOYEE_TOOLS: &str = "employee_tools";
+    /// `employee.create` takes a start profile (`employee.start_profiles`, C6).
+    pub const EMPLOYEE_PROFILES: &str = "employee_profiles";
+    /// The activity log can be read (`activity_log.list`, R8).
+    pub const ACTIVITY_LOG: &str = "activity_log";
+    /// An employee's mailbox can be read (`employee.queue`, U6).
+    pub const EMPLOYEE_QUEUE: &str = "employee_queue";
+    /// An employee's scratchpad can be read (`employee.scratchpad`, `RunBrief::employee_id`).
+    pub const EMPLOYEE_SCRATCHPAD: &str = "employee_scratchpad";
+    /// The reads a workspace narrows take a `project_id` (`notification.list`,
+    /// `approval.list`, `scheduled_message.list`, `activity_log.list`). Older servers
+    /// refuse or ignore it, so a client without this feature does not offer workspaces.
+    pub const WORKSPACE_FILTERS: &str = "workspace_filters";
+    /// Links to Claude Design artifacts (protocol 5, additive): `ProjectSummary::styleguide_url`
+    /// and `project.update { styleguide_url }`, `TicketView::design_url` and
+    /// `ticket.update { design_url }`. `ticket.updated` says `changed: ["design"]`. A client
+    /// without this feature does not offer the fields (a project or ticket update refuses them).
+    pub const DESIGN_LINKS: &str = "design_links";
 }
 
 /// Every feature this build has.
 pub const FEATURES: &[&str] = &[
     feature::UPLOAD_FETCH,
-    feature::NOTES,
-    feature::PROJECT_PLUGINS,
-    feature::PROJECT_PLUGINS_EMPLOYEES,
-    feature::TERMINAL_MULTI,
     feature::PROJECT_DESCRIPTION,
-    feature::APP_KEYS,
     feature::IDEA_ATTACHMENTS,
     feature::RUN_USAGE,
     feature::RUN_TRACE,
     feature::TASK_LESSONS,
     feature::INSTRUCTION_PROPOSALS,
-    feature::TASK_VARIANTS,
     feature::SESSION_COMPACTION,
     feature::ACTIVITY_PREVIEW,
-    feature::MANAGEMENT_CHANNEL,
-    feature::WEBHOOKS,
     feature::QUICK_REPLIES,
     feature::COMPACT_STATUS,
     feature::MANAGEMENT_CHOOSES_MODE,
@@ -416,6 +408,17 @@ pub const FEATURES: &[&str] = &[
     feature::PERSONAL_INBOX,
     feature::QUICK_ANSWERS,
     feature::TICKET_FROM_IDEA,
+    feature::EMPLOYEE_ACCESS,
+    feature::RUN_CARDS,
+    feature::EMPLOYEE_CHATS,
+    feature::SCHEDULED_MESSAGES,
+    feature::EMPLOYEE_SCRATCHPAD,
+    feature::EMPLOYEE_TOOLS,
+    feature::EMPLOYEE_PROFILES,
+    feature::ACTIVITY_LOG,
+    feature::EMPLOYEE_QUEUE,
+    feature::WORKSPACE_FILTERS,
+    feature::DESIGN_LINKS,
 ];
 
 /// Daemon → client.
@@ -433,9 +436,6 @@ pub enum ServerMessage {
     Stream(StreamDelta),
     /// Remote clients only: streamed text as an append.
     StreamAppend(crate::remote::StreamAppend),
-    /// Built-in terminal: only to sessions that opened it.
-    TerminalOutput(TerminalOutput),
-    TerminalExit(TerminalExit),
     /// The machine's load or the admission changed. While runs wait, at most every 2 s.
     LoadChanged(LoadSnapshot),
     /// The pending shutdown changed.
@@ -514,6 +514,18 @@ pub enum ResponseBody {
     Tickets(aurelius_domain::ticket::TicketsSnapshot),
     Users(aurelius_domain::user::UsersSnapshot),
     Channels(aurelius_domain::views::ChannelsSnapshot),
+    EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot),
+    ScheduledMessages(aurelius_domain::views::ScheduledMessagesSnapshot),
+    ThreadWaiting(aurelius_domain::views::ThreadWaitingSnapshot),
+    EmployeeScratchpad(aurelius_domain::views::ScratchpadView),
+    /// `employee.queue`.
+    EmployeeQueue(aurelius_domain::views::EmployeeQueue),
+    /// `activity_log.list`.
+    ActivityLog(aurelius_domain::views::ActivityLogPage),
+    /// `employee.tool_options`.
+    EmployeeToolOptions(aurelius_domain::employee_tools::ToolOptions),
+    /// `employee.start_profiles`.
+    EmployeeStartProfiles(aurelius_domain::employee_tools::StartProfiles),
     /// `thread.read`.
     Thread(aurelius_domain::views::ThreadSnapshot),
     /// `ticket.followers`.
@@ -568,28 +580,19 @@ pub enum ResponseBody {
     UsageHours(UsageHours),
     UsageTotals(UsageTotals),
     RunTrace(RunTrace),
+    RunActivity(RunActivity),
     TraceSetting(TraceSetting),
-    VariantsSetting(VariantsSetting),
-    TaskVariants(TaskVariantsView),
     Load(LoadSnapshot),
     Browser(BrowserSetting),
-    ArtifactSetting(ArtifactSetting),
     ManagementModeSetting(ManagementModeSetting),
     AutoAllowSetting(AutoAllowSetting),
-    Artifacts(ArtifactsSnapshot),
-    ArtifactContent(ArtifactContent),
     McpServers(McpServers),
     McpLogin(McpLogin),
     McpAlwaysAllow(McpAlwaysAllow),
-    Plugins(PluginsSnapshot),
-    PluginCatalog(PluginCatalog),
-    EmployeePlugins(EmployeePlugins),
-    ProjectPlugins(ProjectPlugins),
     Power(PowerState),
     Subscription(SubscriptionUsage),
     Update(UpdateStatus),
     Backups(BackupsSnapshot),
-    Shares(Vec<ShareView>),
     Context(ContextView),
     /// A screenshot the agent took, as JPEG.
     Screenshot { id: String, jpeg_base64: String },
@@ -599,30 +602,18 @@ pub enum ResponseBody {
     Upload(UploadChunk),
     Ideas(IdeasSnapshot),
     AllIdeas(aurelius_domain::views::AllIdeasSnapshot),
-    Notes(aurelius_domain::views::NotesSnapshot),
-    Note(aurelius_domain::views::NoteView),
     Proposals(ProposalsSnapshot),
     EmployeeInstructionVersions(EmployeeInstructionVersionsSnapshot),
     TaskSchedules(TaskSchedulesSnapshot),
-    AgentFunctions(AgentFunctionsSnapshot),
-    FunctionCalls(FunctionCallsSnapshot),
-    ApiKeys(Vec<ApiKeyView>),
-    AppKeys(Vec<aurelius_domain::app_key::AppKeyView>),
     Notifications(NotificationsSnapshot),
     Subscribed { replayed_through_seq: u64 },
     Remote(RemoteStatus),
     DirListing(DirListing),
     /// `None`: Claude Code was not found on the server.
     RuntimeDetected { claude_code: Option<String> },
-    GitStatus(Option<GitStatusView>),
-    GitDiff(Option<GitDiffView>),
     Subagents(Vec<AgentView>),
     /// `activity.get`: one tool call whole.
     Activity(ActivityView),
-    Terminal(TerminalView),
-    Terminals(Vec<TerminalSummary>),
-    /// Input, resize, detach or close of a terminal was handled.
-    TerminalDone,
 }
 
 #[cfg(test)]
@@ -671,29 +662,6 @@ mod tests {
         assert!(err.is_err(), "a unit method takes no params");
         let chat = serde_json::to_value(Request::read(3, Method::EmployeeChat { employee_id: aurelius_domain::EmployeeId::new() })).unwrap();
         assert_eq!(chat["method"], "employee.chat");
-    }
-
-    #[test]
-    fn the_variants_methods_roundtrip_under_their_names() {
-        use crate::write::HostWrite;
-        use aurelius_domain::{TaskId, variants::ChooseTaskVariant};
-        let task_id = TaskId::new();
-        let cases = [
-            (Request::read(1, Method::TaskVariants { task_id }), "task.variants"),
-            (Request::read(2, Method::VariantsGetSetting), "variants.get_setting"),
-            (Request::write(3, CommandId::new(), WriteMethod::Host(HostWrite::VariantsSetEnabled { enabled: true })), "variants.set_enabled"),
-            (Request::write(4, CommandId::new(), WriteMethod::Domain(aurelius_domain::Command::ChooseTaskVariant(ChooseTaskVariant { task_id, variant: Some(2) }))), "task.choose_variant"),
-        ];
-        for (request, name) in cases {
-            let json = serde_json::to_value(&request).unwrap();
-            assert_eq!(json["method"], name);
-            assert_eq!(serde_json::from_value::<Request>(json).unwrap(), request, "{name}");
-        }
-        // A task's run settings carry the count; older clients leave it out.
-        let run: aurelius_domain::task::RunSettings = serde_json::from_value(serde_json::json!({ "variants": 3 })).unwrap();
-        assert_eq!(run.variants, Some(3));
-        assert!(serde_json::to_value(aurelius_domain::task::RunSettings::default()).unwrap().get("variants").is_none());
-        assert!(FEATURES.contains(&feature::TASK_VARIANTS) && FEATURES.contains(&feature::TASK_LESSONS));
     }
 
     #[test]
@@ -766,7 +734,7 @@ mod tests {
         assert_eq!(error_of(bad_write), (44, ErrorCode::InvalidRequest));
         let no_id = serde_json::json!({ "method": "task.list" });
         assert_eq!(error_of(no_id).0, 0);
-        assert!(Method::knows("session.hello") && Method::knows("terminal.close") && !Method::knows("project.create"));
+        assert!(Method::knows("session.hello") && Method::knows("task.list") && !Method::knows("project.create"));
     }
 
     #[test]

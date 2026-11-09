@@ -43,7 +43,7 @@ fn add(tx: &rusqlite::Transaction<'_>, id: &str, user: Option<&str>) -> Result<(
 
 /// (id, read) of what `user`'s Inbox shows, sorted by id.
 fn shown(store: &Store, user: &str) -> Vec<(String, bool)> {
-    let mut rows: Vec<_> = store.read(|c| timeline::list_notifications_for(c, 50, Some(user))).unwrap().into_iter().map(|n| (n.id, n.read)).collect();
+    let mut rows: Vec<_> = store.read(|c| timeline::list_notifications_for(c, 50, Some(user), None)).unwrap().into_iter().map(|n| (n.id, n.read)).collect();
     rows.sort();
     rows
 }
@@ -53,7 +53,7 @@ fn row(id: &str, read: bool) -> (String, bool) {
 }
 
 fn unread(store: &Store, user: &str) -> u64 {
-    store.read(|c| timeline::unread_count_for(c, Some(user))).unwrap()
+    store.read(|c| timeline::unread_count_for(c, Some(user), None)).unwrap()
 }
 
 fn mark_all_read(store: &Store, user: &'static str) -> usize {
@@ -249,7 +249,7 @@ fn new_row(user: &str) -> timeline::NewNotification<'static> {
 }
 
 fn read_row(store: &Store, user: &str, id: &str) -> aurelius_domain::views::NotificationView {
-    store.read(|c| timeline::list_notifications_for(c, 50, Some(user))).unwrap().into_iter().find(|n| n.id == id).unwrap()
+    store.read(|c| timeline::list_notifications_for(c, 50, Some(user), None)).unwrap().into_iter().find(|n| n.id == id).unwrap()
 }
 
 #[test]
@@ -266,7 +266,7 @@ fn a_written_row_reads_back_with_all_it_is_about_and_is_only_for_that_board_memb
     assert_eq!((row.severity.as_str(), row.title.as_str(), row.target_type.as_str()), ("info", "Marie made you responsible", "ticket.updated"));
     assert_eq!((row.merged_count, row.needs_you, row.read), (0, false, false), "needs_you is worked out by the engine, later");
 
-    assert!(!store.read(|c| timeline::list_notifications_for(c, 50, Some(ALEX))).unwrap().iter().any(|n| n.id == id));
+    assert!(!store.read(|c| timeline::list_notifications_for(c, 50, Some(ALEX), None)).unwrap().iter().any(|n| n.id == id));
 }
 
 #[test]
@@ -360,7 +360,7 @@ fn mention_of(user: &str) -> serde_json::Value {
 }
 
 fn rows_for(store: &Store, user: &str) -> Vec<aurelius_domain::views::NotificationView> {
-    store.read(|c| timeline::list_notifications_for(c, 50, Some(user))).unwrap().into_iter().filter(|n| n.ticket_id.is_some()).collect()
+    store.read(|c| timeline::list_notifications_for(c, 50, Some(user), None)).unwrap().into_iter().filter(|n| n.ticket_id.is_some()).collect()
 }
 
 /// What was written for `user`, whether or not the Inbox still shows it: the gate of `notify` is
@@ -608,9 +608,9 @@ fn a_request_from_before_someone_joined_stays_unread_while_it_still_waits() {
 fn without_a_board_member_a_shared_row_is_still_listed_and_counted() {
     let (_dir, store) = inbox();
     shared_at(&store, "old", "task.succeeded", "info", 50);
-    let listed = store.read(|c| timeline::list_notifications_for(c, 50, None)).unwrap();
+    let listed = store.read(|c| timeline::list_notifications_for(c, 50, None, None)).unwrap();
     assert!(listed.iter().any(|n| n.id == "old" && !n.read));
-    assert!(store.read(|c| timeline::unread_count_for(c, None)).unwrap() >= 1);
+    assert!(store.read(|c| timeline::unread_count_for(c, None, None)).unwrap() >= 1);
     assert!(store.read(|c| timeline::list_notifications(c, 50)).unwrap().iter().any(|n| n.id == "old"));
 }
 

@@ -1,6 +1,5 @@
 // What the guideline screens compute, without a screen: counters and limits, the groups of the Links
-// dialog, the largest block, the texts, and markdown that cannot load anything. Port of
-// clients/desktop/src/screens/guidelines/logic.rs.
+// dialog, the largest block, the texts, and markdown that cannot load anything.
 
 import type {
   EffectiveGuidelines,

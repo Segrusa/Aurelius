@@ -15,7 +15,6 @@ const SYSTEM_PARTS: &[(&str, &str)] = &[
     ("The user allows you to use", "Browser"),
     ("The browser could not be started", "Browser"),
     ("You can look at the user's screen", "Screen"),
-    ("You can publish Claude Code artifacts", "Artifacts"),
     ("Work autonomously:", "Autonomy guidance"),
     ("Your colleagues in this project", "Colleagues"),
 ];
@@ -156,6 +155,7 @@ pub fn with_usage(trace: &mut RunTrace, usage: &aurelius_runtime::Usage) {
         (a, b) => a.or(b),
     };
     total.estimate |= usage.estimate;
+    total.model_calls += usage.steps.len().max(1) as u64;
 }
 
 impl CommandService {

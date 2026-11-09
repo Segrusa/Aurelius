@@ -1,8 +1,8 @@
 //! Usage records per run (tokens, and cost when the provider reports it).
 
 use crate::{StorageError, now_ms};
-use aurelius_domain::{ConversationId, EventId, RunId, TaskId};
-use aurelius_domain::views::{SubtaskUsage, TokenUsage, UsageDay, UsageHour, UsageHours, UsageRow, UsageSnapshot, UsageTotals, UsageWindow};
+use aurelius_domain::{ConversationId, EventId, RunId, TaskId, TicketId};
+use aurelius_domain::views::{SubtaskUsage, TokenUsage, UsageDay, UsageHour, UsageHours, UsageRow, UsageSnapshot, UsageTotals, UsageUserRow, UsageWindow};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 pub struct NewUsage {
@@ -14,6 +14,8 @@ pub struct NewUsage {
     pub cache_creation_tokens: u64,
     pub cost_micro_usd: Option<i64>,
     pub estimate: bool,
+    /// How many model calls this record covers.
+    pub model_calls: u64,
 }
 
 pub fn run_exists(conn: &Connection, run: RunId) -> Result<bool, StorageError> {
@@ -23,8 +25,8 @@ pub fn run_exists(conn: &Connection, run: RunId) -> Result<bool, StorageError> {
 pub fn insert(tx: &Transaction<'_>, run: RunId, source_event: EventId, usage: &NewUsage) -> Result<(), StorageError> {
     let n: i64 = tx.query_row("SELECT COUNT(*) FROM usage_records WHERE run_id = ?1", [run.to_string()], |r| r.get(0))?;
     tx.execute(
-        "INSERT INTO usage_records(id, run_id, source_event_id, input_tokens, output_tokens, cached_tokens, cost_microunits, currency, estimate, provider_record_key, recorded_at_ms, cache_creation_tokens)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO usage_records(id, run_id, source_event_id, input_tokens, output_tokens, cached_tokens, cost_microunits, currency, estimate, provider_record_key, recorded_at_ms, cache_creation_tokens, model_calls)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             EventId::new().to_string(),
             run.to_string(),
@@ -38,6 +40,7 @@ pub fn insert(tx: &Transaction<'_>, run: RunId, source_event: EventId, usage: &N
             format!("{run}:{n}"),
             now_ms(),
             usage.cache_creation_tokens as i64,
+            usage.model_calls as i64,
         ],
     )?;
     Ok(())
@@ -114,7 +117,34 @@ pub fn snapshot(conn: &Connection, offset_at: impl Fn(i64) -> i64) -> Result<Usa
         )?;
         by_day.push(UsageDay { day_start_ms: start, tokens: tokens as u64 });
     }
-    Ok(UsageSnapshot { windows, by_source, by_day })
+    let by_user = by_user(conn, local_midnight(now, 29, &offset_at))?;
+    Ok(UsageSnapshot { windows, by_source, by_day, by_user })
+}
+
+/// Usage since `since_ms` per board member whose Claude login ran it, the largest first.
+fn by_user(conn: &Connection, since_ms: i64) -> Result<Vec<UsageUserRow>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT r.login_user, us.username, COUNT(DISTINCT u.run_id), SUM(u.input_tokens), SUM(u.output_tokens), SUM(u.cached_tokens),
+                SUM(u.cache_creation_tokens), SUM(u.cost_microunits), MAX(u.estimate), SUM(u.model_calls)
+         FROM usage_records u JOIN runs r ON r.id = u.run_id LEFT JOIN users us ON us.id = r.login_user
+         WHERE u.recorded_at_ms >= ?1
+         GROUP BY 1 ORDER BY SUM(u.input_tokens) + SUM(u.output_tokens) DESC",
+    )?;
+    let rows = stmt.query_map([since_ms], |r| {
+        Ok(UsageUserRow {
+            login_user: r.get(0)?,
+            username: r.get(1)?,
+            runs: r.get::<_, i64>(2)? as u64,
+            input_tokens: r.get::<_, i64>(3)? as u64,
+            output_tokens: r.get::<_, i64>(4)? as u64,
+            cached_tokens: r.get::<_, i64>(5)? as u64,
+            cache_creation_tokens: r.get::<_, i64>(6)? as u64,
+            cost_micro_usd: r.get(7)?,
+            estimate: r.get::<_, i64>(8)? == 1,
+            model_calls: r.get::<_, i64>(9)? as u64,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 const HOUR_MS: i64 = 3_600_000;
@@ -125,7 +155,7 @@ fn sum(conn: &Connection, filter: &str, param: &str) -> Result<TokenUsage, Stora
     Ok(conn.query_row(
         &format!(
             "SELECT COUNT(DISTINCT u.run_id), COALESCE(SUM(u.input_tokens),0), COALESCE(SUM(u.output_tokens),0), COALESCE(SUM(u.cached_tokens),0),
-                    COALESCE(SUM(u.cache_creation_tokens),0), SUM(u.cost_microunits), COALESCE(MAX(u.estimate),0)
+                    COALESCE(SUM(u.cache_creation_tokens),0), SUM(u.cost_microunits), COALESCE(MAX(u.estimate),0), COALESCE(SUM(u.model_calls),0)
              FROM usage_records u JOIN runs r ON r.id = u.run_id WHERE {filter}"
         ),
         [param],
@@ -138,6 +168,7 @@ fn sum(conn: &Connection, filter: &str, param: &str) -> Result<TokenUsage, Stora
                 cache_creation_tokens: r.get::<_, i64>(4)? as u64,
                 cost_micro_usd: r.get(5)?,
                 estimate: r.get::<_, i64>(6)? == 1,
+                model_calls: r.get::<_, i64>(7)? as u64,
             })
         },
     )?)
@@ -160,6 +191,7 @@ fn add(total: &mut TokenUsage, more: &TokenUsage) {
         (a, b) => a.or(b),
     };
     total.estimate |= more.estimate;
+    total.model_calls += more.model_calls;
 }
 
 /// Runs of a task: its own and those in its conversation.
@@ -211,15 +243,32 @@ pub fn task_totals(conn: &Connection, task: TaskId) -> Result<UsageTotals, Stora
     Ok(totals(own, subtasks))
 }
 
-/// What a conversation used. A task's conversation counts as its task; any other
-/// lists the tasks started from it (e.g. delegated by its employee) apart.
+/// The runs that answered in a discussion (`?1`) though they are not of its conversation:
+/// those that posted there (their answer or `post_to_discussion`) and those it woke.
+const DISCUSSION_RUNS: &str = "(r.id IN (SELECT json_extract(meta_json, '$.run_id') FROM messages WHERE conversation_id = ?1 AND json_extract(meta_json, '$.kind') = 'group')
+      OR r.id IN (SELECT id FROM jobs WHERE json_extract(payload_json, '$.group.conversation_id') = ?1))";
+
+/// What a ticket used: every task of it, and the runs of its discussion.
+pub fn ticket_totals(conn: &Connection, ticket: TicketId) -> Result<UsageTotals, StorageError> {
+    let filter = format!(
+        "(r.task_id IN (SELECT id FROM tasks WHERE ticket_id = ?1)
+          OR r.conversation_id IN (SELECT conversation_id FROM tasks WHERE ticket_id = ?1)
+          OR {})",
+        DISCUSSION_RUNS.replace("?1", "(SELECT conversation_id FROM tickets WHERE id = ?1)")
+    );
+    Ok(totals(sum(conn, &filter, &ticket.to_string())?, Vec::new()))
+}
+
+/// What a conversation used. A task's conversation counts as its task; a discussion
+/// counts the runs that answered in it; any other lists the tasks started from it
+/// (e.g. delegated by its employee) apart.
 pub fn conversation_totals(conn: &Connection, conversation: ConversationId) -> Result<UsageTotals, StorageError> {
     let id = conversation.to_string();
     let task: Option<String> = conn.query_row("SELECT id FROM tasks WHERE conversation_id = ?1", [&id], |r| r.get(0)).optional()?;
     if let Some(task) = task.and_then(|t| TaskId::parse(&t).ok()) {
         return task_totals(conn, task);
     }
-    let own = sum(conn, "r.conversation_id = ?1", &id)?;
+    let own = sum(conn, &format!("(r.conversation_id = ?1 OR {DISCUSSION_RUNS})"), &id)?;
     let subtasks = subtasks(
         conn,
         "SELECT t.id, t.title, m.name FROM tasks t LEFT JOIN employees m ON m.id = t.employee_id

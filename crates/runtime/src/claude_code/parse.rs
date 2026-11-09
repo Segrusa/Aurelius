@@ -36,8 +36,6 @@ pub struct StreamState {
     tokens_reported: u64,
     /// Reset (epoch ms) from a `rate_limit_event` that rejected the request.
     limit_reset_ms: Option<i64>,
-    /// Calls of the artifact tool that publish a page, until their result comes.
-    artifact_publishes: Vec<(String, Option<String>)>,
     /// Usage of each model call so far, by message id (for the trace).
     steps: Vec<(String, crate::UsageStep)>,
     /// The message streaming now (its `message_delta` carries no id).
@@ -48,10 +46,10 @@ pub struct StreamState {
 
 impl StreamState {
     pub fn for_profile(profile: &ToolProfile) -> Self {
-        let (tools, servers): (&[&str], &[&str]) = match profile {
-            ToolProfile::TextOnly => (&[], &[]),
-            ToolProfile::Work { .. } => (super::WORK_TOOLS, &["aurelius"]),
-            ToolProfile::Triage { .. } => (&[], &["aurelius"]),
+        let (tools, servers): (Vec<&str>, &[&str]) = match profile {
+            ToolProfile::TextOnly => (Vec::new(), &[]),
+            ToolProfile::Work { access, tool_policy, .. } => (super::work_tools(*access, tool_policy), &["aurelius"]),
+            ToolProfile::Triage { .. } => (Vec::new(), &["aurelius"]),
         };
         let mut allowed_tools: Vec<String> = tools.iter().map(|t| t.to_string()).collect();
         if let ToolProfile::Triage { tools, .. } = profile {
@@ -62,14 +60,13 @@ impl StreamState {
             allowed_tools.push(super::TOOL_SEARCH_TOOL.into());
             allowed_tools.extend(super::SCREEN_TOOLS.iter().map(|t| t.to_string()));
         }
+        if matches!(profile, ToolProfile::Work { artifact: true, .. }) {
+            allowed_tools.push(super::ARTIFACT_TOOL.into());
+        }
         if !servers.is_empty() {
-            allowed_tools.extend(super::MEMORY_TOOLS.iter().map(|t| t.to_string()));
-        }
-        if matches!(profile, ToolProfile::Work { plugins, .. } if !plugins.is_empty()) {
-            allowed_tools.push(super::SKILL_TOOL.into());
-        }
-        if matches!(profile, ToolProfile::Work { artifacts: true, .. }) {
-            allowed_tools.extend(super::ARTIFACT_TOOLS.iter().map(|t| t.to_string()));
+            // A tool the employee's list switches off is not one this run can have called.
+            let off = |t: &&&str| matches!(profile, ToolProfile::Work { tool_policy, .. } if !tool_policy.allows(t));
+            allowed_tools.extend(super::MEMORY_TOOLS.iter().filter(|t| !off(t)).map(|t| t.to_string()));
         }
         let mut allowed_servers: Vec<String> = servers.iter().map(|s| s.to_string()).collect();
         // Claude in Chrome connects itself even with --strict-mcp-config; only
@@ -212,14 +209,6 @@ impl StreamState {
                         step.tools.push(tool.to_owned());
                     }
                 }
-                if let Some(blocks) = value["message"]["content"].as_array() {
-                    for b in blocks.iter().filter(|b| b["type"] == "tool_use") {
-                        if super::artifact_call_publishes(b["name"].as_str().unwrap_or(""), &b["input"]) {
-                            let file = b["input"]["file_path"].as_str().map(str::to_owned);
-                            self.artifact_publishes.extend(b["id"].as_str().map(|id| (id.to_owned(), file)));
-                        }
-                    }
-                }
                 // Tool calls are part of the complete message (also with partials).
                 let mut events: Vec<RuntimeEvent> = value["message"]["content"]
                     .as_array()
@@ -257,7 +246,7 @@ impl StreamState {
             }
             // Tool results come back as a "user" message.
             "user" => {
-                let mut events: Vec<RuntimeEvent> = value["message"]["content"]
+                let events: Vec<RuntimeEvent> = value["message"]["content"]
                     .as_array()
                     .map(|blocks| {
                         blocks
@@ -271,7 +260,6 @@ impl StreamState {
                             .collect()
                     })
                     .unwrap_or_default();
-                events.extend(self.artifact_published(&value));
                 Ok(events)
             }
             // The limit's state before the result: only a rejection carries the reset that counts.
@@ -342,28 +330,6 @@ impl StreamState {
         step
     }
 
-    /// The result of a publish call, as the stream-json `user` line carries it
-    /// next to the tool result (CLI 2.1.289): `tool_use_result` with `url`,
-    /// `title`, `seq` (the version number) and `path`. A refused or failed publish is none.
-    fn artifact_published(&mut self, value: &Value) -> Option<RuntimeEvent> {
-        let blocks = value["message"]["content"].as_array()?;
-        let block = blocks.iter().find(|b| b["type"] == "tool_result" && self.artifact_publishes.iter().any(|(c, _)| b["tool_use_id"].as_str() == Some(c.as_str())))?;
-        let call = block["tool_use_id"].as_str().unwrap_or_default().to_owned();
-        let input_path = self.artifact_publishes.iter().find(|(c, _)| *c == call).and_then(|(_, p)| p.clone());
-        self.artifact_publishes.retain(|(c, _)| *c != call);
-        let result = &value["tool_use_result"];
-        let url = result["url"].as_str().filter(|u| u.starts_with("https://claude.ai/"))?;
-        if block["is_error"] == true {
-            return None;
-        }
-        Some(RuntimeEvent::ArtifactPublished {
-            url: url.to_owned(),
-            title: result["title"].as_str().unwrap_or_default().to_owned(),
-            version: result["seq"].as_u64().and_then(|n| u32::try_from(n).ok()),
-            // The result's `path` is the file it published; else the call's `file_path`.
-            path: result["path"].as_str().map(str::to_owned).or(input_path),
-        })
-    }
 }
 
 /// Epoch seconds (or already milliseconds) as milliseconds.
@@ -454,9 +420,9 @@ mod tests {
 
     /// An employee at work: the profile with web search among its tools.
     fn work() -> ToolProfile {
-        ToolProfile::Work {
-            folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: crate::ApprovalBridge { program: "x".into(), args: vec![] },
-            browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false,
+        ToolProfile::Work { artifact: false,
+            access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: crate::ApprovalBridge { program: "x".into(), args: vec![] },
+            browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(),
         }
     }
 
@@ -663,16 +629,14 @@ mod tests {
 
     #[test]
     fn work_profile_allows_its_tools_and_bridge_only() {
-        let work = ToolProfile::Work {
-            folders: vec!["C:/p".into(), "C:/w".into()],
+        let work = ToolProfile::Work { artifact: false,
+            access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into(), "C:/w".into()],
             permission_mode: "acceptEdits".into(),
             approval_bridge: crate::ApprovalBridge { program: "ctl".into(), args: vec!["mcp-permissions".into()] },
             browser: false,
             browser_session: None,
             playwright: None,
             mcp_servers: Default::default(),
-            plugins: vec![],
-            artifacts: false,
         };
         let mut s = StreamState::for_profile(&work);
         let init = r#"{"type":"system","subtype":"init","tools":["Bash","Edit","mcp__aurelius__approve"],"mcp_servers":[{"name":"aurelius","status":"connected"}],"plugins":[]}"#;
@@ -684,8 +648,44 @@ mod tests {
         assert!(args.contains("--restricted") && args.contains("--permission-mode acceptEdits"));
         assert!(args.contains("--permission-prompt-tool mcp__aurelius__approve") && args.contains("--add-dir C:/w"));
         assert!(!args.contains("bypass") && !args.contains("--safe-mode"));
-        let bad = ToolProfile::Work { folders: vec![], permission_mode: "bypassPermissions".into(), approval_bridge: crate::ApprovalBridge { program: "x".into(), args: vec![] }, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let bad = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec![], permission_mode: "bypassPermissions".into(), approval_bridge: crate::ApprovalBridge { program: "x".into(), args: vec![] }, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
         assert!(crate::claude_code::profile_arguments(&bad, None, None, None).join(" ").contains("--permission-mode manual"), "never bypass");
+    }
+
+    #[test]
+    fn a_tool_outside_the_employees_level_stops_the_run() {
+        use aurelius_domain::employee::AccessLevel::*;
+        let profile = |access| ToolProfile::Work { artifact: false, access, tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: crate::ApprovalBridge { program: "x".into(), args: vec![] }, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
+        let init = |tools: &[&str]| serde_json::json!({ "type": "system", "subtype": "init", "session_id": "s", "tools": tools, "mcp_servers": [] }).to_string();
+        assert!(StreamState::for_profile(&profile(ReadOnly)).feed(&init(&["Read", "Glob", "Grep", "ToolSearch"])).is_ok());
+        assert!(StreamState::for_profile(&profile(ReadOnly)).feed(&init(&["Read", "Edit"])).is_err(), "Edit is not read-only");
+        assert!(StreamState::for_profile(&profile(ReadEdit)).feed(&init(&["Read", "Edit", "Write"])).is_ok());
+        assert!(StreamState::for_profile(&profile(ReadEdit)).feed(&init(&["Read", "Bash"])).is_err(), "no commands");
+        assert!(StreamState::for_profile(&profile(Inherit)).feed(&init(&["Read", "Bash", "Task"])).is_ok());
+    }
+
+    #[test]
+    fn an_employees_tool_list_narrows_its_tools_and_what_asks_first_is_no_allow_rule() {
+        use aurelius_domain::employee_tools::ToolPolicy;
+        let policy = ToolPolicy {
+            tools: Some(vec!["Read".into(), "Task".into(), "mcp__aurelius__move_ticket".into()]),
+            approval_tools: vec!["Task".into(), "mcp__aurelius__move_ticket".into()],
+            mcp_servers: None,
+        };
+        let p = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: policy, folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: crate::ApprovalBridge { program: "x".into(), args: vec![] }, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
+        let args = crate::claude_code::profile_arguments(&p, None, None, None);
+        let value = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
+        assert_eq!(value("--tools"), "Read,AskUserQuestion,ExitPlanMode,Task,ToolSearch".replace("Read,AskUserQuestion,ExitPlanMode,Task", &crate::claude_code::work_tools(Default::default(), &ToolPolicy { tools: Some(vec!["Read".into(), "Task".into()]), ..Default::default() }).join(",")));
+        assert!(!value("--tools").contains("Bash") && !value("--tools").contains("Edit"));
+        let allowed = value("--allowedTools");
+        assert!(allowed.contains("mcp__aurelius__remember"), "what cannot be switched stays allowed");
+        assert!(!allowed.contains("mcp__aurelius__create_ticket"), "off");
+        assert!(!allowed.contains("mcp__aurelius__move_ticket") && !allowed.split(',').any(|t| t == "Task"), "asks first: {allowed}");
+        // Off is not there; asking first is still a tool the run has.
+        let init = |tools: &[&str]| serde_json::json!({ "type": "system", "subtype": "init", "session_id": "s", "tools": tools, "mcp_servers": [{ "name": "aurelius" }] }).to_string();
+        assert!(StreamState::for_profile(&p).feed(&init(&["Read", "Task", "mcp__aurelius__move_ticket", "mcp__aurelius__remember"])).is_ok());
+        assert!(StreamState::for_profile(&p).feed(&init(&["Read", "Bash"])).is_err(), "Bash is off");
+        assert!(StreamState::for_profile(&p).feed(&init(&["Read", "mcp__aurelius__create_ticket"])).is_err(), "the bridge does not offer it");
     }
 
     #[test]
@@ -694,7 +694,7 @@ mod tests {
         let mut servers = std::collections::BTreeMap::new();
         servers.insert("my.srv".to_string(), serde_json::json!({ "type": "stdio", "command": "node" }));
         servers.insert("aurelius".to_string(), serde_json::json!({ "command": "evil" }));
-        let p = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: servers, plugins: vec![], artifacts: false };
+        let p = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: servers };
         let args = crate::claude_code::profile_arguments(&p, None, None, None);
         assert!(args.contains(&"--strict-mcp-config".to_string()));
         let mcp: serde_json::Value = serde_json::from_str(&args[args.iter().position(|a| a == "--mcp-config").unwrap() + 1]).unwrap();
@@ -702,7 +702,7 @@ mod tests {
         assert_eq!(mcp["mcpServers"]["aurelius"]["type"], "stdio", "the bridge is never replaced");
         let init = r#"{"type":"system","subtype":"init","tools":["Bash","mcp__aurelius__approve","mcp__my_srv__go"],"mcp_servers":[{"name":"aurelius"},{"name":"my.srv"}]}"#;
         assert!(StreamState::for_profile(&p).feed(init).is_ok());
-        let none = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let none = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
         assert!(StreamState::for_profile(&none).feed(init).is_err(), "without enabling, the server must not appear");
         let plain = crate::claude_code::profile_arguments(&none, None, None, None);
         let mcp: serde_json::Value = serde_json::from_str(&plain[plain.iter().position(|a| a == "--mcp-config").unwrap() + 1]).unwrap();
@@ -712,119 +712,24 @@ mod tests {
     #[test]
     fn the_bridge_vault_tools_are_part_of_a_work_profile() {
         let bridge = crate::ApprovalBridge { program: "x".into(), args: vec![] };
-        let p = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let p = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
         // The bridge offers these in every run (AUR-MU-04).
         let init = r#"{"type":"system","subtype":"init","tools":["Bash","mcp__aurelius__approve","mcp__aurelius__vault_list","mcp__aurelius__vault_read"],"mcp_servers":[{"name":"aurelius"}]}"#;
         assert!(StreamState::for_profile(&p).feed(init).is_ok());
     }
 
     #[test]
-    fn artifacts_add_their_tools_only_when_on() {
-        let bridge = || crate::ApprovalBridge { program: "x".into(), args: vec![] };
-        let profile = |artifacts| ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts };
-        let off = crate::claude_code::profile_arguments(&profile(false), None, None, None).join(" ");
-        assert!(!off.contains("Artifact"), "off: the run is unchanged");
-        let on = crate::claude_code::profile_arguments(&profile(true), None, None, None);
-        let tools = &on[on.iter().position(|a| a == "--tools").unwrap() + 1];
-        assert!(tools.ends_with(",Artifact,ArtifactData,ArtifactComments"), "{tools}");
-        let allowed = &on[on.iter().position(|a| a == "--allowedTools").unwrap() + 1];
-        assert!(!allowed.contains("Artifact"), "a publish is never allowed by rule");
-        // The init line of CLI 2.1.289 with artifacts on.
-        let init = r#"{"type":"system","subtype":"init","tools":["Bash","Artifact","ArtifactComments","ArtifactData","mcp__aurelius__approve"],"mcp_servers":[{"name":"aurelius"}]}"#;
-        assert!(StreamState::for_profile(&profile(true)).feed(init).is_ok());
-        assert!(StreamState::for_profile(&profile(false)).feed(init).is_err(), "off: the tools must not appear");
-    }
-
-    #[test]
-    fn a_successful_publish_is_reported_once_with_its_url_title_and_version() {
-        let mut s = StreamState::default();
-        // As CLI 2.1.289 streams a publish (shortened).
-        let call = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_P","name":"Artifact","input":{"file_path":"C:\\t\\spike.html","icon":"page","description":"A test."}}]}}"#;
-        s.feed(call).unwrap();
-        let result = r#"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_P","type":"tool_result","content":"Published C:\\t\\spike.html at https://claude.ai/artifact/2Jwgr8SC4Y55s2rme4hyfb (Version 2, version id 1791545135-6850)"}]},"tool_use_result":{"url":"https://claude.ai/artifact/2Jwgr8SC4Y55s2rme4hyfb","path":"C:\\t\\spike.html","artifact_id":"0a9a7c1d-4f0e-4c6d-89f4-dc9da2f7b0ae","title":"Aurelius spike test","updated":true,"audience":"owner","seq":2,"version":"1791545135-6850"}}"#;
-        let events = s.feed(result).unwrap();
-        assert_eq!(
-            events.last(),
-            Some(&RuntimeEvent::ArtifactPublished { url: "https://claude.ai/artifact/2Jwgr8SC4Y55s2rme4hyfb".into(), title: "Aurelius spike test".into(), version: Some(2), path: Some(r"C:\t\spike.html".into()) })
-        );
-        assert!(!s.feed(result).unwrap().iter().any(|e| matches!(e, RuntimeEvent::ArtifactPublished { .. })), "reported once");
-        // A read of an artifact also carries its URL, but publishes nothing.
-        s.feed(r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_R","name":"Artifact","input":{"action":"read","url":"https://claude.ai/artifact/x"}}]}}"#).unwrap();
-        let read = r#"{"type":"user","message":{"content":[{"tool_use_id":"toolu_R","type":"tool_result","content":"ok"}]},"tool_use_result":{"read":{"url":"https://claude.ai/artifact/x"},"url":"https://claude.ai/artifact/x","title":"x"}}"#;
-        assert!(!s.feed(read).unwrap().iter().any(|e| matches!(e, RuntimeEvent::ArtifactPublished { .. })));
-        // A refused publish is not one.
-        s.feed(r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_D","name":"Artifact","input":{"file_path":"a.html"}}]}}"#).unwrap();
-        let denied = r#"{"type":"user","message":{"content":[{"tool_use_id":"toolu_D","type":"tool_result","is_error":true,"content":"Permission denied"}]},"tool_use_result":"Error: denied"}"#;
-        assert!(!s.feed(denied).unwrap().iter().any(|e| matches!(e, RuntimeEvent::ArtifactPublished { .. })));
-        // Without a `path` in the result, the call's own file.
-        s.feed(r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_M","name":"Artifact","input":{"file_path":"notes.md"}}]}}"#).unwrap();
-        let result = r#"{"type":"user","message":{"content":[{"tool_use_id":"toolu_M","type":"tool_result","content":"Published"}]},"tool_use_result":{"url":"https://claude.ai/artifact/m","title":"Notes","seq":1}}"#;
-        assert!(s.feed(result).unwrap().iter().any(|e| matches!(e, RuntimeEvent::ArtifactPublished { path: Some(p), .. } if p == "notes.md")));
-    }
-
-    #[test]
-    fn artifact_calls_read_or_act_by_their_action() {
-        use crate::claude_code::{artifact_call_publishes, artifact_call_reads};
-        use serde_json::json as j;
-        assert_eq!(artifact_call_reads("Artifact", &j!({"file_path": "a.html"})), Some(false), "no action is a publish");
-        assert_eq!(artifact_call_reads("Artifact", &j!({"action": "list"})), Some(true));
-        assert_eq!(artifact_call_reads("Artifact", &j!({"action": "read", "url": "u"})), Some(true));
-        for action in ["publish", "delete", "pin", "unpin", "open", "quickstart"] {
-            assert_eq!(artifact_call_reads("Artifact", &j!({ "action": action })), Some(false), "{action}");
-        }
-        for action in ["get", "list", "query", "profiles"] {
-            assert_eq!(artifact_call_reads("ArtifactData", &j!({ "action": action })), Some(true), "{action}");
-        }
-        for action in ["set", "update", "str_replace", "delete", "batch"] {
-            assert_eq!(artifact_call_reads("ArtifactData", &j!({ "action": action })), Some(false), "{action}");
-        }
-        assert_eq!(artifact_call_reads("ArtifactComments", &j!({"action": "read"})), Some(true));
-        for action in ["reply", "resolve", "watch"] {
-            assert_eq!(artifact_call_reads("ArtifactComments", &j!({ "action": action })), Some(false), "{action}");
-        }
-        assert_eq!(artifact_call_reads("WebFetch", &j!({})), None);
-        assert!(artifact_call_publishes("Artifact", &j!({"file_path": "a.html"})) && artifact_call_publishes("Artifact", &j!({"action": "publish", "url": "u"})));
-        assert!(!artifact_call_publishes("Artifact", &j!({"action": "publish", "asset": true})) && !artifact_call_publishes("Artifact", &j!({"action": "delete"})));
-    }
-
-    #[test]
-    fn enabled_plugins_add_the_skill_tool_and_their_folders_only() {
-        let bridge = || crate::ApprovalBridge { program: "x".into(), args: vec![] };
-        let with = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec!["C:/c/ponytail".into(), "C:/c/other".into()], artifacts: false };
-        let without = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
-        let args = crate::claude_code::profile_arguments(&with, None, None, None);
-        let dirs: Vec<&String> = args.iter().enumerate().filter(|(_, a)| *a == "--plugin-dir").map(|(i, _)| &args[i + 1]).collect();
-        assert_eq!(dirs, vec!["C:/c/ponytail", "C:/c/other"]);
-        let value_of = |args: &[String], flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
-        assert!(value_of(&args, "--tools").split(',').any(|t| t == "Skill"));
-        assert!(value_of(&args, "--allowedTools").split(',').any(|t| t == "Skill"));
-        assert!(args.contains(&"--restricted".to_string()) && args.contains(&"--strict-mcp-config".to_string()));
-        let plain = crate::claude_code::profile_arguments(&without, None, None, None);
-        assert!(!plain.contains(&"--plugin-dir".to_string()));
-        assert!(!value_of(&plain, "--tools").split(',').any(|t| t == "Skill"));
-        assert!(!value_of(&plain, "--allowedTools").split(',').any(|t| t == "Skill"));
-        // The init line of CLI 2.1.289 with ponytail: the Skill tool and the plugin are fine, but only with plugins.
-        let init = r#"{"type":"system","subtype":"init","tools":["Read","Bash","Skill","mcp__aurelius__approve"],"mcp_servers":[{"name":"aurelius"}],"plugins":[{"name":"ponytail","source":"ponytail@inline"}],"skills":["ponytail:ponytail"]}"#;
-        assert!(StreamState::for_profile(&with).feed(init).is_ok());
-        assert!(StreamState::for_profile(&without).feed(init).is_err(), "Skill without plugins fails closed");
-        let other = r#"{"type":"system","subtype":"init","tools":["Bash","Skill","WebFetch2"],"mcp_servers":[]}"#;
-        assert!(StreamState::for_profile(&with).feed(other).is_err(), "anything else still fails closed");
-        // Never for the text-only profile.
-        assert!(StreamState::for_profile(&ToolProfile::TextOnly).feed(r#"{"type":"system","subtype":"init","tools":["Read","Skill"],"mcp_servers":[]}"#).is_err());
-    }
-
-    #[test]
     fn browser_is_off_unless_asked_for() {
         let bridge = || crate::ApprovalBridge { program: "ctl".into(), args: vec![] };
-        let off = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
-        let on = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: true, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let off = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
+        let on = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: true, browser_session: None, playwright: None, mcp_servers: Default::default() };
         assert!(!crate::claude_code::profile_arguments(&off, None, None, None).contains(&"--chrome".to_string()));
         assert!(crate::claude_code::profile_arguments(&on, None, None, None).contains(&"--chrome".to_string()));
         // --strict-mcp-config stays: Chrome connects itself regardless (checked against CLI 2.1.287).
         assert!(crate::claude_code::profile_arguments(&on, None, None, None).contains(&"--strict-mcp-config".to_string()));
         // The employee's own session id keeps one tab group; only a well-formed one, and only with the browser.
         let key = "0192f1a2-3b4c-7d5e-8f60-718293a4b5c6";
-        let keyed = |browser, id: &str| ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser, browser_session: Some(id.into()), playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let keyed = |browser, id: &str| ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser, browser_session: Some(id.into()), playwright: None, mcp_servers: Default::default() };
         let args = crate::claude_code::profile_arguments(&keyed(true, key), None, None, None).join(" ");
         assert!(args.contains(&format!("--session-id {key}")) && args.contains("--no-session-persistence"));
         assert!(!crate::claude_code::profile_arguments(&keyed(false, key), None, None, None).contains(&"--session-id".to_string()));
@@ -842,11 +747,10 @@ mod tests {
     fn playwright_replaces_chrome_as_the_browser() {
         let bridge = || crate::ApprovalBridge { program: "ctl".into(), args: vec![] };
         let config = serde_json::json!({ "type": "stdio", "command": "node", "args": ["cli.js", "--cdp-endpoint", "http://127.0.0.1:9"] });
-        let profile = |browser, user: Option<&str>| ToolProfile::Work {
-            folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser,
+        let profile = |browser, user: Option<&str>| ToolProfile::Work { artifact: false,
+            access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser,
             browser_session: Some("0192f1a2-3b4c-7d5e-8f60-718293a4b5c6".into()), playwright: Some(config.clone()),
             mcp_servers: user.map(|n| [(n.to_string(), serde_json::json!({ "command": "evil" }))].into_iter().collect()).unwrap_or_default(),
-            plugins: vec![], artifacts: false,
         };
         let on = crate::claude_code::profile_arguments(&profile(true, Some(crate::claude_code::PLAYWRIGHT_SERVER)), None, None, None);
         assert!(!on.contains(&"--chrome".to_string()) && !on.contains(&"--session-id".to_string()), "no Claude in Chrome next to it");
@@ -868,7 +772,7 @@ mod tests {
     fn mcp_tools_are_looked_up_with_tool_search() {
         // Without ToolSearch in --tools, Claude Code sends every MCP tool definition upfront (CLI 2.1.301).
         let bridge = crate::ApprovalBridge { program: "ctl".into(), args: vec![] };
-        let p = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let p = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
         let args = crate::claude_code::profile_arguments(&p, None, None, None);
         let value = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
         assert!(value("--tools").split(',').any(|t| t == "ToolSearch"));
@@ -884,7 +788,7 @@ mod tests {
         // The bridge decides (employee's Screen on, or the inbox); Claude Code must not ask too, nor wave them through.
         let bridge = || crate::ApprovalBridge { program: "ctl".into(), args: vec![] };
         for (mode, browser) in [("manual", false), ("auto", false), ("auto", true), ("plan", false)] {
-            let p = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: mode.into(), approval_bridge: bridge(), browser, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+            let p = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: mode.into(), approval_bridge: bridge(), browser, browser_session: None, playwright: None, mcp_servers: Default::default() };
             let args = crate::claude_code::profile_arguments(&p, None, None, None);
             assert_eq!(args.iter().filter(|a| *a == "--allowedTools").count(), 1, "{mode}: one allow list");
             let i = args.iter().position(|a| a == "--allowedTools").unwrap();
@@ -894,7 +798,7 @@ mod tests {
             assert!(!args[i + 1].split(',').any(|t| matches!(t, "Edit" | "Write" | "Bash" | "WebFetch")), "{mode}: no work tools by rule");
             assert!(!args.contains(&"auto".to_string()), "{mode}: never Claude Code's own auto");
         }
-        let p = ToolProfile::Work { folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default(), plugins: vec![], artifacts: false };
+        let p = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
         let init = r#"{"type":"system","subtype":"init","tools":["Bash","mcp__aurelius__approve","mcp__aurelius__screenshot","mcp__aurelius__list_windows"],"mcp_servers":[{"name":"aurelius"}]}"#;
         assert!(StreamState::for_profile(&p).feed(init).is_ok(), "the bridge's screen tools belong to the work profile");
         assert!(StreamState::for_profile(&ToolProfile::TextOnly).feed(r#"{"type":"system","subtype":"init","tools":["mcp__aurelius__screenshot"],"mcp_servers":[]}"#).is_err(), "never outside work");

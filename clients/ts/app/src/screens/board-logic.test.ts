@@ -1,7 +1,6 @@
 import type { TicketView, TimelineCard } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
-  suggestedReplies,
   activityDetail,
   activityText,
   beforeFor,
@@ -25,7 +24,9 @@ import {
   needsYou,
   ownerChoosable,
   peopleCount,
+  scrollToShow,
   shownCards,
+  suggestedReplies,
   taskCounts,
   ticketNeeds,
 } from "./board-logic";
@@ -335,5 +336,26 @@ describe("suggestedReplies", () => {
 
   it("offers a push when the report talks about pushing", () => {
     expect(suggestedReplies("Nothing was pushed.").map((r) => r.label)).toContain("Push");
+  });
+});
+
+describe("scrollToShow", () => {
+  const stops = [0, 260, 520, 780];
+  const inColumn = (i: number) => ({ start: 14 + 260 * i, end: 262 + 260 * i });
+
+  it("leaves a board alone when the card is already in view", () => {
+    expect(scrollToShow(inColumn(0), stops, 0, 754)).toBe(0);
+  });
+
+  it("starts the row at a column instead of cutting the first one", () => {
+    expect(scrollToShow(inColumn(2), stops, 0, 754)).toBe(260);
+  });
+
+  it("goes back to the card's own column from the right", () => {
+    expect(scrollToShow(inColumn(1), stops, 780, 754)).toBe(260);
+  });
+
+  it("shows the start of a card when the row is too narrow for it", () => {
+    expect(scrollToShow(inColumn(1), stops, 0, 200)).toBe(274);
   });
 });

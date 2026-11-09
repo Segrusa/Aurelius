@@ -69,6 +69,7 @@ pub fn append(tx: &Transaction<'_>, event: NewEvent<'_>) -> Result<Appended, Sto
         ],
     )?;
     let seq = tx.last_insert_rowid() as u64;
+    crate::activity_log::from_event(tx, event.aggregate_type, &event.aggregate_id, event.event_type, &event.correlation_id, &event.metadata);
     if crate::timeline::notifies(event.event_type, &event.metadata) {
         crate::timeline::notify(tx, seq)?;
     }

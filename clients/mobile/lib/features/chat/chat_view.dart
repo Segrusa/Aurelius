@@ -20,7 +20,6 @@ import '../../core/net/connection.dart';
 import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/channels.dart';
-import '../../data/company.dart';
 import '../../data/discussion.dart';
 import '../../data/links.dart' show messageLocateFeature;
 import '../../data/views.dart';
@@ -46,7 +45,6 @@ import '../markdown/mention_markdown.dart';
 import 'following_list.dart';
 import 'message_edit.dart';
 import 'live_steps.dart';
-import 'git_chip.dart';
 import 'subagent_chip.dart';
 import 'upload_files.dart';
 
@@ -233,7 +231,7 @@ class _ChatViewState extends State<ChatView> {
                 padding: const EdgeInsets.only(top: 6, bottom: 10),
                 child: Row(
                 children: [
-                  Expanded(child: GitChip(key: ValueKey(bloc.state.conversationId), conversationId: bloc.state.conversationId!)),
+                  const Spacer(),
                   BlocSelector<ChatBloc, ChatState, bool>(
                     selector: (s) => s.streaming != null,
                     builder: (context, running) => SubagentChip(key: ValueKey('subagents-${bloc.state.conversationId}'), conversationId: bloc.state.conversationId!, running: running, employee: true),
@@ -459,14 +457,12 @@ class _MessagesState extends State<_Messages> {
         if (mainChats.contains(a.conversationId) && !state.messages.any((m) => m.isStreaming && m.runId == a.runId)) a,
     ];
     final live = state.messages.indexWhere((m) => m.isStreaming);
-    final shared = state.shares.isNotEmpty ? 1 : 0;
     final source = widget.config.source;
     final made = source == null ? const <String, TicketRef>{} : ticketsFromMessages(state.messages);
     // Only the last summary line can be tried again: a later one saved it or failed anew.
     final lastSummary = state.messages.where((m) => m.system?.kind == SystemLineKind.summary || m.system?.kind == SystemLineKind.summaryFailed).lastOrNull?.id;
     bool named(MessageView m) => group && authorOf(m) != _me && mentionsName(m.text, _me);
     final items = <FollowItem>[
-      if (state.shares.isNotEmpty) FollowItem('shares', _SharedContext(shares: state.shares)),
       for (final m in state.messages)
         FollowItem(
           m.id,
@@ -510,7 +506,7 @@ class _MessagesState extends State<_Messages> {
     return FollowingList(
       key: _list,
       items: items,
-      liveFrom: live < 0 ? shared + state.messages.length : shared + live,
+      liveFrom: live < 0 ? state.messages.length : live,
       resetKey: state.conversationId,
     );
   }
@@ -1352,15 +1348,6 @@ class _AssistantMessage extends StatelessWidget {
                   Navigator.pop(sheet);
                 },
               ),
-            if (bloc.state.conversationId != null && !message.isStreaming && shownInMobileCore('shares'))
-              ListTile(
-                leading: const Icon(Icons.ios_share),
-                title: const Text('Share to a project or employee'),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  showShareSheet(context, bloc, message.id);
-                },
-              ),
             if (message.runId != null && shownInMobileCore('context'))
               ListTile(
                 leading: const Icon(Icons.manage_search),
@@ -1532,95 +1519,6 @@ class _StatusLine extends StatelessWidget {
         return const SizedBox(height: 2);
     }
   }
-}
-
-class _SharedContext extends StatelessWidget {
-  const _SharedContext({required this.shares});
-
-  final List<ShareView> shares;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: SurfaceCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('SHARED CONTEXT', style: Tokens.eyebrow()),
-              for (final s in shares) ...[
-                const SizedBox(height: 8),
-                Text(s.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                Text(s.excerpt, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: Tokens.text2, fontSize: 13)),
-              ],
-            ],
-          ),
-        ),
-      );
-}
-
-/// Share one answer into a project or an employee, as context or as a memory proposal.
-void showShareSheet(BuildContext context, ChatBloc bloc, String messageId) {
-  final company = context.read<CompanyBloc>().state;
-  showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    builder: (sheet) {
-      var mode = ShareMode.context;
-      return StatefulBuilder(
-        builder: (context, setState) => SafeArea(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.75),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: SegmentedButton<ShareMode>(
-                    segments: const [
-                      ButtonSegment(value: ShareMode.context, label: Text('As context')),
-                      ButtonSegment(value: ShareMode.memory, label: Text('As memory proposal')),
-                    ],
-                    selected: {mode},
-                    onSelectionChanged: (s) => setState(() => mode = s.first),
-                  ),
-                ),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      if (company.visibleProjects.isNotEmpty) const Padding(padding: EdgeInsets.fromLTRB(16, 12, 16, 4), child: Eyebrow('Projects')),
-                      for (final p in company.visibleProjects)
-                        ListTile(
-                          leading: const Icon(Icons.folder_outlined),
-                          title: Text(p.name),
-                          onTap: () {
-                            bloc.add(ChatShared(messageId, targetKind: 'project', targetId: p.id, mode: mode));
-                            Navigator.pop(sheet);
-                          },
-                        ),
-                      for (final g in pickerGroups(company.activeEmployees)) ...[
-                        Padding(padding: const EdgeInsets.fromLTRB(16, 12, 16, 4), child: Eyebrow(g.title)),
-                        for (final m in g.employees)
-                          ListTile(
-                            leading: Monogram(m.monogram, size: 26),
-                            title: Text(m.name),
-                            subtitle: m.roleLine.isEmpty ? null : Text(m.roleLine, style: TextStyle(color: Tokens.muted, fontSize: 12)),
-                            onTap: () {
-                              bloc.add(ChatShared(messageId, targetKind: 'employee', targetId: m.id, mode: mode));
-                              Navigator.pop(sheet);
-                            },
-                          ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
-  );
 }
 
 class _Composer extends StatefulWidget {

@@ -1,6 +1,5 @@
 //! Protocol 5: sign-in, sessions, the gate's surface and the Claude login's.
 
-use crate::app::{NOT_FOR_APPS, required as app_required};
 use crate::remote::{Capability, Needs, required};
 use crate::rpc::{Call, ClaudeLoginPrompt, PROTOCOL_MAJOR, Request, ServerMessage, reject_unparsed};
 use crate::{ClaudeLoginInputParams, HostWrite, LoginParams, Method, SetPasswordParams, WriteMethod};
@@ -121,11 +120,9 @@ fn every_own_device_may_sign_in_and_apps_never() {
     ];
     for call in calls {
         assert_eq!(required(&call), Needs::Cap(Capability::Read), "{call:?}");
-        assert_eq!(app_required(&call).unwrap_err(), NOT_FOR_APPS, "{call:?}");
     }
     let take = Call::Write(WriteMethod::Domain(Command::UseMyLogin(aurelius_domain::ticket::UseMyLogin { ticket_id: TicketId::new() })));
     assert_eq!(required(&take), Needs::Cap(Capability::TaskControl));
-    assert_eq!(app_required(&take).unwrap_err(), NOT_FOR_APPS);
 }
 
 #[test]

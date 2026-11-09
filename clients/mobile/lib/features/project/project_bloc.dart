@@ -42,7 +42,7 @@ class ProjectNoticeShown extends ProjectEvent {
 enum TaskFilter { active, waiting, completed }
 
 class ProjectState extends Equatable {
-  const ProjectState({this.loading = true, this.project, this.tasks = const [], this.busy = false, this.notice, this.lastResult});
+  const ProjectState({this.loading = true, this.project, this.tasks = const [], this.busy = false, this.notice});
 
   final bool loading;
   final ProjectSummary? project;
@@ -50,9 +50,7 @@ class ProjectState extends Equatable {
   final bool busy;
   final String? notice;
 
-  /// The last command result (e.g. `TaskDiscussed` → open the lead's chat).
-  final CommandResult? lastResult;
-
+  
   List<TaskView> filtered(TaskFilter filter) => switch (filter) {
         TaskFilter.active => tasks.where((t) => t.isActive).toList(),
         TaskFilter.waiting => tasks.where((t) => t.isOpen && (t.needsYou || t.waitsToStart)).toList(),
@@ -61,18 +59,17 @@ class ProjectState extends Equatable {
 
   TaskView? task(String id) => tasks.where((t) => t.id == id).firstOrNull;
 
-  ProjectState copyWith({bool? loading, ProjectSummary? project, List<TaskView>? tasks, bool? busy, String? notice, CommandResult? lastResult}) =>
+  ProjectState copyWith({bool? loading, ProjectSummary? project, List<TaskView>? tasks, bool? busy, String? notice}) =>
       ProjectState(
         loading: loading ?? this.loading,
         project: project ?? this.project,
         tasks: tasks ?? this.tasks,
         busy: busy ?? this.busy,
         notice: notice,
-        lastResult: lastResult,
       );
 
   @override
-  List<Object?> get props => [loading, project, tasks, busy, notice, lastResult];
+  List<Object?> get props => [loading, project, tasks, busy, notice];
 }
 
 /// One project and its tasks, and every action on them. Employees are
@@ -113,11 +110,11 @@ class ProjectBloc extends Bloc<ProjectEvent, ProjectState> {
   Future<void> _command(ProjectCommandSent event, Emitter<ProjectState> emit) async {
     emit(state.copyWith(busy: true));
     try {
-      final receipt = await _repository.write(event.command, expectedVersion: event.expectedVersion, retry: event.retry);
+      await _repository.write(event.command, expectedVersion: event.expectedVersion, retry: event.retry);
       for (final next in event.then) {
         await _repository.write(next, retry: event.retry);
       }
-      emit(state.copyWith(busy: false, notice: event.done, lastResult: receipt.command));
+      emit(state.copyWith(busy: false, notice: event.done));
       add(const ProjectRefreshed());
     } on NotSentException catch (e) {
       emit(state.copyWith(busy: false, notice: e.toString()));

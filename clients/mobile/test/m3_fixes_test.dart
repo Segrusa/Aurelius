@@ -150,11 +150,11 @@ void main() {
       final runtime = MockRuntimeBloc();
       whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: const RuntimeState());
       final router = GoRouter(
-        initialLocation: '/home',
+        initialLocation: '/team',
         refreshListenable: step,
         redirect: (_, state) => boardMemberRedirect(step.value, state.matchedLocation),
         routes: [
-          GoRoute(path: '/home', builder: (_, _) => const TicketPage(ticketId: 'k1', discussion: true)),
+          GoRoute(path: '/team', builder: (_, _) => const TicketPage(ticketId: 'k1', discussion: true)),
           GoRoute(path: '/onboarding', builder: (_, _) => const Scaffold(body: Text('You were signed out on this device.'))),
         ],
       );

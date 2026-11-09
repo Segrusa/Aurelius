@@ -8,9 +8,7 @@ import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/chat/chat_bloc.dart';
-import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
-import 'package:aurelius_mobile/features/inbox/inbox_sections.dart';
 import 'package:aurelius_mobile/features/pairing/pairing_bloc.dart';
 import 'package:aurelius_mobile/features/updates/updates_bloc.dart';
 import 'package:bloc_test/bloc_test.dart';
@@ -634,14 +632,14 @@ void main() {
     );
 
     group('Harness²', () {
-      const harness2 = LinkState(status: LinkStatus.online, capabilities: ['read', 'approve'], features: [Harness2.instructionProposals, Harness2.variants, Harness2.lessons]);
+      const harness2 = LinkState(status: LinkStatus.online, capabilities: ['read', 'approve'], features: [Harness2.instructionProposals, Harness2.lessons]);
       void quiet() {
         when(() => repo.approvals()).thenAnswer((_) async => []);
         when(() => repo.notifications()).thenAnswer((_) async => const NotificationsSnapshot(notifications: [], unread: 0));
       }
 
       blocTest<InboxBloc, InboxState>(
-        'proposed instructions and variants stay hidden on a server without the features',
+        'proposed instructions stay hidden on a server without the feature',
         build: () {
           quiet();
           when(() => repo.proposals()).thenAnswer((_) async => [instructionProposalOf('pr2'), proposalOf('pr1')]);
@@ -649,14 +647,9 @@ void main() {
         },
         act: (bloc) async {
           await loaded(bloc);
-          bloc.add(const VariantsRequested('t1'));
-          await Future<void>.delayed(const Duration(milliseconds: 20));
         },
         verify: (bloc) {
           expect(bloc.state.proposals.map((p) => p.id), ['pr1'], reason: 'the colleague stays, the instructions go');
-          expect(bloc.state.variantsOn, isFalse);
-          expect(bloc.state.variants, isEmpty);
-          verifyNever(() => repo.variantsOf(any()));
         },
       );
 
@@ -715,74 +708,6 @@ void main() {
         },
       );
 
-      blocTest<InboxBloc, InboxState>(
-        'variants load for the compare card, refresh on their events and a choice is sent',
-        build: () {
-          when(() => repo.linkState).thenReturn(harness2);
-          quiet();
-          when(() => repo.proposals()).thenAnswer((_) async => []);
-          final changes = StreamController<Event>.broadcast();
-          addTearDown(changes.close);
-          when(() => repo.companyChanges).thenAnswer((_) => changes.stream);
-          var phase = VariantPhase.ready;
-          when(() => repo.variantsOf('t1')).thenAnswer((_) async => variantsOf('t1', phase: phase));
-          when(() => repo.write(any(), retry: false)).thenAnswer((_) async {
-            phase = VariantPhase.applying;
-            return receipt(const CommandResultTaskVariantChosen(taskId: 't1', variant: 1));
-          });
-          return InboxBloc(repo);
-        },
-        act: (bloc) async {
-          await loaded(bloc);
-          expect(bloc.state.variantsOn, isTrue);
-          bloc.add(const VariantsRequested('t1'));
-          await stateWhere(bloc, (s) => s.variants['t1'] != null);
-          expect(bloc.state.variants['t1']!.judgePick, 2);
-          bloc.add(const VariantChosen('t1', variant: 1));
-          await stateWhere(bloc, (s) => s.variants['t1']?.phase == VariantPhase.applying && s.deciding.isEmpty);
-        },
-        verify: (bloc) {
-          final request = verify(() => repo.write(captureAny(), retry: false)).captured.single as Map<String, dynamic>;
-          expect(request['method'], 'task.choose_variant');
-          expect(params(request), {'task_id': 't1', 'variant': 1});
-        },
-        expect: () => contains(isA<InboxState>().having((s) => s.notice, 'notice', 'Variant 1 is applied.')),
-      );
-
-      blocTest<InboxBloc, InboxState>(
-        "letting the judge choose sends no variant; settled elsewhere says so",
-        build: () {
-          when(() => repo.linkState).thenReturn(harness2);
-          quiet();
-          when(() => repo.proposals()).thenAnswer((_) async => []);
-          when(() => repo.variantsOf('t1')).thenAnswer((_) async => variantsOf('t1', phase: VariantPhase.done));
-          when(() => repo.write(any(), retry: false)).thenThrow(const ProtocolException(ErrorCode.validation, 'not ready'));
-          return InboxBloc(repo);
-        },
-        act: (bloc) async {
-          await loaded(bloc);
-          bloc.add(const VariantChosen('t1'));
-          await stateWhere(bloc, (s) => s.notice != null);
-        },
-        verify: (_) {
-          final request = verify(() => repo.write(captureAny(), retry: false)).captured.single as Map<String, dynamic>;
-          expect(params(request), {'task_id': 't1'});
-        },
-        expect: () => contains(isA<InboxState>().having((s) => s.notice, 'notice', 'These variants were already settled.')),
-      );
-
-      test('Needs you shows tasks with variants ready as a compare card, only with the feature', () {
-        final ready = taskOf(id: 'tv', status: TaskStatus.waiting, waitingReason: 'variants', variantPhase: VariantPhase.ready);
-        final input = taskOf(id: 'ti', status: TaskStatus.waiting, waitingReason: 'input');
-        final company = CompanyState(tasks: [ready, input]);
-        final on = InboxSections.of(const InboxState(variantsOn: true), company);
-        expect(on.variantTasks.map((t) => t.id), ['tv']);
-        expect(on.waitingTasks.map((t) => t.id), ['ti']);
-        expect(on.needsYou, 2);
-        final off = InboxSections.of(const InboxState(), company);
-        expect(off.variantTasks, isEmpty);
-        expect(off.waitingTasks.map((t) => t.id), containsAll(['tv', 'ti']), reason: 'without the feature it stays a plain waiting task');
-      });
     });
   });
 

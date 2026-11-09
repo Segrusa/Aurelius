@@ -21,7 +21,7 @@ async fn setup(client: &Client, name: &str, employee: &str) -> (ProjectId, Emplo
         panic!()
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: employee.into(), role: "Productpartner".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: employee.into(), role: "Productpartner".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result
@@ -52,7 +52,6 @@ async fn timeline_tells_the_story_and_notifies_once() {
         title: "Onboarding".into(),
         goal: "Vergelijk ideeën voor onboarding".into(),
         acceptance_criteria: vec!["Elk resultaat noemt een bron".into()],
-        depends_on: vec![],
     };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     for _ in 0..400 {

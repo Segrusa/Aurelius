@@ -1,5 +1,13 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { LayoutFooter } from "@astryxdesign/core/Layout";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { expectBody, ProtocolError } from "@aurelius/client";
 import type { AgentMode, TaskRun, TicketPriority } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
@@ -8,9 +16,12 @@ import { showChord } from "../keys/keymap";
 import { isMac, useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { AttachRow, useAttachments } from "../ui/attach";
-import { Button, Chip, initial, Kbd, Mark, markColor } from "../ui/kit";
-import { Dialog, DialogClose, Menu } from "../ui/overlay";
+import { Chip } from "../ui/chip";
+import { KeyHint } from "../ui/key-hint";
+import { initial, Mark, markColor } from "../ui/marks";
+import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import { cycle, defaultAssignee, parseDeadline, parseLabels, rootsOf, titleOfGoal } from "./dialog-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
 import { modelName, useSetting } from "./settings-kit";
@@ -31,16 +42,76 @@ const MODES: { key: AgentMode | "default"; label: string }[] = [
   { key: "plan", label: "Plan" },
 ];
 
-const INPUT =
-  "w-full rounded-[6px] border border-btn-line bg-sunk px-3 text-[13px] text-text outline-none focus:border-acc-text placeholder:text-text3";
+const styles = stylex.create({
+  body: {
+    display: "flex",
+    minHeight: 0,
+    flexDirection: "column",
+    gap: 12,
+    overflowY: "auto",
+    padding: 16,
+  },
+  giveBody: { gap: 16 },
+  chips: { display: "flex", flexWrap: "wrap", gap: 6 },
+  twoColumns: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
+  none: { fontSize: 12, color: "var(--precision-text3)" },
+  caption: { fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)" },
+  choices: { display: "flex", flexDirection: "column", gap: 6 },
+  pick: { flexWrap: "wrap" },
+  empty: { color: "var(--precision-text3)" },
+  footer: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+    paddingInline: 16,
+    paddingBlock: 12,
+  },
+  footerNote: { marginInlineEnd: "auto", fontSize: 12, color: "var(--precision-text3)" },
+  switchDialog: {
+    flexShrink: 0,
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    fontSize: 12,
+    color: "var(--color-text-accent)",
+  },
+});
 
-function Labeled({ label, children }: { label: string; children: ReactNode }) {
+/** The Menu next to the pressed buttons reads as one of them when it holds the choice. */
+const PICKED = {
+  borderColor: "var(--color-text-accent)",
+  backgroundColor: "var(--color-overlay-hover)",
+  color: "var(--color-text-primary)",
+};
+
+/** Astryx's Dialog as both windows use it. */
+function FormDialog({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: ReactNode;
+}) {
   return (
-    // biome-ignore lint/a11y/noLabelWithoutControl: the control comes in as children.
-    <label className="flex flex-col gap-1 text-[12px] font-medium text-text2">
-      <span>{label}</span>
+    <Dialog
+      isOpen={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      aria-label={title}
+      width={640}
+      maxHeight="calc(100vh - 48px)"
+      padding={0}
+      purpose="form"
+    >
       {children}
-    </label>
+    </Dialog>
   );
 }
 
@@ -101,45 +172,21 @@ export function useSend(onDone: (text: string) => void) {
 
 export function Held({ names, onSend, busy }: { names: string[]; onSend: () => void; busy: boolean }) {
   return (
-    <div
+    <Banner
+      status="warning"
       role="alert"
-      className="flex items-center gap-3 rounded-[8px] bg-amber-soft px-3 py-2 shadow-[inset_0_0_0_1px_var(--amber-line)]"
-    >
-      <span className="min-w-0 flex-1">
-        This text holds the value of {names.length > 0 ? names.join(", ") : "a vault item"}. Anyone who reads it sees
-        that value.
-      </span>
-      <Button disabled={busy} onClick={onSend}>
-        Send anyway
-      </Button>
-    </div>
+      title={`This text holds the value of ${names.length > 0 ? names.join(", ") : "a vault item"}. Anyone who reads it sees that value.`}
+      endContent={<Button label="Send anyway" isDisabled={busy} onClick={onSend} />}
+    />
   );
 }
 
 /** The two windows are one choice: start now or plan for later. What was typed goes along. */
 function SwitchDialog({ label, onSwitch }: { label: string; onSwitch: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onSwitch}
-      className="ml-auto flex-none cursor-pointer border-0 bg-transparent p-0 text-[12px] text-acc-text"
-    >
+    <button type="button" onClick={onSwitch} {...stylex.props(styles.switchDialog)}>
       {label}
     </button>
-  );
-}
-
-function CloseButton() {
-  return (
-    <DialogClose asChild>
-      <button
-        type="button"
-        aria-label="Close"
-        className="ml-auto grid size-6 cursor-pointer place-items-center rounded-[5px] border-0 bg-transparent text-text3 hover:bg-sel hover:text-text"
-      >
-        ✕
-      </button>
-    </DialogClose>
   );
 }
 
@@ -153,7 +200,8 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const employees = useEmployees();
   const models = useModels();
   const [seed] = useState(() => overlays.prefill());
-  const [projectId, setProjectId] = useState<string | null>(seed?.projectId ?? null);
+  const workspace = useWorkspace();
+  const [projectId, setProjectId] = useState<string | null>(seed?.projectId ?? workspace.id);
   const [title, setTitle] = useState(seed?.title ?? "");
   const [description, setDescription] = useState(seed?.description ?? "");
   const [priority, setPriority] = useState<TicketPriority>("normal");
@@ -214,29 +262,22 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <div className="flex h-11 flex-none items-center gap-2 border-b border-line2 px-4 text-text3">
-        <span className="font-medium text-text">New ticket</span>
-        <CloseButton />
-      </div>
-      <div {...attach.target} className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
-        <Labeled label="Title">
-          <input
-            data-autofocus
-            className={`${INPUT} h-9`}
-            placeholder="What should happen?"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </Labeled>
-        <Labeled label="Description">
-          <textarea
-            className={`${INPUT} min-h-[120px] resize-y py-2 leading-[1.5]`}
-            placeholder="Details, in Markdown"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </Labeled>
-        <div className="flex flex-wrap gap-[6px]">
+      <DialogHeader
+        title="New ticket"
+        onOpenChange={(next) => {
+          if (!next) onClose();
+        }}
+      />
+      <div {...attach.target} {...stylex.props(styles.body)}>
+        <TextInput label="Title" hasAutoFocus placeholder="What should happen?" value={title} onChange={setTitle} />
+        <TextArea
+          label="Description"
+          placeholder="Details, in Markdown"
+          rows={5}
+          value={description}
+          onChange={setDescription}
+        />
+        <div {...stylex.props(styles.chips)}>
           {project ? (
             <Menu
               label="Project"
@@ -251,7 +292,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
               }
             />
           ) : (
-            <span className="text-[12px] text-text3">No project yet</span>
+            <span {...stylex.props(styles.none)}>No project yet</span>
           )}
           <Menu
             label="Priority"
@@ -316,48 +357,31 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
             trigger={<Chip name="Model">{models.find((m) => m.key === model)?.label ?? "Default"}</Chip>}
           />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Labeled label="Labels">
-            <input
-              className={`${INPUT} h-8`}
-              placeholder="backend, ui"
-              value={labels}
-              onChange={(e) => setLabels(e.target.value)}
-            />
-          </Labeled>
-          <Labeled label="Deadline">
-            <input
-              className={`${INPUT} h-8`}
-              placeholder="2026-11-04 or 2026-11-04 17:00"
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
-            />
-          </Labeled>
+        <div {...stylex.props(styles.twoColumns)}>
+          <TextInput label="Labels" size="sm" placeholder="backend, ui" value={labels} onChange={setLabels} />
+          <TextInput
+            label="Deadline"
+            size="sm"
+            placeholder="2026-11-04 or 2026-11-04 17:00"
+            value={deadline}
+            onChange={setDeadline}
+          />
         </div>
         <AttachRow attach={attach} />
         {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
+        {error ? <Banner status="error" role="alert" title={error} /> : null}
       </div>
-      <div className="flex flex-none flex-wrap items-center gap-2 border-t border-line2 px-4 py-3">
-        {noConnection ? (
-          <span className="mr-auto">
-            <NoConnectionNote />
+      <LayoutFooter hasDivider padding={0}>
+        <div {...stylex.props(styles.footer)}>
+          <span {...stylex.props(styles.footerNote)}>
+            {noConnection ? <NoConnectionNote /> : "Lands in Backlog. Nothing starts until you press Start."}
           </span>
-        ) : null}
-        <span className={`${noConnection ? "hidden" : "mr-auto"} text-[12px] text-text3`}>
-          Lands in Backlog. Nothing starts until you press Start.
-        </span>
-        <Button disabled={!ready || busy} onClick={() => create(false)}>
-          Create
-        </Button>
-        <Button kind="primary" disabled={!ready || busy} onClick={() => create(true)}>
-          Create and start <Kbd onAccent>{showChord("secondary-enter", isMac)}</Kbd>
-        </Button>
-      </div>
+          <Button label="Create" isDisabled={!ready || busy} onClick={() => create(false)} />
+          <Button label="Create and start" variant="primary" isDisabled={!ready || busy} onClick={() => create(true)}>
+            Create and start <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
+          </Button>
+        </div>
+      </LayoutFooter>
     </>
   );
 }
@@ -379,7 +403,8 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const attach = useAttachments();
   const [effort, setEffort] = useState("default");
   const [picked, setPicked] = useState<string | null>(() => overlays.prefill()?.employeeId ?? null);
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const workspace = useWorkspace();
+  const [projectId, setProjectId] = useState<string | null>(workspace.id);
   const [mode, setMode] = useState("default");
   const [model, setModel] = useState("default");
   const { busy, error, held, send, sendAnyway } = useSend((text) => {
@@ -392,7 +417,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const whoId = picked ?? defaultAssignee(employees.data ?? [], storage.get(LAST_GIVEN));
   const who = active.find((e) => e.id === whoId) ?? null;
   const shownProjects = projects.data ?? [];
-  // Required, without a default: work should not land in a project nobody chose. Only one leaves no choice.
+  // Required: work should not land in a project nobody chose. The workspace chose it, or only one leaves no choice.
   const project = shownProjects.length === 1 ? shownProjects[0] : shownProjects.find((p) => p.id === projectId);
   const ready = Boolean(project) && Boolean(who) && goal.trim() !== "";
 
@@ -453,49 +478,59 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
     ),
   );
 
-  const pick =
-    "inline-flex h-7 cursor-pointer items-center gap-[6px] rounded-[6px] border px-2 text-[12px] font-medium";
-  const on = "border-acc-text bg-sel text-text";
-  const off = "border-line bg-transparent text-text2 hover:bg-sel hover:text-text";
   const chosenOther = others.find((e) => e.id === whoId);
 
   return (
     <>
-      <div className="flex h-11 flex-none items-center gap-2 border-b border-line2 px-4">
-        <span className="font-medium">Give work</span>
-        <span className="truncate text-text3">· starts right away, or with a plan for you to approve</span>
-        <SwitchDialog
-          label="New ticket instead"
-          onSwitch={() => overlays.open("ticket", { title: titleOfGoal(goal), description: goal.trim() })}
-        />
-        <CloseButton />
-      </div>
-      <div {...attach.target} className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
-        <Labeled label="What needs doing">
-          <textarea
-            data-autofocus
-            className={`${INPUT} min-h-[110px] resize-y py-2 leading-[1.5]`}
-            placeholder="What needs doing? For example: compare three hosting options"
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
+      <DialogHeader
+        title="Give work"
+        subtitle="starts right away, or with a plan for you to approve"
+        endContent={
+          <SwitchDialog
+            label="New ticket instead"
+            onSwitch={() => overlays.open("ticket", { title: titleOfGoal(goal), description: goal.trim() })}
           />
-        </Labeled>
-        <div className="flex flex-col gap-[6px]">
-          <span className="text-[12px] font-medium text-text2">For</span>
-          <div className="flex flex-wrap gap-[6px]">
-            {active.length === 0 ? <span className="text-text3">No employee yet.</span> : null}
-            {roots.map((e) => (
-              <button
-                key={e.id}
-                type="button"
-                aria-pressed={e.id === whoId}
-                onClick={() => setPicked(e.id)}
-                className={`${pick} ${e.id === whoId ? on : off}`}
+        }
+        onOpenChange={(next) => {
+          if (!next) onClose();
+        }}
+      />
+      <div {...attach.target} {...stylex.props(styles.body, styles.giveBody)}>
+        <TextArea
+          label="What needs doing"
+          hasAutoFocus
+          placeholder="What needs doing? For example: compare three hosting options"
+          rows={4}
+          value={goal}
+          onChange={setGoal}
+        />
+        <div {...stylex.props(styles.choices)}>
+          <span {...stylex.props(styles.caption)}>For</span>
+          <div {...stylex.props(styles.chips)}>
+            {active.length === 0 ? <span {...stylex.props(styles.empty)}>No employee yet.</span> : null}
+            {roots.length > 0 ? (
+              <ToggleButtonGroup
+                label="For"
+                type="single"
+                size="sm"
+                value={whoId ?? null}
+                onChange={(next) => {
+                  if (typeof next === "string") setPicked(next);
+                }}
+                xstyle={styles.pick}
               >
-                <Mark letter={initial(e.name)} color={markColor(e.id)} size={16} radius={4} />
-                {e.name}
-              </button>
-            ))}
+                {roots.map((e) => (
+                  <ToggleButton
+                    key={e.id}
+                    value={e.id}
+                    label={e.name}
+                    icon={<Mark letter={initial(e.name)} color={markColor(e.id)} size={16} radius={4} />}
+                  >
+                    {e.name}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+            ) : null}
             {others.length > 0 ? (
               <Menu
                 label="Someone else"
@@ -503,35 +538,43 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
                 options={others.map((e) => ({ key: e.id, label: e.name }))}
                 onPick={setPicked}
                 trigger={
-                  <button type="button" className={`${pick} ${chosenOther ? on : off}`}>
-                    {chosenOther ? chosenOther.name : "Anyone…"}
-                  </button>
+                  <Chip style={chosenOther ? PICKED : undefined}>{chosenOther ? chosenOther.name : "Anyone…"}</Chip>
                 }
               />
             ) : null}
           </div>
         </div>
-        <div className="flex flex-col gap-[6px]">
-          <span className="text-[12px] font-medium text-text2">Project · its memory and guidelines come along</span>
-          <div className="flex flex-wrap gap-[6px]">
+        <div {...stylex.props(styles.choices)}>
+          <span {...stylex.props(styles.caption)}>Project · its memory and guidelines come along</span>
+          <div {...stylex.props(styles.chips)}>
             {shownProjects.length === 0 ? (
-              <span className="text-text3">Create a project first: work always belongs to one.</span>
-            ) : null}
-            {shownProjects.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                aria-pressed={p.id === project?.id}
-                onClick={() => setProjectId(p.id)}
-                className={`${pick} ${p.id === project?.id ? on : off}`}
+              <span {...stylex.props(styles.empty)}>Create a project first: work always belongs to one.</span>
+            ) : (
+              <ToggleButtonGroup
+                label="Project"
+                type="single"
+                size="sm"
+                value={project?.id ?? null}
+                onChange={(next) => {
+                  if (typeof next === "string") setProjectId(next);
+                }}
+                xstyle={styles.pick}
               >
-                <Mark letter={initial(p.name)} color={markColor(p.id)} size={16} radius={4} />
-                {p.name}
-              </button>
-            ))}
+                {shownProjects.map((p) => (
+                  <ToggleButton
+                    key={p.id}
+                    value={p.id}
+                    label={p.name}
+                    icon={<Mark letter={initial(p.name)} color={markColor(p.id)} size={16} radius={4} />}
+                  >
+                    {p.name}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+            )}
           </div>
         </div>
-        <div className="flex flex-wrap gap-[6px]">
+        <div {...stylex.props(styles.chips)}>
           <Menu
             label="Model"
             value={model}
@@ -565,26 +608,24 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
         </div>
         <AttachRow attach={attach} />
         {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
+        {error ? <Banner status="error" role="alert" title={error} /> : null}
       </div>
-      <div className="flex flex-none items-center gap-2 border-t border-line2 px-4 py-3">
-        <span className="mr-auto text-[12px] text-text3">
-          {noConnection ? (
-            <NoConnectionNote />
-          ) : who ? (
-            `${who.name} reports back to you when it is done.`
-          ) : (
-            "Choose who gets this work."
-          )}
-        </span>
-        <Button kind="primary" disabled={!ready || busy} onClick={submit}>
-          Give work <Kbd onAccent>{showChord("secondary-enter", isMac)}</Kbd>
-        </Button>
-      </div>
+      <LayoutFooter hasDivider padding={0}>
+        <div {...stylex.props(styles.footer)}>
+          <span {...stylex.props(styles.footerNote)}>
+            {noConnection ? (
+              <NoConnectionNote />
+            ) : who ? (
+              `${who.name} reports back to you when it is done.`
+            ) : (
+              "Choose who gets this work."
+            )}
+          </span>
+          <Button label="Give work" variant="primary" isDisabled={!ready || busy} onClick={submit}>
+            Give work <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
+          </Button>
+        </div>
+      </LayoutFooter>
     </>
   );
 }
@@ -601,9 +642,9 @@ export function NewTicketDialog() {
   const { close } = overlays;
   useCloseWhenSignedOut(open, close);
   return (
-    <Dialog open={open} onClose={close} title="New ticket">
+    <FormDialog open={open} onClose={close} title="New ticket">
       {open ? <NewTicketBody onClose={close} /> : null}
-    </Dialog>
+    </FormDialog>
   );
 }
 
@@ -612,8 +653,8 @@ export function GiveWorkDialog() {
   const { close } = overlays;
   useCloseWhenSignedOut(open, close);
   return (
-    <Dialog open={open} onClose={close} title="Give work">
+    <FormDialog open={open} onClose={close} title="Give work">
       {open ? <GiveWorkBody onClose={close} /> : null}
-    </Dialog>
+    </FormDialog>
   );
 }

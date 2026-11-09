@@ -1,4 +1,3 @@
-import '../../app/mobile_core.dart';
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
@@ -22,12 +21,11 @@ import '../guidelines/target_guidelines_page.dart';
 import '../connection/connection_banner.dart';
 import '../dashboard/give_work.dart';
 import 'employee_run_sheet.dart';
-import '../plugins/employee_plugins_sheet.dart';
 import '../project/tasks_tab.dart';
 import 'employee_widgets.dart';
 
 /// An employee: give it work, where it sits (boss, team), where it
-/// works now, its model, plugins and status, and its tasks across projects.
+/// works now, its model and status, and its tasks across projects.
 class EmployeePage extends StatelessWidget {
   const EmployeePage({super.key, required this.employeeId});
 
@@ -162,7 +160,6 @@ class EmployeePage extends StatelessWidget {
                             value: m.screenAllowed,
                             onChanged: (value) => _setScreen(context, m, value),
                           ),
-                          if (shownInMobileCore('heartbeats')) GroupRow(title: heartbeatLine(m.heartbeat), chevron: false),
                           GroupRow(key: const ValueKey('employee-edit'), title: 'Edit', onTap: () => editEmployee(context, m)),
                           _Advanced(employee: m),
                         ],
@@ -281,7 +278,7 @@ class EmployeePage extends StatelessWidget {
 }
 
 /// Edit's Advanced section, folded as on the desktop: subagents, run one at a
-/// time, plugins and instruction versions (read-only; restoring is on the PC).
+/// time and instruction versions (read-only; restoring is on the PC).
 class _Advanced extends StatelessWidget {
   const _Advanced({required this.employee});
 
@@ -299,13 +296,12 @@ class _Advanced extends StatelessWidget {
       collapsedShape: const Border(),
       title: const Text('Advanced'),
       subtitle: Text(
-        ['Subagents', if (m.sequentialTasks) 'one at a time', 'plugins', if (versions) 'instruction versions'].join(' · '),
+        ['Subagents', if (m.sequentialTasks) 'one at a time', if (versions) 'instruction versions'].join(' · '),
         style: TextStyle(color: Tokens.muted, fontSize: 12.5),
       ),
       children: [
         GroupRow(key: const ValueKey('employee-subagents'), title: 'Subagents', subtitle: 'Model of the helpers ${m.name} starts', onTap: () => showEmployeeRunSheet(context, m, subagents: true)),
         EmployeeSequentialTile(employee: m),
-        GroupRow(key: const ValueKey('employee-plugins'), title: 'Plugins', onTap: () => showEmployeePluginsSheet(context, m)),
         if (versions) GroupRow(key: const ValueKey('employee-instruction-versions'), title: 'Instruction versions', onTap: () => _showInstructionVersions(context, m)),
       ],
     );

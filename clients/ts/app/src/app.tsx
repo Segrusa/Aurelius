@@ -1,12 +1,28 @@
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { LayerProvider } from "@astryxdesign/core/Layer";
+import { LinkProvider } from "@astryxdesign/core/Link";
+import { Theme } from "@astryxdesign/core/theme";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRootRoute, createRoute, createRouter, Outlet, RouterProvider, redirect } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { type Appearance, AppearanceContext, applyAppearance, readAppearance, saveAppearance } from "./appearance";
+import {
+  type Appearance,
+  AppearanceContext,
+  applyAppearance,
+  readAppearance,
+  saveAppearance,
+  useResolvedMode,
+} from "./appearance";
 import { ConnectionProvider } from "./connection";
+import { hidden } from "./hidden";
 import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
+import { activityFilters } from "./screens/activity-logic";
 import { BoardScreen } from "./screens/board";
 import { ChatScreen } from "./screens/chat";
+import { EmployeeChatScreen } from "./screens/employee-chat";
+import { type EmployeeTab, isEmployeeTab } from "./screens/employee-logic";
 import { EmployeePage } from "./screens/employee-page";
 import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
 import { Frame } from "./screens/frame";
@@ -17,24 +33,28 @@ import { InboxScreen } from "./screens/inbox";
 import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { MyTicketsScreen } from "./screens/my-tickets";
-import { ProjectPage, ProjectsScreen } from "./screens/projects";
+import { ProjectPage, ProjectsScreen, projectTabShown } from "./screens/projects";
+import { ScheduledScreen } from "./screens/scheduled";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
 import { TasksScreen } from "./screens/tasks";
 import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
-import { Button } from "./ui/kit";
-import { TooltipProvider } from "./ui/overlay";
+import { precisionTheme } from "./theme/precision/precision";
+import { RouterLink } from "./ui/router-link";
+import { useWorkspace, WorkspaceProvider } from "./workspace";
 
 /** A screen of the design that is not built yet: says so, and the phase, instead of looking finished. */
 
 const root = createRootRoute({
   component: () => (
-    <LinkFollower>
-      <Frame>
-        <Outlet />
-      </Frame>
-    </LinkFollower>
+    <WorkspaceProvider>
+      <LinkFollower>
+        <Frame>
+          <Outlet />
+        </Frame>
+      </LinkFollower>
+    </WorkspaceProvider>
   ),
 });
 const index = createRoute({
@@ -93,9 +113,20 @@ const orgChart = createRoute({ getParentRoute: () => root, path: "/employees/org
 const employee = createRoute({
   getParentRoute: () => root,
   path: "/employees/$id",
+  validateSearch: (search: Record<string, unknown>): { tab?: EmployeeTab } =>
+    isEmployeeTab(search.tab) ? { tab: search.tab } : {},
   component: function EmployeeRoute() {
     const { id } = employee.useParams();
-    return <EmployeePage key={id} id={id} />;
+    const { tab } = employee.useSearch();
+    return <EmployeePage key={id} id={id} {...(tab ? { tab } : {})} />;
+  },
+});
+const employeeChat = createRoute({
+  getParentRoute: () => root,
+  path: "/talk/$conversationId",
+  component: function EmployeeChatRoute() {
+    const { conversationId } = employeeChat.useParams();
+    return <EmployeeChatScreen key={conversationId} conversationId={conversationId} />;
   },
 });
 const knowledgeIndex = createRoute({
@@ -113,9 +144,12 @@ const knowledge = createRoute({
   component: function KnowledgeRoute() {
     const { tab } = knowledge.useParams();
     const { project: start } = knowledge.useSearch();
-    if (tab === "memory") return <MemoryBody key={start ?? ""} projectId={null} start={start ?? null} />;
-    if (tab === "ideas") return <IdeasBody projectId={null} />;
-    if (tab === "vault") return <VaultScreen />;
+    const workspace = useWorkspace();
+    if (tab === "memory") {
+      return <MemoryBody key={workspace.id ?? start ?? ""} projectId={workspace.id} start={start ?? null} />;
+    }
+    if (tab === "ideas" && !hidden("Ideas")) return <IdeasBody projectId={null} />;
+    if (tab === "vault" && !hidden("Vault")) return <VaultScreen />;
     return <GuidelinesScreen />;
   },
 });
@@ -136,7 +170,7 @@ const project = createRoute({
   getParentRoute: () => root,
   path: "/projects/$id",
   validateSearch: (search: Record<string, unknown>): { tab?: (typeof PROJECT_TABS)[number] } =>
-    PROJECT_TABS.includes(search.tab as (typeof PROJECT_TABS)[number])
+    PROJECT_TABS.includes(search.tab as (typeof PROJECT_TABS)[number]) && projectTabShown(search.tab as string)
       ? { tab: search.tab as (typeof PROJECT_TABS)[number] }
       : {},
   component: function ProjectRoute() {
@@ -146,6 +180,16 @@ const project = createRoute({
 });
 
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
+const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
+// The log lives in Settings now; an old link keeps what it narrowed on.
+const activity = createRoute({
+  getParentRoute: () => root,
+  path: "/activity",
+  validateSearch: activityFilters,
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: "/settings/$section", params: { section: "activity" }, search });
+  },
+});
 const settingsIndex = createRoute({
   getParentRoute: () => root,
   path: "/settings",
@@ -156,18 +200,19 @@ const settingsIndex = createRoute({
 const settings = createRoute({
   getParentRoute: () => root,
   path: "/settings/$section",
+  validateSearch: activityFilters,
   component: function SettingsRoute() {
-    return <SettingsScreen section={settings.useParams().section} />;
+    return <SettingsScreen section={settings.useParams().section} filters={settings.useSearch()} />;
   },
 });
 
 function ScreenFailed({ reset }: { reset: () => void }) {
   return (
-    <div className="m-auto flex max-w-[420px] flex-col items-center gap-3 p-10 text-center">
-      <p className="m-0 text-[15px] font-semibold">This screen ran into a problem.</p>
-      <p className="m-0 text-text2">The rest of the app still works. Try it again, or go to another screen.</p>
-      <Button onClick={reset}>Try again</Button>
-    </div>
+    <EmptyState
+      title="This screen ran into a problem."
+      description="The rest of the app still works. Try it again, or go to another screen."
+      actions={<Button label="Try again" onClick={() => reset()} />}
+    />
   );
 }
 
@@ -180,9 +225,12 @@ const router = createRouter({
     tasks,
     taskRun,
     chat,
+    employeeChat,
     settingsIndex,
     settings,
     usage,
+    scheduled,
+    activity,
     orgChart,
     employee,
     employees,
@@ -204,6 +252,7 @@ export function App({ platform }: { platform: Platform }) {
   const [generation, setGeneration] = useState(0);
   const [appearance, setAppearance] = useState<Appearance>(() => readAppearance(platform.storage));
   useEffect(() => applyAppearance(appearance), [appearance]);
+  const mode = useResolvedMode(appearance);
   const look = useMemo(
     () => ({
       appearance,
@@ -217,17 +266,21 @@ export function App({ platform }: { platform: Platform }) {
   return (
     <PlatformProvider value={platform}>
       <AppearanceContext.Provider value={look}>
-        <QueryClientProvider client={client}>
-          <ConnectionProvider platform={platform} generation={generation}>
-            <Gate onPaired={() => setGeneration((g) => g + 1)}>
-              <KeysProvider>
-                <TooltipProvider>
-                  <RouterProvider router={router} />
-                </TooltipProvider>
-              </KeysProvider>
-            </Gate>
-          </ConnectionProvider>
-        </QueryClientProvider>
+        <Theme theme={precisionTheme} mode={mode}>
+          <LayerProvider toast={{ maxVisible: 3, position: "bottomEnd" }}>
+            <LinkProvider component={RouterLink}>
+              <QueryClientProvider client={client}>
+                <ConnectionProvider platform={platform} generation={generation}>
+                  <Gate onPaired={() => setGeneration((g) => g + 1)}>
+                    <KeysProvider>
+                      <RouterProvider router={router} />
+                    </KeysProvider>
+                  </Gate>
+                </ConnectionProvider>
+              </QueryClientProvider>
+            </LinkProvider>
+          </LayerProvider>
+        </Theme>
       </AppearanceContext.Provider>
     </PlatformProvider>
   );

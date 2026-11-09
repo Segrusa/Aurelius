@@ -3,10 +3,11 @@
 pub mod chat;
 pub mod files;
 pub mod discussion;
+pub(crate) mod employee_chat;
 pub mod message_files;
 pub mod message_images;
 pub mod message_uploads;
 pub mod overview;
 pub mod project_chat;
-pub mod shares;
+pub(crate) mod scheduled;
 pub mod ticket_channel;

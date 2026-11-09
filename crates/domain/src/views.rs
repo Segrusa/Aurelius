@@ -3,8 +3,8 @@
 //! They live in `domain` so that `storage` and `application` never depend on the wire crate.
 
 use crate::{
-    ApprovalId, AttachmentId, ConversationId, EmployeeId, MemoryId, MessageId, NoteId, ProjectId,
-    ProjectStatus, ProposalId, ProviderId, RunId, TaskId,
+    ApprovalId, AttachmentId, ConversationId, EmployeeId, MemoryId, MessageId, ProjectId,
+    ProjectStatus, ProposalId, ProviderId, RunId, TaskId, TicketId,
     approval::ApprovalStatus,
     connection::{ConfigScope, Purpose, RunDefaults},
     conversation::{MessageRole, MessageStatus},
@@ -29,6 +29,10 @@ pub struct ProjectSummary {
     /// The project's own dispatcher for tickets; none: the company's (B5).
     #[serde(default)]
     pub dispatcher_employee_id: Option<EmployeeId>,
+    /// The workspace's styleguide, a Claude Design artifact (feature `design_links`). A
+    /// link only: runs read the artifact themselves. Left out when none and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub styleguide_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -63,7 +67,6 @@ pub struct TaskView {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub result: Option<String>,
-    pub depends_on: Vec<TaskId>,
     /// Actions (and questions) of this task waiting for the user.
     pub pending_approvals: u32,
     /// The task this one was delegated from (a sub-task), and its employee.
@@ -83,18 +86,6 @@ pub struct TaskView {
     pub attachments: Vec<MessageFileView>,
     /// The recurring task this one was made from.
     pub schedule_id: Option<crate::TaskScheduleId>,
-    /// The agent function whose call made this task.
-    pub function_id: Option<crate::AgentFunctionId>,
-    /// The app (the name of its app key) that created this task through
-    /// `aurelius-mcp` (feature `app_keys`); none for the user's own tasks.
-    #[serde(default)]
-    pub created_by_app: Option<String>,
-    /// The app key behind `created_by_app`.
-    #[serde(default)]
-    pub created_by_app_key_id: Option<crate::AppKeyId>,
-    /// Where the task's variants are, when it has some (feature `task_variants`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variant_phase: Option<crate::variants::VariantPhase>,
     /// A finished task (succeeded, failed or cancelled) in whose conversation a
     /// run goes on or waits to start, after the user (or a manager) wrote to it.
     /// The status does not change: clients show such a task as working or
@@ -168,86 +159,6 @@ pub struct TaskScheduleView {
     /// The task from this schedule that is still open, if any.
     pub open_task_id: Option<TaskId>,
     pub created_at_ms: i64,
-}
-
-/// Agent functions. Times are epoch milliseconds.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct AgentFunctionsSnapshot {
-    /// The kill switch: false means every function refuses calls.
-    pub all_enabled: bool,
-    pub functions: Vec<AgentFunctionView>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct AgentFunctionView {
-    pub id: crate::AgentFunctionId,
-    pub project_id: ProjectId,
-    pub employee_id: EmployeeId,
-    pub employee_name: String,
-    pub name: String,
-    pub slug: String,
-    pub description: String,
-    pub instruction_template: String,
-    pub params: Vec<crate::agent_function::FunctionParam>,
-    /// None: the employee's own default mode.
-    pub mode: Option<crate::autonomy::AgentMode>,
-    pub limit_per_day: Option<u32>,
-    pub limit_per_week: Option<u32>,
-    pub enabled: bool,
-    /// Accepted calls in the last 24 hours / 7 days (rolling).
-    pub used_day: u32,
-    pub used_week: u32,
-    pub created_at_ms: i64,
-}
-
-/// An API key; the secret is never part of it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ApiKeyView {
-    pub id: crate::ApiKeyId,
-    pub name: String,
-    pub function_ids: Vec<crate::AgentFunctionId>,
-    pub created_at_ms: i64,
-    pub last_used_ms: Option<i64>,
-    pub revoked_at_ms: Option<i64>,
-}
-
-/// The answer to `api_keys/create`: the secret (`ak_...`) is shown once and not kept.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ApiKeyCreated {
-    pub key: ApiKeyView,
-    pub secret: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct FunctionCallsSnapshot {
-    /// Newest first.
-    pub calls: Vec<FunctionCallView>,
-    pub usage: Vec<FunctionUsageView>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct FunctionCallView {
-    pub id: crate::FunctionCallId,
-    pub function_id: crate::AgentFunctionId,
-    pub function_name: String,
-    pub api_key_id: crate::ApiKeyId,
-    pub api_key_name: String,
-    /// The task the call made (open it like any task).
-    pub task_id: TaskId,
-    /// queued, running, succeeded, failed or cancelled.
-    pub status: crate::agent_function::CallStatus,
-    pub created_at_ms: i64,
-    pub finished_at_ms: Option<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct FunctionUsageView {
-    pub function_id: crate::AgentFunctionId,
-    /// Accepted calls in the last 24 hours / 7 days (rolling).
-    pub used_day: u32,
-    pub used_week: u32,
-    pub limit_per_day: Option<u32>,
-    pub limit_per_week: Option<u32>,
 }
 
 /// A project's ideas.
@@ -358,6 +269,14 @@ pub struct ApprovalView {
     /// servers or Claude in Chrome); answered with `DecideApproval::always_allow`.
     #[serde(default)]
     pub always_allow_eligible: bool,
+    /// The ticket it waits on: of the run's task, or of the discussion that woke
+    /// the run (feature `run_cards`). Left out for other runs and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<crate::TicketId>,
+    /// The discussion (a channel, a ticket's) that woke the run (feature `run_cards`).
+    /// Left out for other runs and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discussion_id: Option<ConversationId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -374,6 +293,23 @@ pub struct EmployeeSummary {
     pub title: Option<String>,
     /// Who this employee reports to; none: a root of the org chart (the management team).
     pub reports_to: Option<EmployeeId>,
+    /// What other employees read about it (P7). Left out when it has none: their
+    /// prompt then shows the first line of its instructions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// What its runs may do with files and commands (C3); left out when `Inherit`.
+    #[serde(default, skip_serializing_if = "crate::employee::AccessLevel::is_inherit")]
+    pub access_level: crate::employee::AccessLevel,
+    /// Its tools, MCP servers and what asks first (C2); left out when it has all of its level.
+    #[serde(default, skip_serializing_if = "crate::employee_tools::ToolPolicy::is_default")]
+    pub tool_policy: crate::employee_tools::ToolPolicy,
+    /// Its own provider, model and effort (C1); left out when it inherits them all.
+    /// The same as `connection.list` has for its scope, without needing that read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<crate::connection::RunDefaults>,
+    /// What it is doing now (U6, derived, never stored); left out when idle.
+    #[serde(default, skip_serializing_if = "crate::employee::ActivityState::is_idle")]
+    pub activity_state: crate::employee::ActivityState,
     /// Projects it has open tasks in (derived, never stored).
     pub projects_active: Vec<ProjectId>,
     pub instructions: Option<String>,
@@ -390,108 +326,15 @@ pub struct EmployeeSummary {
     pub screen_allowed: bool,
     /// Own workspace folder, if any: the work folder of its chat (in a task the project folder applies).
     pub folder: Option<String>,
-    /// Opt-in heartbeat; `None` = off.
-    pub heartbeat: Option<HeartbeatView>,
     /// It works on one task at a time; the others wait their turn.
     pub sequential_tasks: bool,
     /// Its chats, most recent first: the persistent one (`conversation_id`, it
-    /// carries mode, heartbeat and memory summaries) and older ones from before
+    /// carries mode and memory summaries) and older ones from before
     /// protocol 3 (history). Task conversations are not listed.
     pub conversations: Vec<ConversationSummary>,
     /// What runs for this employee right now: its own steps,
     /// subagents and sub-tasks delegated to colleagues (derived, never stored).
     pub agents: Vec<AgentView>,
-}
-
-/// A page on claude.ai that a Claude Code run published (Claude Code artifact).
-/// The URL is its identity: republishing keeps it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArtifactView {
-    /// `https://claude.ai/artifact/<id>`; private to the user's claude.ai account until shared there.
-    pub url: String,
-    pub title: String,
-    /// The conversation whose run published it first.
-    pub conversation_id: ConversationId,
-    pub task_id: Option<TaskId>,
-    pub project_id: Option<ProjectId>,
-    /// Claude Code's version number of the latest publish (1 on the first).
-    pub version: u32,
-    pub first_published_at_ms: i64,
-    pub last_published_at_ms: i64,
-    /// The server kept the published file of at least one version, so
-    /// `artifact.get_content` can show it; false for pages published before
-    /// servers kept them (and from older servers): show the link instead.
-    #[serde(default)]
-    pub has_content: bool,
-}
-
-/// What kind of file a run published; decides how a client renders it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ArtifactKind {
-    Html,
-    Markdown,
-    /// Neither: show as plain text.
-    Text,
-}
-
-/// The file one publish sent to claude.ai, as the server kept it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArtifactSnapshot {
-    pub version: u32,
-    pub kind: ArtifactKind,
-    /// The published file's name (no folder).
-    pub file_name: String,
-    pub content: String,
-    pub published_at_ms: i64,
-}
-
-/// `artifact.get_content`: an artifact and the kept file of one version.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArtifactContent {
-    pub artifact: ArtifactView,
-    /// Versions with a kept file, newest first (the server keeps the last 20).
-    pub versions: Vec<u32>,
-    /// The asked version, else the newest kept one; none when the server kept
-    /// no file of it (published before servers kept them, larger than 2 MB, or
-    /// not text): show the link instead.
-    pub snapshot: Option<ArtifactSnapshot>,
-}
-
-/// `artifact.list`: newest publish first.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ArtifactsSnapshot {
-    pub artifacts: Vec<ArtifactView>,
-}
-
-/// A note of a project as `note.list` shows it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct NoteSummary {
-    pub id: NoteId,
-    pub project_id: ProjectId,
-    /// The first non-empty line without Markdown heading marks; empty for an empty note.
-    pub title: String,
-    /// The text after the title on one line, at most 120 characters.
-    pub preview: String,
-    pub pinned: bool,
-    pub created_at_ms: i64,
-    pub updated_at_ms: i64,
-    /// Goes up by one with every save; `note.update` names the one it edited.
-    pub revision: u64,
-}
-
-/// `note.list`: pinned first, then the last edited first.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct NotesSnapshot {
-    pub notes: Vec<NoteSummary>,
-}
-
-/// One note with its Markdown body (`note.get` and every note write).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct NoteView {
-    #[serde(flatten)]
-    pub summary: NoteSummary,
-    pub body: String,
 }
 
 /// One agent at work for an employee.
@@ -512,32 +355,6 @@ pub struct AgentView {
     pub doing: Option<String>,
     /// A subagent: how many tools it used so far.
     pub steps: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct HeartbeatView {
-    pub every_minutes: u32,
-    pub quiet_start_min: u32,
-    pub quiet_end_min: u32,
-    pub daily_token_budget: u64,
-    pub tokens_today: u64,
-    pub next_due_ms: Option<i64>,
-    /// e.g. "budget" when today's budget is used up.
-    pub waiting: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ShareView {
-    pub id: crate::ShareId,
-    pub title: String,
-    /// Where it came from, e.g. "Chat · How do we …" or "Task · Onboarding".
-    pub source: String,
-    /// project · <name> | employee · <name> | conversation
-    pub destination: String,
-    pub mode: crate::share::ShareMode,
-    pub excerpt: String,
-    pub created_at_ms: i64,
-    pub revoked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -691,6 +508,40 @@ pub struct MessageView {
     /// `message_edits`), per reader like `ReactionView::mine`. Left out when false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub editable: bool,
+    /// The run behind this message waits for a board member (feature `run_cards`):
+    /// a question or an approval is open, or the post ended a ticket's main task on
+    /// a question (the rule of `group_chat::asks_question`). Only on the run's last
+    /// message in the list. Left out when false and by older servers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub awaiting_user: bool,
+    /// What a run card under this message shows (feature `run_cards`): on a post in a
+    /// discussion and on a `Reported` line, the last one of its run in the list. With
+    /// `usage` for the tokens. Left out for other messages and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<RunBrief>,
+}
+
+/// What the run card of a post shows while folded (`MessageView::run`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunBrief {
+    /// `runs.status`: created | starting | running | waiting | cancelling | succeeded |
+    /// failed | cancelled | unknown. A string, so a new state never breaks a client.
+    pub status: String,
+    pub tool_calls: u32,
+    pub failed_calls: u32,
+    /// The employee whose run it was, for its scratchpad (feature `employee_scratchpad`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_id: Option<EmployeeId>,
+}
+
+/// `run.get_activity`: every tool call of a run, for an opened run card (feature `run_cards`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunActivity {
+    pub run_id: RunId,
+    /// The answer the calls are kept with (`activity.get` reads one whole); none without calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<MessageId>,
+    pub calls: Vec<ActivityView>,
 }
 
 /// `message.locate` (feature `message_locate`): where a message of a channel or
@@ -845,6 +696,9 @@ pub mod system_action {
     /// `by` chose who is responsible for the ticket (`to`: who; on a `moved` line,
     /// so an older client shows `text` and never reads a new `SystemLineKind`).
     pub const RESPONSIBLE: &str = "responsible";
+    /// A handoff waits until its sender has caught up with the thread (R5; `from`
+    /// who holds it, `to` who gets it; on a `limit` line, so `text` says it all).
+    pub const HANDOFF_HELD: &str = "handoff_held";
 }
 
 impl SystemLine {
@@ -1033,6 +887,174 @@ pub struct ChannelsSnapshot {
     pub channels: Vec<ChannelView>,
 }
 
+/// A message an employee scheduled (`schedule_message`, R7; feature `scheduled_messages`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ScheduledMessageView {
+    pub id: crate::ScheduledMessageId,
+    pub from_employee: EmployeeId,
+    pub from_name: String,
+    pub to_employee: EmployeeId,
+    pub to_name: String,
+    pub text: String,
+    pub created_at_ms: i64,
+    pub due_at_ms: i64,
+    /// scheduled | delivered | cancelled | not_delivered. A string, so a new state never breaks a client.
+    pub state: String,
+    /// Where it goes, in words ("the discussion of ticket #21").
+    pub place: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<TicketId>,
+    /// The channel of the Team chat it goes to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<ConversationId>,
+    /// Whose Claude login its run uses: the one of the run that planned it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_name: Option<String>,
+    /// Why it did not go out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    /// The run it started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
+}
+
+/// `scheduled_message.list`: what waits, soonest first, then the latest that went out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ScheduledMessagesSnapshot {
+    pub as_of_seq: u64,
+    pub messages: Vec<ScheduledMessageView>,
+}
+
+/// An employee that waits to pick up a thread (U3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ThreadWaiter {
+    pub employee_id: EmployeeId,
+    pub employee_name: String,
+    /// How many threads of this employee go first, counting what it is doing now.
+    pub behind: u32,
+    /// What holds it back besides its turn: `limit` (a usage limit), `question`
+    /// (the thread waits for a board member's answer). A string, so a new one never breaks a client.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// `thread.waiting`: who waits to pick up a thread and what is scheduled in it (U3, R7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ThreadWaitingSnapshot {
+    pub as_of_seq: u64,
+    pub waiters: Vec<ThreadWaiter>,
+    pub scheduled: Vec<ScheduledMessageView>,
+}
+
+/// Where a thread is, as `activity_log.list` and `employee.queue` name it (R8, U6).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ThreadPlace {
+    /// "#21 Fix login", a channel's name, "Chat with sam", or what is left of it.
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_id: Option<TicketId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<ConversationId>,
+    /// A board member's chat with an employee, when it is the reader's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_id: Option<ConversationId>,
+}
+
+/// One delivery, queue step or run step (R8; feature `activity_log`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActivityLogEntry {
+    pub seq: u64,
+    pub at_ms: i64,
+    /// delivery, queue or run. Text, not an enum: a later value only shows as it is.
+    pub category: String,
+    /// What happened (delivered, claimed, started, tool, ...). Text for the same reason.
+    pub step: String,
+    /// A short code or a tool's name; never the text of a message or a tool's input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_id: Option<EmployeeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub employee_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<ThreadPlace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hop: Option<u32>,
+}
+
+/// `activity_log.list`: the newest rows that match, newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActivityLogPage {
+    pub as_of_seq: u64,
+    pub entries: Vec<ActivityLogEntry>,
+    /// There are older rows: ask again with `before_seq` as the last row's `seq`.
+    #[serde(default)]
+    pub has_more: bool,
+}
+
+/// One item of an employee's mailbox (U6; feature `employee_queue`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeQueueItem {
+    pub id: String,
+    /// message, task, resume, scheduled. Text, not an enum.
+    pub kind: String,
+    /// board, employee or system.
+    pub source: String,
+    /// claimed (a run works on it), queued or held.
+    pub state: String,
+    pub thread_key: String,
+    pub place: ThreadPlace,
+    /// The run that works on it; none while it waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
+    pub hop: u32,
+    pub created_at_ms: i64,
+    pub not_before_ms: i64,
+    /// What holds it back besides its turn: question, limit, later, machine or handoff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waits_for: Option<String>,
+}
+
+/// `employee.queue`: what is in an employee's mailbox, what runs first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeQueue {
+    pub as_of_seq: u64,
+    pub employee_id: EmployeeId,
+    pub items: Vec<EmployeeQueueItem>,
+}
+
+/// `employee.scratchpad`: an employee's own note (C7; feature `employee_scratchpad`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ScratchpadView {
+    pub employee_id: EmployeeId,
+    pub text: String,
+    /// When it last changed; none when it was never written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<i64>,
+}
+
+/// One of a board member's lasting chats with an employee (feature `employee_chats`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeChatView {
+    pub conversation_id: ConversationId,
+    pub employee_id: EmployeeId,
+    pub employee_name: String,
+    /// What the employee wrote since the board member last read it.
+    pub unread: u32,
+    pub last_activity_ms: i64,
+}
+
+/// `employee.chats`: the reader's chats that have something in them, the latest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct EmployeeChatsSnapshot {
+    pub as_of_seq: u64,
+    pub chats: Vec<EmployeeChatView>,
+}
+
 /// A file the user sent to an employee, copied into its work folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MessageFileView {
@@ -1106,8 +1128,6 @@ pub struct MessagesSnapshot {
     pub browser_allowed: bool,
     /// The agent may take screenshots without asking each time; off by default (it then asks).
     pub screen_allowed: bool,
-    /// Snapshots shared into this conversation (e.g. a discussed task).
-    pub shares: Vec<ShareView>,
     /// Model and effort chosen for this conversation (unset: the employee's).
     pub run: crate::task::RunSettings,
     /// The employee of a task conversation or an employee chat.
@@ -1292,6 +1312,10 @@ pub struct TokenUsage {
     pub cost_micro_usd: Option<i64>,
     /// Some values are not a bill (e.g. subscription: API-equivalent value).
     pub estimate: bool,
+    /// How many model calls those runs made (feature `run_cards`). 0: not known,
+    /// for usage from before the calls were counted and by older servers.
+    #[serde(default)]
+    pub model_calls: u64,
 }
 
 /// `usage.get_totals`: what a conversation or a task used (feature `run_usage`).
@@ -1313,68 +1337,6 @@ pub struct SubtaskUsage {
     /// Who works on it.
     pub employee_name: Option<String>,
     pub usage: TokenUsage,
-}
-
-/// `variants.get_setting` / `variants.set_enabled`: whether tasks may be tried in
-/// several ways first (feature `task_variants`; off by default).
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
-)]
-pub struct VariantsSetting {
-    pub enabled: bool,
-    /// At most this many variants per task.
-    pub max_variants: u8,
-}
-
-/// A task's variants and the judge's comparison (`task.variants`).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TaskVariantsView {
-    pub task_id: TaskId,
-    pub phase: crate::variants::VariantPhase,
-    /// How many variants.
-    pub count: u8,
-    /// The commit the variants started from.
-    pub base_commit: Option<String>,
-    /// The judge's pick, once it compared them.
-    pub judge_pick: Option<u8>,
-    /// What the judge advises to combine, if anything.
-    pub compose: Option<String>,
-    /// The chosen variant and by whom (`user` | `judge`).
-    pub chosen: Option<u8>,
-    pub chosen_by: Option<String>,
-    /// Why it failed (phase `failed`), e.g. the chosen diff did not apply.
-    pub error: Option<String>,
-    pub variants: Vec<TaskVariantView>,
-}
-
-/// One variant of a task.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TaskVariantView {
-    /// 1 to 3.
-    pub n: u8,
-    /// The approach it was told to take.
-    pub hint: String,
-    pub status: crate::variants::VariantStatus,
-    /// Its own conversation (read it like any other).
-    pub conversation_id: Option<ConversationId>,
-    pub run_id: Option<RunId>,
-    /// Files changed, lines added and removed.
-    pub files: u32,
-    pub insertions: u32,
-    pub deletions: u32,
-    /// The diff against `base_commit` (cut at 200 kB; `diff_truncated`).
-    pub diff: String,
-    pub diff_truncated: bool,
-    /// Its closing answer.
-    pub report: String,
-    /// Tool calls that failed or were refused.
-    pub errors: u32,
-    /// The last test or build output it saw (cut), if any.
-    pub tests: Option<String>,
-    pub usage: TokenUsage,
-    /// Its place in the judge's ranking (1 = best) and why.
-    pub rank: Option<u8>,
-    pub judge_note: Option<String>,
 }
 
 /// `trace.get_setting` / `trace.set_enabled`: whether runs keep a trace (feature `run_trace`).
@@ -1461,6 +1423,30 @@ pub struct UsageSnapshot {
     pub by_source: Vec<UsageRow>,
     /// Tokens per day, last 14 days (oldest first).
     pub by_day: Vec<UsageDay>,
+    /// Per board member whose Claude login ran it, last 30 days (feature `run_cards`).
+    /// Left out by older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by_user: Vec<UsageUserRow>,
+}
+
+/// One board member's share of the usage (`UsageSnapshot::by_user`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UsageUserRow {
+    /// `runs.login_user`; none: runs on no one's login (an API key, a background run).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_user: Option<String>,
+    /// That board member's name; none when there is none or they are gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    pub runs: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub cost_micro_usd: Option<i64>,
+    pub estimate: bool,
+    #[serde(default)]
+    pub model_calls: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

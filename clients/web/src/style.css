@@ -1,2 +1,3 @@
-@import "tailwindcss";
-@import "@aurelius/app/theme.css";
+@layer reset, astryx-base, astryx-theme;
+
+@import "@aurelius/app/app.css";

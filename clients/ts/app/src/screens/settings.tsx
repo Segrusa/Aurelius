@@ -1,10 +1,16 @@
+import { Heading } from "@astryxdesign/core/Heading";
+import { LayoutHeader } from "@astryxdesign/core/Layout";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { useLinkState } from "../connection";
+import { type Feature, shown } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { Icon } from "../ui/icons";
+import { ActivitySection } from "./activity";
+import type { ActivityFilters } from "./activity-logic";
 import {
   BackupsSection,
   ConnectionsSection,
@@ -43,14 +49,114 @@ const KEYED_ACTIONS = [
   "LoadToggleEnabled",
 ];
 
+const enter = stylex.keyframes({
+  from: { opacity: 0, transform: "translateY(4px)" },
+});
+
+const styles = stylex.create({
+  sidebar: {
+    display: "flex",
+    width: 224,
+    flexShrink: 0,
+    flexDirection: "column",
+    gap: 18,
+    overflowY: "auto",
+    paddingBlockStart: 6,
+    paddingInlineEnd: 10,
+    paddingBlockEnd: 10,
+    paddingInlineStart: 14,
+  },
+  back: {
+    display: "flex",
+    height: 32,
+    flexShrink: 0,
+    alignItems: "center",
+    gap: 8,
+    paddingInline: 8,
+    fontWeight: 500,
+    textDecoration: "none",
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+  },
+  nav: { display: "flex", flexDirection: "column", gap: 14 },
+  group: { display: "flex", flexDirection: "column", gap: 1 },
+  groupName: {
+    margin: 0,
+    marginBlockEnd: 4,
+    paddingInline: 8,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--precision-text3)",
+  },
+  link: {
+    display: "flex",
+    height: 28,
+    flexShrink: 0,
+    alignItems: "center",
+    borderRadius: 6,
+    paddingInline: 8,
+    fontWeight: 500,
+    textDecoration: "none",
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+  },
+  linkOn: { backgroundColor: "var(--color-overlay-hover)", color: "var(--color-text-primary)" },
+  place: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    marginBlockStart: "auto",
+    paddingInline: 8,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    flexShrink: 0,
+    borderRadius: "50%",
+    backgroundColor: "var(--color-text-accent)",
+  },
+  placeName: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  head: {
+    display: "flex",
+    height: 44,
+    alignItems: "center",
+    gap: 8,
+    paddingInlineStart: 18,
+    paddingInlineEnd: 12,
+    color: "var(--precision-text3)",
+  },
+  arrow: { color: "var(--color-text-disabled)" },
+  title: { margin: 0, fontSize: 13, fontWeight: 500 },
+  scroller: { minHeight: 0, flex: 1, overflowY: "auto" },
+  wide: { maxWidth: 1180 },
+  page: {
+    display: "flex",
+    width: "100%",
+    maxWidth: 820,
+    boxSizing: "border-box",
+    flexDirection: "column",
+    gap: 28,
+    paddingBlock: 28,
+    paddingInline: { default: 24, "@media (min-width: 1280px)": 40 },
+    animationName: enter,
+    animationDuration: "160ms",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+  },
+  missing: { margin: 0, color: "var(--precision-text3)" },
+});
+
 interface Section {
   key: string;
   label: string;
-  body: () => ReactNode;
+  body: (filters: ActivityFilters) => ReactNode;
+  feature?: Feature;
+  /** A table that needs the room. */
+  wide?: boolean;
 }
 
-// Plugins and App keys are in the design's list, but hidden.ts leads: they stay out.
-const GROUPS: { label: string; sections: Section[] }[] = [
+// hidden.ts leads: what it names stays out.
+const ALL_GROUPS: { label: string; sections: Section[] }[] = [
   {
     label: "You",
     sections: [
@@ -71,30 +177,30 @@ const GROUPS: { label: string; sections: Section[] }[] = [
     sections: [
       { key: "connections", label: "Connections", body: () => <ConnectionsSection /> },
       { key: "mcp", label: "MCP & tools", body: () => <McpSection /> },
-      { key: "schedules", label: "Recurring schedules", body: () => <SchedulesSection /> },
+      { key: "schedules", label: "Recurring schedules", body: () => <SchedulesSection />, feature: "RecurringTasks" },
       { key: "backups", label: "Backups", body: () => <BackupsSection /> },
       { key: "load", label: "Load limits", body: () => <LoadSection /> },
-      { key: "trace", label: "Trace", body: () => <TraceSection /> },
+      { key: "trace", label: "Trace", body: () => <TraceSection />, feature: "Trace" },
+      { key: "activity", label: "Activity log", body: (filters) => <ActivitySection filters={filters} />, wide: true },
     ],
   },
 ];
+
+const GROUPS = ALL_GROUPS.map((group) => ({ ...group, sections: shown(group.sections) }));
 
 export function SettingsSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const { hostName, remote } = useLinkState();
   return (
-    <aside className="flex w-[224px] flex-none flex-col gap-[18px] overflow-y-auto pt-[6px] pr-[10px] pb-[10px] pl-[14px]">
-      <Link
-        to="/inbox"
-        className="flex h-8 flex-none items-center gap-2 px-2 font-medium text-text2 no-underline hover:text-text"
-      >
+    <aside {...stylex.props(styles.sidebar)}>
+      <Link to="/inbox" {...stylex.props(styles.back)}>
         <Icon name="back" size={14} />
         Back to the app
       </Link>
-      <nav aria-label="Settings" className="flex flex-col gap-[14px]">
+      <nav aria-label="Settings" {...stylex.props(styles.nav)}>
         {GROUPS.map((group) => (
-          <div key={group.label} className="flex flex-col gap-px">
-            <p className="m-0 mb-1 px-2 text-[12px] font-medium text-text3">{group.label}</p>
+          <div key={group.label} {...stylex.props(styles.group)}>
+            <p {...stylex.props(styles.groupName)}>{group.label}</p>
             {group.sections.map((section) => {
               const to = `/settings/${section.key}`;
               const on = path === to;
@@ -104,7 +210,7 @@ export function SettingsSidebar() {
                   to="/settings/$section"
                   params={{ section: section.key }}
                   aria-current={on ? "page" : undefined}
-                  className={`flex h-7 flex-none items-center rounded-[6px] px-2 font-medium no-underline ${on ? "bg-sel text-text" : "text-text2 hover:bg-sel hover:text-text"}`}
+                  {...stylex.props(styles.link, on && styles.linkOn)}
                 >
                   {section.label}
                 </Link>
@@ -113,9 +219,9 @@ export function SettingsSidebar() {
           </div>
         ))}
       </nav>
-      <div className="mt-auto flex items-center gap-[6px] px-2 text-[12px] text-text3">
-        <span className="size-[6px] flex-none rounded-full bg-acc-text" />
-        <span className="truncate">
+      <div {...stylex.props(styles.place)}>
+        <span {...stylex.props(styles.dot)} />
+        <span {...stylex.props(styles.placeName)}>
           {remote ? "Remote" : "This computer"} · {hostName ?? "Aurelius"}
         </span>
       </div>
@@ -123,7 +229,7 @@ export function SettingsSidebar() {
   );
 }
 
-export function SettingsScreen({ section }: { section: string }) {
+export function SettingsScreen({ section, filters }: { section: string; filters: ActivityFilters }) {
   const navigate = useNavigate();
   useKeyContext("Settings");
   const { storage } = usePlatform();
@@ -150,13 +256,17 @@ export function SettingsScreen({ section }: { section: string }) {
   const found = GROUPS.flatMap((g) => g.sections).find((s) => s.key === section);
   return (
     <>
-      <header className="flex h-11 flex-none items-center gap-2 border-b border-line pr-3 pl-[18px] text-text3">
-        Settings<span className="text-faint">›</span>
-        <h1 className="m-0 text-[13px] font-medium text-text">{found?.label ?? "Not found"}</h1>
-      </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div key={section} className="enter box-border flex w-full max-w-[820px] flex-col gap-7 px-6 py-7 xl:px-10">
-          {found ? found.body() : <p className="m-0 text-text3">This section does not exist.</p>}
+      <LayoutHeader hasDivider padding={0} data-titlebar>
+        <div {...stylex.props(styles.head)}>
+          Settings<span {...stylex.props(styles.arrow)}>›</span>
+          <Heading level={1} xstyle={styles.title}>
+            {found?.label ?? "Not found"}
+          </Heading>
+        </div>
+      </LayoutHeader>
+      <div {...stylex.props(styles.scroller)}>
+        <div key={section} {...stylex.props(styles.page, found?.wide && styles.wide)}>
+          {found ? found.body(filters) : <p {...stylex.props(styles.missing)}>This section does not exist.</p>}
         </div>
       </div>
     </>

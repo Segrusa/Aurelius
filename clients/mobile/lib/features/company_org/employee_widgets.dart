@@ -1,5 +1,3 @@
-import '../../app/mobile_core.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -11,7 +9,6 @@ import '../../core/widgets/widgets.dart';
 import '../../data/commands.dart';
 import '../../data/org_chart.dart';
 import '../../data/views.dart';
-import '../account/claude_login.dart' show ownSubscriptionNote;
 import '../company/company_bloc.dart';
 import '../inbox/instruction_proposal_card.dart';
 
@@ -23,14 +20,6 @@ Widget employeePresence(EmployeeSummary m) {
     const SizedBox(width: 6),
     Text(m.working ? 'Working' : 'Available', style: TextStyle(color: m.working ? Tokens.accent : Tokens.label2, fontSize: 15)),
   ]);
-}
-
-String heartbeatLine(HeartbeatView? h) {
-  if (h == null || h.everyMinutes == 0) return 'Heartbeat off';
-  final every = h.everyMinutes % 60 == 0 ? (h.everyMinutes == 60 ? 'hourly' : 'every ${h.everyMinutes ~/ 60} h') : 'every ${h.everyMinutes} min';
-  final budget = h.dailyTokenBudget > 0 ? ' · ${Fmt.tokens(h.tokensToday)} / ${Fmt.tokens(h.dailyTokenBudget)} tokens today' : '';
-  final waiting = h.waiting == 'budget' ? ' · budget used up' : (h.waiting == 'quiet' ? ' · quiet hours' : '');
-  return 'Heartbeat $every$budget$waiting';
 }
 
 /// One employee in a list: monogram, name, what it does now (or its role) and
@@ -87,7 +76,7 @@ Future<void> createEmployee(BuildContext context) async {
   );
 }
 
-/// Edit, heartbeat, pause/resume, archive. Model, effort and plugins are on
+/// Edit, pause/resume, archive. Model and effort are on
 /// the employee page's Setup rows only.
 class EmployeeMenu extends StatelessWidget {
   const EmployeeMenu({super.key, required this.employee});
@@ -104,29 +93,6 @@ class EmployeeMenu extends StatelessWidget {
         switch (value) {
           case 'edit':
             await editEmployee(context, m);
-          case 'heartbeat':
-            if (!context.mounted) return;
-            final minutes = await showModalBottomSheet<int>(
-              context: context,
-              builder: (sheet) => SafeArea(
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  Padding(
-                    key: const ValueKey('heartbeat-subscription'),
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: Text(ownSubscriptionNote, style: TextStyle(fontSize: 13, color: Tokens.label2)),
-                  ),
-                  for (final (label, value) in [('Off', 0), ('Every 30 minutes', 30), ('Hourly', 60), ('Every 4 hours', 240)])
-                    ListTile(
-                      title: Text(label),
-                      trailing: (m.heartbeat?.everyMinutes ?? 0) == value ? Icon(Icons.check, color: Tokens.accentText) : null,
-                      onTap: () => Navigator.pop(sheet, value),
-                    ),
-                ]),
-              ),
-            );
-            if (minutes != null) {
-              bloc.send(Commands.setHeartbeat(m.id, minutes, dailyTokenBudget: m.heartbeat?.dailyTokenBudget), done: minutes == 0 ? 'Heartbeat off.' : 'Heartbeat set.');
-            }
           case 'pause':
             bloc.send(Commands.setEmployeeStatus(m.id, LifecycleStatus.paused), done: '${m.name} paused.');
           case 'resume':
@@ -139,7 +105,6 @@ class EmployeeMenu extends StatelessWidget {
       },
       items: () => [
         const GlassMenuItem('edit', 'Edit'),
-        if (shownInMobileCore('heartbeats')) const GlassMenuItem('heartbeat', 'Heartbeat'),
         if (m.status == LifecycleStatus.active) const GlassMenuItem('pause', 'Pause'),
         if (m.status == LifecycleStatus.paused) const GlassMenuItem('resume', 'Resume'),
         const GlassMenuItem('archive', 'Archive', danger: true),

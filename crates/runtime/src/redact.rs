@@ -3,8 +3,8 @@
 //! versions before it), in every form a run or a tool is likely to print it.
 //! A match becomes `«secret:NAME»`.
 //!
-//! It is global, not per run: memory extraction, the Team chat, webhooks and
-//! push do not know their run. The daemon installs a new automaton
+//! It is global, not per run: memory extraction, the Team chat and push do
+//! not know their run. The daemon installs a new automaton
 //! ([`install`]) before a new value can reach any run; every reader takes the
 //! one that is current ([`current`]) without a lock.
 //!

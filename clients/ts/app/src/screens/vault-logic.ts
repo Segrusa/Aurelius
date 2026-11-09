@@ -14,7 +14,7 @@ import type {
 
 export const MASK = "••••••••";
 export const SHOW_MS = 30_000;
-export const PLUGINS_SEE_SECRETS = "Plugins and MCP servers of an employee see the secrets of its runs.";
+export const MCP_SEES_SECRETS = "MCP servers of an employee see the secrets of its runs.";
 export const LINUX_KEY_NOTE =
   "On Linux, any process of the daemon's user, also an agent through Bash, can read the key.";
 export const ALL_READ =

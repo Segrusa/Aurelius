@@ -1,5 +1,10 @@
+import * as stylex from "@stylexjs/stylex";
 import qrcode from "qrcode-generator";
 import { useMemo } from "react";
+
+const styles = stylex.create({
+  code: { borderRadius: 6, backgroundColor: "#fff" },
+});
 
 /** Dark squares on white, whatever the theme: a scanner needs that contrast. */
 export function QrCode({ payload, label, size = 148 }: { payload: string; label: string; size?: number }) {
@@ -21,7 +26,7 @@ export function QrCode({ payload, label, size = 148 }: { payload: string; label:
       width={size}
       height={size}
       viewBox={`0 0 ${path.side} ${path.side}`}
-      className="rounded-[6px] bg-white"
+      {...stylex.props(styles.code)}
     >
       <path d={path.d} fill="#000" />
     </svg>

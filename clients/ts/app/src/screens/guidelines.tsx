@@ -1,5 +1,13 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { expectBody, ProtocolError } from "@aurelius/client";
 import type { GuidelineProposalView, GuidelineTarget, GuidelineView, StarterTemplate } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -17,10 +25,9 @@ import {
 } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { Button } from "../ui/kit";
 import { Markdown } from "../ui/markdown";
-import { Dialog } from "../ui/overlay";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import {
   ABOUT,
   affectedLine,
@@ -69,7 +76,214 @@ import {
   tri,
   wanted,
 } from "./guideline-logic";
-import { AREA, Confirm, Empty, EYEBROW, FIELD, failureOf, KnowledgeTabs, PageHead, SMALL, shortDay } from "./org-kit";
+import {
+  Confirm,
+  Empty,
+  Eyebrow,
+  FormDialog,
+  failureOf,
+  Hint,
+  KnowledgeTabs,
+  Loading,
+  Page,
+  PageHead,
+  Problem,
+  shortDay,
+} from "./org-kit";
+import { guidelineReach, guidelinesIn } from "./workspace-logic";
+
+const enter = stylex.keyframes({ from: { opacity: 0, transform: "translateY(4px)" } });
+
+const styles = stylex.create({
+  sub: { margin: 0, color: "var(--color-text-secondary)" },
+  message: { margin: 0, padding: 24, color: "var(--color-text-secondary)" },
+  empty: { margin: 0, padding: 24, color: "var(--precision-text3)" },
+  buttons: { display: "flex", gap: 8 },
+  bannerSlot: { marginBlockStart: 14, marginInline: 18 },
+  readOnly: { margin: 0, paddingInline: 18, paddingBlockStart: 12, color: "var(--color-text-secondary)" },
+  scroll: { minHeight: 0, flex: 1, overflow: "auto" },
+  table: { minWidth: 760 },
+  headCell: { fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
+  sizeColumn: { width: 60, minWidth: 60, maxWidth: 60, textAlign: "end" },
+  versionColumn: { width: 70, minWidth: 70, maxWidth: 70 },
+  updatedColumn: { width: 150, minWidth: 150, maxWidth: 150 },
+  sort: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    fontSize: 12,
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+  },
+  row: { height: 42 },
+  link: {
+    display: "block",
+    overflow: "hidden",
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--color-text-primary)",
+    textDecoration: "none",
+  },
+  waiting: { marginInlineStart: 8, color: "var(--color-text-accent)" },
+  applies: { display: "block", overflow: "hidden", fontSize: 12, whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  appliesOn: { color: "var(--color-text-secondary)" },
+  dim: { color: "var(--precision-text3)" },
+  size: { fontFamily: "var(--font-family-code)", fontSize: 12, textAlign: "end", color: "var(--precision-text3)" },
+  small: { fontSize: 12, color: "var(--precision-text3)" },
+  updated: {
+    display: "block",
+    overflow: "hidden",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--precision-text3)",
+  },
+  footnote: { margin: 0, paddingInline: 18, paddingBlock: 12, fontSize: 12, color: "var(--precision-text3)" },
+  fieldset: { display: "flex", flexDirection: "column", gap: 4, margin: 0, borderWidth: 0, padding: 0 },
+  member: { marginInlineStart: 24 },
+  history: {
+    display: "flex",
+    width: 380,
+    flexShrink: 0,
+    flexDirection: "column",
+    gap: 12,
+    overflowY: "auto",
+    borderInlineStartWidth: 1,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    padding: 18,
+    animationName: enter,
+    animationDuration: "160ms",
+    animationTimingFunction: "ease-out",
+  },
+  versions: { display: "flex", maxHeight: 320, flexDirection: "column", gap: 8, overflowY: "auto" },
+  version: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--color-background-surface)",
+    paddingInline: 12,
+    paddingBlock: 10,
+  },
+  versionCurrent: { borderColor: "var(--precision-acc-line)" },
+  versionPick: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    textAlign: "start",
+    color: "var(--color-text-primary)",
+  },
+  versionSource: { display: "block", fontSize: 12, color: "var(--precision-text3)" },
+  stack4: { display: "flex", flexDirection: "column", gap: 4 },
+  diff: {
+    margin: 0,
+    maxHeight: 320,
+    overflow: "auto",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--color-background-surface)",
+    padding: 10,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    lineHeight: "17px",
+    whiteSpace: "pre-wrap",
+  },
+  added: { backgroundColor: "var(--color-overlay-hover)", color: "var(--color-text-accent)" },
+  removed: { backgroundColor: "var(--color-overlay-hover)", color: "var(--color-text-error)" },
+  same: { color: "var(--color-text-secondary)" },
+  editorShell: { display: "flex", minHeight: 0, flex: 1 },
+  editorMain: { display: "flex", minWidth: 0, flex: 1, flexDirection: "column" },
+  back: {
+    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
+    textDecoration: "none",
+  },
+  truncate: { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  versionTag: {
+    borderRadius: 4,
+    backgroundColor: "var(--color-overlay-hover)",
+    paddingInline: 6,
+    fontSize: 12,
+    color: "var(--color-text-secondary)",
+  },
+  blocked: { opacity: 0.6 },
+  editor: {
+    display: "flex",
+    minHeight: 0,
+    flex: 1,
+    flexDirection: "column",
+    gap: 14,
+    overflowY: "auto",
+    paddingInline: 22,
+    paddingBlock: 20,
+  },
+  notice: { display: "flex", flexDirection: "column", gap: 8 },
+  reason: { margin: 0, color: "var(--color-text-secondary)" },
+  alert: { margin: 0, color: "var(--color-text-error)" },
+  amber: { margin: 0, color: "var(--color-text-warning)" },
+  start: { alignSelf: "flex-start" },
+  panes: { display: "grid", gap: 12 },
+  panesOne: { gridTemplateColumns: "minmax(0, 1fr)" },
+  panesTwo: { gridTemplateColumns: "repeat(2, minmax(0, 1fr))" },
+  source: { fontFamily: "var(--font-family-code)", fontSize: 12, lineHeight: 1.7 },
+  preview: {
+    overflowY: "auto",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    paddingInline: 18,
+    paddingBlock: 16,
+    lineHeight: 1.65,
+  },
+  meters: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: 20,
+    rowGap: 4,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  meterLine: { display: "flex", alignItems: "center", gap: 8 },
+  over: { color: "var(--color-text-error)" },
+  close: { color: "var(--color-text-warning)" },
+  bar: {
+    display: "inline-block",
+    width: 120,
+    height: 3,
+    overflow: "hidden",
+    borderRadius: 2,
+    backgroundColor: "var(--color-overlay-hover)",
+    verticalAlign: "middle",
+  },
+  fill: { display: "block", height: "100%" },
+  toneOver: { backgroundColor: "var(--color-text-error)" },
+  toneClose: { backgroundColor: "var(--color-text-warning)" },
+  toneCalm: { backgroundColor: "var(--color-text-accent)" },
+  company: { marginInlineStart: 8, fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
+  appliesRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    paddingInline: 12,
+    paddingBlock: 10,
+  },
+  appliesText: { minWidth: 0, flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+});
 
 function useNames(): Names {
   const employees = useEmployees();
@@ -126,53 +340,44 @@ function StarterDialog({ onClose }: { onClose: () => void }) {
     }
   };
   return (
-    <Dialog open onClose={onClose} title="Add starter set" width={520}>
-      <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto p-4">
-        <p className="m-0 text-[15px] font-semibold">Add starter set</p>
-        <p className="m-0 text-text2">
-          Templates to start from. They become ordinary guidelines without links: link them to use them.
-        </p>
-        {templates === null && !error ? <p className="m-0 text-text3">Loading…</p> : null}
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
-        {templates?.map((t) => (
-          <label key={t.key} className={`flex items-start gap-2 ${t.in_library ? "text-text3" : "cursor-pointer"}`}>
-            <input
-              type="checkbox"
-              className="mt-[3px] accent-(--acc-text)"
-              disabled={t.in_library}
-              checked={ticked.has(t.key)}
-              onChange={(e) => {
-                const next = new Set(ticked);
-                if (e.target.checked) next.add(t.key);
-                else next.delete(t.key);
-                setTicked(next);
-              }}
-            />
-            <span>
-              {t.title}
-              <span className="block text-[12px] text-text3">
-                {count(t.chars)} characters · for {t.level === "project" ? "a project" : "employees"}
-                {t.in_library ? " · already in the library" : ""}
-              </span>
-            </span>
-          </label>
-        ))}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="primary" disabled={busy || ticked.size === 0} onClick={() => void add()}>
-          {busy ? "Adding…" : `Add ${ticked.size}`}
-        </Button>
-      </div>
-    </Dialog>
+    <FormDialog
+      title="Add starter set"
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button
+            variant="primary"
+            label={busy ? "Adding…" : `Add ${ticked.size}`}
+            isDisabled={busy || ticked.size === 0}
+            onClick={() => void add()}
+          />
+        </>
+      }
+    >
+      <p {...stylex.props(styles.sub)}>
+        Templates to start from. They become ordinary guidelines without links: link them to use them.
+      </p>
+      {templates === null && !error ? <Loading /> : null}
+      {error ? <Problem>{error}</Problem> : null}
+      {templates?.map((t) => (
+        <CheckboxInput
+          key={t.key}
+          label={t.title}
+          description={`${count(t.chars)} characters · for ${t.level === "project" ? "a project" : "employees"}${t.in_library ? " · already in the library" : ""}`}
+          isDisabled={t.in_library}
+          value={ticked.has(t.key)}
+          onChange={(checked) => {
+            const next = new Set(ticked);
+            if (checked) next.add(t.key);
+            else next.delete(t.key);
+            setTicked(next);
+          }}
+        />
+      ))}
+    </FormDialog>
   );
 }
-
-const GRID = "grid grid-cols-[minmax(220px,1.3fr)_minmax(220px,1.4fr)_60px_70px_150px] items-center gap-3 px-[18px]";
 
 export function GuidelinesScreen() {
   const { user, features } = useLinkState();
@@ -197,7 +402,12 @@ export function GuidelinesScreen() {
   const gone = useArchivedGuidelines(archived);
   const proposals = useGuidelineProposals();
   const source = archived ? gone : active;
-  const list = useMemo(() => shown(source.data ?? [], query, sort, names), [source.data, query, sort, names]);
+  const workspace = useWorkspace().id;
+  const inHere = useMemo(
+    () => guidelinesIn(source.data ?? [], workspace, names.employees),
+    [source.data, workspace, names.employees],
+  );
+  const list = useMemo(() => shown(inHere, query, sort, names), [inHere, query, sort, names]);
   const writable = canEdit(user);
   const open = (id: string) => void navigate({ to: "/knowledge/guidelines/$id", params: { id } });
   useAction("NewGuideline", () => open("new"), writable);
@@ -208,21 +418,17 @@ export function GuidelinesScreen() {
 
   if (!features.includes("guidelines")) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <Page>
         <PageHead title="Knowledge" tabs={<KnowledgeTabs />} />
-        <p className="m-0 p-6 text-text2">This server does not have guidelines yet. Update the server.</p>
-      </div>
+        <p {...stylex.props(styles.message)}>This server does not have guidelines yet. Update the server.</p>
+      </Page>
     );
   }
 
   const pending = (g: GuidelineView) => (proposals.data ?? []).filter((p) => p.guideline_id === g.id);
   const showBanner = !archived && writable && bannerDue(active.data ?? [], user?.id ?? null, done);
-  const head = (key: Sort, label: string, right = false) => (
-    <button
-      type="button"
-      onClick={() => setSort(key)}
-      className={`cursor-pointer border-0 bg-transparent p-0 text-[12px] text-text3 hover:text-text ${right ? "text-right" : "text-left"}`}
-    >
+  const head = (key: Sort, label: string) => (
+    <button type="button" onClick={() => setSort(key)} {...stylex.props(styles.sort)}>
       {label}
       {sort === key ? " ▾" : ""}
     </button>
@@ -238,123 +444,150 @@ export function GuidelinesScreen() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <Page>
       <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
-        <input
+        <TextInput
           ref={search}
-          aria-label="Find a guideline"
+          label="Find a guideline"
+          isLabelHidden
+          size="sm"
+          width={220}
           placeholder="Find… (@Forge, ▸project)"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className={`${FIELD} !h-7 !w-[220px]`}
+          onChange={setQuery}
         />
-        <Button kind="ghost" aria-pressed={archived} className={SMALL} onClick={() => setArchived(!archived)}>
-          Archived
-        </Button>
-        {writable ? (
-          <Button kind="primary" className={SMALL} onClick={() => open("new")}>
-            New guideline
-          </Button>
-        ) : null}
+        <ToggleButton size="sm" label="Archived" isPressed={archived} onPressedChange={setArchived} />
+        {writable ? <Button size="sm" variant="primary" label="New guideline" onClick={() => open("new")} /> : null}
       </PageHead>
       {showBanner ? (
-        <div className="mx-[18px] mt-[14px] flex items-center gap-[10px] rounded-[8px] border border-acc-line bg-acc-soft px-3 py-[10px]">
-          <span className="size-[7px] flex-none rounded-full bg-acc-text" />
-          <span className="min-w-0 flex-1">{BANNER}</span>
-          <Button
-            className="h-[26px] px-2 text-[12px]"
-            onClick={() => {
-              const next = [...done, user?.id ?? ""];
-              setDone(next);
-              platform.storage.set("guidelines_banner_done", JSON.stringify(next));
-            }}
-          >
-            Got it
-          </Button>
+        <div {...stylex.props(styles.bannerSlot)}>
+          <Banner
+            status="info"
+            title={BANNER}
+            endContent={
+              <Button
+                size="sm"
+                label="Got it"
+                onClick={() => {
+                  const next = [...done, user?.id ?? ""];
+                  setDone(next);
+                  platform.storage.set("guidelines_banner_done", JSON.stringify(next));
+                }}
+              />
+            }
+          />
         </div>
       ) : null}
-      {!writable ? <p className="m-0 px-[18px] pt-3 text-text2">{READ_ONLY}</p> : null}
-      <div className="min-h-0 flex-1 overflow-auto">
+      {!writable ? <p {...stylex.props(styles.readOnly)}>{READ_ONLY}</p> : null}
+      <div {...stylex.props(styles.scroll)}>
         {source.isPending ? (
-          <p className="m-0 p-6 text-text3">Loading…</p>
+          <Loading />
         ) : (source.data ?? []).length === 0 ? (
           archived ? (
-            <p className="m-0 p-6 text-text3">Nothing is archived.</p>
+            <p {...stylex.props(styles.empty)}>Nothing is archived.</p>
           ) : (
-            <Empty title="No guidelines yet">
-              <p className="m-0 leading-[1.6] text-text2">{EMPTY_ABOUT}</p>
+            <Empty title="No guidelines yet" description={`${EMPTY_ABOUT} ${EMPTY_PROPOSE}`}>
               {writable ? (
-                <div className="flex gap-2">
-                  <Button kind="primary" onClick={() => open("new")}>
-                    + New guideline
-                  </Button>
-                  <Button onClick={() => setStarter(true)}>Add starter set…</Button>
+                <div {...stylex.props(styles.buttons)}>
+                  <Button variant="primary" label="+ New guideline" onClick={() => open("new")} />
+                  <Button label="Add starter set…" onClick={() => setStarter(true)} />
                 </div>
               ) : null}
-              <p className="m-0 text-[12px] text-text3">{EMPTY_PROPOSE}</p>
             </Empty>
           )
         ) : (
-          <div className="min-w-[760px]">
-            <div className={`${GRID} h-8 border-b border-line2`}>
-              {head("title", "Title")}
-              <span className="text-[12px] text-text3">Applies to</span>
-              {head("size", "Size", true)}
-              <span className="text-[12px] text-text3">Version</span>
-              {head("updated", "Updated")}
-            </div>
-            {list.length === 0 ? <p className="m-0 p-6 text-text3">No guideline matches.</p> : null}
-            {list.map((g) => {
-              const applies = appliesTo(g.links, names);
-              const waiting = Math.max(g.open_proposals ?? 0, pending(g).length);
-              return (
-                <div key={g.id} className={`${GRID} min-h-[42px] border-b border-line2 hover:bg-sel`}>
-                  <Link
-                    to="/knowledge/guidelines/$id"
-                    params={{ id: g.id }}
-                    className="min-w-0 truncate font-medium text-text no-underline"
-                  >
-                    {g.title}
-                    {waiting > 0 ? (
-                      <span
-                        title={waiting === 1 ? "1 proposal waits for you" : `${waiting} proposals wait for you`}
-                        className="ml-2 text-acc-text"
-                      >
-                        ◆{waiting}
-                      </span>
-                    ) : null}
-                  </Link>
-                  <span
-                    title={applies.all}
-                    className={`truncate text-[12px] ${g.links.length === 0 ? "text-text3" : "text-text2"}`}
-                  >
-                    {applies.shown}
-                  </span>
-                  <span className="text-right font-mono text-[12px] text-text3">{count(g.chars)}</span>
-                  <span className="text-[12px] text-text3">v{g.version}</span>
-                  {archived && writable ? (
-                    <Button className="h-[26px] justify-self-start px-2 text-[12px]" onClick={() => void restore(g)}>
-                      Restore
-                    </Button>
-                  ) : (
-                    <span className="truncate text-[12px] text-text3">
-                      {g.updated_by ? (g.updated_by.id === user?.id ? "You" : g.updated_by.username) : "Starter set"} ·{" "}
-                      {shortDay(g.updated_at_ms)}
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-            <p className="m-0 px-[18px] py-3 text-[12px] text-text3">
+          <>
+            <Table density="compact" hasHover xstyle={styles.table}>
+              <TableHeader>
+                <TableRow isHeaderRow>
+                  <TableHeaderCell xstyle={styles.headCell}>{head("title", "Title")}</TableHeaderCell>
+                  <TableHeaderCell xstyle={styles.headCell}>Applies to</TableHeaderCell>
+                  <TableHeaderCell xstyle={[styles.headCell, styles.sizeColumn]}>
+                    {head("size", "Size")}
+                  </TableHeaderCell>
+                  <TableHeaderCell xstyle={[styles.headCell, styles.versionColumn]}>Version</TableHeaderCell>
+                  <TableHeaderCell xstyle={[styles.headCell, styles.updatedColumn]}>
+                    {head("updated", "Updated")}
+                  </TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {list.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <span {...stylex.props(styles.small)}>No guideline matches.</span>
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+                {list.map((g) => {
+                  const applies = appliesTo(g.links, names);
+                  const waiting = Math.max(g.open_proposals ?? 0, pending(g).length);
+                  return (
+                    <TableRow key={g.id} {...stylex.props(styles.row)}>
+                      <TableCell>
+                        <Link to="/knowledge/guidelines/$id" params={{ id: g.id }} {...stylex.props(styles.link)}>
+                          {g.title}
+                          {workspace !== null && guidelineReach(g, workspace, names.employees) === "company" ? (
+                            <span
+                              title="For the whole company, not only this workspace"
+                              {...stylex.props(styles.company)}
+                            >
+                              Company
+                            </span>
+                          ) : null}
+                          {waiting > 0 ? (
+                            <span
+                              title={waiting === 1 ? "1 proposal waits for you" : `${waiting} proposals wait for you`}
+                              {...stylex.props(styles.waiting)}
+                            >
+                              ◆{waiting}
+                            </span>
+                          ) : null}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          title={applies.all}
+                          {...stylex.props(styles.applies, g.links.length === 0 ? styles.dim : styles.appliesOn)}
+                        >
+                          {applies.shown}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span {...stylex.props(styles.size)}>{count(g.chars)}</span>
+                      </TableCell>
+                      <TableCell>
+                        <span {...stylex.props(styles.small)}>v{g.version}</span>
+                      </TableCell>
+                      <TableCell>
+                        {archived && writable ? (
+                          <Button size="sm" label="Restore" onClick={() => void restore(g)} />
+                        ) : (
+                          <span {...stylex.props(styles.updated)}>
+                            {g.updated_by
+                              ? g.updated_by.id === user?.id
+                                ? "You"
+                                : g.updated_by.username
+                              : "Starter set"}{" "}
+                            · {shortDay(g.updated_at_ms)}
+                          </span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            <p {...stylex.props(styles.footnote)}>
               {archived
                 ? `${list.length} archived · no run gets these; Restore puts one back`
                 : `${list.length} guideline${list.length === 1 ? "" : "s"} · ${ABOUT.charAt(0).toLowerCase()}${ABOUT.slice(1, -1)}. Size in characters (max ${count(TEXT_LIMIT)} each)`}
             </p>
-          </div>
+          </>
         )}
       </div>
       {starter ? <StarterDialog onClose={() => setStarter(false)} /> : null}
-    </div>
+    </Page>
   );
 }
 
@@ -405,116 +638,93 @@ function LinksDialog({
       : null;
   };
   return (
-    <Dialog open onClose={onClose} title={title} width={640}>
-      <div className="flex max-h-[64vh] flex-col gap-3 overflow-y-auto p-4">
-        <p className="m-0 text-[15px] font-semibold">{title}</p>
-        <p className={EYEBROW}>EMPLOYEES</p>
-        {grouped.map((g) => {
-          const state = tri(g.members, ticked);
-          return (
-            <fieldset key={g.label} className="m-0 flex flex-col gap-1 border-0 p-0">
-              <label className="flex cursor-pointer items-center gap-2 font-medium">
-                <input
-                  type="checkbox"
-                  className="accent-(--acc-text)"
-                  ref={(el) => {
-                    if (el) el.indeterminate = state.state === "some";
-                  }}
-                  checked={state.state === "all"}
-                  onChange={() => {
-                    const next = new Set(ticked);
-                    for (const m of g.members) {
-                      const key = `employee:${m}`;
-                      if (state.state === "all") next.delete(key);
-                      else if (!blockedEmployee(m)) next.add(key);
-                    }
-                    setTicked(next);
-                  }}
-                />
-                {g.label}
-                <span className="text-[12px] font-normal text-text3">
-                  {state.ticked} of {state.of}
-                </span>
-              </label>
-              {g.members.map((id) => {
-                const e = names.employees.find((x) => x.id === id);
-                const blocked = blockedEmployee(id);
-                return (
-                  <label
-                    key={id}
-                    title={blocked ? blockSentence(blocked, names) : undefined}
-                    className={`ml-6 flex items-center gap-2 ${blocked ? "text-text3" : "cursor-pointer"}`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="accent-(--acc-text)"
-                      disabled={blocked !== null}
-                      checked={ticked.has(`employee:${id}`)}
-                      onChange={(ev) => toggle(`employee:${id}`, ev.target.checked)}
-                    />
-                    {e?.name}
-                    {e?.status === "paused" ? " (paused)" : e?.status === "archived" ? " (archived)" : ""}
-                  </label>
-                );
-              })}
-            </fieldset>
-          );
-        })}
-        <p className="m-0 text-[12px] text-text3">{GROUP_NOTE}</p>
-        <p className={EYEBROW}>PROJECTS</p>
-        {names.projects.map((p) => {
-          const block = projectBlock(sets, p.id, where, names.employees, guideline, size);
-          const key = `project:${p.id}`;
-          const blocked = !before.has(key) && !ticked.has(key) && block && block.chars > RUN_LIMIT ? block : null;
-          return (
-            <label
-              key={p.id}
-              title={blocked ? blockSentence(blocked, names) : undefined}
-              className={`flex items-center gap-2 ${blocked ? "text-text3" : "cursor-pointer"}`}
-            >
-              <input
-                type="checkbox"
-                className="accent-(--acc-text)"
-                disabled={blocked !== null}
-                checked={ticked.has(key)}
-                onChange={(ev) => toggle(key, ev.target.checked)}
-              />
-              {p.name}
-              <span className="text-[12px] text-text3">everyone working in this project</span>
-            </label>
-          );
-        })}
-        {largest ? (
-          <p className="m-0 text-[12px] text-text3">
-            largest: {blockWhere(largest, names)} · {count(largest.chars)}
-          </p>
-        ) : null}
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          kind="primary"
-          disabled={busy}
-          onClick={() => {
-            setBusy(true);
-            setError(null);
-            onSave(asTargets(ticked), before, ticked)
-              .then(onClose)
-              .catch((e: unknown) => {
-                setError(writeFailure(e, names));
-                setBusy(false);
-              });
-          }}
-        >
-          {busy ? "Saving…" : saveLabel}
-        </Button>
-      </div>
-    </Dialog>
+    <FormDialog
+      title={title}
+      width={640}
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button
+            variant="primary"
+            label={busy ? "Saving…" : saveLabel}
+            isDisabled={busy}
+            onClick={() => {
+              setBusy(true);
+              setError(null);
+              onSave(asTargets(ticked), before, ticked)
+                .then(onClose)
+                .catch((e: unknown) => {
+                  setError(writeFailure(e, names));
+                  setBusy(false);
+                });
+            }}
+          />
+        </>
+      }
+    >
+      <Eyebrow>EMPLOYEES</Eyebrow>
+      {grouped.map((g) => {
+        const state = tri(g.members, ticked);
+        return (
+          <fieldset key={g.label} {...stylex.props(styles.fieldset)}>
+            <CheckboxInput
+              label={g.label}
+              description={`${state.ticked} of ${state.of}`}
+              value={state.state === "all" ? true : state.state === "some" ? "indeterminate" : false}
+              onChange={() => {
+                const next = new Set(ticked);
+                for (const m of g.members) {
+                  const key = `employee:${m}`;
+                  if (state.state === "all") next.delete(key);
+                  else if (!blockedEmployee(m)) next.add(key);
+                }
+                setTicked(next);
+              }}
+            />
+            {g.members.map((id) => {
+              const e = names.employees.find((x) => x.id === id);
+              const blocked = blockedEmployee(id);
+              return (
+                <div key={id} {...stylex.props(styles.member)}>
+                  <CheckboxInput
+                    label={`${e?.name ?? ""}${e?.status === "paused" ? " (paused)" : e?.status === "archived" ? " (archived)" : ""}`}
+                    isDisabled={blocked !== null}
+                    {...(blocked ? { disabledMessage: blockSentence(blocked, names) } : {})}
+                    value={ticked.has(`employee:${id}`)}
+                    onChange={(checked) => toggle(`employee:${id}`, checked)}
+                  />
+                </div>
+              );
+            })}
+          </fieldset>
+        );
+      })}
+      <Hint>{GROUP_NOTE}</Hint>
+      <Eyebrow>PROJECTS</Eyebrow>
+      {names.projects.map((p) => {
+        const block = projectBlock(sets, p.id, where, names.employees, guideline, size);
+        const key = `project:${p.id}`;
+        const blocked = !before.has(key) && !ticked.has(key) && block && block.chars > RUN_LIMIT ? block : null;
+        return (
+          <CheckboxInput
+            key={p.id}
+            label={p.name}
+            description="everyone working in this project"
+            isDisabled={blocked !== null}
+            {...(blocked ? { disabledMessage: blockSentence(blocked, names) } : {})}
+            value={ticked.has(key)}
+            onChange={(checked) => toggle(key, checked)}
+          />
+        );
+      })}
+      {largest ? (
+        <Hint>
+          largest: {blockWhere(largest, names)} · {count(largest.chars)}
+        </Hint>
+      ) : null}
+      {error ? <Problem>{error}</Problem> : null}
+    </FormDialog>
   );
 }
 
@@ -565,55 +775,47 @@ function History({
   const picked = versions.data?.find((v) => v.version === pick);
   const diff = useMemo(() => (picked ? lineDiff(picked.text, text) : []), [picked, text]);
   return (
-    <aside
-      aria-label="History"
-      className="enter flex w-[380px] flex-none flex-col gap-3 overflow-y-auto border-l border-line bg-sunk p-[18px]"
-    >
-      <p className={EYEBROW}>HISTORY · {title.toUpperCase()}</p>
-      {versions.isPending ? <p className="m-0 text-text3">Loading…</p> : null}
-      <div className="flex max-h-[320px] flex-col gap-2 overflow-y-auto">
+    <aside aria-label="History" {...stylex.props(styles.history)}>
+      <Eyebrow>HISTORY · {title.toUpperCase()}</Eyebrow>
+      {versions.isPending ? <Loading /> : null}
+      <div {...stylex.props(styles.versions)}>
         {versions.data?.map((v) => (
-          <div
-            key={v.version}
-            className={`flex flex-col gap-1 rounded-[8px] border bg-panel px-3 py-[10px] ${v.version === current ? "border-acc-line" : "border-line"}`}
-          >
+          <div key={v.version} {...stylex.props(styles.version, v.version === current && styles.versionCurrent)}>
             <button
               type="button"
               aria-pressed={pick === v.version}
               onClick={() => setPick(pick === v.version ? null : v.version)}
-              className="cursor-pointer border-0 bg-transparent p-0 text-left text-text"
+              {...stylex.props(styles.versionPick)}
             >
               Version {v.version}
               {v.version === current ? " · current" : ""} · {v.by?.username ?? "Aurelius"} · {shortDay(v.created_at_ms)}
-              <span className="block text-[12px] text-text3">{sourceLabel(v, proposals.data ?? [], names)}</span>
+              <span {...stylex.props(styles.versionSource)}>{sourceLabel(v, proposals.data ?? [], names)}</span>
             </button>
             {canRestore && v.version !== current ? (
-              <Button className="h-6 self-start px-2 text-[12px]" onClick={() => onRestore(v.version)}>
-                Restore
-              </Button>
+              <Button size="sm" label="Restore" onClick={() => onRestore(v.version)} />
             ) : null}
           </div>
         ))}
       </div>
       {picked ? (
-        <div className="flex flex-col gap-1">
-          <p className={EYEBROW}>Version {picked.version} → what the editor holds</p>
+        <div {...stylex.props(styles.stack4)}>
+          <Eyebrow>Version {picked.version} → what the editor holds</Eyebrow>
           <Diff lines={diff} />
         </div>
       ) : null}
-      <p className="m-0 text-[12px] text-text3">Links have no versions: only the title and the text do.</p>
+      <Hint>Links have no versions: only the title and the text do.</Hint>
     </aside>
   );
 }
 
 function Diff({ lines }: { lines: ReturnType<typeof lineDiff> }) {
   return (
-    <pre className="m-0 max-h-[320px] overflow-auto rounded-[6px] border border-line bg-panel p-[10px] font-mono text-[12px] leading-[17px] whitespace-pre-wrap">
+    <pre {...stylex.props(styles.diff)}>
       {lines.map((l, i) => (
         <div
           // biome-ignore lint/suspicious/noArrayIndexKey: a diff is drawn whole.
           key={i}
-          className={l.mark === "+" ? "bg-sel text-acc-text" : l.mark === "-" ? "bg-sel text-red" : "text-text2"}
+          {...stylex.props(l.mark === "+" ? styles.added : l.mark === "-" ? styles.removed : styles.same)}
         >
           {l.mark} {l.line}
         </div>
@@ -649,29 +851,27 @@ function RejectDialog({
     }
   };
   return (
-    <Dialog open onClose={onClose} title="Reject this proposal?" width={480}>
-      <div className="flex flex-col gap-2 p-4">
-        <p className="m-0 text-[15px] font-semibold">Reject this proposal?</p>
-        <label className="flex flex-col gap-1 text-[12px] text-text3">
-          Note for {who}
-          <textarea
-            data-autofocus
-            rows={3}
-            className={AREA}
-            placeholder="Optional: why, for the employee who proposed it"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </label>
-        <p className="m-0 text-[12px] text-text3">{who} gets your decision and the note.</p>
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="danger" onClick={() => void reject()}>
-          Reject
-        </Button>
-      </div>
-    </Dialog>
+    <FormDialog
+      title="Reject this proposal?"
+      width={480}
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button variant="destructive" label="Reject" onClick={() => void reject()} />
+        </>
+      }
+    >
+      <TextArea
+        hasAutoFocus
+        label={`Note for ${who}`}
+        rows={3}
+        placeholder="Optional: why, for the employee who proposed it"
+        value={note}
+        onChange={setNote}
+      />
+      <Hint>{who} gets your decision and the note.</Hint>
+    </FormDialog>
   );
 }
 
@@ -853,10 +1053,10 @@ export function GuidelineEditor({ id, proposalId }: { id: string; proposalId: st
   const safe = useMemo(() => safeMarkdown(text), [text]);
   const counter = level(n, TEXT_LIMIT);
   const blockLevel = largest ? level(largest.chars, RUN_LIMIT) : "calm";
-  const tone = (l: string) => (l === "over" ? "bg-red" : l === "close" ? "bg-amber" : "bg-acc-text");
+  const tone = (l: string) => (l === "over" ? styles.toneOver : l === "close" ? styles.toneClose : styles.toneCalm);
   const bar = (value: number, max: number, l: string) => (
-    <span className="inline-block h-[3px] w-[120px] overflow-hidden rounded-[2px] bg-sel align-middle">
-      <span className={`block h-full ${tone(l)}`} style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
+    <span {...stylex.props(styles.bar)}>
+      <span {...stylex.props(styles.fill, tone(l))} style={{ width: `${Math.min(100, (value / max) * 100)}%` }} />
     </span>
   );
   const whoProposed = proposal
@@ -865,24 +1065,22 @@ export function GuidelineEditor({ id, proposalId }: { id: string; proposalId: st
 
   if (!isNew && detail.error) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <Page>
         <PageHead
           title={
-            <Link to="/knowledge/$tab" params={{ tab: "guidelines" }} className="text-text2 no-underline">
+            <Link to="/knowledge/$tab" params={{ tab: "guidelines" }} {...stylex.props(styles.back)}>
               ‹ Guidelines
             </Link>
           }
         />
-        <p role="alert" className="m-0 p-6 text-red">
-          {detail.error.message}
-        </p>
-      </div>
+        <Problem>{detail.error.message}</Problem>
+      </Page>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col">
+    <div {...stylex.props(styles.editorShell)}>
+      <div {...stylex.props(styles.editorMain)}>
         <PageHead
           title={
             <>
@@ -895,145 +1093,138 @@ export function GuidelineEditor({ id, proposalId }: { id: string; proposalId: st
                     setConfirm("leave");
                   }
                 }}
-                className="text-text2 no-underline hover:text-text"
+                {...stylex.props(styles.back)}
               >
                 ‹ Guidelines
               </Link>
-              <span className="truncate">· {heading}</span>
-              {current ? (
-                <span className="rounded-[4px] bg-sel px-[6px] text-[12px] text-text2">v{current.version}</span>
-              ) : null}
+              <span {...stylex.props(styles.truncate)}>· {heading}</span>
+              {current ? <span {...stylex.props(styles.versionTag)}>v{current.version}</span> : null}
             </>
           }
         >
           {!isNew && !proposal ? (
-            <Button kind="ghost" aria-expanded={history} className={SMALL} onClick={() => setHistory(!history)}>
-              History {history ? "◂" : "▸"}
-            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-expanded={history}
+              label={`History ${history ? "◂" : "▸"}`}
+              onClick={() => setHistory(!history)}
+            />
           ) : null}
           {!isNew && !proposal && writable ? (
-            <Button kind="ghost" className={SMALL} onClick={() => setConfirm("archive")}>
-              Archive…
-            </Button>
+            <Button size="sm" variant="ghost" label="Archive…" onClick={() => setConfirm("archive")} />
           ) : null}
-          <Button className={SMALL} onClick={tryLeave}>
-            Cancel
-          </Button>
+          <Button size="sm" label="Cancel" onClick={tryLeave} />
           {writable ? (
             <Button
-              kind="primary"
-              className={`${SMALL} ${problem || busy ? "opacity-60" : ""}`}
+              size="sm"
+              variant="primary"
+              label={busy ? "Saving…" : proposal ? "Approve" : "Save"}
               onClick={() => void save()}
-            >
-              {busy ? "Saving…" : proposal ? "Approve" : "Save"}
-            </Button>
+              xstyle={problem || busy ? styles.blocked : undefined}
+            />
           ) : null}
         </PageHead>
-        <div className="flex min-h-0 flex-1 flex-col gap-[14px] overflow-y-auto px-[22px] py-5">
+        <div {...stylex.props(styles.editor)}>
           {archived ? (
-            <p className="m-0 text-text2">Archived: no run gets this. Restore it from the library to change it.</p>
+            <p {...stylex.props(styles.reason)}>
+              Archived: no run gets this. Restore it from the library to change it.
+            </p>
           ) : null}
           {proposal ? (
-            <div className="flex flex-col gap-1 rounded-[8px] border border-amber-line bg-amber-soft px-3 py-[10px]">
-              <p className={EYEBROW}>GUIDELINE PROPOSED · WAITING FOR YOU</p>
-              <p className="m-0 font-medium">{proposalHeadline(proposal, current, names)}</p>
-              {proposal.reason ? <p className="m-0 text-text2">{proposal.reason}</p> : null}
-              {isStale ? (
-                <p role="alert" className="m-0 text-red">
-                  “{current?.title}” changed since this was proposed (version {isStale.base} → {isStale.now}), so it
-                  can't be approved. Reject it; {whoProposed} can propose again on the new text.
-                </p>
-              ) : approveOff ? (
-                <p className="m-0 text-amber">{approveOff}</p>
-              ) : null}
-              <Button kind="danger" className={`${SMALL} self-start`} onClick={() => setRejecting(true)}>
-                Reject
-              </Button>
-            </div>
+            <Banner status="warning" title={proposalHeadline(proposal, current, names)} collapsible={false}>
+              <div {...stylex.props(styles.notice)}>
+                <Eyebrow>GUIDELINE PROPOSED · WAITING FOR YOU</Eyebrow>
+                {proposal.reason ? <p {...stylex.props(styles.reason)}>{proposal.reason}</p> : null}
+                {isStale ? (
+                  <p role="alert" {...stylex.props(styles.alert)}>
+                    “{current?.title}” changed since this was proposed (version {isStale.base} → {isStale.now}), so it
+                    can't be approved. Reject it; {whoProposed} can propose again on the new text.
+                  </p>
+                ) : approveOff ? (
+                  <p {...stylex.props(styles.amber)}>{approveOff}</p>
+                ) : null}
+                <div>
+                  <Button size="sm" variant="destructive" label="Reject" onClick={() => setRejecting(true)} />
+                </div>
+              </div>
+            </Banner>
           ) : null}
           {conflict !== null ? (
-            <div
+            <Banner
+              status="warning"
               role="alert"
-              className="flex flex-col gap-2 rounded-[8px] border border-amber-line bg-amber-soft px-3 py-[10px]"
+              title={`Version ${conflict} was saved while you were editing. Nothing of yours was saved.`}
+              collapsible={false}
             >
-              <p className="m-0 font-medium">
-                Version {conflict} was saved while you were editing. Nothing of yours was saved.
-              </p>
-              <div className="flex gap-2">
-                <Button className={SMALL} aria-expanded={compare} onClick={() => setCompare(!compare)}>
-                  {compare ? "Hide compare" : "Compare"}
-                </Button>
-                <Button className={SMALL} onClick={discardMine}>
-                  Discard mine
-                </Button>
+              <div {...stylex.props(styles.notice)}>
+                <div {...stylex.props(styles.buttons)}>
+                  <Button
+                    size="sm"
+                    aria-expanded={compare}
+                    label={compare ? "Hide compare" : "Compare"}
+                    onClick={() => setCompare(!compare)}
+                  />
+                  <Button size="sm" label="Discard mine" onClick={discardMine} />
+                </div>
+                {compare && detail.data ? (
+                  <>
+                    <Eyebrow>Version {detail.data.version.version} → yours</Eyebrow>
+                    <Diff lines={lineDiff(detail.data.version.text, text)} />
+                  </>
+                ) : null}
               </div>
-              {compare && detail.data ? (
-                <>
-                  <p className={EYEBROW}>Version {detail.data.version.version} → yours</p>
-                  <Diff lines={lineDiff(detail.data.version.text, text)} />
-                </>
-              ) : null}
-            </div>
+            </Banner>
           ) : null}
-          <label className="flex flex-col gap-1 text-[12px] text-text3">
-            Title *
-            <input
-              data-autofocus
-              readOnly={!writable}
-              placeholder="Rust"
-              className={`${FIELD} !h-[34px] text-[14px] font-medium`}
-              value={title}
-              onChange={(e) => edit(setTitle)(e.target.value)}
-            />
-          </label>
-          <fieldset
-            aria-label="View"
-            className="m-0 flex gap-px self-start rounded-[6px] border border-line2 bg-sunk p-[2px]"
+          <TextInput
+            hasAutoFocus
+            label="Title *"
+            placeholder="Rust"
+            isReadOnly={!writable}
+            value={title}
+            onChange={edit(setTitle)}
+          />
+          <ToggleButtonGroup
+            label="View"
+            size="sm"
+            value={mode}
+            onChange={(v) => v && setMode(v as typeof mode)}
+            xstyle={styles.start}
           >
-            {(["write", "preview", "side"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                aria-pressed={mode === m}
-                onClick={() => setMode(m)}
-                className={`h-[22px] cursor-pointer rounded-[4px] border-0 px-2 text-[12px] font-medium ${mode === m ? "bg-sel text-text" : "bg-transparent text-text2"}`}
-              >
-                {m === "write" ? "Write" : m === "preview" ? "Preview" : "Side by side"}
-              </button>
-            ))}
-          </fieldset>
+            <ToggleButton value="write" label="Write" />
+            <ToggleButton value="preview" label="Preview" />
+            <ToggleButton value="side" label="Side by side" />
+          </ToggleButtonGroup>
           <div
-            className={`grid gap-3 ${mode === "side" ? "grid-cols-2" : "grid-cols-1"}`}
+            {...stylex.props(styles.panes, mode === "side" ? styles.panesTwo : styles.panesOne)}
             style={{ minHeight: height }}
           >
             {mode !== "preview" ? (
-              <textarea
-                aria-label="Text"
-                readOnly={!writable}
+              <TextArea
+                label="Text"
+                isLabelHidden
+                isReadOnly={!writable}
+                rows={Math.max(3, Math.floor((height - 28) / 20))}
                 placeholder="The rules, in Markdown: ## headings and - lists work."
-                style={{ height }}
-                className="w-full resize-none rounded-[8px] border border-line bg-sunk p-[14px] font-mono text-[12px] leading-[1.7] text-text2 outline-none focus:border-acc-text focus-visible:outline-none"
+                controlXstyle={styles.source}
                 value={text}
-                onChange={(e) => edit(setText)(e.target.value)}
+                onChange={edit(setText)}
               />
             ) : null}
             {mode !== "write" ? (
-              <div
-                style={{ height }}
-                className="overflow-y-auto rounded-[8px] border border-line px-[18px] py-4 leading-[1.65] [&>*:first-child]:mt-0"
-              >
+              <div {...stylex.props(styles.preview)} style={{ height }}>
                 <Markdown text={safe} safe />
               </div>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px] text-text3">
-            <span className="flex items-center gap-2">
+          <div {...stylex.props(styles.meters)}>
+            <span {...stylex.props(styles.meterLine)}>
               {bar(n, TEXT_LIMIT, counter)} {counterLine(n)} · {tokens(n)}
               {counterNote(n) ? (
-                <span className={counter === "over" ? "text-red" : "text-amber"}>{counterNote(n)}</span>
+                <span {...stylex.props(counter === "over" ? styles.over : styles.close)}>{counterNote(n)}</span>
               ) : null}
             </span>
-            <span className="flex items-center gap-2">
+            <span {...stylex.props(styles.meterLine)}>
               Largest block with this:{" "}
               {largest ? (
                 <>
@@ -1045,27 +1236,19 @@ export function GuidelineEditor({ id, proposalId }: { id: string; proposalId: st
               )}
             </span>
           </div>
-          {message ? (
-            <p role="alert" className="m-0 text-red">
-              {message}
-            </p>
-          ) : null}
-          <div className="flex items-center gap-3 rounded-[8px] border border-line px-3 py-[10px]">
-            <span className="text-[12px] text-text3">Applies to</span>
-            <span title={appliesTo(linkList, names).all} className="min-w-0 flex-1 truncate">
+          {message ? <Problem>{message}</Problem> : null}
+          <div {...stylex.props(styles.appliesRow)}>
+            <span {...stylex.props(styles.small)}>Applies to</span>
+            <span title={appliesTo(linkList, names).all} {...stylex.props(styles.appliesText)}>
               {appliesTo(linkList, names).shown}
             </span>
-            {writable ? (
-              <Button className={SMALL} onClick={() => setEditLinks(true)}>
-                Links…
-              </Button>
-            ) : null}
+            {writable ? <Button size="sm" label="Links…" onClick={() => setEditLinks(true)} /> : null}
           </div>
-          <p className="m-0 text-[12px] text-text3">
+          <Hint>
             {affected.data
               ? `${affectedLine(affected.data)} Runs that already started keep version ${current?.version}.`
               : "Applies from the next run."}
-          </p>
+          </Hint>
         </div>
       </div>
       {history && current ? (

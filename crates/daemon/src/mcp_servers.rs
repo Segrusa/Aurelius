@@ -256,7 +256,7 @@ pub async fn add(shared: &Arc<Shared>, params: McpAddParams, user: Option<aureli
         return Err(invalid(format!("A server named '{}' already exists.", params.name)));
     }
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    if let Err(e) = aurelius_host::plugins::claude(&refs, std::time::Duration::from_secs(60)).await {
+    if let Err(e) = aurelius_host::claude_cli::claude(&refs, std::time::Duration::from_secs(60)).await {
         return Err(ProtocolError::new(e.code, redact(&e.message, &secrets_of(&params))));
     }
     if !discover().iter().any(|f| f.name == params.name) {
@@ -278,20 +278,21 @@ pub async fn remove(shared: &Arc<Shared>, name: String, user: Option<aurelius_do
     if !discover().iter().any(|f| f.name == name) {
         return Err(invalid(format!("There is no user-scope server named '{name}'.")));
     }
-    aurelius_host::plugins::claude(&["mcp", "remove", "--scope", "user", &name], std::time::Duration::from_secs(60)).await?;
+    aurelius_host::claude_cli::claude(&["mcp", "remove", "--scope", "user", &name], std::time::Duration::from_secs(60)).await?;
     let shared2 = shared.clone();
     tokio::task::spawn_blocking(move || write_enabled(&shared2, move |names| names.retain(|n| *n != name))).await.map_err(internal)??;
     list(shared, user).await
 }
 
-/// The full configs of the enabled servers that still exist, read now.
+/// The full configs of the enabled servers that still exist, read now, of
+/// those the ones this employee may use (C2).
 /// Empty when none is enabled (the run is then as before).
-pub fn configs_for_run(shared: &Shared) -> BTreeMap<String, Value> {
+pub fn configs_for_run(shared: &Shared, policy: &aurelius_domain::employee_tools::ToolPolicy) -> BTreeMap<String, Value> {
     let enabled = shared.store().read(|c| Ok(enabled_names(c).unwrap_or_default())).unwrap_or_default();
     if enabled.is_empty() {
         return BTreeMap::new();
     }
-    discover().into_iter().filter(|f| enabled.contains(&f.name)).map(|f| (f.name, f.config)).collect()
+    discover().into_iter().filter(|f| enabled.contains(&f.name) && policy.allows_server(&f.name)).map(|f| (f.name, f.config)).collect()
 }
 
 /// Whether `tool` (`mcp__<server>__<tool>`) belongs to an enabled server.

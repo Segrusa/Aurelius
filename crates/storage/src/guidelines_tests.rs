@@ -556,7 +556,7 @@ fn a_run_keeps_the_versions_it_got_in_block_order() {
 // ---------------------------------------------------------------- the seed and the starter set
 
 /// The sizes of docs/product/guidelines/seed.md (characters, with line ends).
-const SEED_SIZES: [(&str, u32); 8] = [("g1", 1477), ("g2", 790), ("g3", 743), ("g4", 1188), ("g5", 849), ("g6", 977), ("p1", 1114), ("p2", 1344)];
+const SEED_SIZES: [(&str, u32); 7] = [("g1", 1477), ("g2", 790), ("g4", 1188), ("g5", 849), ("g6", 977), ("p1", 1114), ("p2", 1344)];
 const TEAM: [&str; 14] = ["Forge", "Flux", "Bridge", "Nexus", "Schema", "Sentinel", "Pulse", "Orbit", "Trace", "Titan", "Orion", "Nova", "Pixel", "Atlas"];
 
 #[test]
@@ -576,7 +576,7 @@ fn the_starter_set_is_seed_md_and_stays_within_the_limits() {
         .collect();
     assert!(per_run.iter().all(|(_, n)| *n <= MAX_RUN_CHARS));
     let largest = per_run.iter().max_by_key(|(_, n)| *n).unwrap();
-    assert_eq!(*largest, ("Bridge", 7_505), "GL-18 AC5");
+    assert_eq!(*largest, ("Sentinel", 6_949), "GL-18 AC5");
     assert_eq!(per_run.iter().find(|(n, _)| *n == "Orbit").unwrap().1, 3_646);
     assert_eq!(project, 2_458);
 }
@@ -599,10 +599,10 @@ fn the_seed_adds_the_starter_set_once_with_links_by_exact_name() {
 
     let report = w.seed();
     let links_expected: usize = guidelines::starter_set().iter().map(|s| s.employees.iter().filter(|n| **n != "Pulse" && **n != "Orbit").count()).sum::<usize>() + 2;
-    assert_eq!(report, SeedReport { ran: true, inserted: 8, linked: links_expected, missing: vec!["Pulse".into(), "Orbit".into()] });
+    assert_eq!(report, SeedReport { ran: true, inserted: 7, linked: links_expected, missing: vec!["Pulse".into(), "Orbit".into()] });
 
     let list = w.store.read(|c| guidelines::list(c, false)).unwrap();
-    assert_eq!(list.len(), 8);
+    assert_eq!(list.len(), 7);
     let by_title = |t: &str| list.iter().find(|g| g.title == t).unwrap().clone();
     assert_eq!(by_title("Aurelius: layers and boundaries").links, [GuidelineTarget::Project(aurelius)]);
     assert_eq!(by_title("Worktrees, builds and cleanup").links.len(), 8, "ten names, minus Pulse and Orbit");
@@ -610,13 +610,13 @@ fn the_seed_adds_the_starter_set_once_with_links_by_exact_name() {
     let first = w.store.read(move |c| guidelines::get(c, by_title("Rust style").id, None)).unwrap().unwrap();
     assert_eq!((first.source, first.by, first.text.as_str()), (GuidelineSource::Seed, None, guidelines::starter_set()[0].text));
 
-    // The seeded set of the largest member is the 7,505 of seed.md, and no combination is over 16k.
+    // The seeded set of the largest member is the 7,505 of seed.md minus the GPUI kit, and no combination is over 16k.
     let bridge_id = ids["Bridge"];
     let bridge = w.store.read(move |c| guidelines::effective(c, Some(bridge_id), Some(aurelius))).unwrap();
-    assert_eq!((bridge.guidelines.len(), bridge.total_chars), (7, 7_505));
+    assert_eq!((bridge.guidelines.len(), bridge.total_chars), (6, 6_762));
     assert_eq!(bridge.guidelines.iter().filter(|g| g.level == GuidelineLevel::Project).count(), 2);
     let elsewhere = w.store.read(move |c| guidelines::effective(c, Some(bridge_id), Some(other))).unwrap();
-    assert_eq!(elsewhere.total_chars, 5_047, "the Aurelius rules only in Aurelius");
+    assert_eq!(elsewhere.total_chars, 4_304, "the Aurelius rules only in Aurelius");
     assert!(w.store.read(|c| guidelines::combinations_over(c, MAX_RUN_CHARS)).unwrap().is_empty());
 
     // Once: a second start adds nothing, also after the library is emptied out by archiving.
@@ -625,9 +625,9 @@ fn the_seed_adds_the_starter_set_once_with_links_by_exact_name() {
         w.archive(g.id);
     }
     assert_eq!(w.seed(), SeedReport::default());
-    assert_eq!(w.store.read(|c| guidelines::list(c, true)).unwrap().len(), 8);
+    assert_eq!(w.store.read(|c| guidelines::list(c, true)).unwrap().len(), 7);
     let marker: serde_json::Value = serde_json::from_str(&w.store.read(|c| settings::get(c, guidelines::SEEDED)).unwrap().unwrap()).unwrap();
-    assert_eq!((marker["inserted"].as_u64(), marker["at_ms"].as_i64()), (Some(8), Some(50)));
+    assert_eq!((marker["inserted"].as_u64(), marker["at_ms"].as_i64()), (Some(7), Some(50)));
 }
 
 #[test]
@@ -689,7 +689,7 @@ fn add_starter_set_adds_unlinked_guidelines_and_skips_taken_titles() {
 
     let again = w.store.write(move |tx| guidelines::add_starter_set(tx, &["g1", "g2"], alex, 61)).unwrap();
     assert_eq!((again.added.len(), again.skipped.as_slice()), (1, ["g1"].as_slice()));
-    rejected(w.store.write(move |tx| guidelines::add_starter_set(tx, &["g3", "g9"], alex, 62)), guidelines::UNKNOWN_STARTER);
+    rejected(w.store.write(move |tx| guidelines::add_starter_set(tx, &["g4", "g9"], alex, 62)), guidelines::UNKNOWN_STARTER);
     assert_eq!(w.store.read(|c| guidelines::list(c, false)).unwrap().len(), 3, "an unknown key adds nothing");
 }
 

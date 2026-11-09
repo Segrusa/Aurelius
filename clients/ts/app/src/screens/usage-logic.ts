@@ -15,7 +15,8 @@ export function costText(microUsd: number | null | undefined, estimate: boolean)
 }
 
 /** The colour of a limit's bar: amber from 70%, red from 90%. */
-export const limitTone = (percent: number) => (percent >= 90 ? "bg-red" : percent >= 70 ? "bg-amber" : "bg-acc-text");
+export const limitTone = (percent: number) =>
+  percent >= 90 ? "var(--color-error)" : percent >= 70 ? "var(--color-warning)" : "var(--color-text-accent)";
 
 export const clampPercent = (percent: number) => Math.max(0, Math.min(100, Math.round(percent)));
 
@@ -32,6 +33,10 @@ export function bars(days: { day_start_ms: number; tokens: number }[], todayMs: 
     empty: d.tokens === 0,
   }));
 }
+
+/** Whose share a row of the usage per board member is. */
+export const userRowName = (row: { login_user?: string | null; username?: string | null }): string =>
+  row.username ?? (row.login_user ? "Former board member" : "No Claude login");
 
 /** The answer of `subscription.get`, only when it is of this member's own login (`own_subscription` in the desktop app). */
 export const subscriptionFor = <T extends { login_user?: string | null; fetched_at_ms: number }>(

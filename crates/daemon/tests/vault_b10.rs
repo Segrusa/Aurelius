@@ -124,7 +124,7 @@ fn nothing_left(root: &Path, secrets: &[Secret]) {
 }
 
 async fn setup(client: &Client) -> (EmployeeId, ProjectId) {
-    let create = CreateEmployee { name: "Builder".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Builder".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let project = CreateProject { name: "Atlas".into(), description: None, folder: None };
     let CommandResult::ProjectCreated { project_id, .. } = client.execute(aurelius_client::envelope(Command::CreateProject(project), None)).await.unwrap().result else { panic!() };
@@ -213,7 +213,6 @@ async fn every_text_command_is_refused_by_name_and_stored_redacted_when_confirme
             title: "Rotate the key".into(),
             goal: format!("Rotate {}", task.value),
             acceptance_criteria: vec![format!("{} no longer works", task.value)],
-            depends_on: vec![],
             run: RunSettings::default(),
             files: vec![],
             confirm_secret,
@@ -264,7 +263,7 @@ async fn every_text_command_is_refused_by_name_and_stored_redacted_when_confirme
     let made = b10(root, &client, ticket, "create_ticket", |c| Command::CreateTicket(new_ticket(project_id, None, format!("Deploy with {}", ticket.value), AgentMode::Auto, false, c))).await;
     let CommandResult::TicketCreated { ticket_id, .. } = made.result else { panic!("{:?}", made.result) };
     b10(root, &client, ticket_edit, "update_ticket", |confirm_secret| {
-        Command::UpdateTicket(UpdateTicket {
+        Command::UpdateTicket(UpdateTicket { design_url: None,
             ticket_id,
             title: None,
             description: Some(format!("Deploy with {}", ticket_edit.value)),

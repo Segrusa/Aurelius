@@ -1,4 +1,4 @@
-// Where a project window goes back to (clients/desktop/src/project_window.rs). A window keeps its
+// Where a project window goes back to. A window keeps its
 // place if its title strip can still be grabbed; otherwise it moves onto a screen that exists.
 
 export interface Box {

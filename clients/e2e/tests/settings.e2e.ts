@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
+import { hidden } from "../../ts/app/src/hidden";
 import { REPO, TestDaemon } from "./daemon";
 
 const PASSWORD = "a-long-enough-password";
@@ -13,10 +14,9 @@ const SECTIONS = [
   "Remote access",
   "Connections",
   "MCP & tools",
-  "Recurring schedules",
   "Backups",
   "Load limits",
-  "Trace",
+  "Activity log",
 ];
 
 async function open(page: Page, name: string) {
@@ -60,9 +60,9 @@ test("every section works against a real daemon, and what is changed stays chang
     }
 
     await open(page, "App");
-    await page.getByRole("button", { name: "Light" }).click();
+    await page.getByRole("radio", { name: "Light" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
-    await page.getByRole("button", { name: "Dark" }).click();
+    await page.getByRole("radio", { name: "Dark" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
     await open(page, "Company");
@@ -70,9 +70,9 @@ test("every section works against a real daemon, and what is changed stays chang
     await companyName.fill("Northwind");
     await main(page).getByRole("button", { name: "Save" }).click();
     const mode = main(page).getByRole("switch", { name: "Management chooses the mode" });
-    const was = await mode.getAttribute("aria-checked");
+    const was = await mode.isChecked();
     await mode.click();
-    await expect(mode).toHaveAttribute("aria-checked", was === "true" ? "false" : "true");
+    await expect(mode).toBeChecked({ checked: !was });
     await main(page).getByLabel("New board member's name").fill("alex");
     await main(page).getByLabel("New board member's password").fill(PASSWORD);
     await main(page).getByLabel("Repeat the first password").fill(PASSWORD);
@@ -87,12 +87,15 @@ test("every section works against a real daemon, and what is changed stays chang
     await main(page).getByRole("button", { name: "Save" }).click();
     await expect(main(page).getByRole("button", { name: "Save" })).toBeHidden();
 
-    await open(page, "Trace");
-    const trace = main(page).getByRole("switch", { name: "Trace mode" });
-    const traced = await trace.getAttribute("aria-checked");
-    await trace.click();
-    if (traced === "true") await main(page).getByRole("button", { name: "Turn off and delete" }).click();
-    await expect(trace).toHaveAttribute("aria-checked", traced === "true" ? "false" : "true");
+    let traced = false;
+    if (!hidden("Trace")) {
+      await open(page, "Trace");
+      const trace = main(page).getByRole("switch", { name: "Trace mode" });
+      traced = await trace.isChecked();
+      await trace.click();
+      if (traced) await main(page).getByRole("button", { name: "Turn off and delete" }).click();
+      await expect(trace).toBeChecked({ checked: !traced });
+    }
 
     await open(page, "Load limits");
     const runs = main(page).getByLabel("Max runs at once");
@@ -126,17 +129,15 @@ test("every section works against a real daemon, and what is changed stays chang
     await expect(page.getByRole("heading", { level: 1, name: "Remote access" })).toBeVisible();
     await open(page, "Company");
     await expect(main(page).getByLabel("Company name")).toHaveValue("Northwind");
-    await expect(main(page).getByRole("switch", { name: "Management chooses the mode" })).toHaveAttribute(
-      "aria-checked",
-      was === "true" ? "false" : "true",
-    );
+    await expect(main(page).getByRole("switch", { name: "Management chooses the mode" })).toBeChecked({
+      checked: !was,
+    });
     await open(page, "Load limits");
     await expect(main(page).getByLabel("Max runs at once")).toHaveValue(limit);
-    await open(page, "Trace");
-    await expect(main(page).getByRole("switch", { name: "Trace mode" })).toHaveAttribute(
-      "aria-checked",
-      traced === "true" ? "false" : "true",
-    );
+    if (!hidden("Trace")) {
+      await open(page, "Trace");
+      await expect(main(page).getByRole("switch", { name: "Trace mode" })).toBeChecked({ checked: !traced });
+    }
     await open(page, "Servers & PC");
     await expect(main(page).getByLabel("Server name")).toHaveValue("Testbak");
 

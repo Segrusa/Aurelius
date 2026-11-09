@@ -7,14 +7,14 @@
 //!   the summary after Done): the ticket's `login_user` (its creator unless a
 //!   board member took it over, `ticket.use_my_login`). A task without a ticket:
 //!   the login it was made with (`tasks.login_user`: the board member who made
-//!   it, the run that delegated it, an app key's, an API key's (an agent
-//!   function's call) or a schedule's), else its parent's.
+//!   it, the run that delegated it or a schedule's), else its parent's.
 //! - A run the Team chat or a discussion woke: the login of the board member of
 //!   hop 0, carried in the marking (`GroupRun::login_user`), also at hop 2–3.
+//! - A run in a board member's lasting chat with an employee: that board member,
+//!   also for an update nobody wrote (a ticket that reached Review).
 //! - A chat run (an employee, the project assistant): the board member who wrote
 //!   the message; else the one whose command queued it (a decision); a report of
-//!   a delegated task: that task's login. A heartbeat: the login of the board
-//!   member who turned it on (B5).
+//!   a delegated task: that task's login (B5).
 //! - Background jobs without a source (memory consolidation): the company's login
 //!   (`company.background_login_user`, B6).
 //!
@@ -30,29 +30,27 @@ fn user(text: Option<String>) -> Option<UserId> {
 }
 
 /// The login a task's runs use: its ticket's, else its own, else its parent's,
-/// else its schedule's, app key's or (an agent function's call) API key's.
+/// else its schedule's.
 pub(crate) fn of_task(conn: &Connection, task: TaskId) -> Result<Option<UserId>, StorageError> {
     let mut at = Some(task.to_string());
     // A chain of delegations is short; the bound only guards against a cycle.
     for _ in 0..64 {
         let Some(id) = at.take() else { return Ok(None) };
-        let row: Option<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)> = conn
+        let row: Option<(Option<String>, Option<String>, Option<String>, Option<String>)> = conn
             .query_row(
                 "SELECT (SELECT k.login_user FROM tickets k WHERE k.id = t.ticket_id), t.login_user, t.parent_task_id,
-                        (SELECT s.login_user FROM recurring_tasks s WHERE s.id = t.schedule_id),
-                        (SELECT a.login_user FROM app_keys a WHERE a.id = t.created_by_app_key_id),
-                        (SELECT k.login_user FROM function_calls c JOIN api_keys k ON k.id = c.api_key_id WHERE c.task_id = t.id)
+                        (SELECT s.login_user FROM recurring_tasks s WHERE s.id = t.schedule_id)
                  FROM tasks t WHERE t.id = ?1",
                 [&id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
-        let Some((ticket, own, parent, schedule, app_key, api_key)) = row else { return Ok(None) };
+        let Some((ticket, own, parent, schedule)) = row else { return Ok(None) };
         if let Some(login) = user(ticket).or(user(own)) {
             return Ok(Some(login));
         }
         if parent.is_none() {
-            return Ok(user(schedule).or(user(app_key)).or(user(api_key)));
+            return Ok(user(schedule));
         }
         at = parent;
     }
@@ -83,7 +81,10 @@ pub(crate) fn for_run(conn: &Connection, conversation: ConversationId, reply_to:
     if let Some(login) = group {
         return Ok(Some(login));
     }
-    // Set by the caller (a heartbeat: the login of who turned it on, null when none).
+    if let Some(chat) = aurelius_storage::employee_chats::of_conversation(conn, conversation)? {
+        return Ok(Some(chat.user));
+    }
+    // Set by the caller (a scheduled message: the login it was planned with, null when none).
     if let Some(login) = meta.get("login_user") {
         return Ok(login.as_str().and_then(|u| UserId::parse(u).ok()));
     }

@@ -49,7 +49,7 @@ async fn task_run_config(root: &Path, title: &str) -> serde_json::Value {
 }
 
 async fn employee(client: &Client, project_id: aurelius_domain::ProjectId, name: &str) -> aurelius_domain::EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     match exec(client, Command::CreateEmployee(create)).await {
         CommandResult::EmployeeCreated { employee_id, .. } => employee_id,
         other => panic!("{other:?}"),
@@ -64,7 +64,6 @@ fn new_task(project_id: aurelius_domain::ProjectId, employee_id: aurelius_domain
         title: title.into(),
         goal: "Doe het".into(),
         acceptance_criteria: vec![],
-        depends_on: vec![],
         run: Default::default(),
         files: vec![],
     })
@@ -115,7 +114,9 @@ async fn builtin_connection_and_inheritance_with_origin() {
 #[tokio::test(flavor = "multi_thread")]
 async fn api_connection_needs_a_key_and_disabled_means_no_fallback() {
     let dir = tempfile::tempdir().unwrap();
-    let daemon = start(dir.path()).await;
+    // Without the runtime override: an override answers whatever the connection says, and
+    // whether a run without a connection fails is what this test is here for.
+    let daemon = common::start_real(dir.path()).await;
     let client = connect(dir.path()).await;
 
     let CommandResult::ProviderAdded { connection_id } = exec(

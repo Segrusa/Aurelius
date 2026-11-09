@@ -33,7 +33,6 @@ EmployeeSummary employeeOf({
   String conversationId = 'main',
   List<ConversationSummary> conversations = const [],
   List<AgentView> agents = const [],
-  HeartbeatView? heartbeat,
   String? instructions,
   int version = 1,
 }) =>
@@ -43,7 +42,6 @@ EmployeeSummary employeeOf({
       browserAllowed: browserAllowed,
       conversationId: conversationId,
       conversations: conversations,
-      heartbeat: heartbeat,
       id: id,
       instructions: instructions,
       name: name,
@@ -78,8 +76,6 @@ TaskView taskOf({
   String? result,
   TaskRun run = const TaskRun(),
   List<String> criteria = const [],
-  String? createdByApp,
-  VariantPhase? variantPhase,
   LiveRun? liveRun,
   String? ticketId,
   int? ticketNumber,
@@ -89,13 +85,11 @@ TaskView taskOf({
       ticketId: ticketId,
       ticketNumber: ticketNumber,
       attachments: const [],
-      createdByApp: createdByApp,
       children: children,
       conversationId: conversationId,
       createdAtMs: 0,
       criteria: criteria,
       delegatedBy: delegatedBy,
-      dependsOn: const [],
       goal: goal,
       handoffs: const [],
       id: id,
@@ -110,7 +104,6 @@ TaskView taskOf({
       status: status,
       title: title,
       updatedAtMs: updatedAtMs,
-      variantPhase: variantPhase,
       waitingReason: waitingReason,
       waitingUntilMs: waitingUntilMs,
     );
@@ -161,7 +154,6 @@ MessagesSnapshot snapshotOf(String conversationId, {List<MessageView> messages =
       readOnly: readOnly,
       run: run,
       screenAllowed: screenAllowed,
-      shares: const [],
     );
 
 ApprovalView approvalOf(
@@ -253,31 +245,6 @@ ProposalView instructionProposalOf(String id, {int baseVersion = 2, int currentV
       status: ProposalStatus.pending,
       targetEmployeeId: 'm2',
       targetEmployeeName: 'Max',
-    );
-
-TaskVariantView variantOf(int n, {String hint = '', VariantStatus status = VariantStatus.done, int? rank, String? judgeNote, String diff = '--- a/x\n+++ b/x\n-old\n+new', String report = 'Did it.'}) => TaskVariantView(
-      deletions: 1,
-      diff: diff,
-      diffTruncated: false,
-      errors: 0,
-      files: 1,
-      hint: hint,
-      insertions: 1,
-      judgeNote: judgeNote,
-      n: n,
-      rank: rank,
-      report: report,
-      status: status,
-      usage: const TokenUsage(cacheCreationTokens: 100, cachedTokens: 0, estimate: false, inputTokens: 1000, outputTokens: 400, runs: 1),
-    );
-
-TaskVariantsView variantsOf(String taskId, {VariantPhase phase = VariantPhase.ready, int? judgePick = 2, String? compose = 'Variant 2 keeps the API.', List<TaskVariantView>? variants}) => TaskVariantsView(
-      compose: compose,
-      count: variants?.length ?? 2,
-      judgePick: judgePick,
-      phase: phase,
-      taskId: taskId,
-      variants: variants ?? [variantOf(1, hint: 'Small patch', rank: 2), variantOf(2, hint: 'Refactor', rank: 1, judgeNote: 'Cleaner')],
     );
 
 Receipt receiptOf(CommandResult result) => Receipt(committedSeq: 1, idempotencyKey: 'k', replayed: false, result: WriteResultCommand(value: result));

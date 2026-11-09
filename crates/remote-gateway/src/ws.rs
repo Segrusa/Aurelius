@@ -15,37 +15,19 @@ use tokio::sync::mpsc;
 /// Close code the app reads as "revoked or remote access turned off".
 pub const CLOSE_REVOKED: u16 = 4401;
 
-/// Who opened the WebSocket.
-pub enum Caller {
-    /// A paired device with its session token.
-    Device(RemoteClient),
-    /// An outside app with its app key (feature `app_keys`).
-    App(aurelius_storage::app_keys::AppKeyRow),
-}
-
-pub async fn serve(hub: Hub, caller: Caller, socket: WebSocket) {
+pub async fn serve(hub: Hub, client: RemoteClient, socket: WebSocket) {
     let Some(dispatch) = hub.inner.dispatch.get().cloned() else { return };
     let (req_tx, req_rx) = mpsc::channel::<Request>(16);
     let (out_tx, mut out_rx) = mpsc::channel::<ServerMessage>(256);
     // The guard keeps a device counted as connected while the socket is open.
-    let (mut kill, _guard) = match caller {
-        Caller::Device(client) => {
-            let (kill, guard) = hub.connect(client.id);
-            let inbox = hub.inbox(client.id);
-            let _ = std::fs::create_dir_all(&inbox);
-            dispatch.open(
-                Device { client_id: client.id, name: client.name.clone(), capabilities: client.capabilities.clone(), inbox },
-                req_rx,
-                out_tx,
-            );
-            (kill, Some(guard))
-        }
-        Caller::App(key) => {
-            let kill = hub.connect_app(key.id);
-            dispatch.open_app(key, req_rx, out_tx);
-            (kill, None)
-        }
-    };
+    let (mut kill, _guard) = hub.connect(client.id);
+    let inbox = hub.inbox(client.id);
+    let _ = std::fs::create_dir_all(&inbox);
+    dispatch.open(
+        Device { client_id: client.id, name: client.name.clone(), capabilities: client.capabilities.clone(), inbox },
+        req_rx,
+        out_tx,
+    );
 
     let (mut sink, mut stream) = socket.split();
     let mut appends = Appends::default();

@@ -6,18 +6,22 @@
 //! * Blobs are written to disk *before* the transaction (temp file, fsync,
 //!   atomic rename); a crash can leave an orphan file, never a half-visible row.
 
-pub mod artifacts;
 pub mod auto_allow;
 pub mod management_mode;
 pub mod backup;
 pub mod blobs;
-pub mod heartbeats;
 pub mod conversations;
 pub mod discussions;
 pub mod threads;
 pub mod message_edits;
 pub mod conversation_sessions;
 pub mod employees;
+pub mod employee_chats;
+pub mod employee_profiles;
+pub mod activity_log;
+pub mod scheduled;
+pub mod scratchpads;
+pub mod inbox;
 pub mod company_convert;
 pub mod approvals;
 pub mod proposals;
@@ -25,17 +29,11 @@ pub mod instruction_versions;
 pub mod connections;
 pub mod tasks;
 pub mod ideas;
-pub mod notes;
 pub mod task_schedules;
-pub mod agent_functions;
-pub mod app_keys;
-pub mod webhooks;
 pub mod files;
 pub mod timeline;
 pub mod memory;
 pub mod usage;
-pub mod variants;
-pub mod shares;
 pub mod events;
 pub mod import;
 pub mod fresh_start;
@@ -246,6 +244,22 @@ mod schema27_tests;
 mod schema28_tests;
 #[cfg(test)]
 mod schema32_tests;
+#[cfg(test)]
+mod schema33_tests;
+#[cfg(test)]
+mod schema34_tests;
+#[cfg(test)]
+mod schema35_tests;
+#[cfg(test)]
+mod schema36_tests;
+#[cfg(test)]
+mod schema37_tests;
+#[cfg(test)]
+mod schema38_tests;
+#[cfg(test)]
+mod schema39_tests;
+#[cfg(test)]
+mod schema40_tests;
 #[cfg(test)]
 mod schema29_tests;
 #[cfg(test)]

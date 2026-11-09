@@ -1,11 +1,24 @@
+import { Button } from "@astryxdesign/core/Button";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { LayoutPanel } from "@astryxdesign/core/Layout";
+import { Link } from "@astryxdesign/core/Link";
+import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { expectBody } from "@aurelius/client";
 import type { AgentMode, TicketPriority, TicketView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
   useAllTasks,
+  useApprovals,
   useBoard,
   useCompany,
   useEmployees,
@@ -19,10 +32,13 @@ import { showChord } from "../keys/keymap";
 import { isMac, useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { acceptable, filesFrom } from "../ui/attach";
-import { Button, Chip, initial, Kbd, Mark, markColor } from "../ui/kit";
+import { Chip } from "../ui/chip";
+import { KeyHint } from "../ui/key-hint";
 import { Markdown } from "../ui/markdown";
-import { Dialog, Menu } from "../ui/overlay";
+import { initial, Mark, markColor } from "../ui/marks";
+import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { ApprovalCard, ReplyCard } from "./approval-card";
 import {
   activityDetail,
   activityText,
@@ -45,10 +61,16 @@ import {
   testingNote,
 } from "./board-logic";
 import { canChange, completeMention, mentionSuggestions } from "./chat-logic";
+import { ActivityOutput } from "./chat-message";
+import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { messageLink, ticketLink } from "./links-logic";
+import { FormDialog, Loading, Problem } from "./org-kit";
+import { RunCard, TicketOdometer } from "./run-card";
+import { approvalsFor, waitsOnReply } from "./run-card-logic";
 import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
+import { ThreadWaiting } from "./scheduled";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
 import {
   ColumnGlyph,
@@ -67,28 +89,255 @@ const MODES: { key: string; label: string }[] = [
   { key: "plan", label: "Plan" },
 ];
 
-const FIELD =
-  "w-full rounded-[6px] border border-btn-line bg-sunk px-2 text-[13px] text-text outline-none focus:border-acc-text";
+const enter = stylex.keyframes({
+  from: { opacity: 0, transform: "translateY(4px)" },
+});
+
+const styles = stylex.create({
+  box: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingInline: 14,
+    paddingBlock: 12,
+  },
+  boxAmber: { borderColor: "var(--color-border-warning)", backgroundColor: "var(--color-warning-muted)" },
+  boxRed: { borderColor: "var(--color-text-error)" },
+  row: { display: "grid", minHeight: 30, gridTemplateColumns: "100px minmax(0,1fr)", alignItems: "center", gap: 8 },
+  rowValue: { minWidth: 0 },
+  editable: {
+    display: "block",
+    width: "100%",
+    cursor: "text",
+    borderRadius: 5,
+    borderWidth: 0,
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    padding: 0,
+    textAlign: "left",
+    color: "inherit",
+  },
+  stack: { display: "flex", flexDirection: "column", gap: 8 },
+  designLink: { color: "var(--color-text-accent)", textDecoration: "none" },
+  designChange: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    fontSize: 12,
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+  },
+  buttons: { display: "flex", flexWrap: "wrap", gap: 8 },
+  buttonsCentered: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  gateHead: { display: "flex", alignItems: "center", gap: 8, fontWeight: 500 },
+  dot: { width: 7, height: 7, borderRadius: "50%", backgroundColor: "var(--color-text-warning)" },
+  small: { fontSize: 12, color: "var(--color-text-secondary)" },
+  secondary: { color: "var(--color-text-secondary)" },
+  third: { color: "var(--precision-text3)" },
+  thirdSmall: { fontSize: 12, color: "var(--precision-text3)" },
+  sectionLabel: { fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
+  medium: { fontWeight: 500 },
+  failed: { fontWeight: 500, color: "var(--color-text-error)" },
+  red: { color: "var(--color-text-error)" },
+  error: { fontSize: 12, color: "var(--color-text-error)" },
+  linkEnd: { marginInlineStart: "auto", alignSelf: "center", fontSize: 12 },
+  followers: { display: "inline-flex", alignItems: "center", gap: 4 },
+  spaced: { marginTop: 8 },
+  summaryLine: { marginTop: 8, display: "flex", alignItems: "center", gap: 8 },
+  discussion: {
+    display: "flex",
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "0%",
+    flexDirection: "column",
+    gap: 16,
+    overflowY: "auto",
+    paddingInline: 22,
+    paddingBlock: 16,
+  },
+  // A card clips its content, so in this column it would be squeezed instead of scrolled.
+  interrupt: { flexShrink: 0 },
+  message: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    borderRadius: 6,
+    transitionProperty: "background-color",
+    transitionDuration: "150ms",
+  },
+  lit: { backgroundColor: "var(--color-overlay-hover)" },
+  earlier: {
+    cursor: "pointer",
+    alignSelf: "flex-start",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    fontSize: 12,
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+  },
+  messageHead: { display: "flex", alignItems: "baseline", gap: 8 },
+  // Negative margin: the button may not make a one-line message head taller than its text.
+  messageActions: { marginInlineStart: "auto", marginBlock: -4 },
+  messageEdit: {
+    resize: "vertical",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border-emphasized)",
+    backgroundColor: "var(--precision-sunk)",
+    padding: 8,
+    fontSize: 13,
+    color: "var(--color-text-primary)",
+  },
+  reply: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--precision-line2)",
+    paddingInline: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+  },
+  mentions: {
+    display: "flex",
+    flexDirection: "column",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--color-background-surface)",
+    paddingBlock: 4,
+  },
+  mention: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    paddingInline: 12,
+    paddingBlock: 4,
+    textAlign: "left",
+    color: "var(--color-text-primary)",
+  },
+  replyBox: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border-emphasized)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingBlock: 6,
+    paddingInlineEnd: 6,
+    paddingInlineStart: 12,
+  },
+  replyInput: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "0%",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "var(--color-text-primary)",
+    outline: "none",
+    "::placeholder": { color: "var(--precision-text3)" },
+  },
+  activity: { margin: 0, display: "flex", listStyleType: "none", flexDirection: "column", gap: 12, padding: 0 },
+  activityItem: { display: "flex", flexDirection: "column", gap: 2 },
+  pending: { display: "flex", flexDirection: "column", gap: 12, padding: 20 },
+  panel: {
+    display: "flex",
+    height: "100%",
+    minWidth: 0,
+    flexDirection: "column",
+    backgroundColor: "var(--color-background-surface)",
+    animationName: enter,
+    animationDuration: "160ms",
+    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
+  },
+  panelHead: {
+    display: "flex",
+    height: 44,
+    flexShrink: 0,
+    alignItems: "center",
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--precision-line2)",
+    paddingInlineStart: 20,
+    paddingInlineEnd: 10,
+    color: "var(--precision-text3)",
+  },
+  number: { fontFamily: "var(--font-family-code)", fontSize: 12 },
+  panelTools: { marginInlineStart: "auto", display: "flex", gap: 2 },
+  top: { display: "flex", flexShrink: 0, flexDirection: "column", gap: 12, paddingInline: 22, paddingTop: 20 },
+  topGate: { display: "flex", flexShrink: 0, flexDirection: "column", gap: 12, paddingInline: 22, paddingTop: 12 },
+  title: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: "-0.015em" },
+  chips: { display: "flex", flexWrap: "wrap", gap: 6 },
+  tabPanel: { display: "flex", minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%", flexDirection: "column" },
+  section: {
+    display: "flex",
+    minHeight: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "0%",
+    flexDirection: "column",
+    gap: 18,
+    overflowY: "auto",
+    paddingInline: 22,
+    paddingBlock: 16,
+  },
+  rows: { display: "flex", flexDirection: "column" },
+  files: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 },
+  tasks: { display: "flex", flexDirection: "column", gap: 4 },
+  task: {
+    display: "flex",
+    height: 32,
+    cursor: "pointer",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 6,
+    borderWidth: 0,
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    paddingInlineEnd: 4,
+    textAlign: "left",
+    color: "var(--color-text-primary)",
+  },
+  taskTitle: {
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: "0%",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  taskState: { flexShrink: 0, fontSize: 12 },
+});
 
 function time(ms: number): string {
   return new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
 function Box({ tone = "plain", children }: { tone?: "plain" | "amber" | "red"; children: ReactNode }) {
-  const look =
-    tone === "amber"
-      ? "border-amber-line bg-amber-soft"
-      : tone === "red"
-        ? "border-red bg-sunk"
-        : "border-line bg-sunk";
-  return <div className={`flex flex-col gap-[10px] rounded-[8px] border px-[14px] py-3 ${look}`}>{children}</div>;
+  return (
+    <div {...stylex.props(styles.box, tone === "amber" && styles.boxAmber, tone === "red" && styles.boxRed)}>
+      {children}
+    </div>
+  );
 }
 
 function Row({ name, children }: { name: string; children: ReactNode }) {
   return (
-    <div className="grid min-h-[30px] grid-cols-[100px_minmax(0,1fr)] items-center gap-2">
-      <span className="text-text3">{name}</span>
-      <div className="min-w-0">{children}</div>
+    <div {...stylex.props(styles.row)}>
+      <span {...stylex.props(styles.third)}>{name}</span>
+      <div {...stylex.props(styles.rowValue)}>{children}</div>
     </div>
   );
 }
@@ -102,6 +351,8 @@ function Editable({
   onSave,
   label,
   placeholder,
+  opened = false,
+  onClose,
 }: {
   value: string;
   enabled: boolean;
@@ -110,15 +361,22 @@ function Editable({
   onSave: (next: string) => Promise<boolean>;
   label: string;
   placeholder?: string;
+  /** Opens as an editor (a link field has no display worth clicking while it has a value). */
+  opened?: boolean;
+  onClose?: () => void;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
+  const [draft, setDraftRaw] = useState<string | null>(opened ? value : null);
+  const setDraft = (next: string | null) => {
+    setDraftRaw(next);
+    if (next === null) onClose?.();
+  };
   if (draft === null) {
     return enabled ? (
       <button
         type="button"
         aria-label={`Edit ${label}`}
         onClick={() => setDraft(value)}
-        className="block w-full cursor-text rounded-[5px] border-0 bg-transparent p-0 text-left text-inherit hover:bg-sel"
+        {...stylex.props(styles.editable)}
       >
         {display}
       </button>
@@ -141,34 +399,78 @@ function Editable({
     }
   };
   return (
-    <div className="flex flex-col gap-2">
+    <div {...stylex.props(styles.stack)}>
       {multiline ? (
-        <textarea
-          aria-label={label}
-          className={`${FIELD} min-h-[120px] resize-y py-2`}
+        <TextArea
+          label={label}
+          isLabelHidden
+          rows={6}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={setDraft}
           onKeyDown={keys}
           ref={(el) => el?.focus({ preventScroll: true })}
         />
       ) : (
-        <input
-          aria-label={label}
-          className={`${FIELD} h-8`}
+        <TextInput
+          label={label}
+          isLabelHidden
           value={draft}
-          placeholder={placeholder}
-          onChange={(e) => setDraft(e.target.value)}
+          {...(placeholder ? { placeholder } : {})}
+          onChange={setDraft}
           onKeyDown={keys}
           ref={(el) => el?.focus({ preventScroll: true })}
         />
       )}
-      <div className="flex gap-2">
-        <Button kind="primary" onClick={() => void save()}>
-          Save
-        </Button>
-        <Button onClick={() => setDraft(null)}>Cancel</Button>
+      <div {...stylex.props(styles.buttons)}>
+        <Button variant="primary" label="Save" onClick={() => void save()} />
+        <Button label="Cancel" onClick={() => setDraft(null)} />
       </div>
     </div>
+  );
+}
+
+/** A ticket's design: only an Open link when it has one; "None" (click to edit) otherwise. */
+function DesignRow({
+  url,
+  enabled,
+  onSave,
+}: {
+  url: string | null;
+  enabled: boolean;
+  onSave: (text: string) => Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const field =
+    url && !editing ? (
+      <span {...stylex.props(styles.buttonsCentered)}>
+        <a href={url} target="_blank" rel="noreferrer" {...stylex.props(styles.designLink)}>
+          Open
+        </a>
+        {enabled ? (
+          <button type="button" onClick={() => setEditing(true)} {...stylex.props(styles.designChange)}>
+            Change
+          </button>
+        ) : null}
+      </span>
+    ) : (
+      <Editable
+        value={url ?? ""}
+        enabled={enabled}
+        opened={editing}
+        onClose={() => setEditing(false)}
+        label="Design"
+        placeholder={ARTIFACT_PLACEHOLDER}
+        display={<span {...stylex.props(styles.third)}>None</span>}
+        onSave={onSave}
+      />
+    );
+  return (
+    <Row name="Design">
+      <div {...stylex.props(styles.stack)}>
+        {field}
+        <span {...stylex.props(styles.thirdSmall)}>{ARTIFACT_HINT}</span>
+      </div>
+    </Row>
   );
 }
 
@@ -185,14 +487,15 @@ function Feedback({
 }) {
   return (
     <>
-      <textarea
-        aria-label={placeholder}
-        className={`${FIELD} min-h-[72px] resize-y py-2`}
+      <TextArea
+        label={placeholder}
+        isLabelHidden
         placeholder={placeholder}
+        rows={3}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
       />
-      {missing ? <span className="text-[12px] text-red">Write what needs to change.</span> : null}
+      {missing ? <span {...stylex.props(styles.error)}>Write what needs to change.</span> : null}
     </>
   );
 }
@@ -283,12 +586,16 @@ function ReviewGate({
           onNo={() => setMode("back")}
         />
       ) : null}
-      <div className="flex items-center gap-2 font-medium">
-        <span className="size-[7px] rounded-full bg-amber" />
+      <div {...stylex.props(styles.gateHead)}>
+        <span {...stylex.props(styles.dot)} />
         In review · your decision
       </div>
-      {too ? <span className="text-[12px] text-text2">{too}</span> : null}
-      {report ? <Markdown text={report} /> : <span className="text-text2">No report text. See the conversation.</span>}
+      {too ? <span {...stylex.props(styles.small)}>{too}</span> : null}
+      {report ? (
+        <Markdown text={report} />
+      ) : (
+        <span {...stylex.props(styles.secondary)}>No report text. See the conversation.</span>
+      )}
       {mode ? (
         <Feedback
           placeholder={mode === "reply" ? "What should happen next?" : "What needs to change?"}
@@ -298,26 +605,25 @@ function ReviewGate({
         />
       ) : null}
       {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
-      {error ? (
-        <p role="alert" className="m-0 text-red">
-          {error}
-        </p>
-      ) : null}
-      {whyNot ? <span className="text-[12px] text-text2">{whyNot}</span> : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[12px] text-text3">Tell {t.owner_name ?? "the owner"}:</span>
+      {error ? <Problem>{error}</Problem> : null}
+      {whyNot ? <span {...stylex.props(styles.small)}>{whyNot}</span> : null}
+      <div {...stylex.props(styles.buttonsCentered)}>
+        <span {...stylex.props(styles.thirdSmall)}>Tell {t.owner_name ?? "the owner"}:</span>
         {suggestedReplies(report).map((r) => (
-          <Button key={r.label} disabled={busy} onClick={() => reply(r.text)}>
-            {r.label}
-          </Button>
+          <Button label={r.label} key={r.label} isDisabled={busy} onClick={() => reply(r.text)} />
         ))}
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Button kind="primary" disabled={!ready} onClick={done}>
-          Mark done {keyed ? <Kbd onAccent>{showChord("secondary-enter", isMac)}</Kbd> : null}
+      <div {...stylex.props(styles.buttons)}>
+        <Button variant="primary" label="Mark done" isDisabled={!ready} onClick={done}>
+          {keyed ? (
+            <>
+              Mark done <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
+            </>
+          ) : null}
         </Button>
         <Button
-          disabled={busy}
+          label={`Reply to ${t.owner_name ?? "the owner"}`}
+          isDisabled={busy}
           onClick={() => {
             if (mode !== "reply") return setMode("reply");
             if (feedback.trim() === "") return setMissing(true);
@@ -331,11 +637,10 @@ function ReviewGate({
               return "";
             });
           }}
-        >
-          Reply to {t.owner_name ?? "the owner"}
-        </Button>
+        />
         <Button
-          disabled={busy}
+          label="Send back to Doing"
+          isDisabled={busy}
           onClick={() => {
             if (mode !== "back") return setMode("back");
             if (feedback.trim() === "") return setMissing(true);
@@ -349,20 +654,15 @@ function ReviewGate({
               return `${ticketNumber(t)} went back to Doing.`;
             });
           }}
-        >
-          Send back to Doing
-        </Button>
+        />
         {lastMessage ? (
-          <Button onClick={() => void navigate({ to: "/board", search: { ticket: t.id, message: lastMessage.id } })}>
-            Open discussion
-          </Button>
+          <Button
+            label="Open discussion"
+            onClick={() => void navigate({ to: "/board", search: { ticket: t.id, message: lastMessage.id } })}
+          />
         ) : null}
         {t.root_task_id ? (
-          <Link
-            to="/tasks/$taskId"
-            params={{ taskId: t.root_task_id }}
-            className="ml-auto self-center text-[12px] text-acc-text no-underline"
-          >
+          <Link href={`/tasks/${t.root_task_id}`} xstyle={styles.linkEnd}>
             Open run →
           </Link>
         ) : null}
@@ -391,21 +691,17 @@ function PlanGate({ t, plan, keyed = false }: { t: TicketView; plan: string | nu
   return (
     <Box tone="amber">
       {keyed ? <GateKeys onYes={() => void approve("approve")} onNo={() => setRejecting(true)} /> : null}
-      <div className="flex items-center gap-2 font-medium">
-        <span className="size-[7px] rounded-full bg-amber" />
+      <div {...stylex.props(styles.gateHead)}>
+        <span {...stylex.props(styles.dot)} />
         Plan review · your decision
       </div>
-      {too ? <span className="text-[12px] text-text2">{too}</span> : null}
+      {too ? <span {...stylex.props(styles.small)}>{too}</span> : null}
       {plan === undefined ? (
-        <span className="text-text2">Loading the plan…</span>
+        <Loading />
       ) : plan === null ? (
-        <span className="text-text2">
+        <span {...stylex.props(styles.secondary)}>
           This agent did not write a plan of its own.{" "}
-          {t.root_task_id ? (
-            <Link to="/tasks/$taskId" params={{ taskId: t.root_task_id }} className="text-acc-text no-underline">
-              Read what it said →
-            </Link>
-          ) : null}
+          {t.root_task_id ? <Link href={`/tasks/${t.root_task_id}`}>Read what it said →</Link> : null}
         </span>
       ) : (
         <Markdown text={plan} />
@@ -417,18 +713,19 @@ function PlanGate({ t, plan, keyed = false }: { t: TicketView; plan: string | nu
         missing={missing}
       />
       {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
-      {error ? (
-        <p role="alert" className="m-0 text-red">
-          {error}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button kind="primary" onClick={() => void approve("approve")}>
-          Approve {keyed ? <Kbd onAccent>{showChord("secondary-enter", isMac)}</Kbd> : null}
+      {error ? <Problem>{error}</Problem> : null}
+      <div {...stylex.props(styles.buttons)}>
+        <Button variant="primary" label="Approve" onClick={() => void approve("approve")}>
+          {keyed ? (
+            <>
+              Approve <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
+            </>
+          ) : null}
         </Button>
-        <Button onClick={() => void approve("approve_edits")}>Approve, accept edits</Button>
+        <Button label="Approve, accept edits" onClick={() => void approve("approve_edits")} />
         <Button
-          disabled={busy}
+          label="Request changes"
+          isDisabled={busy}
           onClick={() => {
             if (feedback.trim() === "") return setMissing(true);
             setMissing(false);
@@ -441,12 +738,8 @@ function PlanGate({ t, plan, keyed = false }: { t: TicketView; plan: string | nu
               return "A new plan is asked.";
             });
           }}
-        >
-          Request changes
-        </Button>
-        <Button kind="danger" onClick={() => setRejecting(true)}>
-          Reject
-        </Button>
+        />
+        <Button label="Reject" variant="destructive" onClick={() => setRejecting(true)} />
       </div>
       <ConfirmDialog
         open={rejecting}
@@ -479,25 +772,31 @@ export function ConfirmDialog({
   onConfirm: () => unknown;
 }) {
   return (
-    <Dialog open={open} onClose={onClose} title={title} width={440}>
-      <div className="flex flex-col gap-2 p-4">
-        <p className="m-0 text-[15px] font-semibold">{title}</p>
-        <p className="m-0 text-text2">{body}</p>
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button
-          data-autofocus
-          kind={danger ? "danger" : "primary"}
-          onClick={() => {
-            onClose();
-            void onConfirm();
-          }}
+    <>
+      {open ? (
+        <FormDialog
+          title={title}
+          width={440}
+          onClose={onClose}
+          footer={
+            <>
+              <Button label="Cancel" onClick={onClose} />
+              <Button
+                data-autofocus
+                variant={danger ? "destructive" : "primary"}
+                label={confirm}
+                onClick={() => {
+                  onClose();
+                  void onConfirm();
+                }}
+              />
+            </>
+          }
         >
-          {confirm}
-        </Button>
-      </div>
-    </Dialog>
+          <span {...stylex.props(styles.secondary)}>{body}</span>
+        </FormDialog>
+      ) : null}
+    </>
   );
 }
 
@@ -515,11 +814,11 @@ function Followers({ id }: { id: string }) {
   const shown = list.slice(0, FOLLOWERS_SHOWN);
   return (
     <Row name="Followers">
-      <span title={list.map((f) => f.username).join(", ")} className="inline-flex items-center gap-1">
+      <span title={list.map((f) => f.username).join(", ")} {...stylex.props(styles.followers)}>
         {shown.map((f) => (
           <Mark key={f.user_id} letter={initial(f.username)} color={markColor(f.user_id)} size={18} radius={5} />
         ))}
-        {list.length > shown.length ? <span className="text-text3">+{list.length - shown.length}</span> : null}
+        {list.length > shown.length ? <span {...stylex.props(styles.third)}>+{list.length - shown.length}</span> : null}
       </span>
     </Row>
   );
@@ -560,11 +859,7 @@ function StatusBox({
     write("ticket.start", { ticket_id: t.id, employee_id: employee }, { done: `${ticketNumber(t)} started.` });
   const back = () => write("ticket.cancel", { ticket_id: t.id }, { done: `${ticketNumber(t)} is back in Backlog.` });
   const runLink = t.root_task_id ? (
-    <Link
-      to="/tasks/$taskId"
-      params={{ taskId: t.root_task_id }}
-      className="ml-auto self-center text-[12px] text-acc-text no-underline"
-    >
+    <Link href={`/tasks/${t.root_task_id}`} xstyle={styles.linkEnd}>
       Open run →
     </Link>
   ) : null;
@@ -592,21 +887,18 @@ function StatusBox({
   if (wait) {
     return (
       <Box tone="amber">
-        <span className="font-medium">{wait}</span>
+        <span {...stylex.props(styles.medium)}>{wait}</span>
         {t.login_user === me && !wait.startsWith("⏸") ? (
           <div>
-            <Link
-              to="/settings/$section"
-              params={{ section: "account" }}
-              className="inline-flex h-7 items-center rounded-[6px] border border-btn-line px-3 text-text no-underline"
-            >
-              {claudeLogin?.status === "expired" ? "Reconnect Claude login" : "Connect Claude login"}
-            </Link>
+            <Button
+              href="/settings/account"
+              label={claudeLogin?.status === "expired" ? "Reconnect Claude login" : "Connect Claude login"}
+            />
           </div>
         ) : null}
         {takeOverOffered(t, me) ? (
           <div>
-            <Button onClick={() => void write("ticket.use_my_login", { ticket_id: t.id })}>Run on my login</Button>
+            <Button label="Run on my login" onClick={() => void write("ticket.use_my_login", { ticket_id: t.id })} />
           </div>
         ) : null}
       </Box>
@@ -615,12 +907,10 @@ function StatusBox({
   if ((t.column === "todo" || t.column === "doing") && t.root_task_status === "failed") {
     return (
       <Box tone="red">
-        <span className="font-medium text-red">✕ The main task failed</span>
-        <div className="flex flex-wrap gap-2">
-          <Button kind="primary" onClick={() => void start()}>
-            Start again
-          </Button>
-          <Button onClick={() => setLeaving("backlog")}>Back to Backlog</Button>
+        <span {...stylex.props(styles.failed)}>✕ The main task failed</span>
+        <div {...stylex.props(styles.buttons)}>
+          <Button label="Start again" variant="primary" onClick={() => void start()} />
+          <Button label="Back to Backlog" onClick={() => setLeaving("backlog")} />
           {runLink}
         </div>
         {dialogs}
@@ -631,13 +921,9 @@ function StatusBox({
     case "backlog":
       return (
         <Box>
-          <div className="flex flex-wrap gap-2">
-            <Button kind="primary" onClick={() => void start()}>
-              Start
-            </Button>
-            <Button kind="danger" onClick={() => setLeaving("delete")}>
-              Delete
-            </Button>
+          <div {...stylex.props(styles.buttons)}>
+            <Button label="Start" variant="primary" onClick={() => void start()} />
+            <Button label="Delete" variant="destructive" onClick={() => setLeaving("delete")} />
           </div>
           {dialogs}
         </Box>
@@ -648,15 +934,15 @@ function StatusBox({
       }
       return (
         <Box tone={choosing ? "plain" : "amber"}>
-          <span className={choosing ? "text-text2" : "font-medium"}>{dispatcherLine}</span>
-          <div className="flex flex-wrap gap-2">
+          <span {...stylex.props(choosing ? styles.secondary : styles.medium)}>{dispatcherLine}</span>
+          <div {...stylex.props(styles.buttons)}>
             <Menu
               label={choosing ? "Choose yourself" : "Choose employee"}
               options={active}
               onPick={(id) => void write("ticket.assign", { ticket_id: t.id, employee_id: id })}
-              trigger={<Button>{choosing ? "Choose yourself" : "Choose employee"}</Button>}
+              trigger={<Button label={choosing ? "Choose yourself" : "Choose employee"} />}
             />
-            <Button onClick={() => (choosing ? setLeaving("backlog") : void back())}>Back to Backlog</Button>
+            <Button label="Back to Backlog" onClick={() => (choosing ? setLeaving("backlog") : void back())} />
           </div>
           {dialogs}
         </Box>
@@ -665,19 +951,15 @@ function StatusBox({
       if (stopped) {
         return (
           <Box tone="amber">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium">{t.owner_name ?? "The employee"} stopped and waits for you.</span>
+            <div {...stylex.props(styles.buttonsCentered)}>
+              <span {...stylex.props(styles.medium)}>{t.owner_name ?? "The employee"} stopped and waits for you.</span>
               {runLink}
             </div>
-            {failure ? <span className="text-text2">{failure}</span> : null}
+            {failure ? <span {...stylex.props(styles.secondary)}>{failure}</span> : null}
             {failure && noConnection ? <NoConnectionNote /> : null}
-            <div className="flex flex-wrap gap-2">
-              {failure ? (
-                <Button kind="primary" onClick={retry}>
-                  Try again
-                </Button>
-              ) : null}
-              <Button onClick={() => setLeaving("backlog")}>Back to Backlog</Button>
+            <div {...stylex.props(styles.buttons)}>
+              {failure ? <Button label="Try again" variant="primary" onClick={retry} /> : null}
+              <Button label="Back to Backlog" onClick={() => setLeaving("backlog")} />
             </div>
             {dialogs}
           </Box>
@@ -685,12 +967,14 @@ function StatusBox({
       }
       return (
         <Box>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-text2">{t.owner_name ? `${t.owner_name} is working on it.` : "In progress."}</span>
+          <div {...stylex.props(styles.buttonsCentered)}>
+            <span {...stylex.props(styles.secondary)}>
+              {t.owner_name ? `${t.owner_name} is working on it.` : "In progress."}
+            </span>
             {runLink}
           </div>
           <div>
-            <Button onClick={() => setLeaving("backlog")}>Back to Backlog</Button>
+            <Button label="Back to Backlog" onClick={() => setLeaving("backlog")} />
           </div>
           {dialogs}
         </Box>
@@ -700,14 +984,8 @@ function StatusBox({
         <Box>
           {testingNote(testTask?.employee_name ?? tester)}
           {testTask ? (
-            <div className="mt-2">
-              <Link
-                to="/tasks/$taskId"
-                params={{ taskId: testTask.id }}
-                className="inline-flex h-7 items-center rounded-[6px] border border-btn-line px-3 text-text no-underline"
-              >
-                Open test task
-              </Link>
+            <div {...stylex.props(styles.spaced)}>
+              <Button href={`/tasks/${testTask.id}`} label="Open test task" />
             </div>
           ) : null}
         </Box>
@@ -717,9 +995,9 @@ function StatusBox({
         <Box>
           {`Done${t.done_at_ms ? ` · ${time(t.done_at_ms)}` : ""}. Nothing was merged, pushed or deployed by closing it.`}
           {summaryFailed ? (
-            <div className="mt-2 flex items-center gap-2">
-              <span className="text-red">✕ The summary could not be saved to project memory.</span>
-              <Button onClick={() => void write("ticket.retry_summary", { ticket_id: t.id })}>Try again</Button>
+            <div {...stylex.props(styles.summaryLine)}>
+              <span {...stylex.props(styles.red)}>✕ The summary could not be saved to project memory.</span>
+              <Button label="Try again" onClick={() => void write("ticket.retry_summary", { ticket_id: t.id })} />
             </div>
           ) : null}
         </Box>
@@ -740,6 +1018,8 @@ function Discussion({
 }) {
   const connection = useConnection();
   const messages = useMessages(conversationId);
+  const approvals = useApprovals();
+  const pending = approvalsFor(approvals.data ?? [], { conversationId, ticketId: t.id });
   const [text, setText] = useState("");
   const { busy, held, error, send, sendAnyway } = useSend(() => setText(""));
   const post = () => {
@@ -780,29 +1060,21 @@ function Discussion({
   const { shown: list, earlier } = foldUpdates(all, unfolded);
   return (
     <>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-[22px] py-4">
-        {messages.isPending && conversationId ? <span className="text-text3">Loading the discussion…</span> : null}
-        {list.length === 0 && !messages.isPending ? <span className="text-text3">Nothing said yet.</span> : null}
+      <div {...stylex.props(styles.discussion)}>
+        {messages.isPending && conversationId ? <Loading /> : null}
+        {list.length === 0 && !messages.isPending ? <EmptyState isCompact title="Nothing said yet." /> : null}
         {list.map((m) => (
-          <div
-            key={m.id}
-            data-message={m.id}
-            className={`flex flex-col gap-1 rounded-[6px] transition-colors ${lit === m.id ? "bg-sel" : ""}`}
-          >
+          <div key={m.id} data-message={m.id} {...stylex.props(styles.message, lit === m.id && styles.lit)}>
             {earlier.get(m.id) ? (
-              <button
-                type="button"
-                onClick={() => setUnfolded(true)}
-                className="cursor-pointer self-start border-0 bg-transparent p-0 text-[12px] text-text3 hover:text-text"
-              >
+              <button type="button" onClick={() => setUnfolded(true)} {...stylex.props(styles.earlier)}>
                 {earlier.get(m.id) === 1 ? "1 earlier update" : `${earlier.get(m.id)} earlier updates`}
               </button>
             ) : null}
-            <div className="flex items-baseline gap-2">
-              <span className="font-medium">
+            <div {...stylex.props(styles.messageHead)}>
+              <span {...stylex.props(styles.medium)}>
                 {m.author_user?.username ?? m.author ?? (m.role === "user" ? "You" : "Aurelius")}
               </span>
-              <span className="text-[12px] text-text3">{time(m.created_at_ms)}</span>
+              <span {...stylex.props(styles.thirdSmall)}>{time(m.created_at_ms)}</span>
               {m.system ? null : (
                 <Menu
                   label="Message actions"
@@ -824,30 +1096,31 @@ function Discussion({
                     if (key === "delete") setDeleting(m.id);
                   }}
                   trigger={
-                    <button
-                      type="button"
-                      aria-label="Message actions"
-                      className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-text3 hover:text-text"
-                    >
-                      ⋯
-                    </button>
+                    <IconButton
+                      variant="ghost"
+                      size="sm"
+                      label="Message actions"
+                      icon={<Icon icon="moreHorizontal" />}
+                      xstyle={styles.messageActions}
+                    />
                   }
                 />
               )}
             </div>
             {editing?.id === m.id ? (
-              <div className="flex flex-col gap-2">
+              <div {...stylex.props(styles.stack)}>
                 <textarea
                   aria-label="Edit message"
                   rows={3}
                   value={editing.text}
                   onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
-                  className="resize-y rounded-[6px] border border-btn-line bg-sunk p-2 text-[13px] text-text"
+                  {...stylex.props(styles.messageEdit)}
                 />
-                <div className="flex gap-2">
+                <div {...stylex.props(styles.buttons)}>
                   <Button
-                    kind="primary"
-                    disabled={editing.text.trim() === ""}
+                    label="Save"
+                    variant="primary"
+                    isDisabled={editing.text.trim() === ""}
                     onClick={() => {
                       const { text: next } = editing;
                       setEditing(null);
@@ -855,34 +1128,42 @@ function Discussion({
                         connection.write("message.edit", { message_id: m.id, text: next }, { retry: false }),
                       );
                     }}
-                  >
-                    Save
-                  </Button>
-                  <Button onClick={() => setEditing(null)}>Cancel</Button>
+                  />
+                  <Button label="Cancel" onClick={() => setEditing(null)} />
                 </div>
               </div>
             ) : m.system ? (
-              <span className="text-text2">{m.text}</span>
+              <span {...stylex.props(styles.secondary)}>{m.text}</span>
             ) : (
               <Markdown text={m.text} />
             )}
+            {m.run ? <RunCard m={m} Output={ActivityOutput} /> : null}
+            {t.column !== "done" && waitsOnReply(m, pending) ? (
+              <ReplyCard
+                who={m.author ?? "An employee"}
+                onSend={(reply) =>
+                  connection.write(
+                    "ticket.post",
+                    { ticket_id: t.id, text: reply, confirm_secret: false },
+                    { retry: false },
+                  )
+                }
+              />
+            ) : null}
+          </div>
+        ))}
+        {pending.map((a) => (
+          <div key={a.id} {...stylex.props(styles.interrupt)}>
+            <ApprovalCard approval={a} />
           </div>
         ))}
       </div>
       {t.column === "done" ? null : (
-        <div className="flex flex-col gap-2 border-t border-line2 px-4 pt-3 pb-[14px]">
+        <div {...stylex.props(styles.reply)}>
           {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
-          {error ? (
-            <p role="alert" className="m-0 text-red">
-              {error}
-            </p>
-          ) : null}
+          {error ? <Problem>{error}</Problem> : null}
           {suggestions && suggestions.found.length > 0 ? (
-            <div
-              role="listbox"
-              aria-label="Mention"
-              className="flex flex-col rounded-[8px] border border-line bg-panel py-1"
-            >
+            <div role="listbox" aria-label="Mention" {...stylex.props(styles.mentions)}>
               {suggestions.found.map((p) => (
                 <button
                   key={p.name}
@@ -894,19 +1175,19 @@ function Discussion({
                     setClosedOn(null);
                     area.current?.focus();
                   }}
-                  className="cursor-pointer border-0 bg-transparent px-3 py-1 text-left text-text hover:bg-sel"
+                  {...stylex.props(styles.mention)}
                 >
                   {p.name}
                 </button>
               ))}
             </div>
           ) : null}
-          <div className="flex items-center gap-2 rounded-[8px] border border-btn-line bg-sunk py-[6px] pr-[6px] pl-3">
+          <div {...stylex.props(styles.replyBox)}>
             <input
               ref={area}
               aria-label="Reply in discussion"
               placeholder="Reply in discussion · @ to mention"
-              className="min-w-0 flex-1 border-0 bg-transparent text-text outline-none placeholder:text-text3"
+              {...stylex.props(styles.replyInput)}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -921,9 +1202,7 @@ function Discussion({
                 }
               }}
             />
-            <Button disabled={busy || text.trim() === ""} onClick={post}>
-              Send
-            </Button>
+            <Button label="Send" isDisabled={busy || text.trim() === ""} onClick={post} />
           </div>
         </div>
       )}
@@ -948,18 +1227,18 @@ function Discussion({
 
 function Activity({ id }: { id: string }) {
   const activity = useTicketActivity(id);
-  if (activity.isPending) return <span className="text-text3">Loading the activity…</span>;
-  if (activity.error) return <span className="text-red">{activity.error.message}</span>;
-  if ((activity.data ?? []).length === 0) return <span className="text-text3">Nothing happened yet.</span>;
+  if (activity.isPending) return <Loading />;
+  if (activity.error) return <Problem>{activity.error.message}</Problem>;
+  if ((activity.data ?? []).length === 0) return <EmptyState isCompact title="Nothing happened yet." />;
   return (
-    <ul className="m-0 flex list-none flex-col gap-3 p-0">
+    <ul {...stylex.props(styles.activity)}>
       {activity.data?.map((card) => {
         const detail = activityDetail(card);
         return (
-          <li key={card.seq} className="flex flex-col gap-[2px]">
+          <li key={card.seq} {...stylex.props(styles.activityItem)}>
             <span>{activityText(card)}</span>
-            {detail ? <span className="text-[12px] text-text2">{detail}</span> : null}
-            <span className="text-[12px] text-text3">{time(card.at_ms)}</span>
+            {detail ? <span {...stylex.props(styles.small)}>{detail}</span> : null}
+            <span {...stylex.props(styles.thirdSmall)}>{time(card.at_ms)}</span>
           </li>
         );
       })}
@@ -967,13 +1246,14 @@ function Activity({ id }: { id: string }) {
   );
 }
 
-type Tab = "ticket" | "discussion" | "activity";
+type Section = "ticket" | "discussion" | "activity";
 
 export function TicketPanel({ id, onClose, message }: { id: string; onClose: () => void; message?: string }) {
   const platform = usePlatform();
   const { hostId } = useLinkState();
   useKeyContext("TicketPanel");
   useAction("Back", onClose);
+  const resizable = useResizable({ defaultSize: 460, minSize: 360, maxSize: 720, autoSaveId: "ticket-panel" });
   const navigate = useNavigate();
   const { features, status } = useLinkState();
   const detail = useTicket(id);
@@ -982,7 +1262,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
   const models = useModels();
   const write = useTicketWrite();
   const members = useMembers();
-  const [tab, setTab] = useState<Tab>(message ? "discussion" : "ticket");
+  const [tab, setTab] = useState<Section>(message ? "discussion" : "ticket");
   const t = detail.data?.ticket;
   const list = useMemo(() => (t ? [t] : []), [t]);
   const need = useTicketNeeds(list);
@@ -995,17 +1275,23 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
   if (!t) {
     const gone = detail.error && /not.?found/i.test(detail.error.message);
     return (
-      <aside
-        aria-label="Ticket"
-        className="flex w-[clamp(360px,38%,560px)] flex-none flex-col gap-3 border-l border-line p-5"
-      >
-        <span className="text-text2">
-          {gone ? "This ticket is not on this server." : (detail.error?.message ?? "Loading the ticket…")}
-        </span>
-        <div>
-          <Button onClick={onClose}>Close</Button>
-        </div>
-      </aside>
+      <>
+        <ResizeHandle resizable={resizable} isReversed hasDivider />
+        <LayoutPanel resizable={resizable} role="complementary" label="Ticket" isScrollable={false} padding={0}>
+          <div {...stylex.props(styles.pending)}>
+            {gone ? (
+              <span {...stylex.props(styles.secondary)}>This ticket is not on this server.</span>
+            ) : detail.error ? (
+              <Problem>{detail.error.message}</Problem>
+            ) : (
+              <Loading />
+            )}
+            <div>
+              <Button label="Close" onClick={onClose} />
+            </div>
+          </div>
+        </LayoutPanel>
+      </>
     );
   }
 
@@ -1095,264 +1381,292 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
     if (fit.length > 0 && t.column !== "done") platform.keepFiles(fit).then(addFiles).catch(addFailed);
   };
   return (
-    <aside
-      onPaste={(e) => {
-        const given = filesFrom(e.clipboardData);
-        if (given.length === 0) return;
-        e.preventDefault();
-        takeFiles(given);
-      }}
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes("Files")) e.preventDefault();
-      }}
-      onDrop={(e) => {
-        const given = filesFrom(e.dataTransfer);
-        if (given.length === 0) return;
-        e.preventDefault();
-        takeFiles(given);
-      }}
-      aria-label={`${ticketNumber(t)} ${t.title}`}
-      className="enter flex w-[clamp(360px,38%,560px)] min-w-0 flex-none flex-col border-l border-line bg-panel"
-    >
-      <div className="flex h-11 flex-none items-center gap-2 border-b border-line2 pr-[10px] pl-5 text-text3">
-        <span className="font-mono text-[12px]">{ticketNumber(t)}</span>
-        <div className="ml-auto flex gap-[2px]">
-          <Menu
-            label="More"
-            options={more}
-            onPick={pick}
-            trigger={
-              <button
-                type="button"
-                className="grid size-7 cursor-pointer place-items-center rounded-[6px] border-0 bg-transparent text-text2 hover:bg-sel hover:text-text"
-              >
-                ⋯
-              </button>
-            }
-          />
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
-            className="grid size-7 cursor-pointer place-items-center rounded-[6px] border-0 bg-transparent text-text2 hover:bg-sel hover:text-text"
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-      <div className="flex flex-none flex-col gap-3 px-[22px] pt-5">
-        <Editable
-          label="Title"
-          value={t.title}
-          enabled={open}
-          display={<h2 className="m-0 text-[20px] font-semibold tracking-[-0.015em]">{t.title}</h2>}
-          onSave={(title) => update({ title: title.trim() })}
-        />
-        <div className="flex flex-wrap gap-[6px]">
-          <Chip>
-            <ColumnGlyph kind={t.column} />
-            {columns.length >= 0
-              ? (board.data?.columns.find((c) => c.column.kind === t.column)?.column.name ?? t.column)
-              : null}
-          </Chip>
-          {open ? (
-            <Menu
-              label="Priority"
-              value={t.priority}
-              options={PRIORITIES.map((p) => ({ key: p, label: priorityLabel(p) }))}
-              onPick={(priority: TicketPriority) => void update({ priority })}
-              trigger={<Chip>{priorityLabel(t.priority)}</Chip>}
-            />
-          ) : (
-            <Chip disabled>{priorityLabel(t.priority)}</Chip>
-          )}
-          {choosable ? (
-            <Menu
-              label="Owner"
-              {...(t.owner_employee_id ? { value: t.owner_employee_id } : {})}
-              options={(employees.data ?? [])
-                .filter((e) => e.status === "active")
-                .map((e) => ({ key: e.id, label: e.name }))}
-              onPick={(id) => void write("ticket.assign", { ticket_id: t.id, employee_id: id })}
-              trigger={
-                <Chip>
-                  {t.owner_name ? (
-                    <Mark
-                      letter={initial(t.owner_name)}
-                      color={markColor(t.owner_employee_id ?? "")}
-                      size={14}
-                      radius={4}
-                    />
-                  ) : null}
-                  {t.owner_name ?? "No owner"}
-                </Chip>
-              }
-            />
-          ) : (
-            <Chip disabled>{t.owner_name ?? "No owner"}</Chip>
-          )}
-          {open && !locked ? (
-            <Menu
-              label="Mode"
-              value={t.run.mode ?? "default"}
-              options={MODES}
-              onPick={(mode) =>
-                void update({ run: { ...t.run, mode: mode === "default" ? null : (mode as AgentMode) } })
-              }
-              trigger={<Chip name="Mode">{MODES.find((m) => m.key === (t.run.mode ?? "default"))?.label}</Chip>}
-            />
-          ) : null}
-          {open && !locked ? (
-            <Menu
-              label="Model"
-              value={t.run.model ?? "default"}
-              options={models}
-              onPick={(model) => void update({ run: { ...t.run, model: model === "default" ? null : model } })}
-              trigger={
-                <Chip name="Model">{models.find((m) => m.key === (t.run.model ?? "default"))?.label ?? "Default"}</Chip>
-              }
-            />
-          ) : null}
-        </div>
-      </div>
-      <div className="flex flex-none flex-col gap-3 px-[22px] pt-3">
-        {t.column === "review" ? (
-          <ReviewGate
-            key={t.version}
-            t={t}
-            report={detail.data?.root_task?.result ?? null}
-            ready={check.kind === "ready" && can}
-            whyNot={check.kind === "working" ? "Still at work: Done waits until that has finished." : null}
-          />
-        ) : t.column === "plan_review" ? (
-          <PlanGate t={t} plan={rootMessages.isPending ? undefined : latestPlan(rootMessages.data?.messages ?? [])} />
-        ) : (
-          <StatusBox t={t} choosing={choosing} dispatcherLine={dispatcherLine} />
-        )}
-        <div role="tablist" aria-label="Ticket sections" className="flex gap-[18px] border-b border-line2">
-          {(
-            [
-              ["ticket", "Ticket"],
-              ...(features.includes("ticket_discussion")
-                ? ([["discussion", count > 0 ? `Discussion ${count}` : "Discussion"]] as [Tab, string][])
-                : []),
-              ["activity", "Activity"],
-            ] as [Tab, string][]
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={tab === key}
-              onClick={() => setTab(key)}
-              className={`h-8 cursor-pointer border-0 border-b-2 border-solid bg-transparent p-0 text-[13px] font-medium ${tab === key ? "border-text text-text" : "border-transparent text-text3 hover:text-text2"}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      {tab === "discussion" ? (
-        <Discussion t={t} conversationId={t.conversation_id} flash={message} />
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-[18px] overflow-y-auto px-[22px] py-4">
-          {tab === "activity" ? (
-            <Activity id={t.id} />
-          ) : (
-            <>
-              {t.review_feedback && t.column === "doing" ? (
-                <Box>
-                  <span className="text-[12px] font-medium text-text3">{feedbackLabel(activity.data)}</span>
-                  <span>{t.review_feedback}</span>
-                </Box>
-              ) : null}
-              <Editable
-                label="Description"
-                value={t.description ?? ""}
-                enabled={open}
-                multiline
-                display={
-                  t.description?.trim() ? (
-                    <Markdown text={t.description} />
-                  ) : (
-                    <span className="text-text3">No description.</span>
-                  )
-                }
-                onSave={(description) => update({ description })}
+    <>
+      <ResizeHandle resizable={resizable} isReversed hasDivider />
+      <LayoutPanel
+        resizable={resizable}
+        role="complementary"
+        label={`${ticketNumber(t)} ${t.title}`}
+        isScrollable={false}
+        padding={0}
+        onPaste={(e) => {
+          const given = filesFrom(e.clipboardData);
+          if (given.length === 0) return;
+          e.preventDefault();
+          takeFiles(given);
+        }}
+        onDragOver={(e) => {
+          if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+        }}
+        onDrop={(e) => {
+          const given = filesFrom(e.dataTransfer);
+          if (given.length === 0) return;
+          e.preventDefault();
+          takeFiles(given);
+        }}
+      >
+        <div {...stylex.props(styles.panel)}>
+          <div {...stylex.props(styles.panelHead)}>
+            <span {...stylex.props(styles.number)}>{ticketNumber(t)}</span>
+            <div {...stylex.props(styles.panelTools)}>
+              <Menu
+                label="More"
+                options={more}
+                onPick={pick}
+                trigger={<IconButton variant="ghost" size="sm" label="More" icon={<Icon icon="moreHorizontal" />} />}
               />
-              <div className="flex flex-col">
-                <Row name="Project">{t.project_name}</Row>
-                <Row name="Labels">
-                  <Editable
-                    label="Labels"
-                    value={t.labels.join(", ")}
-                    enabled={open}
-                    placeholder="backend, ui"
-                    display={t.labels.length > 0 ? t.labels.join(", ") : <span className="text-text3">None</span>}
-                    onSave={(text) => update({ labels: parseLabels(text) })}
-                  />
-                </Row>
-                <Row name="Deadline">
-                  <Editable
-                    label="Deadline"
-                    value={t.deadline_ms ? deadlineInput(t.deadline_ms, -new Date().getTimezoneOffset()) : ""}
-                    enabled={open}
-                    placeholder="2026-11-04 or 2026-11-04 17:00"
-                    display={t.deadline_ms ? time(t.deadline_ms) : <span className="text-text3">None</span>}
-                    onSave={async (text) => {
-                      try {
-                        const ms = parseDeadline(text, -new Date().getTimezoneOffset());
-                        return await update(ms === null ? { clear_deadline: true } : { deadline_ms: ms });
-                      } catch (e) {
-                        toast((e as Error).message);
-                        return false;
-                      }
-                    }}
-                  />
-                </Row>
-                {features.includes("ticket_responsible") ? (
-                  <Row name="Responsible">{t.responsible_username ?? <span className="text-text3">No one</span>}</Row>
-                ) : null}
-                <Row name="Runs on">
-                  {t.login_user === need.me ? "Your Claude login" : `${t.login_username}'s Claude login`}
-                </Row>
-                <Row name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</Row>
-                {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}
-                <Row name="Files">
-                  <span className="flex flex-col items-start gap-[6px]">
-                    <FileChips files={t.attachments} />
-                    {t.column === "done" ? null : (
-                      <Button onClick={() => platform.pickFiles().then(addFiles, addFailed)}>Add files…</Button>
-                    )}
-                  </span>
-                </Row>
-              </div>
-              {tasks.length > 0 ? (
-                <div className="flex flex-col gap-1">
-                  <span className="text-[12px] font-medium text-text3">Tasks ({detail.data?.tasks.length})</span>
-                  {tasks.map(({ task, depth }) => {
-                    const state = taskStateLine(task);
-                    return (
-                      <button
-                        key={task.id}
-                        type="button"
-                        onClick={() => void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } })}
-                        style={{ paddingLeft: 4 + 16 * depth }}
-                        className="flex h-8 cursor-pointer items-center gap-2 rounded-[6px] border-0 bg-transparent pr-1 text-left text-text hover:bg-sel"
-                      >
-                        <span className="min-w-0 flex-1 truncate">{task.title}</span>
-                        <span className="flex-none text-[12px]" style={{ color: state.color }}>
-                          {state.text}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+              <IconButton variant="ghost" size="sm" label="Close" icon={<Icon icon="close" />} onClick={onClose} />
+            </div>
+          </div>
+          <div {...stylex.props(styles.top)}>
+            <Editable
+              label="Title"
+              value={t.title}
+              enabled={open}
+              display={
+                <Heading level={2} xstyle={styles.title}>
+                  {t.title}
+                </Heading>
+              }
+              onSave={(title) => update({ title: title.trim() })}
+            />
+            <div {...stylex.props(styles.chips)}>
+              <Chip>
+                <ColumnGlyph kind={t.column} />
+                {columns.length >= 0
+                  ? (board.data?.columns.find((c) => c.column.kind === t.column)?.column.name ?? t.column)
+                  : null}
+              </Chip>
+              {open ? (
+                <Menu
+                  label="Priority"
+                  value={t.priority}
+                  options={PRIORITIES.map((p) => ({ key: p, label: priorityLabel(p) }))}
+                  onPick={(priority: TicketPriority) => void update({ priority })}
+                  trigger={<Chip>{priorityLabel(t.priority)}</Chip>}
+                />
+              ) : (
+                <Chip disabled>{priorityLabel(t.priority)}</Chip>
+              )}
+              {choosable ? (
+                <Menu
+                  label="Owner"
+                  {...(t.owner_employee_id ? { value: t.owner_employee_id } : {})}
+                  options={(employees.data ?? [])
+                    .filter((e) => e.status === "active")
+                    .map((e) => ({ key: e.id, label: e.name }))}
+                  onPick={(id) => void write("ticket.assign", { ticket_id: t.id, employee_id: id })}
+                  trigger={
+                    <Chip>
+                      {t.owner_name ? (
+                        <Mark
+                          letter={initial(t.owner_name)}
+                          color={markColor(t.owner_employee_id ?? "")}
+                          size={14}
+                          radius={4}
+                        />
+                      ) : null}
+                      {t.owner_name ?? "No owner"}
+                    </Chip>
+                  }
+                />
+              ) : (
+                <Chip disabled>{t.owner_name ?? "No owner"}</Chip>
+              )}
+              {open && !locked ? (
+                <Menu
+                  label="Mode"
+                  value={t.run.mode ?? "default"}
+                  options={MODES}
+                  onPick={(mode) =>
+                    void update({ run: { ...t.run, mode: mode === "default" ? null : (mode as AgentMode) } })
+                  }
+                  trigger={<Chip name="Mode">{MODES.find((m) => m.key === (t.run.mode ?? "default"))?.label}</Chip>}
+                />
               ) : null}
-            </>
-          )}
+              {open && !locked ? (
+                <Menu
+                  label="Model"
+                  value={t.run.model ?? "default"}
+                  options={models}
+                  onPick={(model) => void update({ run: { ...t.run, model: model === "default" ? null : model } })}
+                  trigger={
+                    <Chip name="Model">
+                      {models.find((m) => m.key === (t.run.model ?? "default"))?.label ?? "Default"}
+                    </Chip>
+                  }
+                />
+              ) : null}
+            </div>
+            <TicketOdometer ticketId={t.id} />
+            <ThreadWaiting ticketId={t.id} />
+          </div>
+          <div {...stylex.props(styles.topGate)}>
+            {t.column === "review" ? (
+              <ReviewGate
+                key={t.version}
+                t={t}
+                report={detail.data?.root_task?.result ?? null}
+                ready={check.kind === "ready" && can}
+                whyNot={check.kind === "working" ? "Still at work: Done waits until that has finished." : null}
+              />
+            ) : t.column === "plan_review" ? (
+              <PlanGate
+                t={t}
+                plan={rootMessages.isPending ? undefined : latestPlan(rootMessages.data?.messages ?? [])}
+              />
+            ) : (
+              <StatusBox t={t} choosing={choosing} dispatcherLine={dispatcherLine} />
+            )}
+            <TabList
+              role="tablist"
+              aria-label="Ticket sections"
+              hasDivider
+              value={tab}
+              onChange={(next) => setTab(next as Section)}
+            >
+              {(
+                [
+                  ["ticket", "Ticket"],
+                  ...(features.includes("ticket_discussion")
+                    ? ([["discussion", count > 0 ? `Discussion ${count}` : "Discussion"]] as [Section, string][])
+                    : []),
+                  ["activity", "Activity"],
+                ] as [Section, string][]
+              ).map(([key, label]) => (
+                <Tab key={key} value={key} label={label} panelId="ticket-section" />
+              ))}
+            </TabList>
+          </div>
+          <div id="ticket-section" role="tabpanel" aria-label="Ticket section" {...stylex.props(styles.tabPanel)}>
+            {tab === "discussion" ? (
+              <Discussion t={t} conversationId={t.conversation_id} flash={message} />
+            ) : (
+              <div {...stylex.props(styles.section)}>
+                {tab === "activity" ? (
+                  <Activity id={t.id} />
+                ) : (
+                  <>
+                    {t.review_feedback && t.column === "doing" ? (
+                      <Box>
+                        <span {...stylex.props(styles.sectionLabel)}>{feedbackLabel(activity.data)}</span>
+                        <span>{t.review_feedback}</span>
+                      </Box>
+                    ) : null}
+                    <Editable
+                      label="Description"
+                      value={t.description ?? ""}
+                      enabled={open}
+                      multiline
+                      display={
+                        t.description?.trim() ? (
+                          <Markdown text={t.description} />
+                        ) : (
+                          <span {...stylex.props(styles.third)}>No description.</span>
+                        )
+                      }
+                      onSave={(description) => update({ description })}
+                    />
+                    <div {...stylex.props(styles.rows)}>
+                      <Row name="Project">{t.project_name}</Row>
+                      <Row name="Labels">
+                        <Editable
+                          label="Labels"
+                          value={t.labels.join(", ")}
+                          enabled={open}
+                          placeholder="backend, ui"
+                          display={
+                            t.labels.length > 0 ? (
+                              t.labels.join(", ")
+                            ) : (
+                              <span {...stylex.props(styles.third)}>None</span>
+                            )
+                          }
+                          onSave={(text) => update({ labels: parseLabels(text) })}
+                        />
+                      </Row>
+                      <Row name="Deadline">
+                        <Editable
+                          label="Deadline"
+                          value={t.deadline_ms ? deadlineInput(t.deadline_ms, -new Date().getTimezoneOffset()) : ""}
+                          enabled={open}
+                          placeholder="2026-11-04 or 2026-11-04 17:00"
+                          display={
+                            t.deadline_ms ? time(t.deadline_ms) : <span {...stylex.props(styles.third)}>None</span>
+                          }
+                          onSave={async (text) => {
+                            try {
+                              const ms = parseDeadline(text, -new Date().getTimezoneOffset());
+                              return await update(ms === null ? { clear_deadline: true } : { deadline_ms: ms });
+                            } catch (e) {
+                              toast((e as Error).message);
+                              return false;
+                            }
+                          }}
+                        />
+                      </Row>
+                      {features.includes(DESIGN_FEATURE) ? (
+                        <DesignRow
+                          url={t.design_url ?? null}
+                          enabled={open}
+                          onSave={async (text) => {
+                            const problem = artifactProblem(text);
+                            if (problem) {
+                              toast(problem);
+                              return false;
+                            }
+                            return update({ design_url: text.trim() });
+                          }}
+                        />
+                      ) : null}
+                      {features.includes("ticket_responsible") ? (
+                        <Row name="Responsible">
+                          {t.responsible_username ?? <span {...stylex.props(styles.third)}>No one</span>}
+                        </Row>
+                      ) : null}
+                      <Row name="Runs on">
+                        {t.login_user === need.me ? "Your Claude login" : `${t.login_username}'s Claude login`}
+                      </Row>
+                      <Row name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</Row>
+                      {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}
+                      <Row name="Files">
+                        <span {...stylex.props(styles.files)}>
+                          <FileChips files={t.attachments} />
+                          {t.column === "done" ? null : (
+                            <Button label="Add files…" onClick={() => platform.pickFiles().then(addFiles, addFailed)} />
+                          )}
+                        </span>
+                      </Row>
+                    </div>
+                    {tasks.length > 0 ? (
+                      <div {...stylex.props(styles.tasks)}>
+                        <span {...stylex.props(styles.sectionLabel)}>Tasks ({detail.data?.tasks.length})</span>
+                        {tasks.map(({ task, depth }) => {
+                          const state = taskStateLine(task);
+                          return (
+                            <button
+                              key={task.id}
+                              type="button"
+                              onClick={() => void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } })}
+                              {...stylex.props(styles.task)}
+                              style={{ paddingLeft: 4 + 16 * depth }}
+                            >
+                              <span {...stylex.props(styles.taskTitle)}>{task.title}</span>
+                              <span {...stylex.props(styles.taskState)} style={{ color: state.color }}>
+                                {state.text}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      )}
-    </aside>
+      </LayoutPanel>
+    </>
   );
 }

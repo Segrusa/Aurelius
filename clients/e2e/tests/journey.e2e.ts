@@ -81,7 +81,8 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("add a project", async () => {
-      await act(() => nav("Projects").click());
+      await act(() => nav("Knowledge").click());
+      await act(() => p.getByRole("link", { name: "Projects", exact: true }).click());
       await act(() => p.getByRole("button", { name: "New project" }).first().click());
       const dialog = p.getByRole("dialog");
       await act(() => dialog.getByLabel("Name").fill("Atlas"));
@@ -230,7 +231,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
       await expect(nav("Inbox")).toBeVisible();
     });
 
-    for (const screen of ["Inbox", "My tickets", "Board", "Tasks", "Team chat", "Employees", "Knowledge"]) {
+    for (const screen of ["Inbox", "My tickets", "Board", "Team chat", "Employees", "Knowledge"]) {
       await step(`dark ${screen}`, async () => {
         await act(() => nav(screen).click());
         await p.waitForTimeout(300);
@@ -238,7 +239,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     }
 
     await step("the run in dark", async () => {
-      await act(() => nav("Tasks").click());
+      await act(() => p.keyboard.press("Control+7"));
       await act(() => p.getByText("Compare three hosting options").first().click());
       await p.waitForTimeout(400);
     });

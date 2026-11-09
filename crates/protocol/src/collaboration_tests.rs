@@ -3,7 +3,6 @@
 //! before the freeze, as an older client has them: it must read what this server
 //! writes, and a new enum value in a snapshot would fail its whole read (R1).
 
-use crate::app::{NOT_FOR_APPS, required as app_required};
 use crate::channels_tests::enum_values;
 use crate::method::{Method, client_feature};
 use crate::remote::{Capability, Needs, required};
@@ -116,17 +115,15 @@ fn a_refused_message_edit_never_repeats_what_was_sent() {
 }
 
 #[test]
-fn every_new_read_and_write_is_for_devices_and_never_for_apps() {
+fn every_new_read_and_write_is_for_devices() {
     for (method, name) in reads() {
         let call = Call::Read(method);
         assert_eq!(required(&call), Needs::Cap(Capability::Read), "{name}");
-        assert_eq!(app_required(&call), Err(NOT_FOR_APPS), "{name}");
     }
     for (command, name) in writes() {
         let needs = if name.starts_with("ticket.") { Capability::TaskControl } else { Capability::Chat };
         let call = Call::Write(WriteMethod::Domain(command));
         assert_eq!(required(&call), Needs::Cap(needs), "{name}");
-        assert_eq!(app_required(&call), Err(NOT_FOR_APPS), "{name}");
     }
 }
 
@@ -192,6 +189,7 @@ fn the_new_answers_have_their_wire_form() {
 
 fn ticket() -> TicketView {
     TicketView {
+        design_url: None,
         id: TicketId::new(),
         number: 12,
         project_id: ProjectId::new(),
@@ -387,4 +385,25 @@ fn an_older_client_reads_message_deleted_the_same_whatever_its_metadata_says() {
     let read: Event = serde_json::from_value(with_metadata).unwrap();
     assert_eq!(read.kind, EventKind::MessageDeleted);
     assert_eq!(read.kind.area(), "message", "the desktop refreshes the chat on this area");
+}
+
+#[test]
+fn a_workspace_filter_is_optional_on_the_reads_that_had_no_params() {
+    use crate::rpc::{FEATURES, feature, from_method_value};
+    assert!(FEATURES.contains(&feature::WORKSPACE_FILTERS));
+    let project = ProjectId::new();
+    let cases: [(&str, Method, Method); 3] = [
+        ("notification.list", Method::NotificationList { project_id: None }, Method::NotificationList { project_id: Some(project) }),
+        ("approval.list", Method::ApprovalList { project_id: None }, Method::ApprovalList { project_id: Some(project) }),
+        ("scheduled_message.list", Method::ScheduledMessageList { project_id: None }, Method::ScheduledMessageList { project_id: Some(project) }),
+    ];
+    for (name, bare, narrowed) in cases {
+        // What older clients send, and what a client without a workspace sends.
+        assert_eq!(from_method_value::<Method>(serde_json::json!({ "method": name })).unwrap(), bare, "{name}");
+        assert_eq!(from_method_value::<Method>(serde_json::json!({ "method": name, "params": {} })).unwrap(), bare, "{name}");
+        assert_eq!(serde_json::to_value(&bare).unwrap(), serde_json::json!({ "method": name, "params": {} }), "{name}");
+        let wire = serde_json::json!({ "method": name, "params": { "project_id": project } });
+        assert_eq!(serde_json::to_value(&narrowed).unwrap(), wire, "{name}");
+        assert_eq!(from_method_value::<Method>(wire).unwrap(), narrowed, "{name}");
+    }
 }

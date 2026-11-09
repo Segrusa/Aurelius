@@ -57,7 +57,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const SITE = join(here, "../renderer");
 const ORIGIN = "app://aurelius";
 const CSP =
-  "default-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+  "default-src 'self'; style-src 'self' 'sha256-K63bSR1LetGtaTb/2K6EIsLtf78i2//qEkOoBZCNcBQ=' 'sha256-0KUt1GaAbAKiIczMgRikTmhynZoYPcw+0bnDtqcsh14='; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 const DEV_URL = (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) || undefined;
 const ENVIRONMENT =
   process.env.AURELIUS_ENV === "production" || (app.isPackaged && process.env.AURELIUS_ENV !== "dev")
@@ -525,7 +525,7 @@ function makeWindow(extra: Electron.BrowserWindowConstructorOptions, path: strin
     title: "Aurelius",
     icon: app.isPackaged
       ? join(process.resourcesPath, "aurelius-512.png")
-      : join(here, "../../../desktop/assets/aurelius-512.png"),
+      : join(here, "../../assets/aurelius-512.png"),
     ...titleBar,
     ...extra,
     webPreferences: {

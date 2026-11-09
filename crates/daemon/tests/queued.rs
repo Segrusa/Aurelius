@@ -118,13 +118,13 @@ async fn project_with_employee(client: &Client) -> (ProjectId, EmployeeId) {
     else {
         panic!()
     };
-    let create = CreateEmployee { name: "Alex".into(), role: "Backend developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Backend developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     (project_id, employee_id)
 }
 
 async fn create_task(client: &Client, project_id: ProjectId, employee_id: EmployeeId, title: &str, goal: &str) -> TaskId {
-    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: title.into(), goal: goal.into(), acceptance_criteria: vec![] };
     match client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result {
         CommandResult::TaskCreated { task_id } => task_id,
         other => panic!("{other:?}"),
@@ -252,7 +252,7 @@ async fn in_a_task_conversation_send_now_answers_and_the_task_finishes_while_the
     let (daemon, _release) = start_gate(dir.path()).await;
     let client = connect(dir.path()).await;
     let (project, alex) = project_with_employee(&client).await;
-    let one_at_a_time = UpdateEmployee { employee_id: alex, name: "Alex".into(), role: "Backend developer".into(), title: None, instructions: None, sequential_tasks: Some(true) };
+    let one_at_a_time = UpdateEmployee { access_level: None, tool_policy: None, description: None, employee_id: alex, name: "Alex".into(), role: "Backend developer".into(), title: None, instructions: None, sequential_tasks: Some(true) };
     client.execute(envelope(Command::UpdateEmployee(one_at_a_time), None)).await.unwrap();
     let id = create_task(&client, project, alex, "Dark mode", "Werk aan dark mode [hold]").await;
     let run = task_run(dir.path(), id).await;

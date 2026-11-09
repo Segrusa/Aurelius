@@ -24,19 +24,23 @@ pub(super) fn tool_profile(shared: &Arc<Shared>, plan: &ChatRunPlan) -> ToolProf
                     // A run under a ticket, or woken from its discussion, reads and posts there.
                     let bridge = if plan.discussion { with_flag(bridge, "--discussion") } else { bridge };
                     // A ticket's test task gives its verdict (the daemon checks every call).
-                    if plan.testing { with_flag(bridge, "--testing") } else { bridge }
+                    let bridge = if plan.testing { with_flag(bridge, "--testing") } else { bridge };
+                    // What this employee's list switches off is not offered at all (C2).
+                    let off = plan.tool_policy.bridge_tools_off();
+                    if off.is_empty() { bridge } else { with_flag(with_flag(bridge, "--without"), &off.join(",")) }
                 },
                 browser: plan.browser,
                 browser_session: plan.browser_session.clone(),
                 // Filled in by the dispatcher once Aurelius' browser is up (Playwright backend).
                 playwright: None,
-                // The user's own MCP servers the user enabled server-wide; none by default.
-                mcp_servers: crate::mcp_servers::configs_for_run(shared),
-                // The plugins this employee, or for the project assistant this project, has enabled.
-                plugins: aurelius_host::plugins::paths_for_run(shared.store(), plan.conversation_id),
-                // Claude Code artifacts (pages on claude.ai), when the user turned them on server-wide.
-                artifacts: plan.artifacts,
+                // The user's own MCP servers the user enabled server-wide, of those the ones
+                // this employee may use (C2); none by default.
+                mcp_servers: crate::mcp_servers::configs_for_run(shared, &plan.tool_policy),
+                access: plan.access,
+                tool_policy: plan.tool_policy.clone(),
+                artifact: plan.artifact_tool,
             }
+            .confined()
         }
         None => ToolProfile::TextOnly,
     }

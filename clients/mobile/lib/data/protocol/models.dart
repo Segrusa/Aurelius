@@ -2,6 +2,142 @@
 // Run: cargo xtask gen-dart
 // ignore_for_file: unnecessary_cast, unnecessary_null_aware_operator, unnecessary_non_null_assertion, constant_identifier_names, use_null_aware_elements, unintended_html_in_doc_comment
 
+/// What an employee's runs may do with files and commands (C3), next to its mode:
+/// the level says which tools a run has, the mode which of those are asked first.
+enum AccessLevel {
+  /// Every work tool, as a run has without a level of its own.
+  inherit('inherit'),
+  /// Also changes files; no commands or web.
+  readEdit('read_edit'),
+  /// Reads and searches the folder; no edits, commands or web.
+  readOnly('read_only'),
+  /// A level of a newer server this client does not know. A run treats it as read-only.
+  unknown('unknown');
+
+  const AccessLevel(this.wire);
+
+  final String wire;
+
+  static AccessLevel fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown AccessLevel value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
+/// One delivery, queue step or run step (R8; feature `activity_log`).
+final class ActivityLogEntry {
+  const ActivityLogEntry({
+    required this.atMs,
+    required this.category,
+    this.detail,
+    this.employeeId,
+    this.employeeName,
+    this.hop,
+    this.place,
+    this.runId,
+    required this.seq,
+    required this.step,
+    this.threadKey,
+  });
+
+  final int atMs;
+  /// delivery, queue or run. Text, not an enum: a later value only shows as it is.
+  final String category;
+  /// A short code or a tool's name; never the text of a message or a tool's input.
+  final String? detail;
+  final String? employeeId;
+  final String? employeeName;
+  final int? hop;
+  final ThreadPlace? place;
+  final String? runId;
+  final int seq;
+  /// What happened (delivered, claimed, started, tool, ...). Text for the same reason.
+  final String step;
+  final String? threadKey;
+
+  factory ActivityLogEntry.fromJson(Map<String, dynamic> json) => ActivityLogEntry(
+    atMs: (json['at_ms'] as num).toInt(),
+    category: (json['category'] as String),
+    detail: (json['detail'] == null ? null : (json['detail'] as String)),
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+    employeeName: (json['employee_name'] == null ? null : (json['employee_name'] as String)),
+    hop: (json['hop'] == null ? null : (json['hop'] as num).toInt()),
+    place: (json['place'] == null ? null : ThreadPlace.fromJson(json['place'] as Map<String, dynamic>)),
+    runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
+    seq: (json['seq'] as num).toInt(),
+    step: (json['step'] as String),
+    threadKey: (json['thread_key'] == null ? null : (json['thread_key'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'at_ms': atMs,
+    'category': category,
+    if (detail != null) 'detail': detail,
+    if (employeeId != null) 'employee_id': employeeId,
+    if (employeeName != null) 'employee_name': employeeName,
+    if (hop != null) 'hop': hop,
+    if (place != null) 'place': place?.toJson(),
+    if (runId != null) 'run_id': runId,
+    'seq': seq,
+    'step': step,
+    if (threadKey != null) 'thread_key': threadKey,
+  };
+}
+
+/// `activity_log.list`: the newest rows that match, newest first.
+final class ActivityLogPage {
+  const ActivityLogPage({
+    required this.asOfSeq,
+    required this.entries,
+    this.hasMore = false,
+  });
+
+  final int asOfSeq;
+  final List<ActivityLogEntry> entries;
+  /// There are older rows: ask again with `before_seq` as the last row's `seq`.
+  final bool hasMore;
+
+  factory ActivityLogPage.fromJson(Map<String, dynamic> json) => ActivityLogPage(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    entries: (json['entries'] as List<dynamic>).map((x0) => ActivityLogEntry.fromJson(x0 as Map<String, dynamic>)).toList(),
+    hasMore: (json['has_more'] == null ? false : (json['has_more'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'entries': entries.map((x0) => x0.toJson()).toList(),
+    'has_more': hasMore,
+  };
+}
+
+/// What an employee is doing now (U6): the dot in the list. Derived, never stored; a
+/// paused employee is in `status`.
+enum ActivityState {
+  /// Nothing for it to do.
+  idle('idle'),
+  /// There is work, but nothing runs yet (its turn, a usage limit, the machine).
+  queued('queued'),
+  /// A state of a newer server this client does not know.
+  unknown('unknown'),
+  /// It waits for a board member: an approval, or an answer to a question.
+  waiting('waiting'),
+  /// A run of it is going.
+  working('working');
+
+  const ActivityState(this.wire);
+
+  final String wire;
+
+  static ActivityState fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown ActivityState value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 /// One tool use during an answer, shown at its place in the text.
 final class ActivityView {
   const ActivityView({
@@ -120,106 +256,6 @@ final class AddIdea {
     if (note != null) 'note': note,
     'project_id': projectId,
     'title': title,
-  };
-}
-
-final class AgentFunctionView {
-  const AgentFunctionView({
-    required this.createdAtMs,
-    required this.description,
-    required this.employeeId,
-    required this.employeeName,
-    required this.enabled,
-    required this.id,
-    required this.instructionTemplate,
-    this.limitPerDay,
-    this.limitPerWeek,
-    this.mode,
-    required this.name,
-    required this.params,
-    required this.projectId,
-    required this.slug,
-    required this.usedDay,
-    required this.usedWeek,
-  });
-
-  final int createdAtMs;
-  final String description;
-  final String employeeId;
-  final String employeeName;
-  final bool enabled;
-  final String id;
-  final String instructionTemplate;
-  final int? limitPerDay;
-  final int? limitPerWeek;
-  /// None: the employee's own default mode.
-  final AgentMode? mode;
-  final String name;
-  final List<FunctionParam> params;
-  final String projectId;
-  final String slug;
-  /// Accepted calls in the last 24 hours / 7 days (rolling).
-  final int usedDay;
-  final int usedWeek;
-
-  factory AgentFunctionView.fromJson(Map<String, dynamic> json) => AgentFunctionView(
-    createdAtMs: (json['created_at_ms'] as num).toInt(),
-    description: (json['description'] as String),
-    employeeId: (json['employee_id'] as String),
-    employeeName: (json['employee_name'] as String),
-    enabled: (json['enabled'] as bool),
-    id: (json['id'] as String),
-    instructionTemplate: (json['instruction_template'] as String),
-    limitPerDay: (json['limit_per_day'] == null ? null : (json['limit_per_day'] as num).toInt()),
-    limitPerWeek: (json['limit_per_week'] == null ? null : (json['limit_per_week'] as num).toInt()),
-    mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
-    name: (json['name'] as String),
-    params: (json['params'] as List<dynamic>).map((x0) => FunctionParam.fromJson(x0 as Map<String, dynamic>)).toList(),
-    projectId: (json['project_id'] as String),
-    slug: (json['slug'] as String),
-    usedDay: (json['used_day'] as num).toInt(),
-    usedWeek: (json['used_week'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'created_at_ms': createdAtMs,
-    'description': description,
-    'employee_id': employeeId,
-    'employee_name': employeeName,
-    'enabled': enabled,
-    'id': id,
-    'instruction_template': instructionTemplate,
-    if (limitPerDay != null) 'limit_per_day': limitPerDay,
-    if (limitPerWeek != null) 'limit_per_week': limitPerWeek,
-    if (mode != null) 'mode': mode?.toJson(),
-    'name': name,
-    'params': params.map((x0) => x0.toJson()).toList(),
-    'project_id': projectId,
-    'slug': slug,
-    'used_day': usedDay,
-    'used_week': usedWeek,
-  };
-}
-
-/// Agent functions. Times are epoch milliseconds.
-final class AgentFunctionsSnapshot {
-  const AgentFunctionsSnapshot({
-    required this.allEnabled,
-    required this.functions,
-  });
-
-  /// The kill switch: false means every function refuses calls.
-  final bool allEnabled;
-  final List<AgentFunctionView> functions;
-
-  factory AgentFunctionsSnapshot.fromJson(Map<String, dynamic> json) => AgentFunctionsSnapshot(
-    allEnabled: (json['all_enabled'] as bool),
-    functions: (json['functions'] as List<dynamic>).map((x0) => AgentFunctionView.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'all_enabled': allEnabled,
-    'functions': functions.map((x0) => x0.toJson()).toList(),
   };
 }
 
@@ -349,84 +385,6 @@ final class AnswerQuestion {
   };
 }
 
-/// The answer to `api_keys/create`: the secret (`ak_...`) is shown once and not kept.
-final class ApiKeyCreated {
-  const ApiKeyCreated({
-    required this.key,
-    required this.secret,
-  });
-
-  final ApiKeyView key;
-  final String secret;
-
-  factory ApiKeyCreated.fromJson(Map<String, dynamic> json) => ApiKeyCreated(
-    key: ApiKeyView.fromJson(json['key'] as Map<String, dynamic>),
-    secret: (json['secret'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'key': key.toJson(),
-    'secret': secret,
-  };
-}
-
-/// An API key; the secret is never part of it.
-final class ApiKeyView {
-  const ApiKeyView({
-    required this.createdAtMs,
-    required this.functionIds,
-    required this.id,
-    this.lastUsedMs,
-    required this.name,
-    this.revokedAtMs,
-  });
-
-  final int createdAtMs;
-  final List<String> functionIds;
-  final String id;
-  final int? lastUsedMs;
-  final String name;
-  final int? revokedAtMs;
-
-  factory ApiKeyView.fromJson(Map<String, dynamic> json) => ApiKeyView(
-    createdAtMs: (json['created_at_ms'] as num).toInt(),
-    functionIds: (json['function_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    id: (json['id'] as String),
-    lastUsedMs: (json['last_used_ms'] == null ? null : (json['last_used_ms'] as num).toInt()),
-    name: (json['name'] as String),
-    revokedAtMs: (json['revoked_at_ms'] == null ? null : (json['revoked_at_ms'] as num).toInt()),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'created_at_ms': createdAtMs,
-    'function_ids': functionIds,
-    'id': id,
-    if (lastUsedMs != null) 'last_used_ms': lastUsedMs,
-    'name': name,
-    if (revokedAtMs != null) 'revoked_at_ms': revokedAtMs,
-  };
-}
-
-/// Whom an app key may reach (feature `management_channel`).
-enum AppAudience {
-  /// Everything its scopes allow: today's behaviour, and the default.
-  all('all'),
-  /// Only the management: the CEO and the CEO's direct reports. Employees below
-  /// them cannot be listed, messaged or given tasks, and the project assistant is out of reach.
-  management('management');
-
-  const AppAudience(this.wire);
-
-  final String wire;
-
-  static AppAudience fromJson(String value) => values.firstWhere(
-        (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown AppAudience value: $value'),
-      );
-
-  String toJson() => wire;
-}
-
 final class AppError {
   const AppError({
     required this.code,
@@ -463,147 +421,6 @@ final class AppError {
   };
 }
 
-/// The answer to `app_key.create`: the secret (`amk_...`) is shown once and not kept
-/// (only its hash is). The webhook secret (`whsec_...`) is shown once as well, but
-/// Aurelius has to keep it to sign events.
-final class AppKeyCreated {
-  const AppKeyCreated({
-    required this.key,
-    required this.secret,
-    this.webhookSecret,
-  });
-
-  final AppKeyView key;
-  final String secret;
-  /// Only when the key has a webhook (feature `webhooks`).
-  final String? webhookSecret;
-
-  factory AppKeyCreated.fromJson(Map<String, dynamic> json) => AppKeyCreated(
-    key: AppKeyView.fromJson(json['key'] as Map<String, dynamic>),
-    secret: (json['secret'] as String),
-    webhookSecret: (json['webhook_secret'] == null ? null : (json['webhook_secret'] as String)),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'key': key.toJson(),
-    'secret': secret,
-    if (webhookSecret != null) 'webhook_secret': webhookSecret,
-  };
-}
-
-/// An app key; the secret is never part of it.
-final class AppKeyView {
-  const AppKeyView({
-    this.audience,
-    required this.createdAtMs,
-    required this.id,
-    this.lastUsedMs,
-    this.limitConcurrent,
-    this.limitPerHour,
-    required this.name,
-    this.revokedAtMs,
-    required this.scopes,
-    required this.tasksLastHour,
-    required this.tasksOpen,
-    this.webhookUrl,
-  });
-
-  /// Whom it may reach (feature `management_channel`); `all` on older keys.
-  final AppAudience? audience;
-  final int createdAtMs;
-  final String id;
-  final int? lastUsedMs;
-  final int? limitConcurrent;
-  final int? limitPerHour;
-  final String name;
-  final int? revokedAtMs;
-  final List<AppScope> scopes;
-  /// Tasks it created in the last hour (rolling).
-  final int tasksLastHour;
-  /// Its tasks that are open now (queued, running, waiting, in review).
-  final int tasksOpen;
-  /// Where its events are posted (feature `webhooks`); never the secret.
-  final String? webhookUrl;
-
-  factory AppKeyView.fromJson(Map<String, dynamic> json) => AppKeyView(
-    audience: (json['audience'] == null ? null : AppAudience.fromJson(json['audience'] as String)),
-    createdAtMs: (json['created_at_ms'] as num).toInt(),
-    id: (json['id'] as String),
-    lastUsedMs: (json['last_used_ms'] == null ? null : (json['last_used_ms'] as num).toInt()),
-    limitConcurrent: (json['limit_concurrent'] == null ? null : (json['limit_concurrent'] as num).toInt()),
-    limitPerHour: (json['limit_per_hour'] == null ? null : (json['limit_per_hour'] as num).toInt()),
-    name: (json['name'] as String),
-    revokedAtMs: (json['revoked_at_ms'] == null ? null : (json['revoked_at_ms'] as num).toInt()),
-    scopes: (json['scopes'] as List<dynamic>).map((x0) => AppScope.fromJson(x0 as String)).toList(),
-    tasksLastHour: (json['tasks_last_hour'] as num).toInt(),
-    tasksOpen: (json['tasks_open'] as num).toInt(),
-    webhookUrl: (json['webhook_url'] == null ? null : (json['webhook_url'] as String)),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (audience != null) 'audience': audience?.toJson(),
-    'created_at_ms': createdAtMs,
-    'id': id,
-    if (lastUsedMs != null) 'last_used_ms': lastUsedMs,
-    if (limitConcurrent != null) 'limit_concurrent': limitConcurrent,
-    if (limitPerHour != null) 'limit_per_hour': limitPerHour,
-    'name': name,
-    if (revokedAtMs != null) 'revoked_at_ms': revokedAtMs,
-    'scopes': scopes.map((x0) => x0.toJson()).toList(),
-    'tasks_last_hour': tasksLastHour,
-    'tasks_open': tasksOpen,
-    if (webhookUrl != null) 'webhook_url': webhookUrl,
-  };
-}
-
-enum AppScope {
-  approve('approve'),
-  draft('draft'),
-  read('read'),
-  run('run');
-
-  const AppScope(this.wire);
-
-  final String wire;
-
-  static AppScope fromJson(String value) => values.firstWhere(
-        (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown AppScope value: $value'),
-      );
-
-  String toJson() => wire;
-}
-
-/// Who a session speaks for after it authenticated with an app key (in `HelloResult::app`).
-final class AppSession {
-  const AppSession({
-    this.audience,
-    required this.keyId,
-    required this.name,
-    required this.scopes,
-  });
-
-  /// Whom this session may reach (feature `management_channel`).
-  final AppAudience? audience;
-  final String keyId;
-  final String name;
-  final List<AppScope> scopes;
-
-  factory AppSession.fromJson(Map<String, dynamic> json) => AppSession(
-    audience: (json['audience'] == null ? null : AppAudience.fromJson(json['audience'] as String)),
-    keyId: (json['key_id'] as String),
-    name: (json['name'] as String),
-    scopes: (json['scopes'] as List<dynamic>).map((x0) => AppScope.fromJson(x0 as String)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (audience != null) 'audience': audience?.toJson(),
-    'key_id': keyId,
-    'name': name,
-    'scopes': scopes.map((x0) => x0.toJson()).toList(),
-  };
-}
-
 enum ApprovalStatus {
   approved('approved'),
   consumed('consumed'),
@@ -632,6 +449,7 @@ final class ApprovalView {
     this.alwaysAllowEligible = false,
     required this.arguments,
     this.conversationId,
+    this.discussionId,
     required this.effect,
     required this.expiresAtMs,
     required this.id,
@@ -642,6 +460,7 @@ final class ApprovalView {
     required this.runId,
     required this.status,
     this.taskId,
+    this.ticketId,
     required this.tool,
   });
 
@@ -652,6 +471,9 @@ final class ApprovalView {
   final bool alwaysAllowEligible;
   final dynamic arguments;
   final String? conversationId;
+  /// The discussion (a channel, a ticket's) that woke the run (feature `run_cards`).
+  /// Left out for other runs and by older servers.
+  final String? discussionId;
   final String effect;
   final int expiresAtMs;
   final String id;
@@ -664,6 +486,9 @@ final class ApprovalView {
   final ApprovalStatus status;
   /// The task, when a task's conversation asked.
   final String? taskId;
+  /// The ticket it waits on: of the run's task, or of the discussion that woke
+  /// the run (feature `run_cards`). Left out for other runs and by older servers.
+  final String? ticketId;
   final String tool;
 
   factory ApprovalView.fromJson(Map<String, dynamic> json) => ApprovalView(
@@ -672,6 +497,7 @@ final class ApprovalView {
     alwaysAllowEligible: (json['always_allow_eligible'] == null ? false : (json['always_allow_eligible'] as bool)),
     arguments: json['arguments'],
     conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
+    discussionId: (json['discussion_id'] == null ? null : (json['discussion_id'] as String)),
     effect: (json['effect'] as String),
     expiresAtMs: (json['expires_at_ms'] as num).toInt(),
     id: (json['id'] as String),
@@ -682,6 +508,7 @@ final class ApprovalView {
     runId: (json['run_id'] as String),
     status: ApprovalStatus.fromJson(json['status'] as String),
     taskId: (json['task_id'] == null ? null : (json['task_id'] as String)),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
     tool: (json['tool'] as String),
   );
 
@@ -691,6 +518,7 @@ final class ApprovalView {
     'always_allow_eligible': alwaysAllowEligible,
     'arguments': arguments,
     if (conversationId != null) 'conversation_id': conversationId,
+    if (discussionId != null) 'discussion_id': discussionId,
     'effect': effect,
     'expires_at_ms': expiresAtMs,
     'id': id,
@@ -701,6 +529,7 @@ final class ApprovalView {
     'run_id': runId,
     'status': status.toJson(),
     if (taskId != null) 'task_id': taskId,
+    if (ticketId != null) 'ticket_id': ticketId,
     'tool': tool,
   };
 }
@@ -722,179 +551,6 @@ final class ApprovalsSnapshot {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'approvals': approvals.map((x0) => x0.toJson()).toList(),
     'as_of_seq': asOfSeq,
-  };
-}
-
-/// `artifact.get_content`: an artifact and the kept file of one version.
-final class ArtifactContent {
-  const ArtifactContent({
-    required this.artifact,
-    this.snapshot,
-    required this.versions,
-  });
-
-  final ArtifactView artifact;
-  /// The asked version, else the newest kept one; none when the server kept
-  /// no file of it (published before servers kept them, larger than 2 MB, or
-  /// not text): show the link instead.
-  final ArtifactSnapshot? snapshot;
-  /// Versions with a kept file, newest first (the server keeps the last 20).
-  final List<int> versions;
-
-  factory ArtifactContent.fromJson(Map<String, dynamic> json) => ArtifactContent(
-    artifact: ArtifactView.fromJson(json['artifact'] as Map<String, dynamic>),
-    snapshot: (json['snapshot'] == null ? null : ArtifactSnapshot.fromJson(json['snapshot'] as Map<String, dynamic>)),
-    versions: (json['versions'] as List<dynamic>).map((x0) => (x0 as num).toInt()).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'artifact': artifact.toJson(),
-    if (snapshot != null) 'snapshot': snapshot?.toJson(),
-    'versions': versions,
-  };
-}
-
-/// What kind of file a run published; decides how a client renders it.
-enum ArtifactKind {
-  html('html'),
-  markdown('markdown'),
-  /// Neither: show as plain text.
-  text('text');
-
-  const ArtifactKind(this.wire);
-
-  final String wire;
-
-  static ArtifactKind fromJson(String value) => values.firstWhere(
-        (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown ArtifactKind value: $value'),
-      );
-
-  String toJson() => wire;
-}
-
-/// `artifact.get_setting` and `artifact.set_enabled`: whether Claude Code runs
-/// get the artifact tools (publish pages on claude.ai). Off by default.
-final class ArtifactSetting {
-  const ArtifactSetting({
-    required this.enabled,
-  });
-
-  final bool enabled;
-
-  factory ArtifactSetting.fromJson(Map<String, dynamic> json) => ArtifactSetting(
-    enabled: (json['enabled'] as bool),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'enabled': enabled,
-  };
-}
-
-/// The file one publish sent to claude.ai, as the server kept it.
-final class ArtifactSnapshot {
-  const ArtifactSnapshot({
-    required this.content,
-    required this.fileName,
-    required this.kind,
-    required this.publishedAtMs,
-    required this.version,
-  });
-
-  final String content;
-  /// The published file's name (no folder).
-  final String fileName;
-  final ArtifactKind kind;
-  final int publishedAtMs;
-  final int version;
-
-  factory ArtifactSnapshot.fromJson(Map<String, dynamic> json) => ArtifactSnapshot(
-    content: (json['content'] as String),
-    fileName: (json['file_name'] as String),
-    kind: ArtifactKind.fromJson(json['kind'] as String),
-    publishedAtMs: (json['published_at_ms'] as num).toInt(),
-    version: (json['version'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'content': content,
-    'file_name': fileName,
-    'kind': kind.toJson(),
-    'published_at_ms': publishedAtMs,
-    'version': version,
-  };
-}
-
-/// A page on claude.ai that a Claude Code run published (Claude Code artifact).
-/// The URL is its identity: republishing keeps it.
-final class ArtifactView {
-  const ArtifactView({
-    required this.conversationId,
-    required this.firstPublishedAtMs,
-    this.hasContent = false,
-    required this.lastPublishedAtMs,
-    this.projectId,
-    this.taskId,
-    required this.title,
-    required this.url,
-    required this.version,
-  });
-
-  /// The conversation whose run published it first.
-  final String conversationId;
-  final int firstPublishedAtMs;
-  /// The server kept the published file of at least one version, so
-  /// `artifact.get_content` can show it; false for pages published before
-  /// servers kept them (and from older servers): show the link instead.
-  final bool hasContent;
-  final int lastPublishedAtMs;
-  final String? projectId;
-  final String? taskId;
-  final String title;
-  /// `https://claude.ai/artifact/<id>`; private to the user's claude.ai account until shared there.
-  final String url;
-  /// Claude Code's version number of the latest publish (1 on the first).
-  final int version;
-
-  factory ArtifactView.fromJson(Map<String, dynamic> json) => ArtifactView(
-    conversationId: (json['conversation_id'] as String),
-    firstPublishedAtMs: (json['first_published_at_ms'] as num).toInt(),
-    hasContent: (json['has_content'] == null ? false : (json['has_content'] as bool)),
-    lastPublishedAtMs: (json['last_published_at_ms'] as num).toInt(),
-    projectId: (json['project_id'] == null ? null : (json['project_id'] as String)),
-    taskId: (json['task_id'] == null ? null : (json['task_id'] as String)),
-    title: (json['title'] as String),
-    url: (json['url'] as String),
-    version: (json['version'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'conversation_id': conversationId,
-    'first_published_at_ms': firstPublishedAtMs,
-    'has_content': hasContent,
-    'last_published_at_ms': lastPublishedAtMs,
-    if (projectId != null) 'project_id': projectId,
-    if (taskId != null) 'task_id': taskId,
-    'title': title,
-    'url': url,
-    'version': version,
-  };
-}
-
-/// `artifact.list`: newest publish first.
-final class ArtifactsSnapshot {
-  const ArtifactsSnapshot({
-    required this.artifacts,
-  });
-
-  final List<ArtifactView> artifacts;
-
-  factory ArtifactsSnapshot.fromJson(Map<String, dynamic> json) => ArtifactsSnapshot(
-    artifacts: (json['artifacts'] as List<dynamic>).map((x0) => ArtifactView.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'artifacts': artifacts.map((x0) => x0.toJson()).toList(),
   };
 }
 
@@ -1240,24 +896,21 @@ final class BrowserSetting {
   };
 }
 
-/// The status an app sees for a call.
-enum CallStatus {
-  cancelled('cancelled'),
-  failed('failed'),
-  queued('queued'),
-  running('running'),
-  succeeded('succeeded');
+/// `scheduled_message.cancel`: a message an employee scheduled does not go out.
+final class CancelScheduledMessage {
+  const CancelScheduledMessage({
+    required this.messageId,
+  });
 
-  const CallStatus(this.wire);
+  final String messageId;
 
-  final String wire;
+  factory CancelScheduledMessage.fromJson(Map<String, dynamic> json) => CancelScheduledMessage(
+    messageId: (json['message_id'] as String),
+  );
 
-  static CallStatus fromJson(String value) => values.firstWhere(
-        (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown CallStatus value: $value'),
-      );
-
-  String toJson() => wire;
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'message_id': messageId,
+  };
 }
 
 final class CancelTask {
@@ -1431,28 +1084,6 @@ final class ChannelsSnapshot {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'as_of_seq': asOfSeq,
     'channels': channels.map((x0) => x0.toJson()).toList(),
-  };
-}
-
-/// Pick a variant of a task that waits for the user's choice. `variant: None`
-/// lets the judge's pick stand.
-final class ChooseTaskVariant {
-  const ChooseTaskVariant({
-    required this.taskId,
-    this.variant,
-  });
-
-  final String taskId;
-  final int? variant;
-
-  factory ChooseTaskVariant.fromJson(Map<String, dynamic> json) => ChooseTaskVariant(
-    taskId: (json['task_id'] as String),
-    variant: (json['variant'] == null ? null : (json['variant'] as num).toInt()),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'task_id': taskId,
-    if (variant != null) 'variant': variant,
   };
 }
 
@@ -1661,14 +1292,14 @@ sealed class Command {
         );
       case 'attach_file':
         return CommandAttachFile(value: AttachFile.fromJson(json as Map<String, dynamic>));
+      case 'cancel_scheduled_message':
+        return CommandCancelScheduledMessage(value: CancelScheduledMessage.fromJson(json as Map<String, dynamic>));
       case 'cancel_task':
         return CommandCancelTask(value: CancelTask.fromJson(json as Map<String, dynamic>));
       case 'cancel_ticket':
         return CommandCancelTicket(
           ticketId: (json['ticket_id'] as String),
         );
-      case 'choose_task_variant':
-        return CommandChooseTaskVariant(value: ChooseTaskVariant.fromJson(json as Map<String, dynamic>));
       case 'consolidate_memory':
         return CommandConsolidateMemory(value: ConsolidateMemory.fromJson(json as Map<String, dynamic>));
       case 'create_employee':
@@ -1729,8 +1360,6 @@ sealed class Command {
         return CommandDeleteQueuedMessage(value: DeleteQueuedMessage.fromJson(json as Map<String, dynamic>));
       case 'delete_task_schedule':
         return CommandDeleteTaskSchedule(value: DeleteTaskSchedule.fromJson(json as Map<String, dynamic>));
-      case 'discuss_task':
-        return CommandDiscussTask(value: DiscussTask.fromJson(json as Map<String, dynamic>));
       case 'edit_message':
         return CommandEditMessage(value: EditMessage.fromJson(json as Map<String, dynamic>));
       case 'follow_ticket':
@@ -1748,6 +1377,8 @@ sealed class Command {
           columnId: (json['column_id'] as String),
           ticketId: (json['ticket_id'] as String),
         );
+      case 'open_employee_chat':
+        return CommandOpenEmployeeChat(value: OpenEmployeeChat.fromJson(json as Map<String, dynamic>));
       case 'pin_memory':
         return CommandPinMemory(value: PinMemory.fromJson(json as Map<String, dynamic>));
       case 'post_ticket_message':
@@ -1794,8 +1425,6 @@ sealed class Command {
           feedback: (json['feedback'] as String),
           ticketId: (json['ticket_id'] as String),
         );
-      case 'revoke_share':
-        return CommandRevokeShare(value: RevokeShare.fromJson(json as Map<String, dynamic>));
       case 'run_task_schedule_now':
         return CommandRunTaskScheduleNow(value: RunTaskScheduleNow.fromJson(json as Map<String, dynamic>));
       case 'send_back_ticket':
@@ -1832,8 +1461,6 @@ sealed class Command {
         return CommandSetEmployeeStatus(value: SetEmployeeStatus.fromJson(json as Map<String, dynamic>));
       case 'set_follow_org_chart':
         return CommandSetFollowOrgChart(value: SetFollowOrgChart.fromJson(json as Map<String, dynamic>));
-      case 'set_heartbeat':
-        return CommandSetHeartbeat(value: SetHeartbeat.fromJson(json as Map<String, dynamic>));
       case 'set_idea_status':
         return CommandSetIdeaStatus(value: SetIdeaStatus.fromJson(json as Map<String, dynamic>));
       case 'set_project_description':
@@ -1857,8 +1484,6 @@ sealed class Command {
           responsibleUserId: (json['responsible_user_id'] == null ? null : (json['responsible_user_id'] as String)),
           ticketId: (json['ticket_id'] as String),
         );
-      case 'share_message':
-        return CommandShareMessage(value: ShareMessage.fromJson(json as Map<String, dynamic>));
       case 'start_idea':
         return CommandStartIdea(value: StartIdea.fromJson(json as Map<String, dynamic>));
       case 'start_project_conversation':
@@ -1902,6 +1527,7 @@ sealed class Command {
           confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
           deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
           description: (json['description'] == null ? null : (json['description'] as String)),
+          designUrl: (json['design_url'] == null ? null : (json['design_url'] as String)),
           labels: (json['labels'] == null ? null : (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           priority: (json['priority'] == null ? null : TicketPriority.fromJson(json['priority'] as String)),
           run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
@@ -2108,6 +1734,20 @@ final class CommandAttachFile extends Command {
     };
 }
 
+final class CommandCancelScheduledMessage extends Command {
+  const CommandCancelScheduledMessage({
+    required this.value,
+  });
+
+  final CancelScheduledMessage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'cancel_scheduled_message',
+      ...value.toJson(),
+    };
+}
+
 final class CommandCancelTask extends Command {
   const CommandCancelTask({
     required this.value,
@@ -2134,20 +1774,6 @@ final class CommandCancelTicket extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'cancel_ticket',
       'ticket_id': ticketId,
-    };
-}
-
-final class CommandChooseTaskVariant extends Command {
-  const CommandChooseTaskVariant({
-    required this.value,
-  });
-
-  final ChooseTaskVariant value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'choose_task_variant',
-      ...value.toJson(),
     };
 }
 
@@ -2468,20 +2094,6 @@ final class CommandDeleteTaskSchedule extends Command {
     };
 }
 
-final class CommandDiscussTask extends Command {
-  const CommandDiscussTask({
-    required this.value,
-  });
-
-  final DiscussTask value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'discuss_task',
-      ...value.toJson(),
-    };
-}
-
 final class CommandEditMessage extends Command {
   const CommandEditMessage({
     required this.value,
@@ -2569,6 +2181,20 @@ final class CommandMoveTicket extends Command {
       if (beforeTicketId != null) 'before_ticket_id': beforeTicketId,
       'column_id': columnId,
       'ticket_id': ticketId,
+    };
+}
+
+final class CommandOpenEmployeeChat extends Command {
+  const CommandOpenEmployeeChat({
+    required this.value,
+  });
+
+  final OpenEmployeeChat value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'open_employee_chat',
+      ...value.toJson(),
     };
 }
 
@@ -2809,20 +2435,6 @@ final class CommandRevisePlan extends Command {
     };
 }
 
-final class CommandRevokeShare extends Command {
-  const CommandRevokeShare({
-    required this.value,
-  });
-
-  final RevokeShare value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'revoke_share',
-      ...value.toJson(),
-    };
-}
-
 final class CommandRunTaskScheduleNow extends Command {
   const CommandRunTaskScheduleNow({
     required this.value,
@@ -3046,20 +2658,6 @@ final class CommandSetFollowOrgChart extends Command {
     };
 }
 
-final class CommandSetHeartbeat extends Command {
-  const CommandSetHeartbeat({
-    required this.value,
-  });
-
-  final SetHeartbeat value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'set_heartbeat',
-      ...value.toJson(),
-    };
-}
-
 final class CommandSetIdeaStatus extends Command {
   const CommandSetIdeaStatus({
     required this.value,
@@ -3193,20 +2791,6 @@ final class CommandSetTicketResponsible extends Command {
       'type': 'set_ticket_responsible',
       if (responsibleUserId != null) 'responsible_user_id': responsibleUserId,
       'ticket_id': ticketId,
-    };
-}
-
-final class CommandShareMessage extends Command {
-  const CommandShareMessage({
-    required this.value,
-  });
-
-  final ShareMessage value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'share_message',
-      ...value.toJson(),
     };
 }
 
@@ -3409,6 +2993,7 @@ final class CommandUpdateTicket extends Command {
     this.confirmSecret,
     this.deadlineMs,
     this.description,
+    this.designUrl,
     this.labels,
     this.priority,
     this.run,
@@ -3432,6 +3017,10 @@ final class CommandUpdateTicket extends Command {
   final int? deadlineMs;
   /// An empty text clears it.
   final String? description;
+  /// The ticket's design: a Claude Design artifact link (`valid_artifact_url`,
+  /// feature `design_links`); an empty text clears it. Left out unless it changes,
+  /// so older servers, which refuse unknown fields here, keep working.
+  final String? designUrl;
   /// The whole new list.
   final List<String>? labels;
   final TicketPriority? priority;
@@ -3447,6 +3036,7 @@ final class CommandUpdateTicket extends Command {
       if (confirmSecret != null) 'confirm_secret': confirmSecret,
       if (deadlineMs != null) 'deadline_ms': deadlineMs,
       if (description != null) 'description': description,
+      if (designUrl != null) 'design_url': designUrl,
       if (labels != null) 'labels': labels,
       if (priority != null) 'priority': priority?.toJson(),
       if (run != null) 'run': run?.toJson(),
@@ -3548,6 +3138,10 @@ sealed class CommandResult {
         return CommandResultConversationRunSet(
           conversationId: (json['conversation_id'] as String),
         );
+      case 'employee_chat_opened':
+        return CommandResultEmployeeChatOpened(
+          conversationId: (json['conversation_id'] as String),
+        );
       case 'employee_created':
         return CommandResultEmployeeCreated(
           conversationId: (json['conversation_id'] as String),
@@ -3605,11 +3199,6 @@ sealed class CommandResult {
           guidelineId: (json['guideline_id'] == null ? null : (json['guideline_id'] as String)),
           proposalId: (json['proposal_id'] as String),
           status: ProposalStatus.fromJson(json['status'] as String),
-        );
-      case 'heartbeat_set':
-        return CommandResultHeartbeatSet(
-          employeeId: (json['employee_id'] as String),
-          everyMinutes: (json['every_minutes'] as num).toInt(),
         );
       case 'idea_added':
         return CommandResultIdeaAdded(
@@ -3731,6 +3320,10 @@ sealed class CommandResult {
         );
       case 'run_defaults_set':
         return const CommandResultRunDefaultsSet();
+      case 'scheduled_message_cancelled':
+        return CommandResultScheduledMessageCancelled(
+          messageId: (json['message_id'] as String),
+        );
       case 'screen_allowed_set':
         return CommandResultScreenAllowedSet(
           allowed: (json['allowed'] as bool),
@@ -3740,15 +3333,6 @@ sealed class CommandResult {
         return CommandResultServerNameSet(
           name: (json['name'] as String),
           version: (json['version'] as num).toInt(),
-        );
-      case 'share_revoked':
-        return CommandResultShareRevoked(
-          shareId: (json['share_id'] as String),
-        );
-      case 'shared':
-        return CommandResultShared(
-          memoryId: (json['memory_id'] == null ? null : (json['memory_id'] as String)),
-          shareId: (json['share_id'] as String),
         );
       case 'starter_guidelines_added':
         return CommandResultStarterGuidelinesAdded(
@@ -3771,11 +3355,6 @@ sealed class CommandResult {
         return CommandResultTaskCreated(
           taskId: (json['task_id'] as String),
         );
-      case 'task_discussed':
-        return CommandResultTaskDiscussed(
-          conversationId: (json['conversation_id'] as String),
-          employeeId: (json['employee_id'] as String),
-        );
       case 'task_schedule_created':
         return CommandResultTaskScheduleCreated(
           scheduleId: (json['schedule_id'] as String),
@@ -3792,11 +3371,6 @@ sealed class CommandResult {
       case 'task_schedule_updated':
         return CommandResultTaskScheduleUpdated(
           scheduleId: (json['schedule_id'] as String),
-        );
-      case 'task_variant_chosen':
-        return CommandResultTaskVariantChosen(
-          taskId: (json['task_id'] as String),
-          variant: (json['variant'] as num).toInt(),
         );
       case 'ticket_changed':
         return CommandResultTicketChanged(
@@ -4032,6 +3606,20 @@ final class CommandResultConversationRunSet extends CommandResult {
     };
 }
 
+final class CommandResultEmployeeChatOpened extends CommandResult {
+  const CommandResultEmployeeChatOpened({
+    required this.conversationId,
+  });
+
+  final String conversationId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_chat_opened',
+      'conversation_id': conversationId,
+    };
+}
+
 final class CommandResultEmployeeCreated extends CommandResult {
   const CommandResultEmployeeCreated({
     required this.conversationId,
@@ -4231,23 +3819,6 @@ final class CommandResultGuidelineProposalDecided extends CommandResult {
       if (guidelineId != null) 'guideline_id': guidelineId,
       'proposal_id': proposalId,
       'status': status.toJson(),
-    };
-}
-
-final class CommandResultHeartbeatSet extends CommandResult {
-  const CommandResultHeartbeatSet({
-    required this.employeeId,
-    required this.everyMinutes,
-  });
-
-  final String employeeId;
-  final int everyMinutes;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'heartbeat_set',
-      'employee_id': employeeId,
-      'every_minutes': everyMinutes,
     };
 }
 
@@ -4670,6 +4241,20 @@ final class CommandResultRunDefaultsSet extends CommandResult {
     };
 }
 
+final class CommandResultScheduledMessageCancelled extends CommandResult {
+  const CommandResultScheduledMessageCancelled({
+    required this.messageId,
+  });
+
+  final String messageId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'scheduled_message_cancelled',
+      'message_id': messageId,
+    };
+}
+
 final class CommandResultScreenAllowedSet extends CommandResult {
   const CommandResultScreenAllowedSet({
     required this.allowed,
@@ -4703,37 +4288,6 @@ final class CommandResultServerNameSet extends CommandResult {
       'type': 'server_name_set',
       'name': name,
       'version': version,
-    };
-}
-
-final class CommandResultShareRevoked extends CommandResult {
-  const CommandResultShareRevoked({
-    required this.shareId,
-  });
-
-  final String shareId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'share_revoked',
-      'share_id': shareId,
-    };
-}
-
-final class CommandResultShared extends CommandResult {
-  const CommandResultShared({
-    this.memoryId,
-    required this.shareId,
-  });
-
-  final String? memoryId;
-  final String shareId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'shared',
-      if (memoryId != null) 'memory_id': memoryId,
-      'share_id': shareId,
     };
 }
 
@@ -4811,24 +4365,6 @@ final class CommandResultTaskCreated extends CommandResult {
     };
 }
 
-/// The lead employee's chat that now has the task's result as context.
-final class CommandResultTaskDiscussed extends CommandResult {
-  const CommandResultTaskDiscussed({
-    required this.conversationId,
-    required this.employeeId,
-  });
-
-  final String conversationId;
-  final String employeeId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'task_discussed',
-      'conversation_id': conversationId,
-      'employee_id': employeeId,
-    };
-}
-
 /// Also the answer to update, pause and resume.
 final class CommandResultTaskScheduleCreated extends CommandResult {
   const CommandResultTaskScheduleCreated({
@@ -4886,24 +4422,6 @@ final class CommandResultTaskScheduleUpdated extends CommandResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'task_schedule_updated',
       'schedule_id': scheduleId,
-    };
-}
-
-/// The variant whose diff is applied to the work folder; the task goes on with it.
-final class CommandResultTaskVariantChosen extends CommandResult {
-  const CommandResultTaskVariantChosen({
-    required this.taskId,
-    required this.variant,
-  });
-
-  final String taskId;
-  final int variant;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'task_variant_chosen',
-      'task_id': taskId,
-      'variant': variant,
     };
 }
 
@@ -5386,85 +4904,25 @@ final class ConversationSummary {
   };
 }
 
-final class CreateAgentFunction {
-  const CreateAgentFunction({
-    this.enabled = true,
-    required this.function,
-    required this.projectId,
-  });
-
-  final bool enabled;
-  final FunctionFields function;
-  final String projectId;
-
-  factory CreateAgentFunction.fromJson(Map<String, dynamic> json) => CreateAgentFunction(
-    enabled: (json['enabled'] == null ? true : (json['enabled'] as bool)),
-    function: FunctionFields.fromJson(json['function'] as Map<String, dynamic>),
-    projectId: (json['project_id'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'enabled': enabled,
-    'function': function.toJson(),
-    'project_id': projectId,
-  };
-}
-
-/// `app_key.create`. The secret is in the answer once.
-final class CreateAppKey {
-  const CreateAppKey({
-    this.audience,
-    this.limitConcurrent,
-    this.limitPerHour,
-    required this.name,
-    required this.scopes,
-    this.webhookUrl,
-  });
-
-  /// Whom the app may reach; default `all` (feature `management_channel`).
-  final AppAudience? audience;
-  /// Tasks of this app that may be open at once (queued, running, waiting or
-  /// in review; drafts do not count); unset: unlimited.
-  final int? limitConcurrent;
-  /// Tasks it may create in any rolling hour; unset: unlimited.
-  final int? limitPerHour;
-  /// The app's name; tasks it creates show it (`TaskView::created_by_app`).
-  final String name;
-  final List<AppScope> scopes;
-  /// Where Aurelius posts this app's events (`http://` or `https://`); unset: no
-  /// webhook. A secret for the signature is made with the key and shown once
-  /// (`AppKeyCreated::webhook_secret`). Feature `webhooks`.
-  final String? webhookUrl;
-
-  factory CreateAppKey.fromJson(Map<String, dynamic> json) => CreateAppKey(
-    audience: (json['audience'] == null ? null : AppAudience.fromJson(json['audience'] as String)),
-    limitConcurrent: (json['limit_concurrent'] == null ? null : (json['limit_concurrent'] as num).toInt()),
-    limitPerHour: (json['limit_per_hour'] == null ? null : (json['limit_per_hour'] as num).toInt()),
-    name: (json['name'] as String),
-    scopes: (json['scopes'] as List<dynamic>).map((x0) => AppScope.fromJson(x0 as String)).toList(),
-    webhookUrl: (json['webhook_url'] == null ? null : (json['webhook_url'] as String)),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (audience != null) 'audience': audience?.toJson(),
-    if (limitConcurrent != null) 'limit_concurrent': limitConcurrent,
-    if (limitPerHour != null) 'limit_per_hour': limitPerHour,
-    'name': name,
-    'scopes': scopes.map((x0) => x0.toJson()).toList(),
-    if (webhookUrl != null) 'webhook_url': webhookUrl,
-  };
-}
-
 final class CreateEmployee {
   const CreateEmployee({
+    this.accessLevel,
+    this.description,
     this.folder,
     this.instructions,
     required this.name,
     this.reportsTo,
     required this.role,
+    this.startProfile,
     this.title,
+    this.toolPolicy,
   });
 
+  /// What its runs may do with files and commands (C3); none: `Inherit`.
+  final AccessLevel? accessLevel;
+  /// What other employees read to know when to hand work to this one (P7).
+  /// None or empty: their prompt shows the first line of the instructions.
+  final String? description;
   /// Optional own workspace folder: the work folder of its chat.
   final String? folder;
   final String? instructions;
@@ -5472,25 +4930,37 @@ final class CreateEmployee {
   /// Who this employee reports to (not archived); none: a root (the management team).
   final String? reportsTo;
   final String role;
+  /// A key of `employee.start_profiles` (C6). What this command leaves out comes from there.
+  final String? startProfile;
   /// The position on the org chart ("Head of engineering"); free text, at most 80 characters.
   final String? title;
+  /// Which tools and MCP servers it has and which ask first (C2); none: all of its level.
+  final ToolPolicy? toolPolicy;
 
   factory CreateEmployee.fromJson(Map<String, dynamic> json) => CreateEmployee(
+    accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
+    description: (json['description'] == null ? null : (json['description'] as String)),
     folder: (json['folder'] == null ? null : (json['folder'] as String)),
     instructions: (json['instructions'] == null ? null : (json['instructions'] as String)),
     name: (json['name'] as String),
     reportsTo: (json['reports_to'] == null ? null : (json['reports_to'] as String)),
     role: (json['role'] as String),
+    startProfile: (json['start_profile'] == null ? null : (json['start_profile'] as String)),
     title: (json['title'] == null ? null : (json['title'] as String)),
+    toolPolicy: (json['tool_policy'] == null ? null : ToolPolicy.fromJson(json['tool_policy'] as Map<String, dynamic>)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (accessLevel != null) 'access_level': accessLevel?.toJson(),
+    if (description != null) 'description': description,
     if (folder != null) 'folder': folder,
     if (instructions != null) 'instructions': instructions,
     'name': name,
     if (reportsTo != null) 'reports_to': reportsTo,
     'role': role,
+    if (startProfile != null) 'start_profile': startProfile,
     if (title != null) 'title': title,
+    if (toolPolicy != null) 'tool_policy': toolPolicy?.toJson(),
   };
 }
 
@@ -5523,7 +4993,6 @@ final class CreateTask {
   const CreateTask({
     this.acceptanceCriteria = const [],
     this.confirmSecret,
-    this.dependsOn = const [],
     this.employeeId,
     this.files = const [],
     required this.goal,
@@ -5536,8 +5005,6 @@ final class CreateTask {
   /// A board member confirmed that the text may hold a vault secret's value
   /// (after `looks_like_secret`, B10): it is stored with the value redacted.
   final bool? confirmSecret;
-  /// Tasks that must succeed first.
-  final List<String> dependsOn;
   /// Without an employee the task stays a draft.
   final String? employeeId;
   /// Files of any type (images too) to copy into the work folder's
@@ -5553,7 +5020,6 @@ final class CreateTask {
   factory CreateTask.fromJson(Map<String, dynamic> json) => CreateTask(
     acceptanceCriteria: (json['acceptance_criteria'] == null ? const [] : (json['acceptance_criteria'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
-    dependsOn: (json['depends_on'] == null ? const [] : (json['depends_on'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     goal: (json['goal'] as String),
@@ -5565,7 +5031,6 @@ final class CreateTask {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'acceptance_criteria': acceptanceCriteria,
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
-    'depends_on': dependsOn,
     if (employeeId != null) 'employee_id': employeeId,
     'files': files,
     'goal': goal,
@@ -5931,24 +5396,6 @@ final class DirListing {
   };
 }
 
-/// Discuss a task with its lead employee: the task's result becomes context
-/// of the employee's chat (`CommandResult::TaskDiscussed` names it).
-final class DiscussTask {
-  const DiscussTask({
-    required this.taskId,
-  });
-
-  final String taskId;
-
-  factory DiscussTask.fromJson(Map<String, dynamic> json) => DiscussTask(
-    taskId: (json['task_id'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'task_id': taskId,
-  };
-}
-
 /// A board member changes the text of their own message in a channel or a
 /// ticket's discussion (`message.edit`, feature `message_edits`). It wakes nobody.
 /// The earlier text stays in the audit log: editing does not erase a secret.
@@ -6054,6 +5501,61 @@ final class EffectiveGuidelines {
   };
 }
 
+/// One of a board member's lasting chats with an employee (feature `employee_chats`).
+final class EmployeeChatView {
+  const EmployeeChatView({
+    required this.conversationId,
+    required this.employeeId,
+    required this.employeeName,
+    required this.lastActivityMs,
+    required this.unread,
+  });
+
+  final String conversationId;
+  final String employeeId;
+  final String employeeName;
+  final int lastActivityMs;
+  /// What the employee wrote since the board member last read it.
+  final int unread;
+
+  factory EmployeeChatView.fromJson(Map<String, dynamic> json) => EmployeeChatView(
+    conversationId: (json['conversation_id'] as String),
+    employeeId: (json['employee_id'] as String),
+    employeeName: (json['employee_name'] as String),
+    lastActivityMs: (json['last_activity_ms'] as num).toInt(),
+    unread: (json['unread'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'conversation_id': conversationId,
+    'employee_id': employeeId,
+    'employee_name': employeeName,
+    'last_activity_ms': lastActivityMs,
+    'unread': unread,
+  };
+}
+
+/// `employee.chats`: the reader's chats that have something in them, the latest first.
+final class EmployeeChatsSnapshot {
+  const EmployeeChatsSnapshot({
+    required this.asOfSeq,
+    required this.chats,
+  });
+
+  final int asOfSeq;
+  final List<EmployeeChatView> chats;
+
+  factory EmployeeChatsSnapshot.fromJson(Map<String, dynamic> json) => EmployeeChatsSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    chats: (json['chats'] as List<dynamic>).map((x0) => EmployeeChatView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'chats': chats.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 /// One version of an employee's instructions (feature `instruction_proposals`).
 final class EmployeeInstructionVersionView {
   const EmployeeInstructionVersionView({
@@ -6122,43 +5624,104 @@ final class EmployeeInstructionVersionsSnapshot {
   };
 }
 
-/// `plugin.get_for_employee` and `plugin.set_for_employee`.
-final class EmployeePlugins {
-  const EmployeePlugins({
+/// `employee.queue`: what is in an employee's mailbox, what runs first.
+final class EmployeeQueue {
+  const EmployeeQueue({
+    required this.asOfSeq,
     required this.employeeId,
-    required this.enabled,
-    required this.missing,
+    required this.items,
   });
 
+  final int asOfSeq;
   final String employeeId;
-  /// The employee's own plugins. In a task its runs also load the plugins of
-  /// the task's project (`plugin.get_for_project`).
-  final List<String> enabled;
-  /// Enabled ids that are no longer installed; they are skipped in runs.
-  final List<String> missing;
+  final List<EmployeeQueueItem> items;
 
-  factory EmployeePlugins.fromJson(Map<String, dynamic> json) => EmployeePlugins(
+  factory EmployeeQueue.fromJson(Map<String, dynamic> json) => EmployeeQueue(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
     employeeId: (json['employee_id'] as String),
-    enabled: (json['enabled'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    missing: (json['missing'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    items: (json['items'] as List<dynamic>).map((x0) => EmployeeQueueItem.fromJson(x0 as Map<String, dynamic>)).toList(),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
     'employee_id': employeeId,
-    'enabled': enabled,
-    'missing': missing,
+    'items': items.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// One item of an employee's mailbox (U6; feature `employee_queue`).
+final class EmployeeQueueItem {
+  const EmployeeQueueItem({
+    required this.createdAtMs,
+    required this.hop,
+    required this.id,
+    required this.kind,
+    required this.notBeforeMs,
+    required this.place,
+    this.runId,
+    required this.source,
+    required this.state,
+    required this.threadKey,
+    this.waitsFor,
+  });
+
+  final int createdAtMs;
+  final int hop;
+  final String id;
+  /// message, task, resume, scheduled. Text, not an enum.
+  final String kind;
+  final int notBeforeMs;
+  final ThreadPlace place;
+  /// The run that works on it; none while it waits.
+  final String? runId;
+  /// board, employee or system.
+  final String source;
+  /// claimed (a run works on it), queued or held.
+  final String state;
+  final String threadKey;
+  /// What holds it back besides its turn: question, limit, later, machine or handoff.
+  final String? waitsFor;
+
+  factory EmployeeQueueItem.fromJson(Map<String, dynamic> json) => EmployeeQueueItem(
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    hop: (json['hop'] as num).toInt(),
+    id: (json['id'] as String),
+    kind: (json['kind'] as String),
+    notBeforeMs: (json['not_before_ms'] as num).toInt(),
+    place: ThreadPlace.fromJson(json['place'] as Map<String, dynamic>),
+    runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
+    source: (json['source'] as String),
+    state: (json['state'] as String),
+    threadKey: (json['thread_key'] as String),
+    waitsFor: (json['waits_for'] == null ? null : (json['waits_for'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'created_at_ms': createdAtMs,
+    'hop': hop,
+    'id': id,
+    'kind': kind,
+    'not_before_ms': notBeforeMs,
+    'place': place.toJson(),
+    if (runId != null) 'run_id': runId,
+    'source': source,
+    'state': state,
+    'thread_key': threadKey,
+    if (waitsFor != null) 'waits_for': waitsFor,
   };
 }
 
 final class EmployeeSummary {
   const EmployeeSummary({
+    this.accessLevel,
+    this.activityState,
     required this.agentMode,
     required this.agents,
     required this.browserAllowed,
     required this.conversationId,
     required this.conversations,
+    this.description,
     this.folder,
-    this.heartbeat,
     required this.id,
     this.instructions,
     required this.name,
@@ -6167,12 +5730,18 @@ final class EmployeeSummary {
     required this.role,
     required this.screenAllowed,
     required this.sequentialTasks,
+    this.settings,
     required this.status,
     this.title,
+    this.toolPolicy,
     required this.version,
     required this.working,
   });
 
+  /// What its runs may do with files and commands (C3); left out when `Inherit`.
+  final AccessLevel? accessLevel;
+  /// What it is doing now (U6, derived, never stored); left out when idle.
+  final ActivityState? activityState;
   final AgentMode agentMode;
   /// What runs for this employee right now: its own steps,
   /// subagents and sub-tasks delegated to colleagues (derived, never stored).
@@ -6182,13 +5751,14 @@ final class EmployeeSummary {
   /// Its persistent chat with the user (company scope, no project; `employee.chat`).
   final String conversationId;
   /// Its chats, most recent first: the persistent one (`conversation_id`, it
-  /// carries mode, heartbeat and memory summaries) and older ones from before
+  /// carries mode and memory summaries) and older ones from before
   /// protocol 3 (history). Task conversations are not listed.
   final List<ConversationSummary> conversations;
+  /// What other employees read about it (P7). Left out when it has none: their
+  /// prompt then shows the first line of its instructions.
+  final String? description;
   /// Own workspace folder, if any: the work folder of its chat (in a task the project folder applies).
   final String? folder;
-  /// Opt-in heartbeat; `None` = off.
-  final HeartbeatView? heartbeat;
   final String id;
   final String? instructions;
   final String name;
@@ -6201,20 +5771,27 @@ final class EmployeeSummary {
   final bool screenAllowed;
   /// It works on one task at a time; the others wait their turn.
   final bool sequentialTasks;
+  /// Its own provider, model and effort (C1); left out when it inherits them all.
+  /// The same as `connection.list` has for its scope, without needing that read.
+  final RunSettings? settings;
   final LifecycleStatus status;
   final String? title;
+  /// Its tools, MCP servers and what asks first (C2); left out when it has all of its level.
+  final ToolPolicy? toolPolicy;
   final int version;
   /// Derived presence: a run of this employee is active (never stored).
   final bool working;
 
   factory EmployeeSummary.fromJson(Map<String, dynamic> json) => EmployeeSummary(
+    accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
+    activityState: (json['activity_state'] == null ? null : ActivityState.fromJson(json['activity_state'] as String)),
     agentMode: AgentMode.fromJson(json['agent_mode'] as String),
     agents: (json['agents'] as List<dynamic>).map((x0) => AgentView.fromJson(x0 as Map<String, dynamic>)).toList(),
     browserAllowed: (json['browser_allowed'] as bool),
     conversationId: (json['conversation_id'] as String),
     conversations: (json['conversations'] as List<dynamic>).map((x0) => ConversationSummary.fromJson(x0 as Map<String, dynamic>)).toList(),
+    description: (json['description'] == null ? null : (json['description'] as String)),
     folder: (json['folder'] == null ? null : (json['folder'] as String)),
-    heartbeat: (json['heartbeat'] == null ? null : HeartbeatView.fromJson(json['heartbeat'] as Map<String, dynamic>)),
     id: (json['id'] as String),
     instructions: (json['instructions'] == null ? null : (json['instructions'] as String)),
     name: (json['name'] as String),
@@ -6223,20 +5800,24 @@ final class EmployeeSummary {
     role: (json['role'] as String),
     screenAllowed: (json['screen_allowed'] as bool),
     sequentialTasks: (json['sequential_tasks'] as bool),
+    settings: (json['settings'] == null ? null : RunSettings.fromJson(json['settings'] as Map<String, dynamic>)),
     status: LifecycleStatus.fromJson(json['status'] as String),
     title: (json['title'] == null ? null : (json['title'] as String)),
+    toolPolicy: (json['tool_policy'] == null ? null : ToolPolicy.fromJson(json['tool_policy'] as Map<String, dynamic>)),
     version: (json['version'] as num).toInt(),
     working: (json['working'] as bool),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (accessLevel != null) 'access_level': accessLevel?.toJson(),
+    if (activityState != null) 'activity_state': activityState?.toJson(),
     'agent_mode': agentMode.toJson(),
     'agents': agents.map((x0) => x0.toJson()).toList(),
     'browser_allowed': browserAllowed,
     'conversation_id': conversationId,
     'conversations': conversations.map((x0) => x0.toJson()).toList(),
+    if (description != null) 'description': description,
     if (folder != null) 'folder': folder,
-    if (heartbeat != null) 'heartbeat': heartbeat?.toJson(),
     'id': id,
     if (instructions != null) 'instructions': instructions,
     'name': name,
@@ -6245,8 +5826,10 @@ final class EmployeeSummary {
     'role': role,
     'screen_allowed': screenAllowed,
     'sequential_tasks': sequentialTasks,
+    if (settings != null) 'settings': settings?.toJson(),
     'status': status.toJson(),
     if (title != null) 'title': title,
+    if (toolPolicy != null) 'tool_policy': toolPolicy?.toJson(),
     'version': version,
     'working': working,
   };
@@ -6385,8 +5968,6 @@ final class Event {
 }
 
 enum EventKind {
-  agentFunctionChanged('agent_function.changed'),
-  apiKeyChanged('api_key.changed'),
   approvalAllowedAlways('approval.allowed_always'),
   approvalAllowedByMode('approval.allowed_by_mode'),
   approvalAnswered('approval.answered'),
@@ -6399,7 +5980,6 @@ enum EventKind {
   approvalPlanRevisionRequested('approval.plan_revision_requested'),
   approvalRejected('approval.rejected'),
   approvalRequested('approval.requested'),
-  artifactPublished('artifact.published'),
   attachmentAdded('attachment.added'),
   attachmentRemoved('attachment.removed'),
   boardColumnsUpdated('board.columns_updated'),
@@ -6431,8 +6011,6 @@ enum EventKind {
   guidelineRestored('guideline.restored'),
   guidelineUnlinked('guideline.unlinked'),
   guidelineUpdated('guideline.updated'),
-  heartbeatChanged('heartbeat.changed'),
-  heartbeatReported('heartbeat.reported'),
   hostWrite('host.write'),
   ideaAdded('idea.added'),
   ideaDeleted('idea.deleted'),
@@ -6462,9 +6040,6 @@ enum EventKind {
   messageReacted('message.reacted'),
   messageSentNow('message.sent_now'),
   messageUserCommitted('message.user_committed'),
-  noteCreated('note.created'),
-  noteDeleted('note.deleted'),
-  noteUpdated('note.updated'),
   projectArchived('project.archived'),
   projectCreated('project.created'),
   projectFolderSet('project.folder_set'),
@@ -6484,8 +6059,6 @@ enum EventKind {
   runWaiting('run.waiting'),
   serverRenamed('server.renamed'),
   settingsFollowOrgChart('settings.follow_org_chart'),
-  shareGranted('share.granted'),
-  shareRevoked('share.revoked'),
   taskAssigned('task.assigned'),
   taskCancelled('task.cancelled'),
   taskCreated('task.created'),
@@ -6500,12 +6073,6 @@ enum EventKind {
   taskRunChanged('task.run_changed'),
   taskStarted('task.started'),
   taskSucceeded('task.succeeded'),
-  taskVariantChosen('task.variant_chosen'),
-  taskVariantProbed('task.variant_probed'),
-  taskVariantsFailed('task.variants_failed'),
-  taskVariantsReady('task.variants_ready'),
-  taskVariantsStarted('task.variants_started'),
-  taskVariantsStopped('task.variants_stopped'),
   taskWaiting('task.waiting'),
   ticketAccepted('ticket.accepted'),
   ticketArchived('ticket.archived'),
@@ -6717,261 +6284,6 @@ final class ForgetMemory {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'memory_id': memoryId,
-  };
-}
-
-final class FunctionCallView {
-  const FunctionCallView({
-    required this.apiKeyId,
-    required this.apiKeyName,
-    required this.createdAtMs,
-    this.finishedAtMs,
-    required this.functionId,
-    required this.functionName,
-    required this.id,
-    required this.status,
-    required this.taskId,
-  });
-
-  final String apiKeyId;
-  final String apiKeyName;
-  final int createdAtMs;
-  final int? finishedAtMs;
-  final String functionId;
-  final String functionName;
-  final String id;
-  /// queued, running, succeeded, failed or cancelled.
-  final CallStatus status;
-  /// The task the call made (open it like any task).
-  final String taskId;
-
-  factory FunctionCallView.fromJson(Map<String, dynamic> json) => FunctionCallView(
-    apiKeyId: (json['api_key_id'] as String),
-    apiKeyName: (json['api_key_name'] as String),
-    createdAtMs: (json['created_at_ms'] as num).toInt(),
-    finishedAtMs: (json['finished_at_ms'] == null ? null : (json['finished_at_ms'] as num).toInt()),
-    functionId: (json['function_id'] as String),
-    functionName: (json['function_name'] as String),
-    id: (json['id'] as String),
-    status: CallStatus.fromJson(json['status'] as String),
-    taskId: (json['task_id'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'api_key_id': apiKeyId,
-    'api_key_name': apiKeyName,
-    'created_at_ms': createdAtMs,
-    if (finishedAtMs != null) 'finished_at_ms': finishedAtMs,
-    'function_id': functionId,
-    'function_name': functionName,
-    'id': id,
-    'status': status.toJson(),
-    'task_id': taskId,
-  };
-}
-
-final class FunctionCallsSnapshot {
-  const FunctionCallsSnapshot({
-    required this.calls,
-    required this.usage,
-  });
-
-  /// Newest first.
-  final List<FunctionCallView> calls;
-  final List<FunctionUsageView> usage;
-
-  factory FunctionCallsSnapshot.fromJson(Map<String, dynamic> json) => FunctionCallsSnapshot(
-    calls: (json['calls'] as List<dynamic>).map((x0) => FunctionCallView.fromJson(x0 as Map<String, dynamic>)).toList(),
-    usage: (json['usage'] as List<dynamic>).map((x0) => FunctionUsageView.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'calls': calls.map((x0) => x0.toJson()).toList(),
-    'usage': usage.map((x0) => x0.toJson()).toList(),
-  };
-}
-
-/// What the user edits; shared by create and update.
-final class FunctionFields {
-  const FunctionFields({
-    this.description = '',
-    required this.employeeId,
-    required this.instructionTemplate,
-    this.limitPerDay,
-    this.limitPerWeek,
-    this.mode,
-    required this.name,
-    this.params = const [],
-    this.slug = '',
-  });
-
-  final String description;
-  final String employeeId;
-  /// The instruction with `{{param}}` placeholders.
-  final String instructionTemplate;
-  /// Calls allowed in any rolling 24 hours; unset: unlimited.
-  final int? limitPerDay;
-  /// Calls allowed in any rolling 7 days; unset: unlimited.
-  final int? limitPerWeek;
-  /// Unset: the employee's own default mode. Auto is allowed; Plan is not
-  /// (nobody is there to approve a plan).
-  final AgentMode? mode;
-  final String name;
-  final List<FunctionParam> params;
-  /// The URL name (`/v1/functions/<slug>/calls`); made from the name when empty.
-  final String slug;
-
-  factory FunctionFields.fromJson(Map<String, dynamic> json) => FunctionFields(
-    description: (json['description'] == null ? '' : (json['description'] as String)),
-    employeeId: (json['employee_id'] as String),
-    instructionTemplate: (json['instruction_template'] as String),
-    limitPerDay: (json['limit_per_day'] == null ? null : (json['limit_per_day'] as num).toInt()),
-    limitPerWeek: (json['limit_per_week'] == null ? null : (json['limit_per_week'] as num).toInt()),
-    mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
-    name: (json['name'] as String),
-    params: (json['params'] == null ? const [] : (json['params'] as List<dynamic>).map((x0) => FunctionParam.fromJson(x0 as Map<String, dynamic>)).toList()),
-    slug: (json['slug'] == null ? '' : (json['slug'] as String)),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'description': description,
-    'employee_id': employeeId,
-    'instruction_template': instructionTemplate,
-    if (limitPerDay != null) 'limit_per_day': limitPerDay,
-    if (limitPerWeek != null) 'limit_per_week': limitPerWeek,
-    if (mode != null) 'mode': mode?.toJson(),
-    'name': name,
-    'params': params.map((x0) => x0.toJson()).toList(),
-    'slug': slug,
-  };
-}
-
-/// One input the caller passes. Values are text (numbers and booleans are
-/// accepted and turned into text).
-final class FunctionParam {
-  const FunctionParam({
-    required this.maxLength,
-    required this.name,
-    this.required = false,
-  });
-
-  /// Most characters the value may have.
-  final int maxLength;
-  final String name;
-  final bool required;
-
-  factory FunctionParam.fromJson(Map<String, dynamic> json) => FunctionParam(
-    maxLength: (json['max_length'] as num).toInt(),
-    name: (json['name'] as String),
-    required: (json['required'] == null ? false : (json['required'] as bool)),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'max_length': maxLength,
-    'name': name,
-    'required': required,
-  };
-}
-
-final class FunctionUsageView {
-  const FunctionUsageView({
-    required this.functionId,
-    this.limitPerDay,
-    this.limitPerWeek,
-    required this.usedDay,
-    required this.usedWeek,
-  });
-
-  final String functionId;
-  final int? limitPerDay;
-  final int? limitPerWeek;
-  /// Accepted calls in the last 24 hours / 7 days (rolling).
-  final int usedDay;
-  final int usedWeek;
-
-  factory FunctionUsageView.fromJson(Map<String, dynamic> json) => FunctionUsageView(
-    functionId: (json['function_id'] as String),
-    limitPerDay: (json['limit_per_day'] == null ? null : (json['limit_per_day'] as num).toInt()),
-    limitPerWeek: (json['limit_per_week'] == null ? null : (json['limit_per_week'] as num).toInt()),
-    usedDay: (json['used_day'] as num).toInt(),
-    usedWeek: (json['used_week'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'function_id': functionId,
-    if (limitPerDay != null) 'limit_per_day': limitPerDay,
-    if (limitPerWeek != null) 'limit_per_week': limitPerWeek,
-    'used_day': usedDay,
-    'used_week': usedWeek,
-  };
-}
-
-/// `git.get_diff`: the uncommitted change against HEAD. `task.get_diff`
-/// uses it too: `status` is then the task's branch, `head` its tip, and the
-/// counts are against the task's base.
-final class GitDiffView {
-  const GitDiffView({
-    required this.patch,
-    required this.status,
-    required this.truncated,
-    required this.untracked,
-  });
-
-  /// Unified diff of tracked files (staged and unstaged), cut when large.
-  final String patch;
-  final GitStatusView status;
-  final bool truncated;
-  /// New files Git does not track yet (not in `patch`).
-  final List<String> untracked;
-
-  factory GitDiffView.fromJson(Map<String, dynamic> json) => GitDiffView(
-    patch: (json['patch'] as String),
-    status: GitStatusView.fromJson(json['status'] as Map<String, dynamic>),
-    truncated: (json['truncated'] as bool),
-    untracked: (json['untracked'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'patch': patch,
-    'status': status.toJson(),
-    'truncated': truncated,
-    'untracked': untracked,
-  };
-}
-
-/// `git.get_status`: where a conversation works, in Git terms.
-final class GitStatusView {
-  const GitStatusView({
-    this.branch,
-    required this.deletions,
-    required this.files,
-    this.head,
-    required this.insertions,
-  });
-
-  /// The checked-out branch; `None` when HEAD is detached (see `head`).
-  final String? branch;
-  final int deletions;
-  /// Uncommitted change against HEAD (untracked files count as files).
-  final int files;
-  /// Short commit id of HEAD.
-  final String? head;
-  final int insertions;
-
-  factory GitStatusView.fromJson(Map<String, dynamic> json) => GitStatusView(
-    branch: (json['branch'] == null ? null : (json['branch'] as String)),
-    deletions: (json['deletions'] as num).toInt(),
-    files: (json['files'] as num).toInt(),
-    head: (json['head'] == null ? null : (json['head'] as String)),
-    insertions: (json['insertions'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (branch != null) 'branch': branch,
-    'deletions': deletions,
-    'files': files,
-    if (head != null) 'head': head,
-    'insertions': insertions,
   };
 }
 
@@ -7429,51 +6741,9 @@ final class HealthResult {
   };
 }
 
-final class HeartbeatView {
-  const HeartbeatView({
-    required this.dailyTokenBudget,
-    required this.everyMinutes,
-    this.nextDueMs,
-    required this.quietEndMin,
-    required this.quietStartMin,
-    required this.tokensToday,
-    this.waiting,
-  });
-
-  final int dailyTokenBudget;
-  final int everyMinutes;
-  final int? nextDueMs;
-  final int quietEndMin;
-  final int quietStartMin;
-  final int tokensToday;
-  /// e.g. "budget" when today's budget is used up.
-  final String? waiting;
-
-  factory HeartbeatView.fromJson(Map<String, dynamic> json) => HeartbeatView(
-    dailyTokenBudget: (json['daily_token_budget'] as num).toInt(),
-    everyMinutes: (json['every_minutes'] as num).toInt(),
-    nextDueMs: (json['next_due_ms'] == null ? null : (json['next_due_ms'] as num).toInt()),
-    quietEndMin: (json['quiet_end_min'] as num).toInt(),
-    quietStartMin: (json['quiet_start_min'] as num).toInt(),
-    tokensToday: (json['tokens_today'] as num).toInt(),
-    waiting: (json['waiting'] == null ? null : (json['waiting'] as String)),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'daily_token_budget': dailyTokenBudget,
-    'every_minutes': everyMinutes,
-    if (nextDueMs != null) 'next_due_ms': nextDueMs,
-    'quiet_end_min': quietEndMin,
-    'quiet_start_min': quietStartMin,
-    'tokens_today': tokensToday,
-    if (waiting != null) 'waiting': waiting,
-  };
-}
-
 final class HelloParams {
   const HelloParams({
     this.accepts = const [],
-    this.appKey,
     required this.clientName,
     required this.clientVersion,
     this.sessionToken,
@@ -7482,11 +6752,6 @@ final class HelloParams {
   /// What this client can take that older clients cannot (`client_feature`).
   /// Servers without such a feature ignore the name.
   final List<String> accepts;
-  /// An app key's secret (`amk_...`, feature `app_keys`): the session then acts
-  /// for that app, with its scopes only (`HelloResult::app`). A wrong or
-  /// revoked key is refused. A server without the feature ignores it, so a
-  /// client must check `HelloResult::app` before it goes on.
-  final String? appKey;
   final String clientName;
   final String clientVersion;
   /// The session this device got from `user.login` (or the first
@@ -7498,7 +6763,6 @@ final class HelloParams {
 
   factory HelloParams.fromJson(Map<String, dynamic> json) => HelloParams(
     accepts: (json['accepts'] == null ? const [] : (json['accepts'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
-    appKey: (json['app_key'] == null ? null : (json['app_key'] as String)),
     clientName: (json['client_name'] as String),
     clientVersion: (json['client_version'] as String),
     sessionToken: (json['session_token'] == null ? null : (json['session_token'] as String)),
@@ -7506,7 +6770,6 @@ final class HelloParams {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'accepts': accepts,
-    if (appKey != null) 'app_key': appKey,
     'client_name': clientName,
     'client_version': clientVersion,
     if (sessionToken != null) 'session_token': sessionToken,
@@ -7515,7 +6778,6 @@ final class HelloParams {
 
 final class HelloResult {
   const HelloResult({
-    this.app,
     this.boardMembersExist = false,
     required this.capabilities,
     this.claudeLogin,
@@ -7532,9 +6794,6 @@ final class HelloResult {
     this.user,
   });
 
-  /// The app this session acts for when it authenticated with an app key
-  /// (`HelloParams::app_key`, or the key on the gateway); feature `app_keys`.
-  final AppSession? app;
   /// The server has at least one board member; false: the onboarding
   /// ("Create the first board member") is all a client shows.
   final bool boardMembersExist;
@@ -7565,7 +6824,6 @@ final class HelloResult {
   final UserView? user;
 
   factory HelloResult.fromJson(Map<String, dynamic> json) => HelloResult(
-    app: (json['app'] == null ? null : AppSession.fromJson(json['app'] as Map<String, dynamic>)),
     boardMembersExist: (json['board_members_exist'] == null ? false : (json['board_members_exist'] as bool)),
     capabilities: (json['capabilities'] as List<dynamic>).map((x0) => Capability.fromJson(x0 as String)).toList(),
     claudeLogin: (json['claude_login'] == null ? null : ClaudeLoginView.fromJson(json['claude_login'] as Map<String, dynamic>)),
@@ -7583,7 +6841,6 @@ final class HelloResult {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    if (app != null) 'app': app?.toJson(),
     'board_members_exist': boardMembersExist,
     'capabilities': capabilities.map((x0) => x0.toJson()).toList(),
     if (claudeLogin != null) 'claude_login': claudeLogin?.toJson(),
@@ -7608,16 +6865,6 @@ sealed class HostResult {
   factory HostResult.fromJson(Map<String, dynamic> json) {
     final tag = json['type'] as String;
     switch (tag) {
-      case 'agent_function':
-        return HostResultAgentFunction(value: AgentFunctionView.fromJson(json as Map<String, dynamic>));
-      case 'api_key_created':
-        return HostResultApiKeyCreated(value: ApiKeyCreated.fromJson(json as Map<String, dynamic>));
-      case 'app_key':
-        return HostResultAppKey(value: AppKeyView.fromJson(json as Map<String, dynamic>));
-      case 'app_key_created':
-        return HostResultAppKeyCreated(value: AppKeyCreated.fromJson(json as Map<String, dynamic>));
-      case 'artifact_setting':
-        return HostResultArtifactSetting(value: ArtifactSetting.fromJson(json as Map<String, dynamic>));
       case 'auto_allow_setting':
         return HostResultAutoAllowSetting(value: AutoAllowSetting.fromJson(json as Map<String, dynamic>));
       case 'backups':
@@ -7638,8 +6885,6 @@ sealed class HostResult {
         return HostResultDirListing(value: DirListing.fromJson(json as Map<String, dynamic>));
       case 'done':
         return const HostResultDone();
-      case 'employee_plugins':
-        return HostResultEmployeePlugins(value: EmployeePlugins.fromJson(json as Map<String, dynamic>));
       case 'exported':
         return HostResultExported(
           jsonPath: (json['json_path'] as String),
@@ -7655,18 +6900,10 @@ sealed class HostResult {
         return HostResultMcpLogin(value: McpLogin.fromJson(json as Map<String, dynamic>));
       case 'mcp_servers':
         return HostResultMcpServers(value: McpServers.fromJson(json as Map<String, dynamic>));
-      case 'note':
-        return HostResultNote(value: NoteView.fromJson(json as Map<String, dynamic>));
       case 'pairing_code':
         return HostResultPairingCode(value: PairingCode.fromJson(json as Map<String, dynamic>));
-      case 'plugin_preview':
-        return HostResultPluginPreview(value: PluginPreview.fromJson(json as Map<String, dynamic>));
-      case 'plugins':
-        return HostResultPlugins(value: PluginsSnapshot.fromJson(json as Map<String, dynamic>));
       case 'power':
         return HostResultPower(value: PowerState.fromJson(json as Map<String, dynamic>));
-      case 'project_plugins':
-        return HostResultProjectPlugins(value: ProjectPlugins.fromJson(json as Map<String, dynamic>));
       case 'remote':
         return HostResultRemote(value: RemoteStatus.fromJson(json as Map<String, dynamic>));
       case 'shutting_down':
@@ -7677,8 +6914,6 @@ sealed class HostResult {
         return HostResultUpdate(value: UpdateStatus.fromJson(json as Map<String, dynamic>));
       case 'user':
         return HostResultUser(value: UserView.fromJson(json as Map<String, dynamic>));
-      case 'variants_setting':
-        return HostResultVariantsSetting(value: VariantsSetting.fromJson(json as Map<String, dynamic>));
       case 'vault_item':
         return HostResultVaultItem(value: VaultItemView.fromJson(json as Map<String, dynamic>));
       default:
@@ -7687,78 +6922,6 @@ sealed class HostResult {
   }
 
   Map<String, dynamic> toJson();
-}
-
-final class HostResultAgentFunction extends HostResult {
-  const HostResultAgentFunction({
-    required this.value,
-  });
-
-  final AgentFunctionView value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'agent_function',
-      ...value.toJson(),
-    };
-}
-
-/// The secret is shown once; a replayed receipt has an empty `secret`.
-final class HostResultApiKeyCreated extends HostResult {
-  const HostResultApiKeyCreated({
-    required this.value,
-  });
-
-  final ApiKeyCreated value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'api_key_created',
-      ...value.toJson(),
-    };
-}
-
-final class HostResultAppKey extends HostResult {
-  const HostResultAppKey({
-    required this.value,
-  });
-
-  final AppKeyView value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'app_key',
-      ...value.toJson(),
-    };
-}
-
-/// The secret is shown once; a replayed receipt has an empty `secret`.
-final class HostResultAppKeyCreated extends HostResult {
-  const HostResultAppKeyCreated({
-    required this.value,
-  });
-
-  final AppKeyCreated value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'app_key_created',
-      ...value.toJson(),
-    };
-}
-
-final class HostResultArtifactSetting extends HostResult {
-  const HostResultArtifactSetting({
-    required this.value,
-  });
-
-  final ArtifactSetting value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'artifact_setting',
-      ...value.toJson(),
-    };
 }
 
 final class HostResultAutoAllowSetting extends HostResult {
@@ -7872,20 +7035,6 @@ final class HostResultDone extends HostResult {
     };
 }
 
-final class HostResultEmployeePlugins extends HostResult {
-  const HostResultEmployeePlugins({
-    required this.value,
-  });
-
-  final EmployeePlugins value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'employee_plugins',
-      ...value.toJson(),
-    };
-}
-
 final class HostResultExported extends HostResult {
   const HostResultExported({
     required this.jsonPath,
@@ -7973,22 +7122,6 @@ final class HostResultMcpServers extends HostResult {
     };
 }
 
-/// A note after `note.create`, `note.update` or `note.set_pinned`. A replayed
-/// receipt has an empty body (receipts keep no note text): load it with `note.get`.
-final class HostResultNote extends HostResult {
-  const HostResultNote({
-    required this.value,
-  });
-
-  final NoteView value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'note',
-      ...value.toJson(),
-    };
-}
-
 /// A replayed receipt has empty codes.
 final class HostResultPairingCode extends HostResult {
   const HostResultPairingCode({
@@ -8004,34 +7137,6 @@ final class HostResultPairingCode extends HostResult {
     };
 }
 
-final class HostResultPluginPreview extends HostResult {
-  const HostResultPluginPreview({
-    required this.value,
-  });
-
-  final PluginPreview value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'plugin_preview',
-      ...value.toJson(),
-    };
-}
-
-final class HostResultPlugins extends HostResult {
-  const HostResultPlugins({
-    required this.value,
-  });
-
-  final PluginsSnapshot value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'plugins',
-      ...value.toJson(),
-    };
-}
-
 final class HostResultPower extends HostResult {
   const HostResultPower({
     required this.value,
@@ -8042,20 +7147,6 @@ final class HostResultPower extends HostResult {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'power',
-      ...value.toJson(),
-    };
-}
-
-final class HostResultProjectPlugins extends HostResult {
-  const HostResultProjectPlugins({
-    required this.value,
-  });
-
-  final ProjectPlugins value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'project_plugins',
       ...value.toJson(),
     };
 }
@@ -8126,20 +7217,6 @@ final class HostResultUser extends HostResult {
     };
 }
 
-final class HostResultVariantsSetting extends HostResult {
-  const HostResultVariantsSetting({
-    required this.value,
-  });
-
-  final VariantsSetting value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'variants_setting',
-      ...value.toJson(),
-    };
-}
-
 /// `vault.create` / `vault.update` / `vault.archive`: the item as it is now.
 /// A replayed receipt has no value: read it with `vault.list` or `vault.reveal`.
 final class HostResultVaultItem extends HostResult {
@@ -8163,71 +7240,6 @@ sealed class HostWrite {
   factory HostWrite.fromJson(Map<String, dynamic> json) {
     final tag = json['method'] as String;
     switch (tag) {
-      case 'agent_function.create':
-        return HostWriteAgentFunctionCreate(params: CreateAgentFunction.fromJson(json['params'] as Map<String, dynamic>));
-      case 'agent_function.delete':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteAgentFunctionDelete(
-          functionId: (src['function_id'] as String),
-        );
-        }
-      case 'agent_function.set_all_enabled':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteAgentFunctionSetAllEnabled(
-          enabled: (src['enabled'] as bool),
-        );
-        }
-      case 'agent_function.set_enabled':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteAgentFunctionSetEnabled(
-          enabled: (src['enabled'] as bool),
-          functionId: (src['function_id'] as String),
-        );
-        }
-      case 'agent_function.update':
-        return HostWriteAgentFunctionUpdate(params: UpdateAgentFunction.fromJson(json['params'] as Map<String, dynamic>));
-      case 'api_key.create':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteApiKeyCreate(
-          functionIds: (src['function_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-          name: (src['name'] as String),
-        );
-        }
-      case 'api_key.revoke':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteApiKeyRevoke(
-          keyId: (src['key_id'] as String),
-        );
-        }
-      case 'api_key.set_functions':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteApiKeySetFunctions(
-          functionIds: (src['function_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-          keyId: (src['key_id'] as String),
-        );
-        }
-      case 'app_key.create':
-        return HostWriteAppKeyCreate(params: CreateAppKey.fromJson(json['params'] as Map<String, dynamic>));
-      case 'app_key.revoke':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteAppKeyRevoke(
-          keyId: (src['key_id'] as String),
-        );
-        }
-      case 'artifact.set_enabled':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteArtifactSetEnabled(
-          enabled: (src['enabled'] as bool),
-        );
-        }
       case 'auto_allow.set_enabled':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -8333,38 +7345,6 @@ sealed class HostWrite {
           tool: (src['tool'] as String),
         );
         }
-      case 'note.create':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteNoteCreate(
-          body: (src['body'] == null ? '' : (src['body'] as String)),
-          projectId: (src['project_id'] as String),
-        );
-        }
-      case 'note.delete':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteNoteDelete(
-          noteId: (src['note_id'] as String),
-        );
-        }
-      case 'note.set_pinned':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteNoteSetPinned(
-          noteId: (src['note_id'] as String),
-          pinned: (src['pinned'] as bool),
-        );
-        }
-      case 'note.update':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteNoteUpdate(
-          baseRevision: (src['base_revision'] as num).toInt(),
-          body: (src['body'] as String),
-          noteId: (src['note_id'] as String),
-        );
-        }
       case 'notification.dismiss':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -8380,52 +7360,6 @@ sealed class HostWrite {
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return HostWriteNotificationMarkRead(
-          id: (src['id'] as String),
-        );
-        }
-      case 'plugin.install':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWritePluginInstall(
-          employees: (src['employees'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-          ids: (src['ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-          projects: (src['projects'] == null ? const [] : (src['projects'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
-        );
-        }
-      case 'plugin.preview':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWritePluginPreview(
-          source: (src['source'] as String),
-        );
-        }
-      case 'plugin.remove':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWritePluginRemove(
-          id: (src['id'] as String),
-        );
-        }
-      case 'plugin.set_for_employee':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWritePluginSetForEmployee(
-          employeeId: (src['employee_id'] as String),
-          enabled: (src['enabled'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-        );
-        }
-      case 'plugin.set_for_project':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWritePluginSetForProject(
-          enabled: (src['enabled'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-          projectId: (src['project_id'] as String),
-        );
-        }
-      case 'plugin.update':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWritePluginUpdate(
           id: (src['id'] as String),
         );
         }
@@ -8519,13 +7453,6 @@ sealed class HostWrite {
         }
       case 'user.set_password':
         return HostWriteUserSetPassword(params: SetPasswordParams.fromJson(json['params'] as Map<String, dynamic>));
-      case 'variants.set_enabled':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return HostWriteVariantsSetEnabled(
-          enabled: (src['enabled'] as bool),
-        );
-        }
       case 'vault.archive':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -8543,191 +7470,6 @@ sealed class HostWrite {
   }
 
   Map<String, dynamic> toJson();
-}
-
-final class HostWriteAgentFunctionCreate extends HostWrite {
-  const HostWriteAgentFunctionCreate({
-    required this.params,
-  });
-
-  final CreateAgentFunction params;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'agent_function.create',
-      'params': params.toJson(),
-    };
-}
-
-final class HostWriteAgentFunctionDelete extends HostWrite {
-  const HostWriteAgentFunctionDelete({
-    required this.functionId,
-  });
-
-  final String functionId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'agent_function.delete',
-      'params': <String, dynamic>{
-      'function_id': functionId,
-    },
-    };
-}
-
-/// The kill switch: `enabled: false` makes every function refuse calls.
-final class HostWriteAgentFunctionSetAllEnabled extends HostWrite {
-  const HostWriteAgentFunctionSetAllEnabled({
-    required this.enabled,
-  });
-
-  final bool enabled;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'agent_function.set_all_enabled',
-      'params': <String, dynamic>{
-      'enabled': enabled,
-    },
-    };
-}
-
-final class HostWriteAgentFunctionSetEnabled extends HostWrite {
-  const HostWriteAgentFunctionSetEnabled({
-    required this.enabled,
-    required this.functionId,
-  });
-
-  final bool enabled;
-  final String functionId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'agent_function.set_enabled',
-      'params': <String, dynamic>{
-      'enabled': enabled,
-      'function_id': functionId,
-    },
-    };
-}
-
-final class HostWriteAgentFunctionUpdate extends HostWrite {
-  const HostWriteAgentFunctionUpdate({
-    required this.params,
-  });
-
-  final UpdateAgentFunction params;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'agent_function.update',
-      'params': params.toJson(),
-    };
-}
-
-/// The secret is in the answer once; the receipt keeps none.
-final class HostWriteApiKeyCreate extends HostWrite {
-  const HostWriteApiKeyCreate({
-    required this.functionIds,
-    required this.name,
-  });
-
-  final List<String> functionIds;
-  final String name;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'api_key.create',
-      'params': <String, dynamic>{
-      'function_ids': functionIds,
-      'name': name,
-    },
-    };
-}
-
-final class HostWriteApiKeyRevoke extends HostWrite {
-  const HostWriteApiKeyRevoke({
-    required this.keyId,
-  });
-
-  final String keyId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'api_key.revoke',
-      'params': <String, dynamic>{
-      'key_id': keyId,
-    },
-    };
-}
-
-final class HostWriteApiKeySetFunctions extends HostWrite {
-  const HostWriteApiKeySetFunctions({
-    required this.functionIds,
-    required this.keyId,
-  });
-
-  final List<String> functionIds;
-  final String keyId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'api_key.set_functions',
-      'params': <String, dynamic>{
-      'function_ids': functionIds,
-      'key_id': keyId,
-    },
-    };
-}
-
-/// A key for an outside app (feature `app_keys`); answers `AppKeyCreated`
-/// with the secret, once: the receipt keeps none.
-final class HostWriteAppKeyCreate extends HostWrite {
-  const HostWriteAppKeyCreate({
-    required this.params,
-  });
-
-  final CreateAppKey params;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'app_key.create',
-      'params': params.toJson(),
-    };
-}
-
-/// Revoked at once, also for the app's open sessions; answers `AppKey`.
-final class HostWriteAppKeyRevoke extends HostWrite {
-  const HostWriteAppKeyRevoke({
-    required this.keyId,
-  });
-
-  final String keyId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'app_key.revoke',
-      'params': <String, dynamic>{
-      'key_id': keyId,
-    },
-    };
-}
-
-/// Turn Claude Code artifacts on or off for every run that starts afterwards.
-final class HostWriteArtifactSetEnabled extends HostWrite {
-  const HostWriteArtifactSetEnabled({
-    required this.enabled,
-  });
-
-  final bool enabled;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'artifact.set_enabled',
-      'params': <String, dynamic>{
-      'enabled': enabled,
-    },
-    };
 }
 
 /// Auto-allow of the safe read-only tools on or off, from the next tool call. On by default.
@@ -9027,85 +7769,6 @@ final class HostWriteMcpAlwaysAllowRemove extends HostWrite {
     };
 }
 
-/// A new note in a project; answers `Note`.
-final class HostWriteNoteCreate extends HostWrite {
-  const HostWriteNoteCreate({
-    this.body = '',
-    required this.projectId,
-  });
-
-  final String body;
-  final String projectId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'note.create',
-      'params': <String, dynamic>{
-      'body': body,
-      'project_id': projectId,
-    },
-    };
-}
-
-final class HostWriteNoteDelete extends HostWrite {
-  const HostWriteNoteDelete({
-    required this.noteId,
-  });
-
-  final String noteId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'note.delete',
-      'params': <String, dynamic>{
-      'note_id': noteId,
-    },
-    };
-}
-
-final class HostWriteNoteSetPinned extends HostWrite {
-  const HostWriteNoteSetPinned({
-    required this.noteId,
-    required this.pinned,
-  });
-
-  final String noteId;
-  final bool pinned;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'note.set_pinned',
-      'params': <String, dynamic>{
-      'note_id': noteId,
-      'pinned': pinned,
-    },
-    };
-}
-
-/// Replace a note's body. Refused with `version_conflict` when the note is no
-/// longer at `base_revision` (saved elsewhere): load it again with `note.get`.
-final class HostWriteNoteUpdate extends HostWrite {
-  const HostWriteNoteUpdate({
-    required this.baseRevision,
-    required this.body,
-    required this.noteId,
-  });
-
-  final int baseRevision;
-  final String body;
-  final String noteId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'note.update',
-      'params': <String, dynamic>{
-      'base_revision': baseRevision,
-      'body': body,
-      'note_id': noteId,
-    },
-    };
-}
-
 final class HostWriteNotificationDismiss extends HostWrite {
   const HostWriteNotificationDismiss({
     required this.id,
@@ -9152,118 +7815,6 @@ final class HostWriteNotificationMarkRead extends HostWrite {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'notification.mark_read',
-      'params': <String, dynamic>{
-      'id': id,
-    },
-    };
-}
-
-/// Install plugins (`name@marketplace`) and enable them for the given employees and projects.
-final class HostWritePluginInstall extends HostWrite {
-  const HostWritePluginInstall({
-    required this.employees,
-    required this.ids,
-    this.projects = const [],
-  });
-
-  final List<String> employees;
-  final List<String> ids;
-  final List<String> projects;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.install',
-      'params': <String, dynamic>{
-      'employees': employees,
-      'ids': ids,
-      'projects': projects,
-    },
-    };
-}
-
-/// Adds the marketplace behind a link (GitHub URL, `owner/repo` or git URL).
-final class HostWritePluginPreview extends HostWrite {
-  const HostWritePluginPreview({
-    required this.source,
-  });
-
-  final String source;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.preview',
-      'params': <String, dynamic>{
-      'source': source,
-    },
-    };
-}
-
-final class HostWritePluginRemove extends HostWrite {
-  const HostWritePluginRemove({
-    required this.id,
-  });
-
-  final String id;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.remove',
-      'params': <String, dynamic>{
-      'id': id,
-    },
-    };
-}
-
-/// Replace the plugins an employee has enabled; applies from its next run.
-final class HostWritePluginSetForEmployee extends HostWrite {
-  const HostWritePluginSetForEmployee({
-    required this.employeeId,
-    required this.enabled,
-  });
-
-  final String employeeId;
-  final List<String> enabled;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.set_for_employee',
-      'params': <String, dynamic>{
-      'employee_id': employeeId,
-      'enabled': enabled,
-    },
-    };
-}
-
-/// Replace the plugins a project has enabled (for its project assistant); applies from its next run.
-final class HostWritePluginSetForProject extends HostWrite {
-  const HostWritePluginSetForProject({
-    required this.enabled,
-    required this.projectId,
-  });
-
-  final List<String> enabled;
-  final String projectId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.set_for_project',
-      'params': <String, dynamic>{
-      'enabled': enabled,
-      'project_id': projectId,
-    },
-    };
-}
-
-final class HostWritePluginUpdate extends HostWrite {
-  const HostWritePluginUpdate({
-    required this.id,
-  });
-
-  final String id;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.update',
       'params': <String, dynamic>{
       'id': id,
     },
@@ -9571,23 +8122,6 @@ final class HostWriteUserSetPassword extends HostWrite {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'user.set_password',
       'params': params.toJson(),
-    };
-}
-
-/// Allow tasks to be tried in several ways first (feature `task_variants`; off by default).
-final class HostWriteVariantsSetEnabled extends HostWrite {
-  const HostWriteVariantsSetEnabled({
-    required this.enabled,
-  });
-
-  final bool enabled;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'variants.set_enabled',
-      'params': <String, dynamic>{
-      'enabled': enabled,
-    },
     };
 }
 
@@ -11070,6 +9604,7 @@ final class MessageView {
     this.approvalId,
     this.author,
     this.authorUser,
+    this.awaitingUser,
     required this.createdAtMs,
     this.deletedAtMs,
     this.editable,
@@ -11083,6 +9618,7 @@ final class MessageView {
     this.reactions = const [],
     this.replyTo,
     required this.role,
+    this.run,
     this.runId,
     required this.sources,
     required this.status,
@@ -11108,6 +9644,11 @@ final class MessageView {
   /// a channel's; feature `ticket_discussion`). Left out for other messages
   /// and by older servers.
   final UserView? authorUser;
+  /// The run behind this message waits for a board member (feature `run_cards`):
+  /// a question or an approval is open, or the post ended a ticket's main task on
+  /// a question (the rule of `group_chat::asks_question`). Only on the run's last
+  /// message in the list. Left out when false and by older servers.
+  final bool? awaitingUser;
   final int createdAtMs;
   /// When the message was deleted (feature `message_edits`): `text` is the
   /// line that says so. Left out when it was not and by older servers.
@@ -11138,6 +9679,10 @@ final class MessageView {
   /// For retried answers: the user message this answers again.
   final String? replyTo;
   final MessageRole role;
+  /// What a run card under this message shows (feature `run_cards`): on a post in a
+  /// discussion and on a `Reported` line, the last one of its run in the list. With
+  /// `usage` for the tokens. Left out for other messages and by older servers.
+  final RunBrief? run;
   /// Run that produced an assistant message.
   final String? runId;
   /// Web sources fetched for this answer, cited as [n].
@@ -11184,6 +9729,7 @@ final class MessageView {
     approvalId: (json['approval_id'] == null ? null : (json['approval_id'] as String)),
     author: (json['author'] == null ? null : (json['author'] as String)),
     authorUser: (json['author_user'] == null ? null : UserView.fromJson(json['author_user'] as Map<String, dynamic>)),
+    awaitingUser: (json['awaiting_user'] == null ? null : (json['awaiting_user'] as bool)),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     deletedAtMs: (json['deleted_at_ms'] == null ? null : (json['deleted_at_ms'] as num).toInt()),
     editable: (json['editable'] == null ? null : (json['editable'] as bool)),
@@ -11197,6 +9743,7 @@ final class MessageView {
     reactions: (json['reactions'] == null ? const [] : (json['reactions'] as List<dynamic>).map((x0) => ReactionView.fromJson(x0 as Map<String, dynamic>)).toList()),
     replyTo: (json['reply_to'] == null ? null : (json['reply_to'] as String)),
     role: MessageRole.fromJson(json['role'] as String),
+    run: (json['run'] == null ? null : RunBrief.fromJson(json['run'] as Map<String, dynamic>)),
     runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
     sources: (json['sources'] as List<dynamic>).map((x0) => SourceView.fromJson(x0 as Map<String, dynamic>)).toList(),
     status: MessageStatus.fromJson(json['status'] as String),
@@ -11217,6 +9764,7 @@ final class MessageView {
     if (approvalId != null) 'approval_id': approvalId,
     if (author != null) 'author': author,
     if (authorUser != null) 'author_user': authorUser?.toJson(),
+    if (awaitingUser != null) 'awaiting_user': awaitingUser,
     'created_at_ms': createdAtMs,
     if (deletedAtMs != null) 'deleted_at_ms': deletedAtMs,
     if (editable != null) 'editable': editable,
@@ -11230,6 +9778,7 @@ final class MessageView {
     'reactions': reactions.map((x0) => x0.toJson()).toList(),
     if (replyTo != null) 'reply_to': replyTo,
     'role': role.toJson(),
+    if (run != null) 'run': run?.toJson(),
     if (runId != null) 'run_id': runId,
     'sources': sources.map((x0) => x0.toJson()).toList(),
     'status': status.toJson(),
@@ -11259,7 +9808,6 @@ final class MessagesSnapshot {
     this.readOnly,
     required this.run,
     required this.screenAllowed,
-    required this.shares,
   });
 
   final AgentMode agentMode;
@@ -11278,8 +9826,6 @@ final class MessagesSnapshot {
   final TaskRun run;
   /// The agent may take screenshots without asking each time; off by default (it then asks).
   final bool screenAllowed;
-  /// Snapshots shared into this conversation (e.g. a discussed task).
-  final List<ShareView> shares;
 
   factory MessagesSnapshot.fromJson(Map<String, dynamic> json) => MessagesSnapshot(
     agentMode: AgentMode.fromJson(json['agent_mode'] as String),
@@ -11293,7 +9839,6 @@ final class MessagesSnapshot {
     readOnly: (json['read_only'] == null ? null : (json['read_only'] as bool)),
     run: TaskRun.fromJson(json['run'] as Map<String, dynamic>),
     screenAllowed: (json['screen_allowed'] as bool),
-    shares: (json['shares'] as List<dynamic>).map((x0) => ShareView.fromJson(x0 as Map<String, dynamic>)).toList(),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -11308,7 +9853,6 @@ final class MessagesSnapshot {
     if (readOnly != null) 'read_only': readOnly,
     'run': run.toJson(),
     'screen_allowed': screenAllowed,
-    'shares': shares.map((x0) => x0.toJson()).toList(),
   };
 }
 
@@ -11326,36 +9870,25 @@ sealed class Method {
           messageId: (src['message_id'] as String),
         );
         }
-      case 'agent_function.list':
+      case 'activity_log.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodAgentFunctionList(
+          return MethodActivityLogList(
+          beforeSeq: (src['before_seq'] == null ? null : (src['before_seq'] as num).toInt()),
+          category: (src['category'] == null ? null : (src['category'] as String)),
+          employeeId: (src['employee_id'] == null ? null : (src['employee_id'] as String)),
+          limit: (src['limit'] == null ? null : (src['limit'] as num).toInt()),
           projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+          runId: (src['run_id'] == null ? null : (src['run_id'] as String)),
+          threadKey: (src['thread_key'] == null ? null : (src['thread_key'] as String)),
+          ticketNumber: (src['ticket_number'] == null ? null : (src['ticket_number'] as num).toInt()),
         );
         }
-      case 'api_key.list':
-        return const MethodApiKeyList();
-      case 'app_key.list':
-        return const MethodAppKeyList();
       case 'approval.list':
-        return const MethodApprovalList();
-      case 'artifact.get_content':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodArtifactGetContent(
-          url: (src['url'] as String),
-          version: (src['version'] == null ? null : (src['version'] as num).toInt()),
-        );
-        }
-      case 'artifact.get_setting':
-        return const MethodArtifactGetSetting();
-      case 'artifact.list':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodArtifactList(
-          conversationId: (src['conversation_id'] == null ? null : (src['conversation_id'] as String)),
+          return MethodApprovalList(
           projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
-          taskId: (src['task_id'] == null ? null : (src['task_id'] as String)),
         );
         }
       case 'auto_allow.get_setting':
@@ -11404,6 +9937,8 @@ sealed class Method {
           employeeId: (src['employee_id'] as String),
         );
         }
+      case 'employee.chats':
+        return const MethodEmployeeChats();
       case 'employee.instruction_versions':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11413,6 +9948,24 @@ sealed class Method {
         }
       case 'employee.list':
         return const MethodEmployeeList();
+      case 'employee.queue':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodEmployeeQueue(
+          employeeId: (src['employee_id'] as String),
+        );
+        }
+      case 'employee.scratchpad':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodEmployeeScratchpad(
+          employeeId: (src['employee_id'] as String),
+        );
+        }
+      case 'employee.start_profiles':
+        return const MethodEmployeeStartProfiles();
+      case 'employee.tool_options':
+        return const MethodEmployeeToolOptions();
       case 'event.subscribe':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11432,28 +9985,6 @@ sealed class Method {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodFsListDir(
           path: (src['path'] == null ? null : (src['path'] as String)),
-        );
-        }
-      case 'function_call.list':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodFunctionCallList(
-          functionId: (src['function_id'] == null ? null : (src['function_id'] as String)),
-          limit: (src['limit'] == null ? null : (src['limit'] as num).toInt()),
-        );
-        }
-      case 'git.get_diff':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodGitGetDiff(
-          conversationId: (src['conversation_id'] as String),
-        );
-        }
-      case 'git.get_status':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodGitGetStatus(
-          conversationId: (src['conversation_id'] as String),
         );
         }
       case 'group_chat.get':
@@ -11580,41 +10111,13 @@ sealed class Method {
           messageId: (src['message_id'] as String),
         );
         }
-      case 'note.get':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodNoteGet(
-          noteId: (src['note_id'] as String),
-        );
-        }
-      case 'note.list':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodNoteList(
-          projectId: (src['project_id'] as String),
-          query: (src['query'] == null ? null : (src['query'] as String)),
-        );
-        }
       case 'notification.list':
-        return const MethodNotificationList();
-      case 'plugin.get_for_employee':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodPluginGetForEmployee(
-          employeeId: (src['employee_id'] as String),
+          return MethodNotificationList(
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
         );
         }
-      case 'plugin.get_for_project':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodPluginGetForProject(
-          projectId: (src['project_id'] as String),
-        );
-        }
-      case 'plugin.list':
-        return const MethodPluginList();
-      case 'plugin.list_available':
-        return const MethodPluginListAvailable();
       case 'power.get':
         return const MethodPowerGet();
       case 'project.list':
@@ -11637,6 +10140,13 @@ sealed class Method {
         }
       case 'remote.get_status':
         return const MethodRemoteGetStatus();
+      case 'run.get_activity':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodRunGetActivity(
+          runId: (src['run_id'] as String),
+        );
+        }
       case 'run.get_context':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11658,6 +10168,13 @@ sealed class Method {
           runId: (src['run_id'] as String),
         );
         }
+      case 'scheduled_message.list':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodScheduledMessageList(
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
       case 'screenshot.get':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11676,13 +10193,6 @@ sealed class Method {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodSessionList(
           userId: (src['user_id'] == null ? null : (src['user_id'] as String)),
-        );
-        }
-      case 'share.list':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodShareList(
-          projectId: (src['project_id'] as String),
         );
         }
       case 'subagent.list':
@@ -11708,68 +10218,19 @@ sealed class Method {
           state: (src['state'] == null ? null : TaskListState.fromJson(src['state'] as String)),
         );
         }
-      case 'task.variants':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodTaskVariants(
-          taskId: (src['task_id'] as String),
-        );
-        }
-      case 'terminal.close':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodTerminalClose(
-          terminalId: (src['terminal_id'] as String),
-        );
-        }
-      case 'terminal.detach':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodTerminalDetach(
-          terminalId: (src['terminal_id'] as String),
-        );
-        }
-      case 'terminal.input':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodTerminalInput(
-          dataBase64: (src['data_base64'] as String),
-          terminalId: (src['terminal_id'] as String),
-        );
-        }
-      case 'terminal.list':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodTerminalList(
-          conversationId: (src['conversation_id'] as String),
-        );
-        }
-      case 'terminal.open':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodTerminalOpen(
-          additional: (src['additional'] == null ? null : (src['additional'] as bool)),
-          cols: (src['cols'] as num).toInt(),
-          conversationId: (src['conversation_id'] as String),
-          fresh: (src['fresh'] as bool),
-          rows: (src['rows'] as num).toInt(),
-          terminalId: (src['terminal_id'] == null ? null : (src['terminal_id'] as String)),
-        );
-        }
-      case 'terminal.resize':
-        {
-          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
-          return MethodTerminalResize(
-          cols: (src['cols'] as num).toInt(),
-          rows: (src['rows'] as num).toInt(),
-          terminalId: (src['terminal_id'] as String),
-        );
-        }
       case 'thread.read':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodThreadRead(
           messageId: (src['message_id'] as String),
+        );
+        }
+      case 'thread.waiting':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodThreadWaiting(
+          conversationId: (src['conversation_id'] == null ? null : (src['conversation_id'] as String)),
+          ticketId: (src['ticket_id'] == null ? null : (src['ticket_id'] as String)),
         );
         }
       case 'ticket.followers':
@@ -11838,6 +10299,7 @@ sealed class Method {
           return MethodUsageGetTotals(
           conversationId: (src['conversation_id'] == null ? null : (src['conversation_id'] as String)),
           taskId: (src['task_id'] == null ? null : (src['task_id'] as String)),
+          ticketId: (src['ticket_id'] == null ? null : (src['ticket_id'] as String)),
         );
         }
       case 'user.list':
@@ -11848,8 +10310,6 @@ sealed class Method {
         return const MethodUserLogout();
       case 'user.whoami':
         return const MethodUserWhoami();
-      case 'variants.get_setting':
-        return const MethodVariantsGetSetting();
       case 'vault.audit':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11907,101 +10367,64 @@ final class MethodActivityGet extends Method {
     };
 }
 
-final class MethodAgentFunctionList extends Method {
-  const MethodAgentFunctionList({
+/// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
+/// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+/// `project_id` (feature `workspace_filters`): only threads of that project's tickets,
+/// channels and tasks; a board member's private chat has no project.
+final class MethodActivityLogList extends Method {
+  const MethodActivityLogList({
+    this.beforeSeq,
+    this.category,
+    this.employeeId,
+    this.limit,
     this.projectId,
+    this.runId,
+    this.threadKey,
+    this.ticketNumber,
   });
 
+  final int? beforeSeq;
+  /// delivery, queue or run.
+  final String? category;
+  final String? employeeId;
+  final int? limit;
   final String? projectId;
+  final String? runId;
+  /// `ticket:<id>`, `channel:<conversation>` or `chat:<conversation>`.
+  final String? threadKey;
+  /// A ticket's thread, by its number.
+  final int? ticketNumber;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'agent_function.list',
+      'method': 'activity_log.list',
       'params': <String, dynamic>{
+      if (beforeSeq != null) 'before_seq': beforeSeq,
+      if (category != null) 'category': category,
+      if (employeeId != null) 'employee_id': employeeId,
+      if (limit != null) 'limit': limit,
       if (projectId != null) 'project_id': projectId,
+      if (runId != null) 'run_id': runId,
+      if (threadKey != null) 'thread_key': threadKey,
+      if (ticketNumber != null) 'ticket_number': ticketNumber,
     },
     };
 }
 
-final class MethodApiKeyList extends Method {
-  const MethodApiKeyList();
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'api_key.list',
-    };
-}
-
-/// The keys of outside apps that use `aurelius-mcp`, newest first (feature `app_keys`).
-final class MethodAppKeyList extends Method {
-  const MethodAppKeyList();
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'app_key.list',
-    };
-}
-
+/// Pending approvals, then the latest decisions. `project_id` (feature
+/// `workspace_filters`): only those of runs in that project.
 final class MethodApprovalList extends Method {
-  const MethodApprovalList();
+  const MethodApprovalList({
+    this.projectId,
+  });
+
+  final String? projectId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'approval.list',
-    };
-}
-
-/// The file the server kept of one publish (`version`, else the newest kept),
-/// so a client can show the page without a claude.ai login. Not found for an
-/// unknown URL; `snapshot` is none for pages published before servers kept them.
-final class MethodArtifactGetContent extends Method {
-  const MethodArtifactGetContent({
-    required this.url,
-    this.version,
-  });
-
-  final String url;
-  final int? version;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'artifact.get_content',
       'params': <String, dynamic>{
-      'url': url,
-      if (version != null) 'version': version,
-    },
-    };
-}
-
-/// Whether runs may publish Claude Code artifacts (pages on claude.ai).
-final class MethodArtifactGetSetting extends Method {
-  const MethodArtifactGetSetting();
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'artifact.get_setting',
-    };
-}
-
-/// Artifacts runs published, newest first: every given filter applies, none lists all.
-final class MethodArtifactList extends Method {
-  const MethodArtifactList({
-    this.conversationId,
-    this.projectId,
-    this.taskId,
-  });
-
-  final String? conversationId;
-  final String? projectId;
-  final String? taskId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'artifact.list',
-      'params': <String, dynamic>{
-      if (conversationId != null) 'conversation_id': conversationId,
       if (projectId != null) 'project_id': projectId,
-      if (taskId != null) 'task_id': taskId,
     },
     };
 }
@@ -12177,6 +10600,16 @@ final class MethodEmployeeChat extends Method {
     };
 }
 
+/// The reader's lasting chats with employees, the latest first (feature `employee_chats`).
+final class MethodEmployeeChats extends Method {
+  const MethodEmployeeChats();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.chats',
+    };
+}
+
 /// The versions of an employee's instructions, newest first (feature `instruction_proposals`).
 final class MethodEmployeeInstructionVersions extends Method {
   const MethodEmployeeInstructionVersions({
@@ -12201,6 +10634,60 @@ final class MethodEmployeeList extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'employee.list',
+    };
+}
+
+/// What is in an employee's mailbox now (feature `employee_queue`).
+final class MethodEmployeeQueue extends Method {
+  const MethodEmployeeQueue({
+    required this.employeeId,
+  });
+
+  final String employeeId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.queue',
+      'params': <String, dynamic>{
+      'employee_id': employeeId,
+    },
+    };
+}
+
+/// An employee's scratchpad (feature `employee_scratchpad`).
+final class MethodEmployeeScratchpad extends Method {
+  const MethodEmployeeScratchpad({
+    required this.employeeId,
+  });
+
+  final String employeeId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.scratchpad',
+      'params': <String, dynamic>{
+      'employee_id': employeeId,
+    },
+    };
+}
+
+/// The catalogue of start profiles (feature `employee_profiles`).
+final class MethodEmployeeStartProfiles extends Method {
+  const MethodEmployeeStartProfiles();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.start_profiles',
+    };
+}
+
+/// The tools that can be switched per employee (feature `employee_tools`).
+final class MethodEmployeeToolOptions extends Method {
+  const MethodEmployeeToolOptions();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'employee.tool_options',
     };
 }
 
@@ -12251,58 +10738,6 @@ final class MethodFsListDir extends Method {
       'method': 'fs.list_dir',
       'params': <String, dynamic>{
       if (path != null) 'path': path,
-    },
-    };
-}
-
-final class MethodFunctionCallList extends Method {
-  const MethodFunctionCallList({
-    this.functionId,
-    this.limit,
-  });
-
-  final String? functionId;
-  final int? limit;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'function_call.list',
-      'params': <String, dynamic>{
-      if (functionId != null) 'function_id': functionId,
-      if (limit != null) 'limit': limit,
-    },
-    };
-}
-
-final class MethodGitGetDiff extends Method {
-  const MethodGitGetDiff({
-    required this.conversationId,
-  });
-
-  final String conversationId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'git.get_diff',
-      'params': <String, dynamic>{
-      'conversation_id': conversationId,
-    },
-    };
-}
-
-/// Branch and uncommitted change of the folder a conversation works in; none outside a Git repository.
-final class MethodGitGetStatus extends Method {
-  const MethodGitGetStatus({
-    required this.conversationId,
-  });
-
-  final String conversationId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'git.get_status',
-      'params': <String, dynamic>{
-      'conversation_id': conversationId,
     },
     };
 }
@@ -12660,103 +11095,22 @@ final class MethodMessageLocate extends Method {
     };
 }
 
-/// One note with its Markdown body.
-final class MethodNoteGet extends Method {
-  const MethodNoteGet({
-    required this.noteId,
-  });
-
-  final String noteId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'note.get',
-      'params': <String, dynamic>{
-      'note_id': noteId,
-    },
-    };
-}
-
-/// A project's notes (summaries), pinned first, then the last edited; `query` searches the text.
-final class MethodNoteList extends Method {
-  const MethodNoteList({
-    required this.projectId,
-    this.query,
-  });
-
-  final String projectId;
-  final String? query;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'note.list',
-      'params': <String, dynamic>{
-      'project_id': projectId,
-      if (query != null) 'query': query,
-    },
-    };
-}
-
+/// The notifications of the board member, newest first. `project_id` (feature
+/// `workspace_filters`): only those about that project's tickets, tasks or
+/// conversations; `unread` then counts only those too.
 final class MethodNotificationList extends Method {
-  const MethodNotificationList();
+  const MethodNotificationList({
+    this.projectId,
+  });
+
+  final String? projectId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'notification.list',
-    };
-}
-
-/// The plugins one employee has enabled.
-final class MethodPluginGetForEmployee extends Method {
-  const MethodPluginGetForEmployee({
-    required this.employeeId,
-  });
-
-  final String employeeId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.get_for_employee',
       'params': <String, dynamic>{
-      'employee_id': employeeId,
+      if (projectId != null) 'project_id': projectId,
     },
-    };
-}
-
-/// The plugins a project has enabled (its project assistant loads them).
-final class MethodPluginGetForProject extends Method {
-  const MethodPluginGetForProject({
-    required this.projectId,
-  });
-
-  final String projectId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.get_for_project',
-      'params': <String, dynamic>{
-      'project_id': projectId,
-    },
-    };
-}
-
-/// Claude Code plugins installed on the server's computer, with the employees that use each.
-final class MethodPluginList extends Method {
-  const MethodPluginList();
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.list',
-    };
-}
-
-/// Plugins offered by the marketplaces already added.
-final class MethodPluginListAvailable extends Method {
-  const MethodPluginListAvailable();
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'plugin.list_available',
     };
 }
 
@@ -12831,6 +11185,23 @@ final class MethodRemoteGetStatus extends Method {
     };
 }
 
+/// Every tool call of a run, for an opened run card (feature `run_cards`).
+final class MethodRunGetActivity extends Method {
+  const MethodRunGetActivity({
+    required this.runId,
+  });
+
+  final String runId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'run.get_activity',
+      'params': <String, dynamic>{
+      'run_id': runId,
+    },
+    };
+}
+
 /// The context manifest of one run (context inspector).
 final class MethodRunGetContext extends Method {
   const MethodRunGetContext({
@@ -12880,6 +11251,24 @@ final class MethodRunGuidelines extends Method {
       'method': 'run.guidelines',
       'params': <String, dynamic>{
       'run_id': runId,
+    },
+    };
+}
+
+/// Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+/// `project_id` (feature `workspace_filters`): only those in a ticket or channel of that project.
+final class MethodScheduledMessageList extends Method {
+  const MethodScheduledMessageList({
+    this.projectId,
+  });
+
+  final String? projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'scheduled_message.list',
+      'params': <String, dynamic>{
+      if (projectId != null) 'project_id': projectId,
     },
     };
 }
@@ -12955,22 +11344,6 @@ final class MethodSessionList extends Method {
     };
 }
 
-final class MethodShareList extends Method {
-  const MethodShareList({
-    required this.projectId,
-  });
-
-  final String projectId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'share.list',
-      'params': <String, dynamic>{
-      'project_id': projectId,
-    },
-    };
-}
-
 /// The subagents running in the answers of one conversation.
 final class MethodSubagentList extends Method {
   const MethodSubagentList({
@@ -13027,151 +11400,6 @@ final class MethodTaskList extends Method {
     };
 }
 
-/// A task's variants and the judge's comparison (feature `task_variants`).
-final class MethodTaskVariants extends Method {
-  const MethodTaskVariants({
-    required this.taskId,
-  });
-
-  final String taskId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'task.variants',
-      'params': <String, dynamic>{
-      'task_id': taskId,
-    },
-    };
-}
-
-final class MethodTerminalClose extends Method {
-  const MethodTerminalClose({
-    required this.terminalId,
-  });
-
-  final String terminalId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'terminal.close',
-      'params': <String, dynamic>{
-      'terminal_id': terminalId,
-    },
-    };
-}
-
-/// This session stops getting a terminal's output; the shell keeps running and
-/// keeps its scrollback (feature `terminal.multi`).
-final class MethodTerminalDetach extends Method {
-  const MethodTerminalDetach({
-    required this.terminalId,
-  });
-
-  final String terminalId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'terminal.detach',
-      'params': <String, dynamic>{
-      'terminal_id': terminalId,
-    },
-    };
-}
-
-final class MethodTerminalInput extends Method {
-  const MethodTerminalInput({
-    required this.dataBase64,
-    required this.terminalId,
-  });
-
-  final String dataBase64;
-  final String terminalId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'terminal.input',
-      'params': <String, dynamic>{
-      'data_base64': dataBase64,
-      'terminal_id': terminalId,
-    },
-    };
-}
-
-/// The terminals of a conversation, oldest first (feature `terminal.multi`).
-final class MethodTerminalList extends Method {
-  const MethodTerminalList({
-    required this.conversationId,
-  });
-
-  final String conversationId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'terminal.list',
-      'params': <String, dynamic>{
-      'conversation_id': conversationId,
-    },
-    };
-}
-
-/// A shell in the folder a conversation works in. Attaches to the running terminal
-/// unless `fresh`; this session then gets its output as `ServerMessage::TerminalOutput`.
-/// With `terminal_id` it attaches to exactly that terminal (its scrollback follows);
-/// with `additional` it starts another terminal beside the running ones
-/// (feature `terminal.multi`; at most 4 per conversation, 8 per server).
-final class MethodTerminalOpen extends Method {
-  const MethodTerminalOpen({
-    this.additional,
-    required this.cols,
-    required this.conversationId,
-    required this.fresh,
-    required this.rows,
-    this.terminalId,
-  });
-
-  final bool? additional;
-  final int cols;
-  final String conversationId;
-  final bool fresh;
-  final int rows;
-  final String? terminalId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'terminal.open',
-      'params': <String, dynamic>{
-      if (additional != null) 'additional': additional,
-      'cols': cols,
-      'conversation_id': conversationId,
-      'fresh': fresh,
-      'rows': rows,
-      if (terminalId != null) 'terminal_id': terminalId,
-    },
-    };
-}
-
-final class MethodTerminalResize extends Method {
-  const MethodTerminalResize({
-    required this.cols,
-    required this.rows,
-    required this.terminalId,
-  });
-
-  final int cols;
-  final int rows;
-  final String terminalId;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'terminal.resize',
-      'params': <String, dynamic>{
-      'cols': cols,
-      'rows': rows,
-      'terminal_id': terminalId,
-    },
-    };
-}
-
 /// One thread of a channel (feature `chat_threads`): `message_id` is the
 /// message that starts it (a message of a channel or a ticket's discussion
 /// that is not itself a reply), answered with the message and its replies,
@@ -13190,6 +11418,27 @@ final class MethodThreadRead extends Method {
       'method': 'thread.read',
       'params': <String, dynamic>{
       'message_id': messageId,
+    },
+    };
+}
+
+/// Who waits to pick up a thread and what is scheduled in it (U3, feature
+/// `scheduled_messages`): a ticket (`ticket_id`) or a channel or chat (`conversation_id`).
+final class MethodThreadWaiting extends Method {
+  const MethodThreadWaiting({
+    this.conversationId,
+    this.ticketId,
+  });
+
+  final String? conversationId;
+  final String? ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'thread.waiting',
+      'params': <String, dynamic>{
+      if (conversationId != null) 'conversation_id': conversationId,
+      if (ticketId != null) 'ticket_id': ticketId,
     },
     };
 }
@@ -13376,10 +11625,14 @@ final class MethodUsageGetTotals extends Method {
   const MethodUsageGetTotals({
     this.conversationId,
     this.taskId,
+    this.ticketId,
   });
 
   final String? conversationId;
   final String? taskId;
+  /// What a ticket used: its tasks and the runs of its discussion (feature `run_cards`).
+  /// Wins over the other two.
+  final String? ticketId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -13387,6 +11640,7 @@ final class MethodUsageGetTotals extends Method {
       'params': <String, dynamic>{
       if (conversationId != null) 'conversation_id': conversationId,
       if (taskId != null) 'task_id': taskId,
+      if (ticketId != null) 'ticket_id': ticketId,
     },
     };
 }
@@ -13444,16 +11698,6 @@ final class MethodUserWhoami extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'user.whoami',
-    };
-}
-
-/// Whether tasks may be tried in several ways first (feature `task_variants`).
-final class MethodVariantsGetSetting extends Method {
-  const MethodVariantsGetSetting();
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'method': 'variants.get_setting',
     };
 }
 
@@ -13576,123 +11820,6 @@ final class MyTicketsView {
   };
 }
 
-/// A note of a project as `note.list` shows it.
-final class NoteSummary {
-  const NoteSummary({
-    required this.createdAtMs,
-    required this.id,
-    required this.pinned,
-    required this.preview,
-    required this.projectId,
-    required this.revision,
-    required this.title,
-    required this.updatedAtMs,
-  });
-
-  final int createdAtMs;
-  final String id;
-  final bool pinned;
-  /// The text after the title on one line, at most 120 characters.
-  final String preview;
-  final String projectId;
-  /// Goes up by one with every save; `note.update` names the one it edited.
-  final int revision;
-  /// The first non-empty line without Markdown heading marks; empty for an empty note.
-  final String title;
-  final int updatedAtMs;
-
-  factory NoteSummary.fromJson(Map<String, dynamic> json) => NoteSummary(
-    createdAtMs: (json['created_at_ms'] as num).toInt(),
-    id: (json['id'] as String),
-    pinned: (json['pinned'] as bool),
-    preview: (json['preview'] as String),
-    projectId: (json['project_id'] as String),
-    revision: (json['revision'] as num).toInt(),
-    title: (json['title'] as String),
-    updatedAtMs: (json['updated_at_ms'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'created_at_ms': createdAtMs,
-    'id': id,
-    'pinned': pinned,
-    'preview': preview,
-    'project_id': projectId,
-    'revision': revision,
-    'title': title,
-    'updated_at_ms': updatedAtMs,
-  };
-}
-
-/// One note with its Markdown body (`note.get` and every note write).
-final class NoteView {
-  const NoteView({
-    required this.body,
-    required this.createdAtMs,
-    required this.id,
-    required this.pinned,
-    required this.preview,
-    required this.projectId,
-    required this.revision,
-    required this.title,
-    required this.updatedAtMs,
-  });
-
-  final String body;
-  final int createdAtMs;
-  final String id;
-  final bool pinned;
-  /// The text after the title on one line, at most 120 characters.
-  final String preview;
-  final String projectId;
-  /// Goes up by one with every save; `note.update` names the one it edited.
-  final int revision;
-  /// The first non-empty line without Markdown heading marks; empty for an empty note.
-  final String title;
-  final int updatedAtMs;
-
-  factory NoteView.fromJson(Map<String, dynamic> json) => NoteView(
-    body: (json['body'] as String),
-    createdAtMs: (json['created_at_ms'] as num).toInt(),
-    id: (json['id'] as String),
-    pinned: (json['pinned'] as bool),
-    preview: (json['preview'] as String),
-    projectId: (json['project_id'] as String),
-    revision: (json['revision'] as num).toInt(),
-    title: (json['title'] as String),
-    updatedAtMs: (json['updated_at_ms'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'body': body,
-    'created_at_ms': createdAtMs,
-    'id': id,
-    'pinned': pinned,
-    'preview': preview,
-    'project_id': projectId,
-    'revision': revision,
-    'title': title,
-    'updated_at_ms': updatedAtMs,
-  };
-}
-
-/// `note.list`: pinned first, then the last edited first.
-final class NotesSnapshot {
-  const NotesSnapshot({
-    required this.notes,
-  });
-
-  final List<NoteSummary> notes;
-
-  factory NotesSnapshot.fromJson(Map<String, dynamic> json) => NotesSnapshot(
-    notes: (json['notes'] as List<dynamic>).map((x0) => NoteSummary.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'notes': notes.map((x0) => x0.toJson()).toList(),
-  };
-}
-
 final class NotificationView {
   const NotificationView({
     this.conversationId,
@@ -13795,6 +11922,24 @@ final class NotificationsSnapshot {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'notifications': notifications.map((x0) => x0.toJson()).toList(),
     'unread': unread,
+  };
+}
+
+/// `employee.open_chat`: the acting board member's lasting chat with this employee,
+/// made the first time (feature `employee_chats`).
+final class OpenEmployeeChat {
+  const OpenEmployeeChat({
+    required this.employeeId,
+  });
+
+  final String employeeId;
+
+  factory OpenEmployeeChat.fromJson(Map<String, dynamic> json) => OpenEmployeeChat(
+    employeeId: (json['employee_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'employee_id': employeeId,
   };
 }
 
@@ -14015,223 +12160,6 @@ final class PlanLimitView {
   };
 }
 
-/// `plugins/available`.
-final class PluginCatalog {
-  const PluginCatalog({
-    required this.offers,
-  });
-
-  final List<PluginOffer> offers;
-
-  factory PluginCatalog.fromJson(Map<String, dynamic> json) => PluginCatalog(
-    offers: (json['offers'] as List<dynamic>).map((x0) => PluginOffer.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'offers': offers.map((x0) => x0.toJson()).toList(),
-  };
-}
-
-/// What a plugin brings (names only).
-final class PluginComponents {
-  const PluginComponents({
-    required this.agents,
-    required this.commands,
-    required this.hooks,
-    required this.mcpServers,
-    required this.skills,
-  });
-
-  final List<String> agents;
-  final List<String> commands;
-  /// The plugin runs commands on the server's computer at session events.
-  final bool hooks;
-  /// MCP servers it declares; they are not loaded in Aurelius runs.
-  final List<String> mcpServers;
-  final List<String> skills;
-
-  factory PluginComponents.fromJson(Map<String, dynamic> json) => PluginComponents(
-    agents: (json['agents'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    commands: (json['commands'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    hooks: (json['hooks'] as bool),
-    mcpServers: (json['mcp_servers'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    skills: (json['skills'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'agents': agents,
-    'commands': commands,
-    'hooks': hooks,
-    'mcp_servers': mcpServers,
-    'skills': skills,
-  };
-}
-
-/// An installed Claude Code plugin.
-final class PluginInfo {
-  const PluginInfo({
-    required this.components,
-    required this.description,
-    required this.employees,
-    required this.id,
-    this.kind,
-    required this.marketplace,
-    required this.missing,
-    required this.name,
-    this.projects = const [],
-    this.source,
-    required this.version,
-  });
-
-  final PluginComponents components;
-  final String description;
-  /// Employees that have it enabled.
-  final List<String> employees;
-  /// `name@marketplace`; the key for every plugin method.
-  final String id;
-  final PluginKind? kind;
-  final String marketplace;
-  /// The install folder no longer exists.
-  final bool missing;
-  final String name;
-  /// Projects that have it enabled (for their project assistant).
-  final List<String> projects;
-  /// The link a skill was added from; `None` for plugins.
-  final String? source;
-  final String version;
-
-  factory PluginInfo.fromJson(Map<String, dynamic> json) => PluginInfo(
-    components: PluginComponents.fromJson(json['components'] as Map<String, dynamic>),
-    description: (json['description'] as String),
-    employees: (json['employees'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    id: (json['id'] as String),
-    kind: (json['kind'] == null ? null : PluginKind.fromJson(json['kind'] as String)),
-    marketplace: (json['marketplace'] as String),
-    missing: (json['missing'] as bool),
-    name: (json['name'] as String),
-    projects: (json['projects'] == null ? const [] : (json['projects'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
-    source: (json['source'] == null ? null : (json['source'] as String)),
-    version: (json['version'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'components': components.toJson(),
-    'description': description,
-    'employees': employees,
-    'id': id,
-    if (kind != null) 'kind': kind?.toJson(),
-    'marketplace': marketplace,
-    'missing': missing,
-    'name': name,
-    'projects': projects,
-    if (source != null) 'source': source,
-    'version': version,
-  };
-}
-
-/// Whether an entry is a full plugin or a standalone skill that Aurelius wrapped as one.
-enum PluginKind {
-  plugin('plugin'),
-  skill('skill');
-
-  const PluginKind(this.wire);
-
-  final String wire;
-
-  static PluginKind fromJson(String value) => values.firstWhere(
-        (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown PluginKind value: $value'),
-      );
-
-  String toJson() => wire;
-}
-
-/// A plugin a marketplace offers.
-final class PluginOffer {
-  const PluginOffer({
-    this.components,
-    required this.description,
-    required this.id,
-    required this.installed,
-    this.kind,
-    required this.marketplace,
-    required this.name,
-    this.source,
-  });
-
-  /// Known when the marketplace carries the plugin's files; otherwise `None`.
-  final PluginComponents? components;
-  final String description;
-  final String id;
-  final bool installed;
-  final PluginKind? kind;
-  final String marketplace;
-  final String name;
-  /// The link a skill was added from; `None` for plugins.
-  final String? source;
-
-  factory PluginOffer.fromJson(Map<String, dynamic> json) => PluginOffer(
-    components: (json['components'] == null ? null : PluginComponents.fromJson(json['components'] as Map<String, dynamic>)),
-    description: (json['description'] as String),
-    id: (json['id'] as String),
-    installed: (json['installed'] as bool),
-    kind: (json['kind'] == null ? null : PluginKind.fromJson(json['kind'] as String)),
-    marketplace: (json['marketplace'] as String),
-    name: (json['name'] as String),
-    source: (json['source'] == null ? null : (json['source'] as String)),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (components != null) 'components': components?.toJson(),
-    'description': description,
-    'id': id,
-    'installed': installed,
-    if (kind != null) 'kind': kind?.toJson(),
-    'marketplace': marketplace,
-    'name': name,
-    if (source != null) 'source': source,
-  };
-}
-
-/// `plugins/preview`.
-final class PluginPreview {
-  const PluginPreview({
-    required this.marketplace,
-    required this.offers,
-  });
-
-  /// The marketplace's name, as added.
-  final String marketplace;
-  final List<PluginOffer> offers;
-
-  factory PluginPreview.fromJson(Map<String, dynamic> json) => PluginPreview(
-    marketplace: (json['marketplace'] as String),
-    offers: (json['offers'] as List<dynamic>).map((x0) => PluginOffer.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'marketplace': marketplace,
-    'offers': offers.map((x0) => x0.toJson()).toList(),
-  };
-}
-
-/// `plugin.list`, `plugin.install`, `plugin.update`, `plugin.remove`.
-final class PluginsSnapshot {
-  const PluginsSnapshot({
-    required this.plugins,
-  });
-
-  final List<PluginInfo> plugins;
-
-  factory PluginsSnapshot.fromJson(Map<String, dynamic> json) => PluginsSnapshot(
-    plugins: (json['plugins'] as List<dynamic>).map((x0) => PluginInfo.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'plugins': plugins.map((x0) => x0.toJson()).toList(),
-  };
-}
-
 /// `power.get`, `power.shutdown`, `power.cancel` and `power_changed`.
 final class PowerState {
   const PowerState({
@@ -14312,32 +12240,6 @@ final class ProjectConversationsSnapshot {
   };
 }
 
-/// `plugin.get_for_project` and `plugin.set_for_project`.
-final class ProjectPlugins {
-  const ProjectPlugins({
-    required this.enabled,
-    required this.missing,
-    required this.projectId,
-  });
-
-  final List<String> enabled;
-  /// Enabled ids that are no longer installed; they are skipped in runs.
-  final List<String> missing;
-  final String projectId;
-
-  factory ProjectPlugins.fromJson(Map<String, dynamic> json) => ProjectPlugins(
-    enabled: (json['enabled'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    missing: (json['missing'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
-    projectId: (json['project_id'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'enabled': enabled,
-    'missing': missing,
-    'project_id': projectId,
-  };
-}
-
 enum ProjectStatus {
   active('active'),
   archived('archived'),
@@ -14365,6 +12267,7 @@ final class ProjectSummary {
     required this.id,
     required this.name,
     required this.status,
+    this.styleguideUrl,
     required this.version,
   });
 
@@ -14379,6 +12282,9 @@ final class ProjectSummary {
   final String id;
   final String name;
   final ProjectStatus status;
+  /// The workspace's styleguide, a Claude Design artifact (feature `design_links`). A
+  /// link only: runs read the artifact themselves. Left out when none and by older servers.
+  final String? styleguideUrl;
   final int version;
 
   factory ProjectSummary.fromJson(Map<String, dynamic> json) => ProjectSummary(
@@ -14390,6 +12296,7 @@ final class ProjectSummary {
     id: (json['id'] as String),
     name: (json['name'] as String),
     status: ProjectStatus.fromJson(json['status'] as String),
+    styleguideUrl: (json['styleguide_url'] == null ? null : (json['styleguide_url'] as String)),
     version: (json['version'] as num).toInt(),
   );
 
@@ -14402,6 +12309,7 @@ final class ProjectSummary {
     'id': id,
     'name': name,
     'status': status.toJson(),
+    if (styleguideUrl != null) 'styleguide_url': styleguideUrl,
     'version': version,
   };
 }
@@ -15110,22 +13018,12 @@ sealed class ResponseBody {
     switch (tag) {
       case 'activity':
         return ResponseBodyActivity(value: ActivityView.fromJson(json['value'] as Map<String, dynamic>));
-      case 'agent_functions':
-        return ResponseBodyAgentFunctions(value: AgentFunctionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'activity_log':
+        return ResponseBodyActivityLog(value: ActivityLogPage.fromJson(json['value'] as Map<String, dynamic>));
       case 'all_ideas':
         return ResponseBodyAllIdeas(value: AllIdeasSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'api_keys':
-        return ResponseBodyApiKeys(value: (json['value'] as List<dynamic>).map((x0) => ApiKeyView.fromJson(x0 as Map<String, dynamic>)).toList());
-      case 'app_keys':
-        return ResponseBodyAppKeys(value: (json['value'] as List<dynamic>).map((x0) => AppKeyView.fromJson(x0 as Map<String, dynamic>)).toList());
       case 'approvals':
         return ResponseBodyApprovals(value: ApprovalsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'artifact_content':
-        return ResponseBodyArtifactContent(value: ArtifactContent.fromJson(json['value'] as Map<String, dynamic>));
-      case 'artifact_setting':
-        return ResponseBodyArtifactSetting(value: ArtifactSetting.fromJson(json['value'] as Map<String, dynamic>));
-      case 'artifacts':
-        return ResponseBodyArtifacts(value: ArtifactsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'auto_allow_setting':
         return ResponseBodyAutoAllowSetting(value: AutoAllowSetting.fromJson(json['value'] as Map<String, dynamic>));
       case 'backups':
@@ -15148,10 +13046,18 @@ sealed class ResponseBody {
         return ResponseBodyDirListing(value: DirListing.fromJson(json['value'] as Map<String, dynamic>));
       case 'effective_guidelines':
         return ResponseBodyEffectiveGuidelines(value: EffectiveGuidelines.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_chats':
+        return ResponseBodyEmployeeChats(value: EmployeeChatsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'employee_instruction_versions':
         return ResponseBodyEmployeeInstructionVersions(value: EmployeeInstructionVersionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'employee_plugins':
-        return ResponseBodyEmployeePlugins(value: EmployeePlugins.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_queue':
+        return ResponseBodyEmployeeQueue(value: EmployeeQueue.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_scratchpad':
+        return ResponseBodyEmployeeScratchpad(value: ScratchpadView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_start_profiles':
+        return ResponseBodyEmployeeStartProfiles(value: StartProfiles.fromJson(json['value'] as Map<String, dynamic>));
+      case 'employee_tool_options':
+        return ResponseBodyEmployeeToolOptions(value: ToolOptions.fromJson(json['value'] as Map<String, dynamic>));
       case 'employees':
         return ResponseBodyEmployees(value: EmployeesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'file':
@@ -15164,12 +13070,6 @@ sealed class ResponseBody {
           name: (src['name'] as String),
         );
         }
-      case 'function_calls':
-        return ResponseBodyFunctionCalls(value: FunctionCallsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'git_diff':
-        return ResponseBodyGitDiff(value: (json['value'] == null ? null : GitDiffView.fromJson(json['value'] as Map<String, dynamic>)));
-      case 'git_status':
-        return ResponseBodyGitStatus(value: (json['value'] == null ? null : GitStatusView.fromJson(json['value'] as Map<String, dynamic>)));
       case 'guideline':
         return ResponseBodyGuideline(value: GuidelineDetail.fromJson(json['value'] as Map<String, dynamic>));
       case 'guideline_affected':
@@ -15216,22 +13116,12 @@ sealed class ResponseBody {
         return ResponseBodyMessages(value: MessagesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'my_tickets':
         return ResponseBodyMyTickets(value: MyTicketsView.fromJson(json['value'] as Map<String, dynamic>));
-      case 'note':
-        return ResponseBodyNote(value: NoteView.fromJson(json['value'] as Map<String, dynamic>));
-      case 'notes':
-        return ResponseBodyNotes(value: NotesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'notifications':
         return ResponseBodyNotifications(value: NotificationsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'plugin_catalog':
-        return ResponseBodyPluginCatalog(value: PluginCatalog.fromJson(json['value'] as Map<String, dynamic>));
-      case 'plugins':
-        return ResponseBodyPlugins(value: PluginsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'power':
         return ResponseBodyPower(value: PowerState.fromJson(json['value'] as Map<String, dynamic>));
       case 'project_conversations':
         return ResponseBodyProjectConversations(value: ProjectConversationsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'project_plugins':
-        return ResponseBodyProjectPlugins(value: ProjectPlugins.fromJson(json['value'] as Map<String, dynamic>));
       case 'projects':
         return ResponseBodyProjects(value: ProjectsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'proposals':
@@ -15240,6 +13130,8 @@ sealed class ResponseBody {
         return ResponseBodyReceipt(value: Receipt.fromJson(json['value'] as Map<String, dynamic>));
       case 'remote':
         return ResponseBodyRemote(value: RemoteStatus.fromJson(json['value'] as Map<String, dynamic>));
+      case 'run_activity':
+        return ResponseBodyRunActivity(value: RunActivity.fromJson(json['value'] as Map<String, dynamic>));
       case 'run_guidelines':
         return ResponseBodyRunGuidelines(value: RunGuidelines.fromJson(json['value'] as Map<String, dynamic>));
       case 'run_trace':
@@ -15251,6 +13143,8 @@ sealed class ResponseBody {
           claudeCode: (src['claude_code'] == null ? null : (src['claude_code'] as String)),
         );
         }
+      case 'scheduled_messages':
+        return ResponseBodyScheduledMessages(value: ScheduledMessagesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'screenshot':
         {
           final src = (json['value'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -15263,8 +13157,6 @@ sealed class ResponseBody {
         return ResponseBodyServerName(value: ServerNameView.fromJson(json['value'] as Map<String, dynamic>));
       case 'sessions':
         return ResponseBodySessions(value: SessionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'shares':
-        return ResponseBodyShares(value: (json['value'] as List<dynamic>).map((x0) => ShareView.fromJson(x0 as Map<String, dynamic>)).toList());
       case 'starter_set':
         return ResponseBodyStarterSet(value: StarterSet.fromJson(json['value'] as Map<String, dynamic>));
       case 'subagents':
@@ -15280,18 +13172,12 @@ sealed class ResponseBody {
         return ResponseBodySubscription(value: SubscriptionUsage.fromJson(json['value'] as Map<String, dynamic>));
       case 'task_schedules':
         return ResponseBodyTaskSchedules(value: TaskSchedulesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'task_variants':
-        return ResponseBodyTaskVariants(value: TaskVariantsView.fromJson(json['value'] as Map<String, dynamic>));
       case 'tasks':
         return ResponseBodyTasks(value: TasksSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'terminal':
-        return ResponseBodyTerminal(value: TerminalView.fromJson(json['value'] as Map<String, dynamic>));
-      case 'terminal_done':
-        return const ResponseBodyTerminalDone();
-      case 'terminals':
-        return ResponseBodyTerminals(value: (json['value'] as List<dynamic>).map((x0) => TerminalSummary.fromJson(x0 as Map<String, dynamic>)).toList());
       case 'thread':
         return ResponseBodyThread(value: ThreadSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'thread_waiting':
+        return ResponseBodyThreadWaiting(value: ThreadWaitingSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'ticket':
         return ResponseBodyTicket(value: TicketDetail.fromJson(json['value'] as Map<String, dynamic>));
       case 'ticket_followers':
@@ -15314,8 +13200,6 @@ sealed class ResponseBody {
         return ResponseBodyUsageTotals(value: UsageTotals.fromJson(json['value'] as Map<String, dynamic>));
       case 'users':
         return ResponseBodyUsers(value: UsersSnapshot.fromJson(json['value'] as Map<String, dynamic>));
-      case 'variants_setting':
-        return ResponseBodyVariantsSetting(value: VariantsSetting.fromJson(json['value'] as Map<String, dynamic>));
       case 'vault':
         return ResponseBodyVault(value: VaultList.fromJson(json['value'] as Map<String, dynamic>));
       case 'vault_audit':
@@ -15349,16 +13233,17 @@ final class ResponseBodyActivity extends ResponseBody {
     };
 }
 
-final class ResponseBodyAgentFunctions extends ResponseBody {
-  const ResponseBodyAgentFunctions({
+/// `activity_log.list`.
+final class ResponseBodyActivityLog extends ResponseBody {
+  const ResponseBodyActivityLog({
     required this.value,
   });
 
-  final AgentFunctionsSnapshot value;
+  final ActivityLogPage value;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'agent_functions',
+      'type': 'activity_log',
       'value': value.toJson(),
     };
 }
@@ -15377,34 +13262,6 @@ final class ResponseBodyAllIdeas extends ResponseBody {
     };
 }
 
-final class ResponseBodyApiKeys extends ResponseBody {
-  const ResponseBodyApiKeys({
-    required this.value,
-  });
-
-  final List<ApiKeyView> value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'api_keys',
-      'value': value.map((x0) => x0.toJson()).toList(),
-    };
-}
-
-final class ResponseBodyAppKeys extends ResponseBody {
-  const ResponseBodyAppKeys({
-    required this.value,
-  });
-
-  final List<AppKeyView> value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'app_keys',
-      'value': value.map((x0) => x0.toJson()).toList(),
-    };
-}
-
 final class ResponseBodyApprovals extends ResponseBody {
   const ResponseBodyApprovals({
     required this.value,
@@ -15415,48 +13272,6 @@ final class ResponseBodyApprovals extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'approvals',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyArtifactContent extends ResponseBody {
-  const ResponseBodyArtifactContent({
-    required this.value,
-  });
-
-  final ArtifactContent value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'artifact_content',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyArtifactSetting extends ResponseBody {
-  const ResponseBodyArtifactSetting({
-    required this.value,
-  });
-
-  final ArtifactSetting value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'artifact_setting',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyArtifacts extends ResponseBody {
-  const ResponseBodyArtifacts({
-    required this.value,
-  });
-
-  final ArtifactsSnapshot value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'artifacts',
       'value': value.toJson(),
     };
 }
@@ -15616,6 +13431,20 @@ final class ResponseBodyEffectiveGuidelines extends ResponseBody {
     };
 }
 
+final class ResponseBodyEmployeeChats extends ResponseBody {
+  const ResponseBodyEmployeeChats({
+    required this.value,
+  });
+
+  final EmployeeChatsSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_chats',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodyEmployeeInstructionVersions extends ResponseBody {
   const ResponseBodyEmployeeInstructionVersions({
     required this.value,
@@ -15630,16 +13459,61 @@ final class ResponseBodyEmployeeInstructionVersions extends ResponseBody {
     };
 }
 
-final class ResponseBodyEmployeePlugins extends ResponseBody {
-  const ResponseBodyEmployeePlugins({
+/// `employee.queue`.
+final class ResponseBodyEmployeeQueue extends ResponseBody {
+  const ResponseBodyEmployeeQueue({
     required this.value,
   });
 
-  final EmployeePlugins value;
+  final EmployeeQueue value;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'employee_plugins',
+      'type': 'employee_queue',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyEmployeeScratchpad extends ResponseBody {
+  const ResponseBodyEmployeeScratchpad({
+    required this.value,
+  });
+
+  final ScratchpadView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_scratchpad',
+      'value': value.toJson(),
+    };
+}
+
+/// `employee.start_profiles`.
+final class ResponseBodyEmployeeStartProfiles extends ResponseBody {
+  const ResponseBodyEmployeeStartProfiles({
+    required this.value,
+  });
+
+  final StartProfiles value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_start_profiles',
+      'value': value.toJson(),
+    };
+}
+
+/// `employee.tool_options`.
+final class ResponseBodyEmployeeToolOptions extends ResponseBody {
+  const ResponseBodyEmployeeToolOptions({
+    required this.value,
+  });
+
+  final ToolOptions value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'employee_tool_options',
       'value': value.toJson(),
     };
 }
@@ -15681,48 +13555,6 @@ final class ResponseBodyFile extends ResponseBody {
       'media_type': mediaType,
       'name': name,
     },
-    };
-}
-
-final class ResponseBodyFunctionCalls extends ResponseBody {
-  const ResponseBodyFunctionCalls({
-    required this.value,
-  });
-
-  final FunctionCallsSnapshot value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'function_calls',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyGitDiff extends ResponseBody {
-  const ResponseBodyGitDiff({
-    this.value,
-  });
-
-  final GitDiffView? value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'git_diff',
-      if (value != null) 'value': value?.toJson(),
-    };
-}
-
-final class ResponseBodyGitStatus extends ResponseBody {
-  const ResponseBodyGitStatus({
-    this.value,
-  });
-
-  final GitStatusView? value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'git_status',
-      if (value != null) 'value': value?.toJson(),
     };
 }
 
@@ -16057,34 +13889,6 @@ final class ResponseBodyMyTickets extends ResponseBody {
     };
 }
 
-final class ResponseBodyNote extends ResponseBody {
-  const ResponseBodyNote({
-    required this.value,
-  });
-
-  final NoteView value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'note',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyNotes extends ResponseBody {
-  const ResponseBodyNotes({
-    required this.value,
-  });
-
-  final NotesSnapshot value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'notes',
-      'value': value.toJson(),
-    };
-}
-
 final class ResponseBodyNotifications extends ResponseBody {
   const ResponseBodyNotifications({
     required this.value,
@@ -16095,34 +13899,6 @@ final class ResponseBodyNotifications extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'notifications',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyPluginCatalog extends ResponseBody {
-  const ResponseBodyPluginCatalog({
-    required this.value,
-  });
-
-  final PluginCatalog value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'plugin_catalog',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyPlugins extends ResponseBody {
-  const ResponseBodyPlugins({
-    required this.value,
-  });
-
-  final PluginsSnapshot value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'plugins',
       'value': value.toJson(),
     };
 }
@@ -16151,20 +13927,6 @@ final class ResponseBodyProjectConversations extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'project_conversations',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyProjectPlugins extends ResponseBody {
-  const ResponseBodyProjectPlugins({
-    required this.value,
-  });
-
-  final ProjectPlugins value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'project_plugins',
       'value': value.toJson(),
     };
 }
@@ -16226,6 +13988,20 @@ final class ResponseBodyRemote extends ResponseBody {
     };
 }
 
+final class ResponseBodyRunActivity extends ResponseBody {
+  const ResponseBodyRunActivity({
+    required this.value,
+  });
+
+  final RunActivity value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'run_activity',
+      'value': value.toJson(),
+    };
+}
+
 /// `run.guidelines`.
 final class ResponseBodyRunGuidelines extends ResponseBody {
   const ResponseBodyRunGuidelines({
@@ -16269,6 +14045,20 @@ final class ResponseBodyRuntimeDetected extends ResponseBody {
       'value': <String, dynamic>{
       if (claudeCode != null) 'claude_code': claudeCode,
     },
+    };
+}
+
+final class ResponseBodyScheduledMessages extends ResponseBody {
+  const ResponseBodyScheduledMessages({
+    required this.value,
+  });
+
+  final ScheduledMessagesSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'scheduled_messages',
+      'value': value.toJson(),
     };
 }
 
@@ -16318,20 +14108,6 @@ final class ResponseBodySessions extends ResponseBody {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'sessions',
       'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyShares extends ResponseBody {
-  const ResponseBodyShares({
-    required this.value,
-  });
-
-  final List<ShareView> value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'shares',
-      'value': value.map((x0) => x0.toJson()).toList(),
     };
 }
 
@@ -16408,20 +14184,6 @@ final class ResponseBodyTaskSchedules extends ResponseBody {
     };
 }
 
-final class ResponseBodyTaskVariants extends ResponseBody {
-  const ResponseBodyTaskVariants({
-    required this.value,
-  });
-
-  final TaskVariantsView value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'task_variants',
-      'value': value.toJson(),
-    };
-}
-
 final class ResponseBodyTasks extends ResponseBody {
   const ResponseBodyTasks({
     required this.value,
@@ -16436,44 +14198,6 @@ final class ResponseBodyTasks extends ResponseBody {
     };
 }
 
-final class ResponseBodyTerminal extends ResponseBody {
-  const ResponseBodyTerminal({
-    required this.value,
-  });
-
-  final TerminalView value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'terminal',
-      'value': value.toJson(),
-    };
-}
-
-/// Input, resize, detach or close of a terminal was handled.
-final class ResponseBodyTerminalDone extends ResponseBody {
-  const ResponseBodyTerminalDone();
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'terminal_done',
-    };
-}
-
-final class ResponseBodyTerminals extends ResponseBody {
-  const ResponseBodyTerminals({
-    required this.value,
-  });
-
-  final List<TerminalSummary> value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'terminals',
-      'value': value.map((x0) => x0.toJson()).toList(),
-    };
-}
-
 /// `thread.read`.
 final class ResponseBodyThread extends ResponseBody {
   const ResponseBodyThread({
@@ -16485,6 +14209,20 @@ final class ResponseBodyThread extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'thread',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyThreadWaiting extends ResponseBody {
+  const ResponseBodyThreadWaiting({
+    required this.value,
+  });
+
+  final ThreadWaitingSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'thread_waiting',
       'value': value.toJson(),
     };
 }
@@ -16641,20 +14379,6 @@ final class ResponseBodyUsers extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'users',
-      'value': value.toJson(),
-    };
-}
-
-final class ResponseBodyVariantsSetting extends ResponseBody {
-  const ResponseBodyVariantsSetting({
-    required this.value,
-  });
-
-  final VariantsSetting value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'variants_setting',
       'value': value.toJson(),
     };
 }
@@ -16816,19 +14540,61 @@ final class ReviseMemory {
   };
 }
 
-final class RevokeShare {
-  const RevokeShare({
-    required this.shareId,
+/// `run.get_activity`: every tool call of a run, for an opened run card (feature `run_cards`).
+final class RunActivity {
+  const RunActivity({
+    required this.calls,
+    this.messageId,
+    required this.runId,
   });
 
-  final String shareId;
+  final List<ActivityView> calls;
+  /// The answer the calls are kept with (`activity.get` reads one whole); none without calls.
+  final String? messageId;
+  final String runId;
 
-  factory RevokeShare.fromJson(Map<String, dynamic> json) => RevokeShare(
-    shareId: (json['share_id'] as String),
+  factory RunActivity.fromJson(Map<String, dynamic> json) => RunActivity(
+    calls: (json['calls'] as List<dynamic>).map((x0) => ActivityView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    messageId: (json['message_id'] == null ? null : (json['message_id'] as String)),
+    runId: (json['run_id'] as String),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'share_id': shareId,
+    'calls': calls.map((x0) => x0.toJson()).toList(),
+    if (messageId != null) 'message_id': messageId,
+    'run_id': runId,
+  };
+}
+
+/// What the run card of a post shows while folded (`MessageView::run`).
+final class RunBrief {
+  const RunBrief({
+    this.employeeId,
+    required this.failedCalls,
+    required this.status,
+    required this.toolCalls,
+  });
+
+  /// The employee whose run it was, for its scratchpad (feature `employee_scratchpad`).
+  final String? employeeId;
+  final int failedCalls;
+  /// `runs.status`: created | starting | running | waiting | cancelling | succeeded |
+  /// failed | cancelled | unknown. A string, so a new state never breaks a client.
+  final String status;
+  final int toolCalls;
+
+  factory RunBrief.fromJson(Map<String, dynamic> json) => RunBrief(
+    employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
+    failedCalls: (json['failed_calls'] as num).toInt(),
+    status: (json['status'] as String),
+    toolCalls: (json['tool_calls'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (employeeId != null) 'employee_id': employeeId,
+    'failed_calls': failedCalls,
+    'status': status,
+    'tool_calls': toolCalls,
   };
 }
 
@@ -17059,6 +14825,132 @@ final class RunTrace {
     'tools': tools,
     if (usage != null) 'usage': usage?.toJson(),
     'user_turn': userTurn,
+  };
+}
+
+/// A message an employee scheduled (`schedule_message`, R7; feature `scheduled_messages`).
+final class ScheduledMessageView {
+  const ScheduledMessageView({
+    this.channelId,
+    required this.createdAtMs,
+    required this.dueAtMs,
+    required this.fromEmployee,
+    required this.fromName,
+    required this.id,
+    this.loginName,
+    this.outcome,
+    required this.place,
+    this.runId,
+    required this.state,
+    required this.text,
+    this.ticketId,
+    required this.toEmployee,
+    required this.toName,
+  });
+
+  /// The channel of the Team chat it goes to.
+  final String? channelId;
+  final int createdAtMs;
+  final int dueAtMs;
+  final String fromEmployee;
+  final String fromName;
+  final String id;
+  /// Whose Claude login its run uses: the one of the run that planned it.
+  final String? loginName;
+  /// Why it did not go out.
+  final String? outcome;
+  /// Where it goes, in words ("the discussion of ticket #21").
+  final String place;
+  /// The run it started.
+  final String? runId;
+  /// scheduled | delivered | cancelled | not_delivered. A string, so a new state never breaks a client.
+  final String state;
+  final String text;
+  final String? ticketId;
+  final String toEmployee;
+  final String toName;
+
+  factory ScheduledMessageView.fromJson(Map<String, dynamic> json) => ScheduledMessageView(
+    channelId: (json['channel_id'] == null ? null : (json['channel_id'] as String)),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    dueAtMs: (json['due_at_ms'] as num).toInt(),
+    fromEmployee: (json['from_employee'] as String),
+    fromName: (json['from_name'] as String),
+    id: (json['id'] as String),
+    loginName: (json['login_name'] == null ? null : (json['login_name'] as String)),
+    outcome: (json['outcome'] == null ? null : (json['outcome'] as String)),
+    place: (json['place'] as String),
+    runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
+    state: (json['state'] as String),
+    text: (json['text'] as String),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
+    toEmployee: (json['to_employee'] as String),
+    toName: (json['to_name'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (channelId != null) 'channel_id': channelId,
+    'created_at_ms': createdAtMs,
+    'due_at_ms': dueAtMs,
+    'from_employee': fromEmployee,
+    'from_name': fromName,
+    'id': id,
+    if (loginName != null) 'login_name': loginName,
+    if (outcome != null) 'outcome': outcome,
+    'place': place,
+    if (runId != null) 'run_id': runId,
+    'state': state,
+    'text': text,
+    if (ticketId != null) 'ticket_id': ticketId,
+    'to_employee': toEmployee,
+    'to_name': toName,
+  };
+}
+
+/// `scheduled_message.list`: what waits, soonest first, then the latest that went out.
+final class ScheduledMessagesSnapshot {
+  const ScheduledMessagesSnapshot({
+    required this.asOfSeq,
+    required this.messages,
+  });
+
+  final int asOfSeq;
+  final List<ScheduledMessageView> messages;
+
+  factory ScheduledMessagesSnapshot.fromJson(Map<String, dynamic> json) => ScheduledMessagesSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    messages: (json['messages'] as List<dynamic>).map((x0) => ScheduledMessageView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'messages': messages.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// `employee.scratchpad`: an employee's own note (C7; feature `employee_scratchpad`).
+final class ScratchpadView {
+  const ScratchpadView({
+    required this.employeeId,
+    required this.text,
+    this.updatedAtMs,
+  });
+
+  final String employeeId;
+  final String text;
+  /// When it last changed; none when it was never written.
+  final int? updatedAtMs;
+
+  factory ScratchpadView.fromJson(Map<String, dynamic> json) => ScratchpadView(
+    employeeId: (json['employee_id'] as String),
+    text: (json['text'] as String),
+    updatedAtMs: (json['updated_at_ms'] == null ? null : (json['updated_at_ms'] as num).toInt()),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'employee_id': employeeId,
+    'text': text,
+    if (updatedAtMs != null) 'updated_at_ms': updatedAtMs,
   };
 }
 
@@ -17307,10 +15199,6 @@ sealed class ServerMessage {
         return ServerMessageStream(value: StreamDelta.fromJson(json as Map<String, dynamic>));
       case 'stream_append':
         return ServerMessageStreamAppend(value: StreamAppend.fromJson(json as Map<String, dynamic>));
-      case 'terminal_exit':
-        return ServerMessageTerminalExit(value: TerminalExit.fromJson(json as Map<String, dynamic>));
-      case 'terminal_output':
-        return ServerMessageTerminalOutput(value: TerminalOutput.fromJson(json as Map<String, dynamic>));
       default:
         throw FormatException('Unknown ServerMessage type: $tag');
     }
@@ -17444,35 +15332,6 @@ final class ServerMessageStreamAppend extends ServerMessage {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'stream_append',
-      ...value.toJson(),
-    };
-}
-
-final class ServerMessageTerminalExit extends ServerMessage {
-  const ServerMessageTerminalExit({
-    required this.value,
-  });
-
-  final TerminalExit value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'terminal_exit',
-      ...value.toJson(),
-    };
-}
-
-/// Built-in terminal: only to sessions that opened it.
-final class ServerMessageTerminalOutput extends ServerMessage {
-  const ServerMessageTerminalOutput({
-    required this.value,
-  });
-
-  final TerminalOutput value;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'type': 'terminal_output',
       ...value.toJson(),
     };
 }
@@ -17747,41 +15606,6 @@ final class SetFollowOrgChart {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'follow': follow,
-  };
-}
-
-/// Turn an employee's heartbeat on (`every_minutes` > 0) or off (0). Quiet hours
-/// are local minutes since midnight; `None` keeps the defaults (22:00–07:00,
-/// 20k tokens a day).
-final class SetHeartbeat {
-  const SetHeartbeat({
-    this.dailyTokenBudget,
-    required this.employeeId,
-    required this.everyMinutes,
-    this.quietEndMin,
-    this.quietStartMin,
-  });
-
-  final int? dailyTokenBudget;
-  final String employeeId;
-  final int everyMinutes;
-  final int? quietEndMin;
-  final int? quietStartMin;
-
-  factory SetHeartbeat.fromJson(Map<String, dynamic> json) => SetHeartbeat(
-    dailyTokenBudget: (json['daily_token_budget'] == null ? null : (json['daily_token_budget'] as num).toInt()),
-    employeeId: (json['employee_id'] as String),
-    everyMinutes: (json['every_minutes'] as num).toInt(),
-    quietEndMin: (json['quiet_end_min'] == null ? null : (json['quiet_end_min'] as num).toInt()),
-    quietStartMin: (json['quiet_start_min'] == null ? null : (json['quiet_start_min'] as num).toInt()),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (dailyTokenBudget != null) 'daily_token_budget': dailyTokenBudget,
-    'employee_id': employeeId,
-    'every_minutes': everyMinutes,
-    if (quietEndMin != null) 'quiet_end_min': quietEndMin,
-    if (quietStartMin != null) 'quiet_start_min': quietStartMin,
   };
 }
 
@@ -18088,149 +15912,6 @@ final class Setting2Value extends Setting2 {
     };
 }
 
-/// Share one chat message with a project or employee.
-final class ShareMessage {
-  const ShareMessage({
-    required this.conversationId,
-    required this.messageId,
-    required this.mode,
-    required this.target,
-  });
-
-  final String conversationId;
-  final String messageId;
-  final ShareMode mode;
-  final ShareTarget target;
-
-  factory ShareMessage.fromJson(Map<String, dynamic> json) => ShareMessage(
-    conversationId: (json['conversation_id'] as String),
-    messageId: (json['message_id'] as String),
-    mode: ShareMode.fromJson(json['mode'] as String),
-    target: ShareTarget.fromJson(json['target'] as Map<String, dynamic>),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'conversation_id': conversationId,
-    'message_id': messageId,
-    'mode': mode.toJson(),
-    'target': target.toJson(),
-  };
-}
-
-enum ShareMode {
-  /// Used as context by the destination's agents.
-  context('context'),
-  /// Also proposed as a memory (the user still accepts it).
-  memory('memory');
-
-  const ShareMode(this.wire);
-
-  final String wire;
-
-  static ShareMode fromJson(String value) => values.firstWhere(
-        (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown ShareMode value: $value'),
-      );
-
-  String toJson() => wire;
-}
-
-sealed class ShareTarget {
-  const ShareTarget();
-
-  factory ShareTarget.fromJson(Map<String, dynamic> json) {
-    final tag = json['kind'] as String;
-    switch (tag) {
-      case 'employee':
-        return ShareTargetEmployee(
-          id: (json['id'] as String),
-        );
-      case 'project':
-        return ShareTargetProject(
-          id: (json['id'] as String),
-        );
-      default:
-        throw FormatException('Unknown ShareTarget kind: $tag');
-    }
-  }
-
-  Map<String, dynamic> toJson();
-}
-
-final class ShareTargetEmployee extends ShareTarget {
-  const ShareTargetEmployee({
-    required this.id,
-  });
-
-  final String id;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'kind': 'employee',
-      'id': id,
-    };
-}
-
-final class ShareTargetProject extends ShareTarget {
-  const ShareTargetProject({
-    required this.id,
-  });
-
-  final String id;
-
-  @override
-  Map<String, dynamic> toJson() => <String, dynamic>{
-      'kind': 'project',
-      'id': id,
-    };
-}
-
-final class ShareView {
-  const ShareView({
-    required this.createdAtMs,
-    required this.destination,
-    required this.excerpt,
-    required this.id,
-    required this.mode,
-    required this.revoked,
-    required this.source,
-    required this.title,
-  });
-
-  final int createdAtMs;
-  /// project · <name> | employee · <name> | conversation
-  final String destination;
-  final String excerpt;
-  final String id;
-  final ShareMode mode;
-  final bool revoked;
-  /// Where it came from, e.g. "Chat · How do we …" or "Task · Onboarding".
-  final String source;
-  final String title;
-
-  factory ShareView.fromJson(Map<String, dynamic> json) => ShareView(
-    createdAtMs: (json['created_at_ms'] as num).toInt(),
-    destination: (json['destination'] as String),
-    excerpt: (json['excerpt'] as String),
-    id: (json['id'] as String),
-    mode: ShareMode.fromJson(json['mode'] as String),
-    revoked: (json['revoked'] as bool),
-    source: (json['source'] as String),
-    title: (json['title'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'created_at_ms': createdAtMs,
-    'destination': destination,
-    'excerpt': excerpt,
-    'id': id,
-    'mode': mode.toJson(),
-    'revoked': revoked,
-    'source': source,
-    'title': title,
-  };
-}
-
 enum ShutdownWhen {
   /// After the grace countdown (60 s).
   now('now'),
@@ -18326,6 +16007,84 @@ final class StartIdea {
     'employee_id': employeeId,
     'idea_id': ideaId,
     if (run != null) 'run': run?.toJson(),
+  };
+}
+
+/// One entry of the catalogue in the repo (`employee.start_profiles`, C6).
+final class StartProfile {
+  const StartProfile({
+    this.accessLevel,
+    required this.description,
+    this.hired = const [],
+    required this.instructions,
+    required this.key,
+    required this.label,
+    required this.name,
+    required this.role,
+    required this.summary,
+    this.title,
+    this.toolPolicy,
+  });
+
+  final AccessLevel? accessLevel;
+  final String description;
+  /// The employees (not archived) that started from this profile.
+  final List<String> hired;
+  final String instructions;
+  /// Stable key for `employee.create` (`engineer`, `chief_of_staff`, ...).
+  final String key;
+  final String label;
+  /// A suggested name; another employee may already have it.
+  final String name;
+  final String role;
+  /// One sentence for the picker.
+  final String summary;
+  final String? title;
+  final ToolPolicy? toolPolicy;
+
+  factory StartProfile.fromJson(Map<String, dynamic> json) => StartProfile(
+    accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
+    description: (json['description'] as String),
+    hired: (json['hired'] == null ? const [] : (json['hired'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    instructions: (json['instructions'] as String),
+    key: (json['key'] as String),
+    label: (json['label'] as String),
+    name: (json['name'] as String),
+    role: (json['role'] as String),
+    summary: (json['summary'] as String),
+    title: (json['title'] == null ? null : (json['title'] as String)),
+    toolPolicy: (json['tool_policy'] == null ? null : ToolPolicy.fromJson(json['tool_policy'] as Map<String, dynamic>)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (accessLevel != null) 'access_level': accessLevel?.toJson(),
+    'description': description,
+    'hired': hired,
+    'instructions': instructions,
+    'key': key,
+    'label': label,
+    'name': name,
+    'role': role,
+    'summary': summary,
+    if (title != null) 'title': title,
+    if (toolPolicy != null) 'tool_policy': toolPolicy?.toJson(),
+  };
+}
+
+/// `employee.start_profiles` (feature `employee_profiles`).
+final class StartProfiles {
+  const StartProfiles({
+    required this.profiles,
+  });
+
+  final List<StartProfile> profiles;
+
+  factory StartProfiles.fromJson(Map<String, dynamic> json) => StartProfiles(
+    profiles: (json['profiles'] as List<dynamic>).map((x0) => StartProfile.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'profiles': profiles.map((x0) => x0.toJson()).toList(),
   };
 }
 
@@ -18822,24 +16581,18 @@ final class TaskRun {
     this.effort,
     this.mode,
     this.model,
-    this.variants,
   });
 
   final String? connectionId;
   final String? effort;
   final AgentMode? mode;
   final String? model;
-  /// Try the task in this many ways first (1 to 3; feature `task_variants`, when
-  /// the server's setting is on and the work folder is a git repository).
-  /// Left out or 1: no variants.
-  final int? variants;
 
   factory TaskRun.fromJson(Map<String, dynamic> json) => TaskRun(
     connectionId: (json['connection_id'] == null ? null : (json['connection_id'] as String)),
     effort: (json['effort'] == null ? null : (json['effort'] as String)),
     mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
     model: (json['model'] == null ? null : (json['model'] as String)),
-    variants: (json['variants'] == null ? null : (json['variants'] as num).toInt()),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -18847,7 +16600,6 @@ final class TaskRun {
     if (effort != null) 'effort': effort,
     if (mode != null) 'mode': mode?.toJson(),
     if (model != null) 'model': model,
-    if (variants != null) 'variants': variants,
   };
 }
 
@@ -18976,165 +16728,16 @@ enum TaskStatus {
   String toJson() => wire;
 }
 
-/// One variant of a task.
-final class TaskVariantView {
-  const TaskVariantView({
-    this.conversationId,
-    required this.deletions,
-    required this.diff,
-    required this.diffTruncated,
-    required this.errors,
-    required this.files,
-    required this.hint,
-    required this.insertions,
-    this.judgeNote,
-    required this.n,
-    this.rank,
-    required this.report,
-    this.runId,
-    required this.status,
-    this.tests,
-    required this.usage,
-  });
-
-  /// Its own conversation (read it like any other).
-  final String? conversationId;
-  final int deletions;
-  /// The diff against `base_commit` (cut at 200 kB; `diff_truncated`).
-  final String diff;
-  final bool diffTruncated;
-  /// Tool calls that failed or were refused.
-  final int errors;
-  /// Files changed, lines added and removed.
-  final int files;
-  /// The approach it was told to take.
-  final String hint;
-  final int insertions;
-  final String? judgeNote;
-  /// 1 to 3.
-  final int n;
-  /// Its place in the judge's ranking (1 = best) and why.
-  final int? rank;
-  /// Its closing answer.
-  final String report;
-  final String? runId;
-  final VariantStatus status;
-  /// The last test or build output it saw (cut), if any.
-  final String? tests;
-  final TokenUsage usage;
-
-  factory TaskVariantView.fromJson(Map<String, dynamic> json) => TaskVariantView(
-    conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
-    deletions: (json['deletions'] as num).toInt(),
-    diff: (json['diff'] as String),
-    diffTruncated: (json['diff_truncated'] as bool),
-    errors: (json['errors'] as num).toInt(),
-    files: (json['files'] as num).toInt(),
-    hint: (json['hint'] as String),
-    insertions: (json['insertions'] as num).toInt(),
-    judgeNote: (json['judge_note'] == null ? null : (json['judge_note'] as String)),
-    n: (json['n'] as num).toInt(),
-    rank: (json['rank'] == null ? null : (json['rank'] as num).toInt()),
-    report: (json['report'] as String),
-    runId: (json['run_id'] == null ? null : (json['run_id'] as String)),
-    status: VariantStatus.fromJson(json['status'] as String),
-    tests: (json['tests'] == null ? null : (json['tests'] as String)),
-    usage: TokenUsage.fromJson(json['usage'] as Map<String, dynamic>),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (conversationId != null) 'conversation_id': conversationId,
-    'deletions': deletions,
-    'diff': diff,
-    'diff_truncated': diffTruncated,
-    'errors': errors,
-    'files': files,
-    'hint': hint,
-    'insertions': insertions,
-    if (judgeNote != null) 'judge_note': judgeNote,
-    'n': n,
-    if (rank != null) 'rank': rank,
-    'report': report,
-    if (runId != null) 'run_id': runId,
-    'status': status.toJson(),
-    if (tests != null) 'tests': tests,
-    'usage': usage.toJson(),
-  };
-}
-
-/// A task's variants and the judge's comparison (`task.variants`).
-final class TaskVariantsView {
-  const TaskVariantsView({
-    this.baseCommit,
-    this.chosen,
-    this.chosenBy,
-    this.compose,
-    required this.count,
-    this.error,
-    this.judgePick,
-    required this.phase,
-    required this.taskId,
-    required this.variants,
-  });
-
-  /// The commit the variants started from.
-  final String? baseCommit;
-  /// The chosen variant and by whom (`user` | `judge`).
-  final int? chosen;
-  final String? chosenBy;
-  /// What the judge advises to combine, if anything.
-  final String? compose;
-  /// How many variants.
-  final int count;
-  /// Why it failed (phase `failed`), e.g. the chosen diff did not apply.
-  final String? error;
-  /// The judge's pick, once it compared them.
-  final int? judgePick;
-  final VariantPhase phase;
-  final String taskId;
-  final List<TaskVariantView> variants;
-
-  factory TaskVariantsView.fromJson(Map<String, dynamic> json) => TaskVariantsView(
-    baseCommit: (json['base_commit'] == null ? null : (json['base_commit'] as String)),
-    chosen: (json['chosen'] == null ? null : (json['chosen'] as num).toInt()),
-    chosenBy: (json['chosen_by'] == null ? null : (json['chosen_by'] as String)),
-    compose: (json['compose'] == null ? null : (json['compose'] as String)),
-    count: (json['count'] as num).toInt(),
-    error: (json['error'] == null ? null : (json['error'] as String)),
-    judgePick: (json['judge_pick'] == null ? null : (json['judge_pick'] as num).toInt()),
-    phase: VariantPhase.fromJson(json['phase'] as String),
-    taskId: (json['task_id'] as String),
-    variants: (json['variants'] as List<dynamic>).map((x0) => TaskVariantView.fromJson(x0 as Map<String, dynamic>)).toList(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    if (baseCommit != null) 'base_commit': baseCommit,
-    if (chosen != null) 'chosen': chosen,
-    if (chosenBy != null) 'chosen_by': chosenBy,
-    if (compose != null) 'compose': compose,
-    'count': count,
-    if (error != null) 'error': error,
-    if (judgePick != null) 'judge_pick': judgePick,
-    'phase': phase.toJson(),
-    'task_id': taskId,
-    'variants': variants.map((x0) => x0.toJson()).toList(),
-  };
-}
-
 final class TaskView {
   const TaskView({
     required this.attachments,
     required this.children,
     this.conversationId,
     required this.createdAtMs,
-    this.createdByApp,
-    this.createdByAppKeyId,
     required this.criteria,
     this.delegatedBy,
-    required this.dependsOn,
     this.employeeId,
     this.employeeName,
-    this.functionId,
     required this.goal,
     required this.handoffs,
     required this.id,
@@ -19151,7 +16754,6 @@ final class TaskView {
     this.ticketNumber,
     required this.title,
     required this.updatedAtMs,
-    this.variantPhase,
     this.waitingReason,
     this.waitingUntilMs,
   });
@@ -19165,18 +16767,10 @@ final class TaskView {
   /// context; plan, findings and results come back there).
   final String? conversationId;
   final int createdAtMs;
-  /// The app (the name of its app key) that created this task through
-  /// `aurelius-mcp` (feature `app_keys`); none for the user's own tasks.
-  final String? createdByApp;
-  /// The app key behind `created_by_app`.
-  final String? createdByAppKeyId;
   final List<String> criteria;
   final String? delegatedBy;
-  final List<String> dependsOn;
   final String? employeeId;
   final String? employeeName;
-  /// The agent function whose call made this task.
-  final String? functionId;
   final String goal;
   /// Hand-overs between employees, oldest first.
   final List<TaskHandoff> handoffs;
@@ -19207,8 +16801,6 @@ final class TaskView {
   final int? ticketNumber;
   final String title;
   final int updatedAtMs;
-  /// Where the task's variants are, when it has some (feature `task_variants`).
-  final VariantPhase? variantPhase;
   /// Why a waiting task waits. A queued task that does not start now has one
   /// too (derived, never stored): `in_line` (its employee works on one task at
   /// a time and another goes first) or `scheduled` (its start is planned for
@@ -19223,14 +16815,10 @@ final class TaskView {
     children: (json['children'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
     conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
-    createdByApp: (json['created_by_app'] == null ? null : (json['created_by_app'] as String)),
-    createdByAppKeyId: (json['created_by_app_key_id'] == null ? null : (json['created_by_app_key_id'] as String)),
     criteria: (json['criteria'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
     delegatedBy: (json['delegated_by'] == null ? null : (json['delegated_by'] as String)),
-    dependsOn: (json['depends_on'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
     employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
     employeeName: (json['employee_name'] == null ? null : (json['employee_name'] as String)),
-    functionId: (json['function_id'] == null ? null : (json['function_id'] as String)),
     goal: (json['goal'] as String),
     handoffs: (json['handoffs'] as List<dynamic>).map((x0) => TaskHandoff.fromJson(x0 as Map<String, dynamic>)).toList(),
     id: (json['id'] as String),
@@ -19247,7 +16835,6 @@ final class TaskView {
     ticketNumber: (json['ticket_number'] == null ? null : (json['ticket_number'] as num).toInt()),
     title: (json['title'] as String),
     updatedAtMs: (json['updated_at_ms'] as num).toInt(),
-    variantPhase: (json['variant_phase'] == null ? null : VariantPhase.fromJson(json['variant_phase'] as String)),
     waitingReason: (json['waiting_reason'] == null ? null : (json['waiting_reason'] as String)),
     waitingUntilMs: (json['waiting_until_ms'] == null ? null : (json['waiting_until_ms'] as num).toInt()),
   );
@@ -19257,14 +16844,10 @@ final class TaskView {
     'children': children,
     if (conversationId != null) 'conversation_id': conversationId,
     'created_at_ms': createdAtMs,
-    if (createdByApp != null) 'created_by_app': createdByApp,
-    if (createdByAppKeyId != null) 'created_by_app_key_id': createdByAppKeyId,
     'criteria': criteria,
     if (delegatedBy != null) 'delegated_by': delegatedBy,
-    'depends_on': dependsOn,
     if (employeeId != null) 'employee_id': employeeId,
     if (employeeName != null) 'employee_name': employeeName,
-    if (functionId != null) 'function_id': functionId,
     'goal': goal,
     'handoffs': handoffs.map((x0) => x0.toJson()).toList(),
     'id': id,
@@ -19281,7 +16864,6 @@ final class TaskView {
     if (ticketNumber != null) 'ticket_number': ticketNumber,
     'title': title,
     'updated_at_ms': updatedAtMs,
-    if (variantPhase != null) 'variant_phase': variantPhase?.toJson(),
     if (waitingReason != null) 'waiting_reason': waitingReason,
     if (waitingUntilMs != null) 'waiting_until_ms': waitingUntilMs,
   };
@@ -19307,129 +16889,34 @@ final class TasksSnapshot {
   };
 }
 
-/// The shell ended (exit code when known); the terminal is gone.
-final class TerminalExit {
-  const TerminalExit({
-    this.code,
-    required this.terminalId,
+/// Where a thread is, as `activity_log.list` and `employee.queue` name it (R8, U6).
+final class ThreadPlace {
+  const ThreadPlace({
+    this.channelId,
+    this.chatId,
+    required this.label,
+    this.ticketId,
   });
 
-  final int? code;
-  final String terminalId;
+  final String? channelId;
+  /// A board member's chat with an employee, when it is the reader's.
+  final String? chatId;
+  /// "#21 Fix login", a channel's name, "Chat with sam", or what is left of it.
+  final String label;
+  final String? ticketId;
 
-  factory TerminalExit.fromJson(Map<String, dynamic> json) => TerminalExit(
-    code: (json['code'] == null ? null : (json['code'] as num).toInt()),
-    terminalId: (json['terminal_id'] as String),
+  factory ThreadPlace.fromJson(Map<String, dynamic> json) => ThreadPlace(
+    channelId: (json['channel_id'] == null ? null : (json['channel_id'] as String)),
+    chatId: (json['chat_id'] == null ? null : (json['chat_id'] as String)),
+    label: (json['label'] as String),
+    ticketId: (json['ticket_id'] == null ? null : (json['ticket_id'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-    if (code != null) 'code': code,
-    'terminal_id': terminalId,
-  };
-}
-
-/// Output of a terminal, only to the sessions attached to it; never stored.
-final class TerminalOutput {
-  const TerminalOutput({
-    required this.dataBase64,
-    required this.terminalId,
-  });
-
-  final String dataBase64;
-  final String terminalId;
-
-  factory TerminalOutput.fromJson(Map<String, dynamic> json) => TerminalOutput(
-    dataBase64: (json['data_base64'] as String),
-    terminalId: (json['terminal_id'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'data_base64': dataBase64,
-    'terminal_id': terminalId,
-  };
-}
-
-/// One terminal of a conversation in `terminal.list`.
-final class TerminalSummary {
-  const TerminalSummary({
-    required this.alive,
-    required this.attached,
-    required this.conversationId,
-    required this.createdAtMs,
-    required this.cwd,
-    required this.shell,
-    required this.terminalId,
-    required this.title,
-  });
-
-  /// The shell still runs (an ended one stays listed until nobody shows it).
-  final bool alive;
-  /// Sessions that get its output now.
-  final int attached;
-  final String conversationId;
-  final int createdAtMs;
-  final String cwd;
-  final String shell;
-  final String terminalId;
-  /// `Terminal 1`, `Terminal 2`, ...: the lowest number free in the conversation when it started.
-  final String title;
-
-  factory TerminalSummary.fromJson(Map<String, dynamic> json) => TerminalSummary(
-    alive: (json['alive'] as bool),
-    attached: (json['attached'] as num).toInt(),
-    conversationId: (json['conversation_id'] as String),
-    createdAtMs: (json['created_at_ms'] as num).toInt(),
-    cwd: (json['cwd'] as String),
-    shell: (json['shell'] as String),
-    terminalId: (json['terminal_id'] as String),
-    title: (json['title'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'alive': alive,
-    'attached': attached,
-    'conversation_id': conversationId,
-    'created_at_ms': createdAtMs,
-    'cwd': cwd,
-    'shell': shell,
-    'terminal_id': terminalId,
-    'title': title,
-  };
-}
-
-/// `terminal/open`: the shell this session is now attached to.
-final class TerminalView {
-  const TerminalView({
-    required this.conversationId,
-    required this.cwd,
-    required this.reattached,
-    required this.shell,
-    required this.terminalId,
-  });
-
-  final String conversationId;
-  /// The folder the shell started in.
-  final String cwd;
-  /// It was already running (its scrollback follows as output).
-  final bool reattached;
-  /// The shell program, e.g. `pwsh.exe`.
-  final String shell;
-  final String terminalId;
-
-  factory TerminalView.fromJson(Map<String, dynamic> json) => TerminalView(
-    conversationId: (json['conversation_id'] as String),
-    cwd: (json['cwd'] as String),
-    reattached: (json['reattached'] as bool),
-    shell: (json['shell'] as String),
-    terminalId: (json['terminal_id'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'conversation_id': conversationId,
-    'cwd': cwd,
-    'reattached': reattached,
-    'shell': shell,
-    'terminal_id': terminalId,
+    if (channelId != null) 'channel_id': channelId,
+    if (chatId != null) 'chat_id': chatId,
+    'label': label,
+    if (ticketId != null) 'ticket_id': ticketId,
   };
 }
 
@@ -19470,6 +16957,63 @@ final class ThreadSnapshot {
     if (readOnly != null) 'read_only': readOnly,
     'replies': replies.map((x0) => x0.toJson()).toList(),
     'root': root.toJson(),
+  };
+}
+
+/// An employee that waits to pick up a thread (U3).
+final class ThreadWaiter {
+  const ThreadWaiter({
+    required this.behind,
+    required this.employeeId,
+    required this.employeeName,
+    this.reason,
+  });
+
+  /// How many threads of this employee go first, counting what it is doing now.
+  final int behind;
+  final String employeeId;
+  final String employeeName;
+  /// What holds it back besides its turn: `limit` (a usage limit), `question`
+  /// (the thread waits for a board member's answer). A string, so a new one never breaks a client.
+  final String? reason;
+
+  factory ThreadWaiter.fromJson(Map<String, dynamic> json) => ThreadWaiter(
+    behind: (json['behind'] as num).toInt(),
+    employeeId: (json['employee_id'] as String),
+    employeeName: (json['employee_name'] as String),
+    reason: (json['reason'] == null ? null : (json['reason'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'behind': behind,
+    'employee_id': employeeId,
+    'employee_name': employeeName,
+    if (reason != null) 'reason': reason,
+  };
+}
+
+/// `thread.waiting`: who waits to pick up a thread and what is scheduled in it (U3, R7).
+final class ThreadWaitingSnapshot {
+  const ThreadWaitingSnapshot({
+    required this.asOfSeq,
+    required this.scheduled,
+    required this.waiters,
+  });
+
+  final int asOfSeq;
+  final List<ScheduledMessageView> scheduled;
+  final List<ThreadWaiter> waiters;
+
+  factory ThreadWaitingSnapshot.fromJson(Map<String, dynamic> json) => ThreadWaitingSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    scheduled: (json['scheduled'] as List<dynamic>).map((x0) => ScheduledMessageView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    waiters: (json['waiters'] as List<dynamic>).map((x0) => ThreadWaiter.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'scheduled': scheduled.map((x0) => x0.toJson()).toList(),
+    'waiters': waiters.map((x0) => x0.toJson()).toList(),
   };
 }
 
@@ -19571,6 +17115,7 @@ final class TicketView {
     required this.createdByUsername,
     this.deadlineMs,
     this.description,
+    this.designUrl,
     this.doneAtMs,
     required this.id,
     required this.labels,
@@ -19612,6 +17157,9 @@ final class TicketView {
   final int? deadlineMs;
   /// Markdown; none when empty.
   final String? description;
+  /// The ticket's design, a Claude Design artifact (feature `design_links`). A link only:
+  /// its runs read the artifact themselves. Left out when none and by older servers.
+  final String? designUrl;
   final int? doneAtMs;
   final String id;
   final List<String> labels;
@@ -19664,6 +17212,7 @@ final class TicketView {
     createdByUsername: (json['created_by_username'] as String),
     deadlineMs: (json['deadline_ms'] == null ? null : (json['deadline_ms'] as num).toInt()),
     description: (json['description'] == null ? null : (json['description'] as String)),
+    designUrl: (json['design_url'] == null ? null : (json['design_url'] as String)),
     doneAtMs: (json['done_at_ms'] == null ? null : (json['done_at_ms'] as num).toInt()),
     id: (json['id'] as String),
     labels: (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
@@ -19701,6 +17250,7 @@ final class TicketView {
     'created_by_username': createdByUsername,
     if (deadlineMs != null) 'deadline_ms': deadlineMs,
     if (description != null) 'description': description,
+    if (designUrl != null) 'design_url': designUrl,
     if (doneAtMs != null) 'done_at_ms': doneAtMs,
     'id': id,
     'labels': labels,
@@ -19865,6 +17415,7 @@ final class TokenUsage {
     this.costMicroUsd,
     required this.estimate,
     required this.inputTokens,
+    this.modelCalls = 0,
     required this.outputTokens,
     required this.runs,
   });
@@ -19876,6 +17427,9 @@ final class TokenUsage {
   /// Some values are not a bill (e.g. subscription: API-equivalent value).
   final bool estimate;
   final int inputTokens;
+  /// How many model calls those runs made (feature `run_cards`). 0: not known,
+  /// for usage from before the calls were counted and by older servers.
+  final int modelCalls;
   final int outputTokens;
   final int runs;
 
@@ -19885,6 +17439,7 @@ final class TokenUsage {
     costMicroUsd: (json['cost_micro_usd'] == null ? null : (json['cost_micro_usd'] as num).toInt()),
     estimate: (json['estimate'] as bool),
     inputTokens: (json['input_tokens'] as num).toInt(),
+    modelCalls: (json['model_calls'] == null ? 0 : (json['model_calls'] as num).toInt()),
     outputTokens: (json['output_tokens'] as num).toInt(),
     runs: (json['runs'] as num).toInt(),
   );
@@ -19895,8 +17450,85 @@ final class TokenUsage {
     if (costMicroUsd != null) 'cost_micro_usd': costMicroUsd,
     'estimate': estimate,
     'input_tokens': inputTokens,
+    'model_calls': modelCalls,
     'output_tokens': outputTokens,
     'runs': runs,
+  };
+}
+
+/// One line of `employee.tool_options`.
+final class ToolOption {
+  const ToolOption({
+    required this.group,
+    required this.label,
+    required this.levels,
+    required this.name,
+  });
+
+  final String group;
+  final String label;
+  /// The access levels that have this tool at all.
+  final List<AccessLevel> levels;
+  final String name;
+
+  factory ToolOption.fromJson(Map<String, dynamic> json) => ToolOption(
+    group: (json['group'] as String),
+    label: (json['label'] as String),
+    levels: (json['levels'] as List<dynamic>).map((x0) => AccessLevel.fromJson(x0 as String)).toList(),
+    name: (json['name'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'group': group,
+    'label': label,
+    'levels': levels.map((x0) => x0.toJson()).toList(),
+    'name': name,
+  };
+}
+
+/// `employee.tool_options` (feature `employee_tools`).
+final class ToolOptions {
+  const ToolOptions({
+    required this.tools,
+  });
+
+  final List<ToolOption> tools;
+
+  factory ToolOptions.fromJson(Map<String, dynamic> json) => ToolOptions(
+    tools: (json['tools'] as List<dynamic>).map((x0) => ToolOption.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'tools': tools.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// `EmployeeConfig::tool_policy` (C2).
+final class ToolPolicy {
+  const ToolPolicy({
+    this.approvalTools = const [],
+    this.mcpServers,
+    this.tools,
+  });
+
+  /// The tools that always go to a board member first, in every mode:
+  /// a tool of [`SWITCHABLE_TOOLS`], or a whole MCP server as `mcp__<server>__*`.
+  final List<String> approvalTools;
+  /// The MCP servers it may use, of those enabled server-wide. None: all of them.
+  final List<String>? mcpServers;
+  /// The switchable tools it has. None: all that its level gives.
+  final List<String>? tools;
+
+  factory ToolPolicy.fromJson(Map<String, dynamic> json) => ToolPolicy(
+    approvalTools: (json['approval_tools'] == null ? const [] : (json['approval_tools'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    mcpServers: (json['mcp_servers'] == null ? null : (json['mcp_servers'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    tools: (json['tools'] == null ? null : (json['tools'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'approval_tools': approvalTools,
+    if (mcpServers != null) 'mcp_servers': mcpServers,
+    if (tools != null) 'tools': tools,
   };
 }
 
@@ -20020,26 +17652,6 @@ final class TraceStep {
   };
 }
 
-final class UpdateAgentFunction {
-  const UpdateAgentFunction({
-    required this.function,
-    required this.functionId,
-  });
-
-  final FunctionFields function;
-  final String functionId;
-
-  factory UpdateAgentFunction.fromJson(Map<String, dynamic> json) => UpdateAgentFunction(
-    function: FunctionFields.fromJson(json['function'] as Map<String, dynamic>),
-    functionId: (json['function_id'] as String),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'function': function.toJson(),
-    'function_id': functionId,
-  };
-}
-
 /// Change the company's name, its dispatcher or its tester; left out: unchanged.
 final class UpdateCompany {
   const UpdateCompany({
@@ -20068,14 +17680,22 @@ final class UpdateCompany {
 
 final class UpdateEmployee {
   const UpdateEmployee({
+    this.accessLevel,
+    this.description,
     required this.employeeId,
     this.instructions,
     required this.name,
     required this.role,
     this.sequentialTasks,
     this.title,
+    this.toolPolicy,
   });
 
+  /// What its runs may do with files and commands (C3). `None` leaves it as it is.
+  final AccessLevel? accessLevel;
+  /// What other employees read about this one (P7). `None` leaves it as it is;
+  /// an empty text clears it.
+  final String? description;
   final String employeeId;
   final String? instructions;
   final String name;
@@ -20084,23 +17704,32 @@ final class UpdateEmployee {
   final bool? sequentialTasks;
   /// `None` leaves the title as it is; an empty text clears it.
   final String? title;
+  /// Which tools and MCP servers it has and which ask first (C2). `None` leaves it
+  /// as it is; an empty policy is all of its level.
+  final ToolPolicy? toolPolicy;
 
   factory UpdateEmployee.fromJson(Map<String, dynamic> json) => UpdateEmployee(
+    accessLevel: (json['access_level'] == null ? null : AccessLevel.fromJson(json['access_level'] as String)),
+    description: (json['description'] == null ? null : (json['description'] as String)),
     employeeId: (json['employee_id'] as String),
     instructions: (json['instructions'] == null ? null : (json['instructions'] as String)),
     name: (json['name'] as String),
     role: (json['role'] as String),
     sequentialTasks: (json['sequential_tasks'] == null ? null : (json['sequential_tasks'] as bool)),
     title: (json['title'] == null ? null : (json['title'] as String)),
+    toolPolicy: (json['tool_policy'] == null ? null : ToolPolicy.fromJson(json['tool_policy'] as Map<String, dynamic>)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (accessLevel != null) 'access_level': accessLevel?.toJson(),
+    if (description != null) 'description': description,
     'employee_id': employeeId,
     if (instructions != null) 'instructions': instructions,
     'name': name,
     'role': role,
     if (sequentialTasks != null) 'sequential_tasks': sequentialTasks,
     if (title != null) 'title': title,
+    if (toolPolicy != null) 'tool_policy': toolPolicy?.toJson(),
   };
 }
 
@@ -20155,19 +17784,25 @@ final class UpdateProject {
   const UpdateProject({
     this.dispatcher,
     required this.projectId,
+    this.styleguideUrl,
   });
 
   final SetDispatcher? dispatcher;
   final String projectId;
+  /// The workspace's styleguide: a Claude Design artifact link
+  /// (`ticket::valid_artifact_url`, feature `design_links`); an empty text clears it.
+  final String? styleguideUrl;
 
   factory UpdateProject.fromJson(Map<String, dynamic> json) => UpdateProject(
     dispatcher: (json['dispatcher'] == null ? null : SetDispatcher.fromJson(json['dispatcher'] as Map<String, dynamic>)),
     projectId: (json['project_id'] as String),
+    styleguideUrl: (json['styleguide_url'] == null ? null : (json['styleguide_url'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (dispatcher != null) 'dispatcher': dispatcher?.toJson(),
     'project_id': projectId,
+    if (styleguideUrl != null) 'styleguide_url': styleguideUrl,
   };
 }
 
@@ -20477,6 +18112,7 @@ final class UsageSnapshot {
   const UsageSnapshot({
     required this.byDay,
     required this.bySource,
+    this.byUser = const [],
     required this.windows,
   });
 
@@ -20484,18 +18120,23 @@ final class UsageSnapshot {
   final List<UsageDay> byDay;
   /// Per connection and model, last 30 days.
   final List<UsageRow> bySource;
+  /// Per board member whose Claude login ran it, last 30 days (feature `run_cards`).
+  /// Left out by older servers.
+  final List<UsageUserRow> byUser;
   /// Today, 7 days, 30 days.
   final List<UsageWindow> windows;
 
   factory UsageSnapshot.fromJson(Map<String, dynamic> json) => UsageSnapshot(
     byDay: (json['by_day'] as List<dynamic>).map((x0) => UsageDay.fromJson(x0 as Map<String, dynamic>)).toList(),
     bySource: (json['by_source'] as List<dynamic>).map((x0) => UsageRow.fromJson(x0 as Map<String, dynamic>)).toList(),
+    byUser: (json['by_user'] == null ? const [] : (json['by_user'] as List<dynamic>).map((x0) => UsageUserRow.fromJson(x0 as Map<String, dynamic>)).toList()),
     windows: (json['windows'] as List<dynamic>).map((x0) => UsageWindow.fromJson(x0 as Map<String, dynamic>)).toList(),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'by_day': byDay.map((x0) => x0.toJson()).toList(),
     'by_source': bySource.map((x0) => x0.toJson()).toList(),
+    'by_user': byUser.map((x0) => x0.toJson()).toList(),
     'windows': windows.map((x0) => x0.toJson()).toList(),
   };
 }
@@ -20526,6 +18167,61 @@ final class UsageTotals {
     'own': own.toJson(),
     'subtasks': subtasks.map((x0) => x0.toJson()).toList(),
     'total': total.toJson(),
+  };
+}
+
+/// One board member's share of the usage (`UsageSnapshot::by_user`).
+final class UsageUserRow {
+  const UsageUserRow({
+    required this.cacheCreationTokens,
+    required this.cachedTokens,
+    this.costMicroUsd,
+    required this.estimate,
+    required this.inputTokens,
+    this.loginUser,
+    this.modelCalls = 0,
+    required this.outputTokens,
+    required this.runs,
+    this.username,
+  });
+
+  final int cacheCreationTokens;
+  final int cachedTokens;
+  final int? costMicroUsd;
+  final bool estimate;
+  final int inputTokens;
+  /// `runs.login_user`; none: runs on no one's login (an API key, a background run).
+  final String? loginUser;
+  final int modelCalls;
+  final int outputTokens;
+  final int runs;
+  /// That board member's name; none when there is none or they are gone.
+  final String? username;
+
+  factory UsageUserRow.fromJson(Map<String, dynamic> json) => UsageUserRow(
+    cacheCreationTokens: (json['cache_creation_tokens'] as num).toInt(),
+    cachedTokens: (json['cached_tokens'] as num).toInt(),
+    costMicroUsd: (json['cost_micro_usd'] == null ? null : (json['cost_micro_usd'] as num).toInt()),
+    estimate: (json['estimate'] as bool),
+    inputTokens: (json['input_tokens'] as num).toInt(),
+    loginUser: (json['login_user'] == null ? null : (json['login_user'] as String)),
+    modelCalls: (json['model_calls'] == null ? 0 : (json['model_calls'] as num).toInt()),
+    outputTokens: (json['output_tokens'] as num).toInt(),
+    runs: (json['runs'] as num).toInt(),
+    username: (json['username'] == null ? null : (json['username'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'cache_creation_tokens': cacheCreationTokens,
+    'cached_tokens': cachedTokens,
+    if (costMicroUsd != null) 'cost_micro_usd': costMicroUsd,
+    'estimate': estimate,
+    'input_tokens': inputTokens,
+    if (loginUser != null) 'login_user': loginUser,
+    'model_calls': modelCalls,
+    'output_tokens': outputTokens,
+    'runs': runs,
+    if (username != null) 'username': username,
   };
 }
 
@@ -20667,83 +18363,6 @@ final class UsersSnapshot {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'users': users.map((x0) => x0.toJson()).toList(),
-  };
-}
-
-/// Where a task's variants are.
-enum VariantPhase {
-  /// The chosen diff goes into the work folder.
-  applying('applying'),
-  /// Chosen and applied: the task went on as usual.
-  done('done'),
-  /// Something failed (see `error`); the work folder is as it was.
-  failed('failed'),
-  /// The judge compares them.
-  judging('judging'),
-  /// The variants run, one after the other.
-  probing('probing'),
-  /// The cheap model is thinking of approaches.
-  proposing('proposing'),
-  /// Waiting for the user's choice (Needs you).
-  ready('ready'),
-  /// Stopped by the user; the work folder is as it was.
-  stopped('stopped');
-
-  const VariantPhase(this.wire);
-
-  final String wire;
-
-  static VariantPhase fromJson(String value) => values.firstWhere(
-        (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown VariantPhase value: $value'),
-      );
-
-  String toJson() => wire;
-}
-
-/// One variant's state.
-enum VariantStatus {
-  /// Stopped.
-  cancelled('cancelled'),
-  /// Its run completed; the outcome is collected.
-  done('done'),
-  /// Its run failed.
-  failed('failed'),
-  running('running'),
-  waiting('waiting');
-
-  const VariantStatus(this.wire);
-
-  final String wire;
-
-  static VariantStatus fromJson(String value) => values.firstWhere(
-        (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown VariantStatus value: $value'),
-      );
-
-  String toJson() => wire;
-}
-
-/// `variants.get_setting` / `variants.set_enabled`: whether tasks may be tried in
-/// several ways first (feature `task_variants`; off by default).
-final class VariantsSetting {
-  const VariantsSetting({
-    required this.enabled,
-    required this.maxVariants,
-  });
-
-  final bool enabled;
-  /// At most this many variants per task.
-  final int maxVariants;
-
-  factory VariantsSetting.fromJson(Map<String, dynamic> json) => VariantsSetting(
-    enabled: (json['enabled'] as bool),
-    maxVariants: (json['max_variants'] as num).toInt(),
-  );
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-    'enabled': enabled,
-    'max_variants': maxVariants,
   };
 }
 

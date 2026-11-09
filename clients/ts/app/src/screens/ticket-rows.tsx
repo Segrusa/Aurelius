@@ -1,8 +1,63 @@
 import type { ColumnKind, TicketView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef } from "react";
 import type { Needs } from "./board-logic";
 import { ColumnGlyph, NeedsTag, OwnerMark, TicketTags, ticketNumber } from "./tickets-kit";
+
+const styles = stylex.create({
+  scroller: { minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%", overflow: "auto" },
+  track: { position: "relative", minWidth: 640 },
+  head: {
+    position: "absolute",
+    insetInline: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--precision-line2)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingInline: 18,
+    fontWeight: 500,
+  },
+  count: { fontWeight: 400, color: "var(--precision-text3)" },
+  row: {
+    position: "absolute",
+    insetInline: 0,
+    display: "grid",
+    width: "100%",
+    cursor: "pointer",
+    gridTemplateColumns: "22px 56px minmax(0,1fr) auto 100px 44px",
+    alignItems: "center",
+    gap: 12,
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderStyle: "solid",
+    borderBottomColor: "var(--precision-line2)",
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    paddingInline: 18,
+    textAlign: "left",
+    color: "var(--color-text-primary)",
+  },
+  selected: {
+    backgroundColor: "var(--color-overlay-hover)",
+    boxShadow: "inset 2px 0 0 var(--color-text-accent)",
+  },
+  number: { fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--precision-text3)" },
+  titleCell: { display: "flex", minWidth: 0, alignItems: "center", gap: 10 },
+  title: { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontWeight: 500 },
+  tags: { display: "flex", gap: 6 },
+  owner: {
+    display: "flex",
+    minWidth: 0,
+    alignItems: "center",
+    gap: 6,
+    color: "var(--color-text-secondary)",
+  },
+  ownerName: { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  age: { textAlign: "right", fontSize: 12, color: "var(--precision-text3)" },
+});
 
 const ROW_HEIGHT = 44;
 const HEAD_HEIGHT = 34;
@@ -58,21 +113,17 @@ export function TicketRows({
     if (at >= 0) virtual.scrollToIndex(at, { align: "auto" });
   }, [at, virtual]);
   return (
-    <div ref={scroller} className="min-h-0 flex-1 overflow-auto">
-      <div className="relative min-w-[640px]" style={{ height: virtual.getTotalSize() }}>
+    <div ref={scroller} {...stylex.props(styles.scroller)}>
+      <div {...stylex.props(styles.track)} style={{ height: virtual.getTotalSize() }}>
         {virtual.getVirtualItems().map((item) => {
           const row = rows[item.index] as Row;
           const place = { height: item.size, transform: `translateY(${item.start}px)` };
           if (!row.t) {
             return (
-              <div
-                key={row.kind}
-                style={place}
-                className="absolute inset-x-0 flex items-center gap-2 border-b border-line2 bg-sunk px-[18px] font-medium"
-              >
+              <div key={row.kind} {...stylex.props(styles.head)} style={place}>
                 <ColumnGlyph kind={row.kind} />
                 {columnName(row.kind)}
-                <span className="font-normal text-text3">{row.count}</span>
+                <span {...stylex.props(styles.count)}>{row.count}</span>
               </div>
             );
           }
@@ -85,23 +136,23 @@ export function TicketRows({
               data-ticket={t.id}
               aria-current={t.id === selected ? "true" : undefined}
               onClick={() => onOpen(t.id)}
+              {...stylex.props(styles.row, t.id === selected && styles.selected)}
               style={place}
-              className={`absolute inset-x-0 grid w-full cursor-pointer grid-cols-[22px_56px_minmax(0,1fr)_auto_100px_44px] items-center gap-3 border-0 border-b border-solid border-line2 px-[18px] text-left text-text hover:bg-sel ${t.id === selected ? "bg-sel" : "bg-transparent"}`}
             >
               <ColumnGlyph kind={row.kind} />
-              <span className="font-mono text-[12px] text-text3">{ticketNumber(t)}</span>
-              <span className="flex min-w-0 items-center gap-[10px]">
-                <span className="truncate font-medium">{t.title}</span>
+              <span {...stylex.props(styles.number)}>{ticketNumber(t)}</span>
+              <span {...stylex.props(styles.titleCell)}>
+                <span {...stylex.props(styles.title)}>{t.title}</span>
                 {need ? <NeedsTag needs={need} mine={mine(t)} /> : null}
               </span>
-              <span className="flex gap-[6px]">
+              <span {...stylex.props(styles.tags)}>
                 <TicketTags t={t} />
               </span>
-              <span className="flex min-w-0 items-center gap-[6px] text-text2">
+              <span {...stylex.props(styles.owner)}>
                 <OwnerMark t={t} />
-                <span className="truncate">{t.owner_name ?? ""}</span>
+                <span {...stylex.props(styles.ownerName)}>{t.owner_name ?? ""}</span>
               </span>
-              <span className="text-right text-[12px] text-text3">{ago(t.updated_at_ms)}</span>
+              <span {...stylex.props(styles.age)}>{ago(t.updated_at_ms)}</span>
             </button>
           );
         })}

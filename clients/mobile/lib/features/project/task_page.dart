@@ -7,7 +7,6 @@ import '../../core/widgets/dialogs.dart';
 import '../../core/widgets/widgets.dart';
 import '../../core/widgets/refresh.dart';
 import '../../data/aurelius_repository.dart';
-import '../../data/commands.dart';
 import '../../data/company.dart';
 import '../../data/views.dart';
 import '../../data/run_config.dart';
@@ -66,11 +65,9 @@ class TaskPage extends StatelessWidget {
     return BlocProvider(
       create: (context) => ProjectBloc(context.read<AureliusRepository>(), projectId),
       child: BlocConsumer<ProjectBloc, ProjectState>(
-        listenWhen: (a, b) => (b.notice != null && a.notice != b.notice) || (b.lastResult != null && a.lastResult != b.lastResult),
+        listenWhen: (a, b) => b.notice != null && a.notice != b.notice,
         listener: (context, state) {
           if (state.notice != null) toast(context, state.notice!);
-          final result = state.lastResult;
-          if (result is CommandResultTaskDiscussed) context.push('/conversation/${result.conversationId}?e=${result.employeeId}');
           context.read<ProjectBloc>().add(const ProjectNoticeShown());
         },
         builder: (context, state) {
@@ -214,11 +211,6 @@ class _TaskBody extends StatelessWidget {
               'Delegated by ${task.delegatedBy}${_parentTitle() == null ? '' : ' for “${_parentTitle()}”'}',
               style: TextStyle(color: Tokens.accentText, fontSize: 13.5),
             ),
-          ),
-        if (task.createdByApp case final app?)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text('Created via $app (aurelius-mcp)', key: const ValueKey('task-created-by-app'), style: TextStyle(color: Tokens.accentText, fontSize: 13.5)),
           ),
         for (final h in task.handoffs)
           Padding(
@@ -365,11 +357,6 @@ class _TaskBody extends StatelessWidget {
         ],
         const SizedBox(height: 24),
         Wrap(spacing: 8, runSpacing: 8, children: [
-          OutlinedButton.icon(
-            onPressed: busy ? null : () => bloc.send(Commands.discussTask(task.id)),
-            icon: const Icon(Icons.forum_outlined, size: 18),
-            label: const Text('Discuss in Chat'),
-          ),
           if (!task.isDone && !task.isTicketMain)
             OutlinedButton(
               style: OutlinedButton.styleFrom(foregroundColor: Tokens.negative),

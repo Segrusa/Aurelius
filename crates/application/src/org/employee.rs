@@ -150,8 +150,17 @@ impl CommandService {
         hash: String,
         cmd: &employee::CreateEmployee,
     ) -> Result<Committed, AppError> {
-        let (name, role, instructions) = employee::validate_fields(&cmd.name, &cmd.role, cmd.instructions.as_deref()).map_err(domain_error)?;
-        let title = employee::validate_title(cmd.title.as_deref()).map_err(domain_error)?;
+        // A start profile (C6) fills in what this command leaves out; what it says itself wins.
+        let profile = match cmd.start_profile.as_deref() {
+            Some(key) => Some(aurelius_storage::employee_profiles::find(key).ok_or_else(|| domain_error(DomainError::OutOfRange { field: "start_profile".into(), detail: format!("{key} is not a start profile") }))?),
+            None => None,
+        };
+        let instructions = cmd.instructions.as_deref().or(profile.map(|p| p.instructions));
+        let (name, role, instructions) = employee::validate_fields(&cmd.name, &cmd.role, instructions).map_err(domain_error)?;
+        let title = employee::validate_title(cmd.title.as_deref().or(profile.and_then(|p| p.title))).map_err(domain_error)?;
+        let description = employee::validate_description(cmd.description.as_deref().or(profile.map(|p| p.description))).map_err(domain_error)?;
+        let access_level = cmd.access_level.or(profile.map(|p| p.access)).unwrap_or_default().validate().map_err(domain_error)?;
+        let tool_policy = cmd.tool_policy.clone().or(profile.map(|p| p.policy())).unwrap_or_default().validate().map_err(domain_error)?;
         let workspace = match cmd.folder.as_deref().filter(|p| !p.trim().is_empty()) {
             Some(p) => Some(self.chosen_folder(p)?),
             None => None,
@@ -165,6 +174,12 @@ impl CommandService {
                 Ok(notice) => notice,
                 Err(refused) => return Ok(Err(refused)),
             };
+            employees::set_description(tx, new.employee_id, description.as_deref())?;
+            employees::set_access_level(tx, new.employee_id, access_level)?;
+            employees::set_tool_policy(tx, new.employee_id, &tool_policy)?;
+            if let Some(profile) = profile {
+                employees::set_start_profile(tx, new.employee_id, profile.key)?;
+            }
             Ok(Ok((CommandResult::EmployeeCreated { employee_id: new.employee_id, conversation_id: new.conversation_id }, vec![notice])))
         })
     }
@@ -184,8 +199,14 @@ impl CommandService {
         };
         // `None` leaves the title as it is; an empty text clears it.
         let new_title = cmd.title.as_deref().map(|t| employee::validate_title(Some(t))).transpose().map_err(domain_error)?;
+        // `None` leaves the description as it is; an empty text clears it.
+        let new_description = cmd.description.as_deref().map(|d| employee::validate_description(Some(d))).transpose().map_err(domain_error)?;
+        // `None` leaves the level as it is.
+        let access_level = cmd.access_level.map(|l| l.validate()).transpose().map_err(domain_error)?;
+        // `None` leaves the tools as they are.
+        let tool_policy = cmd.tool_policy.clone().map(|p| p.validate()).transpose().map_err(domain_error)?;
         let payload = blobs_store
-            .put_json(&serde_json::json!({ "employee_id": cmd.employee_id, "name": name, "role": role, "title": new_title, "sequential_tasks": cmd.sequential_tasks }))
+            .put_json(&serde_json::json!({ "employee_id": cmd.employee_id, "name": name, "role": role, "title": new_title, "sequential_tasks": cmd.sequential_tasks, "description": new_description, "access_level": access_level, "tool_policy": tool_policy }))
             .map_err(storage_error)?;
         let employee_id = cmd.employee_id;
         let sequential = cmd.sequential_tasks;
@@ -212,6 +233,16 @@ impl CommandService {
             let version = current.version + 1;
             let title = new_title.clone().unwrap_or(current.title.clone());
             employees::update_employee(tx, employee_id, &name, &role, title.as_deref(), instructions_blob.as_ref().map(|b| b.id.to_string()).as_deref(), version)?;
+            if let Some(description) = &new_description {
+                employees::set_description(tx, employee_id, description.as_deref())?;
+            }
+            if let Some(level) = access_level {
+                // The sessions start over by themselves: the level is in their key.
+                employees::set_access_level(tx, employee_id, level)?;
+            }
+            if let Some(policy) = &tool_policy {
+                employees::set_tool_policy(tx, employee_id, policy)?;
+            }
             // Changed instructions are a new version, and the employee's sessions start over with them.
             let (_, changed) = aurelius_storage::instruction_versions::record(tx, employee_id, aurelius_storage::instruction_versions::Source::Edited)?;
             if changed {
@@ -395,8 +426,6 @@ impl CommandService {
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
         let actor = ctx.principal_id.to_string();
-        // An app writing to the employee's chat gets the replies to it (management channel).
-        let app_key = ctx.app.as_ref().map(|a| a.key_id);
         let store = self.store.clone();
         self.commit(command_id, hash, move |tx| {
             let Some(current) = employees::load_employee(tx, employee_id)? else {
@@ -451,11 +480,6 @@ impl CommandService {
             })?;
             crate::conversation::message_images::keep(tx, message_id, &images)?;
             conv::set_message_uploads(tx, message_id, &uploads)?;
-            if chat {
-                if let Some(key) = app_key {
-                    aurelius_storage::app_keys::note_thread(tx, key, conversation_id, employee_id)?;
-                }
-            }
             let mut notices = vec![n];
             if interrupt {
                 notices.extend(crate::run::queue::interrupt_conversation(tx, &store, &meta, &command_id.to_string(), conversation_id)?);

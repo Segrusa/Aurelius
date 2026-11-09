@@ -44,7 +44,8 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
       .click();
     await expect(p.getByRole("dialog")).toHaveCount(0);
 
-    await nav("Projects").click();
+    await nav("Knowledge").click();
+    await p.getByRole("link", { name: "Projects", exact: true }).click();
     await p.getByRole("button", { name: "New project" }).first().click();
     await p.getByRole("dialog").getByLabel("Name").fill("Atlas");
     await p.getByRole("dialog").getByLabel("Project folder (required)").fill(join(daemon.dir, "atlas"));

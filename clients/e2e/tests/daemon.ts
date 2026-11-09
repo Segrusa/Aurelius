@@ -87,12 +87,16 @@ const MIME: Record<string, string> = {
 };
 
 /** Serves a build as the gateway does: a path that is no file is the app's. */
-export async function serveStatic(root: string): Promise<{ origin: string; close: () => void }> {
+export async function serveStatic(
+  root: string,
+  headers: Record<string, string> = {},
+): Promise<{ origin: string; close: () => void }> {
   const server = createHttpServer((request, response) => {
     const path = normalize(new URL(request.url ?? "/", "http://x").pathname);
     const asked = join(root, path);
     const file = path !== "/" && existsSync(asked) ? asked : join(root, "index.html");
     response.setHeader("content-type", MIME[extname(file)] ?? "application/octet-stream");
+    for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
     response.end(readFileSync(file));
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));

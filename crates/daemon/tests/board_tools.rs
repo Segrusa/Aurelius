@@ -16,7 +16,7 @@ use std::path::Path;
 use std::time::Duration;
 
 async fn hire(client: &Client, name: &str, boss: Option<EmployeeId>) -> (EmployeeId, ConversationId) {
-    let create = CreateEmployee { name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     (employee_id, conversation_id)
 }
@@ -60,10 +60,12 @@ async fn management_makes_and_starts_a_ticket_and_a_plain_agent_cannot() {
     let create = |title: &str| EmployeeTaskOp::CreateTicket { project: Some("Orbit".into()), title: title.into(), description: Some("Why.".into()), priority: Some("high".into()), labels: vec!["api".into()] };
 
     // A plain agent is refused, and nothing is written.
-    let (events, tickets) = (count(dir.path(), "SELECT COUNT(*) FROM events"), count(dir.path(), "SELECT COUNT(*) FROM tickets"));
+    // Only the ticket's own events count: the two runs of this test go on writing theirs.
+    let of_tickets = "SELECT COUNT(*) FROM events WHERE aggregate_type = 'ticket'";
+    let (events, tickets) = (count(dir.path(), of_tickets), count(dir.path(), "SELECT COUNT(*) FROM tickets"));
     let (ok, text) = bridge.employee_act(ann_run, create("By Ann")).await.unwrap();
     assert!(!ok && text.contains("Only management creates tickets"), "{text}");
-    assert_eq!((count(dir.path(), "SELECT COUNT(*) FROM events"), count(dir.path(), "SELECT COUNT(*) FROM tickets")), (events, tickets));
+    assert_eq!((count(dir.path(), of_tickets), count(dir.path(), "SELECT COUNT(*) FROM tickets")), (events, tickets));
 
     // The head of the chart makes one: Backlog, no task, no run, no job.
     let (runs, tasks, jobs) = (count(dir.path(), "SELECT COUNT(*) FROM runs"), count(dir.path(), "SELECT COUNT(*) FROM tasks"), count(dir.path(), "SELECT COUNT(*) FROM jobs WHERE kind LIKE 'ticket.%'"));
@@ -83,14 +85,14 @@ async fn management_makes_and_starts_a_ticket_and_a_plain_agent_cannot() {
     assert!(ok && read.contains("Why."), "{read}");
     let (ok, text) = bridge.employee_act(ann_run, EmployeeTaskOp::MoveTicket { ticket: "#1".into(), column: "todo".into() }).await.unwrap();
     assert!(!ok && text.contains("Only management moves"), "{text}");
-    let (ok, text) = bridge.employee_act(ann_run, EmployeeTaskOp::UpdateTicket { ticket: "#1".into(), title: Some("Ann's".into()), description: None, priority: None, labels: None }).await.unwrap();
+    let (ok, text) = bridge.employee_act(ann_run, EmployeeTaskOp::UpdateTicket { design_url: None, ticket: "#1".into(), title: Some("Ann's".into()), description: None, priority: None, labels: None }).await.unwrap();
     assert!(!ok && text.contains("you work on"), "{text}");
     for column in ["done", "doing", "review", "testing", "plan_review"] {
         let (ok, _) = bridge.employee_act(atlas_run, EmployeeTaskOp::MoveTicket { ticket: "#1".into(), column: column.into() }).await.unwrap();
         assert!(!ok, "{column}");
     }
     assert_eq!(ticket_row(dir.path(), "Export to CSV").unwrap().1, "backlog");
-    let (ok, text) = bridge.employee_act(atlas_run, EmployeeTaskOp::UpdateTicket { ticket: "#1".into(), title: Some("Export to CSV and JSON".into()), description: None, priority: None, labels: None }).await.unwrap();
+    let (ok, text) = bridge.employee_act(atlas_run, EmployeeTaskOp::UpdateTicket { design_url: None, ticket: "#1".into(), title: Some("Export to CSV and JSON".into()), description: None, priority: None, labels: None }).await.unwrap();
     assert!(ok, "{text}");
     let (ok, text) = bridge.employee_act(atlas_run, EmployeeTaskOp::MoveTicket { ticket: "#1".into(), column: "todo".into() }).await.unwrap();
     assert!(ok, "{text}");

@@ -378,7 +378,6 @@ fn source_label(event_type: &str, title: Option<String>) -> String {
         "approval.plan_rejected" | "approval.plan_revision_requested" => "Plan sent back",
         "task.cancelled" => "Part cancelled",
         "task.waiting" => "Part came back",
-        "task.variant_chosen" => "Variant chosen",
         "task.created" => "Assignment",
         "message.user_committed" => "Your message",
         "message.assistant_committed" => "Answer",

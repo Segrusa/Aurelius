@@ -61,6 +61,10 @@ pub struct UpdateProject {
     pub project_id: ProjectId,
     #[serde(default)]
     pub dispatcher: Option<SetDispatcher>,
+    /// The workspace's styleguide: a Claude Design artifact link
+    /// (`ticket::valid_artifact_url`, feature `design_links`); an empty text clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub styleguide_url: Option<String>,
 }
 
 impl UpdateCompany {

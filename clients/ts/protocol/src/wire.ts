@@ -58,8 +58,6 @@ const MESSAGE_TYPES: Record<ServerMessage["type"], true> = {
   signed_out: true,
   stream: true,
   stream_append: true,
-  terminal_exit: true,
-  terminal_output: true,
 };
 
 /** One message from the server, or null for what this client cannot read: a newer server may send more types. */

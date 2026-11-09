@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::conversation::discussion;
+use crate::run::approvals::RuntimePermission;
 use crate::task::task_runs::EmployeeAction;
 use aurelius_domain::company::{UpdateProject};
 use aurelius_domain::employee::CreateEmployee;
@@ -26,7 +27,7 @@ struct Setup {
 }
 
 fn ctx(user: Option<UserId>) -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: user }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: user }
 }
 
 fn exec(s: &Setup, command: Command) -> Result<CommandResult, AppError> {
@@ -34,7 +35,7 @@ fn exec(s: &Setup, command: Command) -> Result<CommandResult, AppError> {
 }
 
 fn hire(service: &CommandService, user: UserId, name: &str, boss: Option<EmployeeId>) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: boss, instructions: None, folder: None };
     let made = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateEmployee(create) }).unwrap().receipt.result;
     let CommandResult::EmployeeCreated { employee_id, .. } = made else { panic!("{made:?}") };
     employee_id
@@ -127,12 +128,16 @@ fn post_in_discussion(s: &Setup, run: RunId, message: &str) -> (bool, String) {
     act(s, run, EmployeeAction::PostToDiscussion { message: message.into() })
 }
 
+fn hand_off(s: &Setup, run: RunId, to: &str, message: &str) -> (bool, String) {
+    act(s, run, EmployeeAction::HandOff { to: to.into(), message: message.into() })
+}
+
 /// The runs queued for `employee` in its main chat, oldest first: (run, discussion that woke it, hop).
 fn woken(s: &Setup, employee: EmployeeId) -> Vec<(RunId, ConversationId, u32)> {
     s.service
         .store()
         .read(move |c| {
-            let chat = aurelius_storage::employees::main_chat(c, employee)?.unwrap();
+            let chat = last_chat(c, employee);
             let mut stmt = c.prepare("SELECT r.id FROM runs r WHERE r.conversation_id = ?1 ORDER BY r.rowid")?;
             let ids: Vec<String> = stmt.query_map([chat.to_string()], |r| r.get(0))?.collect::<Result<_, _>>()?;
             let mut out = Vec::new();
@@ -161,6 +166,100 @@ fn last_woken(s: &Setup, employee: EmployeeId) -> (RunId, ConversationId, u32) {
     *woken(s, employee).last().expect("woken")
 }
 
+/// The update that woke `employee` last, as its main chat has it.
+fn wake_text(s: &Setup, employee: EmployeeId) -> String {
+    messages(s, aurelius_storage_main_chat(s, employee)).into_iter().rev().find(|m| m.update.as_deref() == Some("group")).expect("an update").text
+}
+
+/// What the run of `run` is given: its system text and its turns.
+fn plan_of(s: &Setup, run: RunId) -> crate::run::plan::ChatRunPlan {
+    let payload: String = s.service.store().read(|c| Ok(c.query_row("SELECT payload_json FROM jobs WHERE id = ?1", [run.to_string()], |r| r.get(0))?)).unwrap();
+    s.service.prepare_chat_run(&serde_json::from_str(&payload).unwrap()).unwrap().expect("a plan")
+}
+
+#[test]
+fn a_non_lead_is_woken_with_a_scoped_view_and_the_lead_with_the_whole_thread() {
+    let s = setup();
+    send(&s, None, "@Ann please look at the logs").unwrap();
+    send(&s, None, "@Bo what about the release date").unwrap();
+    send(&s, None, "@Ann and @Cy, one more thing").unwrap();
+
+    // Ann is no lead: what named her, and how much she misses.
+    let ann = wake_text(&s, s.ann);
+    assert!(ann.contains("please look at the logs"), "{ann}");
+    assert!(!ann.contains("release date"), "not addressed to her: {ann}");
+    assert!(ann.contains("Other messages in this thread, not shown here: 1. read_group_chat reads them."), "{ann}");
+    assert!(ann.contains("The lead of this thread is @Atlas."), "{ann}");
+
+    // The CEO leads the general channel: everything, with no note.
+    send(&s, None, "And what does the boss think?").unwrap();
+    let ceo = wake_text(&s, s.ceo);
+    assert!(ceo.contains(r#""text":"@Ann please look at the logs"}"#) && ceo.contains(r#""board_member":true"#) && ceo.contains("release date"), "{ceo}");
+    assert!(!ceo.contains("Scoped view") && ceo.contains("You are the lead of this thread"), "{ceo}");
+}
+
+#[test]
+fn the_owner_of_a_ticket_without_a_responsible_leads_and_sees_all_of_it() {
+    let s = setup();
+    let ticket = new_ticket(&s, "Alone", Some(s.ann));
+    post(&s, ticket, "@Ann first question").unwrap();
+    post(&s, ticket, "A thought in passing").unwrap();
+    post(&s, ticket, "@Ann second question").unwrap();
+    let ann = wake_text(&s, s.ann);
+    assert!(ann.contains("first question") && ann.contains("in passing") && !ann.contains("Scoped view"), "{ann}");
+    assert!(ann.contains("You are the lead of this thread"), "{ann}");
+}
+
+#[test]
+fn the_full_thread_stays_readable_with_the_tool() {
+    let s = setup();
+    send(&s, None, "@Bo private to Bo").unwrap();
+    let (_, runs) = send(&s, None, "@Ann your turn").unwrap();
+    assert!(!wake_text(&s, s.ann).contains("private to Bo"));
+    let (ok, text) = act(&s, runs[0], EmployeeAction::ReadGroupChat { last: None, channel: None });
+    assert!(ok && text.contains("private to Bo") && text.contains("your turn"), "{text}");
+}
+
+#[test]
+fn the_platform_rules_and_the_roster_are_in_the_system_text() {
+    let s = setup();
+    let (_, runs) = send(&s, None, "@Ann hello").unwrap();
+    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { access_level: None, tool_policy: None, description: Some("Reviews Rust.".into()), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None })).unwrap();
+    let system = plan_of(&s, runs[0]).system.unwrap();
+    assert!(system.starts_with(crate::run::plan::PLATFORM_RULES), "{system}");
+    assert!(system.contains("- @Bo (Dev): Reviews Rust."), "the description: {system}");
+    assert!(system.contains("- @Cy (Dev)"), "{system}");
+}
+
+#[test]
+fn a_description_falls_back_to_the_first_instruction_line_and_can_be_cleared() {
+    let s = setup();
+    let update = |description: Option<&str>, instructions: Option<&str>| {
+        exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { access_level: None, tool_policy: None, description: description.map(str::to_owned), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: instructions.map(str::to_owned), sequential_tasks: None })).unwrap();
+    };
+    update(None, Some("\nGuards the release.\nMore detail."));
+    let roster = |s: &Setup| {
+        let (_, runs) = send(s, None, "@Ann hello").unwrap();
+        let system = plan_of(s, *runs.last().unwrap()).system.unwrap();
+        system.lines().find(|l| l.starts_with("- @Bo")).unwrap().to_owned()
+    };
+    assert_eq!(roster(&s), "- @Bo (Dev): Guards the release.");
+    update(Some("  Reviews   Rust. "), Some("\nGuards the release."));
+    assert!(roster(&s).ends_with(": Reviews Rust."), "trimmed on one line");
+    update(Some(""), Some("\nGuards the release."));
+    assert!(roster(&s).ends_with(": Guards the release."), "cleared");
+    let too_long = "x".repeat(161);
+    assert!(exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { access_level: None, tool_policy: None, description: Some(too_long), employee_id: s.bo, name: "Bo".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: None })).is_err());
+}
+
+#[test]
+fn a_message_that_woke_the_run_is_marked_new() {
+    let s = setup();
+    let (_, runs) = send(&s, None, "@Ann start").unwrap();
+    let turn = plan_of(&s, runs[0]).turns.last().unwrap().text.clone();
+    assert!(turn.starts_with("[Group chat · from Owner] (new)\n"), "{turn}");
+}
+
 #[test]
 fn the_general_channel_wakes_the_ceo_and_a_project_channel_its_dispatcher() {
     let s = setup();
@@ -175,7 +274,7 @@ fn the_general_channel_wakes_the_ceo_and_a_project_channel_its_dispatcher() {
     assert_eq!(to, vec![s.ceo]);
     assert_eq!(last_woken(&s, s.ceo), (runs[0], orbit, 0));
     // With a dispatcher for the project: that one.
-    exec(&s, Command::UpdateProject(UpdateProject { project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: Some(s.bo) }) })).unwrap();
+    exec(&s, Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: Some(s.bo) }) })).unwrap();
     let (to, _) = send(&s, Some(orbit), "And now?").unwrap();
     assert_eq!(to, vec![s.bo]);
     let update = messages(&s, aurelius_storage_main_chat(&s, s.bo)).into_iter().last().unwrap();
@@ -204,8 +303,20 @@ fn the_general_channel_wakes_the_ceo_and_a_project_channel_its_dispatcher() {
     assert!(messages(&s, discussion).iter().any(|m| m.text == "x"));
 }
 
+/// The conversation `employee` was last woken in: its own for that thread (R6), else its main chat.
 fn aurelius_storage_main_chat(s: &Setup, employee: EmployeeId) -> ConversationId {
-    s.service.store().read(move |c| aurelius_storage::employees::main_chat(c, employee)).unwrap().unwrap()
+    s.service.store().read(move |c| Ok(last_chat(c, employee))).unwrap()
+}
+
+fn last_chat(c: &rusqlite::Connection, employee: EmployeeId) -> ConversationId {
+    let id: String = c
+        .query_row(
+            "SELECT id FROM conversations WHERE employee_id = ?1 AND kind = 'employee' AND quick_answer = 0 ORDER BY thread_key IS NOT NULL DESC, created_at_ms DESC, rowid DESC LIMIT 1",
+            [employee.to_string()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    ConversationId::parse(&id).unwrap()
 }
 
 #[test]
@@ -287,7 +398,7 @@ fn without_a_mention_a_ticket_goes_to_its_owner_in_the_main_task() {
     // The owner has no entry in `run_ids` (that run is the task's): `to` is longer.
     let (to, runs) = post(&s, t, "Please also check the logout.").unwrap();
     assert_eq!((to, runs), (vec![s.ann], vec![]));
-    assert_eq!(runs_in(&s).len(), 1, "no extra run while one is queued");
+    assert_eq!(runs_in(&s).len(), 2, "queued behind it: the worker takes them together");
     let note = messages(&s, root_conversation).into_iter().last().unwrap();
     assert_eq!((note.update.as_deref(), note.author.as_deref()), (Some("message"), Some("grace")));
     assert!(note.text.starts_with("Please also check the logout.") && note.text.contains("post_to_discussion"), "{}", note.text);
@@ -341,9 +452,9 @@ fn an_answer_in_the_discussion_reaches_an_owner_whose_report_asks_a_question() {
     // The task stays in Review until that run reports again.
     assert_eq!(task_status(&s, root), TaskStatus::Review);
     assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
-    // A second answer while that run is queued: no extra run.
+    // A second answer while that run is queued waits too; the worker takes them together.
     post(&s, t, "And show it on mobile too.").unwrap();
-    assert_eq!(runs_in(&s).len(), 1);
+    assert_eq!(runs_in(&s).len(), 2);
 }
 
 /// A started ticket whose owner works in Auto: its main task, that task's conversation and its run.
@@ -574,20 +685,19 @@ fn hops_stop_at_max_and_leave_a_system_line_that_wakes_nobody() {
     let names = [("Bo", s.bo), ("Ann", s.ann)];
     for hop in 1..=MAX_HOPS {
         let (name, who) = names[(hop as usize + 1) % 2];
-        let (ok, text) = post_in_channel(&s, run, None, &format!("@{name} your turn"));
+        let (ok, text) = hand_off(&s, run, name, "Your turn: check the release notes and report back.");
         assert!(ok && text.contains(&format!("{name} will answer")), "hop {hop}: {text}");
         let (next, conversation, at) = last_woken(&s, who);
         assert_eq!((conversation, at), (general, hop));
         run = next;
     }
     let before = (woken(&s, s.ann).len(), woken(&s, s.bo).len());
-    // Bo (at hop MAX_HOPS) names Ann and Cy: neither is woken.
-    let (ok, text) = post_in_channel(&s, run, None, "@Ann @Cy again");
-    assert!(ok && text.contains("Limit reached") && text.contains("will not be woken"), "{text}");
+    // Bo (at hop MAX_HOPS) cannot hand over any more.
+    let (ok, text) = hand_off(&s, run, "Ann", "One more.");
+    assert!(!ok && text.contains("Limit reached") && text.contains("will not be woken"), "{text}");
     assert_eq!((woken(&s, s.ann).len(), woken(&s, s.bo).len()), before, "nobody past MAX_HOPS");
-    assert!(woken(&s, s.cy).is_empty());
     let lines = system_lines(&s, general);
-    assert!(lines.contains(&(SystemLineKind::Limit, "Limit reached: Ann, Cy was not woken.".into())), "{lines:?}");
+    assert!(lines.contains(&(SystemLineKind::Limit, "Limit reached: Ann was not woken.".into())), "{lines:?}");
     // The system line itself names them, and is not part of what employees read.
     let read = act(&s, run, EmployeeAction::ReadGroupChat { last: None, channel: None }).1;
     assert!(!read.contains("Limit reached"), "{read}");
@@ -619,30 +729,30 @@ fn waking_posts_are_capped_per_run_and_per_hour_over_three_discussions_together(
     let orbit = channel(&s, s.project);
     let t = new_ticket(&s, "Login", None);
     let d = ticket_view(&s, t).conversation_id.unwrap();
-    // Per run: WAKING_POSTS_PER_RUN waking posts, also when they go to different discussions.
+    // Per run: WAKING_POSTS_PER_RUN handoffs.
     let (_, runs) = send(&s, None, "@Ann hi").unwrap();
     let run = runs[0];
-    assert!(post_in_channel(&s, run, None, "@Bo one").1.contains("Bo will answer"));
-    assert!(post_in_channel(&s, run, Some("Orbit"), "@Bo two").1.contains("Bo will answer"));
+    assert!(hand_off(&s, run, "Bo", "One.").1.contains("Bo will answer"));
+    assert!(hand_off(&s, run, "Bo", "Two.").1.contains("Bo will answer"));
     assert_eq!(WAKING_POSTS_PER_RUN, 2);
-    let (ok, text) = post_in_channel(&s, run, Some("General"), "@Bo three");
-    assert!(ok && text.contains("Limit reached") && text.contains("in this run"), "{text}");
+    let (ok, text) = hand_off(&s, run, "Bo", "Three.");
+    assert!(!ok && text.contains("Limit reached") && text.contains("in this run"), "{text}");
     // Per hour: Ann's runs from three discussions share one budget of WAKING_POSTS_PER_WINDOW.
     let (_, r_orbit) = send(&s, Some(orbit), "@Ann hi").unwrap();
     let (_, r_ticket) = post(&s, t, "@Ann hi").unwrap();
     let (_, r_general) = send(&s, None, "@Ann again").unwrap();
     assert_eq!(WAKING_POSTS_PER_WINDOW, 4);
     // Two waking posts so far (in `run`); two more from two other discussions...
-    assert!(post_in_channel(&s, r_orbit[0], None, "@Cy look").1.contains("Cy will answer"));
-    assert!(post_in_discussion(&s, r_ticket[0], "@Cy look").1.contains("Cy will answer"));
+    assert!(hand_off(&s, r_orbit[0], "Cy", "Look.").1.contains("Cy will answer"));
+    assert!(hand_off(&s, r_ticket[0], "Cy", "Look.").1.contains("Cy will answer"));
     // ...and the fifth, in a third discussion, is refused.
-    let (ok, text) = post_in_channel(&s, r_general[0], None, "@Cy and here");
-    assert!(ok && text.contains("Limit reached") && text.contains("last hour") && text.contains("all channels and tickets together"), "{text}");
+    let (ok, text) = hand_off(&s, r_general[0], "Cy", "And here.");
+    assert!(!ok && text.contains("Limit reached") && text.contains("last hour") && text.contains("all channels and tickets together"), "{text}");
     for conversation in [general, orbit, d] {
         assert!(!messages(&s, conversation).is_empty());
     }
     assert!(system_lines(&s, general).iter().any(|(k, text)| *k == SystemLineKind::Limit && text == "Limit reached: Cy was not woken."));
-    // A post without @ still goes through.
+    // A post still goes through: it wakes nobody.
     let (ok, text) = post_in_channel(&s, r_general[0], None, "No mention.");
     assert_eq!((ok, text.as_str()), (true, "Posted in the group chat."));
 }
@@ -744,12 +854,13 @@ fn a_ticket_made_from_a_message_links_both_ways_and_wakes_nobody() {
     let hello = sent_message(&s, None, "And a PDF export?");
     let (_, n) = ticket_from(&s, Some(hello), Some(s.user)).unwrap();
     assert!(system_lines(&s, general).contains(&(SystemLineKind::TicketCreated, format!("grace created #{n} from a message"))));
-    let chat = aurelius_storage_main_chat(&s, s.ann);
-    let (ann_ticket, _) = {
+    let (ann_ticket, chat, _) = {
         let (_, runs) = send(&s, None, "@Ann what about XML?").unwrap();
         assert!(!runs.is_empty());
+        let chat = aurelius_storage_main_chat(&s, s.ann);
         let update = messages(&s, chat).into_iter().rev().find(|m| m.update.is_some()).expect("an update in Ann's chat").id;
-        ticket_from(&s, Some(update), Some(s.user)).unwrap()
+        let (ticket, number) = ticket_from(&s, Some(update), Some(s.user)).unwrap();
+        (ticket, chat, number)
     };
     let first = messages(&s, ticket_view(&s, ann_ticket).conversation_id.unwrap()).into_iter().next().unwrap();
     assert!(first.text.contains("in Ann's chat"), "{}", first.text);
@@ -854,7 +965,7 @@ fn a_message_for_an_owner_whose_main_task_waits_its_turn_runs_nothing_and_comes_
         })
         .unwrap();
     let ann = ticket_view(&s, a).owner_employee_id.unwrap();
-    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { employee_id: ann, name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: Some(true) })).unwrap();
+    exec(&s, Command::UpdateEmployee(aurelius_domain::employee::UpdateEmployee { access_level: None, tool_policy: None, description: None, employee_id: ann, name: "Ann".into(), role: "Dev".into(), title: None, instructions: None, sequential_tasks: Some(true) })).unwrap();
     // The colleague is done: A waits for its turn behind B (as after Send back with a busy owner).
     let st = s.service.store().clone();
     s.service.store().write(move |tx| crate::task::task_runs::continue_when_done(tx, &st, root_a)).unwrap();
@@ -936,19 +1047,19 @@ fn a_waiting_main_task_takes_the_message_without_resuming() {
 
 #[test]
 fn only_colleagues_that_can_be_woken_use_the_waking_budget() {
-    // Trace m4: a named colleague without a main chat wakes nobody, so the post uses no budget.
+    // Trace m4: a colleague without a main chat cannot be handed to, and that uses no budget.
     let s = setup();
     let (cy, project) = (s.cy, s.project);
     s.service.store().write(move |tx| Ok(tx.execute("UPDATE conversations SET kind = 'task', project_id = ?2 WHERE employee_id = ?1 AND kind = 'employee'", [cy.to_string(), project.to_string()])?)).unwrap();
     let (_, runs) = send(&s, None, "@Ann hi").unwrap();
     let run = runs[0];
     for _ in 0..WAKING_POSTS_PER_RUN + 1 {
-        let (ok, text) = post_in_channel(&s, run, None, "@Cy look");
-        assert!(ok && !text.contains("Limit reached"), "{text}");
+        let (ok, text) = hand_off(&s, run, "Cy", "Look.");
+        assert!(!ok && !text.contains("Limit reached"), "{text}");
     }
-    assert!(post_in_channel(&s, run, None, "@Bo one").1.contains("Bo will answer"));
-    assert!(post_in_channel(&s, run, None, "@Bo two").1.contains("Bo will answer"));
-    assert!(post_in_channel(&s, run, None, "@Bo three").1.contains("Limit reached"));
+    assert!(hand_off(&s, run, "Bo", "One.").1.contains("Bo will answer"));
+    assert!(hand_off(&s, run, "Bo", "Two.").1.contains("Bo will answer"));
+    assert!(hand_off(&s, run, "Bo", "Three.").1.contains("Limit reached"));
 }
 
 #[test]
@@ -1177,7 +1288,7 @@ fn quick_answers_stop_at_the_hourly_cost_cap_and_the_busy_line_stays() {
         .write(move |tx| {
             tx.execute("UPDATE runs SET status = 'succeeded' WHERE id = ?1", [run.to_string()])?;
             let event: String = tx.query_row("SELECT id FROM events LIMIT 1", [], |r| r.get(0))?;
-            let usage = aurelius_storage::usage::NewUsage { input_tokens: 1, output_tokens: 1, cached_tokens: 0, cache_creation_tokens: 0, cost_micro_usd: Some(aurelius_domain::group_chat::QUICK_ANSWER_COST_PER_HOUR_MICRO), estimate: true };
+            let usage = aurelius_storage::usage::NewUsage { input_tokens: 1, output_tokens: 1, cached_tokens: 0, cache_creation_tokens: 0, cost_micro_usd: Some(aurelius_domain::group_chat::QUICK_ANSWER_COST_PER_HOUR_MICRO), estimate: true, model_calls: 1 };
             aurelius_storage::usage::insert(tx, run, aurelius_domain::EventId::parse(&event).unwrap(), &usage)
         })
         .unwrap();
@@ -1204,3 +1315,130 @@ fn a_message_to_a_busy_owner_gets_a_quick_answer_in_the_ticket() {
     let after = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap().len();
     assert!(after >= before);
 }
+
+// ---- run cards, interrupt cards and the odometer (U1, U2, U4) ----
+
+fn set_running(s: &Setup, run: RunId, started_at_ms: i64) {
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute("UPDATE runs SET status = 'running', started_at_ms = ?2 WHERE id = ?1", rusqlite::params![run.to_string(), started_at_ms])?;
+            Ok(tx.execute("UPDATE jobs SET state = 'leased', lease_owner = 'test', lease_until_ms = 0 WHERE id = ?1", [run.to_string()])?)
+        })
+        .unwrap();
+}
+
+fn record_usage(s: &Setup, run: RunId, input: u64, login: Option<UserId>) {
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute("UPDATE runs SET login_user = ?2 WHERE id = ?1", rusqlite::params![run.to_string(), login.map(|u| u.to_string())])?;
+            let event: String = tx.query_row("SELECT id FROM events LIMIT 1", [], |r| r.get(0))?;
+            let usage = aurelius_storage::usage::NewUsage { input_tokens: input, output_tokens: 1, cached_tokens: 0, cache_creation_tokens: 0, cost_micro_usd: Some(10), estimate: false, model_calls: 2 };
+            aurelius_storage::usage::insert(tx, run, aurelius_domain::EventId::parse(&event).unwrap(), &usage)
+        })
+        .unwrap();
+}
+
+#[test]
+fn a_post_names_its_run_and_only_the_last_post_of_a_run_has_its_card() {
+    let s = setup();
+    let (t, _, _, _) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.expect("a discussion");
+    let (_, runs) = post(&s, t, "@Bo please look").unwrap();
+    let run = runs[0];
+    set_running(&s, run, 1);
+    assert!(post_in_discussion(&s, run, "First finding.").0);
+    assert!(post_in_discussion(&s, run, "Second finding.").0);
+    record_usage(&s, run, 40, None);
+
+    let all = messages(&s, d);
+    let of = |start: &str| all.iter().find(|m| m.text.starts_with(start)).unwrap().clone();
+    let (first, second) = (of("First finding."), of("Second finding."));
+    assert_eq!((first.run_id, second.run_id), (Some(run), Some(run)), "the run is read from the post's own meta");
+    assert_eq!(first.run, None, "one card per run: on its last post");
+    assert_eq!(first.usage, None);
+    let card = second.run.expect("a card on the last post");
+    assert_eq!((card.status.as_str(), card.tool_calls, card.failed_calls), ("running", 0, 0));
+    assert_eq!(second.usage.map(|u| (u.input_tokens, u.model_calls)), Some((40, 2)));
+    assert!(!second.awaiting_user);
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::conversations::activity_for_run(c, run)).unwrap().calls.len(), 0);
+}
+
+#[test]
+fn an_open_question_of_a_woken_run_is_on_its_ticket_and_marks_its_post() {
+    let s = setup();
+    let (t, _, _, _) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.expect("a discussion");
+    let (_, runs) = post(&s, t, "@Bo which format?").unwrap();
+    let run = runs[0];
+    set_running(&s, run, 1);
+    assert!(post_in_discussion(&s, run, "Looking into it.").0);
+    assert!(!messages(&s, d).iter().any(|m| m.awaiting_user));
+
+    let input = serde_json::json!({ "questions": [{ "question": "Which format?", "header": "Format", "multiSelect": false, "options": [] }] });
+    let RuntimePermission::Pending { approval_id, .. } = s.service.request_runtime_permission(run, Some("q1".into()), "AskUserQuestion", &input).unwrap() else { panic!("a question waits") };
+
+    assert!(messages(&s, d).iter().find(|m| m.text == "Looking into it.").unwrap().awaiting_user, "the post stands for the waiting run");
+    let st = s.service.store().clone();
+    let listed = s.service.store().read(move |c| aurelius_storage::approvals::list_approvals(c, None, &|k| st.blobs().read(k).ok().and_then(|b| String::from_utf8(b).ok()))).unwrap();
+    let a = listed.iter().find(|a| a.id == approval_id).expect("listed");
+    assert_eq!((a.ticket_id, a.discussion_id), (Some(t), Some(d)));
+}
+
+#[test]
+fn a_reported_line_finds_its_run_and_a_post_that_ended_on_a_question_waits() {
+    let s = setup();
+    let (t, root, _, run) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.expect("a discussion");
+    set_running(&s, run, 1);
+    assert!(post_in_discussion(&s, run, "Shall I go on?").0);
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE tasks SET status = 'waiting', waiting_reason = 'input' WHERE id = ?1", [root.to_string()])?)).unwrap();
+    assert!(messages(&s, d).iter().find(|m| m.text == "Shall I go on?").unwrap().awaiting_user);
+
+    s.service
+        .store()
+        .write(move |tx| {
+            let mut line = SystemLine::new(SystemLineKind::Reported);
+            line.task_id = Some(root);
+            discussion::ticket_line(tx, t, line, "Ann reported back")?;
+            Ok(())
+        })
+        .unwrap();
+    let all = messages(&s, d);
+    let line = all.iter().rfind(|m| m.system.as_ref().is_some_and(|l| l.kind == SystemLineKind::Reported)).unwrap();
+    assert_eq!(line.run_id, Some(run));
+    assert_eq!(line.run.as_ref().map(|c| c.status.as_str()), Some("running"), "the card goes to the line, the run's last word");
+    assert_eq!(all.iter().find(|m| m.text == "Shall I go on?").unwrap().run, None);
+}
+
+#[test]
+fn the_odometer_counts_a_tickets_tasks_and_its_discussion_and_each_login() {
+    let s = setup();
+    let (t, _, _, main) = started_ticket(&s);
+    let (_, woken) = post(&s, t, "@Bo please look").unwrap();
+    record_usage(&s, main, 100, Some(s.user));
+    record_usage(&s, woken[0], 30, None);
+
+    let totals = s.service.store().read(move |c| aurelius_storage::usage::ticket_totals(c, t)).unwrap();
+    assert_eq!((totals.total.runs, totals.total.input_tokens, totals.total.model_calls, totals.total.cost_micro_usd), (2, 130, 4, Some(20)));
+    let empty = new_ticket(&s, "Idle", None);
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::usage::ticket_totals(c, empty)).unwrap().total.runs, 0);
+
+    let snapshot = s.service.store().read(|c| aurelius_storage::usage::snapshot(c, |_| 0)).unwrap();
+    let grace = snapshot.by_user.iter().find(|r| r.username.as_deref() == Some("grace")).expect("grace's login");
+    assert_eq!((grace.runs, grace.input_tokens), (1, 100));
+    assert!(snapshot.by_user.iter().any(|r| r.login_user.is_none() && r.input_tokens == 30), "no one's login is a row too");
+
+    // A channel counts the runs it woke, whose conversation is the employee's own.
+    let general = general(&s);
+    let (_, runs) = send(&s, None, "@Bo a quick one").unwrap();
+    record_usage(&s, runs[0], 7, None);
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::usage::conversation_totals(c, general)).unwrap().total.input_tokens, 7);
+}
+
+#[path = "handoff_tests.rs"]
+mod handoff_tests;
+
+#[path = "scheduled_tests.rs"]
+mod scheduled_tests;

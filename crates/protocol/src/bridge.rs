@@ -196,8 +196,8 @@ pub enum EmployeeTaskOp {
         #[serde(default)]
         labels: Vec<String>,
     },
-    /// Change a ticket's title, description, priority or labels (the bridge's `update_ticket`):
-    /// management, or the employee who works on the ticket.
+    /// Change a ticket's title, description, priority, labels or design link (the bridge's
+    /// `update_ticket`): management, or the employee who works on the ticket.
     UpdateTicket {
         ticket: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,6 +208,9 @@ pub enum EmployeeTaskOp {
         priority: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         labels: Option<Vec<String>>,
+        /// A Claude Design artifact link; an empty text clears it (feature `design_links`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        design_url: Option<String>,
     },
     /// Start a ticket (the bridge's `move_ticket`): management moves Backlog → Todo; every other
     /// move is refused (a board member's decision, or the work's own).
@@ -215,6 +218,18 @@ pub enum EmployeeTaskOp {
     /// A message in a ticket's discussion (the bridge's `post_to_ticket`), as `post_to_group_chat`
     /// does in a channel.
     PostToTicket { ticket: String, message: String },
+    /// A message to itself or a colleague later (the bridge's `schedule_message`): `delay` as
+    /// `10m`, `2h`, `1d`; `to` a name, none for itself. It comes back in the run's thread.
+    ScheduleMessage { delay: String, content: String, #[serde(default, skip_serializing_if = "Option::is_none")] to: Option<String> },
+    /// Replace the employee's own note (the bridge's `scratchpad`), which is in its prompt at every run.
+    Scratchpad { content: String },
+    /// Hand the work in the run's thread to a colleague (the bridge's `hand_off`): `to`
+    /// a name, `message` self-contained. Waits while the sender has unread items (R5).
+    HandOff { to: String, message: String },
+    /// Send the responsible board member of the run's ticket a message in their chat with
+    /// this employee (the bridge's `tell_responsible`), with a link to the ticket. Marked
+    /// unread there; it starts no run and completes nothing.
+    TellResponsible { message: String },
 }
 
 fn yes() -> bool {
@@ -310,6 +325,10 @@ mod tests {
             UpdateTicket { .. } => "update_ticket",
             MoveTicket { .. } => "move_ticket",
             PostToTicket { .. } => "post_to_ticket",
+            HandOff { .. } => "hand_off",
+            TellResponsible { .. } => "tell_responsible",
+            ScheduleMessage { .. } => "schedule_message",
+            Scratchpad { .. } => "scratchpad",
         }
     }
 

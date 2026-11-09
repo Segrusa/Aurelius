@@ -97,9 +97,6 @@ pub struct CreateTask {
     pub goal: String,
     #[serde(default)]
     pub acceptance_criteria: Vec<String>,
-    /// Tasks that must succeed first.
-    #[serde(default)]
-    pub depends_on: Vec<TaskId>,
     /// How the task's conversation runs; unset fields follow the employee.
     #[serde(default, skip_serializing_if = "RunSettings::is_empty")]
     pub run: RunSettings,
@@ -129,11 +126,6 @@ pub struct RunSettings {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
-    /// Try the task in this many ways first (1 to 3; feature `task_variants`, when
-    /// the server's setting is on and the work folder is a git repository).
-    /// Left out or 1: no variants.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variants: Option<u8>,
     // Never sent with a task; only a new chat's start fills them.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[schemars(skip)]
@@ -164,8 +156,7 @@ impl RunSettings {
         if effort.as_ref().is_some_and(|e| !crate::connection::EFFORT_LEVELS.contains(&e.as_str())) {
             return Err(DomainError::OutOfRange { field: "effort".into(), detail: crate::connection::EFFORT_LEVELS.join(", ") });
         }
-        let variants = self.variants.map(crate::variants::validate_count).transpose()?.filter(|n| *n > 1);
-        Ok(RunSettings { mode: self.mode, connection_id: self.connection_id, model, effort, variants, browser_allowed: self.browser_allowed, screen_allowed: self.screen_allowed })
+        Ok(RunSettings { mode: self.mode, connection_id: self.connection_id, model, effort, browser_allowed: self.browser_allowed, screen_allowed: self.screen_allowed })
     }
 }
 
@@ -199,25 +190,6 @@ pub fn validate(cmd: &CreateTask) -> Result<ValidTask, DomainError> {
         return Err(DomainError::OutOfRange { field: "acceptance_criteria".into(), detail: format!("at most {MAX_CRITERIA}") });
     }
     Ok(ValidTask { title, goal, criteria })
-}
-
-/// True if adding `task → requires` would create a cycle, given existing edges.
-pub fn creates_cycle(edges: &[(TaskId, TaskId)], task: TaskId, requires: TaskId) -> bool {
-    if task == requires {
-        return true;
-    }
-    // Is `task` reachable from `requires`?
-    let mut stack = vec![requires];
-    let mut seen = std::collections::HashSet::new();
-    while let Some(node) = stack.pop() {
-        if node == task {
-            return true;
-        }
-        if seen.insert(node) {
-            stack.extend(edges.iter().filter(|(from, _)| *from == node).map(|(_, to)| *to));
-        }
-    }
-    false
 }
 
 /// Most hand-overs of one task (no ping-pong between employees).
@@ -306,15 +278,6 @@ mod tests {
         // The review gate: success only through Review, a draft never runs or reports directly.
         assert!(!can_transition(Waiting, Succeeded) && !can_transition(Draft, Running) && !can_transition(Draft, Review));
         assert!(!can_transition(Running, Draft) && !can_transition(Review, Draft), "a working or reported task is not a draft again");
-    }
-
-    #[test]
-    fn dependency_cycles_are_detected() {
-        let (a, b, c) = (TaskId::new(), TaskId::new(), TaskId::new());
-        let edges = vec![(a, b), (b, c)];
-        assert!(creates_cycle(&edges, c, a));
-        assert!(!creates_cycle(&edges, a, c));
-        assert!(creates_cycle(&edges, a, a));
     }
 
     #[test]

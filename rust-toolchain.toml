@@ -1,5 +1,4 @@
 [toolchain]
-# Verified with gpui-kit 0.7.0 (requires >= 1.92).
 channel = "1.99.0"
 components = ["rustfmt", "clippy"]
 profile = "minimal"

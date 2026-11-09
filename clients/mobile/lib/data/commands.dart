@@ -113,18 +113,6 @@ abstract final class Commands {
         text: text,
       ));
 
-  static Map<String, dynamic> shareMessage(String conversationId, String messageId, {required String targetKind, required String targetId, required ShareMode mode}) =>
-      shareCreate(ShareMessage(
-        conversationId: conversationId,
-        messageId: messageId,
-        mode: mode,
-        target: targetKind == 'employee' ? ShareTargetEmployee(id: targetId) : ShareTargetProject(id: targetId),
-      ));
-
-  static Map<String, dynamic> discussTask(String taskId) => taskDiscuss(DiscussTask(taskId: taskId));
-
-  static Map<String, dynamic> revokeShare(String shareId) => shareRevoke(RevokeShare(shareId: shareId));
-
   static Map<String, dynamic> createProject(String name, {String? description}) =>
       projectCreate(CreateProject(name: name, description: description));
 
@@ -166,23 +154,19 @@ abstract final class Commands {
   static Map<String, dynamic> setEmployeeStatus(String employeeId, LifecycleStatus status) =>
       employeeSetStatus(SetEmployeeStatus(employeeId: employeeId, status: status));
 
-  /// `every_minutes` 0 turns the heartbeat off.
-  static Map<String, dynamic> setHeartbeat(String employeeId, int everyMinutes, {int? dailyTokenBudget}) =>
-      heartbeatSet(SetHeartbeat(dailyTokenBudget: dailyTokenBudget, everyMinutes: everyMinutes, employeeId: employeeId));
-
   /// Give a task to an employee; `null` makes it a draft again.
   static Map<String, dynamic> assignTask(String taskId, String? employeeId) => taskAssign(AssignTask(employeeId: employeeId, taskId: taskId));
 
   /// [run]: mode, connection_id, model, effort of the task's conversation (see [TaskRun.choices]); unset follows the employee.
-  /// [files]: upload paths of attached files. [variants] 2 or 3 tries the task that many ways first (feature `task_variants`).
-  static Map<String, dynamic> createTask(String projectId, String title, String goal, List<String> criteria, {String? employeeId, Map<String, String>? run, List<String> files = const [], int variants = 1}) =>
+  /// [files]: upload paths of attached files.
+  static Map<String, dynamic> createTask(String projectId, String title, String goal, List<String> criteria, {String? employeeId, Map<String, String>? run, List<String> files = const []}) =>
       taskCreate(CreateTask(
         acceptanceCriteria: criteria,
         files: files,
         goal: goal,
         employeeId: employeeId,
         projectId: projectId,
-        run: withVariants(taskRunOf(run), variants),
+        run: taskRunOf(run),
         title: title,
       ));
 
@@ -252,14 +236,6 @@ abstract final class Commands {
   static Map<String, dynamic> deleteIdea(String ideaId) => ideaDelete(DeleteIdea(ideaId: ideaId));
 
   static Map<String, dynamic> setIdeaStatus(String ideaId, IdeaStatus status) => ideaSetStatus(SetIdeaStatus(ideaId: ideaId, status: status));
-
-  /// Take variant [variant] of a task whose variants are ready; null takes the judge's pick. Needs the Approve right.
-  static Map<String, dynamic> chooseVariant(String taskId, {int? variant}) => taskChooseVariant(ChooseTaskVariant(taskId: taskId, variant: variant));
-
-  /// [run] with `variants` set when more than one; 1 sends nothing, as older servers expect.
-  static TaskRun? withVariants(TaskRun? run, int variants) => variants <= 1
-      ? run
-      : TaskRun(connectionId: run?.connectionId, effort: run?.effort, mode: run?.mode, model: run?.model, variants: variants);
 
   static Map<String, dynamic> cancelTask(String taskId) => taskCancel(CancelTask(taskId: taskId));
 

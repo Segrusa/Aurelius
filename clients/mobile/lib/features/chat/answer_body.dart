@@ -1,4 +1,3 @@
-import '../../app/mobile_core.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -9,7 +8,6 @@ import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/views.dart';
-import '../artifacts/artifacts.dart';
 import '../connection/connection_bloc.dart';
 import '../markdown/links.dart';
 import 'chat_view.dart';
@@ -263,14 +261,6 @@ class _ActivityCardState extends State<ActivityCard> {
       'Grep' => ('Searched in files: ${a.field('pattern')}', 'Grep', a.field('pattern')),
       'WebSearch' => ('Searched the web: ${a.field('query')}', 'Web search', a.field('query')),
       'WebFetch' => ('Opened ${a.field('url')}', 'Web fetch', a.field('url')),
-      'Artifact' when isArtifactPublish(a) => (
-          a.ok == true ? 'Published an artifact: ${artifactTitle(a)}' : 'Publishing an artifact: ${artifactTitle(a)}',
-          'Artifact',
-          a.field('url').isNotEmpty ? a.field('url') : a.field('file_path'),
-        ),
-      'Artifact' => ('Artifact: ${a.field('action')}', 'Artifact', a.field('url')),
-      'ArtifactData' => ('Artifact data: ${a.field('action')}', 'ArtifactData', a.field('url')),
-      'ArtifactComments' => ('Artifact comments: ${a.field('action')}', 'ArtifactComments', a.field('url')),
       'Task' || 'Agent' => (described('A subagent'), 'Subagent', a.field('prompt')),
       'mcp__aurelius__screenshot' => (switch ((a.field('window'), a.inputValue('monitor'))) {
           (final w, _) when w.isNotEmpty => 'Screenshot of window "$w"',
@@ -298,7 +288,6 @@ class _ActivityCardState extends State<ActivityCard> {
     final (summary, tool, code) = _label(a);
     final output = a.tool == 'WebSearch' ? webSearchSummary(a.output ?? '') : (a.output ?? '');
     final shot = a.tool == 'mcp__aurelius__screenshot' ? screenshotId(a.output) : null;
-    final artifact = artifactPublished(a);
     final showOutput = output.trim().isNotEmpty && !const {'Read', 'Edit', 'MultiEdit', 'Write', 'mcp__aurelius__screenshot'}.contains(a.tool);
     final lines = output.split('\n');
     final shown = lines.length.clamp(0, 400);
@@ -347,7 +336,6 @@ class _ActivityCardState extends State<ActivityCard> {
             ),
           ),
         ),
-        if (artifact != null && shownInMobileCore('artifacts')) ArtifactLinkCard(artifact: artifact),
         if (_expanded)
           Container(
             margin: const EdgeInsets.only(top: 6),

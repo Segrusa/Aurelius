@@ -40,7 +40,7 @@ if ($Part -eq "server") {
 # could not replace them. Work resumes after the restart.
 Get-Process electron -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$PWD*" } | Stop-Process -Force
 if ($Part -eq "all") { Stop-Daemon }
-$packages = if ($Part -eq "desktop") { @() } else { @("--workspace", "--exclude", "aurelius-desktop") }
+$packages = if ($Part -eq "desktop") { @() } else { @("--workspace") }
 if ($packages.Count -gt 0) { cargo build @packages }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $env:AURELIUS_DAEMON_PATH = "$debug\aurelius-daemon.exe"

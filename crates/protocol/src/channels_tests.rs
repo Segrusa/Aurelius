@@ -115,7 +115,7 @@ fn closed_line() -> SystemLine {
 
 fn message(system: Option<SystemLine>) -> MessageView {
     MessageView {
-        edited_at_ms: None, deleted_at_ms: None, editable: false,
+        edited_at_ms: None, deleted_at_ms: None, editable: false, awaiting_user: false, run: None,
         id: MessageId::new(),
         ordinal: 4,
         role: MessageRole::Assistant,

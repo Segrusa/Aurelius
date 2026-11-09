@@ -24,7 +24,7 @@ async fn raw(root: &std::path::Path, name: &str, accepts: &[&str]) -> BoxStream 
     let mut stream = ipc::connect(&aurelius_host::endpoint(root)).await.unwrap();
     let token = sign_in(root, &connect_anonymous(root).await, name).await.session_token;
     let accepts = accepts.iter().map(|a| (*a).to_owned()).collect();
-    let hello = Request::read(1, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), app_key: None, accepts, session_token: Some(token) }));
+    let hello = Request::read(1, Method::SessionHello(HelloParams { client_name: "raw".into(), client_version: "0".into(), accepts, session_token: Some(token) }));
     write_frame(&mut stream, &hello).await.unwrap();
     loop {
         if let ServerMessage::Response { request_id: 1, .. } = read_frame::<ServerMessage, _>(&mut stream).await.unwrap().unwrap() {
@@ -70,7 +70,7 @@ async fn project(client: &Client, name: &str) -> ProjectId {
 }
 
 async fn employee(client: &Client, name: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let created = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap();
     let CommandResult::EmployeeCreated { employee_id, .. } = created.result else { panic!("{:?}", created.result) };
     employee_id

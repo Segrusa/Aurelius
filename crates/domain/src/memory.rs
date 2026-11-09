@@ -15,8 +15,12 @@ pub enum EmployeeMemoryOp {
 }
 
 pub const MAX_MEMORY_CHARS: usize = 2_000;
+/// What belongs in memory (C5): the words of the extraction prompt and of the
+/// `remember` tool, so an employee and the extraction draw the same line.
+pub const MEMORY_SCOPE_RULE: &str = "Memory is for what stays true after this work: how you do your job, conventions, and decisions and knowledge that also matter for later work. A fact that only holds for one ticket or task (its status, its branch or PR number, who is doing what, a value used once) belongs in that ticket's discussion, not in memory.";
 /// 2: lessons from what went wrong in a task (signals S1..S8), see `validate_lessons`.
-pub const EXTRACTION_VERSION: &str = "aurelius-extract-2";
+/// 3: the scope rule (C5), see `MEMORY_SCOPE_RULE`.
+pub const EXTRACTION_VERSION: &str = "aurelius-extract-3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]

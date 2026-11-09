@@ -60,7 +60,7 @@ async fn setup(client: &Client) -> (EmployeeId, ProjectId, PathBuf) {
     let folder = PathBuf::from(client.projects().await.unwrap().projects.into_iter().find(|p| p.id == project_id).unwrap().folder.expect("project folder"));
     let CommandResult::EmployeeCreated { employee_id, .. } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Builder".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Builder".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -110,7 +110,6 @@ async fn switch_during(client: &Client, employee: EmployeeId, project: ProjectId
         title: format!("Switch for {file}"),
         goal,
         acceptance_criteria: vec![],
-        depends_on: vec![],
     };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     let conversation = task_conversation(client, task_id).await;

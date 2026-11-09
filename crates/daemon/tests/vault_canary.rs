@@ -2,10 +2,9 @@
 //! the run tries every way to leak it (text split over deltas, a command, tool
 //! output in every encoding, the group chat, memory, an idea, an approval, a
 //! ticket's discussion, a delegated task, a guideline proposal, the log), with trace mode on; a
-//! board member pastes it (Team chat, ticket discussion, a task's title); an
-//! app's task posts its end to a local webhook receiver; and then no form of it
-//! (E12) may be in the database files, any table (the traces too), a blob, a
-//! backup, the daemon's log, the events a client got or a webhook's body. A
+//! board member pastes it (Team chat, ticket discussion, a task's title); and
+//! then no form of it (E12) may be in the database files, any table (the
+//! traces too), a blob, a backup, the daemon's log or the events a client got. A
 //! project's secret reaches the runs of that project only (SEC1 M2). Its own
 //! test binary: it catches the log of the whole process.
 //! Scratch data folder; the key in its own `secrets/`; no real Claude.
@@ -19,7 +18,6 @@ use aurelius_domain::connection::{AddProvider, ConfigScope, ProviderKind, Purpos
 use aurelius_domain::employee::Setting;
 use aurelius_domain::memory::EmployeeMemoryOp;
 use aurelius_domain::vault::VaultKind;
-use aurelius_domain::app_key::{AppAudience, AppScope, CreateAppKey};
 use aurelius_domain::employee::CreateEmployee;
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::task::{CreateTask, RunSettings};
@@ -200,52 +198,6 @@ fn needles_of(value: &str) -> Vec<String> {
     needles(value).into_iter().filter(|n| n != "FAKE-0000").collect()
 }
 
-/// A local webhook receiver: every request's body, answered 200.
-struct Receiver {
-    url: String,
-    seen: Arc<Mutex<Vec<String>>>,
-}
-
-impl Receiver {
-    async fn start() -> Self {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://127.0.0.1:{}/hooks", listener.local_addr().unwrap().port());
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let into = seen.clone();
-        tokio::spawn(async move {
-            while let Ok((mut stream, _)) = listener.accept().await {
-                let into = into.clone();
-                tokio::spawn(async move {
-                    let mut buffer = Vec::new();
-                    let mut chunk = [0u8; 4096];
-                    loop {
-                        let n = match stream.read(&mut chunk).await {
-                            Ok(0) | Err(_) => return,
-                            Ok(n) => n,
-                        };
-                        buffer.extend_from_slice(&chunk[..n]);
-                        let Some(at) = buffer.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
-                        let head = String::from_utf8_lossy(&buffer[..at]).to_lowercase();
-                        let length = head.lines().find_map(|l| l.strip_prefix("content-length:")).and_then(|v| v.trim().parse::<usize>().ok()).unwrap_or(0);
-                        if buffer.len() >= at + 4 + length {
-                            into.lock().unwrap().push(String::from_utf8_lossy(&buffer[at + 4..at + 4 + length]).into_owned());
-                            break;
-                        }
-                    }
-                    let _ = stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").await;
-                    let _ = stream.shutdown().await;
-                });
-            }
-        });
-        Self { url, seen }
-    }
-
-    fn bodies(&self) -> Vec<String> {
-        self.seen.lock().unwrap().clone()
-    }
-}
-
 fn files(dir: &Path) -> Vec<(String, Vec<u8>)> {
     let mut out = Vec::new();
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
@@ -272,7 +224,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
 
     let dir = tempfile::tempdir().unwrap();
     let seen = Arc::new(Mutex::new(Seen::default()));
-    // SAFETY (test): its own binary; set before the daemon starts. The webhook's local receiver is plain http.
+    // SAFETY (test): its own binary; set before the daemon starts.
     unsafe {
         std::env::set_var("AURELIUS_REMOTE_PORT", "0");
         std::env::set_var("AURELIUS_ENV", "dev");
@@ -291,7 +243,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
     free_chart(&client).await;
     let mut employees = Vec::new();
     for name in ["Forge", "Bridge"] {
-        let create = CreateEmployee { name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
+        let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
         let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
         employees.push(employee_id);
     }
@@ -366,7 +318,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
     let refused = client.ticket_command(post(false), None).await.unwrap_err();
     assert!(matches!(&refused, aurelius_client::ClientError::Protocol(e) if e.code == aurelius_domain::ErrorCode::LooksLikeSecret), "{refused:?}");
     client.ticket_command(post(true), None).await.unwrap();
-    let titled = CreateTask { confirm_secret: false, project_id: project_a, employee_id: Some(employees[1]), title: format!("Rotate {CANARY}"), goal: "Rotate it".into(), acceptance_criteria: vec![], depends_on: vec![], run: RunSettings::default(), files: vec![] };
+    let titled = CreateTask { confirm_secret: false, project_id: project_a, employee_id: Some(employees[1]), title: format!("Rotate {CANARY}"), goal: "Rotate it".into(), acceptance_criteria: vec![], run: RunSettings::default(), files: vec![] };
     let refused = client.create_task(titled).await.unwrap_err();
     assert!(matches!(&refused, aurelius_client::ClientError::Protocol(e) if e.code == aurelius_domain::ErrorCode::LooksLikeSecret), "{refused:?}");
 
@@ -379,26 +331,9 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    // Then an app's task (so the delegation above stays the ticket's): its end goes to the app's webhook, a local receiver.
-    let receiver = Receiver::start().await;
-    let made = client
-        .create_app_key(CreateAppKey { name: "Hooked".into(), scopes: vec![AppScope::Read, AppScope::Run], limit_per_hour: None, limit_concurrent: None, audience: AppAudience::All, webhook_url: Some(receiver.url.clone()) })
-        .await
-        .unwrap();
-    let app = aurelius_client::Client::connect_app(&aurelius_host::endpoint(dir.path()), &made.secret, "hooked").await.unwrap();
-    let app_task = CreateTask { confirm_secret: false, project_id: project_a, employee_id: Some(employees[1]), title: "Check the deploy".into(), goal: "Check it".into(), acceptance_criteria: vec![], depends_on: vec![], run: RunSettings::default(), files: vec![] };
-    app.execute(aurelius_client::envelope(Command::CreateTask(app_task), None)).await.unwrap();
-
-    for _ in 0..800 {
-        if !receiver.bodies().is_empty() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
     // Their leaks ran (each waits 300 ms before its last delta).
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert!(ticket_runs() >= 2, "the ticket's main run and the delegation's run");
-    assert!(!receiver.bodies().is_empty(), "the webhook got the app task's end");
     {
         let seen = seen.lock().unwrap();
         assert!(seen.runs.iter().any(|r| r.contains(&"PROJECT_A_KEY".to_owned())), "project A's runs get its secret: {:?}", seen.runs);
@@ -449,12 +384,6 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
     let found = found_in(&logged, &needles);
     if !found.is_empty() {
         hits.push(format!("daemon log: {found:?}"));
-    }
-    for body in receiver.bodies() {
-        let found = found_in(body.as_bytes(), &needles);
-        if !found.is_empty() {
-            hits.push(format!("webhook body: {found:?}"));
-        }
     }
     for event in &received {
         let found = found_in(event.as_bytes(), &needles);

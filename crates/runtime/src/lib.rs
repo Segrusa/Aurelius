@@ -114,17 +114,34 @@ pub enum ToolProfile {
     /// with `browser` in place of Claude in Chrome.
     /// `mcp_servers` are the user's own MCP servers this employee may use (name
     /// to full config, read from their Claude Code setup at run time).
-    /// `plugins` are install folders of the Claude Code plugins this employee (or,
-    /// for the project assistant, this project) has enabled (loaded with
-    /// `--plugin-dir`; they add the `Skill` tool).
-    /// `artifacts` adds Claude Code's artifact tools (pages on claude.ai); off
-    /// unless the user turned them on server-wide. A publish always asks first
-    /// except in Auto.
-    Work { folders: Vec<std::path::PathBuf>, permission_mode: String, approval_bridge: ApprovalBridge, #[serde(default)] browser: bool, #[serde(default)] browser_session: Option<String>, #[serde(default)] playwright: Option<serde_json::Value>, #[serde(default)] mcp_servers: std::collections::BTreeMap<String, serde_json::Value>, #[serde(default)] plugins: Vec<std::path::PathBuf>, #[serde(default)] artifacts: bool },
+    /// `access` is the employee's level (C3): which built-in tools the run gets.
+    /// Below `Inherit` it has only that list, see [`ToolProfile::confined`].
+    /// `tool_policy` is the employee's own list on top of that (C2): it can only
+    /// narrow the level, and says which tools always ask first.
+    /// `artifact` offers Claude Code's `Artifact` tool: the run's project has a
+    /// styleguide link or its ticket a design link, it runs on a Claude login and
+    /// its level is not ReadOnly. Tied to the link, so an employee's list does not
+    /// block it, and allowed by rule like a read tool.
+    Work { folders: Vec<std::path::PathBuf>, permission_mode: String, approval_bridge: ApprovalBridge, #[serde(default)] browser: bool, #[serde(default)] browser_session: Option<String>, #[serde(default)] playwright: Option<serde_json::Value>, #[serde(default)] mcp_servers: std::collections::BTreeMap<String, serde_json::Value>, #[serde(default)] access: aurelius_domain::employee::AccessLevel, #[serde(default)] tool_policy: aurelius_domain::employee_tools::ToolPolicy, #[serde(default)] artifact: bool },
     /// A short decision with only the given tools of the bridge (`tools`: their
     /// full names, allowed without asking): no files, commands, web or other MCP
     /// servers, at most `max_turns` turns (the dispatcher of a ticket).
     Triage { approval_bridge: ApprovalBridge, tools: Vec<String>, max_turns: u32 },
+}
+
+impl ToolProfile {
+    /// A level below `Inherit` is an explicit list: besides its built-in tools and
+    /// the bridge the run has nothing the level does not name, so no MCP servers of
+    /// the user. The browser
+    /// is a permission of its own, which the user switches per employee.
+    pub fn confined(mut self) -> Self {
+        if let ToolProfile::Work { access, mcp_servers, .. } = &mut self {
+            if !access.is_inherit() {
+                mcp_servers.clear();
+            }
+        }
+        self
+    }
 }
 
 /// Program (the agent bridge, an MCP stdio server) that Claude Code asks for permission; it
@@ -164,10 +181,6 @@ pub enum RuntimeEvent {
     /// recorded as usage (that is `Usage`). Exact per finished message, estimated
     /// (characters / 4) while a message streams.
     Progress { output_tokens: u64 },
-    /// The run published (or republished) a Claude Code artifact; `version` is
-    /// Claude Code's version number of that publish, when it gave one; `path`
-    /// is the published file (as the run named it, maybe relative to its folder).
-    ArtifactPublished { url: String, title: String, version: Option<u32>, path: Option<String> },
     /// The runtime compacted the session's context (asked with `/compact`, or on its
     /// own when it ran full): about this many tokens before and after.
     Compacted { pre_tokens: u64, post_tokens: u64 },
@@ -368,7 +381,6 @@ fn redact_event(r: &redact::Redactor, event: RuntimeEvent) -> RuntimeEvent {
             RuntimeEvent::Activity(Activity::Started { call_id, tool: s(tool), input, parent })
         }
         RuntimeEvent::Activity(Activity::Finished { call_id, ok, output }) => RuntimeEvent::Activity(Activity::Finished { call_id, ok, output: s(output) }),
-        RuntimeEvent::ArtifactPublished { url, title, version, path } => RuntimeEvent::ArtifactPublished { url: s(url), title: s(title), version, path: path.map(s) },
         RuntimeEvent::Failed { code, message } => RuntimeEvent::Failed { code, message: s(message) },
         other => other,
     }

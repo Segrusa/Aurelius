@@ -28,8 +28,6 @@ pub const UNKNOWN: &str = "There is no guideline in use by that name; list_guide
 pub const ARCHIVED: &str = "That guideline is archived; it is no longer in use.";
 /// More than one guideline in use has that title.
 pub const AMBIGUOUS: &str = "More than one guideline has that title; name it by its g: id (list_guidelines shows them).";
-const TRIAL: &str = "A trial cannot read guidelines; read them from the task itself.";
-
 impl CommandService {
     /// `list_guidelines` from a run. Returns (ok, text for the model).
     pub fn list_guidelines(&self, run: RunId) -> Result<(bool, String), AppError> {
@@ -43,7 +41,7 @@ impl CommandService {
 }
 
 fn list(conn: &Connection, run: RunId) -> Result<(bool, String), StorageError> {
-    if let Err(why) = employee_run(conn, run, "read guidelines", TRIAL)? {
+    if let Err(why) = employee_run(conn, run, "read guidelines")? {
         return Ok((false, why));
     }
     let library = guidelines::list(conn, false)?;
@@ -77,7 +75,7 @@ fn list(conn: &Connection, run: RunId) -> Result<(bool, String), StorageError> {
 }
 
 fn read(conn: &Connection, run: RunId, wanted: &str) -> Result<(bool, String), StorageError> {
-    if let Err(why) = employee_run(conn, run, "read guidelines", TRIAL)? {
+    if let Err(why) = employee_run(conn, run, "read guidelines")? {
         return Ok((false, why));
     }
     let id = match find(conn, wanted.trim())? {

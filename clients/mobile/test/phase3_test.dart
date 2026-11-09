@@ -589,7 +589,6 @@ void main() {
       expect(claudeLoginRisk,
           "Your Claude login is kept on this server. Other board members' agents could read your Claude login's files: their file tools are blocked from it, but a command they run is not. Connect only if you trust the work that runs on this server.");
       expect(ownSubscriptionNote, 'Tasks of this app run on your own Claude subscription.');
-      expect(apiKeyLoginNote, 'Its calls run on the Claude login of the board member who made it or last set its functions. Only for your own use: don\'t give this key to others. For calls from others, use an employee on an Anthropic API key connection.');
       expect(claudeRevokeAtAnthropic, 'To end it at Anthropic too, revoke the session at claude.ai → Settings.');
       expect(claudeUsageState(null), ClaudeUsageState.none);
       expect(claudeUsageState(const SubscriptionUsage(fetchedAtMs: 5, limits: [], raw: '', error: 'Connect your Claude login to see your usage.')), ClaudeUsageState.error);

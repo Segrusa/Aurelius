@@ -1,13 +1,19 @@
+import { Button } from "@astryxdesign/core/Button";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { expectBody } from "@aurelius/client";
 import type { LoadLimitsUpdate, McpLogin, McpTransport, ProviderKind, TaskScheduleView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, Fragment, useEffect, useState } from "react";
 import { useConnection } from "../connection";
 import { useEmployees, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { AttachRow, useAttachments } from "../ui/attach";
-import { Button, Segments } from "../ui/kit";
-import { Dialog } from "../ui/overlay";
+import { useWorkspace } from "../workspace";
+import { DialogSelector, FormDialog } from "./org-kit";
 import { FileChips } from "./run-tools";
 import {
   bytes,
@@ -17,6 +23,7 @@ import {
   Muted,
   modelName,
   openWeb,
+  Part,
   Problem,
   Row,
   SmallButton,
@@ -26,7 +33,82 @@ import {
   useSetting,
   when,
 } from "./settings-kit";
-import { recurrenceForm, recurrenceOf, recurrenceText, WEEKDAYS } from "./settings-logic";
+import { type RecurrenceForm, recurrenceForm, recurrenceOf, recurrenceText, WEEKDAYS } from "./settings-logic";
+
+const TEXT3 = "var(--precision-text3)";
+
+const styles = stylex.create({
+  pick: {
+    height: "auto",
+    whiteSpace: "normal",
+    justifyContent: "flex-start",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 8,
+    padding: 12,
+    textAlign: "left",
+    color: "var(--color-text-primary)",
+  },
+  pickOn: { borderColor: "var(--color-text-accent)", backgroundColor: "var(--color-overlay-hover)" },
+  pickName: { display: "block", fontWeight: 600 },
+  pickAbout: { display: "block", fontSize: 12, fontWeight: 400, color: TEXT3 },
+  picks: { display: "flex", flexDirection: "column", gap: 8 },
+  form: { display: "flex", alignItems: "center", gap: 8 },
+  open: {
+    cursor: "pointer",
+    borderWidth: 0,
+    padding: 0,
+    backgroundColor: "transparent",
+    fontWeight: 500,
+    textAlign: "left",
+    color: "var(--color-text-primary)",
+  },
+  details: { paddingBlockStart: 0, paddingInline: 16, paddingBlockEnd: 14 },
+  facts: { margin: 0, display: "grid", gridTemplateColumns: "110px 1fr", columnGap: 12, rowGap: 4, fontSize: 12 },
+  fact: { color: TEXT3 },
+  value: { margin: 0 },
+  mono: { margin: 0, fontFamily: "var(--font-family-code)" },
+  monoTool: { fontFamily: "var(--font-family-code)", fontSize: 12 },
+  start: { alignSelf: "flex-start" },
+  status: { fontSize: 12, color: "var(--color-text-secondary)" },
+  quiet: { margin: 0, color: TEXT3 },
+  contents: { display: "contents" },
+  chips: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 },
+  chip: {
+    cursor: "pointer",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 6,
+    backgroundColor: "transparent",
+    paddingInline: 8,
+    paddingBlock: 4,
+    fontSize: 12,
+    color: "var(--color-text-primary)",
+  },
+  two: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
+  weekdays: { margin: 0, display: "flex", gap: 4, borderWidth: 0, padding: 0 },
+  day: {
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 6,
+    paddingInline: 8,
+    fontSize: 12,
+    color: "var(--color-text-secondary)",
+  },
+  dayOn: {
+    borderColor: "var(--color-text-accent)",
+    backgroundColor: "var(--color-overlay-hover)",
+    color: "var(--color-text-primary)",
+  },
+  block: { display: "flex", flexDirection: "column", gap: 12, fontSize: 12 },
+  blockTitle: { margin: 0, marginBlockEnd: 4, fontWeight: 500, color: TEXT3 },
+  text: { margin: 0 },
+  goal: { margin: 0, lineHeight: 1.5, whiteSpace: "pre-wrap" },
+  list: { margin: 0, paddingInlineStart: 16 },
+});
 
 const PROVIDERS: { key: ProviderKind; label: string; about: string }[] = [
   {
@@ -76,42 +158,44 @@ function AddConnectionDialog({ onClose }: { onClose: () => void }) {
         })
       : undefined;
   return (
-    <Dialog open onClose={onClose} title="Add connection" width={520}>
-      <div className="flex flex-col gap-3 p-4">
-        <p className="m-0 text-[15px] font-semibold">Add connection</p>
-        <Muted>
-          Choose a runtime. Nothing is connected automatically and there is never a silent switch to a paid service.
-        </Muted>
+    <FormDialog
+      title="Add connection"
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button variant="primary" label="Add connection" isDisabled={busy || !chosen} onClick={() => void add()} />
+        </>
+      }
+    >
+      <Muted>
+        Choose a runtime. Nothing is connected automatically and there is never a silent switch to a paid service.
+      </Muted>
+      <div {...stylex.props(styles.picks)}>
         {PROVIDERS.map((p) => (
-          <button
+          <ToggleButton
             key={p.key}
-            type="button"
-            aria-pressed={provider === p.key}
-            onClick={() => setProvider(p.key)}
-            className={`cursor-pointer rounded-[8px] border p-3 text-left text-text ${provider === p.key ? "border-acc-text bg-sel" : "border-line bg-transparent hover:bg-sel"}`}
+            label={`${p.label}. ${p.about}`}
+            isPressed={provider === p.key}
+            onPressedChange={() => setProvider(p.key)}
+            xstyle={[styles.pick, provider === p.key && styles.pickOn]}
           >
-            <span className="block font-semibold">{p.label}</span>
-            <span className="block text-[12px] text-text3">{p.about}</span>
-          </button>
+            <span {...stylex.props(styles.pickName)}>{p.label}</span>
+            <span {...stylex.props(styles.pickAbout)}>{p.about}</span>
+          </ToggleButton>
         ))}
-        {provider === "claude_code" ? (
-          <TextInput
-            label="Program"
-            placeholder="Path to claude"
-            className="font-mono"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-          />
-        ) : null}
-        <Problem error={error} />
       </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="primary" disabled={busy || !chosen} onClick={() => void add()}>
-          Add connection
-        </Button>
-      </div>
-    </Dialog>
+      {provider === "claude_code" ? (
+        <TextInput
+          label="Program"
+          placeholder="Path to claude"
+          mono
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+        />
+      ) : null}
+      <Problem error={error} />
+    </FormDialog>
   );
 }
 
@@ -132,7 +216,7 @@ function ApiKey({ id, has }: { id: string; has: boolean }) {
   };
   return (
     <form
-      className="flex items-center gap-2"
+      {...stylex.props(styles.form)}
       onSubmit={(e) => {
         e.preventDefault();
         // Never kept for a reconnect: the parameters hold the key.
@@ -148,7 +232,7 @@ function ApiKey({ id, has }: { id: string; has: boolean }) {
         type="password"
         autoComplete="off"
         placeholder="API key (Enter saves, Esc cancels)"
-        className="w-[240px]"
+        width={240}
         value={secret}
         onChange={(e) => setSecret(e.target.value)}
         onKeyDown={(e) => {
@@ -182,14 +266,15 @@ export function ConnectionsSection() {
         {(list.data ?? { connections: [] }).connections.map((c) => {
           const needsKey = c.provider === "anthropic_api" || c.provider === "openai_api";
           return (
-            <div key={c.id}>
+            <Fragment key={c.id}>
               <Row
+                joined={open === c.id}
                 title={
                   <button
                     type="button"
                     aria-expanded={open === c.id}
                     onClick={() => setOpen(open === c.id ? null : c.id)}
-                    className="cursor-pointer border-0 bg-transparent p-0 font-medium text-text"
+                    {...stylex.props(styles.open)}
                   >
                     {open === c.id ? "▾" : "▸"} {c.display_name}
                   </button>
@@ -225,37 +310,39 @@ export function ConnectionsSection() {
                 </Keyed>
               </Row>
               {open === c.id ? (
-                <dl className="m-0 grid grid-cols-[110px_1fr] gap-x-3 gap-y-1 px-4 pb-[14px] text-[12px]">
-                  <dt className="text-text3">Status</dt>
-                  <dd className="m-0">
-                    {c.status}
-                    {c.detail ? ` · ${c.detail}` : ""}
-                  </dd>
-                  <dt className="text-text3">Billing</dt>
-                  <dd className="m-0">{c.billing}</dd>
-                  <dt className="text-text3">Sign-in</dt>
-                  <dd className="m-0">
-                    {needsKey
-                      ? c.has_secret
-                        ? "API key is in the OS credential store"
-                        : "No API key yet"
-                      : c.provider === "claude_code"
-                        ? "In Claude Code itself (`claude auth login`)"
-                        : "Not needed"}
-                  </dd>
-                  {c.runtime_path ? (
-                    <>
-                      <dt className="text-text3">Program</dt>
-                      <dd className="m-0 font-mono">{c.runtime_path}</dd>
-                    </>
-                  ) : null}
-                  <dt className="text-text3">Available</dt>
-                  <dd className="m-0">{c.models.map(modelName).join(", ") || "None"}</dd>
-                  <dt className="text-text3">Id</dt>
-                  <dd className="m-0 font-mono">{c.id}</dd>
-                </dl>
+                <Part xstyle={styles.details}>
+                  <dl {...stylex.props(styles.facts)}>
+                    <dt {...stylex.props(styles.fact)}>Status</dt>
+                    <dd {...stylex.props(styles.value)}>
+                      {c.status}
+                      {c.detail ? ` · ${c.detail}` : ""}
+                    </dd>
+                    <dt {...stylex.props(styles.fact)}>Billing</dt>
+                    <dd {...stylex.props(styles.value)}>{c.billing}</dd>
+                    <dt {...stylex.props(styles.fact)}>Sign-in</dt>
+                    <dd {...stylex.props(styles.value)}>
+                      {needsKey
+                        ? c.has_secret
+                          ? "API key is in the OS credential store"
+                          : "No API key yet"
+                        : c.provider === "claude_code"
+                          ? "In Claude Code itself (`claude auth login`)"
+                          : "Not needed"}
+                    </dd>
+                    {c.runtime_path ? (
+                      <>
+                        <dt {...stylex.props(styles.fact)}>Program</dt>
+                        <dd {...stylex.props(styles.mono)}>{c.runtime_path}</dd>
+                      </>
+                    ) : null}
+                    <dt {...stylex.props(styles.fact)}>Available</dt>
+                    <dd {...stylex.props(styles.value)}>{c.models.map(modelName).join(", ") || "None"}</dd>
+                    <dt {...stylex.props(styles.fact)}>Id</dt>
+                    <dd {...stylex.props(styles.mono)}>{c.id}</dd>
+                  </dl>
+                </Part>
               ) : null}
-            </div>
+            </Fragment>
           );
         })}
       </Group>
@@ -290,17 +377,19 @@ function Browser() {
             : "The extension in your own browser profile, with your logins. Asks before each browser action unless the mode is Auto."
         }
       >
-        <Segments
+        <SegmentedControl
           label="Drive the browser with"
+          size="sm"
           value={backend}
-          options={[
-            { key: "claude_in_chrome", label: "Claude in Chrome" },
-            { key: "playwright", label: "Playwright" },
-          ]}
           onChange={(next) =>
-            void run(() => connection.write("browser.set_backend", { backend: next }, { retry: false }))
+            void run(() =>
+              connection.write("browser.set_backend", { backend: next as typeof backend }, { retry: false }),
+            )
           }
-        />
+        >
+          <SegmentedControlItem value="claude_in_chrome" label="Claude in Chrome" />
+          <SegmentedControlItem value="playwright" label="Playwright" />
+        </SegmentedControl>
       </Row>
       {backend === "claude_in_chrome" ? (
         <Row
@@ -313,18 +402,19 @@ function Browser() {
                 : "Used from the next run."
           }
         >
-          <Segments
+          <SegmentedControl
             label="Browser"
+            size="sm"
             value={data?.choice ?? "automatic"}
-            options={[
-              { key: "automatic", label: "Automatic" },
-              { key: "chrome", label: "Chrome" },
-              { key: "edge", label: "Edge" },
-            ]}
-            onChange={(choice) => {
+            onChange={(next) => {
+              const choice = next as NonNullable<typeof data>["choice"];
               if (!busy) void run(() => connection.write("browser.set", { choice }, { retry: false }));
             }}
-          />
+          >
+            <SegmentedControlItem value="automatic" label="Automatic" />
+            <SegmentedControlItem value="chrome" label="Chrome" />
+            <SegmentedControlItem value="edge" label="Edge" />
+          </SegmentedControl>
         </Row>
       ) : null}
       <Problem error={browser.error ?? error} />
@@ -355,56 +445,47 @@ function AddMcp({ onClose }: { onClose: () => void }) {
     });
   };
   return (
-    <Dialog open onClose={onClose} title="Add MCP server" width={520}>
-      <div className="flex flex-col gap-3 p-4">
-        <p className="m-0 text-[15px] font-semibold">Add MCP server</p>
-        <Muted>Adds the server to Claude Code on the server PC (user scope).</Muted>
-        <Segments
-          label="Transport"
-          value={transport}
-          options={[
-            { key: "stdio", label: "Command" },
-            { key: "http", label: "HTTP" },
-            { key: "sse", label: "SSE" },
-          ]}
-          onChange={setTransport}
+    <FormDialog
+      title="Add MCP server"
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button
+            variant="primary"
+            label={busy ? "Adding…" : "Add server"}
+            isDisabled={busy || !ready}
+            onClick={() => void add()}
+          />
+        </>
+      }
+    >
+      <Muted>Adds the server to Claude Code on the server PC (user scope).</Muted>
+      <SegmentedControl
+        label="Transport"
+        size="sm"
+        value={transport}
+        onChange={(next) => setTransport(next as McpTransport)}
+      >
+        <SegmentedControlItem value="stdio" label="Command" />
+        <SegmentedControlItem value="http" label="HTTP" />
+        <SegmentedControlItem value="sse" label="SSE" />
+      </SegmentedControl>
+      <TextInput label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
+      {local ? (
+        <TextInput
+          label="Command"
+          placeholder="Command and arguments"
+          mono
+          value={command}
+          onChange={(e) => setCommand(e.target.value)}
         />
-        <TextInput label="Name" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        {local ? (
-          <TextInput
-            label="Command"
-            placeholder="Command and arguments"
-            className="font-mono"
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-          />
-        ) : (
-          <TextInput
-            label="URL"
-            placeholder="https://…"
-            className="font-mono"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-        )}
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            className="accent-(--acc-text)"
-            checked={enable}
-            onChange={(e) => setEnable(e.target.checked)}
-          />
-          Turn on now
-        </label>
-        <Problem error={error} />
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="primary" disabled={busy || !ready} onClick={() => void add()}>
-          {busy ? "Adding…" : "Add server"}
-        </Button>
-      </div>
-    </Dialog>
+      ) : (
+        <TextInput label="URL" placeholder="https://…" mono value={url} onChange={(e) => setUrl(e.target.value)} />
+      )}
+      <CheckboxInput label="Turn on now" value={enable} onChange={(checked) => setEnable(checked)} />
+      <Problem error={error} />
+    </FormDialog>
   );
 }
 
@@ -452,38 +533,38 @@ function McpLoginDialog({ name, onClose }: { name: string; onClose: () => void }
           .catch((e: unknown) => setProblem(e instanceof Error ? e.message : "This did not work."))
       : undefined;
   return (
-    <Dialog open onClose={onClose} title={`Log in to ${name}`} width={520}>
-      <div className="flex flex-col gap-3 p-4">
-        <p className="m-0 text-[15px] font-semibold">Log in to {name}</p>
-        {login ? (
-          <>
-            <Muted>
-              Log in in the browser. It then ends on a page that does not load: copy that page's address and paste it
-              here.
-            </Muted>
-            <SmallButton className="self-start" onClick={() => openWeb(login.authorization_url)}>
-              Open sign-in page ↗
-            </SmallButton>
-            <TextInput
-              label="Page address"
-              placeholder={login.redirect_uri}
-              className="font-mono"
-              value={redirect}
-              onChange={(e) => setRedirect(e.target.value)}
-            />
-          </>
-        ) : !problem ? (
-          <p className="m-0 text-text3">Starting the login…</p>
-        ) : null}
-        <Problem error={problem ?? login?.error} />
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="primary" disabled={redirect.trim() === ""} onClick={() => void finish()}>
-          Finish
-        </Button>
-      </div>
-    </Dialog>
+    <FormDialog
+      title={`Log in to ${name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button variant="primary" label="Finish" isDisabled={redirect.trim() === ""} onClick={() => void finish()} />
+        </>
+      }
+    >
+      {login ? (
+        <>
+          <Muted>
+            Log in in the browser. It then ends on a page that does not load: copy that page's address and paste it
+            here.
+          </Muted>
+          <span {...stylex.props(styles.start)}>
+            <SmallButton onClick={() => openWeb(login.authorization_url)}>Open sign-in page ↗</SmallButton>
+          </span>
+          <TextInput
+            label="Page address"
+            placeholder={login.redirect_uri}
+            mono
+            value={redirect}
+            onChange={(e) => setRedirect(e.target.value)}
+          />
+        </>
+      ) : !problem ? (
+        <p {...stylex.props(styles.quiet)}>Starting the login…</p>
+      ) : null}
+      <Problem error={problem ?? login?.error} />
+    </FormDialog>
   );
 }
 
@@ -501,7 +582,7 @@ function AlwaysAllowed() {
         <Row title="No tools yet." hint="Choose 'Always allow' on an MCP tool's approval to add one." />
       ) : null}
       {(list.data ?? []).map((tool) => (
-        <Row key={tool} title={<span className="font-mono text-[12px]">{tool}</span>}>
+        <Row key={tool} title={<span {...stylex.props(styles.monoTool)}>{tool}</span>}>
           <SmallButton
             disabled={busy}
             onClick={() => void run(() => connection.write("mcp_always_allow.remove", { tool }, { retry: false }))}
@@ -616,7 +697,8 @@ export function ScheduleDialog({
   const [goal, setGoal] = useState(schedule?.goal ?? "");
   const [criteria, setCriteria] = useState((schedule?.criteria ?? []).join("\n"));
   const [employee, setEmployee] = useState(schedule?.employee_id ?? "");
-  const [project, setProject] = useState(schedule?.project_id ?? projectId ?? "");
+  const workspace = useWorkspace();
+  const [project, setProject] = useState(schedule?.project_id ?? projectId ?? workspace.id ?? "");
   const [form, setForm] = useState(start);
   const { busy, error, run } = useChange();
   const [problem, setProblem] = useState<string | null>(null);
@@ -655,150 +737,122 @@ export function ScheduleDialog({
     );
     if (ok) onClose();
   };
-  const label = "flex flex-col gap-1 text-[12px] text-text3";
-  const pick = "h-7 rounded-[6px] border border-btn-line bg-btn px-2 text-[12px] text-text";
   const heading = schedule ? "Edit recurring task" : "New recurring task";
   return (
-    <Dialog open onClose={onClose} title={heading} width={560}>
-      <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto p-4">
-        <p className="m-0 text-[15px] font-semibold">{heading}</p>
-        <Muted>
-          Each time it is due, a normal task is made from this for the employee. If the previous one is still open, that
-          time is skipped.
-        </Muted>
-        <div className={label}>
-          Title
-          <TextInput label="Title" data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} />
-        </div>
-        <label className={label}>
-          What to do
-          <textarea
-            rows={4}
-            className="rounded-[6px] border border-btn-line bg-sunk p-2 text-[13px] text-text"
-            value={goal}
-            onChange={(e) => setGoal(e.target.value)}
+    <FormDialog
+      title={heading}
+      width={560}
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button
+            variant="primary"
+            label={schedule ? "Save" : "Save recurring task"}
+            isDisabled={busy}
+            onClick={() => void save()}
           />
-        </label>
-        <label className={label}>
-          Done when (one per line)
-          <textarea
-            rows={2}
-            className="rounded-[6px] border border-btn-line bg-sunk p-2 text-[13px] text-text"
-            value={criteria}
-            onChange={(e) => setCriteria(e.target.value)}
-          />
-        </label>
-        <div {...attach.target} className="flex flex-wrap items-center gap-[6px]">
-          {(schedule?.attachments ?? [])
-            .filter((f) => !dropped.includes(f.path))
-            .map((f) => (
-              <button
-                key={f.path}
-                type="button"
-                aria-label={`Remove ${f.name}`}
-                onClick={() => setDropped([...dropped, f.path])}
-                className="cursor-pointer rounded-[6px] border border-line bg-transparent px-2 py-1 text-[12px] text-text"
-              >
-                {f.name} ×
-              </button>
-            ))}
-          <AttachRow attach={attach} />
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <label className={label}>
-            Employee
-            <select
-              className={pick}
-              value={employee || (employees.data?.find((e) => e.status === "active")?.id ?? "")}
-              onChange={(e) => setEmployee(e.target.value)}
+        </>
+      }
+    >
+      <Muted>
+        Each time it is due, a normal task is made from this for the employee. If the previous one is still open, that
+        time is skipped.
+      </Muted>
+      <TextInput label="Title" showLabel autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
+      <TextArea label="What to do" rows={4} value={goal} onChange={setGoal} />
+      <TextArea label="Done when (one per line)" rows={2} value={criteria} onChange={setCriteria} />
+      <div {...attach.target} {...stylex.props(styles.chips)}>
+        {(schedule?.attachments ?? [])
+          .filter((f) => !dropped.includes(f.path))
+          .map((f) => (
+            <button
+              key={f.path}
+              type="button"
+              aria-label={`Remove ${f.name}`}
+              onClick={() => setDropped([...dropped, f.path])}
+              {...stylex.props(styles.chip)}
             >
-              {(employees.data ?? [])
-                .filter((e) => e.status === "active" || e.id === employee)
-                .map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
-                  </option>
-                ))}
-            </select>
-          </label>
-          {schedule ? null : (
-            <label className={label}>
-              Project
-              <select className={pick} value={project} onChange={(e) => setProject(e.target.value)}>
-                {(projects.data ?? [])
-                  .filter((p) => p.status !== "archived")
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          )}
-        </div>
-        <Segments
-          label="When"
-          value={form.kind}
-          options={[
-            { key: "every_hours", label: "Every N hours" },
-            { key: "daily", label: "Daily" },
-            { key: "weekly", label: "Weekly" },
-          ]}
-          onChange={(kind) => setForm({ ...form, kind })}
+              {f.name} ×
+            </button>
+          ))}
+        <AttachRow attach={attach} />
+      </div>
+      <div {...stylex.props(styles.two)}>
+        <DialogSelector
+          label="Employee"
+          size="sm"
+          variant="secondary"
+          value={employee || (employees.data?.find((e) => e.status === "active")?.id ?? "")}
+          options={(employees.data ?? [])
+            .filter((e) => e.status === "active" || e.id === employee)
+            .map((e) => ({ value: e.id, label: e.name }))}
+          onChange={setEmployee}
         />
-        {form.kind === "every_hours" ? (
-          <div className={label}>
-            Hours
-            <TextInput
-              label="Hours"
-              type="number"
-              min={1}
-              className="w-[90px]"
-              value={form.hours}
-              onChange={(e) => setForm({ ...form, hours: e.target.value })}
-            />
-          </div>
-        ) : (
-          <div className={label}>
-            Time
-            <TextInput
-              label="Time"
-              placeholder="HH:MM"
-              className="w-[90px]"
-              value={form.time}
-              onChange={(e) => setForm({ ...form, time: e.target.value })}
-            />
-          </div>
+        {schedule ? null : (
+          <DialogSelector
+            label="Project"
+            size="sm"
+            variant="secondary"
+            value={project || (projects.data?.find((p) => p.status !== "archived")?.id ?? "")}
+            options={(projects.data ?? [])
+              .filter((p) => p.status !== "archived")
+              .map((p) => ({ value: p.id, label: p.name }))}
+            onChange={setProject}
+          />
         )}
-        {form.kind === "weekly" ? (
-          <fieldset className="m-0 flex gap-1 border-0 p-0" aria-label="Weekdays">
-            {WEEKDAYS.map((d, i) => {
-              const on = form.weekdays.includes(i);
-              return (
-                <button
-                  key={d}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() =>
-                    setForm({ ...form, weekdays: on ? form.weekdays.filter((x) => x !== i) : [...form.weekdays, i] })
-                  }
-                  className={`h-7 cursor-pointer rounded-[6px] border px-2 text-[12px] ${on ? "border-acc-text bg-sel text-text" : "border-line bg-transparent text-text2"}`}
-                >
-                  {d}
-                </button>
-              );
-            })}
-          </fieldset>
-        ) : null}
-        <Problem error={problem ?? error} />
       </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="primary" disabled={busy} onClick={() => void save()}>
-          {schedule ? "Save" : "Save recurring task"}
-        </Button>
-      </div>
-    </Dialog>
+      <SegmentedControl
+        label="When"
+        size="sm"
+        value={form.kind}
+        onChange={(next) => setForm({ ...form, kind: next as RecurrenceForm["kind"] })}
+      >
+        <SegmentedControlItem value="every_hours" label="Every N hours" />
+        <SegmentedControlItem value="daily" label="Daily" />
+        <SegmentedControlItem value="weekly" label="Weekly" />
+      </SegmentedControl>
+      {form.kind === "every_hours" ? (
+        <TextInput
+          label="Hours"
+          showLabel
+          type="number"
+          min={1}
+          width={90}
+          value={form.hours}
+          onChange={(e) => setForm({ ...form, hours: e.target.value })}
+        />
+      ) : (
+        <TextInput
+          label="Time"
+          showLabel
+          placeholder="HH:MM"
+          width={90}
+          value={form.time}
+          onChange={(e) => setForm({ ...form, time: e.target.value })}
+        />
+      )}
+      {form.kind === "weekly" ? (
+        <fieldset {...stylex.props(styles.weekdays)} aria-label="Weekdays">
+          {WEEKDAYS.map((d, i) => {
+            const on = form.weekdays.includes(i);
+            return (
+              <ToggleButton
+                key={d}
+                label={d}
+                size="sm"
+                isPressed={on}
+                onPressedChange={() =>
+                  setForm({ ...form, weekdays: on ? form.weekdays.filter((x) => x !== i) : [...form.weekdays, i] })
+                }
+                xstyle={[styles.day, on && styles.dayOn]}
+              />
+            );
+          })}
+        </fieldset>
+      ) : null}
+      <Problem error={problem ?? error} />
+    </FormDialog>
   );
 }
 
@@ -816,14 +870,15 @@ export function SchedulesSection() {
       <Group title="Recurring schedules">
         {list.data?.length === 0 ? <Row title="No recurring tasks yet." /> : null}
         {(list.data ?? []).map((s) => (
-          <div key={s.id}>
+          <Fragment key={s.id}>
             <Row
+              joined={open === s.id}
               title={
                 <button
                   type="button"
                   aria-expanded={open === s.id}
                   onClick={() => setOpen(open === s.id ? null : s.id)}
-                  className="cursor-pointer border-0 bg-transparent p-0 text-left font-medium text-text"
+                  {...stylex.props(styles.open)}
                 >
                   {open === s.id ? "▾" : "▸"} {s.title}
                 </button>
@@ -861,15 +916,15 @@ export function SchedulesSection() {
               />
             </Row>
             {open === s.id ? (
-              <div className="flex flex-col gap-3 px-4 pb-[14px] text-[12px]">
+              <Part xstyle={[styles.details, styles.block]}>
                 <div>
-                  <p className="m-0 mb-1 font-medium text-text3">Goal</p>
-                  <p className="m-0 leading-[1.5] whitespace-pre-wrap">{s.goal}</p>
+                  <p {...stylex.props(styles.blockTitle)}>Goal</p>
+                  <p {...stylex.props(styles.goal)}>{s.goal}</p>
                 </div>
                 {s.criteria.length > 0 ? (
                   <div>
-                    <p className="m-0 mb-1 font-medium text-text3">Acceptance criteria</p>
-                    <ul className="m-0 pl-4">
+                    <p {...stylex.props(styles.blockTitle)}>Acceptance criteria</p>
+                    <ul {...stylex.props(styles.list)}>
                       {s.criteria.map((c) => (
                         <li key={c}>{c}</li>
                       ))}
@@ -877,21 +932,21 @@ export function SchedulesSection() {
                   </div>
                 ) : null}
                 <div>
-                  <p className="m-0 mb-1 font-medium text-text3">Each task runs with</p>
-                  <p className="m-0">
+                  <p {...stylex.props(styles.blockTitle)}>Each task runs with</p>
+                  <p {...stylex.props(styles.text)}>
                     Mode {s.run.mode ?? "default"} · Model {s.run.model ? modelName(s.run.model) : "default"} · Effort{" "}
                     {s.run.effort ?? "default"}
                   </p>
                 </div>
                 {s.attachments.length > 0 ? (
                   <div>
-                    <p className="m-0 mb-1 font-medium text-text3">Attachments</p>
+                    <p {...stylex.props(styles.blockTitle)}>Attachments</p>
                     <FileChips files={s.attachments} />
                   </div>
                 ) : null}
-              </div>
+              </Part>
             ) : null}
-          </div>
+          </Fragment>
         ))}
       </Group>
       <div>
@@ -992,7 +1047,7 @@ function RunningNow() {
     <Group title="Running now">
       {open.map((j) => (
         <Row key={j.id} title={j.label} hint={j.reason ?? j.kind}>
-          <span className="text-[12px] text-text2">{j.state === "leased" ? "Running" : "Waiting"}</span>
+          <span {...stylex.props(styles.status)}>{j.state === "leased" ? "Running" : "Waiting"}</span>
         </Row>
       ))}
     </Group>
@@ -1038,14 +1093,14 @@ export function LoadSection() {
           hint={data ? `${data.held} waiting · ${data.running} running` : undefined}
         >
           {data ? (
-            <span className="text-[12px] text-text2">
+            <span {...stylex.props(styles.status)}>
               CPU {Math.round(data.cpu_pct)}% · {bytes(data.mem_free_mb * 1024 * 1024)} free of{" "}
               {bytes(data.mem_total_mb * 1024 * 1024)}
             </span>
           ) : null}
         </Row>
       </Group>
-      <form onSubmit={(e) => void save(e)} className="contents">
+      <form onSubmit={(e) => void save(e)} {...stylex.props(styles.contents)}>
         <Group title="CPU and memory">
           <Row title="Hold runs when the computer is busy">
             <Keyed action="LoadToggleEnabled" chord="Alt E">
@@ -1066,7 +1121,7 @@ export function LoadSection() {
                 type="number"
                 min={0}
                 step="any"
-                className="w-[90px] text-right"
+                width={90}
                 value={draft[key] ?? shownLimit(key, data?.limits[key])}
                 onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
               />
@@ -1110,7 +1165,7 @@ export function TraceSection() {
         >
           {asking ? (
             <>
-              <span className="text-[12px] text-text2">Turn trace mode off? Every kept trace is deleted.</span>
+              <span {...stylex.props(styles.status)}>Turn trace mode off? Every kept trace is deleted.</span>
               <SmallButton
                 kind="danger"
                 onClick={() => {

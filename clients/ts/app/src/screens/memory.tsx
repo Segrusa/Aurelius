@@ -1,21 +1,165 @@
+import { Button } from "@astryxdesign/core/Button";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Selector } from "@astryxdesign/core/Selector";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { TextArea } from "@astryxdesign/core/TextArea";
 import type { MemoryContextItem, MemoryView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useConnection } from "../connection";
 import { useEmployees, useMemory, useMemoryContext, useProjects } from "../data";
+import { hidden } from "../hidden";
 import { useAction } from "../keys/provider";
-import { Button, Segments } from "../ui/kit";
-import { Dialog } from "../ui/overlay";
 import { toast } from "../ui/toast";
 import { consolidationScopes, memoryHistory, memoryKind, memoryProposals, thousands } from "./knowledge-logic";
-import { AREA, Confirm, EYEBROW, failureOf, hhmm, KnowledgeTabs, PageHead, SMALL } from "./org-kit";
+import {
+  Confirm,
+  Eyebrow,
+  FormDialog,
+  failureOf,
+  Hint,
+  hhmm,
+  KnowledgeTabs,
+  Loading,
+  Page,
+  PageHead,
+  Problem,
+} from "./org-kit";
 
-type Tab = "context" | "proposals" | "history";
+type MemoryTab = "context" | "proposals" | "history";
 
-const NOTE =
-  "Employees propose memories during runs. Proposals wait here until you accept or reject them; accepted ones go into every run in this project.";
+const PANEL = "memory-panel";
+// Selector takes no empty value, so "no employee" needs a word of its own.
+const NO_EMPLOYEE = "no-employee";
 
-function Entry({
+const styles = stylex.create({
+  entry: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    borderBlockEndWidth: 1,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: "var(--precision-line2)",
+    paddingInline: 18,
+    paddingBlock: 16,
+  },
+  selected: { backgroundColor: "var(--color-overlay-hover)" },
+  meta: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  kind: {
+    display: "inline-flex",
+    height: 20,
+    alignItems: "center",
+    gap: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    paddingInline: 7,
+    fontSize: 11,
+    color: "var(--color-text-secondary)",
+  },
+  dot: { width: 6, height: 6, borderRadius: "50%", backgroundColor: "var(--precision-violet)" },
+  badge: {
+    display: "inline-flex",
+    height: 20,
+    alignItems: "center",
+    borderRadius: 4,
+    backgroundColor: "var(--color-overlay-hover)",
+    paddingInline: 6,
+    fontSize: 11,
+    letterSpacing: "0.04em",
+    color: "var(--precision-text3)",
+  },
+  badgeProposed: { color: "var(--color-text-accent)" },
+  source: { marginInlineStart: "auto" },
+  content: { margin: 0, fontSize: 14, lineHeight: 1.6, whiteSpace: "pre-wrap" },
+  erased: { color: "var(--precision-text3)" },
+  actions: { display: "flex", flexWrap: "wrap", gap: 8 },
+  contextSection: { display: "flex", flexDirection: "column", gap: 4, paddingInline: 18, paddingBlock: 12 },
+  contextRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 12,
+    borderBlockEndWidth: 1,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: "var(--precision-line2)",
+    paddingBlock: 8,
+  },
+  dim75: { opacity: 0.75 },
+  dim55: { opacity: 0.55 },
+  contextText: { minWidth: 0, flex: 1, whiteSpace: "pre-wrap" },
+  contextSide: { flexShrink: 0, fontSize: 12, color: "var(--precision-text3)" },
+  empty: { margin: 0, padding: 24, color: "var(--precision-text3)" },
+  split: { display: "flex", minHeight: 0, flex: 1 },
+  main: { display: "flex", minWidth: 0, flexGrow: 999, flexShrink: 1, flexBasis: 520, flexDirection: "column" },
+  panel: { minHeight: 0, flex: 1, overflowY: "auto" },
+  column: { display: "flex", flexDirection: "column" },
+  contextHead: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 12,
+    borderBlockEndWidth: 1,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: "var(--precision-line2)",
+    paddingInline: 18,
+    paddingBlock: 12,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  meter: {
+    display: "inline-block",
+    width: 320,
+    maxWidth: "100%",
+    height: 4,
+    overflow: "hidden",
+    borderRadius: 2,
+    backgroundColor: "var(--color-overlay-hover)",
+  },
+  meterFill: { display: "block", height: "100%", backgroundColor: "var(--color-accent)" },
+  meterOver: { backgroundColor: "var(--color-text-error)" },
+  active: { paddingInline: 18, paddingBlockStart: 12 },
+  expander: { paddingInline: 10, paddingBlock: 8 },
+  aside: {
+    display: "flex",
+    minWidth: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 320,
+    flexDirection: "column",
+    gap: 14,
+    overflowY: "auto",
+    borderInlineStartWidth: 1,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    padding: 18,
+  },
+  remember: {
+    margin: 0,
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+    paddingBlockStart: 14,
+    fontSize: 12,
+    lineHeight: 1.6,
+    color: "var(--precision-text3)",
+  },
+});
+
+const NOTE = hidden("MemoryProposals")
+  ? "What you remember here is used in the runs of this project."
+  : "Employees propose memories during runs. Proposals wait here until you accept or reject them; accepted ones go into every run in this project.";
+
+export function Entry({
   m,
   selected,
   onSelect,
@@ -42,33 +186,31 @@ function Entry({
     <article
       aria-current={selected ? "true" : undefined}
       onClick={onSelect}
-      className={`flex flex-col gap-2 border-b border-line2 px-[18px] py-4 ${selected ? "bg-sel" : ""}`}
+      {...stylex.props(styles.entry, selected && styles.selected)}
     >
-      <div className="flex flex-wrap items-center gap-2 text-[12px] text-text3">
-        <span className="inline-flex h-5 items-center gap-[6px] rounded-[10px] border border-line px-[7px] text-[11px] text-text2">
-          <span className="size-[6px] rounded-full bg-violet" />
+      <div {...stylex.props(styles.meta)}>
+        <span {...stylex.props(styles.kind)}>
+          <span {...stylex.props(styles.dot)} />
           {memoryKind(m)}
         </span>
         {badge ? (
-          <span
-            className={`inline-flex h-5 items-center rounded-[4px] bg-sel px-[6px] text-[11px] tracking-[0.04em] ${m.status === "proposed" ? "text-acc-text" : "text-text3"}`}
-          >
-            {badge}
-          </span>
+          <span {...stylex.props(styles.badge, m.status === "proposed" && styles.badgeProposed)}>{badge}</span>
         ) : null}
         {m.scope === "global" ? <span>· global</span> : m.employee_name ? <span>· {m.employee_name}</span> : null}
         {m.pinned ? <span>· pinned</span> : null}
-        <span className="ml-auto">{source ? `source: ${source.label} · ${hhmm(source.at_ms)}` : "no source"}</span>
+        <span {...stylex.props(styles.source)}>
+          {source ? `source: ${source.label} · ${hhmm(source.at_ms)}` : "no source"}
+        </span>
       </div>
-      <p className="m-0 text-[14px] leading-[1.6] whitespace-pre-wrap">
-        {m.content || <span className="text-text3">(content erased)</span>}
+      <p {...stylex.props(styles.content)}>
+        {m.content || <span {...stylex.props(styles.erased)}>(content erased)</span>}
       </p>
-      {children ? <div className="flex flex-wrap gap-2">{children}</div> : null}
+      {children ? <div {...stylex.props(styles.actions)}>{children}</div> : null}
     </article>
   );
 }
 
-function ReviseDialog({ m, onClose }: { m: MemoryView; onClose: () => void }) {
+export function ReviseDialog({ m, onClose }: { m: MemoryView; onClose: () => void }) {
   const connection = useConnection();
   const client = useQueryClient();
   const [text, setText] = useState(m.content);
@@ -82,28 +224,24 @@ function ReviseDialog({ m, onClose }: { m: MemoryView; onClose: () => void }) {
     }
   };
   return (
-    <Dialog open onClose={onClose} title="Revise memory" width={520}>
-      <div className="flex flex-col gap-2 p-4">
-        <p className="m-0 text-[15px] font-semibold">Revise memory</p>
-        <p className="m-0 text-[12px] text-text3">
-          The old version stays visible in the history but is no longer used.
-        </p>
-        <textarea
-          data-autofocus
-          aria-label="Memory"
-          rows={5}
-          className={AREA}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        <Button onClick={onClose}>Cancel</Button>
-        <Button kind="primary" disabled={text.trim() === ""} onClick={() => void save()}>
-          Save new version
-        </Button>
-      </div>
-    </Dialog>
+    <FormDialog
+      title="Revise memory"
+      onClose={onClose}
+      footer={
+        <>
+          <Button label="Cancel" onClick={onClose} />
+          <Button
+            variant="primary"
+            label="Save new version"
+            isDisabled={text.trim() === ""}
+            onClick={() => void save()}
+          />
+        </>
+      }
+    >
+      <Hint>The old version stays visible in the history but is no longer used.</Hint>
+      <TextArea hasAutoFocus isLabelHidden label="Memory" rows={5} value={text} onChange={setText} />
+    </FormDialog>
   );
 }
 
@@ -116,19 +254,17 @@ function ContextRows({
   title: string;
   info?: string;
   items: MemoryContextItem[];
-  dim: string;
+  dim?: stylex.StyleXStyles;
 }) {
   if (items.length === 0) return null;
   return (
-    <section className="flex flex-col gap-1 px-[18px] py-3">
-      <p className={EYEBROW} title={info}>
-        {title}
-      </p>
-      {info ? <p className="m-0 text-[12px] text-text3">{info}</p> : null}
+    <section {...stylex.props(styles.contextSection)}>
+      <Eyebrow {...(info ? { title: info } : {})}>{title}</Eyebrow>
+      {info ? <Hint>{info}</Hint> : null}
       {items.map((i) => (
-        <div key={i.memory_id} className={`flex items-start gap-3 border-b border-line2 py-2 ${dim}`}>
-          <span className="min-w-0 flex-1 whitespace-pre-wrap">{i.content}</span>
-          <span className="flex-none text-[12px] text-text3">
+        <div key={i.memory_id} {...stylex.props(styles.contextRow, dim)}>
+          <span {...stylex.props(styles.contextText)}>{i.content}</span>
+          <span {...stylex.props(styles.contextSide)}>
             {i.label} · ~{i.tokens} tok
           </span>
         </div>
@@ -160,7 +296,7 @@ export function MemoryBody({
   const [who, setWho] = useState<string | null | undefined>(undefined);
   const contextEmployee = who === undefined ? (staff[0]?.id ?? null) : who;
   const context = useMemoryContext(project, contextEmployee);
-  const [tab, setTab] = useState<Tab>("proposals");
+  const [tab, setTab] = useState<MemoryTab>(hidden("MemoryProposals") ? "context" : "proposals");
   const [text, setText] = useState("");
   const [kind, setKind] = useState<"project_knowledge" | "decision">("project_knowledge");
   const [revising, setRevising] = useState<MemoryView | null>(null);
@@ -227,10 +363,14 @@ export function MemoryBody({
   };
   useAction("SelectNext", () => step(1));
   useAction("SelectPrev", () => step(-1));
-  useAction("AcceptMemory", () => {
-    if (current?.status === "proposed") void decide(current, true);
-    else toast("Select a proposal to accept (filter 2 shows only proposals).");
-  });
+  useAction(
+    "AcceptMemory",
+    () => {
+      if (current?.status === "proposed") void decide(current, true);
+      else toast("Select a proposal to accept (filter 2 shows only proposals).");
+    },
+    !hidden("MemoryProposals"),
+  );
   useAction("RemoveMemory", () => {
     if (current?.status === "proposed") void decide(current, false);
     else if (current?.status === "active") setForgetting(current);
@@ -245,83 +385,73 @@ export function MemoryBody({
     if (current) void pin(current);
   });
   useAction("Filter1", () => setTab("context"));
-  useAction("Filter2", () => setTab("proposals"));
+  useAction("Filter2", () => setTab("proposals"), !hidden("MemoryProposals"));
   useAction("Filter3", () => setTab("history"));
   const ctx = context.data;
   const place = (p: string) => (ctx?.items ?? []).filter((i) => i.placement === p);
   const budget = Math.max(1, ctx?.memory_budget_tokens ?? 1);
   const over = (ctx?.always_tokens ?? 0) > budget;
-  const tabs: { key: Tab; label: string; n?: number }[] = [
+  const tabs: { key: MemoryTab; label: string; n?: number }[] = [
     { key: "context", label: "In context" },
-    { key: "proposals", label: "Proposals", n: proposals.length },
+    ...(hidden("MemoryProposals") ? [] : [{ key: "proposals" as const, label: "Proposals", n: proposals.length }]),
     { key: "history", label: "History", n: history.length },
   ];
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <Page>
       {chrome ? (
         <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
-          <select
-            aria-label="Memory of"
-            value={project ?? ""}
-            onChange={(e) => {
-              setPicked(e.target.value);
-              setWho(undefined);
-            }}
-            className="h-6 rounded-[12px] border border-btn-line bg-transparent px-2 text-[12px] text-text outline-none"
-          >
-            {(projects.data ?? [])
-              .filter((p) => p.status !== "archived")
-              .map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-          </select>
-          <Button className={SMALL} disabled={!project} onClick={() => void consolidate()}>
-            Consolidate
-          </Button>
+          {/* A workspace is one project: nothing to choose. */}
+          {projectId ? null : (
+            <Selector
+              label="Memory of"
+              isLabelHidden
+              size="sm"
+              value={project ?? ""}
+              onChange={(v) => {
+                setPicked(v);
+                setWho(undefined);
+              }}
+              options={(projects.data ?? [])
+                .filter((p) => p.status !== "archived")
+                .map((p) => ({ value: p.id, label: p.name }))}
+            />
+          )}
+          <Button size="sm" label="Consolidate" isDisabled={!project} onClick={() => void consolidate()} />
         </PageHead>
       ) : null}
       {!project && projects.data ? (
-        <p className="m-0 p-6 text-text3">Make a project first: memory belongs to a project.</p>
+        <p {...stylex.props(styles.empty)}>Make a project first: memory belongs to a project.</p>
       ) : (
-        <div className="flex min-h-0 flex-1">
-          <div className="flex min-w-0 flex-[999_1_520px] flex-col">
-            <div role="tablist" aria-label="Memory" className="flex gap-[18px] border-b border-line2 px-[18px]">
+        <div {...stylex.props(styles.split)}>
+          <div {...stylex.props(styles.main)}>
+            <TabList role="tablist" aria-label="Memory" hasDivider value={tab} onChange={(v) => setTab(v as MemoryTab)}>
               {tabs.map((t) => (
-                <button
+                <Tab
                   key={t.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === t.key}
-                  onClick={() => setTab(t.key)}
-                  className={`-mb-px h-[38px] cursor-pointer border-0 border-b-2 bg-transparent px-0 text-[13px] font-medium ${tab === t.key ? "border-text text-text" : "border-transparent text-text2"}`}
-                >
-                  {t.label} {t.n ? <span className="text-text3">{t.n}</span> : null}
-                </button>
+                  value={t.key}
+                  label={t.label}
+                  panelId={PANEL}
+                  {...(t.n ? { endContent: <span>{t.n}</span> } : {})}
+                />
               ))}
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {memory.isPending ? <p className="m-0 p-6 text-text3">Loading memory…</p> : null}
+            </TabList>
+            <div id={PANEL} role="tabpanel" {...stylex.props(styles.panel)}>
+              {memory.isPending ? <Loading /> : null}
               {tab === "proposals" && memory.data ? (
                 proposals.length === 0 ? (
-                  <p className="m-0 p-6 text-text3">No proposals.</p>
+                  <p {...stylex.props(styles.empty)}>No proposals.</p>
                 ) : (
                   proposals.map((m) => (
                     <Entry key={m.id} m={m} selected={m.id === current?.id} onSelect={() => setChosen(m.id)}>
-                      <Button kind="primary" className={SMALL} onClick={() => void decide(m, true)}>
-                        Accept
-                      </Button>
-                      <Button className={SMALL} onClick={() => void decide(m, false)}>
-                        Reject
-                      </Button>
+                      <Button size="sm" variant="primary" label="Accept" onClick={() => void decide(m, true)} />
+                      <Button size="sm" label="Reject" onClick={() => void decide(m, false)} />
                     </Entry>
                   ))
                 )
               ) : null}
               {tab === "history" && memory.data ? (
                 history.length === 0 ? (
-                  <p className="m-0 p-6 text-text3">Nothing superseded, rejected or forgotten yet.</p>
+                  <p {...stylex.props(styles.empty)}>Nothing superseded, rejected or forgotten yet.</p>
                 ) : (
                   history.map((m) => (
                     <Entry key={m.id} m={m} selected={m.id === current?.id} onSelect={() => setChosen(m.id)} />
@@ -329,46 +459,40 @@ export function MemoryBody({
                 )
               ) : null}
               {tab === "context" ? (
-                <div className="flex flex-col">
-                  <div className="flex flex-wrap items-center gap-3 border-b border-line2 px-[18px] py-3 text-[12px] text-text3">
-                    Context of
-                    <select
-                      aria-label="Context of"
-                      value={contextEmployee ?? ""}
-                      onChange={(e) => setWho(e.target.value || null)}
-                      className="h-6 rounded-[6px] border border-btn-line bg-transparent px-2 text-text outline-none"
-                    >
-                      {staff.map((e) => (
-                        <option key={e.id} value={e.id}>
-                          {e.name}
-                        </option>
-                      ))}
-                      <option value="">No employee</option>
-                    </select>
+                <div {...stylex.props(styles.column)}>
+                  <div {...stylex.props(styles.contextHead)}>
+                    <Selector
+                      label="Context of"
+                      size="sm"
+                      value={contextEmployee ?? NO_EMPLOYEE}
+                      onChange={(v) => setWho(v === NO_EMPLOYEE ? null : v)}
+                      options={[
+                        ...staff.map((e) => ({ value: e.id, label: e.name })),
+                        { value: NO_EMPLOYEE, label: "No employee" },
+                      ]}
+                    />
                     {ctx ? (
                       <>
                         <span>
                           {ctx.system_tokens ? `Instructions ~${thousands(ctx.system_tokens)} tokens · ` : ""}Memory{" "}
                           {thousands(ctx.always_tokens)} / {thousands(ctx.memory_budget_tokens)} tokens
                         </span>
-                        <span className="inline-block h-1 w-[320px] max-w-full overflow-hidden rounded-[2px] bg-sel">
+                        <span {...stylex.props(styles.meter)}>
                           <span
-                            className={`block h-full ${over ? "bg-red" : "bg-acc"}`}
+                            {...stylex.props(styles.meterFill, over && styles.meterOver)}
                             style={{ width: `${Math.min(100, (ctx.always_tokens / budget) * 100)}%` }}
                           />
                         </span>
                       </>
                     ) : null}
                   </div>
-                  {context.isPending ? <p className="m-0 p-6 text-text3">Loading what goes into the context…</p> : null}
-                  {context.error ? (
-                    <p role="alert" className="m-0 p-6 text-red">
-                      {context.error.message}
-                    </p>
-                  ) : null}
+                  {context.isPending ? <Loading /> : null}
+                  {context.error ? <Problem>{context.error.message}</Problem> : null}
                   {ctx && ctx.items.length === 0 ? (
-                    <p className="m-0 p-6 text-text3">
-                      No memory yet for this employee. Use Remember, or accept proposals.
+                    <p {...stylex.props(styles.empty)}>
+                      {hidden("MemoryProposals")
+                        ? "No memory yet for this employee. Use Remember."
+                        : "No memory yet for this employee. Use Remember, or accept proposals."}
                     </p>
                   ) : null}
                   {ctx ? (
@@ -376,79 +500,64 @@ export function MemoryBody({
                       <ContextRows
                         title={`ALWAYS IN CONTEXT · ${place("always").length} · ${thousands(ctx.always_tokens)} TOKENS`}
                         items={place("always")}
-                        dim=""
                       />
                       <ContextRows
                         title={`ONLY WHEN RELEVANT TO THE QUESTION · ${place("when_relevant").length}`}
                         info="Added only when the question matches and budget is left."
                         items={place("when_relevant")}
-                        dim="opacity-75"
+                        dim={styles.dim75}
                       />
                       {place("over_budget").length > 5 && !overOpen ? (
-                        <button
-                          type="button"
-                          onClick={() => setOverOpen(true)}
-                          className="cursor-pointer border-0 bg-transparent px-[18px] py-2 text-left text-[12px] text-text3 hover:text-text"
-                        >
-                          ▸ Does not fit the budget · {place("over_budget").length}
-                        </button>
+                        <div {...stylex.props(styles.expander)}>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            label={`▸ Does not fit the budget · ${place("over_budget").length}`}
+                            onClick={() => setOverOpen(true)}
+                          />
+                        </div>
                       ) : (
                         <ContextRows
                           title={`DOES NOT FIT THE BUDGET · ${place("over_budget").length}`}
                           info="Not sent; the employee can still find these with recall."
                           items={place("over_budget")}
-                          dim="opacity-55"
+                          dim={styles.dim55}
                         />
                       )}
                     </>
                   ) : null}
-                  <p className={`${EYEBROW} px-[18px] pt-3`}>ACTIVE MEMORIES</p>
+                  <div {...stylex.props(styles.active)}>
+                    <Eyebrow>ACTIVE MEMORIES</Eyebrow>
+                  </div>
                   {items
                     .filter((m) => m.status === "active")
                     .map((m) => (
                       <Entry key={m.id} m={m} selected={m.id === current?.id} onSelect={() => setChosen(m.id)}>
-                        <Button className={SMALL} onClick={() => setRevising(m)}>
-                          Revise
-                        </Button>
-                        <Button className={SMALL} onClick={() => void pin(m)}>
-                          {m.pinned ? "Unpin" : "Pin"}
-                        </Button>
-                        <Button kind="danger" className={SMALL} onClick={() => setForgetting(m)}>
-                          Forget…
-                        </Button>
+                        <Button size="sm" label="Revise" onClick={() => setRevising(m)} />
+                        <Button size="sm" label={m.pinned ? "Unpin" : "Pin"} onClick={() => void pin(m)} />
+                        <Button size="sm" variant="destructive" label="Forget…" onClick={() => setForgetting(m)} />
                       </Entry>
                     ))}
                 </div>
               ) : null}
             </div>
           </div>
-          <aside
-            aria-label="Remember"
-            className="flex min-w-0 flex-[1_1_320px] flex-col gap-[14px] overflow-y-auto border-l border-line bg-sunk p-[18px]"
-          >
-            <label className="flex flex-col gap-1 text-[12px] text-text3">
-              Remember for this project
-              <textarea
-                rows={4}
-                placeholder="For example: publishing requires a prior review"
-                className={AREA}
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-              />
-            </label>
-            <Segments
-              label="Kind"
-              value={kind}
-              options={[
-                { key: "project_knowledge", label: "Knowledge" },
-                { key: "decision", label: "Decision" },
-              ]}
-              onChange={setKind}
+          <aside aria-label="Remember" {...stylex.props(styles.aside)}>
+            <TextArea
+              label="Remember for this project"
+              rows={4}
+              placeholder="For example: publishing requires a prior review"
+              value={text}
+              onChange={setText}
             />
-            <Button kind="primary" className={`${SMALL} self-start`} disabled={text.trim() === ""} onClick={remember}>
-              Remember
-            </Button>
-            <p className="m-0 border-t border-line2 pt-[14px] text-[12px] leading-[1.6] text-text3">{NOTE}</p>
+            <SegmentedControl label="Kind" size="sm" value={kind} onChange={(v) => setKind(v as typeof kind)}>
+              <SegmentedControlItem value="project_knowledge" label="Knowledge" />
+              <SegmentedControlItem value="decision" label="Decision" />
+            </SegmentedControl>
+            <div>
+              <Button size="sm" variant="primary" label="Remember" isDisabled={text.trim() === ""} onClick={remember} />
+            </div>
+            <p {...stylex.props(styles.remember)}>{NOTE}</p>
           </aside>
         </div>
       )}
@@ -470,6 +579,6 @@ export function MemoryBody({
           }}
         />
       ) : null}
-    </div>
+    </Page>
   );
 }

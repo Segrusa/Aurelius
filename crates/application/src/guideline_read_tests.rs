@@ -25,7 +25,7 @@ struct Setup {
 }
 
 fn ctx(user: Option<UserId>) -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: user }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: user }
 }
 
 fn exec(s: &Setup, command: Command) -> CommandResult {
@@ -33,7 +33,7 @@ fn exec(s: &Setup, command: Command) -> CommandResult {
 }
 
 fn hire(service: &CommandService, user: UserId, name: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
     let made = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateEmployee(create) }).unwrap().receipt.result;
     let CommandResult::EmployeeCreated { employee_id, .. } = made else { panic!("{made:?}") };
     employee_id
@@ -80,7 +80,7 @@ fn queued(s: &Setup, conversation: ConversationId) -> RunId {
 
 /// A running task of `employee` in the project, with a run in its conversation.
 fn task_run(s: &Setup, employee: EmployeeId) -> (String, RunId, ConversationId) {
-    let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(employee), title: "Export".into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(employee), title: "Export".into(), goal: "Do it".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = exec(s, Command::CreateTask(create)) else { panic!() };
     let st = s.service.store().clone();
     let (run, conversation) = s
@@ -324,18 +324,7 @@ fn e10_an_employees_chat_and_task_run_read_but_not_the_assistant_the_dispatcher_
             )?)
         })
         .unwrap();
-    // A variant trial: a run in a conversation of the task's variants.
-    let bo_chat = chat_of(&s, s.bo);
-    let trial = queued(&s, bo_chat);
-    s.service
-        .store()
-        .write(move |tx| {
-            tx.execute("INSERT INTO task_variant_sets(task_id, phase, count, created_at_ms, updated_at_ms) VALUES (?1, 'probing', 2, 1, 1)", [&task])?;
-            Ok(tx.execute("INSERT INTO task_variants(task_id, n, hint, status, conversation_id, created_at_ms) VALUES (?1, 1, 'small', 'running', ?2, 1)", rusqlite::params![task, bo_chat.to_string()])?)
-        })
-        .unwrap();
-
-    for (who, run, says) in [("assistant", assistant, "Only an employee can read guidelines."), ("dispatcher", triage, "Only an employee can read guidelines."), ("trial", trial, "A trial cannot read guidelines; read them from the task itself.")] {
+    for (who, run, says) in [("assistant", assistant, "Only an employee can read guidelines."), ("dispatcher", triage, "Only an employee can read guidelines.")] {
         assert_eq!(list(&s, run), (false, says.to_string()), "{who}");
         assert_eq!(read(&s, run, "Rust style"), (false, says.to_string()), "{who}");
     }

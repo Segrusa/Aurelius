@@ -58,7 +58,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId) {
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -72,7 +72,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId) {
 
 /// A task for the employee; the conversation it is worked on in, once it exists.
 async fn start_task(client: &Client, project_id: ProjectId, employee_id: EmployeeId) -> ConversationId {
-    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: "Find the chip".into(), goal: "Where is the chip?".into(), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id: Some(employee_id), title: "Find the chip".into(), goal: "Where is the chip?".into(), acceptance_criteria: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
     task_conversation(client, task_id).await
 }

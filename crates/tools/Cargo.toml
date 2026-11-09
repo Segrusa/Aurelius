@@ -1,6 +1,6 @@
 [package]
 name = "aurelius-tools"
-description = "Tool implementations: files, Git, safe web fetch, HTML and text extraction."
+description = "Tool implementations: files, safe web fetch, HTML and text extraction."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

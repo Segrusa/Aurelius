@@ -28,7 +28,7 @@ pub fn list_projects(
         "SELECT p.id, p.name, b.storage_key, p.status, p.version, p.created_at_ms,
                 (SELECT COUNT(DISTINCT t.employee_id) FROM tasks t WHERE t.project_id = p.id AND t.employee_id IS NOT NULL
                    AND t.status NOT IN ('succeeded','failed','cancelled')),
-                p.folder, p.dispatcher_employee_id
+                p.folder, p.dispatcher_employee_id, p.styleguide_url
          FROM projects p LEFT JOIN blobs b ON b.id = p.description_blob_id
          WHERE p.status <> 'archived'
          ORDER BY p.created_at_ms, p.id",
@@ -44,11 +44,12 @@ pub fn list_projects(
             row.get::<_, i64>(6)? as u32,
             row.get::<_, Option<String>>(7)?,
             row.get::<_, Option<String>>(8)?,
+            row.get::<_, Option<String>>(9)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, name, key, status, version, created_at_ms, employees_active, folder, dispatcher) = row?;
+        let (id, name, key, status, version, created_at_ms, employees_active, folder, dispatcher, styleguide_url) = row?;
         out.push(ProjectSummary {
             id,
             name,
@@ -59,6 +60,7 @@ pub fn list_projects(
             employees_active,
             folder,
             dispatcher_employee_id: dispatcher.and_then(|d| aurelius_domain::EmployeeId::parse(&d).ok()),
+            styleguide_url,
         });
     }
     Ok(out)
@@ -124,6 +126,7 @@ pub fn has_work(conn: &Connection) -> Result<bool, StorageError> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM jobs WHERE kind IN ('run.chat', 'task.run') AND state IN ('ready', 'leased'))
              OR EXISTS(SELECT 1 FROM runs WHERE status IN ('created', 'starting', 'running'))
+             OR EXISTS(SELECT 1 FROM employee_inbox WHERE state = 'queued')
              OR EXISTS(SELECT 1 FROM tasks WHERE status IN ('queued', 'running'))",
         [],
         |r| r.get::<_, bool>(0),
@@ -141,15 +144,23 @@ pub fn claim_due_job(tx: &Transaction<'_>, owner: &str, now: i64, lease_ms: i64,
                 "SELECT {JOB_COLUMNS} FROM jobs j WHERE j.state = 'ready' AND j.not_before_ms <= ?1
                  AND (j.kind NOT IN ('run.chat', 'task.run') OR (
                      (SELECT COUNT(*) FROM jobs a WHERE a.kind IN ('run.chat', 'task.run') AND a.state = 'leased') < ?2
-                     AND (j.kind <> 'run.chat' OR NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
-                         AND json_extract(o.payload_json, '$.conversation_id') = json_extract(j.payload_json, '$.conversation_id')))))
+                     AND (j.kind <> 'run.chat' OR (NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
+                         AND json_extract(o.payload_json, '$.conversation_id') = json_extract(j.payload_json, '$.conversation_id'))
+                       -- One run per employee (R2): a retry or a run back from a limit waits for its slot too.
+                       AND (json_extract(j.payload_json, '$.employee_id') IS NULL OR NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
+                         AND json_extract(o.payload_json, '$.employee_id') = json_extract(j.payload_json, '$.employee_id')
+                         AND NOT EXISTS (SELECT 1 FROM approvals a WHERE a.run_id = o.id AND a.status = 'pending')))))))
                  ORDER BY j.priority DESC, j.not_before_ms, j.id LIMIT 1"
             ),
             params![now, global_runs],
             job_from_row,
         )
         .optional()?;
-    let Some(mut job) = job else { return Ok(None) };
+    let Some(job) = job else { return Ok(None) };
+    lease(tx, job, owner, now, lease_ms).map(Some)
+}
+
+fn lease(tx: &Transaction<'_>, mut job: JobRow, owner: &str, now: i64, lease_ms: i64) -> Result<JobRow, StorageError> {
     tx.execute(
         "UPDATE jobs SET state = 'leased', lease_owner = ?2, lease_until_ms = ?3,
              lease_epoch = lease_epoch + 1, attempts = attempts + 1 WHERE id = ?1",
@@ -157,7 +168,18 @@ pub fn claim_due_job(tx: &Transaction<'_>, owner: &str, now: i64, lease_ms: i64,
     )?;
     job.lease_epoch += 1;
     job.state = JobState::Leased;
-    Ok(Some(job))
+    Ok(job)
+}
+
+/// One job as the dispatcher reads it.
+pub fn job_row(conn: &Connection, job_id: &str) -> Result<JobRow, StorageError> {
+    Ok(conn.query_row(&format!("SELECT {JOB_COLUMNS} FROM jobs WHERE id = ?1"), [job_id], job_from_row)?)
+}
+
+/// Lease a job that was just made for a run a worker took from the inbox.
+pub fn lease_new_job(tx: &Transaction<'_>, job_id: &str, owner: &str, now: i64, lease_ms: i64) -> Result<JobRow, StorageError> {
+    let job = tx.query_row(&format!("SELECT {JOB_COLUMNS} FROM jobs WHERE id = ?1"), [job_id], job_from_row)?;
+    lease(tx, job, owner, now, lease_ms)
 }
 
 /// True while `epoch` is the current lease of a leased job (fencing check for every write).
@@ -223,7 +245,7 @@ pub fn mark_held_runs(tx: &Transaction<'_>, reason: &str, now: i64) -> Result<Ve
 /// Runs (chat answers and task starts) that are due and free to start, so
 /// only the machine's load holds them back.
 pub fn held_runs(conn: &Connection, now: i64) -> Result<u32, StorageError> {
-    Ok(conn.query_row(
+    Ok(crate::inbox::held(conn, now)? + conn.query_row(
         "SELECT COUNT(*) FROM jobs j WHERE j.kind IN ('run.chat', 'task.run') AND j.state = 'ready' AND j.not_before_ms <= ?1
          AND (j.kind <> 'run.chat' OR NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
              AND json_extract(o.payload_json, '$.conversation_id') = json_extract(j.payload_json, '$.conversation_id')))",
@@ -253,6 +275,7 @@ pub fn wake_parked_for_login(tx: &Transaction<'_>, error_code: &str, login_user:
     for id in &ids {
         tx.execute("UPDATE jobs SET not_before_ms = ?2, last_error_code = NULL WHERE id = ?1", params![id, now])?;
     }
+    crate::inbox::wake(tx, error_code, login_user, now)?;
     Ok(ids)
 }
 
@@ -342,7 +365,8 @@ pub fn events_after(conn: &Connection, after_seq: u64, limit: u32) -> Result<Vec
     let mut out = Vec::new();
     for row in rows {
         let (seq, kind, aggregate_id, project, occurred_at_ms) = row?;
-        let kind = EventKind::parse(&kind).ok_or_else(|| StorageError::Rejected(format!("unknown event type {kind} in the log")))?;
+        // A row of a removed feature stays in the log; clients have no kind for it.
+        let Some(kind) = EventKind::parse(&kind) else { continue };
         out.push(EventNotice {
             seq: seq as u64,
             kind,

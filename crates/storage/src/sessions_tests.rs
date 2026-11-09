@@ -511,7 +511,7 @@ fn work_waiting_for_a_login_is_found_and_woken_per_login() {
 }
 
 #[test]
-fn app_keys_schedules_heartbeats_and_the_company_name_a_login() {
+fn schedules_and_the_company_name_a_login() {
     let f = fixture();
     // The company login.
     assert_eq!(f.store.read(company::background_login_user).unwrap(), None);
@@ -523,25 +523,12 @@ fn app_keys_schedules_heartbeats_and_the_company_name_a_login() {
     assert_eq!(f.store.read(company::background_login_user).unwrap(), None);
     assert!(f.store.write(|tx| company::set_background_login_user(tx, Some(UserId::new())).map(|_| ())).is_err(), "references users");
 
-    // An app key, a recurring task and a heartbeat name the login their tasks run on.
-    let key = aurelius_domain::AppKeyId::new();
-    f.store
-        .write(move |tx| {
-            tx.execute("INSERT INTO app_keys(id, name, key_verifier, scopes_json, created_at_ms) VALUES (?1, 'CI', 'kv', '[]', 1)", [key.to_string()])?;
-            crate::app_keys::set_login_user(tx, key, Some(&alex.to_string()))
-        })
-        .unwrap();
-    assert_eq!(f.store.read(move |c| crate::app_keys::login_user(c, key)).unwrap().as_deref(), Some(f.alex.as_str()));
-    f.store.write(move |tx| crate::app_keys::set_login_user(tx, key, None)).unwrap();
-    assert_eq!(f.store.read(move |c| crate::app_keys::login_user(c, key)).unwrap(), None);
+    // A recurring task names the login its tasks run on.
     let schedule = aurelius_domain::TaskScheduleId::new();
     assert_eq!(f.store.read(move |c| crate::task_schedules::login_user(c, schedule)).unwrap(), None);
-    let employee = aurelius_domain::EmployeeId::new();
-    let robin = f.robin.clone();
-    assert!(!f.store.write(move |tx| crate::heartbeats::set_login_user(tx, employee, Some(&robin))).unwrap(), "no heartbeat");
 
     // All of them are plain nullable references to users.
-    for table in ["app_keys", "recurring_tasks", "heartbeats", "remote_clients", "runs"] {
+    for table in ["recurring_tasks", "remote_clients", "runs"] {
         let (notnull, target): (i64, String) = f
             .store
             .read(move |c| {

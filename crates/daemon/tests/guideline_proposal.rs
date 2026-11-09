@@ -20,12 +20,13 @@ async fn a_text_only_run_of_an_employee_cannot_propose_a_guideline() {
     // The fake runtime is not Claude Code: its runs are text-only.
     let daemon = start_with_delay(dir.path(), 100).await;
     let client = connect(dir.path()).await;
-    let create = CreateEmployee { name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     let send = SendEmployeeMessage { confirm_secret: false, employee_id, text: "houd me wakker".into(), conversation_id, images: vec![], files: vec![], interrupt: false };
     let CommandResult::EmployeeMessageSent { run_id, .. } = client.execute(envelope(Command::SendEmployeeMessage(send), None)).await.unwrap().result else { panic!() };
     for _ in 0..200 {
-        let status: String = db(dir.path()).query_row("SELECT status FROM runs WHERE id = ?1", [run_id.to_string()], |r| r.get(0)).unwrap();
+        // The run row is made when its turn comes.
+        let status: String = db(dir.path()).query_row("SELECT status FROM runs WHERE id = ?1", [run_id.to_string()], |r| r.get(0)).unwrap_or_default();
         if matches!(status.as_str(), "starting" | "running" | "waiting") {
             break;
         }

@@ -595,9 +595,6 @@ export class Connection {
         // A sign-out this device asked for needs no message.
         void this.endSession(this.signingOut && message.reason === "logged_out" ? null : message.reason);
         return;
-      case "terminal_output":
-      case "terminal_exit":
-        return;
     }
   }
 

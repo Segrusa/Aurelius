@@ -38,7 +38,7 @@ async fn ask(root: &Path, run: RunId, call: &str, tool: &str, input: serde_json:
 
 async fn employee(client: &Client, project_id: ProjectId, name: &str, role: &str) -> EmployeeId {
     match client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }), None))
+        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None }), None))
         .await
         .unwrap()
         .result
@@ -64,7 +64,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId, EmployeeId) {
 }
 
 async fn create(client: &Client, project_id: ProjectId, employee_id: Option<EmployeeId>, title: &str) -> TaskId {
-    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id, title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![], depends_on: vec![] };
+    let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id, employee_id, title: title.into(), goal: format!("Werk aan {title}"), acceptance_criteria: vec![] };
     match client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result {
         CommandResult::TaskCreated { task_id } => task_id,
         other => panic!("{other:?}"),
@@ -116,7 +116,7 @@ impl AgentRuntime for Holding {
     }
     async fn start(&self, request: RunRequest) -> Result<RunHandle, RuntimeError> {
         let system = request.system.clone().unwrap_or_default();
-        let first = self.hold.split('|').any(|h| system.starts_with(&format!("You are {h}"))) &&system.contains("This conversation is a task you took on") && request.turns.len() == 1 && !request.turns.iter().any(|t| t.text.contains("[Task message"));
+        let first = self.hold.split('|').any(|h| system.contains(&format!("You are {h}"))) &&system.contains("This conversation is a task you took on") && request.turns.len() == 1 && !request.turns.iter().any(|t| t.text.contains("[Task message"));
         let mut text = fake::answer_for(&request);
         if let (true, Some(folder)) = (first, &self.file) {
             let shot = folder.join("scherm 1.png");
@@ -526,7 +526,7 @@ impl AgentRuntime for Unstartable {
         self.inner.probe().await
     }
     async fn start(&self, request: RunRequest) -> Result<RunHandle, RuntimeError> {
-        if self.broken.load(std::sync::atomic::Ordering::SeqCst) && request.system.as_deref().is_some_and(|s| s.starts_with("You are Alex")) {
+        if self.broken.load(std::sync::atomic::Ordering::SeqCst) && request.system.as_deref().is_some_and(|s| s.contains("You are Alex")) {
             return Err(RuntimeError::Unavailable("could not start claude.exe: The filename or extension is too long. (os error 206)".into()));
         }
         self.inner.start(request).await
@@ -777,7 +777,7 @@ async fn a_growing_memory_is_consolidated_by_itself_and_on_request() {
 /// Let an employee work on one task at a time (or not again).
 async fn one_at_a_time(client: &Client, employee_id: EmployeeId, name: &str, role: &str, on: bool) {
     use aurelius_domain::employee::UpdateEmployee;
-    let update = UpdateEmployee { employee_id, name: name.into(), role: role.into(), title: None, instructions: None, sequential_tasks: Some(on) };
+    let update = UpdateEmployee { access_level: None, tool_policy: None, description: None, employee_id, name: name.into(), role: role.into(), title: None, instructions: None, sequential_tasks: Some(on) };
     client.execute(envelope(Command::UpdateEmployee(update), None)).await.unwrap();
 }
 
@@ -895,12 +895,20 @@ async fn turning_one_at_a_time_off_starts_the_queued_tasks() {
 
     assert_eq!(client.tasks(None).await.unwrap().tasks.iter().find(|t| t.id == second).unwrap().status, TaskStatus::Queued);
 
-    // Off again: the queued task starts beside the running one, as before.
+    // Off again: the queued task is free to start, and goes when Alex is free (R2).
     one_at_a_time(&client, alex, "Alex", "Backend developer", false).await;
     assert!(!client.employees().await.unwrap().employees.iter().find(|m| m.id == alex).unwrap().sequential_tasks);
-    running_run(dir.path(), second).await;
-    assert_eq!(running_tasks(dir.path(), alex), 2);
+    let queued = |root: &Path| -> i64 { db(root).query_row("SELECT COUNT(*) FROM employee_inbox WHERE task_id = ?1 AND state = 'queued'", [second.to_string()], |r| r.get(0)).unwrap() };
+    for _ in 0..400 {
+        if queued(dir.path()) == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(queued(dir.path()), 1, "in Alex's mailbox");
+    assert_eq!(db(dir.path()).query_row("SELECT COUNT(*) FROM runs WHERE task_id = ?1", [second.to_string()], |r| r.get::<_, i64>(0)).unwrap(), 0);
     release.notify_one();
+    running_run(dir.path(), second).await;
     release.notify_one();
     for id in [first, second] {
         assert_eq!(wait_task(&client, id, |t| t.status.is_terminal()).await.status, TaskStatus::Succeeded);

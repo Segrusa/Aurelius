@@ -22,7 +22,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId) {
     };
     let CommandResult::EmployeeCreated { employee_id, .. } = client
         .execute(envelope(
-            Command::CreateEmployee(CreateEmployee { name: "Alex".into(), role: "Productpartner".into(), title: None, reports_to: None, instructions: None, folder: None }),
+            Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Productpartner".into(), title: None, reports_to: None, instructions: None, folder: None }),
             None,
         ))
         .await
@@ -34,7 +34,7 @@ async fn setup(client: &Client) -> (ProjectId, EmployeeId) {
     (project_id, employee_id)
 }
 
-async fn create(client: &Client, project_id: ProjectId, employee_id: Option<EmployeeId>, title: &str, deps: Vec<TaskId>) -> Result<TaskId, aurelius_client::ClientError> {
+async fn create(client: &Client, project_id: ProjectId, employee_id: Option<EmployeeId>, title: &str) -> Result<TaskId, aurelius_client::ClientError> {
     let cmd = CreateTask {
         confirm_secret: false,
         files: vec![],
@@ -44,7 +44,6 @@ async fn create(client: &Client, project_id: ProjectId, employee_id: Option<Empl
         title: title.into(),
         goal: format!("Vergelijk ideeën voor {title}"),
         acceptance_criteria: vec!["Elk resultaat noemt een bron".into(), "Er is een aanbeveling".into()],
-        depends_on: deps,
     };
     match client.execute(envelope(Command::CreateTask(cmd), None)).await?.result {
         CommandResult::TaskCreated { task_id } => Ok(task_id),
@@ -86,7 +85,7 @@ async fn a_task_is_worked_on_in_a_conversation_and_ends_with_a_report() {
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let (project, employee) = setup(&client).await;
-    let id = create(&client, project, Some(employee), "het nieuwe product", vec![]).await.unwrap();
+    let id = create(&client, project, Some(employee), "het nieuwe product").await.unwrap();
 
     let task = wait_task(&client, id, |t| t.status.is_terminal()).await;
     assert_eq!(task.status, TaskStatus::Succeeded, "{task:?}");
@@ -113,28 +112,18 @@ async fn a_task_is_worked_on_in_a_conversation_and_ends_with_a_report() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn drafts_dependencies_cycles_and_cancel() {
+async fn drafts_and_cancel() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
-    let (project, employee) = setup(&client).await;
+    let (project, _employee) = setup(&client).await;
 
     // Without an employee a task is a draft and nothing runs.
-    let draft = create(&client, project, None, "concept", vec![]).await.unwrap();
+    let draft = create(&client, project, None, "concept").await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     let t = client.tasks(Some(project)).await.unwrap().tasks.into_iter().find(|t| t.id == draft).unwrap();
     assert_eq!(t.status, TaskStatus::Draft);
     assert!(t.conversation_id.is_none(), "nothing worked on it");
-
-    // B depends on A: B finishes after A.
-    let a = create(&client, project, Some(employee), "A", vec![]).await.unwrap();
-    let b = create(&client, project, Some(employee), "B", vec![a]).await.unwrap();
-    wait_task(&client, b, |t| t.status == TaskStatus::Succeeded).await;
-    let a_view = client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.id == a).unwrap();
-    assert_eq!(a_view.status, TaskStatus::Succeeded);
-
-    // Unknown dependency is refused.
-    assert!(create(&client, project, Some(employee), "C", vec![TaskId::new()]).await.is_err());
 
     // Cancel a draft.
     client.execute(envelope(Command::CancelTask(CancelTask { task_id: draft }), None)).await.unwrap();
@@ -151,7 +140,7 @@ async fn creating_a_task_for_an_employee_delivers_created_then_queued() {
     let (project, employee) = setup(&client).await;
     client.subscribe(0).await.unwrap();
 
-    let id = create(&client, project, Some(employee), "typed", vec![]).await.unwrap();
+    let id = create(&client, project, Some(employee), "typed").await.unwrap();
     let kinds = task_events(&mut events, id, EventKind::TaskQueued).await;
     assert_eq!(kinds, [EventKind::TaskCreated, EventKind::TaskQueued]);
     stop(dir.path(), daemon).await;
@@ -165,7 +154,7 @@ async fn a_finished_task_delivers_task_succeeded() {
     let (project, employee) = setup(&client).await;
     client.subscribe(0).await.unwrap();
 
-    let id = create(&client, project, Some(employee), "typed", vec![]).await.unwrap();
+    let id = create(&client, project, Some(employee), "typed").await.unwrap();
     let kinds = task_events(&mut events, id, EventKind::TaskSucceeded).await;
     assert_eq!(kinds.first(), Some(&EventKind::TaskCreated));
     assert_eq!(kinds.last(), Some(&EventKind::TaskSucceeded));

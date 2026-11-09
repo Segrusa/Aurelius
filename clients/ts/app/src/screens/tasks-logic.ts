@@ -1,4 +1,4 @@
-// The Tasks page's filter and tree, pure. Port of clients/desktop/src/screens/tasks.rs.
+// The Tasks page's filter and tree, pure.
 
 import type { TaskStatus, TaskView } from "@aurelius/protocol";
 import { isWaiting } from "./inbox-logic";
@@ -108,23 +108,23 @@ export function foldTree(tree: { task: TaskView; depth: number }[], folds: Recor
 
 /** What a task's state says, and in which colour. */
 export function taskStateLine(t: TaskView): { text: string; color: string } {
-  if (t.pending_approvals > 0) return { text: "Paused · needs approval", color: "var(--amber)" };
-  if (t.live_run === "running" || t.status === "running") return { text: "Running", color: "var(--acc-text)" };
+  if (t.pending_approvals > 0) return { text: "Paused · needs approval", color: "var(--color-text-warning)" };
+  if (t.live_run === "running" || t.status === "running") return { text: "Running", color: "var(--color-text-accent)" };
   switch (t.status) {
     case "draft":
-      return { text: "Draft", color: "var(--text3)" };
+      return { text: "Draft", color: "var(--precision-text3)" };
     case "queued":
-      return { text: t.waiting_reason ? "Waiting" : "Queued", color: "var(--text2)" };
+      return { text: t.waiting_reason ? "Waiting" : "Queued", color: "var(--color-text-secondary)" };
     case "waiting":
-      return { text: "Waiting for you", color: "var(--amber)" };
+      return { text: "Waiting for you", color: "var(--color-text-warning)" };
     case "review":
-      return { text: "In review", color: "var(--violet)" };
+      return { text: "In review", color: "var(--precision-violet)" };
     case "succeeded":
-      return { text: "Done", color: "var(--text3)" };
+      return { text: "Done", color: "var(--precision-text3)" };
     case "failed":
-      return { text: "Failed", color: "var(--red)" };
+      return { text: "Failed", color: "var(--color-text-error)" };
     default:
-      return { text: "Cancelled", color: "var(--text3)" };
+      return { text: "Cancelled", color: "var(--precision-text3)" };
   }
 }
 

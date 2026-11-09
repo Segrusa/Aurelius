@@ -1,6 +1,15 @@
 import type { TaskView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { filesWritten, filterTasks, foldTree, stepLine, stepsOf, subtasksOf, taskStateLine, treeOrder } from "./tasks-logic";
+import {
+  filesWritten,
+  filterTasks,
+  foldTree,
+  stepLine,
+  stepsOf,
+  subtasksOf,
+  taskStateLine,
+  treeOrder,
+} from "./tasks-logic";
 
 const task = (id: string, over: Partial<TaskView> = {}): TaskView => ({
   id,
@@ -11,7 +20,6 @@ const task = (id: string, over: Partial<TaskView> = {}): TaskView => ({
   children: [],
   created_at_ms: 0,
   criteria: [],
-  depends_on: [],
   handoffs: [],
   pending_approvals: 0,
   project_id: "p",

@@ -7,7 +7,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "lint": "biome check clients/ts clients/electron clients/web clients/e2e",
+    "lint": "biome check clients/ts clients/stylex-plugin.ts clients/electron clients/web clients/e2e",
     "deps": "depcruise clients/ts clients/web clients/electron/src --config .dependency-cruiser.cjs",
     "test": "vitest run",
     "test:contract": "vitest run clients/electron/src/main/contract.test.ts",
@@ -15,8 +15,10 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
+    "@stylexjs/unplugin": "0.19.1",
     "dependency-cruiser": "18.7.2",
     "typescript": "6.0.3",
+    "unplugin": "2.3.11",
     "vitest": "5.1.0"
   }
 }

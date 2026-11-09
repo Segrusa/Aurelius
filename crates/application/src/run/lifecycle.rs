@@ -22,6 +22,8 @@ impl CommandService {
             cache_creation_tokens: usage.cache_creation_tokens,
             cost_micro_usd: usage.cost_micro_usd,
             estimate: usage.estimate,
+            // A runtime that lists no calls (the local one, an API key's) made this one.
+            model_calls: usage.steps.len().max(1) as u64,
         };
         self.store
             .write(move |tx| {
@@ -235,6 +237,7 @@ impl CommandService {
         self.store
             .write(move |tx| {
                 let mut notices = Vec::new();
+                notices.extend(CommandService::note_held_items(tx, &reason, aurelius_storage::now_ms())?);
                 for job in queries::mark_held_runs(tx, &reason, aurelius_storage::now_ms())? {
                     let conversation: Option<String> = tx
                         .query_row("SELECT json_extract(payload_json, '$.conversation_id') FROM jobs WHERE id = ?1", [&job], |r| r.get(0))?;
@@ -663,8 +666,5 @@ pub(crate) fn commit_end(tx: &aurelius_storage::Tx<'_>, store: &aurelius_storage
     );
     notices.extend(CommandService::invalidate_run_approvals(tx, run_id)?);
     conv::set_run_status(tx, run_id, run_status, error.as_deref())?;
-    if let Some(n) = crate::run::heartbeat::on_run_finished(tx, run_id, end.outcome == RunOutcome::Completed, end.reply)? {
-        notices.push(n);
-    }
     Ok(notices)
 }

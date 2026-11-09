@@ -1,18 +1,40 @@
 // The Vault. A secret's value lives only in `shown` below, for at most 30 seconds, and in the editor's
 // field while it is open. It goes through no query cache, no log and no retry.
 
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Heading } from "@astryxdesign/core/Heading";
+import { List, ListItem } from "@astryxdesign/core/List";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { expectBody, ProtocolError } from "@aurelius/client";
 import type { VaultAuditRow, VaultItemView, VaultKind } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useProjects, useVault, useVaultAudit } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { Button, initial, Mark, markColor } from "../ui/kit";
-import { Dialog } from "../ui/overlay";
+import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
-import { AREA, Confirm, EYEBROW, FIELD, hhmm, KnowledgeTabs, PageHead, SMALL, shortDay } from "./org-kit";
+import {
+  Confirm,
+  Empty,
+  Eyebrow,
+  FormDialog,
+  Hint,
+  hhmm,
+  KnowledgeTabs,
+  Loading,
+  Page,
+  PageHead,
+  Problem,
+  shortDay,
+} from "./org-kit";
 import {
   ALL_READ,
   actionText,
@@ -30,9 +52,9 @@ import {
   kindsFor,
   LINUX_KEY_NOTE,
   MASK,
+  MCP_SEES_SECRETS,
   mergeAudit,
   NOT_SECRET,
-  PLUGINS_SEE_SECRETS,
   SHOW_MS,
   SHOW_TIP,
   scopes,
@@ -40,6 +62,142 @@ import {
   via,
   who,
 } from "./vault-logic";
+
+const PANEL = "vault-panel";
+
+const styles = stylex.create({
+  pushApart: { marginInlineEnd: "auto" },
+  type: { display: "flex", flexDirection: "column", gap: 4 },
+  typeLabel: { fontSize: 12, color: "var(--precision-text3)" },
+  warning: { margin: 0, fontSize: 12, color: "var(--color-text-warning)" },
+  secret: { display: "flex", alignItems: "flex-end", gap: 4 },
+  grow: { minWidth: 0, flex: 1 },
+  mono: { fontFamily: "var(--font-family-code)" },
+  keyValue: {
+    margin: 0,
+    overflowX: "auto",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    padding: 12,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    lineHeight: "17px",
+    wordBreak: "break-all",
+    whiteSpace: "pre-wrap",
+  },
+  about: { margin: 0, lineHeight: 1.5, color: "var(--color-text-secondary)" },
+  status: { margin: 0, fontSize: 12, color: "var(--precision-text3)" },
+  auditTable: { minWidth: 700 },
+  itemsTable: { minWidth: 760 },
+  headCell: { fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
+  timeColumn: { width: 110, minWidth: 110, maxWidth: 110 },
+  whoColumn: { width: 170, minWidth: 170, maxWidth: 170 },
+  actionColumn: { width: 130, minWidth: 130, maxWidth: 130 },
+  itemColumn: { width: 150, minWidth: 150, maxWidth: 150 },
+  typeColumn: { width: 100, minWidth: 100, maxWidth: 100 },
+  updatedColumn: { width: 120, minWidth: 120, maxWidth: 120 },
+  cellText: { display: "block", overflow: "hidden", fontSize: 12, whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  dim: { color: "var(--precision-text3)" },
+  more: { margin: 12 },
+  note: { margin: 0, paddingInline: 22, paddingBlock: 12, fontSize: 12, color: "var(--precision-text3)" },
+  empty: { margin: 0, paddingInline: 22, paddingBlock: 16, color: "var(--precision-text3)" },
+  name: {
+    display: "block",
+    maxWidth: "100%",
+    overflow: "hidden",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    textAlign: "start",
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--color-text-primary)",
+  },
+  nameEditable: { cursor: "pointer", textDecoration: { default: "none", ":hover": "underline" } },
+  overrides: { marginInlineStart: 8, fontSize: 11, fontWeight: 400, color: "var(--precision-text3)" },
+  key: {
+    display: "block",
+    overflow: "hidden",
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--color-text-secondary)",
+  },
+  valueCell: { display: "flex", minWidth: 0, flexWrap: "wrap", alignItems: "center", gap: 8, paddingBlock: 6 },
+  error: { fontSize: 12, color: "var(--color-text-error)" },
+  url: {
+    overflow: "hidden",
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--color-text-accent)",
+  },
+  plain: {
+    overflow: "hidden",
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+    color: "var(--color-text-secondary)",
+  },
+  masked: {
+    minWidth: 0,
+    overflow: "hidden",
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    whiteSpace: "nowrap",
+    textOverflow: "ellipsis",
+  },
+  revealed: { width: "100%", minWidth: 0, fontFamily: "var(--font-family-code)", fontSize: 12, wordBreak: "break-all" },
+  hides: { fontSize: 11, whiteSpace: "nowrap", color: "var(--precision-text3)" },
+  message: { margin: 0, padding: 24, color: "var(--color-text-secondary)" },
+  body: { display: "flex", minWidth: 0, flex: 1, flexDirection: "column" },
+  title: { display: "flex", alignItems: "center", gap: 12, paddingInline: 22, paddingBlockStart: 18 },
+  heading: { margin: 0, fontSize: 18, fontWeight: 600 },
+  count: { fontSize: 12, color: "var(--precision-text3)" },
+  new: { marginInlineStart: "auto" },
+  tabs: { paddingInline: 22, paddingBlockStart: 10 },
+  scroll: { minHeight: 0, flex: 1, overflow: "auto" },
+  companyToggle: { paddingInline: 22, paddingBlock: 12 },
+  notes: { marginBlock: 18, marginInline: 22 },
+  visuallyHidden: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    overflow: "hidden",
+    clipPath: "inset(50%)",
+    whiteSpace: "nowrap",
+  },
+  split: { display: "flex", minHeight: 0, flex: 1 },
+  scopes: {
+    display: "flex",
+    width: 220,
+    flexShrink: 0,
+    flexDirection: "column",
+    overflowY: "auto",
+    borderInlineEndWidth: 1,
+    borderInlineEndStyle: "solid",
+    borderInlineEndColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    paddingInline: 8,
+    paddingBlock: 12,
+  },
+  scopeLabel: {
+    margin: 0,
+    marginBlockEnd: 4,
+    paddingInline: 8,
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--precision-text3)",
+  },
+  scopeCount: { fontSize: 12, color: "var(--precision-text3)" },
+});
 
 /** Never holds a value: only what the server answered in general terms. */
 function failureText(e: unknown): string {
@@ -143,133 +301,106 @@ function Editor({
   const isSecret = form.kind === "secret";
   const title = item ? `${item.name} · ${scopeName}` : `New item · ${scopeName}`;
   const kinds = kindsFor(item?.kind ?? null);
-  const label = "grid grid-cols-[70px_1fr] items-start gap-2 text-[12px] text-text3";
   return (
-    <Dialog open onClose={close} title={title} width={560}>
-      <div className="flex max-h-[70vh] flex-col gap-3 overflow-y-auto p-4">
-        <p className="m-0 text-[17px] font-semibold">{title}</p>
-        <div className={label}>
-          <span className="pt-1">Type</span>
-          <div className="flex flex-col gap-1">
-            <div className="flex gap-1">
-              {kinds.map((k: VaultKind) => (
-                <button
-                  key={k}
-                  type="button"
-                  aria-pressed={form.kind === k}
-                  onClick={() => change({ kind: k })}
-                  className={`h-[26px] cursor-pointer rounded-[6px] border px-2 text-[12px] ${form.kind === k ? "border-btn-line bg-sel text-text" : "border-line bg-transparent text-text2"}`}
-                >
-                  {KIND_LABEL[k]}
-                </button>
-              ))}
-            </div>
-            {item?.kind === "secret" ? (
-              <span>A secret stays a secret. Make a new item to change its type.</span>
-            ) : item ? (
-              <span>Text and URL trade places; a secret needs a new item.</span>
-            ) : null}
-          </div>
-        </div>
-        <label className={label}>
-          <span className="pt-2">Name *</span>
-          <input
-            data-autofocus
-            placeholder="GitHub token"
-            className={FIELD}
-            value={form.name}
-            onChange={(e) => change({ name: e.target.value })}
-          />
-        </label>
-        <label className={label}>
-          <span className="pt-2">Key *</span>
-          <span className="flex flex-col gap-1">
-            <input
-              placeholder="From the name"
-              className={`${FIELD} font-mono`}
-              value={form.env}
-              onChange={(e) => change({ env: e.target.value })}
-            />
-            <span>{envHint}A–Z, 0–9 and _ · unique in this scope</span>
-            {item && form.env.trim() !== "" && form.env.trim() !== item.env_name ? (
-              <span className="text-amber">Runs that use {item.env_name} will no longer find it.</span>
-            ) : null}
-          </span>
-        </label>
-        <div className={label}>
-          <span className="pt-2">Value *</span>
-          <span className="flex flex-col gap-1">
-            {isSecret ? (
-              <span className="flex gap-1">
-                <input
-                  autoComplete="off"
-                  spellCheck={false}
-                  aria-label="Value"
-                  type={reveal ? "text" : "password"}
-                  placeholder={item ? "Leave empty to keep the current secret" : ""}
-                  className={`${FIELD} font-mono`}
-                  value={form.value}
-                  onChange={(e) => change({ value: e.target.value })}
-                />
-                <Button
-                  aria-label={reveal ? "Hide what you type" : "Show what you type"}
-                  onClick={() => setReveal(!reveal)}
-                >
-                  {reveal ? "Hide" : "Show"}
-                </Button>
+    <>
+      <FormDialog
+        title={title}
+        width={560}
+        onClose={close}
+        footer={
+          <>
+            {item ? (
+              <span {...stylex.props(styles.pushApart)}>
+                <Button variant="destructive" label="Delete…" onClick={() => setDeleting(true)} />
               </span>
-            ) : form.kind === "url" ? (
-              <input
-                className={`${FIELD} font-mono`}
-                value={form.value}
-                onChange={(e) => change({ value: e.target.value })}
-              />
-            ) : (
-              <textarea
-                rows={3}
-                className={AREA}
-                value={form.value}
-                onChange={(e) => change({ value: e.target.value })}
-              />
-            )}
-            {isSecret ? (
-              <span>At least 8 characters. It is never shown again here.</span>
-            ) : form.kind === "url" ? (
-              <span>https://… · {NOT_SECRET}</span>
-            ) : (
-              <span>{NOT_SECRET}</span>
-            )}
-          </span>
+            ) : null}
+            <Button label="Cancel" onClick={close} />
+            <Button variant="primary" label={busy ? "Saving…" : "Save"} isDisabled={busy} onClick={() => void save()} />
+          </>
+        }
+      >
+        <div {...stylex.props(styles.type)}>
+          <span {...stylex.props(styles.typeLabel)}>Type</span>
+          <ToggleButtonGroup
+            label="Type"
+            size="sm"
+            value={form.kind}
+            onChange={(v) => v && change({ kind: v as VaultKind })}
+          >
+            {kinds.map((k: VaultKind) => (
+              <ToggleButton key={k} value={k} label={KIND_LABEL[k]} />
+            ))}
+          </ToggleButtonGroup>
+          {item?.kind === "secret" ? (
+            <Hint>A secret stays a secret. Make a new item to change its type.</Hint>
+          ) : item ? (
+            <Hint>Text and URL trade places; a secret needs a new item.</Hint>
+          ) : null}
         </div>
-        <label className={label}>
-          <span className="pt-2">Note</span>
-          <input
-            placeholder="Employees see this; never a secret"
-            className={FIELD}
-            value={form.note}
-            onChange={(e) => change({ note: e.target.value })}
+        <TextInput
+          hasAutoFocus
+          label="Name *"
+          placeholder="GitHub token"
+          value={form.name}
+          onChange={(name) => change({ name })}
+        />
+        <TextInput
+          label="Key *"
+          placeholder="From the name"
+          description={`${envHint}A–Z, 0–9 and _ · unique in this scope`}
+          controlXstyle={styles.mono}
+          value={form.env}
+          onChange={(env) => change({ env })}
+        />
+        {item && form.env.trim() !== "" && form.env.trim() !== item.env_name ? (
+          <p {...stylex.props(styles.warning)}>Runs that use {item.env_name} will no longer find it.</p>
+        ) : null}
+        {isSecret ? (
+          <div {...stylex.props(styles.secret)}>
+            <span {...stylex.props(styles.grow)}>
+              <TextInput
+                width="100%"
+                label="Value *"
+                description="At least 8 characters. It is never shown again here."
+                autoComplete="off"
+                hasSpellCheck={false}
+                type={reveal ? "text" : "password"}
+                placeholder={item ? "Leave empty to keep the current secret" : ""}
+                controlXstyle={styles.mono}
+                value={form.value}
+                onChange={(value) => change({ value })}
+              />
+            </span>
+            <Button label={reveal ? "Hide what you type" : "Show what you type"} onClick={() => setReveal(!reveal)}>
+              {reveal ? "Hide" : "Show"}
+            </Button>
+          </div>
+        ) : form.kind === "url" ? (
+          <TextInput
+            label="Value *"
+            description={`https://… · ${NOT_SECRET}`}
+            controlXstyle={styles.mono}
+            value={form.value}
+            onChange={(value) => change({ value })}
           />
-        </label>
-        <p className="m-0 text-[12px] text-text3">{ALL_READ}</p>
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex gap-2 border-t border-line2 px-4 py-3">
-        {item ? (
-          <Button kind="danger" onClick={() => setDeleting(true)}>
-            Delete…
-          </Button>
-        ) : null}
-        <Button className="ml-auto" onClick={close}>
-          Cancel
-        </Button>
-        <Button kind="primary" disabled={busy} onClick={() => void save()}>
-          {busy ? "Saving…" : "Save"}
-        </Button>
-      </div>
+        ) : (
+          <TextArea
+            label="Value *"
+            description={NOT_SECRET}
+            rows={3}
+            value={form.value}
+            onChange={(value) => change({ value })}
+          />
+        )}
+        <TextInput
+          label="Note"
+          placeholder="Employees see this; never a secret"
+          value={form.note}
+          onChange={(note) => change({ note })}
+        />
+        <Hint>{ALL_READ}</Hint>
+        {error ? <Problem>{error}</Problem> : null}
+      </FormDialog>
       {deleting ? (
         <Confirm
           danger
@@ -280,7 +411,7 @@ function Editor({
           onConfirm={() => void remove()}
         />
       ) : null}
-    </Dialog>
+    </>
   );
 }
 
@@ -355,74 +486,61 @@ function KeyExport({ onClose }: { onClose: () => void }) {
   };
   const env = key ? keyEnv(key.value) : null;
   return (
-    <Dialog open onClose={hide} title="Export the vault key" width={520}>
-      <div className="flex flex-col gap-3 p-4">
-        <p className="m-0 text-[17px] font-semibold">Export the vault key</p>
-        <p className="m-0 leading-[1.5] text-text2">{KEY_ABOUT}</p>
-        {key ? (
+    <FormDialog
+      title="Export the vault key"
+      onClose={hide}
+      footer={
+        key ? (
           <>
-            <p className={EYEBROW}>
-              Key {key.id}
-              {env ? ` · ${env}` : ""} · shown once
-            </p>
-            <section aria-label="The vault key, shown once">
-              <pre className="m-0 overflow-x-auto rounded-[6px] border border-line bg-sunk p-3 font-mono text-[12px] leading-[17px] break-all whitespace-pre-wrap">
-                {key.value}
-              </pre>
-            </section>
-            <p role="status" className="m-0 text-[12px] text-text3">
-              {hidesIn(until, now)}
-            </p>
+            <Button label="Copy" onClick={() => void copy(key.value)} />
+            <Button label="Save to file…" onClick={() => void save()} />
+            <Button variant="primary" label="Done" onClick={hide} />
           </>
         ) : (
-          <label className="flex flex-col gap-1 text-[12px] text-text3">
-            Password
-            <input
-              data-autofocus
-              autoComplete="current-password"
-              type="password"
-              placeholder="Your password"
-              className={FIELD}
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setError(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void run();
-                }
-              }}
+          <>
+            <Button label="Cancel" onClick={hide} />
+            <Button
+              variant="primary"
+              label={busy ? "Exporting…" : "Export key"}
+              isDisabled={busy || password === ""}
+              onClick={() => void run()}
             />
-            <span>Type your password: exporting the key asks it again.</span>
-          </label>
-        )}
-        {error ? (
-          <p role="alert" className="m-0 text-red">
-            {error}
+          </>
+        )
+      }
+    >
+      <p {...stylex.props(styles.about)}>{KEY_ABOUT}</p>
+      {key ? (
+        <>
+          <Eyebrow>
+            Key {key.id}
+            {env ? ` · ${env}` : ""} · shown once
+          </Eyebrow>
+          <section aria-label="The vault key, shown once">
+            <pre {...stylex.props(styles.keyValue)}>{key.value}</pre>
+          </section>
+          <p role="status" {...stylex.props(styles.status)}>
+            {hidesIn(until, now)}
           </p>
-        ) : null}
-      </div>
-      <div className="flex justify-end gap-2 border-t border-line2 px-4 py-3">
-        {key ? (
-          <>
-            <Button onClick={() => void copy(key.value)}>Copy</Button>
-            <Button onClick={() => void save()}>Save to file…</Button>
-            <Button kind="primary" onClick={hide}>
-              Done
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button onClick={hide}>Cancel</Button>
-            <Button kind="primary" disabled={busy || password === ""} onClick={() => void run()}>
-              {busy ? "Exporting…" : "Export key"}
-            </Button>
-          </>
-        )}
-      </div>
-    </Dialog>
+        </>
+      ) : (
+        <TextInput
+          hasAutoFocus
+          label="Password"
+          description="Type your password: exporting the key asks it again."
+          autoComplete="current-password"
+          type="password"
+          placeholder="Your password"
+          value={password}
+          onChange={(value) => {
+            setPassword(value);
+            setError(null);
+          }}
+          onEnter={() => void run()}
+        />
+      )}
+      {error ? <Problem>{error}</Problem> : null}
+    </FormDialog>
   );
 }
 
@@ -443,38 +561,51 @@ function AuditLog({ projectId, all }: { projectId: string | null; all: boolean }
     setOlder((now) => [...now, ...page.rows]);
     setMore(page.more);
   };
-  const grid = "grid grid-cols-[110px_170px_130px_150px_1fr] items-center gap-3 px-[22px]";
   return (
-    <div className="min-w-[700px]">
-      <div className={`${grid} h-8 border-b border-line2 text-[12px] text-text3`}>
-        <span>Time</span>
-        <span>Who</span>
-        <span>Action</span>
-        <span>Item</span>
-        <span>Via</span>
-      </div>
-      {first.isPending ? <p className="m-0 px-[22px] py-4 text-text3">Loading…</p> : null}
-      {first.data && rows.length === 0 ? (
-        <p className="m-0 px-[22px] py-4 text-text3">Nothing in the audit log yet.</p>
-      ) : null}
-      {rows.map((r) => (
-        <div key={r.id} className={`${grid} min-h-[34px] border-b border-line2 text-[12px]`}>
-          <span className="text-text3">
-            {shortDay(r.at_ms)} {hhmm(r.at_ms)}
-          </span>
-          <span className="truncate">{who(r.actor, user?.id ?? null)}</span>
-          <span className="truncate">{actionText(r)}</span>
-          <span className="truncate">{r.item_name ?? "—"}</span>
-          <span className="truncate text-text3">{via(r)}</span>
-        </div>
-      ))}
+    <>
+      <Table density="compact" xstyle={styles.auditTable}>
+        <TableHeader>
+          <TableRow isHeaderRow>
+            <TableHeaderCell xstyle={[styles.headCell, styles.timeColumn]}>Time</TableHeaderCell>
+            <TableHeaderCell xstyle={[styles.headCell, styles.whoColumn]}>Who</TableHeaderCell>
+            <TableHeaderCell xstyle={[styles.headCell, styles.actionColumn]}>Action</TableHeaderCell>
+            <TableHeaderCell xstyle={[styles.headCell, styles.itemColumn]}>Item</TableHeaderCell>
+            <TableHeaderCell xstyle={styles.headCell}>Via</TableHeaderCell>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((r) => (
+            <TableRow key={r.id}>
+              <TableCell>
+                <span {...stylex.props(styles.cellText, styles.dim)}>
+                  {shortDay(r.at_ms)} {hhmm(r.at_ms)}
+                </span>
+              </TableCell>
+              <TableCell>
+                <span {...stylex.props(styles.cellText)}>{who(r.actor, user?.id ?? null)}</span>
+              </TableCell>
+              <TableCell>
+                <span {...stylex.props(styles.cellText)}>{actionText(r)}</span>
+              </TableCell>
+              <TableCell>
+                <span {...stylex.props(styles.cellText)}>{r.item_name ?? "—"}</span>
+              </TableCell>
+              <TableCell>
+                <span {...stylex.props(styles.cellText, styles.dim)}>{via(r)}</span>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {first.isPending ? <Loading /> : null}
+      {first.data && rows.length === 0 ? <p {...stylex.props(styles.empty)}>Nothing in the audit log yet.</p> : null}
       {(more ?? first.data?.more) ? (
-        <Button className={`${SMALL} m-3`} onClick={() => void load()}>
-          Load older
-        </Button>
+        <div {...stylex.props(styles.more)}>
+          <Button size="sm" label="Load older" onClick={() => void load()} />
+        </div>
       ) : null}
-      <p className="m-0 px-[22px] py-3 text-[12px] text-text3">The audit log is read-only and never shows a value.</p>
-    </div>
+      <p {...stylex.props(styles.note)}>The audit log is read-only and never shows a value.</p>
+    </>
   );
 }
 
@@ -544,154 +675,146 @@ export function VaultBody({ projectId, scopeName }: { projectId: string | null; 
   };
   const items = list.data?.items ?? [];
   const company = list.data?.company_items ?? [];
-  const small =
-    "h-[22px] cursor-pointer rounded-[5px] border border-btn-line bg-btn px-[7px] text-[11.5px] text-text hover:bg-sel";
-  const grid = "grid grid-cols-[1.2fr_1fr_100px_1.2fr_120px] items-center gap-3 px-[22px]";
   const row = (item: VaultItemView, readOnly = false) => {
     const open = shown?.id === item.id ? shown : null;
     return (
-      <div key={item.id} className={`${grid} min-h-[38px] border-b border-line2 text-[13px]`}>
-        <button
-          type="button"
-          aria-label={`Edit ${item.name}`}
-          disabled={readOnly}
-          title={item.description ?? undefined}
-          onClick={() => setEditing(item)}
-          className={`min-w-0 truncate border-0 bg-transparent p-0 text-left font-medium text-text ${readOnly ? "" : "cursor-pointer hover:underline"}`}
-        >
-          {item.name}
-          {item.overrides_company ? (
-            <span className="ml-2 text-[11px] font-normal text-text3">overrides Company</span>
-          ) : null}
-        </button>
-        <code className="truncate font-mono text-[12px] text-text2">{item.env_name}</code>
-        <span className="text-[12px] text-text3">{KIND_TAG[item.kind]}</span>
-        <span className="flex min-w-0 flex-wrap items-center gap-2 py-[6px]">
-          {item.undecryptable ? (
-            <span className="text-[12px] text-red">Cannot be decrypted</span>
-          ) : item.kind === "url" && item.value && /^https?:\/\//i.test(item.value) ? (
-            <a
-              href={item.value}
-              target="_blank"
-              rel="noreferrer"
-              className="truncate font-mono text-[12px] text-acc-text"
-            >
-              {item.value}
-            </a>
-          ) : item.kind !== "secret" ? (
-            <span className="truncate font-mono text-[12px] text-text2">{(item.value ?? "").split("\n")[0]}</span>
-          ) : (
-            <>
-              <span className={`min-w-0 font-mono text-[12px] ${open ? "w-full break-all" : "truncate"}`}>
-                {open ? open.value : MASK}
-              </span>
-              <button
-                type="button"
-                aria-label={`${open ? "Hide" : "Show"} ${item.name}`}
-                title={SHOW_TIP}
-                className={small}
-                onClick={() => (open ? hide() : void show(item))}
-              >
-                {open ? "Hide" : "Show"}
-              </button>
-              <button
-                type="button"
-                aria-label={`Copy ${item.name}`}
-                title="Copies without showing it, and clears the clipboard after 60 s. This is logged."
-                className={small}
-                onClick={() => void copy(item)}
-              >
-                Copy
-              </button>
-              {open ? (
-                <span className="whitespace-nowrap text-[11px] text-text3">{hidesIn(open.until, now)}</span>
-              ) : null}
-            </>
-          )}
-        </span>
-        <span className="truncate text-[12px] text-text3">
-          {item.updated_by?.id === user?.id ? "You" : (item.updated_by?.username ?? "")} ·{" "}
-          {shortDay(item.updated_at_ms)}
-        </span>
-      </div>
+      <TableRow key={item.id}>
+        <TableCell>
+          <button
+            type="button"
+            aria-label={`Edit ${item.name}`}
+            disabled={readOnly}
+            title={item.description ?? undefined}
+            onClick={() => setEditing(item)}
+            {...stylex.props(styles.name, !readOnly && styles.nameEditable)}
+          >
+            {item.name}
+            {item.overrides_company ? <span {...stylex.props(styles.overrides)}>overrides Company</span> : null}
+          </button>
+        </TableCell>
+        <TableCell>
+          <code {...stylex.props(styles.key)}>{item.env_name}</code>
+        </TableCell>
+        <TableCell>
+          <span {...stylex.props(styles.cellText, styles.dim)}>{KIND_TAG[item.kind]}</span>
+        </TableCell>
+        <TableCell>
+          <span {...stylex.props(styles.valueCell)}>
+            {item.undecryptable ? (
+              <span {...stylex.props(styles.error)}>Cannot be decrypted</span>
+            ) : item.kind === "url" && item.value && /^https?:\/\//i.test(item.value) ? (
+              <a href={item.value} target="_blank" rel="noreferrer" {...stylex.props(styles.url)}>
+                {item.value}
+              </a>
+            ) : item.kind !== "secret" ? (
+              <span {...stylex.props(styles.plain)}>{(item.value ?? "").split("\n")[0]}</span>
+            ) : (
+              <>
+                <span {...stylex.props(open ? styles.revealed : styles.masked)}>{open ? open.value : MASK}</span>
+                <Button
+                  size="sm"
+                  label={`${open ? "Hide" : "Show"} ${item.name}`}
+                  tooltip={SHOW_TIP}
+                  onClick={() => (open ? hide() : void show(item))}
+                >
+                  {open ? "Hide" : "Show"}
+                </Button>
+                <Button
+                  size="sm"
+                  label={`Copy ${item.name}`}
+                  tooltip="Copies without showing it, and clears the clipboard after 60 s. This is logged."
+                  onClick={() => void copy(item)}
+                >
+                  Copy
+                </Button>
+                {open ? <span {...stylex.props(styles.hides)}>{hidesIn(open.until, now)}</span> : null}
+              </>
+            )}
+          </span>
+        </TableCell>
+        <TableCell>
+          <span {...stylex.props(styles.cellText, styles.dim)}>
+            {item.updated_by?.id === user?.id ? "You" : (item.updated_by?.username ?? "")} ·{" "}
+            {shortDay(item.updated_at_ms)}
+          </span>
+        </TableCell>
+      </TableRow>
     );
   };
+  const table = (rows: React.ReactNode) => (
+    <Table density="compact" xstyle={styles.itemsTable}>
+      <TableHeader>
+        <TableRow isHeaderRow>
+          <TableHeaderCell xstyle={styles.headCell}>Name</TableHeaderCell>
+          <TableHeaderCell xstyle={styles.headCell}>Key</TableHeaderCell>
+          <TableHeaderCell xstyle={[styles.headCell, styles.typeColumn]}>Type</TableHeaderCell>
+          <TableHeaderCell xstyle={styles.headCell}>Value</TableHeaderCell>
+          <TableHeaderCell xstyle={[styles.headCell, styles.updatedColumn]}>Updated</TableHeaderCell>
+        </TableRow>
+      </TableHeader>
+      <TableBody>{rows}</TableBody>
+    </Table>
+  );
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex items-center gap-3 px-[22px] pt-[18px]">
-        <h2 className="m-0 text-[18px] font-semibold">{scopeName}</h2>
-        <span className="text-[12px] text-text3">
+    <div {...stylex.props(styles.body)}>
+      <div {...stylex.props(styles.title)}>
+        <Heading level={2} xstyle={styles.heading}>
+          {scopeName}
+        </Heading>
+        <span {...stylex.props(styles.count)}>
           · {items.length} item{items.length === 1 ? "" : "s"}
         </span>
-        <Button kind="primary" className={`${SMALL} ml-auto`} onClick={() => setEditing("new")}>
-          New item
-        </Button>
+        <span {...stylex.props(styles.new)}>
+          <Button size="sm" variant="primary" label="New item" onClick={() => setEditing("new")} />
+        </span>
       </div>
-      <div role="tablist" aria-label="Vault" className="flex gap-[18px] border-b border-line2 px-[22px] pt-[10px]">
-        {(["items", "audit"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => setTab(t)}
-            className={`-mb-px h-[34px] cursor-pointer border-0 border-b-2 bg-transparent px-0 text-[13px] font-medium ${tab === t ? "border-text text-text" : "border-transparent text-text2"}`}
-          >
-            {t === "items" ? "Items" : "Audit log"}
-          </button>
-        ))}
+      <div {...stylex.props(styles.tabs)}>
+        <TabList role="tablist" aria-label="Vault" hasDivider value={tab} onChange={(v) => setTab(v as typeof tab)}>
+          <Tab value="items" label="Items" panelId={PANEL} />
+          <Tab value="audit" label="Audit log" panelId={PANEL} />
+        </TabList>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div id={PANEL} role="tabpanel" {...stylex.props(styles.scroll)}>
         {tab === "audit" ? (
           <AuditLog projectId={projectId} all={false} />
         ) : list.isPending ? (
-          <p className="m-0 p-6 text-text3">Loading…</p>
+          <Loading />
         ) : list.error ? (
-          <p role="alert" className="m-0 p-6 text-red">
-            {failureText(list.error)}
-          </p>
+          <Problem>{failureText(list.error)}</Problem>
         ) : (
-          <div className="min-w-[760px]">
+          <>
             {items.length > 0 ? (
-              <>
-                <div className={`${grid} h-8 border-b border-line2 text-[12px] text-text3`}>
-                  <span>Name</span>
-                  <span>Key</span>
-                  <span>Type</span>
-                  <span>Value</span>
-                  <span>Updated</span>
-                </div>
-                {items.map((i) => row(i))}
-              </>
+              table(items.map((i) => row(i)))
             ) : (
-              <div className="mx-auto flex max-w-[420px] flex-col items-center gap-3 p-10 text-center">
-                <p className="m-0 text-[15px] font-semibold">No items in {scopeName} yet</p>
-                <p className="m-0 leading-[1.6] text-text2">
-                  {projectId ? "Employees of this project" : "Every employee"} can read every item here.
-                </p>
-                <Button kind="primary" onClick={() => setEditing("new")}>
-                  New item
-                </Button>
-              </div>
+              <Empty
+                title={`No items in ${scopeName} yet`}
+                description={`${projectId ? "Employees of this project" : "Every employee"} can read every item here.`}
+              >
+                <Button variant="primary" label="New item" onClick={() => setEditing("new")} />
+              </Empty>
             )}
             {company.length > 0 ? (
               <>
-                <button
-                  type="button"
-                  aria-expanded={companyOpen}
-                  onClick={() => setCompanyOpen(!companyOpen)}
-                  className="cursor-pointer border-0 bg-transparent px-[22px] py-3 text-[12px] text-text3 hover:text-text"
-                >
-                  {companyOpen ? "▾" : "▸"} Company items also available here: {company.length}
-                </button>
-                {companyOpen ? company.map((i) => row(i, true)) : null}
+                <div {...stylex.props(styles.companyToggle)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-expanded={companyOpen}
+                    label={`${companyOpen ? "▾" : "▸"} Company items also available here: ${company.length}`}
+                    onClick={() => setCompanyOpen(!companyOpen)}
+                  />
+                </div>
+                {companyOpen ? table(company.map((i) => row(i, true))) : null}
               </>
             ) : null}
-            <ul className="mx-[22px] my-[18px] flex list-none flex-col gap-1 rounded-[8px] border border-amber-line bg-amber-soft p-0 px-[14px] py-3 text-[12px] text-text2">
-              <li>{PLUGINS_SEE_SECRETS}</li>
-              {platform.kind === "electron" ? <li>{LINUX_KEY_NOTE}</li> : null}
-            </ul>
-          </div>
+            <div {...stylex.props(styles.notes)}>
+              <Banner
+                status="warning"
+                title={MCP_SEES_SECRETS}
+                {...(platform.kind === "electron" ? { description: LINUX_KEY_NOTE } : {})}
+              />
+            </div>
+          </>
         )}
       </div>
       {editing ? (
@@ -702,7 +825,7 @@ export function VaultBody({ projectId, scopeName }: { projectId: string | null; 
           onClose={() => setEditing(null)}
         />
       ) : null}
-      <p role="status" className="sr-only">
+      <p role="status" {...stylex.props(styles.visuallyHidden)}>
         {shown ? "Shown for 30 seconds" : "Hidden"}
       </p>
     </div>
@@ -719,38 +842,34 @@ export function VaultScreen() {
   const current = all.find((s) => s.id === scope) ?? all[0];
   if (!features.includes("vault")) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <Page>
         <PageHead title="Knowledge" tabs={<KnowledgeTabs />} />
-        <p className="m-0 p-6 text-text2">This server does not have the vault yet. Update the server.</p>
-      </div>
+        <p {...stylex.props(styles.message)}>This server does not have the vault yet. Update the server.</p>
+      </Page>
     );
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <Page>
       <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
-        <Button className={SMALL} onClick={() => setExporting(true)}>
-          Export key…
-        </Button>
+        <Button size="sm" label="Export key…" onClick={() => setExporting(true)} />
       </PageHead>
-      <div className="flex min-h-0 flex-1">
-        <nav
-          aria-label="Scope"
-          className="flex w-[220px] flex-none flex-col gap-px overflow-y-auto border-r border-line bg-sunk px-2 py-3"
-        >
-          <p className="m-0 mb-1 px-2 text-[12px] font-medium text-text3">Scope</p>
-          {all.map((s) => (
-            <button
-              key={s.id ?? "company"}
-              type="button"
-              aria-current={s.id === (current?.id ?? null) ? "true" : undefined}
-              onClick={() => setScope(s.id)}
-              className={`flex h-[30px] cursor-pointer items-center gap-[9px] rounded-[6px] border-0 px-2 text-left ${s.id === (current?.id ?? null) ? "bg-sel text-text" : "bg-transparent text-text2 hover:text-text"}`}
-            >
-              <Mark letter={initial(s.name)} color={s.id ? markColor(s.id) : "#3A3D44"} size={15} radius={4} />
-              <span className="min-w-0 flex-1 truncate">{s.name}</span>
-              <span className="text-[12px] text-text3">{s.count}</span>
-            </button>
-          ))}
+      <div {...stylex.props(styles.split)}>
+        <nav aria-label="Scope" {...stylex.props(styles.scopes)}>
+          <p {...stylex.props(styles.scopeLabel)}>Scope</p>
+          <List density="compact">
+            {all.map((s) => (
+              <ListItem
+                key={s.id ?? "company"}
+                isSelected={s.id === (current?.id ?? null)}
+                onClick={() => setScope(s.id)}
+                startContent={
+                  <Mark letter={initial(s.name)} color={s.id ? markColor(s.id) : "#3A3D44"} size={15} radius={4} />
+                }
+                label={s.name}
+                endContent={<span {...stylex.props(styles.scopeCount)}>{s.count}</span>}
+              />
+            ))}
+          </List>
         </nav>
         <VaultBody
           key={current?.id ?? "company"}
@@ -759,6 +878,6 @@ export function VaultScreen() {
         />
       </div>
       {exporting ? <KeyExport onClose={() => setExporting(false)} /> : null}
-    </div>
+    </Page>
   );
 }

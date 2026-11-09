@@ -14,14 +14,10 @@
 //!   Keychain, only its SHA-256 here) and trades it for 12-hour session tokens.
 //! * The WebSocket carries the JSON of protocol 2.0 (`Request` in, `ServerMessage` out), one message per frame.
 //!   Text streaming is converted to appends (`StreamAppend`).
-//! * Outside apps (app keys `amk_…`, feature `app_keys`) open the same
-//!   WebSocket with their key, or speak MCP over Streamable HTTP at `/v1/mcp`
-//!   (`mcp`): the tools of `aurelius-mcp`, on a daemon session of that app.
 
 mod auth;
 pub mod bind;
 mod http;
-mod mcp;
 pub mod push;
 pub mod tailscale;
 mod web;
@@ -47,23 +43,6 @@ pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 pub trait Dispatch: Send + Sync + 'static {
     /// Serve `requests` for `device` until the channel closes; write to `out`.
     fn open(&self, device: Device, requests: mpsc::Receiver<Request>, out: mpsc::Sender<ServerMessage>);
-
-    /// The same for an outside app that presented its (working) app key: the
-    /// session has that app's scopes only, and checks the key on every request.
-    fn open_app(&self, key: aurelius_storage::app_keys::AppKeyRow, requests: mpsc::Receiver<Request>, out: mpsc::Sender<ServerMessage>);
-}
-
-/// Calls from apps with an API key (implemented by the daemon). `verifier`
-/// is the hash of the key the app presented; the secret never gets here.
-pub trait FunctionHost: Send + Sync + 'static {
-    fn call(
-        &self,
-        verifier: &str,
-        slug: &str,
-        params: &serde_json::Map<String, serde_json::Value>,
-    ) -> Result<aurelius_domain::agent_function::CallAccepted, aurelius_domain::agent_function::CallError>;
-
-    fn state(&self, verifier: &str, call_id: &str) -> Result<aurelius_domain::agent_function::CallState, aurelius_domain::agent_function::CallError>;
 }
 
 #[derive(Debug, Clone)]
@@ -111,13 +90,10 @@ pub(crate) struct Inner {
     version: String,
     environment: String,
     dispatch: OnceLock<Arc<dyn Dispatch>>,
-    functions: OnceLock<Arc<dyn FunctionHost>>,
     config: Mutex<Config>,
     server: tokio::sync::Mutex<Option<Server>>,
     pairings: Mutex<auth::Pairings>,
     live: Mutex<HashMap<ClientId, Live>>,
-    /// The kill switch of each app key's open WebSockets (revoke).
-    apps: Mutex<HashMap<aurelius_domain::AppKeyId, watch::Sender<bool>>>,
     push: push::Pusher,
 }
 
@@ -150,12 +126,10 @@ impl Hub {
                 version: version.into(),
                 environment: aurelius_host::Environment::current().as_str().into(),
                 dispatch: OnceLock::new(),
-                functions: OnceLock::new(),
                 config: Mutex::new(config),
                 server: tokio::sync::Mutex::new(None),
                 pairings: Mutex::new(auth::Pairings::default()),
                 live: Mutex::new(HashMap::new()),
-                apps: Mutex::new(HashMap::new()),
                 push: push::Pusher::new(),
             }),
         }
@@ -163,10 +137,6 @@ impl Hub {
 
     pub fn set_dispatch(&self, dispatch: Arc<dyn Dispatch>) {
         let _ = self.inner.dispatch.set(dispatch);
-    }
-
-    pub fn set_functions(&self, host: Arc<dyn FunctionHost>) {
-        let _ = self.inner.functions.set(host);
     }
 
     /// Loopback port: `AURELIUS_REMOTE_PORT` (0 = any, tests), else 47613 (dev 47614).
@@ -268,9 +238,6 @@ impl Hub {
         // Close every open WebSocket first; graceful shutdown waits for them.
         for live in self.inner.live.lock().unwrap().values() {
             let _ = live.kill.send(true);
-        }
-        for kill in self.inner.apps.lock().unwrap().values() {
-            let _ = kill.send(true);
         }
         if let Some(server) = self.inner.server.lock().await.take() {
             let _ = server.stop.send(());
@@ -451,39 +418,6 @@ impl Hub {
         }
         tracing::info!(%client_id, "remote device revoked");
         Ok(self.status().await)
-    }
-
-    /// An app key was revoked: close its open WebSockets now. (Each request of
-    /// any of its sessions is refused by the daemon already.)
-    pub fn revoke_app(&self, key: aurelius_domain::AppKeyId) {
-        if let Some(kill) = self.inner.apps.lock().unwrap().get(&key) {
-            let _ = kill.send(true);
-        }
-    }
-
-    /// The working app key behind a secret an app presented (`amk_…`); none
-    /// for an unknown or revoked key. Only its hash is looked up.
-    async fn app_key(&self, secret: &str) -> Result<Option<aurelius_storage::app_keys::AppKeyRow>, ()> {
-        if !secret.starts_with(aurelius_domain::app_key::KEY_PREFIX) {
-            return Ok(None);
-        }
-        let store = self.inner.store.clone();
-        let verifier = auth::verifier(secret);
-        match tokio::task::spawn_blocking(move || store.read(|c| aurelius_storage::app_keys::by_verifier(c, &verifier))).await {
-            Ok(Ok(key)) => Ok(key.filter(|k| !k.revoked())),
-            _ => Err(()),
-        }
-    }
-
-    /// An app's WebSocket: its kill switch.
-    fn connect_app(&self, key: aurelius_domain::AppKeyId) -> watch::Receiver<bool> {
-        let mut apps = self.inner.apps.lock().unwrap();
-        let kill = apps.entry(key).or_insert_with(|| watch::channel(false).0);
-        if *kill.borrow() {
-            // Remote access was turned off and on again; the key itself passed auth.
-            *kill = watch::channel(false).0;
-        }
-        kill.subscribe()
     }
 
     fn push_status(&self) -> PushStatus {

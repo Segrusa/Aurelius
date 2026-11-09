@@ -4,7 +4,7 @@
 //! Task conversations carry the task's project.
 
 use crate::{StorageError, now_ms};
-use aurelius_domain::{ConversationId, EmployeeId, ProjectId, employee::LifecycleStatus, views::{AgentView, EmployeeSummary}};
+use aurelius_domain::{ConversationId, EmployeeId, ProjectId, RunId, connection::{ConfigScope, Purpose, RunDefaults}, employee::{AccessLevel, ActivityState, LifecycleStatus}, employee_tools::{ToolPolicy, tool_policy_in}, views::{AgentView, EmployeeSummary}};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 pub struct EmployeeRow {
@@ -19,7 +19,7 @@ pub struct EmployeeRow {
 }
 
 /// The persistent chat of employee `?` (the column or parameter it is compared with).
-pub(crate) const MAIN_CHAT: &str = "(SELECT id FROM conversations WHERE employee_id = {} AND kind = 'employee' ORDER BY created_at_ms, id LIMIT 1)";
+pub(crate) const MAIN_CHAT: &str = "(SELECT id FROM conversations WHERE employee_id = {} AND kind = 'employee' AND thread_key IS NULL ORDER BY created_at_ms, id LIMIT 1)";
 
 pub(crate) fn main_chat_of(employee: &str) -> String {
     MAIN_CHAT.replace("{}", employee)
@@ -128,6 +128,71 @@ pub fn by_name(conn: &Connection, name: &str) -> Result<Option<EmployeeId>, Stor
     Ok(id.and_then(|i| EmployeeId::parse(&i).ok()))
 }
 
+/// What other employees read about it (P7); `None` clears it. In the transaction
+/// of the create or update that carries it, so it needs no version of its own.
+pub fn set_description(tx: &Transaction<'_>, id: EmployeeId, description: Option<&str>) -> Result<(), StorageError> {
+    tx.execute("UPDATE employees SET description = ?2 WHERE id = ?1", params![id.to_string(), description.unwrap_or("")])?;
+    Ok(())
+}
+
+/// What its runs may do with files and commands (C3). In the transaction of the
+/// create or update that carries it; a run reads it when it is planned.
+pub fn set_access_level(tx: &Transaction<'_>, id: EmployeeId, level: AccessLevel) -> Result<(), StorageError> {
+    tx.execute("UPDATE employees SET access_level = ?2 WHERE id = ?1", params![id.to_string(), level.as_str()])?;
+    Ok(())
+}
+
+/// Which tools it has and which ask first (C2), in `config_json`. The sessions start
+/// over by themselves: a tool list is in their key.
+pub fn set_tool_policy(tx: &Transaction<'_>, id: EmployeeId, policy: &ToolPolicy) -> Result<(), StorageError> {
+    let setting = if policy.is_default() { serde_json::json!({ "mode": "inherit" }) } else { serde_json::json!({ "mode": "value", "value": policy }) };
+    tx.execute("UPDATE employees SET config_json = json_set(config_json, '$.tool_policy', json(?2)) WHERE id = ?1", params![id.to_string(), setting.to_string()])?;
+    Ok(())
+}
+
+/// The profile it was hired from (C6).
+pub fn set_start_profile(tx: &Transaction<'_>, id: EmployeeId, key: &str) -> Result<(), StorageError> {
+    tx.execute("UPDATE employees SET config_json = json_set(config_json, '$.start_profile', ?2) WHERE id = ?1", params![id.to_string(), key])?;
+    Ok(())
+}
+
+/// The tool policy of the employee behind a conversation; none without an employee.
+pub fn tool_policy_of(conn: &Connection, conversation: ConversationId) -> Result<ToolPolicy, StorageError> {
+    let config: Option<String> = conn
+        .query_row("SELECT m.config_json FROM conversations c JOIN employees m ON m.id = c.employee_id WHERE c.id = ?1", [conversation.to_string()], |r| r.get(0))
+        .optional()?;
+    Ok(config.map(|c| tool_policy_in(&c)).unwrap_or_default())
+}
+
+/// The tool policy of the employee a run works for, as it is now: what asks first
+/// holds at once, also for a run already going. None for a run without an employee.
+pub fn tool_policy_of_run(conn: &Connection, run: RunId) -> Result<ToolPolicy, StorageError> {
+    let config: Option<String> = conn
+        .query_row(
+            "SELECT m.config_json FROM runs r
+             LEFT JOIN conversations c ON c.id = r.conversation_id
+             JOIN employees m ON m.id = COALESCE(r.employee_id, c.employee_id)
+             WHERE r.id = ?1",
+            [run.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(config.map(|c| tool_policy_in(&c)).unwrap_or_default())
+}
+
+/// The access level of the employee behind a conversation; a conversation
+/// without an employee (the project assistant) has no level of its own.
+pub fn access_level_of(conn: &Connection, conversation: ConversationId) -> Result<AccessLevel, StorageError> {
+    let level: Option<String> = conn
+        .query_row(
+            "SELECT m.access_level FROM conversations c JOIN employees m ON m.id = c.employee_id WHERE c.id = ?1",
+            [conversation.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(level.map(|l| AccessLevel::parse(&l)).unwrap_or_default())
+}
+
 pub fn update_employee(
     tx: &Transaction<'_>,
     id: EmployeeId,
@@ -190,9 +255,10 @@ pub fn projects_active(conn: &Connection, employee: EmployeeId) -> Result<Vec<Pr
 pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<EmployeeSummary>, StorageError> {
     let sql = format!(
         "SELECT m.id, m.name, m.role, m.title, m.reports_to, b.storage_key, m.status, m.version, c.id,
-                EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id IN (SELECT id FROM conversations WHERE employee_id = m.id) AND r.status IN ('created','starting','running','cancelling')),
+                EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id IN (SELECT id FROM conversations WHERE employee_id = m.id) AND r.status IN ('created','starting','running','cancelling'))
+                  OR EXISTS(SELECT 1 FROM employee_inbox i WHERE i.employee_id = m.id AND i.state = 'queued'),
                 c.agent_mode, m.folder, c.browser_allowed, c.screen_allowed,
-                COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0)
+                COALESCE(json_extract(m.config_json, '$.task_policy.sequential_tasks'), 0), m.description, m.access_level, m.config_json
          FROM employees m
          JOIN conversations c ON c.id = {}
          LEFT JOIN blobs b ON b.id = m.instructions_blob_id
@@ -218,17 +284,25 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             r.get::<_, bool>(12)?,
             r.get::<_, bool>(13)?,
             r.get::<_, bool>(14)?,
+            r.get::<_, String>(15)?,
+            r.get::<_, String>(16)?,
+            r.get::<_, String>(17)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks) = row?;
+        let (id, name, role, title, reports_to, key, status, version, conversation_id, working, mode, folder, browser_allowed, screen_allowed, sequential_tasks, description, access_level, config_json) = row?;
         out.push(EmployeeSummary {
             id,
             name,
             role,
             title,
             reports_to,
+            description: (!description.is_empty()).then_some(description),
+            access_level: AccessLevel::parse(&access_level),
+            tool_policy: tool_policy_in(&config_json),
+            settings: None,
+            activity_state: ActivityState::Idle,
             projects_active: Vec::new(),
             instructions: key.as_deref().and_then(read_blob),
             status,
@@ -239,13 +313,19 @@ pub fn list_employees(conn: &Connection, read_blob: &dyn Fn(&str) -> Option<Stri
             browser_allowed,
             screen_allowed,
             folder,
-            heartbeat: None,
             sequential_tasks,
             conversations: Vec::new(),
             agents: Vec::new(),
         });
     }
+    let defaults = crate::connections::list_defaults(conn)?;
     for m in out.iter_mut() {
+        m.settings = defaults
+            .iter()
+            .find(|d| d.purpose == Purpose::Employee && d.scope == ConfigScope::Employee(m.id))
+            .map(|d| d.settings.clone())
+            .filter(|s| *s != RunDefaults::default());
+        m.activity_state = activity_state(conn, m.id)?;
         m.projects_active = projects_active(conn, m.id)?;
         m.conversations = crate::conversations::employee_conversations(conn, m.id)?;
         m.agents = running_agents(conn, m.id)?;
@@ -341,6 +421,26 @@ pub fn running_subagents(conn: &Connection, conversation: ConversationId) -> Res
         out.extend(subagents_of_run(conn, &run, Some(conversation))?);
     }
     Ok(out)
+}
+
+/// What an employee is doing now (`EmployeeSummary::activity_state`).
+pub fn activity_state(conn: &Connection, employee: EmployeeId) -> Result<ActivityState, StorageError> {
+    const ITS_RUN: &str = "FROM runs r JOIN conversations c ON c.id = r.conversation_id WHERE c.employee_id = ?1";
+    const WAITS_ON_APPROVAL: &str = "EXISTS(SELECT 1 FROM approvals a WHERE a.run_id = r.id AND a.status = 'pending')";
+    let state: String = conn.query_row(
+        &format!(
+            "SELECT CASE
+               WHEN EXISTS(SELECT 1 {ITS_RUN} AND r.status IN ('starting','running','cancelling') AND NOT {WAITS_ON_APPROVAL}) THEN 'working'
+               WHEN EXISTS(SELECT 1 {ITS_RUN} AND {WAITS_ON_APPROVAL})
+                 OR EXISTS(SELECT 1 FROM tasks t WHERE t.employee_id = ?1 AND t.status = 'waiting' AND t.waiting_reason = 'input') THEN 'waiting'
+               WHEN EXISTS(SELECT 1 FROM employee_inbox i WHERE i.employee_id = ?1 AND i.state = 'queued')
+                 OR EXISTS(SELECT 1 {ITS_RUN} AND r.status IN ('created','waiting')) THEN 'queued'
+               ELSE 'idle' END"
+        ),
+        [employee.to_string()],
+        |r| r.get(0),
+    )?;
+    Ok(ActivityState::parse(&state))
 }
 
 /// What runs for an employee right now (see `EmployeeSummary::agents`), oldest first.
@@ -464,59 +564,6 @@ pub fn set_reports_to(tx: &Transaction<'_>, employee: EmployeeId, reports_to: Op
         params![employee.to_string(), reports_to.map(|m| m.to_string()), now_ms()],
     )?;
     Ok(())
-}
-
-/// Plugins (`name@marketplace`) an employee has enabled, in the order they were enabled.
-pub fn plugins_of(conn: &Connection, employee: EmployeeId) -> Result<Vec<String>, StorageError> {
-    let mut stmt = conn.prepare("SELECT plugin_id FROM employee_plugins WHERE employee_id = ?1 ORDER BY enabled_at_ms, plugin_id")?;
-    let rows = stmt.query_map([employee.to_string()], |r| r.get(0))?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
-pub fn set_plugins(tx: &Transaction<'_>, employee: EmployeeId, plugins: &[String]) -> Result<(), StorageError> {
-    tx.execute("DELETE FROM employee_plugins WHERE employee_id = ?1", [employee.to_string()])?;
-    let now = now_ms();
-    for (i, plugin) in plugins.iter().enumerate() {
-        tx.execute(
-            "INSERT OR IGNORE INTO employee_plugins(employee_id, plugin_id, enabled_at_ms) VALUES (?1, ?2, ?3)",
-            params![employee.to_string(), plugin, now + i as i64],
-        )?;
-    }
-    Ok(())
-}
-
-/// Which employees use which plugin.
-pub fn plugin_users(conn: &Connection) -> Result<Vec<(String, EmployeeId)>, StorageError> {
-    let mut stmt = conn.prepare("SELECT plugin_id, employee_id FROM employee_plugins ORDER BY plugin_id, employee_id")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, parse(EmployeeId::parse(&r.get::<_, String>(1)?))?)))?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
-/// Plugins (`name@marketplace`) a project has enabled, in the order they were enabled.
-/// Its project assistant and every employee run in its tasks load them.
-pub fn project_plugins_of(conn: &Connection, project: ProjectId) -> Result<Vec<String>, StorageError> {
-    let mut stmt = conn.prepare("SELECT plugin_id FROM project_plugins WHERE project_id = ?1 ORDER BY enabled_at_ms, plugin_id")?;
-    let rows = stmt.query_map([project.to_string()], |r| r.get(0))?;
-    Ok(rows.collect::<Result<_, _>>()?)
-}
-
-pub fn set_project_plugins(tx: &Transaction<'_>, project: ProjectId, plugins: &[String]) -> Result<(), StorageError> {
-    tx.execute("DELETE FROM project_plugins WHERE project_id = ?1", [project.to_string()])?;
-    let now = now_ms();
-    for (i, plugin) in plugins.iter().enumerate() {
-        tx.execute(
-            "INSERT OR IGNORE INTO project_plugins(project_id, plugin_id, enabled_at_ms) VALUES (?1, ?2, ?3)",
-            params![project.to_string(), plugin, now + i as i64],
-        )?;
-    }
-    Ok(())
-}
-
-/// Which projects use which plugin.
-pub fn project_plugin_users(conn: &Connection) -> Result<Vec<(String, ProjectId)>, StorageError> {
-    let mut stmt = conn.prepare("SELECT plugin_id, project_id FROM project_plugins ORDER BY plugin_id, project_id")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, parse(ProjectId::parse(&r.get::<_, String>(1)?))?)))?;
-    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// The server setting "Follow the org chart".

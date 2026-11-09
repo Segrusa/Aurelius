@@ -95,7 +95,7 @@ async fn board(choices: Vec<Option<&'static str>>) -> Board {
 }
 
 async fn employee(client: &Client, name: &str, role: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: role.into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
     employee_id
 }
@@ -188,7 +188,7 @@ async fn the_dispatcher_chooses_an_owner_and_the_work_starts() {
     assert_eq!(runs, [("succeeded".to_string(), Some(orion.to_string()))]);
     // MU2-03: the dispatcher's choice with its reason, linked to the main task; once.
     let lines = discussion_lines(&b.client, id).await;
-    let chose: Vec<_> = lines.iter().filter(|(_, _, t)| t.starts_with("Orion chose")).collect();
+    let chose: Vec<_> = lines.iter().filter(|(_, _, t)| t.starts_with("Orion made")).collect();
     assert_eq!(chose.len(), 1, "{lines:#?}");
     assert_eq!((chose[0].0, chose[0].1, chose[0].2.as_str()), (aurelius_domain::views::SystemLineKind::Delegated, Some(root), "Orion made Builder the owner of this ticket. Reason: Builder knows this part"));
 
@@ -203,7 +203,7 @@ async fn a_projects_own_dispatcher_goes_first() {
     let lead = employee(&b.client, "Lead", "Tech Lead").await;
     employee(&b.client, "Builder", "Backend Developer").await;
     company_dispatcher(&b.client, Some(orion)).await;
-    b.client.ticket_command(Command::UpdateProject(UpdateProject { project_id: b.project, dispatcher: Some(SetDispatcher { employee_id: Some(lead) }) }), None).await.unwrap();
+    b.client.ticket_command(Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: b.project, dispatcher: Some(SetDispatcher { employee_id: Some(lead) }) }), None).await.unwrap();
     let id = started(&b.client, b.project, "Search").await;
     until(&b.client, id, |d| d.ticket.owner_employee_id.is_some()).await;
     assert_eq!(events(&b.root, id, "ticket.dispatched")[0]["by"]["employee_id"], serde_json::json!(lead));
@@ -275,7 +275,7 @@ async fn a_paused_or_archived_project_dispatcher_leaves_the_choice_to_the_board(
     let lead = employee(&b.client, "Lead", "Tech Lead").await;
     employee(&b.client, "Builder", "Backend Developer").await;
     company_dispatcher(&b.client, Some(orion)).await;
-    b.client.ticket_command(Command::UpdateProject(UpdateProject { project_id: b.project, dispatcher: Some(SetDispatcher { employee_id: Some(lead) }) }), None).await.unwrap();
+    b.client.ticket_command(Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: b.project, dispatcher: Some(SetDispatcher { employee_id: Some(lead) }) }), None).await.unwrap();
 
     for (status, title) in [(LifecycleStatus::Paused, "Paused dispatcher"), (LifecycleStatus::Archived, "Archived dispatcher")] {
         b.client.execute(aurelius_client::envelope(Command::SetEmployeeStatus(SetEmployeeStatus { employee_id: lead, status }), None)).await.unwrap();

@@ -134,7 +134,7 @@ printf '%s' "$version" > "$bin/aurelius.version"
 icons="$prefix/share/icons/hicolor/512x512/apps"
 apps="$prefix/share/applications"
 mkdir -p "$icons" "$apps"
-install -m 644 clients/desktop/assets/aurelius-512.png "$icons/aurelius.png"
+install -m 644 clients/electron/assets/aurelius-512.png "$icons/aurelius.png"
 cat > "$apps/aurelius.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application

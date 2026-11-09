@@ -4,21 +4,14 @@
 //! Every request carries the protocol major, which must equal ours (else a hard
 //! "update the app or the server"). A request then passes the rights of its
 //! peer (`required`), and is either a read (`reads`), a session method (hello,
-//! subscribe, terminals) or a write: every write, domain command or host
+//! subscribe) or a write: every write, domain command or host
 //! write, goes through the one pipeline in `writes`.
-//!
-//! A session of an outside app (an app key, feature `app_keys`: given in the
-//! hello over local IPC, or on the gateway's WebSocket and `/v1/mcp`) passes
-//! the scopes of `aurelius_protocol::app` instead, with its key looked up again
-//! for every request, so a revoked key stops at once.
 //!
 //! The internal channel of the agent bridge is separate (`bridge`).
 
 mod bridge;
-mod git;
 mod host;
 pub mod limits;
-mod management;
 mod reads;
 pub mod sessions;
 mod sql;
@@ -32,7 +25,7 @@ pub use users::SESSION_CHECK_MS;
 
 use crate::{Shared, VERSION};
 use aurelius_application::Origin;
-use aurelius_domain::{AppKeyId, ClientId, Command, app_key::{AppAudience, AppScope}};
+use aurelius_domain::{ClientId, Command};
 use aurelius_host::ipc::{BoxStream, IpcError, read_frame};
 use aurelius_protocol::remote::{Capability, Needs, grants, required};
 use aurelius_protocol::{
@@ -40,7 +33,6 @@ use aurelius_protocol::{
     reject_unparsed,
 };
 use aurelius_storage::StorageError;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -55,9 +47,7 @@ pub struct Peer {
     pub client_id: ClientId,
     pub origin: Origin,
     pub remote: Option<RemotePeer>,
-    /// An outside app: its scopes decide, not the device rights.
-    pub app: Option<AppPeer>,
-    /// The board member of this connection's session (never for an app); set
+    /// The board member of this connection's session; set
     /// only by `hello { session_token }`, `user.login` and the first `user.create`.
     pub user: Option<aurelius_domain::UserId>,
     /// The session behind `user` (protocol 5); none: the gate lets only the
@@ -65,21 +55,6 @@ pub struct Peer {
     pub session: Option<users::PeerSession>,
     /// This connection, for closing it when its session ends (`sessions::Hub`).
     pub conn: u64,
-}
-
-/// The app key a session acts for; its scopes as of the last request.
-#[derive(Debug, Clone)]
-pub struct AppPeer {
-    pub key_id: AppKeyId,
-    pub name: String,
-    pub scopes: Vec<AppScope>,
-    pub audience: AppAudience,
-}
-
-impl AppPeer {
-    fn of(key: &aurelius_storage::app_keys::AppKeyRow) -> Self {
-        Self { key_id: key.id, name: key.name.clone(), scopes: key.scopes.clone(), audience: key.audience }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -91,16 +66,11 @@ pub struct RemotePeer {
 
 impl Peer {
     pub fn local() -> Self {
-        Self { client_id: ClientId::new(), origin: Origin::LocalIpc, remote: None, app: None, user: None, session: None, conn: 0 }
+        Self { client_id: ClientId::new(), origin: Origin::LocalIpc, remote: None, user: None, session: None, conn: 0 }
     }
 
     pub fn remote(client_id: ClientId, capabilities: Vec<Capability>, inbox: PathBuf) -> Self {
-        Self { client_id, origin: Origin::Remote, remote: Some(RemotePeer { capabilities, inbox }), app: None, user: None, session: None, conn: 0 }
-    }
-
-    /// An app that came in over the gateway with its key (WebSocket or `/v1/mcp`).
-    pub fn remote_app(key: &aurelius_storage::app_keys::AppKeyRow) -> Self {
-        Self { client_id: ClientId::new(), origin: Origin::Remote, remote: None, app: Some(AppPeer::of(key)), user: None, session: None, conn: 0 }
+        Self { client_id, origin: Origin::Remote, remote: Some(RemotePeer { capabilities, inbox }), user: None, session: None, conn: 0 }
     }
 
     fn is_owner(&self) -> bool {
@@ -109,10 +79,6 @@ impl Peer {
 
     /// `Some(error)` when a remote device may not send this.
     fn denied(&self, call: &Call) -> Option<ProtocolError> {
-        // An app's scopes are checked in `gate`, against its key as it is now.
-        if self.app.is_some() {
-            return None;
-        }
         let remote = self.remote.as_ref()?;
         let needs = required(call);
         if !grants(&remote.capabilities, needs) {
@@ -251,8 +217,6 @@ pub(crate) fn oversized(message: &ServerMessage, err: &aurelius_host::frame::Fra
         ServerMessage::Event(_) => "event",
         ServerMessage::Stream(_) => "stream update",
         ServerMessage::StreamAppend(_) => "stream append",
-        ServerMessage::TerminalOutput(_) => "terminal output",
-        ServerMessage::TerminalExit(_) => "terminal exit",
         ServerMessage::LoadChanged(_) => "load update",
         ServerMessage::PowerChanged(_) => "power update",
         ServerMessage::ClaudeLoginPrompt(_) => "claude login prompt",
@@ -287,8 +251,6 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
     // One event forwarder per session; a new subscribe replaces the old one
     // (two forwarders would deliver every event twice).
     let mut forwarder: Option<tokio::task::JoinHandle<()>> = None;
-    // Terminals this session shows; dropping one detaches (the shell keeps running).
-    let mut terminals: HashMap<String, aurelius_host::terminal::Attachment> = HashMap::new();
     // The hello said this client merges tool-use changes in live updates.
     let mut accepts = subscription::Accepts::default();
     // The hello said this client shows ticket channels and knows `channel_archived`.
@@ -363,21 +325,18 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             Call::Read(Method::SessionHello(params)) => {
                 accepts = subscription::Accepts::of(&params.accepts);
                 ticket_channels = params.accepts.iter().any(|a| a == aurelius_protocol::client_feature::TICKET_CHANNELS);
-                match authenticate(&shared, &mut peer, params.app_key).await {
-                    Ok(()) => match users::hello_session(&shared, &mut peer, &end_tx, params.session_token).await {
-                        Ok(who) => {
-                            let host_name = server_name(&shared).await.name;
-                            Ok(ResponseBody::Hello(hello(&shared, &peer, who, host_name)))
-                        }
-                        Err(err) => Err(err),
-                    },
+                match users::hello_session(&shared, &mut peer, &end_tx, params.session_token).await {
+                    Ok(who) => {
+                        let host_name = server_name(&shared).await.name;
+                        Ok(ResponseBody::Hello(hello(&shared, &peer, who, host_name)))
+                    }
                     Err(err) => Err(err),
                 }
             }
             Call::Read(Method::UserLogin(params)) => users::login(&shared, &mut peer, &mut attempts, &end_tx, params).await.map(ResponseBody::Login),
             // Without a session the board members are not named (Titan, SEC1 m9): the sign-in
-            // screen needs only `board_members_exist` from the hello or whoami. Apps keep the list.
-            Call::Read(Method::UserList) if peer.app.is_none() && peer.session.is_none() => Ok(ResponseBody::Users(aurelius_domain::user::UsersSnapshot { users: Vec::new() })),
+            // screen needs only `board_members_exist` from the hello or whoami.
+            Call::Read(Method::UserList) if peer.session.is_none() => Ok(ResponseBody::Users(aurelius_domain::user::UsersSnapshot { users: Vec::new() })),
             Call::Read(Method::UserLogout) => users::logout(&shared, &mut peer).await.map(ResponseBody::WhoAmI),
             Call::Read(Method::UserWhoami) => users::whoami_of(&shared, &peer).await.map(ResponseBody::WhoAmI),
             Call::Read(method @ (Method::SessionList { .. } | Method::ClaudeLoginStatus | Method::ClaudeLoginInput(_))) => users::session_read(&shared, &peer, method).await,
@@ -393,49 +352,17 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
                 }
                 Err(err) => Err(err),
             },
-            Call::Read(Method::TerminalOpen { conversation_id, cols, rows, fresh, terminal_id, additional }) => {
-                // A plain open keeps the old one-terminal-per-conversation view of this session.
-                let only = terminal_id.is_none() && !additional;
-                let options = aurelius_host::terminal::OpenOptions { fresh, terminal_id, additional };
-                match aurelius_host::terminal::open(&shared, conversation_id, cols, rows, options, out_tx.clone()).await {
-                    Ok((view, mut attachment)) => {
-                        // Drop an earlier attachment to this terminal before the new one replays.
-                        terminals.remove(&view.terminal_id);
-                        // The response goes out before any output: the client knows the id first.
-                        if respond(&out_tx, request_id, Ok(ResponseBody::Terminal(view.clone()))).await.is_err() {
-                            break;
-                        }
-                        attachment.release();
-                        if only {
-                            terminals.retain(|_, a| !a.is_for(conversation_id));
-                        }
-                        terminals.insert(view.terminal_id, attachment);
-                        continue;
-                    }
-                    Err(err) => Err(err),
-                }
-            }
-            // Dropping the attachment stops the output; the shell and its scrollback stay.
-            Call::Read(Method::TerminalDetach { terminal_id }) => match terminals.remove(&terminal_id) {
-                Some(_) => Ok(ResponseBody::TerminalDone),
-                None if shared.terminals.exists(&terminal_id) => Ok(ResponseBody::TerminalDone),
-                None => Err(ProtocolError::new(ErrorCode::NotFound, "This terminal has ended.")),
-            },
             // Ticket channels only for a client that shows them (feature `ticket_channels`).
-            Call::Read(Method::ChannelList) => reads::channels(&shared, peer.user.filter(|_| peer.app.is_none()), ticket_channels, None).await,
-            Call::Read(Method::ChannelSearch { query }) => reads::channels(&shared, peer.user.filter(|_| peer.app.is_none()), ticket_channels, Some(query)).await,
-            // The board member reading a discussion marks it read for themselves (not an app).
-            Call::Read(method) => match (reads::handle(&shared, method, peer.user.filter(|_| peer.app.is_none())).await, peer.app.as_ref().filter(|a| a.audience == AppAudience::Management)) {
-                // What a management app reads is cut down to the management (and its own work).
-                (Ok(body), Some(app)) => management::filter(&shared, app, body).await,
-                (outcome, _) => outcome,
-            },
+            Call::Read(Method::ChannelList) => reads::channels(&shared, peer.user, ticket_channels, None).await,
+            Call::Read(Method::ChannelSearch { query }) => reads::channels(&shared, peer.user, ticket_channels, Some(query)).await,
+            // The board member reading a discussion marks it read for themselves.
+            Call::Read(method) => reads::handle(&shared, method, peer.user).await,
         };
         // The board member is gone (signed out, disabled themselves, a hello with a
-        // token that no longer works, an app key): out of the hub, and no more
-        // events or terminal output on this connection (MU3-06 AC2, R1 M-1).
-        // Another board member signed in instead keeps the hub, not the terminals
-        // or a sign-in to Claude of the earlier one (R4 m-2).
+        // token that no longer works): out of the hub, and no more
+        // events on this connection (MU3-06 AC2, R1 M-1).
+        // Another board member signed in instead keeps the hub, not a sign-in
+        // to Claude of the earlier one (R4 m-2).
         if before.is_some() && peer.user != before {
             if peer.user.is_none() {
                 shared.sessions.forget(peer.conn);
@@ -443,7 +370,6 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
                     task.abort();
                 }
             }
-            terminals.clear();
             shared.claude_links.cancel_conn(peer.conn);
         }
         let outcome = if ticket_channels { outcome } else { outcome.map_err(for_older_client) };
@@ -477,53 +403,6 @@ async fn respond(out_tx: &mpsc::Sender<ServerMessage>, request_id: u64, outcome:
     out_tx.send(ServerMessage::Response { request_id, outcome }).await.map_err(|_| ())
 }
 
-/// A hello with an app key: from now on this session acts for that app. A
-/// session that already acts for an app keeps it (a hello never widens it).
-/// An app has no board member, so one named before on this session is dropped.
-async fn authenticate(shared: &Arc<Shared>, peer: &mut Peer, key: Option<String>) -> Result<(), ProtocolError> {
-    let Some(secret) = key else { return Ok(()) };
-    let s = shared.clone();
-    let key = app_task(move || s.service.authenticate_app(&secret)).await?;
-    match &peer.app {
-        Some(app) if app.key_id != key.id => Err(ProtocolError::new(ErrorCode::Forbidden, "This session already acts for another app.")),
-        _ => {
-            peer.app = Some(AppPeer::of(&key));
-            peer.user = None;
-            peer.session = None;
-            Ok(())
-        }
-    }
-}
-
-/// An app's request: its key still works (looked up now, so revoking stops
-/// open sessions too), its scopes cover the call, and what the call points
-/// at is in a project, never one of the user's own chats.
-async fn app_gate(shared: &Arc<Shared>, app: &mut AppPeer, call: &Call) -> Result<(), ProtocolError> {
-    let s = shared.clone();
-    let key_id = app.key_id;
-    let key = app_task(move || s.service.app_key_for_request(key_id)).await?;
-    *app = AppPeer::of(&key);
-    aurelius_protocol::app::allowed_for(&app.scopes, app.audience, call).map_err(|why| ProtocolError::new(ErrorCode::Forbidden, why))?;
-    // A management app reaches the management only: checked against the company as it is now.
-    if app.audience == AppAudience::Management {
-        return management::check(shared, app, call).await;
-    }
-    let conversation = match call {
-        Call::Read(Method::ConversationGet { conversation_id }) => Some(*conversation_id),
-        Call::Write(WriteMethod::Domain(Command::SetAgentMode(m))) => Some(m.conversation_id),
-        Call::Write(WriteMethod::Domain(Command::SendEmployeeMessage(m))) => Some(m.conversation_id),
-        Call::Write(WriteMethod::Domain(Command::SendProjectMessage(m))) => m.conversation_id,
-        _ => None,
-    };
-    if let Some(conversation) = conversation {
-        let store = shared.store().clone();
-        if !storage_task(move || store.read(|c| aurelius_storage::app_keys::project_conversation(c, conversation))).await? {
-            return Err(ProtocolError::new(ErrorCode::Forbidden, "Apps only reach the conversations of projects."));
-        }
-    }
-    Ok(())
-}
-
 /// What every request must pass first: the protocol major, then the rights of the peer.
 async fn gate(shared: &Arc<Shared>, peer: &mut Peer, request: &Request) -> Result<(), ProtocolError> {
     if request.protocol != PROTOCOL_MAJOR {
@@ -531,9 +410,6 @@ async fn gate(shared: &Arc<Shared>, peer: &mut Peer, request: &Request) -> Resul
     }
     if let Some(err) = peer.denied(&request.call) {
         return Err(err);
-    }
-    if let Some(app) = peer.app.as_mut() {
-        return app_gate(shared, app, &request.call).await;
     }
     // The gate (MU3-06): nothing without a session but the sign-in; a temporary
     // password only lets its change through.
@@ -590,14 +466,11 @@ fn hello(shared: &Arc<Shared>, peer: &Peer, who: users::HelloWho, host_name: Str
         os: std::env::consts::OS.into(),
         remote: peer.remote.is_some() || peer.origin == Origin::Remote,
         client_id: peer.remote.as_ref().map(|_| peer.client_id),
-        capabilities: match (&peer.app, &peer.remote) {
-            // An app has scopes (`app`), no device rights.
-            (Some(_), _) => Vec::new(),
-            (None, None) => Capability::ALL.to_vec(),
-            (None, Some(remote)) => remote.capabilities.clone(),
+        capabilities: match &peer.remote {
+            None => Capability::ALL.to_vec(),
+            Some(remote) => remote.capabilities.clone(),
         },
         features: aurelius_protocol::FEATURES.iter().map(|f| (*f).to_owned()).collect(),
-        app: peer.app.as_ref().map(|a| aurelius_domain::app_key::AppSession { key_id: a.key_id, name: a.name.clone(), scopes: a.scopes.clone(), audience: a.audience }),
         board_members_exist: who.who.board_members_exist,
         user: who.who.user,
         must_change_password: who.who.must_change_password,
@@ -669,7 +542,7 @@ mod tests {
 
     #[test]
     fn an_oversized_push_is_dropped() {
-        let push = ServerMessage::TerminalExit(aurelius_protocol::TerminalExit { terminal_id: "t".into(), code: None });
+        let push = ServerMessage::PowerChanged(aurelius_protocol::PowerState { pending: None });
         assert!(oversized(&push, &FrameError::TooLarge(MAX_FRAME_BYTES + 1)).is_none());
     }
 }

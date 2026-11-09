@@ -1,6 +1,6 @@
 import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/data/markdown_paths.dart';
-import 'package:aurelius_mobile/features/artifacts/artifacts.dart';
+import 'package:aurelius_mobile/features/links/external_link.dart';
 import 'package:aurelius_mobile/features/markdown/links.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

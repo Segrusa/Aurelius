@@ -24,7 +24,7 @@ struct Setup {
 }
 
 fn ctx(user: Option<UserId>) -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: user }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: user }
 }
 
 fn envelope(command: Command) -> CommandEnvelope {
@@ -45,7 +45,7 @@ fn setup() -> Setup {
         .unwrap();
     let made = service.execute(&ctx(Some(user)), envelope(Command::CreateProject(CreateProject { name: "Orbit".into(), description: None, folder: None }))).unwrap().receipt.result;
     let CommandResult::ProjectCreated { project_id, .. } = made else { panic!("{made:?}") };
-    let create = CreateEmployee { name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Ann".into(), role: "Dev".into(), title: None, reports_to: None, instructions: None, folder: None };
     let made = service.execute(&ctx(Some(user)), envelope(Command::CreateEmployee(create))).unwrap().receipt.result;
     let CommandResult::EmployeeCreated { employee_id: ann, .. } = made else { panic!("{made:?}") };
     let folder = dir.path().join("work");
@@ -82,7 +82,7 @@ fn new_ticket(s: &Setup) -> TicketId {
 }
 
 fn add_files(id: TicketId, files: &[String]) -> Command {
-    Command::UpdateTicket(ticket::UpdateTicket {
+    Command::UpdateTicket(ticket::UpdateTicket { design_url: None,
         confirm_secret: false,
         ticket_id: id,
         title: None,

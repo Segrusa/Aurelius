@@ -120,11 +120,8 @@ extension EventKinds on Event {
   bool get isTask => kind.wire.startsWith('task.');
   bool get isIdea => kind.wire.startsWith('idea.');
 
-  /// Project notes: only the Notes tab follows them (an autosave is one a second).
-  bool get isNote => kind.wire.startsWith('note.');
-
-  /// Memories and what was shared into them.
-  bool get isMemory => kind.wire.startsWith('memory.') || kind.wire.startsWith('share.');
+  /// Memories.
+  bool get isMemory => kind.wire.startsWith('memory.');
 
   /// Connections and the run defaults.
   bool get isRuntimeConfig => kind == EventKind.configChanged || kind == EventKind.connectionChanged;

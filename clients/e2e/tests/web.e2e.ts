@@ -69,8 +69,10 @@ test.describe("against a real daemon", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await expect(page).toHaveURL(/\/inbox$/);
-    await expect(page.getByText("Northwind API")).toBeVisible();
-    await expect(page.getByText("Nothing waits for you.")).toBeVisible();
+    await page.getByRole("button", { name: "Workspace: All projects" }).click();
+    await expect(page.getByRole("menuitem", { name: "Northwind API" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("heading", { name: "Nothing waits for you." })).toBeVisible();
 
     // No credential for a script, and none in the address.
     const cookies = await page.context().cookies();
@@ -87,14 +89,19 @@ test.describe("against a real daemon", () => {
 
     // A change elsewhere reaches this page by an event.
     await owner.write("project.create", { name: "Seen live" });
-    await expect(page.getByText("Seen live")).toBeVisible();
+    const projectInSwitcher = async () => {
+      await page.getByRole("button", { name: "Workspace: All projects" }).click();
+      await expect(page.getByRole("menuitem", { name: "Seen live" })).toBeVisible();
+      await page.keyboard.press("Escape");
+    };
+    await projectInSwitcher();
 
     // The server goes away and comes back.
     await daemon.stop();
-    await expect(page.getByRole("status")).toHaveText("Reconnecting…");
+    await expect(page.locator('p[role="status"]')).toHaveText("Reconnecting…");
     await daemon.start();
-    await expect(page.getByRole("status")).toBeHidden({ timeout: 30_000 });
-    await expect(page.getByText("Seen live")).toBeVisible();
+    await expect(page.locator('p[role="status"]')).toBeHidden({ timeout: 30_000 });
+    await projectInSwitcher();
 
     // Settings in a browser: no section fails, and none allows other devices from here.
     await page.getByRole("link", { name: "Settings" }).click();
@@ -106,10 +113,9 @@ test.describe("against a real daemon", () => {
       "Remote access",
       "Connections",
       "MCP & tools",
-      "Recurring schedules",
       "Backups",
       "Load limits",
-      "Trace",
+      "Activity log",
     ]) {
       await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name, exact: true }).click();
       await expect(page.getByRole("heading", { level: 1, name, exact: true })).toBeVisible();
@@ -171,7 +177,7 @@ test.describe("the Inbox", () => {
     await page.keyboard.press("d");
     await expect.poll(() => writes.length).toBe(2);
     expect(writes[1]).toMatchObject({ params: { approval_id: "b", approve: false } });
-    await expect(page.getByText("Nothing waits for you.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Nothing waits for you." })).toBeVisible();
   });
 
   test("J and K keep the selected row in view, and it fits a narrow window", async ({ page }) => {
@@ -206,7 +212,7 @@ test.describe("the Inbox", () => {
     });
     await page.goto(`${site.origin}/inbox`);
     await expect(page.locator("pre")).toHaveText("<script>alert(1)</script>");
-    expect(await page.locator("main img").count()).toBe(0);
+    expect(await page.locator('[role="main"] img').count()).toBe(0);
   });
 
   test("walks with J and K, and filters", async ({ page }) => {
@@ -218,10 +224,10 @@ test.describe("the Inbox", () => {
     await expect(position).toContainText("2 / 3");
     await page.keyboard.press("k");
     await expect(position).toContainText("1 / 3");
-    await page.getByRole("button", { name: "Reviews" }).click();
+    await page.getByRole("radio", { name: "Reviews" }).click();
     await expect(position).toContainText("1 / 1");
     await expect(page.getByRole("button", { name: /Ready for your review/ })).toBeVisible();
-    await page.getByRole("button", { name: "Mentions" }).click();
+    await page.getByRole("radio", { name: "Mentions" }).click();
     await expect(page.getByRole("button", { name: /Update 5/ })).toBeVisible();
   });
 

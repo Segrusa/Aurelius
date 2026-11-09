@@ -1,103 +1,158 @@
-import { Children, isValidElement, memo, type ReactElement, type ReactNode, useState } from "react";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { usePlatform } from "../platform";
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
+import { Markdown as AstryxMarkdown } from "@astryxdesign/core/Markdown";
+import {
+  createMarkdownFenceTransform,
+  createMarkdownPlugin,
+  type MarkdownExtensionNode,
+} from "@astryxdesign/core/Markdown/plugins";
+import * as stylex from "@stylexjs/stylex";
+import { memo, type ReactNode } from "react";
 import { useFollowLink } from "../screens/links";
 import { Mermaid } from "./mermaid";
 
-/** The sanitizer knows web addresses; ours go to the app, not to the browser. */
-const keepAppLinks = (url: string) => (url.startsWith("aurelius://") ? url : defaultUrlTransform(url));
+const styles = stylex.create({
+  // The design's reading type and its tighter block spacing, set as the tokens Astryx reads for every block.
+  prose: {
+    "--text-body-size": "14px",
+    "--text-body-leading": "1.65",
+    "--text-code-size": "12px",
+    "--text-heading-1-size": "14px",
+    "--text-heading-2-size": "14px",
+    "--text-heading-3-size": "14px",
+    "--text-heading-4-size": "14px",
+    "--text-heading-5-size": "14px",
+    "--text-heading-6-size": "14px",
+    "--spacing-3": "10px",
+    "--spacing-4": "10px",
+    "--spacing-6": "14px",
+  },
+  link: { color: "var(--color-text-accent)", textDecoration: "none" },
+  appLink: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    color: "var(--color-text-accent)",
+    textDecoration: "underline",
+  },
+  image: { maxWidth: "100%", borderRadius: 6 },
+  noImage: { color: "var(--precision-text3)" },
+  // A fence a plugin claims gets no spacing from Markdown itself.
+  diagram: {
+    marginBlockStart: { default: 10, ":first-child": 0 },
+    marginBlockEnd: { default: 10, ":last-child": 0 },
+  },
+});
 
-function AppLink({ href, children }: { href: string; children: React.ReactNode }) {
+/** Worked out once: a Markdown is drawn for every visible message. */
+const PROSE = stylex.props(styles.prose);
+const DIAGRAM = stylex.props(styles.diagram);
+
+/**
+ * What the sanitizer let through: no scheme, a web address or mail, and our own links.
+ * Astryx only blocks script-like schemes, and a link here opens outside the app.
+ */
+function allowedUrl(url: string): boolean {
+  if (url.startsWith("aurelius://")) return true;
+  const colon = url.indexOf(":");
+  if (colon === -1) return true;
+  // A colon after one of these is part of a path or query, not a scheme.
+  if (["/", "?", "#"].some((ch) => url.includes(ch) && colon > url.indexOf(ch))) return true;
+  return /^(https?|ircs?|mailto|xmpp)$/i.test(url.slice(0, colon));
+}
+
+function AppLink({ href, children }: { href: string; children: ReactNode }) {
   const follow = useFollowLink();
   if (follow === null) return <>{children}</>;
   return (
-    <button
-      type="button"
-      onClick={() => follow(href)}
-      className="cursor-pointer border-0 bg-transparent p-0 text-acc-text underline"
-    >
+    <button type="button" onClick={() => follow(href)} {...stylex.props(styles.appLink)}>
       {children}
     </button>
   );
 }
 
-function textOf(node: ReactNode): string {
-  if (typeof node === "string") return node;
-  if (Array.isArray(node)) return node.map(textOf).join("");
-  return isValidElement(node) ? textOf((node as ReactElement<{ children?: ReactNode }>).props.children) : "";
+/** A link opens a new window, which the Electron shell hands to the browser; `#@Name` is a mention and goes nowhere. */
+function MarkdownLink({ href, children }: { href: string; children: ReactNode }) {
+  if (href.startsWith("#")) return <span className="mention">{children}</span>;
+  if (href.startsWith("aurelius://")) return <AppLink href={href}>{children}</AppLink>;
+  if (!allowedUrl(href)) return <>{children}</>;
+  return (
+    <a href={href} target="_blank" rel="noreferrer" {...stylex.props(styles.link)}>
+      {children}
+    </a>
+  );
 }
 
-function Code({ children, diagrams }: { children: ReactNode; diagrams: boolean }) {
-  const platform = usePlatform();
-  const [copied, setCopied] = useState(false);
-  const code = Children.toArray(children)[0];
-  const className = isValidElement(code) ? (code as ReactElement<{ className?: string }>).props.className : undefined;
-  const text = textOf(children).replace(/\n$/, "");
-  const block = (
-    <div className="group relative">
-      <pre>{children}</pre>
-      <button
-        type="button"
-        onClick={() => {
-          platform
-            .copy(text)
-            .then(() => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1200);
-            })
-            .catch(() => undefined);
-        }}
-        className="absolute top-[6px] right-[6px] cursor-pointer rounded-[5px] border border-line bg-panel px-[6px] py-[2px] text-[11px] text-text2 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
-    </div>
-  );
-  if (diagrams && /(^|\s)language-mermaid(\s|$)/i.test(className ?? ""))
-    return <Mermaid source={text} fallback={block} />;
-  return block;
+function NoImage({ alt }: { alt: string }) {
+  return <span {...stylex.props(styles.noImage)}>[{alt || "image"}]</span>;
 }
+
+function MarkdownImage({ src, alt }: { src: string; alt: string }) {
+  if (!allowedUrl(src)) return <NoImage alt={alt} />;
+  return <img src={src} alt={alt} {...stylex.props(styles.image)} />;
+}
+
+const PARTS = { link: MarkdownLink, image: MarkdownImage };
+// Nothing in a guideline loads by itself.
+const SAFE_PARTS = { link: MarkdownLink, image: NoImage };
+
+type DiagramNode = MarkdownExtensionNode<"diagrams", "diagram", { readonly code: string }, "block">;
+
+const diagrams = createMarkdownPlugin<"diagrams", DiagramNode>({
+  name: "diagrams",
+  apiVersion: 1,
+  transform: createMarkdownFenceTransform({
+    languages: ["mermaid", "Mermaid"],
+    createNode: ({ code }) => ({
+      type: "extension",
+      plugin: "diagrams",
+      name: "diagram",
+      display: "block",
+      data: { code },
+    }),
+  }),
+  renderers: {
+    diagram: {
+      render: ({ node }) => (
+        <div {...DIAGRAM}>
+          <Mermaid
+            source={node.data.code}
+            fallback={<CodeBlock code={node.data.code} language="mermaid" isWrapped width="100%" />}
+          />
+        </div>
+      ),
+      toText: (node) => node.data.code,
+    },
+  },
+});
+
+const WITH_DIAGRAMS = { plugins: [diagrams] };
 
 /**
- * Markdown in the design's type. No raw HTML, and react-markdown drops unsafe link schemes. A link opens
- * a new window, which the Electron shell hands to the browser; `#@Name` is a mention and goes nowhere.
- * `live`: still being written, so no diagrams yet.
+ * Markdown in the design's type. No raw HTML, and links and images only go where `allowedUrl` says.
+ * `live`: still being written, so no diagrams yet. `streaming`: the block text is arriving in right now.
  */
 export const Markdown = memo(function Markdown({
   text,
   live = false,
   safe = false,
+  streaming = false,
 }: {
   text: string;
   live?: boolean;
   safe?: boolean;
+  streaming?: boolean;
 }) {
   return (
-    <div className="prose-aurelius">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        urlTransform={keepAppLinks}
-        components={{
-          a: ({ href, children }) =>
-            href?.startsWith("#") ? (
-              <span className="mention">{children}</span>
-            ) : href?.startsWith("aurelius://") ? (
-              <AppLink href={href}>{children}</AppLink>
-            ) : (
-              <a href={href} target="_blank" rel="noreferrer">
-                {children}
-              </a>
-            ),
-          pre: ({ children }) => <Code diagrams={!live && !safe}>{children}</Code>,
-          // Nothing in a guideline loads by itself.
-          ...(safe
-            ? { img: ({ alt }: { alt?: string | undefined }) => <span className="text-text3">[{alt || "image"}]</span> }
-            : {}),
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
+    <AstryxMarkdown
+      autolink="gfm"
+      contentWidth="100%"
+      components={safe ? SAFE_PARTS : PARTS}
+      isStreaming={streaming}
+      {...(live || safe ? {} : WITH_DIAGRAMS)}
+      {...PROSE}
+    >
+      {text}
+    </AstryxMarkdown>
   );
 });

@@ -54,7 +54,6 @@ extension EmployeeSummaryView on EmployeeSummary {
         conversationId: conversationId,
         conversations: conversations,
         folder: folder,
-        heartbeat: heartbeat,
         id: id,
         instructions: instructions,
         name: name,
@@ -115,16 +114,8 @@ extension TaskViewState on TaskView {
   /// scheduled for later. Not at work. Older servers never send a reason here.
   bool get waitsToStart => status == TaskStatus.queued && waitingReason != null;
 
-  bool get needsYou => pendingApprovals > 0 || variantsReady || (status == TaskStatus.waiting && (waitingReason == 'input' || waitingReason == 'escalated'));
+  bool get needsYou => pendingApprovals > 0 || (status == TaskStatus.waiting && (waitingReason == 'input' || waitingReason == 'escalated'));
 
-  /// Its variants are done and wait for the user to choose one (feature `task_variants`).
-  bool get variantsReady => variantPhase == VariantPhase.ready;
-
-  /// Tried in several ways and not yet settled.
-  bool get tryingVariants => switch (variantPhase) {
-        VariantPhase.proposing || VariantPhase.probing || VariantPhase.judging || VariantPhase.applying => true,
-        _ => false,
-      };
 
   /// The same labels as the desktop task list.
   String get statusLabel => switch (status) {
@@ -136,11 +127,9 @@ extension TaskViewState on TaskView {
             'quota' => limitWait(waitingUntilMs),
             'offline' => 'Waiting for connection',
             'escalated' => 'Your decision needed',
-            'variants' => variantsReady ? 'Variants ready to compare' : 'Trying variants',
             _ => 'Waiting',
           },
         TaskStatus.running when pendingApprovals > 0 => 'Waiting for you in the Inbox',
-        TaskStatus.running when tryingVariants => variantPhaseLabel(variantPhase!),
         TaskStatus.draft => 'Draft',
         TaskStatus.queued => switch ((waitingReason, startsAtMs)) {
             ('scheduled', final int ms) => 'Scheduled · starts ${DateFormat.Hm().format(DateTime.fromMillisecondsSinceEpoch(ms))}',
@@ -513,116 +502,11 @@ String pendingText(PendingShutdown p, int now) {
   return 'PC shuts down in ${countdownText(Duration(milliseconds: deadline - now))}';
 }
 
-// ---- git ----
-
-extension GitStatusState on GitStatusView {
-  bool get clean => files == 0;
-
-  /// "main", or "detached abc123".
-  String? get label => branch ?? (head == null ? null : 'detached $head');
-
-  /// What a tap copies: the branch name, else the commit.
-  String get copyText => branch ?? head ?? '';
-
-  bool same(GitStatusView? o) => o != null && o.branch == branch && o.head == head && o.files == files && o.insertions == insertions && o.deletions == deletions;
-}
-
-extension GitDiffState on GitDiffView {
-  List<FileDiff> get fileDiffs => FileDiff.split(patch);
-}
-
-/// One file's part of a unified diff.
-class FileDiff {
-  const FileDiff({required this.path, required this.lines, required this.insertions, required this.deletions});
-
-  final String path;
-
-  /// Hunk headers and changed lines, or a note such as "Binary files differ".
-  final List<String> lines;
-  final int insertions;
-  final int deletions;
-
-  /// Split `git diff` output into files (`diff --git a/x b/x` starts one).
-  static List<FileDiff> split(String patch) {
-    final files = <FileDiff>[];
-    String? path;
-    var lines = <String>[];
-    var inHunks = false;
-    void flush() {
-      if (path == null) return;
-      while (lines.isNotEmpty && lines.last.isEmpty) {
-        lines.removeLast();
-      }
-      final ins = lines.where((l) => l.startsWith('+')).length;
-      final del = lines.where((l) => l.startsWith('-')).length;
-      files.add(FileDiff(path: path, lines: lines, insertions: ins, deletions: del));
-    }
-
-    for (final raw in patch.split('\n')) {
-      final line = raw.endsWith('\r') ? raw.substring(0, raw.length - 1) : raw;
-      if (line.startsWith('diff --git ')) {
-        flush();
-        path = _path(line);
-        lines = <String>[];
-        inHunks = false;
-      } else if (path == null) {
-        continue;
-      } else if (line.startsWith('@@')) {
-        inHunks = true;
-        lines.add(line);
-      } else if (inHunks) {
-        lines.add(line);
-      } else if (line.startsWith('Binary files') || line.startsWith('rename ') || line.startsWith('deleted file') || line.startsWith('new file')) {
-        lines.add(line);
-      } else if (line.startsWith('+++ b/')) {
-        path = line.substring(6);
-      }
-    }
-    flush();
-    return files;
-  }
-
-  static String _path(String header) {
-    final rest = header.substring('diff --git '.length);
-    final b = rest.lastIndexOf(' b/');
-    return b >= 0 ? rest.substring(b + 3) : rest;
-  }
-}
-
 // ---- markdown ----
 
 extension MarkdownFileEntryView on MarkdownFileEntry {
   String get name => path.split('/').last;
   String get folder => path.contains('/') ? path.substring(0, path.lastIndexOf('/')) : '';
-}
-
-// ---- app keys ----
-
-extension ApiKeyViewState on ApiKeyView {
-  bool get revoked => revokedAtMs != null;
-}
-
-// ---- plugins ----
-
-const pluginsNeedsApprove = 'Changing plugins needs the Approve right on this phone.';
-const pluginHooksWarning = 'Runs hooks (commands on this PC)';
-const pluginMcpNote = 'MCP servers not loaded';
-
-extension PluginComponentsView on PluginComponents {
-  /// "3 skills", "1 command", ...: one label per kind that is present.
-  List<String> get chips => [
-        if (skills.isNotEmpty) '${skills.length} ${skills.length == 1 ? 'skill' : 'skills'}',
-        if (commands.isNotEmpty) '${commands.length} ${commands.length == 1 ? 'command' : 'commands'}',
-        if (agents.isNotEmpty) '${agents.length} ${agents.length == 1 ? 'agent' : 'agents'}',
-        if (hooks) 'hooks',
-        if (mcpServers.isNotEmpty) 'MCP',
-      ];
-}
-
-/// A readable line for a failed plugin call.
-String pluginError(Object e, String fallback) {
-  final text = e.toString().trim();
-  return text.isEmpty ? fallback : text;
 }
 
 // ---- MCP ----
@@ -686,33 +570,8 @@ extension ProposalState on ProposalView {
 abstract final class Harness2 {
   static const lessons = 'task_lessons';
   static const instructionProposals = 'instruction_proposals';
-  static const variants = 'task_variants';
 }
 
-/// A task's variant phase in words.
-String variantPhaseLabel(VariantPhase phase) => switch (phase) {
-      VariantPhase.proposing => 'Thinking up variants',
-      VariantPhase.probing => 'Trying variants',
-      VariantPhase.judging => 'Comparing variants',
-      VariantPhase.ready => 'Variants ready to compare',
-      VariantPhase.applying => 'Applying the chosen variant',
-      VariantPhase.done => 'Variant chosen',
-      VariantPhase.stopped => 'Variants stopped',
-      VariantPhase.failed => 'Variants failed',
-    };
-
-/// The cost note next to the variants picker: k variants use about k times the tokens.
-String variantsCostNote(int count) => count <= 1 ? 'One run, as usual.' : 'Tries it $count ways side by side, then a judge compares: about $count× the tokens.';
-
-extension TaskVariantViewText on TaskVariantView {
-  /// "3 files · +40 −12".
-  String get changeLine => '$files file${files == 1 ? '' : 's'} · +$insertions −$deletions';
-
-  /// Tokens this trial used (input, cache writes and output).
-  int get tokens => usage.inputTokens + usage.cacheCreationTokens + usage.outputTokens;
-
-  bool get choosable => status == VariantStatus.done;
-}
 
 extension LessonLocatorText on LessonLocator {
   /// "confirmed 2×" once later tasks reinforced it; null before.

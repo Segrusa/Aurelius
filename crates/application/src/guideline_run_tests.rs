@@ -25,7 +25,7 @@ struct Setup {
 }
 
 fn ctx(user: Option<UserId>) -> CommandContext {
-    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, app: None, user_id: user }
+    CommandContext { principal_id: PrincipalId::new(), client_id: ClientId::new(), origin: Origin::LocalIpc, request_id: 1, user_id: user }
 }
 
 fn exec(s: &Setup, command: Command) -> CommandResult {
@@ -33,7 +33,7 @@ fn exec(s: &Setup, command: Command) -> CommandResult {
 }
 
 fn hire(service: &CommandService, user: UserId, name: &str) -> EmployeeId {
-    let create = CreateEmployee { name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: name.into(), role: "Dev".into(), title: None, reports_to: None, instructions: Some(format!("Focus of {name}.")), folder: None };
     let made = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateEmployee(create) }).unwrap().receipt.result;
     let CommandResult::EmployeeCreated { employee_id, .. } = made else { panic!("{made:?}") };
     employee_id
@@ -74,7 +74,7 @@ fn queued(s: &Setup, conversation: ConversationId) -> RunId {
 
 /// A running task of `employee` in the project, with a run in its conversation.
 fn task_run(s: &Setup, employee: EmployeeId) -> RunId {
-    let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(employee), title: "Export".into(), goal: "Do it".into(), acceptance_criteria: vec![], depends_on: vec![], run: Default::default(), files: vec![] };
+    let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(employee), title: "Export".into(), goal: "Do it".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
     let CommandResult::TaskCreated { task_id } = exec(s, Command::CreateTask(create)) else { panic!() };
     let st = s.service.store().clone();
     s.service
@@ -112,7 +112,8 @@ fn the_block_comes_after_the_identity_with_the_set_of_the_run() {
     // Its own chat without a project: its own guidelines only.
     let chat = plan(&s, queued(&s, chat_of(&s, s.ann)));
     let system = chat.system.clone().unwrap();
-    assert!(system.starts_with("You are Ann, Dev. Focus of Ann.\n\n## Guidelines\n"), "right after the identity and the instructions: {system}");
+    assert!(system.starts_with(crate::run::plan::PLATFORM_RULES), "the platform rules come first: {system}");
+    assert!(system.contains("\n\nYou are Ann, Dev. Focus of Ann.\n\n## Guidelines\n"), "right after the identity and the instructions: {system}");
     assert_eq!(titles_in(&system), vec!["Own rule"]);
     assert_eq!(items(&chat), vec![(format!("g:{own}@1"), true, "required".to_string())]);
     assert_eq!(chat.session.context.guidelines, vec![format!("{own}@1")]);
@@ -121,7 +122,7 @@ fn the_block_comes_after_the_identity_with_the_set_of_the_run() {
     // A task in the project: its own, then the project's; before the task's own section.
     let task = plan(&s, task_run(&s, s.ann));
     let system = task.system.clone().unwrap();
-    assert!(system.starts_with("You are Ann, Dev. Focus of Ann.\n\n## Guidelines\n"), "{system}");
+    assert!(system.contains("\n\nYou are Ann, Dev. Focus of Ann.\n\n## Guidelines\n"), "{system}");
     assert_eq!(titles_in(&system), vec!["Own rule", "Project rule"]);
     assert!(system.contains(&format!("<guideline id=\"g:{project}\" version=\"1\" level=\"project\" project=\"Orbit\">")), "{system}");
     assert!(system.find("## Guidelines").unwrap() < system.find("## This conversation is about your task").unwrap());

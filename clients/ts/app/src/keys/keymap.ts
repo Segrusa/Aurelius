@@ -1,8 +1,8 @@
 // Every action has a keyboard shortcut. This table is the single source of truth: it registers the
-// bindings and feeds the command palette. Port of clients/desktop/src/keymap.rs, in its notation:
+// bindings and feeds the command palette. Its notation:
 // `secondary` is Cmd on macOS and Ctrl elsewhere. An action does nothing until a screen handles it.
 
-import type { Feature } from "../hidden";
+import { type Feature, hidden } from "../hidden";
 
 export interface Shortcut {
   keys: string[];
@@ -27,6 +27,15 @@ export const SHORTCUTS: Shortcut[] = [
     action: "OpenPalette",
   },
   {
+    keys: ["secondary-p"],
+    context: "Aurelius",
+    navKeys: [],
+    label: "Switch workspace",
+    section: "General",
+    inPalette: true,
+    action: "SwitchWorkspace",
+  },
+  {
     keys: ["secondary-1"],
     context: "Aurelius",
     navKeys: [],
@@ -39,7 +48,7 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["secondary-5"],
     context: "Aurelius",
     navKeys: [],
-    label: "Go to Board (tickets of every project)",
+    label: "Go to Board",
     section: "General",
     inPalette: true,
     action: "GoBoard",
@@ -48,7 +57,7 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["secondary-8"],
     context: "Aurelius",
     navKeys: [],
-    label: "Go to Team chat (you and every employee)",
+    label: "Go to Team chat",
     section: "General",
     inPalette: true,
     action: "GoTeamChat",
@@ -84,7 +93,7 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["secondary-7"],
     context: "Aurelius",
     navKeys: [],
-    label: "Go to Tasks (all projects)",
+    label: "Go to Tasks",
     section: "General",
     inPalette: true,
     action: "GoTasks",
@@ -97,6 +106,7 @@ export const SHORTCUTS: Shortcut[] = [
     section: "General",
     inPalette: true,
     action: "GoIdeas",
+    feature: "Ideas",
   },
   {
     keys: ["secondary-shift-v"],
@@ -106,6 +116,7 @@ export const SHORTCUTS: Shortcut[] = [
     section: "General",
     inPalette: true,
     action: "GoVault",
+    feature: "Vault",
   },
   {
     keys: ["secondary-shift-i"],
@@ -147,7 +158,9 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["secondary-n"],
     context: "Aurelius",
     navKeys: ["n"],
-    label: "New (give work, project, task, memory or idea, depending on the page)",
+    label: hidden("Ideas")
+      ? "New (give work, project, task or memory, depending on the page)"
+      : "New (give work, project, task, memory or idea, depending on the page)",
     section: "General",
     inPalette: true,
     action: "NewItem",
@@ -297,16 +310,6 @@ export const SHORTCUTS: Shortcut[] = [
     section: "General",
     inPalette: true,
     action: "CycleAgentMode",
-  },
-  {
-    keys: ["alt-h"],
-    context: "Aurelius",
-    navKeys: [],
-    label: "Employee heartbeat: off \u2192 every 30 min \u2192 hourly \u2192 every 4 h",
-    section: "Manager",
-    inPalette: true,
-    action: "CycleHeartbeat",
-    feature: "Heartbeats",
   },
   {
     keys: ["alt-b"],
@@ -528,7 +531,7 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["f2"],
     context: "Aurelius",
     navKeys: [],
-    label: "Edit project, employee or idea",
+    label: hidden("Ideas") ? "Edit project or employee" : "Edit project, employee or idea",
     section: "Project",
     inPalette: true,
     action: "EditItem",
@@ -564,7 +567,7 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["secondary-t"],
     context: "Aurelius",
     navKeys: [],
-    label: "New ticket \u00b7 in Ideas: make a ticket of the selected idea",
+    label: hidden("Ideas") ? "New ticket" : "New ticket \u00b7 in Ideas: make a ticket of the selected idea",
     section: "Project",
     inPalette: true,
     action: "MakeTicket",
@@ -855,7 +858,7 @@ export function actionsFor(chord: string, state: KeyState): string[] {
   for (const name of names) {
     for (const b of CONTEXT_BINDINGS) if (b.context === name && b.key === chord) out.push(b.action);
     for (const s of SHORTCUTS) {
-      if (s.context !== name) continue;
+      if (s.context !== name || (s.feature && hidden(s.feature))) continue;
       if (keysFor(s.keys, state.kind).includes(chord) || (!state.typing && s.navKeys.includes(chord)))
         out.push(s.action);
     }

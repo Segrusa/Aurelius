@@ -56,38 +56,6 @@ async fn answer(shared: &Arc<Shared>, request: BridgeRequest) -> BridgeOutcome {
         Err(message) => return BridgeOutcome::Error { message },
     };
     let request = BridgeRequest { call, ..request };
-    // A trial of a task (variants) may only read with Aurelius' own tools: Claude Code
-    // never asks for them, so the sandbox is kept here.
-    let own_tool = match &request.call {
-        BridgeCall::MemoryRun { run_id, op } => Some((*run_id, match op {
-            aurelius_domain::memory::EmployeeMemoryOp::Remember { .. } => "remember",
-            aurelius_domain::memory::EmployeeMemoryOp::Recall { .. } => "recall",
-        })),
-        // Only the reading ones pass; anything that acts (delegating, ideas, proposals, …) is refused.
-        BridgeCall::EmployeeAct { run_id, op } => Some((*run_id, match op {
-            EmployeeTaskOp::ListTasks { .. } => "list_tasks",
-            EmployeeTaskOp::ReadTask { .. } => "read_task",
-            EmployeeTaskOp::ListConversations { .. } => "list_conversations",
-            EmployeeTaskOp::ReadConversation { .. } => "read_conversation",
-            EmployeeTaskOp::ReadGroupChat { .. } => "read_group_chat",
-            EmployeeTaskOp::ReadDiscussion { .. } => "read_discussion",
-            EmployeeTaskOp::ListTickets { .. } => "list_tickets",
-            EmployeeTaskOp::ReadTicket { .. } => "read_ticket",
-            EmployeeTaskOp::VaultList { .. } => "vault_list",
-            EmployeeTaskOp::VaultRead { .. } => "vault_read",
-            _ => "act",
-        })),
-        _ => None,
-    };
-    if let Some((run_id, name)) = own_tool {
-        let s = shared.clone();
-        if let Ok(Some(worktree)) = app_task(move || s.service.probe_worktree(run_id)).await {
-            let tool = format!("mcp__aurelius__{name}");
-            if let aurelius_domain::variants::ProbeVerdict::Deny(why) = aurelius_domain::variants::probe_verdict(&tool, &serde_json::json!({}), &worktree) {
-                return BridgeOutcome::Text { ok: false, text: why };
-            }
-        }
-    }
     let outcome = match request.call {
         BridgeCall::PermissionAsk { run_id, call_id, tool, input } => crate::permissions::ask(shared, run_id, call_id, tool, input).await,
         BridgeCall::MemoryRun { run_id, op } => {
@@ -128,13 +96,17 @@ async fn employee_act(shared: &Arc<Shared>, run_id: aurelius_domain::RunId, op: 
         EmployeeTaskOp::PostToGroupChat { message, channel } => EmployeeAction::PostToGroupChat { message, channel },
         EmployeeTaskOp::ReadDiscussion { last } => EmployeeAction::ReadDiscussion { last },
         EmployeeTaskOp::PostToDiscussion { message } => EmployeeAction::PostToDiscussion { message },
+        EmployeeTaskOp::HandOff { to, message } => EmployeeAction::HandOff { to, message },
+        EmployeeTaskOp::TellResponsible { message } => EmployeeAction::TellResponsible { message },
+        EmployeeTaskOp::ScheduleMessage { delay, content, to } => EmployeeAction::ScheduleMessage { delay, content, to },
+        EmployeeTaskOp::Scratchpad { content } => EmployeeAction::Scratchpad { content },
         EmployeeTaskOp::AssignTicket { employee, reason } => EmployeeAction::AssignTicket { employee, reason },
         // Checked in the application (`ticket::agent`): who may read, make, change, start and post; the
         // writes are not in the trial filter's reading list above, so a trial cannot use them.
         EmployeeTaskOp::ListTickets { project, column, query, limit } => EmployeeAction::ListTickets { project, column, query, limit },
         EmployeeTaskOp::ReadTicket { ticket, last } => EmployeeAction::ReadTicket { ticket, last },
         EmployeeTaskOp::CreateTicket { project, title, description, priority, labels } => EmployeeAction::CreateTicket { project, title, description, priority, labels },
-        EmployeeTaskOp::UpdateTicket { ticket, title, description, priority, labels } => EmployeeAction::UpdateTicket { ticket, title, description, priority, labels },
+        EmployeeTaskOp::UpdateTicket { ticket, title, description, priority, labels, design_url } => EmployeeAction::UpdateTicket { ticket, title, description, priority, labels, design_url },
         EmployeeTaskOp::MoveTicket { ticket, column } => EmployeeAction::MoveTicket { ticket, column },
         EmployeeTaskOp::PostToTicket { ticket, message } => EmployeeAction::PostToTicket { ticket, message },
         // Checked in the application (`testing::verdict`): only the open test task of a ticket in Testing.

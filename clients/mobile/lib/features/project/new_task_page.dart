@@ -1,4 +1,3 @@
-import '../../app/mobile_core.dart';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -17,14 +16,12 @@ import '../../data/views.dart';
 import '../account/claude_login.dart' show ownSubscriptionNote;
 import '../../data/run_config.dart';
 import '../../core/widgets/ios.dart';
-import 'variants_picker.dart';
 
 /// What [NewTaskPage] returns.
 /// `run`: mode, connection_id, model and effort of the task's conversation (unset: as the employee).
 /// `projectId`: the project picked on the form (only when it shows the project field).
 /// `files`: upload paths of the files added now; `removeFiles`: paths of a
 /// schedule's own attachments taken off. `recurrence` and `paused` only for recurring tasks.
-/// `variants`: try the task that many ways first (1 = as usual; feature `task_variants`).
 typedef NewTask = ({
   String title,
   String goal,
@@ -36,7 +33,6 @@ typedef NewTask = ({
   List<String> removeFiles,
   Recurrence? recurrence,
   bool paused,
-  int variants,
 });
 
 /// A file on the form: already on a schedule ([path] is its place in the work
@@ -169,10 +165,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
         _ => null,
       };
 
-  /// The server's variants setting when it allows them; null hides the picker.
-  VariantsSetting? _variantsSetting;
-  int _variants = 1;
-
   late List<_Attached> _files = [for (final f in widget.schedule?.attachments ?? const []) _Attached(name: f.name, byteLength: f.byteLength, path: f.path, existing: true)];
   final _removed = <String>[];
   bool _uploading = false;
@@ -186,7 +178,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
   void initState() {
     super.initState();
     _loadConnections();
-    if (!widget.recurring) _loadVariantsSetting();
     _loadManagementMode();
     _recallMode();
   }
@@ -234,16 +225,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
 
   /// What "no mode picked" is called: the lead chooses itself when it is management.
   String get _defaultModeLabel => _managementChooses && _employee != null && isManagement(widget.employees, _employee!) ? managerChoosesLabel : 'Employee default';
-
-  /// Whether this server lets tasks be tried in several ways (feature `task_variants`, switched on).
-  Future<void> _loadVariantsSetting() async {
-    try {
-      final setting = await context.read<AureliusRepository>().variantsSetting();
-      if (mounted && setting != null && setting.enabled && setting.maxVariants > 1) setState(() => _variantsSetting = setting);
-    } catch (_) {
-      // No repository (tests) or offline: no variants.
-    }
-  }
 
   /// The models offered: every model of every usable connection.
   Future<void> _loadConnections() async {
@@ -396,7 +377,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
       if (_model case (_, final model)?) ModelCatalog.friendly(model),
       if (_mode case final mode?) {for (final (v, l) in taskModes) v: l}[mode] ?? mode,
       if (_effort case final effort?) ModelCatalog.effortLabel(effort),
-      if (_variantsSetting != null && _variants > 1) '$_variants ways',
       if (count > 0) '$count ${count == 1 ? 'criterion' : 'criteria'}',
     ];
     return parts.join(' · ');
@@ -426,7 +406,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
       removeFiles: _removed,
       recurrence: widget.recurring ? _recurrence : null,
       paused: _paused,
-      variants: _variantsSetting == null ? 1 : _variants,
     );
     if (widget.submit case final submit?) {
       setState(() => _sending = true);
@@ -689,7 +668,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
                       ],
                     ),
                   ],
-                  if (_variantsSetting != null && shownInMobileCore('variants')) ...variantsPicker(context, max: _variantsSetting!.maxVariants, value: _variants, onChanged: (n) => setState(() => _variants = n)),
                   const Eyebrow('Effort for this task', padding: EdgeInsets.fromLTRB(0, 22, 0, 10)),
                   Wrap(
                     spacing: 8,
