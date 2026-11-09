@@ -157,7 +157,7 @@ const styles = stylex.create({
 const NOTE =
   "Employees propose memories during runs. Proposals wait here until you accept or reject them; accepted ones go into every run in this project.";
 
-function Entry({
+export function Entry({
   m,
   selected,
   onSelect,
@@ -208,7 +208,7 @@ function Entry({
   );
 }
 
-function ReviseDialog({ m, onClose }: { m: MemoryView; onClose: () => void }) {
+export function ReviseDialog({ m, onClose }: { m: MemoryView; onClose: () => void }) {
   const connection = useConnection();
   const client = useQueryClient();
   const [text, setText] = useState(m.content);

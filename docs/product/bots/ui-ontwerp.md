@@ -30,6 +30,12 @@
 - **Scherm:** dezelfde berichtrijen, approvalkaarten en het invoerveld als de Team chat, maar zonder threads, reacties en `@`-suggesties. Een gepauzeerde of gearchiveerde employee: geen invoerveld, wel een regel die het zegt.
 - **Berichten uit een ticket:** een regel met het label FROM A TICKET en de link. De aanleiding van een update uit Review is onzichtbaar; wat de board member leest is het bericht van de employee zelf.
 
+## Stap 11: activity log en de employee-pagina (gebouwd)
+
+De pagina **Activity log** (`/activity`, onder Scheduled in de navigatie) toont per rij wanneer, wie, soort stap (Delivery, Queue, Run), de stap, een detail, de thread en de run. Bovenaan kies je een employee en een soort stap; in het zoekveld past `#21`, een thread-sleutel of een heel run-id. Een klik op een employee, thread of run in een rij vernauwt daarop. Wat gekozen is staat in de URL. Oudere rijen komen met Load older.
+
+De **employee-pagina** heeft drie tabs onder de naam: Inbox (de wachtrij, wat er nu loopt en wat waarom wacht), Memory (de scratchpad, voorstellen en wat in gebruik is) en Settings (modus, browser, scherm, provider, model, effort, toegang, tools, beschrijving en instructies). De tab staat in de URL. De takenkolom rechts blijft bij elke tab staan. Onder de naam staat de status, en in de lijst de status-dot met het woord ernaast.
+
 ## Latere stappen
 
 | Stap | Scherm | Astryx | Opmerking |
@@ -65,3 +71,8 @@
 | P-216 | Lijst of uitzonderingen | Een lijst van wat aan staat (geen lijst: alles van het niveau). Een later toegevoegde tool staat dan niet vanzelf aan bij iemand met een eigen lijst, net als bij een toegangsniveau |
 | P-217 | Wanneer geldt "Asks first" | Meteen, ook voor een lopende run: de bridge leest de actuele instelling. In elke modus, ook Auto; geen modusschakelaar of "Always allow" haalt het weg. De toollijst zelf geldt vanaf de volgende run, en start een nieuwe sessie |
 | P-218 | Wat doet een startprofiel | Het vult de velden van de dialoog in, ook bij een tweede keer; alleen een getypte naam blijft staan. Er wordt niets vanzelf aangenomen. Een profiel dat al gekozen is toont wie ermee begon en stelt zijn naam niet opnieuw voor. Geen icoon per profiel: een employee heeft overal een letter als merkteken |
+| P-219 | Wat staat er in een regel van het log | Alleen wat er gebeurde: een code of de naam van een tool, nooit de tekst van een bericht of de invoer van een tool. Een rij heeft geen foreign keys en overleeft dus wat er in het gesprek gewist wordt |
+| P-220 | Wie leest wat | Elk board member leest het hele log, behalve de privégesprekken van een ander: die rijen en wachtrij-items bestaan voor hem niet |
+| P-221 | Hoe lang blijft een rij | 90 dagen, net als notificaties, en weg bij dezelfde dagelijkse opruimslag |
+| P-222 | Welke toestanden heeft de dot | Working (pulseert), Waiting for you (een approval of een vraag), Queued (er is werk, maar het loopt nog niet), Available, en Paused uit de status. Altijd met het woord erbij: de kleur alleen is niet genoeg |
+| P-223 | Kun je in de Inbox-tab ingrijpen | Nee, de tab leest alleen en linkt naar de thread. Send now en verwijderen staan al waar het bericht staat |

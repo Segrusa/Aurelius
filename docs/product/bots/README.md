@@ -53,7 +53,7 @@ Deze tabel gaat voor op de andere documenten in deze map.
 | 8 | C2 tools en MCP per employee | gebouwd |
 | 9 | C6 startprofielen | gebouwd |
 | 10 | C9 externe actoren, C10 Telegram | vervallen (besluit gebruiker) |
-| 11 | R8 activity log, U6 | open |
+| 11 | R8 activity log, U6 | gebouwd |
 | 12 | U8 Living Office | vervallen (besluit gebruiker) |
 | 13 | Gesprekken met employees (B8) | gebouwd |
 

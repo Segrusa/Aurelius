@@ -17,9 +17,12 @@ import {
 import { ConnectionProvider } from "./connection";
 import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
+import { ActivityScreen } from "./screens/activity";
+import { activityFilters } from "./screens/activity-logic";
 import { BoardScreen } from "./screens/board";
 import { ChatScreen } from "./screens/chat";
 import { EmployeeChatScreen } from "./screens/employee-chat";
+import { type EmployeeTab, isEmployeeTab } from "./screens/employee-logic";
 import { EmployeePage } from "./screens/employee-page";
 import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
 import { Frame } from "./screens/frame";
@@ -107,9 +110,12 @@ const orgChart = createRoute({ getParentRoute: () => root, path: "/employees/org
 const employee = createRoute({
   getParentRoute: () => root,
   path: "/employees/$id",
+  validateSearch: (search: Record<string, unknown>): { tab?: EmployeeTab } =>
+    isEmployeeTab(search.tab) ? { tab: search.tab } : {},
   component: function EmployeeRoute() {
     const { id } = employee.useParams();
-    return <EmployeePage key={id} id={id} />;
+    const { tab } = employee.useSearch();
+    return <EmployeePage key={id} id={id} {...(tab ? { tab } : {})} />;
   },
 });
 const employeeChat = createRoute({
@@ -169,6 +175,14 @@ const project = createRoute({
 
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
 const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
+const activity = createRoute({
+  getParentRoute: () => root,
+  path: "/activity",
+  validateSearch: activityFilters,
+  component: function ActivityRoute() {
+    return <ActivityScreen filters={activity.useSearch()} />;
+  },
+});
 const settingsIndex = createRoute({
   getParentRoute: () => root,
   path: "/settings",
@@ -208,6 +222,7 @@ const router = createRouter({
     settings,
     usage,
     scheduled,
+    activity,
     orgChart,
     employee,
     employees,

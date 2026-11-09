@@ -88,6 +88,49 @@ export const choiceLine = (
   name: (value: string) => string = (v) => v,
 ): string => (choice === "inherit" ? inheritLabel(inherited) : name(choice));
 
+export type EmployeeTab = "inbox" | "memory" | "settings";
+
+/** The employee page's tabs. An older server has no mailbox to show. */
+export function employeeTabs(queue: boolean): { key: EmployeeTab; label: string }[] {
+  return [
+    ...(queue ? [{ key: "inbox" as const, label: "Inbox" }] : []),
+    { key: "memory", label: "Memory" },
+    { key: "settings", label: "Settings" },
+  ];
+}
+
+export const isEmployeeTab = (value: unknown): value is EmployeeTab =>
+  value === "inbox" || value === "memory" || value === "settings";
+
+/** What the dot and word beside an employee say (U6). Colors are CSS values. */
+export interface EmployeeState {
+  label: string;
+  color: string;
+  variant: "accent" | "warning" | "neutral";
+  isPulsing: boolean;
+}
+
+const STATE_TEXT = "var(--color-text-secondary)";
+const STATE_DIM = "var(--precision-text3)";
+const STATE_ON = "var(--color-text-accent)";
+const STATE_WARN = "var(--color-text-warning)";
+
+export function employeeState(e: Pick<EmployeeSummary, "status" | "working" | "activity_state">): EmployeeState {
+  if (e.status === "paused") return { label: "Paused", color: STATE_DIM, variant: "neutral", isPulsing: false };
+  // An older server has no state, and a state of a newer server says no more than `working`.
+  const known = e.activity_state && e.activity_state !== "unknown" ? e.activity_state : null;
+  switch (known ?? (e.working ? "working" : "idle")) {
+    case "working":
+      return { label: "Working", color: STATE_ON, variant: "accent", isPulsing: true };
+    case "waiting":
+      return { label: "Waiting for you", color: STATE_WARN, variant: "warning", isPulsing: false };
+    case "queued":
+      return { label: "Queued", color: STATE_TEXT, variant: "accent", isPulsing: false };
+    default:
+      return { label: "Available", color: STATE_TEXT, variant: "neutral", isPulsing: false };
+  }
+}
+
 export function matchesSearch(e: EmployeeSummary, query: string): boolean {
   const q = query.trim().toLowerCase();
   return (

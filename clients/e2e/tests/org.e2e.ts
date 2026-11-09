@@ -60,6 +60,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByLabel("Description").fill("Plans the work and reviews it.");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Head of things · Lead")).toBeVisible();
+    await page.getByRole("tab", { name: "Settings" }).click();
     await expect(page.getByText("Plans the work and reviews it.")).toBeVisible();
 
     // A provider, model and effort of its own, and a level of access.
@@ -102,6 +103,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByRole("checkbox", { name: "Run commands asks first" }).click();
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Quinn", exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: "Settings" }).click();
     await expect(page.getByText("9 on, 2 ask first")).toBeVisible();
 
     // The profile says it was hired, and its name is not offered twice.
@@ -656,6 +658,119 @@ test.describe("scripted organisation", () => {
     await page.getByRole("button", { name: "Take back" }).click();
     await expect.poll(() => writes.filter((w) => w.method === "scheduled_message.cancel").length).toBe(1);
     expect(writes.find((w) => w.method === "scheduled_message.cancel")?.params).toMatchObject({ message_id: "s1" });
+    await stop();
+  });
+
+  test("the employee page has its inbox, memory and settings, and the list says what it is doing", async ({ page }) => {
+    const { stop } = await scripted(
+      page,
+      {
+        features: ["employee_queue", "activity_log"],
+        employees: [
+          {
+            ...orion,
+            working: true,
+            activity_state: "waiting",
+            settings: { model: { mode: "value", value: "sonnet" } },
+          },
+          pixel,
+        ],
+        reads: {
+          "employee.queue": () => ({
+            type: "employee_queue",
+            value: {
+              as_of_seq: 1,
+              employee_id: "e1",
+              items: [
+                {
+                  id: "i1",
+                  kind: "task",
+                  source: "board",
+                  state: "claimed",
+                  thread_key: "ticket:t1",
+                  place: { label: "#21 Fix the login", ticket_id: "t1" },
+                  run_id: "r1",
+                  hop: 0,
+                  created_at_ms: 1,
+                  not_before_ms: 1,
+                },
+                {
+                  id: "i2",
+                  kind: "message",
+                  source: "employee",
+                  state: "queued",
+                  thread_key: "ticket:t2",
+                  place: { label: "#22 Write the docs", ticket_id: "t2" },
+                  hop: 1,
+                  created_at_ms: 2,
+                  not_before_ms: 2,
+                },
+              ],
+            },
+          }),
+          "memory.list": () => ({ type: "memory", value: { items: [] } }),
+        },
+      },
+      "/employees",
+    );
+    await expect(page.getByRole("row", { name: /Orion/ }).getByText("Waiting for you")).toBeVisible();
+    await expect(page.getByRole("row", { name: /Pixel/ }).getByText("Available")).toBeVisible();
+
+    await page.getByRole("link", { name: "Orion", exact: true }).click();
+    const tabs = page.getByRole("tablist", { name: "About Orion" });
+    await expect(tabs.getByRole("tab", { name: "Inbox" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("row", { name: /#21 Fix the login/ })).toContainText("Working on it");
+    await expect(page.getByRole("row", { name: /#22 Write the docs/ })).toContainText("Message from a colleague");
+    await expect(page.getByRole("row", { name: /#22 Write the docs/ })).toContainText("Next");
+
+    await tabs.getByRole("tab", { name: "Memory" }).click();
+    await expect(page.getByText("Orion has no memories of its own yet.", { exact: false })).toBeVisible();
+
+    await tabs.getByRole("tab", { name: "Settings" }).click();
+    await expect(page.getByText("sonnet", { exact: false }).first()).toBeVisible();
+    await expect(page).toHaveURL(/tab=settings/);
+    await stop();
+  });
+
+  test("the activity log narrows on what a row names", async ({ page }) => {
+    const asked: Record<string, unknown>[] = [];
+    const entry = {
+      seq: 2,
+      at_ms: 1_700_000_000_000,
+      category: "delivery",
+      step: "delivered",
+      detail: "message from board",
+      employee_id: "e1",
+      employee_name: "Orion",
+      thread_key: "ticket:t1",
+      place: { label: "#21 Fix the login", ticket_id: "t1" },
+      run_id: "019a52f0-1111-7000-8000-000000abcdef",
+      hop: 0,
+    };
+    const { stop } = await scripted(
+      page,
+      {
+        features: ["activity_log"],
+        reads: {
+          "activity_log.list": (request: Record<string, unknown>) => {
+            asked.push(request.params as Record<string, unknown>);
+            return { type: "activity_log", value: { as_of_seq: 1, entries: [entry], has_more: false } };
+          },
+        },
+      },
+      "/activity",
+    );
+    await expect(page.getByRole("heading", { name: "Activity log" })).toBeVisible();
+    const row = page.getByRole("row", { name: /Delivered/ });
+    await expect(row).toContainText("message from board");
+
+    await row.getByRole("button", { name: "#21 Fix the login" }).click();
+    await expect.poll(() => asked.at(-1)).toMatchObject({ thread_key: "ticket:t1" });
+    await expect(page).toHaveURL(/thread=ticket/);
+
+    await page.getByRole("button", { name: "Show all" }).click();
+    await page.getByRole("textbox", { name: "Ticket, thread or run" }).fill("#21");
+    await expect.poll(() => asked.at(-1)).toMatchObject({ ticket_number: 21 });
     await stop();
   });
 

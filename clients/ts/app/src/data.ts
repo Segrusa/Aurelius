@@ -47,7 +47,7 @@ export function areasOf(kind: EventKind | string): Area[] {
   const family = kind.split(".")[0];
   switch (family) {
     case "approval":
-      return ["approvals", "tasks", "notifications"];
+      return ["approvals", "tasks", "notifications", "employees"];
     case "notification":
       return ["notifications"];
     case "proposal":

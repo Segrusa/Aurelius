@@ -122,6 +122,7 @@ const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon }[] = [
   { to: "/board", label: "Board", icon: "board" },
   { to: "/tasks", label: "Tasks", icon: "tasks" },
   { to: "/scheduled", label: "Scheduled", icon: "clock" },
+  { to: "/activity", label: "Activity log", icon: "note" },
   { to: "/chat", label: "Team chat", icon: "chat" },
   { to: "/employees", label: "Employees", icon: "team" },
   { to: "/knowledge", label: "Knowledge", icon: "know" },

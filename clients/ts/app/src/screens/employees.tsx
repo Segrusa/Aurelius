@@ -1,4 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
@@ -19,6 +20,7 @@ import { EmployeeDialog } from "./employee-dialog";
 import {
   canPin,
   employeeGroups,
+  employeeState,
   matchesSearch,
   type OrgNode,
   orgTree,
@@ -78,8 +80,9 @@ const styles = stylex.create({
   note: { margin: 0, padding: 24, color: "var(--precision-text3)" },
   table: { minWidth: 560 },
   headCell: { fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
-  statusColumn: { width: 150 },
-  guidelinesColumn: { width: 90 },
+  // A cell has max-width: 0 for truncating, which would close these columns.
+  statusColumn: { width: 150, minWidth: 150, maxWidth: 150 },
+  guidelinesColumn: { width: 90, minWidth: 90, maxWidth: 90 },
   groupCell: {
     height: 30,
     backgroundColor: "var(--precision-sunk)",
@@ -120,7 +123,6 @@ const styles = stylex.create({
   },
   pinned: { color: "var(--color-text-accent)", opacity: 1 },
   status: { display: "flex", alignItems: "center", gap: 8, fontSize: 12 },
-  dot: { width: 6, height: 6, borderRadius: "50%" },
   work: {
     display: "block",
     overflow: "hidden",
@@ -377,17 +379,6 @@ function ProposalCard({ proposal, all }: { proposal: ProposalView; all: Employee
   );
 }
 
-const STATE_TEXT = "var(--color-text-secondary)";
-const STATE_DIM = "var(--precision-text3)";
-const STATE_ON = "var(--color-text-accent)";
-
-/** The colors are CSS values, since they are applied inline per employee. */
-export function employeeState(e: EmployeeSummary): { label: string; color: string; dot: string } {
-  if (e.status === "paused") return { label: "Paused", color: STATE_DIM, dot: STATE_DIM };
-  if (e.working) return { label: "Working", color: STATE_ON, dot: STATE_ON };
-  return { label: "Available", color: STATE_TEXT, dot: STATE_DIM };
-}
-
 export function EmployeesScreen() {
   const { hostName, features } = useLinkState();
   const navigate = useNavigate();
@@ -506,7 +497,7 @@ export function EmployeesScreen() {
                       </TableCell>
                       <TableCell>
                         <span {...stylex.props(styles.status)} style={{ color: s.color }}>
-                          <span {...stylex.props(styles.dot)} style={{ backgroundColor: s.dot }} />
+                          <StatusDot variant={s.variant} isPulsing={s.isPulsing} label={s.label} />
                           {s.label}
                         </span>
                       </TableCell>

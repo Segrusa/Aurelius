@@ -3,6 +3,8 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Layout, LayoutContent, LayoutPanel } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { expectBody } from "@aurelius/client";
 import type { EmployeeSummary, TaskView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
@@ -18,6 +20,7 @@ import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useOpenChat } from "./employee-chat";
 import { EmployeeDialog } from "./employee-dialog";
+import { EmployeeInboxTab, EmployeeMemoryTab } from "./employee-inbox";
 import {
   type AgentMode,
   accessLabel,
@@ -25,7 +28,10 @@ import {
   asChoice,
   canPin,
   choiceLine,
+  type EmployeeTab,
   effortName,
+  employeeState,
+  employeeTabs,
   inheritedRun,
   MODE_LABELS,
   nextMode,
@@ -34,11 +40,10 @@ import {
   togglePin,
 } from "./employee-logic";
 import { policyLine } from "./employee-tools-logic";
-import { employeeState, pinKey, usePins } from "./employees";
+import { pinKey, usePins } from "./employees";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, shortDay } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { useFolderChooser } from "./run-tools";
-import { ScratchpadSection } from "./scratchpad";
 import { modelName, useSetting } from "./settings-kit";
 import { taskStateLine } from "./tasks-logic";
 
@@ -77,7 +82,6 @@ const styles = stylex.create({
   name: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: "-0.01em" },
   position: { margin: 0, color: "var(--color-text-secondary)" },
   status: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 },
-  dot: { width: 6, height: 6, borderRadius: "50%" },
   on: { color: "var(--color-text-accent)" },
   section: { display: "flex", flexDirection: "column", gap: 8 },
   instructions: {
@@ -90,9 +94,18 @@ const styles = stylex.create({
     WebkitBoxOrient: "vertical",
     WebkitLineClamp: 12,
   },
-  noTasks: { display: "flex", flexDirection: "column", gap: 4, color: "var(--color-text-secondary)" },
-  noTasksTitle: { margin: 0, fontWeight: 500 },
-  link: { color: "var(--color-text-accent)", textDecoration: "none" },
+  guidelinesTitle: { margin: 0, fontWeight: 500, color: "var(--color-text-secondary)" },
+  tabPanel: {
+    display: "flex",
+    minWidth: 0,
+    flexDirection: "column",
+    gap: 16,
+    // A Table bleeds over its container's padding, and here that would be over the tabs.
+    "--container-padding-block-start": "0px",
+    "--container-padding-block-end": "0px",
+    "--container-padding-inline-start": "0px",
+    "--container-padding-inline-end": "0px",
+  },
   panel: { display: "flex", minWidth: 0, flexDirection: "column", gap: 12 },
   panelTitle: { display: "flex", margin: 0, fontWeight: 500 },
   counts: { marginInlineStart: "auto", fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
@@ -158,7 +171,9 @@ function EmployeeKeys({
   return null;
 }
 
-export function EmployeePage({ id }: { id: string }) {
+const PANEL = "employee-panel";
+
+export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTab }) {
   const connection = useConnection();
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -189,6 +204,10 @@ export function EmployeePage({ id }: { id: string }) {
   );
   const now = Date.now();
   const byGroup = (g: string) => mine.filter((t) => threadGroup(isOngoing(t), false, t.updated_at_ms, now) === g);
+  const tabs = employeeTabs(features.includes("employee_queue"));
+  const tab = tabs.find((t) => t.key === wanted)?.key ?? tabs[0]?.key ?? "settings";
+  const pickTab = (key: string) =>
+    void navigate({ to: "/employees/$id", params: { id }, search: { tab: key as EmployeeTab }, replace: true });
   const refresh = () => client.invalidateQueries({ queryKey: ["employees"] });
   const act = async (run: () => Promise<unknown>, done?: string) => {
     try {
@@ -222,9 +241,11 @@ export function EmployeePage({ id }: { id: string }) {
   const boss = employees.data?.find((b) => b.id === e.reports_to);
   const pinned = pins.includes(e.id);
   const own =
+    e.settings ??
     connections.data?.defaults?.find(
       (d) => d.purpose === "employee" && d.scope.kind === "employee" && d.scope.id === e.id,
-    )?.settings ?? {};
+    )?.settings ??
+    {};
   const inherited = inheritedRun(connections.data);
   const providerChoice = asChoice(own.connection);
   const providerName =
@@ -336,91 +357,91 @@ export function EmployeePage({ id }: { id: string }) {
                     {position(e)}
                     {boss ? ` · reports to ${boss.name}` : ""}
                   </p>
-                </div>
-              </div>
-              <MetadataList orientation="horizontal" label={{ position: "start" }}>
-                <MetadataListItem label="Status">
                   <span {...stylex.props(styles.status)} style={{ color: state.color }}>
-                    <span {...stylex.props(styles.dot)} style={{ backgroundColor: state.dot }} />
+                    <StatusDot variant={state.variant} isPulsing={state.isPulsing} label={state.label} />
                     {state.label}
                   </span>
-                </MetadataListItem>
-                <MetadataListItem label="Mode">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    label={`Mode: ${MODE_LABELS[e.agent_mode]}`}
-                    tooltip="Its mode for new work"
-                    onClick={setMode}
-                  >
-                    {MODE_LABELS[e.agent_mode]}
-                  </Button>
-                </MetadataListItem>
-                <MetadataListItem label="Browser">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    label={`Browser ${e.browser_allowed ? "on" : "off"}`}
-                    onClick={browser}
-                    xstyle={e.browser_allowed ? styles.on : undefined}
-                  >
-                    {e.browser_allowed ? "On" : "Off"}
-                  </Button>
-                </MetadataListItem>
-                <MetadataListItem label="Screen">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    label={`Screen: ${e.screen_allowed ? "allowed" : "asks"}`}
-                    onClick={screen}
-                    xstyle={e.screen_allowed ? styles.on : undefined}
-                  >
-                    {e.screen_allowed ? "Allowed" : "Asks"}
-                  </Button>
-                </MetadataListItem>
-              </MetadataList>
-              <MetadataList orientation="horizontal" label={{ position: "start" }}>
-                <MetadataListItem label="Provider">
-                  {providerChoice === "inherit" ? choiceLine("inherit", inherited.provider) : providerName}
-                </MetadataListItem>
-                <MetadataListItem label="Model">
-                  {choiceLine(asChoice(own.model), inherited.model && modelName(inherited.model), modelName)}
-                </MetadataListItem>
-                <MetadataListItem label="Effort">
-                  {choiceLine(asChoice(own.effort), inherited.effort && effortName(inherited.effort), effortName)}
-                </MetadataListItem>
-                {features.includes("employee_access") ? (
-                  <MetadataListItem label="Access">{accessLabel(accessOf(e))}</MetadataListItem>
-                ) : null}
-                {features.includes("employee_tools") && policyLine(e.tool_policy ?? {}) ? (
-                  <MetadataListItem label="Tools">{policyLine(e.tool_policy ?? {})}</MetadataListItem>
-                ) : null}
-              </MetadataList>
-              {e.description ? (
-                <section {...stylex.props(styles.section)}>
-                  <Eyebrow>DESCRIPTION</Eyebrow>
-                  <p {...stylex.props(styles.instructions)}>{e.description}</p>
-                </section>
-              ) : null}
-              {e.instructions ? (
-                <section {...stylex.props(styles.section)}>
-                  <Eyebrow>INSTRUCTIONS</Eyebrow>
-                  <p {...stylex.props(styles.instructions)}>{e.instructions}</p>
-                </section>
-              ) : null}
-              <ScratchpadSection employeeId={e.id} />
-              {mine.length === 0 ? (
-                <div {...stylex.props(styles.noTasks)}>
-                  <p {...stylex.props(styles.noTasksTitle)}>{e.name} has no tasks yet.</p>
-                  <Hint>
-                    Tasks you give {e.name} show on the right, each with its conversation. Talk with {e.name} in the
-                    Team chat.
-                  </Hint>
                 </div>
-              ) : null}
-              <Link to="/chat" {...stylex.props(styles.link)}>
-                Talk with {e.name} in Team chat →
-              </Link>
+              </div>
+              <TabList role="tablist" aria-label={`About ${e.name}`} hasDivider value={tab} onChange={pickTab}>
+                {tabs.map((t) => (
+                  <Tab key={t.key} value={t.key} label={t.label} panelId={PANEL} />
+                ))}
+              </TabList>
+              <div id={PANEL} role="tabpanel" {...stylex.props(styles.tabPanel)}>
+                {tab === "inbox" ? (
+                  <EmployeeInboxTab employeeId={e.id} name={e.name} logs={features.includes("activity_log")} />
+                ) : null}
+                {tab === "memory" ? <EmployeeMemoryTab employeeId={e.id} name={e.name} /> : null}
+                {tab === "settings" ? (
+                  <>
+                    <MetadataList orientation="horizontal" label={{ position: "start" }}>
+                      <MetadataListItem label="Mode">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          label={`Mode: ${MODE_LABELS[e.agent_mode]}`}
+                          tooltip="Its mode for new work"
+                          onClick={setMode}
+                        >
+                          {MODE_LABELS[e.agent_mode]}
+                        </Button>
+                      </MetadataListItem>
+                      <MetadataListItem label="Browser">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          label={`Browser ${e.browser_allowed ? "on" : "off"}`}
+                          onClick={browser}
+                          xstyle={e.browser_allowed ? styles.on : undefined}
+                        >
+                          {e.browser_allowed ? "On" : "Off"}
+                        </Button>
+                      </MetadataListItem>
+                      <MetadataListItem label="Screen">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          label={`Screen: ${e.screen_allowed ? "allowed" : "asks"}`}
+                          onClick={screen}
+                          xstyle={e.screen_allowed ? styles.on : undefined}
+                        >
+                          {e.screen_allowed ? "Allowed" : "Asks"}
+                        </Button>
+                      </MetadataListItem>
+                    </MetadataList>
+                    <MetadataList orientation="horizontal" label={{ position: "start" }}>
+                      <MetadataListItem label="Provider">
+                        {providerChoice === "inherit" ? choiceLine("inherit", inherited.provider) : providerName}
+                      </MetadataListItem>
+                      <MetadataListItem label="Model">
+                        {choiceLine(asChoice(own.model), inherited.model && modelName(inherited.model), modelName)}
+                      </MetadataListItem>
+                      <MetadataListItem label="Effort">
+                        {choiceLine(asChoice(own.effort), inherited.effort && effortName(inherited.effort), effortName)}
+                      </MetadataListItem>
+                      {features.includes("employee_access") ? (
+                        <MetadataListItem label="Access">{accessLabel(accessOf(e))}</MetadataListItem>
+                      ) : null}
+                      {features.includes("employee_tools") && policyLine(e.tool_policy ?? {}) ? (
+                        <MetadataListItem label="Tools">{policyLine(e.tool_policy ?? {})}</MetadataListItem>
+                      ) : null}
+                    </MetadataList>
+                    {e.description ? (
+                      <section {...stylex.props(styles.section)}>
+                        <Eyebrow>DESCRIPTION</Eyebrow>
+                        <p {...stylex.props(styles.instructions)}>{e.description}</p>
+                      </section>
+                    ) : null}
+                    {e.instructions ? (
+                      <section {...stylex.props(styles.section)}>
+                        <Eyebrow>INSTRUCTIONS</Eyebrow>
+                        <p {...stylex.props(styles.instructions)}>{e.instructions}</p>
+                      </section>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
             </div>
           </LayoutContent>
         }
@@ -464,7 +485,7 @@ export function EmployeePage({ id }: { id: string }) {
               ) : null}
               {showEarlier ? earlier.map((t) => <TaskCard key={t.id} task={t} />) : null}
               <div {...stylex.props(styles.guidelines)}>
-                <p title="What its runs get on top of its instructions" {...stylex.props(styles.noTasksTitle)}>
+                <p title="What its runs get on top of its instructions" {...stylex.props(styles.guidelinesTitle)}>
                   Guidelines{set ? ` · ${set.guidelines.length} · ${set.total_chars} / ${set.limit_chars}` : ""}
                 </p>
                 {set?.guidelines.map((g) => (
