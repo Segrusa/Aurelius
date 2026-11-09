@@ -11,7 +11,7 @@ fn schedule(s: &Setup, run: RunId, delay: &str, content: &str, to: Option<&str>)
 }
 
 fn listed(s: &Setup, reader: Option<UserId>) -> Vec<ScheduledMessageView> {
-    s.service.store().read(move |c| aurelius_storage::scheduled::list(c, reader, 100)).unwrap()
+    s.service.store().read(move |c| aurelius_storage::scheduled::list(c, reader, None, 100)).unwrap()
 }
 
 /// Everything scheduled has come due, and the dispatcher looks.

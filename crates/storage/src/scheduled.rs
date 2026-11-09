@@ -4,7 +4,7 @@
 use crate::{StorageError, now_ms};
 use aurelius_domain::scheduler::scheduled_message::{CANCELLED, SCHEDULED};
 use aurelius_domain::views::ScheduledMessageView;
-use aurelius_domain::{ConversationId, EmployeeId, MessageId, RunId, ScheduledMessageId, TicketId, UserId};
+use aurelius_domain::{ConversationId, EmployeeId, MessageId, ProjectId, RunId, ScheduledMessageId, TicketId, UserId};
 use rusqlite::{Connection, Transaction, params};
 
 /// A message to schedule. `discussion` a ticket's or a channel, else `chat` an employee's own.
@@ -157,6 +157,10 @@ const VIEW: &str = "SELECT s.id, s.from_employee_id, a.name, s.to_employee_id, b
 /// Someone else's private chat stays out of what `reader` sees (`employee_chats::hidden_from`).
 const VISIBLE: &str = "(c.board_member_id IS NULL OR c.board_member_id = ?1)";
 
+/// ?2 is a project: only what is planned in a ticket or channel of it. Null: everything.
+const IN_PROJECT: &str = "(?2 IS NULL OR s.ticket_id IN (SELECT id FROM tickets WHERE project_id = ?2)
+    OR s.discussion_id IN (SELECT id FROM conversations WHERE project_id = ?2))";
+
 fn view(r: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledMessageView> {
     fn id<T, E>(text: Option<String>, parse: impl Fn(&str) -> Result<T, E>) -> Option<T> {
         text.and_then(|t| parse(&t).ok())
@@ -183,15 +187,16 @@ fn view(r: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledMessageView> {
 
 /// What `reader` may see: every message waiting, soonest first, then the latest
 /// `settled` that went out or did not.
-pub fn list(conn: &Connection, reader: Option<UserId>, settled: u32) -> Result<Vec<ScheduledMessageView>, StorageError> {
+pub fn list(conn: &Connection, reader: Option<UserId>, project: Option<ProjectId>, settled: u32) -> Result<Vec<ScheduledMessageView>, StorageError> {
     let reader = reader.map(|u| u.to_string());
+    let project = project.map(|p| p.to_string());
     let mut out = Vec::new();
-    let mut waiting = conn.prepare(&format!("{VIEW} WHERE {VISIBLE} AND s.state = 'scheduled' ORDER BY s.due_at_ms, s.rowid"))?;
-    for row in waiting.query_map(params![reader], view)? {
+    let mut waiting = conn.prepare(&format!("{VIEW} WHERE {VISIBLE} AND {IN_PROJECT} AND s.state = 'scheduled' ORDER BY s.due_at_ms, s.rowid"))?;
+    for row in waiting.query_map(params![reader, project], view)? {
         out.push(row?);
     }
-    let mut done = conn.prepare(&format!("{VIEW} WHERE {VISIBLE} AND s.state <> 'scheduled' ORDER BY s.settled_at_ms DESC, s.rowid DESC LIMIT ?2"))?;
-    for row in done.query_map(params![reader, settled], view)? {
+    let mut done = conn.prepare(&format!("{VIEW} WHERE {VISIBLE} AND {IN_PROJECT} AND s.state <> 'scheduled' ORDER BY s.settled_at_ms DESC, s.rowid DESC LIMIT ?3"))?;
+    for row in done.query_map(params![reader, project, settled], view)? {
         out.push(row?);
     }
     Ok(out)

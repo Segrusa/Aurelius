@@ -9871,13 +9871,19 @@ sealed class Method {
           category: (src['category'] == null ? null : (src['category'] as String)),
           employeeId: (src['employee_id'] == null ? null : (src['employee_id'] as String)),
           limit: (src['limit'] == null ? null : (src['limit'] as num).toInt()),
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
           runId: (src['run_id'] == null ? null : (src['run_id'] as String)),
           threadKey: (src['thread_key'] == null ? null : (src['thread_key'] as String)),
           ticketNumber: (src['ticket_number'] == null ? null : (src['ticket_number'] as num).toInt()),
         );
         }
       case 'approval.list':
-        return const MethodApprovalList();
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodApprovalList(
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
       case 'auto_allow.get_setting':
         return const MethodAutoAllowGetSetting();
       case 'backup.list':
@@ -10099,7 +10105,12 @@ sealed class Method {
         );
         }
       case 'notification.list':
-        return const MethodNotificationList();
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodNotificationList(
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
       case 'power.get':
         return const MethodPowerGet();
       case 'project.list':
@@ -10151,7 +10162,12 @@ sealed class Method {
         );
         }
       case 'scheduled_message.list':
-        return const MethodScheduledMessageList();
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodScheduledMessageList(
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
       case 'screenshot.get':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -10346,12 +10362,15 @@ final class MethodActivityGet extends Method {
 
 /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
 /// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+/// `project_id` (feature `workspace_filters`): only threads of that project's tickets,
+/// channels and tasks; a board member's private chat has no project.
 final class MethodActivityLogList extends Method {
   const MethodActivityLogList({
     this.beforeSeq,
     this.category,
     this.employeeId,
     this.limit,
+    this.projectId,
     this.runId,
     this.threadKey,
     this.ticketNumber,
@@ -10362,6 +10381,7 @@ final class MethodActivityLogList extends Method {
   final String? category;
   final String? employeeId;
   final int? limit;
+  final String? projectId;
   final String? runId;
   /// `ticket:<id>`, `channel:<conversation>` or `chat:<conversation>`.
   final String? threadKey;
@@ -10376,6 +10396,7 @@ final class MethodActivityLogList extends Method {
       if (category != null) 'category': category,
       if (employeeId != null) 'employee_id': employeeId,
       if (limit != null) 'limit': limit,
+      if (projectId != null) 'project_id': projectId,
       if (runId != null) 'run_id': runId,
       if (threadKey != null) 'thread_key': threadKey,
       if (ticketNumber != null) 'ticket_number': ticketNumber,
@@ -10383,12 +10404,21 @@ final class MethodActivityLogList extends Method {
     };
 }
 
+/// Pending approvals, then the latest decisions. `project_id` (feature
+/// `workspace_filters`): only those of runs in that project.
 final class MethodApprovalList extends Method {
-  const MethodApprovalList();
+  const MethodApprovalList({
+    this.projectId,
+  });
+
+  final String? projectId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'approval.list',
+      'params': <String, dynamic>{
+      if (projectId != null) 'project_id': projectId,
+    },
     };
 }
 
@@ -11058,12 +11088,22 @@ final class MethodMessageLocate extends Method {
     };
 }
 
+/// The notifications of the board member, newest first. `project_id` (feature
+/// `workspace_filters`): only those about that project's tickets, tasks or
+/// conversations; `unread` then counts only those too.
 final class MethodNotificationList extends Method {
-  const MethodNotificationList();
+  const MethodNotificationList({
+    this.projectId,
+  });
+
+  final String? projectId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'notification.list',
+      'params': <String, dynamic>{
+      if (projectId != null) 'project_id': projectId,
+    },
     };
 }
 
@@ -11209,12 +11249,20 @@ final class MethodRunGuidelines extends Method {
 }
 
 /// Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+/// `project_id` (feature `workspace_filters`): only those in a ticket or channel of that project.
 final class MethodScheduledMessageList extends Method {
-  const MethodScheduledMessageList();
+  const MethodScheduledMessageList({
+    this.projectId,
+  });
+
+  final String? projectId;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'scheduled_message.list',
+      'params': <String, dynamic>{
+      if (projectId != null) 'project_id': projectId,
+    },
     };
 }
 

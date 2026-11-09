@@ -14,10 +14,14 @@ abstract final class Methods {
   static const String activityGet = 'activity.get';
   /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
   /// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+  /// `project_id` (feature `workspace_filters`): only threads of that project's tickets,
+  /// channels and tasks; a board member's private chat has no project.
   static const String activityLogList = 'activity_log.list';
   static const String approvalAnswer = 'approval.answer';
   static const String approvalDecide = 'approval.decide';
   static const String approvalDecidePlan = 'approval.decide_plan';
+  /// Pending approvals, then the latest decisions. `project_id` (feature
+  /// `workspace_filters`): only those of runs in that project.
   static const String approvalList = 'approval.list';
   static const String attachmentAdd = 'attachment.add';
   static const String attachmentRemove = 'attachment.remove';
@@ -242,6 +246,9 @@ abstract final class Methods {
   static const String messageReact = 'message.react';
   static const String notificationDismiss = 'notification.dismiss';
   static const String notificationDismissAll = 'notification.dismiss_all';
+  /// The notifications of the board member, newest first. `project_id` (feature
+  /// `workspace_filters`): only those about that project's tickets, tasks or
+  /// conversations; `unread` then counts only those too.
   static const String notificationList = 'notification.list';
   static const String notificationMarkAllRead = 'notification.mark_all_read';
   /// One row read, for this board member only (feature `personal_inbox`); answers
@@ -297,6 +304,7 @@ abstract final class Methods {
   static const String runStop = 'run.stop';
   static const String scheduledMessageCancel = 'scheduled_message.cancel';
   /// Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+  /// `project_id` (feature `workspace_filters`): only those in a ticket or channel of that project.
   static const String scheduledMessageList = 'scheduled_message.list';
   /// A screenshot the agent took (the id is in its screenshot tool's output).
   static const String screenshotGet = 'screenshot.get';
@@ -527,21 +535,29 @@ Map<String, dynamic> activityGet({required String callId, required String messag
 
 /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
 /// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
-Map<String, dynamic> activityLogList({int? beforeSeq, String? category, String? employeeId, int? limit, String? runId, String? threadKey, int? ticketNumber}) => <String, dynamic>{
+/// `project_id` (feature `workspace_filters`): only threads of that project's tickets,
+/// channels and tasks; a board member's private chat has no project.
+Map<String, dynamic> activityLogList({int? beforeSeq, String? category, String? employeeId, int? limit, String? projectId, String? runId, String? threadKey, int? ticketNumber}) => <String, dynamic>{
   'method': Methods.activityLogList,
   'params': <String, dynamic>{
     if (beforeSeq != null) 'before_seq': beforeSeq,
     if (category != null) 'category': category,
     if (employeeId != null) 'employee_id': employeeId,
     if (limit != null) 'limit': limit,
+    if (projectId != null) 'project_id': projectId,
     if (runId != null) 'run_id': runId,
     if (threadKey != null) 'thread_key': threadKey,
     if (ticketNumber != null) 'ticket_number': ticketNumber,
   },
 };
 
-Map<String, dynamic> approvalList() => <String, dynamic>{
+/// Pending approvals, then the latest decisions. `project_id` (feature
+/// `workspace_filters`): only those of runs in that project.
+Map<String, dynamic> approvalList({String? projectId}) => <String, dynamic>{
   'method': Methods.approvalList,
+  'params': <String, dynamic>{
+    if (projectId != null) 'project_id': projectId,
+  },
 };
 
 /// Whether the safe read-only tools pass without a question (the auto-allow list).
@@ -871,8 +887,14 @@ Map<String, dynamic> messageLocate({required String messageId}) => <String, dyna
   },
 };
 
-Map<String, dynamic> notificationList() => <String, dynamic>{
+/// The notifications of the board member, newest first. `project_id` (feature
+/// `workspace_filters`): only those about that project's tickets, tasks or
+/// conversations; `unread` then counts only those too.
+Map<String, dynamic> notificationList({String? projectId}) => <String, dynamic>{
   'method': Methods.notificationList,
+  'params': <String, dynamic>{
+    if (projectId != null) 'project_id': projectId,
+  },
 };
 
 Map<String, dynamic> powerGet() => <String, dynamic>{
@@ -943,8 +965,12 @@ Map<String, dynamic> runGuidelines({required String runId}) => <String, dynamic>
 };
 
 /// Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
-Map<String, dynamic> scheduledMessageList() => <String, dynamic>{
+/// `project_id` (feature `workspace_filters`): only those in a ticket or channel of that project.
+Map<String, dynamic> scheduledMessageList({String? projectId}) => <String, dynamic>{
   'method': Methods.scheduledMessageList,
+  'params': <String, dynamic>{
+    if (projectId != null) 'project_id': projectId,
+  },
 };
 
 /// A screenshot the agent took (the id is in its screenshot tool's output).

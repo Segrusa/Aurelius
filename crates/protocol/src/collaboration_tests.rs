@@ -385,3 +385,24 @@ fn an_older_client_reads_message_deleted_the_same_whatever_its_metadata_says() {
     assert_eq!(read.kind, EventKind::MessageDeleted);
     assert_eq!(read.kind.area(), "message", "the desktop refreshes the chat on this area");
 }
+
+#[test]
+fn a_workspace_filter_is_optional_on_the_reads_that_had_no_params() {
+    use crate::rpc::{FEATURES, feature, from_method_value};
+    assert!(FEATURES.contains(&feature::WORKSPACE_FILTERS));
+    let project = ProjectId::new();
+    let cases: [(&str, Method, Method); 3] = [
+        ("notification.list", Method::NotificationList { project_id: None }, Method::NotificationList { project_id: Some(project) }),
+        ("approval.list", Method::ApprovalList { project_id: None }, Method::ApprovalList { project_id: Some(project) }),
+        ("scheduled_message.list", Method::ScheduledMessageList { project_id: None }, Method::ScheduledMessageList { project_id: Some(project) }),
+    ];
+    for (name, bare, narrowed) in cases {
+        // What older clients send, and what a client without a workspace sends.
+        assert_eq!(from_method_value::<Method>(serde_json::json!({ "method": name })).unwrap(), bare, "{name}");
+        assert_eq!(from_method_value::<Method>(serde_json::json!({ "method": name, "params": {} })).unwrap(), bare, "{name}");
+        assert_eq!(serde_json::to_value(&bare).unwrap(), serde_json::json!({ "method": name, "params": {} }), "{name}");
+        let wire = serde_json::json!({ "method": name, "params": { "project_id": project } });
+        assert_eq!(serde_json::to_value(&narrowed).unwrap(), wire, "{name}");
+        assert_eq!(from_method_value::<Method>(wire).unwrap(), narrowed, "{name}");
+    }
+}

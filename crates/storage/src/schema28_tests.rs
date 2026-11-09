@@ -72,14 +72,14 @@ fn a_schema_27_store_keeps_its_notifications_and_what_was_read_stays_read() {
         assert_eq!(n, 0, "{table}");
     }
     let shown = |user| {
-        let mut rows: Vec<_> = store.read(|c| timeline::list_notifications_for(c, 50, Some(user))).unwrap().into_iter().map(|n| (n.id, n.read)).collect();
+        let mut rows: Vec<_> = store.read(|c| timeline::list_notifications_for(c, 50, Some(user), None)).unwrap().into_iter().map(|n| (n.id, n.read)).collect();
         rows.sort();
         rows
     };
     assert_eq!(shown(ALEX), [("open".to_owned(), false), ("read".to_owned(), true)]);
     assert_eq!(shown(BEA), [("open".to_owned(), false), ("own".to_owned(), false), ("read".to_owned(), true)]);
-    assert_eq!(store.read(|c| timeline::unread_count_for(c, Some(ALEX))).unwrap(), 1);
-    assert_eq!(store.read(|c| timeline::unread_count_for(c, Some(BEA))).unwrap(), 2);
+    assert_eq!(store.read(|c| timeline::unread_count_for(c, Some(ALEX), None)).unwrap(), 1);
+    assert_eq!(store.read(|c| timeline::unread_count_for(c, Some(BEA), None)).unwrap(), 2);
 }
 
 #[test]

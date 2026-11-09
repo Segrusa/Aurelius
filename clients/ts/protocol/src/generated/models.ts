@@ -3222,9 +3222,15 @@ export type Method =
   /**
    * The activity log, newest first (R8, feature `activity_log`): every delivery, queue
    * step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+   * `project_id` (feature `workspace_filters`): only threads of that project's tickets,
+   * channels and tasks; a board member's private chat has no project.
    */
-  | ({ method: "activity_log.list"; params: { before_seq?: number | null; category?: string | null; employee_id?: string | null; limit?: number | null; run_id?: string | null; thread_key?: string | null; ticket_number?: number | null } })
-  | ({ method: "approval.list" })
+  | ({ method: "activity_log.list"; params: { before_seq?: number | null; category?: string | null; employee_id?: string | null; limit?: number | null; project_id?: string | null; run_id?: string | null; thread_key?: string | null; ticket_number?: number | null } })
+  /**
+   * Pending approvals, then the latest decisions. `project_id` (feature
+   * `workspace_filters`): only those of runs in that project.
+   */
+  | ({ method: "approval.list"; params: { project_id?: string | null } })
   /**
    * Whether the safe read-only tools pass without a question (the auto-allow list).
    */
@@ -3413,7 +3419,12 @@ export type Method =
    * discussion; any other is `not_found`, as an unknown one. Not for apps.
    */
   | ({ method: "message.locate"; params: { message_id: string } })
-  | ({ method: "notification.list" })
+  /**
+   * The notifications of the board member, newest first. `project_id` (feature
+   * `workspace_filters`): only those about that project's tickets, tasks or
+   * conversations; `unread` then counts only those too.
+   */
+  | ({ method: "notification.list"; params: { project_id?: string | null } })
   | ({ method: "power.get" })
   | ({ method: "project.list" })
   /**
@@ -3447,8 +3458,9 @@ export type Method =
   | ({ method: "run.guidelines"; params: { run_id: string } })
   /**
    * Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+   * `project_id` (feature `workspace_filters`): only those in a ticket or channel of that project.
    */
-  | ({ method: "scheduled_message.list" })
+  | ({ method: "scheduled_message.list"; params: { project_id?: string | null } })
   /**
    * A screenshot the agent took (the id is in its screenshot tool's output).
    */

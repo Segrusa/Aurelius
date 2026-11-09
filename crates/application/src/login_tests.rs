@@ -393,7 +393,7 @@ fn lines(s: &Setup, ticket: TicketId) -> Vec<String> {
 }
 
 fn inbox(s: &Setup, user: UserId) -> Vec<String> {
-    s.service.store().read(move |c| aurelius_storage::timeline::list_notifications_for(c, 50, Some(&user.to_string()))).unwrap().into_iter().map(|n| n.title).collect()
+    s.service.store().read(move |c| aurelius_storage::timeline::list_notifications_for(c, 50, Some(&user.to_string()), None)).unwrap().into_iter().map(|n| n.title).collect()
 }
 
 fn task_wait(s: &Setup, task: TaskId) -> (TaskStatus, Option<String>) {
@@ -433,7 +433,7 @@ fn a_ticket_without_its_creators_login_waits_tells_them_and_resumes_once_linked(
     assert_eq!(lines(&s, ticket).iter().filter(|l| *l == waiting).count(), 1, "{:?}", lines(&s, ticket));
     assert_eq!(inbox(&s, s.robin), ["Connect your Claude login"]);
     assert!(inbox(&s, s.alex).is_empty(), "another board member's Inbox stays empty");
-    assert!(s.service.store().read(|c| aurelius_storage::timeline::list_notifications_for(c, 50, None)).unwrap().is_empty(), "not for everyone");
+    assert!(s.service.store().read(|c| aurelius_storage::timeline::list_notifications_for(c, 50, None, None)).unwrap().is_empty(), "not for everyone");
     // R2 M2: its push goes to Robin's phone only, never to Alex's.
     let (robins_phone, alexs_phone) = (ClientId::new(), ClientId::new());
     let (robin, alex) = (s.robin, s.alex);

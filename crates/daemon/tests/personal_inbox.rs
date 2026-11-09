@@ -695,7 +695,7 @@ async fn an_older_client_reads_every_new_row_with_its_own_enum_and_gets_no_new_e
     set_responsible(&alex, other, Some(bea_id)).await;
     post(&alex, other, "@bea look").await;
 
-    let ResponseBody::Notifications(snapshot) = old_client.call(Method::NotificationList).await.unwrap() else { panic!() };
+    let ResponseBody::Notifications(snapshot) = old_client.call(Method::NotificationList { project_id: None }).await.unwrap() else { panic!() };
     let wire = serde_json::to_value(&snapshot).unwrap();
     let rows: Vec<OldNotification> = serde_json::from_value(wire["notifications"].clone()).expect("the old enum reads every row");
     assert!(rows.len() >= 2, "{rows:#?}");

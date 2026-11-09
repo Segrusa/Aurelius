@@ -251,12 +251,18 @@ export interface MethodParams {
   /**
    * The activity log, newest first (R8, feature `activity_log`): every delivery, queue
    * step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+   * `project_id` (feature `workspace_filters`): only threads of that project's tickets,
+   * channels and tasks; a board member's private chat has no project.
    */
-  "activity_log.list": { before_seq?: number | null; category?: string | null; employee_id?: string | null; limit?: number | null; run_id?: string | null; thread_key?: string | null; ticket_number?: number | null };
+  "activity_log.list": { before_seq?: number | null; category?: string | null; employee_id?: string | null; limit?: number | null; project_id?: string | null; run_id?: string | null; thread_key?: string | null; ticket_number?: number | null };
   "approval.answer": M.AnswerQuestion;
   "approval.decide": M.DecideApproval;
   "approval.decide_plan": M.DecidePlan;
-  "approval.list": undefined;
+  /**
+   * Pending approvals, then the latest decisions. `project_id` (feature
+   * `workspace_filters`): only those of runs in that project.
+   */
+  "approval.list": { project_id?: string | null };
   "attachment.add": M.AttachFile;
   "attachment.remove": M.RemoveAttachment;
   /**
@@ -604,7 +610,12 @@ export interface MethodParams {
   "message.react": M.ReactToMessage;
   "notification.dismiss": { id: string };
   "notification.dismiss_all": undefined;
-  "notification.list": undefined;
+  /**
+   * The notifications of the board member, newest first. `project_id` (feature
+   * `workspace_filters`): only those about that project's tickets, tasks or
+   * conversations; `unread` then counts only those too.
+   */
+  "notification.list": { project_id?: string | null };
   "notification.mark_all_read": undefined;
   /**
    * One row read, for this board member only (feature `personal_inbox`); answers
@@ -680,8 +691,9 @@ export interface MethodParams {
   "scheduled_message.cancel": M.CancelScheduledMessage;
   /**
    * Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+   * `project_id` (feature `workspace_filters`): only those in a ticket or channel of that project.
    */
-  "scheduled_message.list": undefined;
+  "scheduled_message.list": { project_id?: string | null };
   /**
    * A screenshot the agent took (the id is in its screenshot tool's output).
    */

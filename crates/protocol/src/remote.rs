@@ -56,7 +56,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::EmployeeList
         | Method::EmployeeChat { .. }
         | Method::EmployeeChats
-        | Method::ScheduledMessageList
+        | Method::ScheduledMessageList { .. }
         | Method::ThreadWaiting { .. }
         | Method::EmployeeScratchpad { .. }
         | Method::EmployeeQueue { .. }
@@ -71,7 +71,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::MessageHistory { .. }
         | Method::CompanyGet
         | Method::ProjectConversationList { .. }
-        | Method::ApprovalList
+        | Method::ApprovalList { .. }
         | Method::ProviderList
         | Method::TaskList { .. }
         | Method::TimelineList(_)
@@ -100,7 +100,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::McpLoginGet { .. }
         | Method::McpAlwaysAllowList
         | Method::SubscriptionGet { .. }
-        | Method::NotificationList
+        | Method::NotificationList { .. }
         | Method::EventSubscribe { .. }
         | Method::MarkdownList { .. }
         | Method::MarkdownGet { .. }

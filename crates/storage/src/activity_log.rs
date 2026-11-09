@@ -9,7 +9,7 @@
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::views::{ActivityLogEntry, ThreadPlace};
-use aurelius_domain::{ConversationId, EmployeeId, RunId, ScheduledMessageId, TicketId, UserId};
+use aurelius_domain::{ConversationId, EmployeeId, ProjectId, RunId, ScheduledMessageId, TicketId, UserId};
 use rusqlite::types::ToSql;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::collections::HashMap;
@@ -120,6 +120,8 @@ pub fn prune(tx: &Transaction<'_>, now: i64) -> Result<usize, StorageError> {
 /// What to look for; what is `None` does not narrow it.
 #[derive(Debug, Clone, Default)]
 pub struct Filter {
+    /// Only threads of this project: its tickets, channels and tasks.
+    pub project: Option<ProjectId>,
     pub employee: Option<EmployeeId>,
     pub thread: Option<String>,
     pub ticket_number: Option<u32>,
@@ -138,6 +140,19 @@ pub fn list(conn: &Connection, reader: Option<UserId>, filter: &Filter, limit: u
         values.push(value);
         clauses.push(clause(values.len()));
     };
+    if let Some(project) = filter.project {
+        // A task's own conversation is a `chat:` thread with the project on it.
+        add(
+            &|n| {
+                format!(
+                    "(l.thread_key IN (SELECT 'ticket:' || id FROM tickets WHERE project_id = ?{n})
+                      OR l.thread_key IN (SELECT 'channel:' || id FROM conversations WHERE project_id = ?{n})
+                      OR l.thread_key IN (SELECT 'chat:' || id FROM conversations WHERE project_id = ?{n}))"
+                )
+            },
+            Box::new(project.to_string()),
+        );
+    }
     if let Some(employee) = filter.employee {
         add(&|n| format!("l.employee_id = ?{n}"), Box::new(employee.to_string()));
     }

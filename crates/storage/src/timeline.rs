@@ -750,13 +750,13 @@ pub fn insert_notification(tx: &rusqlite::Transaction<'_>, row: &NewNotification
 
 /// Every notification, also those for one board member (push routing, tests).
 pub fn list_notifications(conn: &Connection, limit: u32) -> Result<Vec<NotificationView>, StorageError> {
-    list(conn, limit, None)
+    list(conn, limit, None, None)
 }
 
 /// What `user`'s Inbox shows: the notifications for everyone and their own
 /// (none: only those for everyone).
-pub fn list_notifications_for(conn: &Connection, limit: u32, user: Option<&str>) -> Result<Vec<NotificationView>, StorageError> {
-    list(conn, limit, Some(viewer(user)))
+pub fn list_notifications_for(conn: &Connection, limit: u32, user: Option<&str>, project: Option<ProjectId>) -> Result<Vec<NotificationView>, StorageError> {
+    list(conn, limit, Some(viewer(user)), project)
 }
 
 /// Whose notifications a query sees: the board member bound at `?{at}` (`viewer`)
@@ -778,15 +778,34 @@ fn read_by(at: u8) -> String {
     )
 }
 
+/// ?`at` is a project: only notifications about its tickets, conversations, tasks or runs.
+/// An event's correlation is its task, or its run (an approval), which belongs where
+/// `approvals::list_approvals` says. Null: everything.
+fn in_project(at: u8) -> String {
+    format!(
+        "(?{at} IS NULL OR n.ticket_id IN (SELECT id FROM tickets WHERE project_id = ?{at})
+          OR n.conversation_id IN (SELECT id FROM conversations WHERE project_id = ?{at})
+          OR e.correlation_id IN (SELECT id FROM tasks WHERE project_id = ?{at})
+          OR (SELECT COALESCE(
+                (SELECT t.project_id FROM tasks t WHERE t.id = r.task_id),
+                c.project_id,
+                (SELECT g.project_id FROM conversations g WHERE g.id = json_extract(j.payload_json, '$.group.conversation_id')))
+              FROM runs r
+              LEFT JOIN conversations c ON c.id = r.conversation_id
+              LEFT JOIN jobs j ON j.id = r.id
+              WHERE r.id = e.correlation_id) = ?{at})"
+    )
+}
+
 /// The value for `visible_to`: `user` when it is a board member's id, else NULL.
 fn viewer(user: Option<&str>) -> Option<String> {
     user.filter(|u| aurelius_domain::UserId::parse(u).is_ok()).map(str::to_owned)
 }
 
 /// `viewer`: whose Inbox (`Some(None)`: only everyone's); `None`: every notification.
-fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>) -> Result<Vec<NotificationView>, StorageError> {
+fn list(conn: &Connection, limit: u32, viewer: Option<Option<String>>, project: Option<ProjectId>) -> Result<Vec<NotificationView>, StorageError> {
     let visible = if viewer.is_some() { visible_to(2) } else { "?2 IS NULL".to_string() };
-    read_rows(conn, &format!("{STILL_RELEVANT} AND {visible} ORDER BY n.created_at_ms DESC LIMIT ?1"), params![limit, viewer.flatten()])
+    read_rows(conn, &format!("{STILL_RELEVANT} AND {visible} AND {} ORDER BY n.created_at_ms DESC LIMIT ?1", in_project(3)), params![limit, viewer.flatten(), project.map(|p| p.to_string())])
 }
 
 /// The rows `filter` selects, with what the reader sees of them; `?2` in `filter`
@@ -905,13 +924,13 @@ impl ReadRow {
 }
 
 pub fn unread_count(conn: &Connection) -> Result<u64, StorageError> {
-    unread_count_for(conn, None)
+    unread_count_for(conn, None, None)
 }
 
-pub fn unread_count_for(conn: &Connection, user: Option<&str>) -> Result<u64, StorageError> {
+pub fn unread_count_for(conn: &Connection, user: Option<&str>, project: Option<ProjectId>) -> Result<u64, StorageError> {
     Ok(conn.query_row(
-        &format!("SELECT COUNT(*) FROM notifications n JOIN events e ON e.id = n.event_id WHERE NOT {} AND {STILL_RELEVANT} AND {}", read_by(1), visible_to(1)),
-        [viewer(user)],
+        &format!("SELECT COUNT(*) FROM notifications n JOIN events e ON e.id = n.event_id WHERE NOT {} AND {STILL_RELEVANT} AND {} AND {}", read_by(1), visible_to(1), in_project(2)),
+        params![viewer(user), project.map(|p| p.to_string())],
         |r| r.get::<_, i64>(0),
     )? as u64)
 }

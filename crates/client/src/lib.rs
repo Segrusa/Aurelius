@@ -574,7 +574,7 @@ impl Client {
 
     /// Messages employees scheduled: what waits, then what went out.
     pub async fn scheduled_messages(&self) -> Result<aurelius_domain::views::ScheduledMessagesSnapshot, ClientError> {
-        self.read(Method::ScheduledMessageList, body!(ScheduledMessages)).await
+        self.read(Method::ScheduledMessageList { project_id: None }, body!(ScheduledMessages)).await
     }
 
     /// Who waits to pick up a ticket's thread and what is scheduled in it.
@@ -604,7 +604,7 @@ impl Client {
 
     /// The newest rows of the activity log of a run, or of everything without one.
     pub async fn activity_log(&self, run_id: Option<aurelius_domain::RunId>, employee_id: Option<aurelius_domain::EmployeeId>) -> Result<aurelius_domain::views::ActivityLogPage, ClientError> {
-        self.read(Method::ActivityLogList { employee_id, thread_key: None, ticket_number: None, run_id, category: None, before_seq: None, limit: None }, body!(ActivityLog)).await
+        self.read(Method::ActivityLogList { project_id: None, employee_id, thread_key: None, ticket_number: None, run_id, category: None, before_seq: None, limit: None }, body!(ActivityLog)).await
     }
 
     /// The company's group chat (Team chat): the user and every employee.
@@ -646,7 +646,7 @@ impl Client {
     }
 
     pub async fn approvals(&self) -> Result<aurelius_protocol::ApprovalsSnapshot, ClientError> {
-        self.read(Method::ApprovalList, body!(Approvals)).await
+        self.read(Method::ApprovalList { project_id: None }, body!(Approvals)).await
     }
 
     /// Tasks of one project, or of the whole company (`None`).
@@ -807,7 +807,7 @@ impl Client {
     }
 
     pub async fn notifications(&self) -> Result<aurelius_protocol::NotificationsSnapshot, ClientError> {
-        self.read(Method::NotificationList, body!(Notifications)).await
+        self.read(Method::NotificationList { project_id: None }, body!(Notifications)).await
     }
 
     /// Replay events after `after_seq`, then live events (and load/power pushes).

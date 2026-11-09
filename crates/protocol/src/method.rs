@@ -35,8 +35,12 @@ pub enum Method {
     #[serde(rename = "employee.chat")]
     EmployeeChat { employee_id: EmployeeId },
     /// Messages employees scheduled: what waits, then what went out (feature `scheduled_messages`).
+    /// `project_id` (feature `workspace_filters`): only those in a ticket or channel of that project.
     #[serde(rename = "scheduled_message.list")]
-    ScheduledMessageList,
+    ScheduledMessageList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+    },
     /// Who waits to pick up a thread and what is scheduled in it (U3, feature
     /// `scheduled_messages`): a ticket (`ticket_id`) or a channel or chat (`conversation_id`).
     #[serde(rename = "thread.waiting")]
@@ -60,8 +64,12 @@ pub enum Method {
     EmployeeQueue { employee_id: EmployeeId },
     /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
     /// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
+    /// `project_id` (feature `workspace_filters`): only threads of that project's tickets,
+    /// channels and tasks; a board member's private chat has no project.
     #[serde(rename = "activity_log.list")]
     ActivityLogList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         employee_id: Option<EmployeeId>,
         /// `ticket:<id>`, `channel:<conversation>` or `chat:<conversation>`.
@@ -289,8 +297,13 @@ pub enum Method {
     /// The conversations of a project, most recently active first.
     #[serde(rename = "project_conversation.list")]
     ProjectConversationList { project_id: ProjectId },
+    /// Pending approvals, then the latest decisions. `project_id` (feature
+    /// `workspace_filters`): only those of runs in that project.
     #[serde(rename = "approval.list")]
-    ApprovalList,
+    ApprovalList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+    },
     #[serde(rename = "connection.list")]
     ProviderList,
     /// Tasks, newest first, company-wide; every given filter applies.
@@ -416,8 +429,14 @@ pub enum Method {
     SubscriptionGet { refresh: bool },
     #[serde(rename = "backup.list")]
     BackupList,
+    /// The notifications of the board member, newest first. `project_id` (feature
+    /// `workspace_filters`): only those about that project's tickets, tasks or
+    /// conversations; `unread` then counts only those too.
     #[serde(rename = "notification.list")]
-    NotificationList,
+    NotificationList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+    },
     /// The Markdown files in a work folder, for the in-app viewer.
     #[serde(rename = "markdown.list")]
     MarkdownList { scope: FileScope },

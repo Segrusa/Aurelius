@@ -45,7 +45,7 @@ fn digest_of(service: &CommandService, approval_id: ApprovalId) -> String {
     store
         .read(|c| {
             let read = |k: &str| store.blobs().read(k).ok().and_then(|b| String::from_utf8(b).ok());
-            Ok(aurelius_storage::approvals::list_approvals(c, &read)?)
+            Ok(aurelius_storage::approvals::list_approvals(c, None, &read)?)
         })
         .unwrap()
         .into_iter()

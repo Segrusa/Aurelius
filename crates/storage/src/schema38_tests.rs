@@ -60,7 +60,7 @@ fn a_scheduled_message_is_due_once_and_settled_once() {
     store.write(move |tx| scheduled::settle(tx, id, "delivered", Some(run), None)).unwrap();
     assert!(store.read(|c| scheduled::due(c, 2_000)).unwrap().is_empty());
     store.write(move |tx| scheduled::settle(tx, id, "not_delivered", None, Some("late"))).unwrap();
-    let all = store.read(|c| scheduled::list(c, None, 10)).unwrap();
+    let all = store.read(|c| scheduled::list(c, None, None, 10)).unwrap();
     assert_eq!((all.len(), all[0].state.as_str(), all[0].run_id, all[0].outcome.as_deref()), (1, "delivered", Some(run), None), "the first settling stands");
     assert!(!store.write(move |tx| scheduled::cancel(tx, id, None)).unwrap(), "it no longer waits");
 }

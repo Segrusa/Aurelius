@@ -364,6 +364,10 @@ pub mod feature {
     pub const EMPLOYEE_QUEUE: &str = "employee_queue";
     /// An employee's scratchpad can be read (`employee.scratchpad`, `RunBrief::employee_id`).
     pub const EMPLOYEE_SCRATCHPAD: &str = "employee_scratchpad";
+    /// The reads a workspace narrows take a `project_id` (`notification.list`,
+    /// `approval.list`, `scheduled_message.list`, `activity_log.list`). Older servers
+    /// refuse or ignore it, so a client without this feature does not offer workspaces.
+    pub const WORKSPACE_FILTERS: &str = "workspace_filters";
 }
 
 /// Every feature this build has.
@@ -408,6 +412,7 @@ pub const FEATURES: &[&str] = &[
     feature::EMPLOYEE_PROFILES,
     feature::ACTIVITY_LOG,
     feature::EMPLOYEE_QUEUE,
+    feature::WORKSPACE_FILTERS,
 ];
 
 /// Daemon → client.
