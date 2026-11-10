@@ -881,7 +881,7 @@ fn to_owner(tx: &Tx<'_>, store: &Store, d: &Discussion, t: &TicketPlace, from: &
     let (message, posted) = crate::task::task_threads::post_returning_with(tx, store, conversation, root, crate::task::task_threads::Speaker::Update { kind: "message", from }, &body, extra)?;
     let mut notices = vec![posted];
     // A main task that waits for this answer to its question goes on with a run of its own.
-    let answers_question = row.status == TaskStatus::Waiting && aurelius_storage::tasks::waiting_cause(tx, root)?.as_deref() == Some("question");
+    let answers_question = row.status == TaskStatus::Waiting && matches!(aurelius_storage::tasks::waiting_cause(tx, root)?.as_deref(), Some("question" | "budget"));
     if !matches!(row.status, TaskStatus::Running | TaskStatus::Review) && !answers_question {
         return Ok(Some(notices));
     }

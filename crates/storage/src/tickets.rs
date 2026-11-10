@@ -460,6 +460,7 @@ fn ticket_row(r: &Row<'_>) -> rusqlite::Result<(TicketView, Option<String>)> {
             base_branch: r.get(36)?,
             landed: r.get(37)?,
             landed_url: r.get(38)?,
+            budget: None,
             attention: None,
             busy: Vec::new(),
         },
@@ -514,6 +515,24 @@ pub fn set_worktree(tx: &Transaction<'_>, id: TicketId, branch: &str, base: Opti
 pub fn clear_worktree(tx: &Transaction<'_>, id: TicketId) -> Result<(), StorageError> {
     tx.execute("UPDATE tickets SET worktree = NULL WHERE id = ?1", [id.to_string()])?;
     Ok(())
+}
+
+/// What a ticket has spent of its budget: the wakes of employees on it (its mailbox
+/// items) since a board member last acted on it, by a write on the ticket or a message
+/// in its discussion. None: the ticket is unknown, or its project has no limit.
+pub fn budget(conn: &Connection, id: TicketId) -> Result<Option<aurelius_domain::ticket::TicketBudget>, StorageError> {
+    let row: Option<(i64, i64)> = conn
+        .query_row(
+            "SELECT COALESCE(p.ticket_budget, ?2),
+                    (SELECT COUNT(*) FROM employee_inbox i WHERE i.ticket_id = k.id AND i.created_at_ms > COALESCE(MAX(
+                        COALESCE((SELECT MAX(e.recorded_at_ms) FROM events e WHERE e.aggregate_type = 'ticket' AND e.aggregate_id = k.id AND e.actor_kind = 'user'), 0),
+                        COALESCE((SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = k.conversation_id AND m.author_user_id IS NOT NULL), 0)), 0))
+             FROM tickets k JOIN projects p ON p.id = k.project_id WHERE k.id = ?1",
+            params![id.to_string(), aurelius_domain::ticket::TICKET_BUDGET_DEFAULT],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(row.filter(|(limit, _)| *limit > 0).map(|(limit, spent)| aurelius_domain::ticket::TicketBudget { spent: spent as u32, limit: limit as u32 }))
 }
 
 /// The ticket's branch was merged or pushed (`how`: 'merged' or 'pushed').
@@ -620,7 +639,10 @@ pub fn facts(conn: &Connection, id: TicketId) -> Result<Option<TicketFacts>, Sto
                       AND (i.task_id IS NULL OR i.task_id IS NOT k.test_task_id)
                       AND (i.state IN ('queued','held')
                            OR (i.state = 'claimed' AND EXISTS (SELECT 1 FROM runs r WHERE r.id = i.run_id AND r.status IN {live})))),
-                    x.status, x.waiting_reason
+                    x.status, x.waiting_reason,
+                    COALESCE((SELECT json_extract(e.metadata_json, '$.reason') FROM events e
+                               WHERE e.aggregate_type = 'task' AND e.aggregate_id = t.id AND e.type IN ('task.waiting','task.resumed','task.started')
+                               ORDER BY e.seq DESC LIMIT 1), '') = 'budget'
                  FROM tickets k JOIN board_columns c ON c.id = k.column_id
                  LEFT JOIN tasks t ON t.id = k.root_task_id
                  LEFT JOIN tasks x ON x.id = k.test_task_id AND x.status NOT IN ('succeeded','failed','cancelled')
@@ -641,6 +663,7 @@ pub fn facts(conn: &Connection, id: TicketId) -> Result<Option<TicketFacts>, Sto
                     colleagues: r.get(9)?,
                     tests: r.get::<_, Option<String>>(10)?.and_then(|s| TaskStatus::parse(&s)),
                     tests_waiting: r.get(11)?,
+                    budget_hold: r.get(12)?,
                 })
             },
         )
@@ -685,6 +708,7 @@ fn with_work(conn: &Connection, ticket: &mut TicketView) -> Result<(), StorageEr
         },
     });
     ticket.busy = work.busy.into_iter().map(|b| b.as_str().to_owned()).collect();
+    ticket.budget = budget(conn, ticket.id)?;
     Ok(())
 }
 

@@ -155,7 +155,7 @@ async fn the_dispatcher_is_set_for_the_company_and_per_project() {
     let company = client.company().await.unwrap().company;
     assert_eq!((company.name.as_str(), company.dispatcher_employee_id), ("Segrusa", Some(orion)));
 
-    let set_project = |employee_id| Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: None, project_id: atlas, dispatcher: Some(SetDispatcher { employee_id }) });
+    let set_project = |employee_id| Command::UpdateProject(UpdateProject { ticket_budget: None, ticket_worktrees: None, styleguide_url: None, project_id: atlas, dispatcher: Some(SetDispatcher { employee_id }) });
     client.ticket_command(set_project(Some(forge)), None).await.unwrap();
     let projects = client.projects().await.unwrap().projects;
     assert_eq!(projects.iter().find(|p| p.id == atlas).unwrap().dispatcher_employee_id, Some(forge));

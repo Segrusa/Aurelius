@@ -58,7 +58,8 @@ export type Needs =
   | "input"
   | "approval"
   | "connect_login"
-  | "stalled";
+  | "stalled"
+  | "budget";
 
 const NEEDS_MINE: Record<Needs, string> = {
   review: "Needs you · review",
@@ -69,6 +70,7 @@ const NEEDS_MINE: Record<Needs, string> = {
   approval: "Waiting for your approval",
   connect_login: "Needs you · Claude login",
   stalled: "Needs you · nobody works on it",
+  budget: "Needs you · budget used up",
 };
 
 const NEEDS_OTHERS: Record<Needs, string> = {
@@ -80,6 +82,7 @@ const NEEDS_OTHERS: Record<Needs, string> = {
   approval: "Waiting for approval",
   connect_login: "Waiting for a Claude login",
   stalled: "Nobody works on it",
+  budget: "Budget used up, waits for a board member",
 };
 
 export function needsLine(needs: Needs, mine: boolean): string {
@@ -134,6 +137,7 @@ export function needsFromServer(t: TicketView, me: string | null): Needs | null 
     case "input":
     case "choose_owner":
     case "stalled":
+    case "budget":
       return attention.kind;
     default:
       return "stalled";
@@ -145,6 +149,26 @@ export function needsMeFromServer(t: TicketView, me: string | null): boolean {
   const attention = t.attention;
   if (!attention) return false;
   return !attention.user_id || attention.user_id === me;
+}
+
+export const BUDGET_FEATURE = "ticket_budget";
+/** `ticket::TICKET_BUDGET_DEFAULT` of the server: what a project without a setting has. */
+export const DEFAULT_BUDGET = 25;
+
+/** What was typed as a project's budget: 0 (no limit) to 1000, or null when it is neither. */
+export function budgetOf(typed: string): number | null {
+  const text = typed.trim();
+  if (!/^\d{1,4}$/.test(text)) return null;
+  const value = Number(text);
+  return value <= 1000 ? value : null;
+}
+
+/** What a ticket has spent of its budget, in words (feature `ticket_budget`). */
+export function budgetLine(budget: { spent: number; limit: number }): string {
+  const left = Math.max(0, budget.limit - budget.spent);
+  return left === 0
+    ? `Used up: ${budget.spent} of ${budget.limit} since a board member last wrote. Write in the discussion to let it go on.`
+    : `${budget.spent} of ${budget.limit} used since a board member last wrote`;
 }
 
 /** B6: the ◆, the filter and the badge follow this; anyone can still decide. */

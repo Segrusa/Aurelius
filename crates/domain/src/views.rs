@@ -37,6 +37,10 @@ pub struct ProjectSummary {
     /// (feature `ticket_worktrees`). Left out when off and by older servers.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ticket_worktrees: bool,
+    /// The budget of this project's tickets (feature `ticket_budget`), when it set one:
+    /// 0 is no limit. Left out: the default (`ticket::TICKET_BUDGET_DEFAULT`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_budget: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

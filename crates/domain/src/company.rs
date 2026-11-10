@@ -69,6 +69,11 @@ pub struct UpdateProject {
     /// its own (feature `ticket_worktrees`); off: in the project's folder, as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ticket_worktrees: Option<bool>,
+    /// How many wakes of employees a ticket of this project may have since a board
+    /// member last acted on it (feature `ticket_budget`): 1 to `TICKET_BUDGET_MAX`, or
+    /// 0 for no limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_budget: Option<u32>,
 }
 
 impl UpdateCompany {

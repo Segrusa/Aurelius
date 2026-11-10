@@ -12861,6 +12861,7 @@ final class ProjectSummary {
     required this.name,
     required this.status,
     this.styleguideUrl,
+    this.ticketBudget,
     this.ticketWorktrees,
     required this.version,
   });
@@ -12879,6 +12880,9 @@ final class ProjectSummary {
   /// The workspace's styleguide, a Claude Design artifact (feature `design_links`). A
   /// link only: runs read the artifact themselves. Left out when none and by older servers.
   final String? styleguideUrl;
+  /// The budget of this project's tickets (feature `ticket_budget`), when it set one:
+  /// 0 is no limit. Left out: the default (`ticket::TICKET_BUDGET_DEFAULT`).
+  final int? ticketBudget;
   /// Each ticket of this project works in a git worktree and on a branch of its own
   /// (feature `ticket_worktrees`). Left out when off and by older servers.
   final bool? ticketWorktrees;
@@ -12894,6 +12898,7 @@ final class ProjectSummary {
     name: (json['name'] as String),
     status: ProjectStatus.fromJson(json['status'] as String),
     styleguideUrl: (json['styleguide_url'] == null ? null : (json['styleguide_url'] as String)),
+    ticketBudget: (json['ticket_budget'] == null ? null : (json['ticket_budget'] as num).toInt()),
     ticketWorktrees: (json['ticket_worktrees'] == null ? null : (json['ticket_worktrees'] as bool)),
     version: (json['version'] as num).toInt(),
   );
@@ -12908,6 +12913,7 @@ final class ProjectSummary {
     'name': name,
     'status': status.toJson(),
     if (styleguideUrl != null) 'styleguide_url': styleguideUrl,
+    if (ticketBudget != null) 'ticket_budget': ticketBudget,
     if (ticketWorktrees != null) 'ticket_worktrees': ticketWorktrees,
     'version': version,
   };
@@ -17705,7 +17711,7 @@ final class TicketAttention {
   });
 
   /// One of `TicketAttentionKind`'s names (`login`, `review`, `plan_review`,
-  /// `failed`, `approval`, `input`, `choose_owner`, `stalled`). Text, not an enum,
+  /// `failed`, `approval`, `input`, `choose_owner`, `stalled`, `budget`). Text, not an enum,
   /// so a new kind never breaks an older client: it shows the ticket as needing someone.
   final String kind;
   /// Whom it waits for: the board member whose Claude login is missing, else the
@@ -17720,6 +17726,31 @@ final class TicketAttention {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'kind': kind,
     if (userId != null) 'user_id': userId,
+  };
+}
+
+/// What a ticket has spent of its budget (`TicketView::budget`, feature `ticket_budget`).
+final class TicketBudget {
+  const TicketBudget({
+    required this.limit,
+    required this.spent,
+  });
+
+  /// How many it may have. Reached: employees can hand nothing more on and the
+  /// ticket does not go on by itself; it waits for a board member (`attention: budget`).
+  final int limit;
+  /// Wakes of employees on this ticket since a board member last acted on it: a
+  /// task's run, a handoff, a mention, a planned message, a test round.
+  final int spent;
+
+  factory TicketBudget.fromJson(Map<String, dynamic> json) => TicketBudget(
+    limit: (json['limit'] as num).toInt(),
+    spent: (json['spent'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'limit': limit,
+    'spent': spent,
   };
 }
 
@@ -17853,6 +17884,7 @@ final class TicketView {
     this.attention,
     this.baseBranch,
     this.branch,
+    this.budget,
     this.busy = const [],
     required this.column,
     required this.columnId,
@@ -17905,6 +17937,9 @@ final class TicketView {
   /// `git.diff` with the same two are what this ticket changed. Left out while it has
   /// none (not started, no repository, switched off for the project) and by older servers.
   final String? branch;
+  /// What the ticket has spent of its budget (feature `ticket_budget`). Left out for a
+  /// ticket that is not open, in a project without a limit, and by older servers.
+  final TicketBudget? budget;
   /// What still works on the ticket (feature `ticket_state`): `ticket.accept`
   /// refuses while this is not empty. Left out when empty and by older servers.
   final List<String> busy;
@@ -17976,6 +18011,7 @@ final class TicketView {
     attention: (json['attention'] == null ? null : TicketAttention.fromJson(json['attention'] as Map<String, dynamic>)),
     baseBranch: (json['base_branch'] == null ? null : (json['base_branch'] as String)),
     branch: (json['branch'] == null ? null : (json['branch'] as String)),
+    budget: (json['budget'] == null ? null : TicketBudget.fromJson(json['budget'] as Map<String, dynamic>)),
     busy: (json['busy'] == null ? const [] : (json['busy'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     column: ColumnKind.fromJson(json['column'] as String),
     columnId: (json['column_id'] as String),
@@ -18020,6 +18056,7 @@ final class TicketView {
     if (attention != null) 'attention': attention?.toJson(),
     if (baseBranch != null) 'base_branch': baseBranch,
     if (branch != null) 'branch': branch,
+    if (budget != null) 'budget': budget?.toJson(),
     'busy': busy,
     'column': column.toJson(),
     'column_id': columnId,
@@ -18566,6 +18603,7 @@ final class UpdateProject {
     this.dispatcher,
     required this.projectId,
     this.styleguideUrl,
+    this.ticketBudget,
     this.ticketWorktrees,
   });
 
@@ -18574,6 +18612,10 @@ final class UpdateProject {
   /// The workspace's styleguide: a Claude Design artifact link
   /// (`ticket::valid_artifact_url`, feature `design_links`); an empty text clears it.
   final String? styleguideUrl;
+  /// How many wakes of employees a ticket of this project may have since a board
+  /// member last acted on it (feature `ticket_budget`): 1 to `TICKET_BUDGET_MAX`, or
+  /// 0 for no limit.
+  final int? ticketBudget;
   /// Whether each ticket of this project works in a git worktree and on a branch of
   /// its own (feature `ticket_worktrees`); off: in the project's folder, as before.
   final bool? ticketWorktrees;
@@ -18582,6 +18624,7 @@ final class UpdateProject {
     dispatcher: (json['dispatcher'] == null ? null : SetDispatcher.fromJson(json['dispatcher'] as Map<String, dynamic>)),
     projectId: (json['project_id'] as String),
     styleguideUrl: (json['styleguide_url'] == null ? null : (json['styleguide_url'] as String)),
+    ticketBudget: (json['ticket_budget'] == null ? null : (json['ticket_budget'] as num).toInt()),
     ticketWorktrees: (json['ticket_worktrees'] == null ? null : (json['ticket_worktrees'] as bool)),
   );
 
@@ -18589,6 +18632,7 @@ final class UpdateProject {
     if (dispatcher != null) 'dispatcher': dispatcher?.toJson(),
     'project_id': projectId,
     if (styleguideUrl != null) 'styleguide_url': styleguideUrl,
+    if (ticketBudget != null) 'ticket_budget': ticketBudget,
     if (ticketWorktrees != null) 'ticket_worktrees': ticketWorktrees,
   };
 }

@@ -30,9 +30,9 @@ fn a_schema_39_store_keeps_its_projects_and_its_links_start_empty() {
 
     let id = atlas.id;
     let link = "https://claude.ai/artifact/abc";
-    let version = store.write(move |tx| crate::company::update_project(tx, id, None, Some(Some(link)), None)).unwrap();
+    let version = store.write(move |tx| crate::company::update_project(tx, id, None, Some(Some(link)), None, None)).unwrap();
     assert_eq!(version, 4, "one version for the change");
     assert_eq!(store.read(move |c| crate::company::project_styleguide(c, id)).unwrap().as_deref(), Some(link));
-    store.write(move |tx| crate::company::update_project(tx, id, None, Some(None), None).map(drop)).unwrap();
+    store.write(move |tx| crate::company::update_project(tx, id, None, Some(None), None, None).map(drop)).unwrap();
     assert_eq!(store.read(move |c| crate::company::project_styleguide(c, id)).unwrap(), None, "cleared");
 }

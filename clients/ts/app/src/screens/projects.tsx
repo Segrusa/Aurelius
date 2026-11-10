@@ -30,6 +30,7 @@ import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { BoardScreen } from "./board";
+import { BUDGET_FEATURE, budgetOf, DEFAULT_BUDGET } from "./board-logic";
 import { WORKTREES_FEATURE } from "./changes-logic";
 import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { canPin, pinnedFirst, togglePin } from "./employee-logic";
@@ -877,6 +878,56 @@ function WorktreesRow({ project }: { project: ProjectSummary }) {
   );
 }
 
+/** How much employees may set in motion on a ticket between two actions of a board member. */
+function BudgetRow({ project }: { project: ProjectSummary }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const saved = project.ticket_budget == null ? "" : String(project.ticket_budget);
+  const [draft, setDraft] = useState(saved);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => setDraft(saved), [saved]);
+  const dirty = draft.trim() !== saved;
+  const save = async () => {
+    const wanted = budgetOf(draft);
+    if (wanted === null) return setProblem("A whole number from 1 to 1000, or 0 for no limit.");
+    setProblem(null);
+    try {
+      await connection.write("project.update", { project_id: project.id, ticket_budget: wanted }, { retry: false });
+      await client.invalidateQueries({ queryKey: ["projects"] });
+      await client.invalidateQueries({ queryKey: ["tickets"] });
+    } catch (e) {
+      setProblem(failureOf(e));
+    }
+  };
+  return (
+    <>
+      <Setting name="Budget per ticket">
+        <span {...stylex.props(styles.settingValue)}>
+          <TextInput
+            label="Budget per ticket"
+            isLabelHidden
+            size="sm"
+            width="100%"
+            placeholder={`${DEFAULT_BUDGET} (the default)`}
+            value={draft}
+            onChange={setDraft}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && dirty) void save();
+            }}
+          />
+        </span>
+        {dirty ? <Button size="sm" variant="primary" label="Save" onClick={() => void save()} /> : null}
+      </Setting>
+      <Setting name="">
+        <span {...stylex.props(styles.dim)}>
+          {problem ??
+            "How often employees may be woken on one ticket (a run, a handoff, a test round) before a board member has to write in it again. 0 is no limit."}
+        </span>
+      </Setting>
+    </>
+  );
+}
+
 function WorkspaceSettings({
   project,
   dispatcher,
@@ -894,6 +945,7 @@ function WorkspaceSettings({
     <Panel title="WORKSPACE SETTINGS" right={<Button size="sm" label="Edit…" onClick={onEdit} />}>
       {features.includes(DESIGN_FEATURE) ? <StyleguideRow project={project} /> : null}
       {features.includes(WORKTREES_FEATURE) ? <WorktreesRow project={project} /> : null}
+      {features.includes(BUDGET_FEATURE) ? <BudgetRow project={project} /> : null}
       <Setting name="Folder">
         <code title={project.folder ?? undefined} {...stylex.props(styles.settingValue, styles.mono)}>
           {project.folder ?? "No folder"}

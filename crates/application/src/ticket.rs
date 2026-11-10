@@ -800,7 +800,11 @@ impl CommandService {
         let dispatcher = cmd.dispatcher.map(|d| d.employee_id);
         let styleguide = cmd.styleguide_url.as_deref().map(|u| ticket::valid_artifact_url("styleguide_url", u)).transpose().map_err(domain_error)?;
         let worktrees = cmd.ticket_worktrees;
-        if dispatcher.is_none() && styleguide.is_none() && worktrees.is_none() {
+        let budget = cmd.ticket_budget;
+        if budget.is_some_and(|b| b > ticket::TICKET_BUDGET_MAX) {
+            return Err(domain_error(DomainError::OutOfRange { field: "ticket_budget".into(), detail: format!("at most {}, or 0 for no limit", ticket::TICKET_BUDGET_MAX) }));
+        }
+        if dispatcher.is_none() && styleguide.is_none() && worktrees.is_none() && budget.is_none() {
             return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
         }
         let expected = envelope.expected_version;
@@ -818,7 +822,7 @@ impl CommandService {
             if let Some(employee) = dispatcher.flatten() {
                 check!(check_employee(tx, employee)?);
             }
-            let version = company_store::update_project(tx, cmd.project_id, dispatcher, styleguide.as_ref().map(|s| s.as_deref()), worktrees)?;
+            let version = company_store::update_project(tx, cmd.project_id, dispatcher, styleguide.as_ref().map(|s| s.as_deref()), worktrees, budget)?;
             let mut e = Events::new(&base, "project", cmd.project_id.to_string(), Some(cmd.project_id), version - 1);
             let mut payload = json!({ "by": by });
             if let Some(dispatcher) = dispatcher {
@@ -829,6 +833,9 @@ impl CommandService {
             }
             if let Some(on) = worktrees {
                 payload["ticket_worktrees"] = json!(on);
+            }
+            if let Some(budget) = budget {
+                payload["ticket_budget"] = json!(budget);
             }
             e.push(tx, EventKind::ProjectUpdated, payload)?;
             Ok(Ok((CommandResult::ProjectUpdated { project_id: cmd.project_id, version }, e.notices)))

@@ -737,7 +737,7 @@ mod tests {
     fn setting_a_design_link_takes_the_right_to_approve() {
         use aurelius_domain::company::UpdateProject;
         use aurelius_domain::ticket::UpdateTicket;
-        let project = |styleguide_url: Option<&str>| exec(Command::UpdateProject(UpdateProject { project_id: aurelius_domain::ProjectId::new(), dispatcher: None, ticket_worktrees: None, styleguide_url: styleguide_url.map(str::to_owned) }));
+        let project = |styleguide_url: Option<&str>| exec(Command::UpdateProject(UpdateProject { project_id: aurelius_domain::ProjectId::new(), dispatcher: None, ticket_budget: None, ticket_worktrees: None, styleguide_url: styleguide_url.map(str::to_owned) }));
         let ticket = |design_url: Option<&str>| exec(Command::UpdateTicket(UpdateTicket { ticket_id: aurelius_domain::TicketId::new(), title: None, description: None, priority: None, labels: None, deadline_ms: None, clear_deadline: false, run: None, add_files: None, design_url: design_url.map(str::to_owned), confirm_secret: false }));
         let link = Some("https://claude.ai/artifact/abc");
         assert_eq!(required(&project(link)), cap(Capability::Approve));

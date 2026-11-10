@@ -28,7 +28,7 @@ pub fn list_projects(
         "SELECT p.id, p.name, b.storage_key, p.status, p.version, p.created_at_ms,
                 (SELECT COUNT(DISTINCT t.employee_id) FROM tasks t WHERE t.project_id = p.id AND t.employee_id IS NOT NULL
                    AND t.status NOT IN ('succeeded','failed','cancelled')),
-                p.folder, p.dispatcher_employee_id, p.styleguide_url, p.ticket_worktrees
+                p.folder, p.dispatcher_employee_id, p.styleguide_url, p.ticket_worktrees, p.ticket_budget
          FROM projects p LEFT JOIN blobs b ON b.id = p.description_blob_id
          WHERE p.status <> 'archived'
          ORDER BY p.created_at_ms, p.id",
@@ -46,11 +46,12 @@ pub fn list_projects(
             row.get::<_, Option<String>>(8)?,
             row.get::<_, Option<String>>(9)?,
             row.get::<_, bool>(10)?,
+            row.get::<_, Option<i64>>(11)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, name, key, status, version, created_at_ms, employees_active, folder, dispatcher, styleguide_url, ticket_worktrees) = row?;
+        let (id, name, key, status, version, created_at_ms, employees_active, folder, dispatcher, styleguide_url, ticket_worktrees, ticket_budget) = row?;
         out.push(ProjectSummary {
             id,
             name,
@@ -63,6 +64,7 @@ pub fn list_projects(
             dispatcher_employee_id: dispatcher.and_then(|d| aurelius_domain::EmployeeId::parse(&d).ok()),
             styleguide_url,
             ticket_worktrees,
+            ticket_budget: ticket_budget.map(|b| b as u32),
         });
     }
     Ok(out)

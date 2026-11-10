@@ -4075,6 +4075,11 @@ export interface ProjectSummary {
    */
   styleguide_url?: string | null;
   /**
+   * The budget of this project's tickets (feature `ticket_budget`), when it set one:
+   * 0 is no limit. Left out: the default (`ticket::TICKET_BUDGET_DEFAULT`).
+   */
+  ticket_budget?: number | null;
+  /**
    * Each ticket of this project works in a git worktree and on a branch of its own
    * (feature `ticket_worktrees`). Left out when off and by older servers.
    */
@@ -5769,7 +5774,7 @@ export interface ThreadWaitingSnapshot {
 export interface TicketAttention {
   /**
    * One of `TicketAttentionKind`'s names (`login`, `review`, `plan_review`,
-   * `failed`, `approval`, `input`, `choose_owner`, `stalled`). Text, not an enum,
+   * `failed`, `approval`, `input`, `choose_owner`, `stalled`, `budget`). Text, not an enum,
    * so a new kind never breaks an older client: it shows the ticket as needing someone.
    */
   kind: string;
@@ -5778,6 +5783,22 @@ export interface TicketAttention {
    * ticket's active Responsible. None: every board member. Anyone may still decide.
    */
   user_id?: string | null;
+}
+
+/**
+ * What a ticket has spent of its budget (`TicketView::budget`, feature `ticket_budget`).
+ */
+export interface TicketBudget {
+  /**
+   * How many it may have. Reached: employees can hand nothing more on and the
+   * ticket does not go on by itself; it waits for a board member (`attention: budget`).
+   */
+  limit: number;
+  /**
+   * Wakes of employees on this ticket since a board member last acted on it: a
+   * task's run, a handoff, a mention, a planned message, a test round.
+   */
+  spent: number;
 }
 
 /**
@@ -5871,6 +5892,11 @@ export interface TicketView {
    * none (not started, no repository, switched off for the project) and by older servers.
    */
   branch?: string | null;
+  /**
+   * What the ticket has spent of its budget (feature `ticket_budget`). Left out for a
+   * ticket that is not open, in a project without a limit, and by older servers.
+   */
+  budget?: TicketBudget | null;
   /**
    * What still works on the ticket (feature `ticket_state`): `ticket.accept`
    * refuses while this is not empty. Left out when empty and by older servers.
@@ -6215,6 +6241,12 @@ export interface UpdateProject {
    * (`ticket::valid_artifact_url`, feature `design_links`); an empty text clears it.
    */
   styleguide_url?: string | null;
+  /**
+   * How many wakes of employees a ticket of this project may have since a board
+   * member last acted on it (feature `ticket_budget`): 1 to `TICKET_BUDGET_MAX`, or
+   * 0 for no limit.
+   */
+  ticket_budget?: number | null;
   /**
    * Whether each ticket of this project works in a git worktree and on a branch of
    * its own (feature `ticket_worktrees`); off: in the project's folder, as before.

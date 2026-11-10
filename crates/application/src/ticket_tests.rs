@@ -144,7 +144,7 @@ fn every_ticket_board_and_company_write_needs_a_board_member() {
         Command::ArchiveTicket(ticket::ArchiveTicket { ticket_id: ticket }),
         Command::UpdateBoardColumns(ticket::UpdateBoardColumns { columns: vec![] }),
         Command::UpdateCompany(UpdateCompany { name: Some("Acme".into()), dispatcher: None, tester: None }),
-        Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: None, project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: None }) }),
+        Command::UpdateProject(UpdateProject { ticket_budget: None, ticket_worktrees: None, styleguide_url: None, project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: None }) }),
         Command::SetTicketResponsible(ticket::SetTicketResponsible { ticket_id: ticket, responsible_user_id: None }),
         Command::FollowTicket(ticket::FollowTicket { ticket_id: ticket, on: true }),
         Command::EditMessage(aurelius_domain::group_chat::EditMessage { message_id: aurelius_domain::MessageId::new(), text: "x".into(), confirm_secret: false }),
@@ -334,8 +334,8 @@ fn a_ticket_keeps_its_design_link_until_it_is_cleared() {
 #[test]
 fn a_project_takes_a_styleguide_link_without_changing_its_dispatcher() {
     let s = setup();
-    let update = |url: &str| Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: Some(url.into()), project_id: s.project, dispatcher: None });
-    assert!(run(&s, Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: None, project_id: s.project, dispatcher: None })).is_err(), "nothing to change");
+    let update = |url: &str| Command::UpdateProject(UpdateProject { ticket_budget: None, ticket_worktrees: None, styleguide_url: Some(url.into()), project_id: s.project, dispatcher: None });
+    assert!(run(&s, Command::UpdateProject(UpdateProject { ticket_budget: None, ticket_worktrees: None, styleguide_url: None, project_id: s.project, dispatcher: None })).is_err(), "nothing to change");
     assert_eq!(run(&s, update("https://example.com")).unwrap_err().code, ErrorCode::Validation);
     run(&s, update("https://claude.ai/artifact/abc")).unwrap();
     let styleguide = |s: &Setup| s.service.store().read(|c| aurelius_storage::company::project_styleguide(c, s.project)).unwrap();
@@ -413,7 +413,7 @@ fn the_dispatcher_is_set_on_the_company_and_per_project() {
 
     // project.update sets a dispatcher too, so it needs a board member as well (m3).
     let project = s.project;
-    let update = |who: Option<EmployeeId>| Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: None, project_id: project, dispatcher: Some(SetDispatcher { employee_id: who }) });
+    let update = |who: Option<EmployeeId>| Command::UpdateProject(UpdateProject { ticket_budget: None, ticket_worktrees: None, styleguide_url: None, project_id: project, dispatcher: Some(SetDispatcher { employee_id: who }) });
     assert_eq!(run_as(&s, None, update(Some(forge)), None).unwrap_err().code, ErrorCode::BoardMemberRequired);
     let done = run(&s, update(Some(forge))).unwrap();
     assert!(matches!(done, CommandResult::ProjectUpdated { version: 2, .. }), "{done:?}");

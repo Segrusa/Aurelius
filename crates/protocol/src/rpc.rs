@@ -310,6 +310,13 @@ pub mod feature {
     /// `ticket.land { how: merge | push }` and `TicketView::landed` / `landed_url`. A
     /// client offers it next to accepting a ticket that has a branch.
     pub const TICKET_LANDING: &str = "ticket_landing";
+    /// A budget per ticket (additive): `TicketView::budget` (what is spent and the
+    /// limit), the attention kind `budget`, and `ProjectSummary::ticket_budget` with
+    /// `project.update { ticket_budget }`. Once a ticket's wakes of employees since a
+    /// board member last acted reach the limit, employees can hand nothing more on
+    /// and the ticket does not go on by itself; a board member's message in its
+    /// discussion lets it go on and counts from zero again.
+    pub const TICKET_BUDGET: &str = "ticket_budget";
     /// A channel per ticket (protocol 5, additive; AUR-CHAT-001): the ticket's
     /// discussion is its channel, `#<number>-<slug>` (`ticket_channel_name`).
     /// `channel.list` names ticket channels only to connections whose
@@ -465,6 +472,7 @@ pub const FEATURES: &[&str] = &[
     feature::PROJECT_GIT,
     feature::TICKET_WORKTREES,
     feature::TICKET_LANDING,
+    feature::TICKET_BUDGET,
 ];
 
 /// Daemon → client.

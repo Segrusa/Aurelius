@@ -41,6 +41,7 @@ import { useWorkspace } from "../workspace";
 import {
   activityDetail,
   activityText,
+  budgetLine,
   deadlineInput,
   decideToo,
   doneCheck,
@@ -1388,6 +1389,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
                           ) : null}
                         </Row>
                       ) : null}
+                      {t.budget ? <Row name="Budget">{budgetLine(t.budget)}</Row> : null}
                       <Row name="Runs on">
                         {t.login_user === need.me ? "Your Claude login" : `${t.login_username}'s Claude login`}
                         {payerOffered(t, need.me) ? (

@@ -203,7 +203,7 @@ async fn a_projects_own_dispatcher_goes_first() {
     let lead = employee(&b.client, "Lead", "Tech Lead").await;
     employee(&b.client, "Builder", "Backend Developer").await;
     company_dispatcher(&b.client, Some(orion)).await;
-    b.client.ticket_command(Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: None, project_id: b.project, dispatcher: Some(SetDispatcher { employee_id: Some(lead) }) }), None).await.unwrap();
+    b.client.ticket_command(Command::UpdateProject(UpdateProject { ticket_budget: None, ticket_worktrees: None, styleguide_url: None, project_id: b.project, dispatcher: Some(SetDispatcher { employee_id: Some(lead) }) }), None).await.unwrap();
     let id = started(&b.client, b.project, "Search").await;
     until(&b.client, id, |d| d.ticket.owner_employee_id.is_some()).await;
     assert_eq!(events(&b.root, id, "ticket.dispatched")[0]["by"]["employee_id"], serde_json::json!(lead));
@@ -275,7 +275,7 @@ async fn a_paused_or_archived_project_dispatcher_leaves_the_choice_to_the_board(
     let lead = employee(&b.client, "Lead", "Tech Lead").await;
     employee(&b.client, "Builder", "Backend Developer").await;
     company_dispatcher(&b.client, Some(orion)).await;
-    b.client.ticket_command(Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: None, project_id: b.project, dispatcher: Some(SetDispatcher { employee_id: Some(lead) }) }), None).await.unwrap();
+    b.client.ticket_command(Command::UpdateProject(UpdateProject { ticket_budget: None, ticket_worktrees: None, styleguide_url: None, project_id: b.project, dispatcher: Some(SetDispatcher { employee_id: Some(lead) }) }), None).await.unwrap();
 
     for (status, title) in [(LifecycleStatus::Paused, "Paused dispatcher"), (LifecycleStatus::Archived, "Archived dispatcher")] {
         b.client.execute(aurelius_client::envelope(Command::SetEmployeeStatus(SetEmployeeStatus { employee_id: lead, status }), None)).await.unwrap();

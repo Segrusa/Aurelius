@@ -249,7 +249,7 @@ fn the_dispatcher_is_the_projects_else_the_companys_while_active() {
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), None, "B5: none yet");
     f.store.write(move |tx| company::update(tx, Some("Segrusa"), Some(Some(orion)), None)).unwrap();
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), Some(orion));
-    let version = f.store.write(move |tx| company::update_project(tx, atlas, Some(Some(forge)), None, None)).unwrap();
+    let version = f.store.write(move |tx| company::update_project(tx, atlas, Some(Some(forge)), None, None, None)).unwrap();
     assert_eq!(version, 2);
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), Some(forge));
     f.store.write(move |tx| Ok(tx.execute("UPDATE employees SET status = 'archived' WHERE id = ?1", [forge.to_string()])?)).unwrap();
@@ -258,7 +258,7 @@ fn the_dispatcher_is_the_projects_else_the_companys_while_active() {
     assert_eq!((company.name.as_str(), company.version), ("Segrusa", 2));
     let projects = f.store.read(|c| crate::queries::list_projects(c, &read_blob)).unwrap();
     assert_eq!(projects.iter().find(|p| p.id == atlas).unwrap().dispatcher_employee_id, Some(forge));
-    f.store.write(move |tx| company::update_project(tx, atlas, Some(None), None, None).map(drop)).unwrap();
+    f.store.write(move |tx| company::update_project(tx, atlas, Some(None), None, None, None).map(drop)).unwrap();
     assert_eq!(f.store.read(|c| company::dispatcher_for(c, atlas)).unwrap(), Some(orion), "without its own, the company's");
 }
 

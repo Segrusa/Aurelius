@@ -98,7 +98,7 @@ pub(crate) fn link_run(tx: &Tx<'_>, run: RunId, conversation: ConversationId) ->
     }
     crate::run::inbox::link_task(tx, run, task)?;
     let mut notices = Vec::new();
-    if row.status == TaskStatus::Waiting && matches!(store::waiting_cause(tx, task)?.as_deref(), Some("stopped" | "not_started" | "escalated_to_boss" | WAITING_QUESTION)) {
+    if row.status == TaskStatus::Waiting && matches!(store::waiting_cause(tx, task)?.as_deref(), Some("stopped" | "not_started" | "escalated_to_boss" | "budget" | WAITING_QUESTION)) {
         notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
         notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
         notices.push(task_event(tx, task, row.project_id, "task.resumed", serde_json::json!({ "reason": "conversation" }))?);
@@ -588,7 +588,7 @@ fn ticket_busy(tx: &Tx<'_>, task: TaskId, except: Option<RunId>) -> Result<bool,
 
 /// A task waiting for its colleagues goes on once none of them is still at work.
 pub(crate) fn continue_when_done(tx: &Tx<'_>, st: &Store, task: TaskId) -> Result<Vec<EventNotice>, StorageError> {
-    continue_with(tx, st, task, COLLEAGUES_DONE, "colleagues_done")
+    continue_with(tx, st, task, COLLEAGUES_DONE, "colleagues_done", None)
 }
 
 /// A run, handoff or message of `ticket` ended or was cancelled (`except`: that run): when the
@@ -605,7 +605,7 @@ pub(crate) fn ticket_settled(tx: &Tx<'_>, st: &Store, ticket: TicketId, except: 
         return Ok(vec![]);
     }
     let (text, reason) = if broken { (HANDOFF_BROKEN, "handoff_broken") } else { (HANDOFFS_DONE, "handoff_done") };
-    continue_with(tx, st, root, text, reason)
+    continue_with(tx, st, root, text, reason, except)
 }
 
 /// `ticket_settled` for the run that ended: whatever ticket its mailbox item was for.
@@ -617,7 +617,9 @@ pub(crate) fn run_settled(tx: &Tx<'_>, st: &Store, run: RunId, broken: bool) -> 
 }
 
 /// The owner of a waiting task goes on, told `text`, when nothing of it is still open.
-fn continue_with(tx: &Tx<'_>, st: &Store, task: TaskId, text: &str, reason: &str) -> Result<Vec<EventNotice>, StorageError> {
+/// `except`: the run whose end asks this (`ticket_settled`): it is still open while it
+/// ends, and must not count as work the owner waits for, or the owner would never go on.
+fn continue_with(tx: &Tx<'_>, st: &Store, task: TaskId, text: &str, reason: &str, except: Option<RunId>) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
     if row.status != TaskStatus::Waiting || open_parts(tx, task)? || live_run(tx, task, None)? {
         return Ok(vec![]);
@@ -626,8 +628,13 @@ fn continue_with(tx: &Tx<'_>, st: &Store, task: TaskId, text: &str, reason: &str
     // below it waits for its own parts alone: asked here, the ticket always looks busy,
     // because the run of the part that just ended is itself still open on it, and the
     // task would wait for good.
-    if crate::task::ticket_line::is_root(tx, task)? && ticket_busy(tx, task, None)? {
+    if crate::task::ticket_line::is_root(tx, task)? && ticket_busy(tx, task, except)? {
         return Ok(vec![]);
+    }
+
+    // The owner would go on by itself: only within the ticket's budget.
+    if let Some(held) = crate::task::ticket_line::hold_for_budget(tx, task, "The colleagues are done and the owner would go on, but does not by itself.")? {
+        return Ok(held);
     }
     let Some((conversation, _)) = store::task_conversation(tx, task)? else { return Ok(vec![]) };
     // An employee that works on one task at a time goes on with this one when it is its turn
@@ -789,6 +796,19 @@ impl CommandService {
     /// (ok, text for the model, notices).
     pub fn employee_action(&self, run: RunId, action: EmployeeAction) -> Result<(bool, String, Vec<EventNotice>), AppError> {
         let st = self.store.clone();
+        // What sets more work in motion on a ticket is refused once its budget is used up (D4).
+        if matches!(action, EmployeeAction::HandOff { .. } | EmployeeAction::Delegate { .. } | EmployeeAction::ScheduleMessage { .. } | EmployeeAction::MessageTask { .. }) {
+            let refusal = self
+                .store
+                .read(|c| match aurelius_storage::tickets::of_run(c, run)? {
+                    Some(ticket) => crate::task::ticket_line::budget_refusal(c, ticket),
+                    None => Ok(None),
+                })
+                .map_err(storage_error)?;
+            if let Some(text) = refusal {
+                return Ok((false, text, vec![]));
+            }
+        }
         if let EmployeeAction::ListConversations { .. } | EmployeeAction::ReadConversation { .. } = &action {
             return self
                 .store

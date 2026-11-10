@@ -195,6 +195,36 @@ fn worked_by(tx: &Tx<'_>, task: TaskId) -> Result<Option<Actor>, StorageError> {
     Ok(task_store::status_and_employee(tx, task)?.and_then(|(_, e)| e).map(|employee_id| Actor::Employee { employee_id }))
 }
 
+/// What an employee is told when it tries to set more in motion on a ticket whose budget is used up.
+pub(crate) fn budget_refusal(conn: &rusqlite::Connection, ticket: TicketId) -> Result<Option<String>, StorageError> {
+    Ok(store::budget(conn, ticket)?.filter(|b| b.used_up()).map(|b| {
+        format!(
+            "This ticket's budget is used up: {} wakes of employees since a board member last wrote, of {}. Nothing more can be handed on now. \
+             Finish what you can do yourself, say in the discussion what is done and what is left, and stop: the work goes on when a board member writes there.",
+            b.spent, b.limit
+        )
+    }))
+}
+
+/// The main task `task` would go on by itself (its colleagues are done, its tests failed) while
+/// its ticket's budget is used up: it waits for a board member instead, and the discussion says
+/// why. A message of a board member there makes it go on, and counts from zero again. None:
+/// there is budget left (or `task` is no main task), so it goes on.
+pub(crate) fn hold_for_budget(tx: &Tx<'_>, task: TaskId, next: &str) -> Result<Option<Vec<EventNotice>>, StorageError> {
+    let Some((ticket, project, _)) = root_of(tx, task)? else { return Ok(None) };
+    let Some(budget) = store::budget(tx, ticket)?.filter(|b| b.used_up()) else { return Ok(None) };
+    let mut notices = crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?.into_vec();
+    notices.push(task_event(tx, task, project, "task.waiting", json!({ "reason": "budget", "spent": budget.spent, "limit": budget.limit }))?);
+    let mut line = SystemLine::new(SystemLineKind::Reported);
+    line.task_id = Some(task);
+    let text = format!(
+        "This ticket's budget is used up: {} wakes of employees since a board member last wrote, of {}. {next} Write here to let the work go on, or cancel the ticket.",
+        budget.spent, budget.limit
+    );
+    notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, &text)?);
+    Ok(Some(notices))
+}
+
 /// Put every card that is elsewhere back where its main task says (`column_of`), with
 /// a line in its discussion. For the start of the server: a write always leaves a card
 /// where it belongs, so one that is not was cut off halfway. Done is closed and only
@@ -419,6 +449,13 @@ pub(crate) fn resume_as(tx: &Tx<'_>, st: &Store, task: TaskId, from: &str, text:
     let Some((conversation, _)) = task_store::task_conversation(tx, task)? else { return Ok(vec![]) };
     let (message, posted) = thread::post_returning(tx, st, conversation, task, Speaker::Update { kind: "message", from }, text)?;
     let mut notices = vec![posted];
+    // The tester sent it back by itself: within the ticket's budget only. A board member's own send back always goes on.
+    if reason == "tests_failed" {
+        if let Some(held) = hold_for_budget(tx, task, "The tests failed and the owner has the failures, but does not start on them by itself.")? {
+            notices.extend(held);
+            return Ok(notices);
+        }
+    }
     notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Queued, None)?);
     notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Running, None)?);
     notices.push(task_event(tx, task, row.project_id, "task.resumed", json!({ "reason": reason }))?);

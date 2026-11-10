@@ -177,7 +177,7 @@ async fn a_ticket_works_on_its_own_branch_in_its_own_worktree_and_leaves_no_work
     let plain = dir.path().join("plain");
     repository(&plain);
     let hermes = project(&client, "Hermes", &plain).await;
-    let off = UpdateProject { project_id: hermes, dispatcher: None, styleguide_url: None, ticket_worktrees: Some(false) };
+    let off = UpdateProject { project_id: hermes, dispatcher: None, styleguide_url: None, ticket_budget: None, ticket_worktrees: Some(false) };
     client.execute(aurelius_client::envelope(Command::UpdateProject(off), None)).await.unwrap();
     let old_way = done_ticket(&client, hermes, "As before", forge).await;
     assert_eq!((old_way.ticket.branch, worktree_of(dir.path(), old_way.ticket.id)), (None, None));

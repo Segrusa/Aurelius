@@ -199,6 +199,10 @@ pub struct TicketView {
     /// Where the pull request of a pushed branch is opened, when the remote is a known host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub landed_url: Option<String>,
+    /// What the ticket has spent of its budget (feature `ticket_budget`). Left out for a
+    /// ticket that is not open, in a project without a limit, and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<TicketBudget>,
     /// What the ticket waits for from a board member, and from whom (feature
     /// `ticket_state`): the server's one answer, so every client shows the same
     /// "Needs you". None: nothing. Left out then and by older servers.
@@ -210,11 +214,34 @@ pub struct TicketView {
     pub busy: Vec<String>,
 }
 
+/// How many wakes of employees a ticket may have since a board member last acted on
+/// it, unless its project says otherwise (`ProjectSummary::ticket_budget`).
+pub const TICKET_BUDGET_DEFAULT: u32 = 25;
+/// The most a project can set.
+pub const TICKET_BUDGET_MAX: u32 = 1_000;
+
+/// What a ticket has spent of its budget (`TicketView::budget`, feature `ticket_budget`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TicketBudget {
+    /// Wakes of employees on this ticket since a board member last acted on it: a
+    /// task's run, a handoff, a mention, a planned message, a test round.
+    pub spent: u32,
+    /// How many it may have. Reached: employees can hand nothing more on and the
+    /// ticket does not go on by itself; it waits for a board member (`attention: budget`).
+    pub limit: u32,
+}
+
+impl TicketBudget {
+    pub fn used_up(&self) -> bool {
+        self.spent >= self.limit
+    }
+}
+
 /// What a ticket waits for from a board member (`TicketView::attention`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TicketAttention {
     /// One of `TicketAttentionKind`'s names (`login`, `review`, `plan_review`,
-    /// `failed`, `approval`, `input`, `choose_owner`, `stalled`). Text, not an enum,
+    /// `failed`, `approval`, `input`, `choose_owner`, `stalled`, `budget`). Text, not an enum,
     /// so a new kind never breaks an older client: it shows the ticket as needing someone.
     pub kind: String,
     /// Whom it waits for: the board member whose Claude login is missing, else the
@@ -243,6 +270,8 @@ pub enum TicketAttentionKind {
     /// In Doing or Testing while nothing works on it and it waits for nothing a
     /// board member could give: it would stay there for good. Start again, or cancel.
     Stalled,
+    /// Its budget is used up (`TicketBudget`): it goes on when a board member writes in its discussion.
+    Budget,
 }
 
 impl TicketAttentionKind {
@@ -256,6 +285,7 @@ impl TicketAttentionKind {
             Self::Input => "input",
             Self::ChooseOwner => "choose_owner",
             Self::Stalled => "stalled",
+            Self::Budget => "budget",
         }
     }
 }
@@ -309,6 +339,8 @@ pub struct TicketFacts {
     /// The test task's status while it has not ended, and why it waits.
     pub tests: Option<crate::task::TaskStatus>,
     pub tests_waiting: Option<String>,
+    /// The main task waits because the ticket's budget is used up.
+    pub budget_hold: bool,
 }
 
 /// The column a ticket's card belongs in, from its main task: the one table the
@@ -394,6 +426,7 @@ pub fn ticket_work(f: &TicketFacts) -> TicketWork {
         ColumnKind::PlanReview => Some(TicketAttentionKind::PlanReview),
         ColumnKind::Todo | ColumnKind::Doing if f.root == Some(S::Failed) => Some(TicketAttentionKind::Failed),
         _ if f.approvals > 0 => Some(TicketAttentionKind::Approval),
+        ColumnKind::Doing if f.root == Some(S::Waiting) && input(&f.root_waiting) && f.budget_hold => Some(TicketAttentionKind::Budget),
         ColumnKind::Doing if f.root == Some(S::Waiting) && input(&f.root_waiting) => Some(TicketAttentionKind::Input),
         ColumnKind::Testing if f.tests == Some(S::Waiting) && input(&f.tests_waiting) => Some(TicketAttentionKind::Input),
         ColumnKind::Todo if !f.has_owner && !f.choosing => Some(TicketAttentionKind::ChooseOwner),
@@ -1234,6 +1267,14 @@ mod work_tests {
         assert_eq!(stuck.misplaced(), Some((ColumnKind::Testing, ColumnKind::Review)));
         assert_eq!(facts(ColumnKind::Doing, Some(S::Queued)).misplaced(), None);
         assert_eq!(facts(ColumnKind::Review, Some(S::Review)).misplaced(), None);
+    }
+
+    #[test]
+    fn a_ticket_held_for_its_budget_says_so_and_not_that_it_asked_something() {
+        let held = TicketFacts { root_waiting: Some("input".into()), budget_hold: true, ..facts(ColumnKind::Doing, Some(S::Waiting)) };
+        assert_eq!(ticket_work(&held).attention, Some(TicketAttentionKind::Budget));
+        assert_eq!(ticket_work(&TicketFacts { budget_hold: false, ..held }).attention, Some(TicketAttentionKind::Input));
+        assert!(TicketBudget { spent: 25, limit: 25 }.used_up() && !TicketBudget { spent: 24, limit: 25 }.used_up());
     }
 
     #[test]

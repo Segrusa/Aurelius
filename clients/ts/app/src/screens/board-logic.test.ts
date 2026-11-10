@@ -4,6 +4,8 @@ import {
   activityDetail,
   activityText,
   beforeFor,
+  budgetLine,
+  budgetOf,
   columnShown,
   columnsProblem,
   deadlineInput,
@@ -21,6 +23,7 @@ import {
   loginWait,
   movedCard,
   needsFromServer,
+  needsLine,
   needsMe,
   needsMeFromServer,
   needsYou,
@@ -385,6 +388,19 @@ describe("what the server says a ticket needs", () => {
   it("reads a kind it does not know as a ticket that needs someone", () => {
     const newer = ticket({ column: "doing", attention: { kind: "unknown" } });
     expect(needsFromServer(newer, "u1")).toBe("stalled");
+  });
+});
+
+describe("a ticket's budget", () => {
+  it("is a need of its own and says what is left", () => {
+    const held = ticket({ column: "doing", attention: { kind: "budget" } });
+    expect(needsFromServer(held, "u1")).toBe("budget");
+    expect(needsLine("budget", true)).toBe("Needs you · budget used up");
+    expect(budgetLine({ spent: 12, limit: 25 })).toBe("12 of 25 used since a board member last wrote");
+    expect(budgetLine({ spent: 25, limit: 25 })).toContain("Used up: 25 of 25");
+    expect([budgetOf("40"), budgetOf(" 0 "), budgetOf("1001"), budgetOf("-3"), budgetOf("many"), budgetOf("")]).toEqual(
+      [40, 0, null, null, null, null],
+    );
   });
 });
 

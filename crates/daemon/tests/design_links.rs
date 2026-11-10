@@ -33,7 +33,7 @@ fn set_design(ticket_id: TicketId, design_url: &str) -> Command {
 }
 
 fn set_guide(project_id: ProjectId, styleguide_url: &str) -> Command {
-    Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: Some(styleguide_url.into()), project_id, dispatcher: None })
+    Command::UpdateProject(UpdateProject { ticket_budget: None, ticket_worktrees: None, styleguide_url: Some(styleguide_url.into()), project_id, dispatcher: None })
 }
 
 async fn project(client: &Client, name: &str) -> ProjectId {
