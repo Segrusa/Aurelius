@@ -30,7 +30,7 @@ use crate::task::task_threads::{self as thread, Speaker};
 use crate::task::tasks::task_event;
 use aurelius_domain::{
     ActorKind, EmployeeId, EventKind, EventNotice, ProjectId, RunId, TaskId, TicketId, UserId,
-    task::{TaskStatus, WAITING_PLAN_REVIEW},
+    task::TaskStatus,
     ticket::{Actor, ColumnKind},
     views::{SystemLine, SystemLineKind, system_action},
 };

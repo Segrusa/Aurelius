@@ -5567,77 +5567,18 @@ export interface ThreadWaitingSnapshot {
  * What a ticket waits for from a board member (`TicketView::attention`).
  */
 export interface TicketAttention {
-  kind: TicketAttentionKind;
+  /**
+   * One of `TicketAttentionKind`'s names (`login`, `review`, `plan_review`,
+   * `failed`, `approval`, `input`, `choose_owner`, `stalled`). Text, not an enum,
+   * so a new kind never breaks an older client: it shows the ticket as needing someone.
+   */
+  kind: string;
   /**
    * Whom it waits for: the board member whose Claude login is missing, else the
    * ticket's active Responsible. None: every board member. Anyone may still decide.
    */
   user_id?: string | null;
 }
-
-/**
- * The kinds of `TicketAttention`. A newer server's kind reads as `unknown`: the
- * ticket needs someone, and the app cannot say what for.
- */
-export type TicketAttentionKind =
-  /**
-   * A run of the ticket asks permission for an action.
-   */
-  | "approval"
-  /**
-   * In Todo without an owner, and no dispatcher is choosing one.
-   */
-  | "choose_owner"
-  /**
-   * The main task failed: Start begins a new attempt.
-   */
-  | "failed"
-  /**
-   * The main task (or the test task) stopped on a question.
-   */
-  | "input"
-  /**
-   * The ticket's login user must connect their Claude login (`TicketNeed::Login`).
-   */
-  | "login"
-  /**
-   * The plan waits for approve or revise.
-   */
-  | "plan_review"
-  /**
-   * The report waits for accept or send back.
-   */
-  | "review"
-  /**
-   * In Doing or Testing while nothing works on it and it waits for nothing a
-   * board member could give: it would stay there for good. Start again, or cancel.
-   */
-  | "stalled"
-  | "unknown"
-;
-
-/**
- * What still works on a ticket (`TicketView::busy`).
- */
-export type TicketBusy =
-  /**
-   * A handoff or a message of the ticket waits in a colleague's mailbox, or a run that took one goes.
-   */
-  | "colleagues"
-  /**
-   * Tasks given to colleagues below the ticket have not ended.
-   */
-  | "linked_tasks"
-  /**
-   * A run of the main task goes, or waits its turn.
-   */
-  | "main_task"
-  /**
-   * The tester's test task has not ended.
-   */
-  | "tests"
-  | "unknown"
-;
 
 /**
  * `ticket.get`: the ticket, its main task and every task linked to it.
@@ -5700,7 +5641,7 @@ export interface TicketView {
    * What still works on the ticket (feature `ticket_state`): `ticket.accept`
    * refuses while this is not empty. Left out when empty and by older servers.
    */
-  busy?: TicketBusy[];
+  busy?: string[];
   column: ColumnKind;
   column_id: string;
   /**

@@ -194,7 +194,7 @@ pub struct TicketView {
 }
 
 /// What a ticket waits for from a board member (`TicketView::attention`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TicketAttention {
     /// One of `TicketAttentionKind`'s names (`login`, `review`, `plan_review`,
     /// `failed`, `approval`, `input`, `choose_owner`, `stalled`). Text, not an enum,
