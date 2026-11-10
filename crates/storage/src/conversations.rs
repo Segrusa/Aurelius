@@ -835,6 +835,16 @@ pub fn run_posts(conn: &Connection, conversation: ConversationId) -> Result<std:
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Whether this run already handed in the plan of its ticket (`post_ticket_plan`).
+pub fn run_handed_in_plan(tx: &Transaction<'_>, run_id: RunId) -> Result<bool, StorageError> {
+    let posted = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM messages WHERE json_extract(meta_json, '$.plan_review') = 1 AND json_extract(meta_json, '$.of_run') = ?1)",
+        [run_id.to_string()],
+        |r| r.get(0),
+    )?;
+    Ok(posted)
+}
+
 /// The run's answer continues below what was posted into its conversation
 /// meanwhile (a plan and the decision on it): its message moves to the end.
 pub fn move_run_message_to_end(tx: &Transaction<'_>, run_id: RunId) -> Result<(), StorageError> {
