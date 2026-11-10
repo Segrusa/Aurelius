@@ -131,7 +131,10 @@ pub async fn stop(root: &Path, handle: Daemon) {
     tokio::time::timeout(Duration::from_secs(10), handle).await.expect("daemon stops").expect("join").expect("clean stop");
     // Whatever the test did, it left every card in the column its main task says
     // (`aurelius_domain::ticket::column_of`): each test checks that table for free.
-    let misplaced = aurelius_storage::tickets::misplaced(&db(root)).expect("read the board");
+    // A card a test put in a column itself, without ever starting it, has no main task and says nothing.
+    let read = db(root);
+    let started = |ticket: &aurelius_domain::TicketId| read.query_row("SELECT root_task_id IS NOT NULL FROM tickets WHERE id = ?1", [ticket.to_string()], |r| r.get::<_, bool>(0)).unwrap_or(false);
+    let misplaced: Vec<_> = aurelius_storage::tickets::misplaced(&read).expect("read the board").into_iter().filter(|(ticket, ..)| started(ticket)).collect();
     assert!(misplaced.is_empty(), "cards in another column than their main task says (ticket, project, is in, belongs in): {misplaced:?}");
 }
 

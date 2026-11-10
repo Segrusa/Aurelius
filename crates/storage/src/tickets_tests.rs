@@ -609,11 +609,11 @@ fn following_names_only_the_tickets_in_the_answer() {
 /// one definition (`ticket::ticket_work`), for the board member it waits for.
 #[test]
 fn a_ticket_view_says_what_it_needs_from_whom_and_what_still_works() {
-    use aurelius_domain::ticket::{TicketAttention, TicketAttentionKind, TicketBusy};
+    use aurelius_domain::ticket::TicketAttention;
     let f = fixture();
     let (ticket, _) = add(&f, f.atlas, "Stateful");
     let view = |f: &Fixture| f.store.read(|c| tickets::view(c, ticket, &read_blob)).unwrap().unwrap();
-    assert_eq!((view(&f).attention, view(&f).busy), (None, vec![]), "a card in Backlog needs nothing");
+    assert_eq!((view(&f).attention, view(&f).busy), (None, Vec::<String>::new()), "a card in Backlog needs nothing");
 
     // Todo without an owner and no dispatcher's job: a board member chooses.
     let (root, part) = (TaskId::new(), TaskId::new());
@@ -626,7 +626,7 @@ fn a_ticket_view_says_what_it_needs_from_whom_and_what_still_works() {
         })
         .unwrap();
     on_column(&f, ticket, ColumnKind::Todo);
-    assert_eq!(view(&f).attention, Some(TicketAttention { kind: TicketAttentionKind::ChooseOwner, user_id: None }));
+    assert_eq!(view(&f).attention, Some(TicketAttention { kind: "choose_owner".into(), user_id: None }));
 
     // Doing, the main task waits for a colleague's part: busy, and nobody is asked.
     on_column(&f, ticket, ColumnKind::Doing);
@@ -637,20 +637,20 @@ fn a_ticket_view_says_what_it_needs_from_whom_and_what_still_works() {
             tasks::set_task_status(tx, root, TaskStatus::Waiting, Some("dependency"))
         })
         .unwrap();
-    assert_eq!((view(&f).attention, view(&f).busy), (None, vec![TicketBusy::LinkedTasks]));
+    assert_eq!((view(&f).attention, view(&f).busy), (None, vec!["linked_tasks".to_string()]));
 
     // The part ended and nothing took the ticket up again: it would stay in Doing for good.
     f.store.write(move |tx| tasks::set_task_status(tx, part, TaskStatus::Succeeded, None)).unwrap();
-    assert_eq!((view(&f).attention.map(|a| a.kind), view(&f).busy), (Some(TicketAttentionKind::Stalled), vec![]));
+    assert_eq!((view(&f).attention.map(|a| a.kind), view(&f).busy), (Some("stalled".to_string()), Vec::<String>::new()));
 
     // Review waits for the active Responsible; for everyone once they are disabled.
     let robin = second_user(&f, "robin");
     assert!(make_responsible(&f, ticket, Some(robin)));
     f.store.write(move |tx| tasks::set_task_status(tx, root, TaskStatus::Review, None)).unwrap();
     on_column(&f, ticket, ColumnKind::Review);
-    assert_eq!(view(&f).attention, Some(TicketAttention { kind: TicketAttentionKind::Review, user_id: Some(robin) }));
+    assert_eq!(view(&f).attention, Some(TicketAttention { kind: "review".into(), user_id: Some(robin) }));
     disable(&f, robin);
-    assert_eq!(view(&f).attention, Some(TicketAttention { kind: TicketAttentionKind::Review, user_id: None }));
+    assert_eq!(view(&f).attention, Some(TicketAttention { kind: "review".into(), user_id: None }));
     let on_board = f.store.read(|c| tickets::board(c, None, &read_blob)).unwrap().into_iter().flat_map(|c| c.tickets).find(|t| t.id == ticket).unwrap();
     assert_eq!(on_board.attention, view(&f).attention, "the board says the same");
 }

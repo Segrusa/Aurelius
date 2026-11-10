@@ -190,23 +190,24 @@ pub struct TicketView {
     /// What still works on the ticket (feature `ticket_state`): `ticket.accept`
     /// refuses while this is not empty. Left out when empty and by older servers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub busy: Vec<TicketBusy>,
+    pub busy: Vec<String>,
 }
 
 /// What a ticket waits for from a board member (`TicketView::attention`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TicketAttention {
-    pub kind: TicketAttentionKind,
+    /// One of `TicketAttentionKind`'s names (`login`, `review`, `plan_review`,
+    /// `failed`, `approval`, `input`, `choose_owner`, `stalled`). Text, not an enum,
+    /// so a new kind never breaks an older client: it shows the ticket as needing someone.
+    pub kind: String,
     /// Whom it waits for: the board member whose Claude login is missing, else the
     /// ticket's active Responsible. None: every board member. Anyone may still decide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_id: Option<UserId>,
 }
 
-/// The kinds of `TicketAttention`. A newer server's kind reads as `unknown`: the
-/// ticket needs someone, and the app cannot say what for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
+/// The kinds of `TicketAttention`, on the wire by `as_str`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TicketAttentionKind {
     /// The ticket's login user must connect their Claude login (`TicketNeed::Login`).
     Login,
@@ -225,13 +226,25 @@ pub enum TicketAttentionKind {
     /// In Doing or Testing while nothing works on it and it waits for nothing a
     /// board member could give: it would stay there for good. Start again, or cancel.
     Stalled,
-    #[serde(other)]
-    Unknown,
 }
 
-/// What still works on a ticket (`TicketView::busy`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
+impl TicketAttentionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Login => "login",
+            Self::Review => "review",
+            Self::PlanReview => "plan_review",
+            Self::Failed => "failed",
+            Self::Approval => "approval",
+            Self::Input => "input",
+            Self::ChooseOwner => "choose_owner",
+            Self::Stalled => "stalled",
+        }
+    }
+}
+
+/// What still works on a ticket (`TicketView::busy`, by `as_str`: text, like the kinds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TicketBusy {
     /// A run of the main task goes, or waits its turn.
     MainTask,
@@ -241,8 +254,17 @@ pub enum TicketBusy {
     Colleagues,
     /// The tester's test task has not ended.
     Tests,
-    #[serde(other)]
-    Unknown,
+}
+
+impl TicketBusy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MainTask => "main_task",
+            Self::LinkedTasks => "linked_tasks",
+            Self::Colleagues => "colleagues",
+            Self::Tests => "tests",
+        }
+    }
 }
 
 /// What is known of a ticket, to say what it needs and what still works on it
@@ -311,8 +333,13 @@ impl TicketFacts {
     }
 
     /// The card is in another column than its main task says: (where it is, where it belongs).
+    /// A cancelled ticket is in Backlog whatever its main task ended as: a failed one
+    /// stays failed, it is not cancelled again.
     pub fn misplaced(&self) -> Option<(ColumnKind, ColumnKind)> {
         let (at, to) = (self.column?, self.belongs_in()?);
+        if at == ColumnKind::Backlog && self.root == Some(crate::task::TaskStatus::Failed) {
+            return None;
+        }
         (at != to).then_some((at, to))
     }
 }
@@ -1193,8 +1220,8 @@ mod work_tests {
     }
 
     #[test]
-    fn a_newer_kind_reads_as_unknown() {
-        assert_eq!(serde_json::from_str::<TicketAttentionKind>("\"budget\"").unwrap(), TicketAttentionKind::Unknown);
-        assert_eq!(serde_json::from_str::<TicketBusy>("\"review_bot\"").unwrap(), TicketBusy::Unknown);
+    fn a_cancelled_ticket_stays_in_backlog_with_its_failed_main_task() {
+        assert_eq!(facts(ColumnKind::Backlog, Some(S::Failed)).misplaced(), None);
+        assert_eq!(facts(ColumnKind::Todo, Some(S::Failed)).misplaced(), Some((ColumnKind::Todo, ColumnKind::Doing)));
     }
 }

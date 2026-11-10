@@ -474,7 +474,7 @@ pub fn facts(conn: &Connection, id: TicketId) -> Result<Option<TicketFacts>, Sto
                     t.id IS NOT NULL AND (
                         EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.conversation_id IS NOT NULL AND r.status IN {live})
                      OR EXISTS (SELECT 1 FROM employee_inbox i WHERE i.task_id = t.id AND i.state = 'queued')
-                     OR EXISTS (SELECT 1 FROM jobs j WHERE j.id = t.id AND j.state IN ('ready','leased'))),
+                     OR (t.status IN ('queued','running') AND EXISTS (SELECT 1 FROM jobs j WHERE j.id = t.id AND j.state IN ('ready','leased')))),
                     EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state IN ('ready','leased') AND json_extract(j.payload_json, '$.ticket_id') = k.id),
                     (EXISTS (SELECT 1 FROM tasks w WHERE w.ticket_id = k.id AND w.status = 'waiting' AND w.waiting_reason = 'login')
                      OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state = 'ready' AND j.last_error_code = 'login'
@@ -542,7 +542,7 @@ fn with_work(conn: &Connection, ticket: &mut TicketView) -> Result<(), StorageEr
     }
     let Some(work) = work(conn, ticket.id)? else { return Ok(()) };
     ticket.attention = work.attention.map(|kind| TicketAttention {
-        kind,
+        kind: kind.as_str().to_owned(),
         // A missing login is its own board member's; anything else is the active
         // Responsible's, and everyone's when there is none (B6).
         user_id: match kind {
@@ -550,7 +550,7 @@ fn with_work(conn: &Connection, ticket: &mut TicketView) -> Result<(), StorageEr
             _ => ticket.responsible_user_id.filter(|_| !ticket.responsible_disabled),
         },
     });
-    ticket.busy = work.busy;
+    ticket.busy = work.busy.into_iter().map(|b| b.as_str().to_owned()).collect();
     Ok(())
 }
 
